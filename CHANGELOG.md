@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-05-17
+
+### Fixed
+- Sync no longer gets stuck on conversations with no real content. Previously, files with only metadata or stub records re-queued for summarization on every run. Once ten of them piled up at the head of the queue, real conversations behind them stopped getting summarized at all. Now those files are marked as done the first time they're skipped, and the backlog drains. Thanks to @minyek for the fix.
+
 ## [1.4.0] - 2026-05-13
 
 ### Changed
