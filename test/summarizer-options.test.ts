@@ -1,12 +1,17 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import {
   buildCodexSummaryPrompt,
   buildCodexSummarizerCommand,
   buildSummarizerQueryOptions,
   getApiEnv,
   getCodexModel,
+  isResumeFailure,
   runCodexCommand,
-  shouldSkipReentrantSync
+  shouldSkipReentrantSync,
+  SummarizerSdkError
 } from '../src/summarizer.js';
 import { ConversationExchange } from '../src/types.js';
 
@@ -31,6 +36,52 @@ describe('buildSummarizerQueryOptions', () => {
     const opts = buildSummarizerQueryOptions({ model: 'haiku', sessionId: 'abc-123' });
     expect(opts.resume).toBe('abc-123');
     expect(opts.systemPrompt).toBeUndefined();
+  });
+
+  it('passes cwd through to the SDK so resume looks up the session under the correct project dir', () => {
+    // The session's cwd must exist on disk for the option to be honored.
+    const realCwd = mkdtempSync(join(tmpdir(), 'episodic-memory-cwd-test-'));
+    try {
+      const opts = buildSummarizerQueryOptions({ model: 'haiku', sessionId: 'abc-123', cwd: realCwd });
+      expect(opts.cwd).toBe(realCwd);
+    } finally {
+      rmSync(realCwd, { recursive: true, force: true });
+    }
+  });
+
+  it('omits cwd when the session\'s recorded cwd no longer exists on disk', () => {
+    const opts = buildSummarizerQueryOptions({
+      model: 'haiku',
+      sessionId: 'abc-123',
+      cwd: '/nonexistent/path/that/definitely/does/not/exist'
+    });
+    expect(opts.cwd).toBeUndefined();
+  });
+
+  it('omits cwd when not provided', () => {
+    const opts = buildSummarizerQueryOptions({ model: 'haiku', sessionId: 'abc-123' });
+    expect(opts.cwd).toBeUndefined();
+  });
+});
+
+describe('isResumeFailure', () => {
+  it('matches SummarizerSdkError with subtype error_during_execution (the SDK\'s signal for resume lookup failure)', () => {
+    expect(isResumeFailure(new SummarizerSdkError('error_during_execution'))).toBe(true);
+    expect(isResumeFailure(new SummarizerSdkError('error_during_execution', 'session-id-x'))).toBe(true);
+  });
+
+  it('does not match SummarizerSdkError with other subtypes', () => {
+    expect(isResumeFailure(new SummarizerSdkError('auth_failed'))).toBe(false);
+    expect(isResumeFailure(new SummarizerSdkError('rate_limit'))).toBe(false);
+    expect(isResumeFailure(new SummarizerSdkError('unknown'))).toBe(false);
+  });
+
+  it('does not match plain Error or non-Error values, even if their text looks resume-related', () => {
+    expect(isResumeFailure(new Error('No conversation found with session ID: abc'))).toBe(false);
+    expect(isResumeFailure(new Error('error_during_execution'))).toBe(false);
+    expect(isResumeFailure('No conversation found')).toBe(false);
+    expect(isResumeFailure(undefined)).toBe(false);
+    expect(isResumeFailure(null)).toBe(false);
   });
 });
 
