@@ -6,7 +6,9 @@ import { generateExchangeEmbedding, initEmbeddings } from './embeddings.js';
 import { runMigrationBatch, countStale } from './embedding-migration.js';
 import { spawn } from 'child_process';
 import fs from 'fs';
+import path from 'path';
 import { formatLogLine, getSyncLogPath } from './logging.js';
+import { acquireFileLock, readLockHolder, releaseFileLock } from './file-lock.js';
 const args = process.argv.slice(2);
 // Reentrancy guard (#87): if this sync was triggered by a SessionStart hook
 // inside a Claude subprocess that the summarizer just spawned, exit silently.
@@ -79,6 +81,30 @@ if (sourceDirs.length === 0) {
     }
     process.exit(0);
 }
+// Single-instance lock (#97). Independent SessionStart events from multiple
+// Claude Code sessions each fire `sync --background`; without a lock they race
+// the SQLite write path and pile up Claude subprocesses for summarization. On
+// Windows the latter exhausts the desktop heap and crashes the workers with
+// STATUS_DLL_INIT_FAILED. Acquire after the source-dir check so help/version
+// paths don't touch the filesystem unnecessarily, and release on every exit.
+const syncLockPath = path.join(path.dirname(getSyncLogPath()), 'episodic-memory-sync.lock');
+const syncLock = acquireFileLock(syncLockPath);
+if (!syncLock) {
+    const holder = readLockHolder(syncLockPath);
+    const holderLabel = holder !== null ? `pid ${holder}` : 'another process';
+    console.error(`episodic-memory: sync already running (${holderLabel}); skipping`);
+    process.exit(0);
+}
+const releaseSyncLockOnce = () => {
+    if (releaseSyncLockOnce.done)
+        return;
+    releaseSyncLockOnce.done = true;
+    releaseFileLock(syncLock);
+};
+process.on('exit', releaseSyncLockOnce);
+process.on('SIGINT', () => { releaseSyncLockOnce(); process.exit(130); });
+process.on('SIGTERM', () => { releaseSyncLockOnce(); process.exit(143); });
+process.on('SIGHUP', () => { releaseSyncLockOnce(); process.exit(129); });
 console.log('Syncing conversations...');
 console.log(`Sources: ${sourceDirs.join(', ')}`);
 console.log(`Destination: ${destDir}\n`);

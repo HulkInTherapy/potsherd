@@ -12,21 +12,17 @@
  *   recordReembedded     — atomic update of vec_exchanges + version bump
  */
 import Database from 'better-sqlite3';
+import { acquireFileLock, releaseFileLock, FileLockHandle } from './file-lock.js';
 /** Bump when anything in the embedding pipeline changes (model, dtype, prefix). */
 export declare const EMBEDDING_VERSION = 1;
-export interface MigrationLockHandle {
-    path: string;
-    fd: number;
-}
 /**
- * Acquire an exclusive migration lock by writing our PID to the lock file.
- * Returns null if another live process holds the lock.
- *
- * Stale-lock recovery: if the lock file's PID is no longer alive, we steal it.
- * This avoids needing manual cleanup after crashes or kills.
+ * Lock primitives for the migration are the same as for sync (#97) and any
+ * other once-per-machine background task — see src/file-lock.ts for the shape.
+ * Re-exported here so existing call sites keep their original import names.
  */
-export declare function acquireMigrationLock(lockPath: string): MigrationLockHandle | null;
-export declare function releaseMigrationLock(handle: MigrationLockHandle): void;
+export type MigrationLockHandle = FileLockHandle;
+export declare const acquireMigrationLock: typeof acquireFileLock;
+export declare const releaseMigrationLock: typeof releaseFileLock;
 export interface StaleRow {
     id: string;
     user_message: string;

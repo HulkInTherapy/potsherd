@@ -24797,6 +24797,10 @@ function getDbPath() {
   return path.join(getIndexDir(), "db.sqlite");
 }
 
+// src/file-lock.ts
+import * as lockfile from "proper-lockfile";
+var DEFAULT_STALE_MS = 10 * 60 * 1e3;
+
 // src/db.ts
 function migrateSchema(db) {
   const columns = db.prepare(`SELECT name FROM pragma_table_info('exchanges')`).all();

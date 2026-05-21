@@ -17,6 +17,7 @@ export const REQUIRED_PACKAGES = [
   '@huggingface/transformers',
   'better-sqlite3',
   'onnxruntime-node',
+  'proper-lockfile',
   'sqlite-vec',
 ];
 

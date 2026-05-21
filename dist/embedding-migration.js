@@ -11,75 +11,12 @@
  *   pickStaleBatch       — find rows whose embedding_version is behind
  *   recordReembedded     — atomic update of vec_exchanges + version bump
  */
-import fs from 'fs';
 import path from 'path';
+import { acquireFileLock, releaseFileLock } from './file-lock.js';
 /** Bump when anything in the embedding pipeline changes (model, dtype, prefix). */
 export const EMBEDDING_VERSION = 1;
-/**
- * Acquire an exclusive migration lock by writing our PID to the lock file.
- * Returns null if another live process holds the lock.
- *
- * Stale-lock recovery: if the lock file's PID is no longer alive, we steal it.
- * This avoids needing manual cleanup after crashes or kills.
- */
-export function acquireMigrationLock(lockPath) {
-    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-    // Try exclusive create first.
-    try {
-        const fd = fs.openSync(lockPath, 'wx');
-        fs.writeSync(fd, String(process.pid));
-        return { path: lockPath, fd };
-    }
-    catch (err) {
-        if (err.code !== 'EEXIST')
-            throw err;
-    }
-    // Lock exists. Check whether the holder is still alive.
-    let holderPid;
-    try {
-        holderPid = parseInt(fs.readFileSync(lockPath, 'utf-8').trim(), 10);
-    }
-    catch {
-        holderPid = NaN;
-    }
-    if (Number.isFinite(holderPid) && holderPid > 0 && isProcessAlive(holderPid)) {
-        // The holder is alive (possibly us — concurrent acquires from the same
-        // process must serialize via release/acquire pairs).
-        return null;
-    }
-    // Stale lock. Replace it.
-    try {
-        fs.unlinkSync(lockPath);
-    }
-    catch { }
-    try {
-        const fd = fs.openSync(lockPath, 'wx');
-        fs.writeSync(fd, String(process.pid));
-        return { path: lockPath, fd };
-    }
-    catch {
-        return null;
-    }
-}
-export function releaseMigrationLock(handle) {
-    try {
-        fs.closeSync(handle.fd);
-    }
-    catch { }
-    try {
-        fs.unlinkSync(handle.path);
-    }
-    catch { }
-}
-function isProcessAlive(pid) {
-    try {
-        process.kill(pid, 0);
-        return true;
-    }
-    catch (err) {
-        return err.code === 'EPERM';
-    }
-}
+export const acquireMigrationLock = acquireFileLock;
+export const releaseMigrationLock = releaseFileLock;
 /**
  * Return up to `limit` rows whose embedding_version is older than
  * EMBEDDING_VERSION, joined with their tool names so the caller can
