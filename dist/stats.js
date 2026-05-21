@@ -30,13 +30,15 @@ export async function getIndexStats(dbPath) {
         }
         // Total conversations
         const totalConversations = db.prepare('SELECT COUNT(DISTINCT archive_path) as count FROM exchanges').get();
-        // Check for summaries (these are files, not DB fields)
-        const fs = await import('fs');
+        // Check for summaries (these are files, not DB fields). Only count
+        // conversations with a real summary — skip empty zero-exchange sentinels
+        // (#91) and error sentinels (#96) so stats reflect actual coverage.
+        const { hasRealSummary } = await import('./summary-sentinel.js');
         const conversationPaths = db.prepare('SELECT DISTINCT archive_path FROM exchanges').all();
         let withSummariesCount = 0;
         for (const { archive_path } of conversationPaths) {
             const summaryPath = archive_path.replace('.jsonl', '-summary.txt');
-            if (fs.existsSync(summaryPath)) {
+            if (hasRealSummary(summaryPath)) {
                 withSummariesCount++;
             }
         }

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { SUMMARIZER_CONTEXT_MARKER } from './constants.js';
 import { getExcludedProjects, findJsonlFiles } from './paths.js';
+import { formatErrorSentinel, shouldQueueForSummary } from './summary-sentinel.js';
 const EXCLUSION_MARKERS = [
     '<INSTRUCTIONS-TO-EPISODIC-MEMORY>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-EPISODIC-MEMORY>',
     'Only use NO_INSIGHTS_FOUND',
@@ -88,10 +89,12 @@ export async function syncConversations(sourceDir, destDir, options = {}) {
                 else {
                     result.skipped++;
                 }
-                // Check if this file needs a summary (whether newly copied or existing)
+                // Check if this file needs a summary (whether newly copied or existing).
+                // shouldQueueForSummary skips files that already have a real summary or
+                // an empty zero-exchange sentinel, and retries stale error sentinels (#96).
                 if (!options.skipSummaries) {
                     const summaryPath = destFile.replace('.jsonl', '-summary.txt');
-                    if (!fs.existsSync(summaryPath) && !shouldSkipConversation(destFile)) {
+                    if (shouldQueueForSummary(summaryPath) && !shouldSkipConversation(destFile)) {
                         const sessionId = extractSessionIdFromPath(destFile);
                         if (sessionId) {
                             filesToSummarize.push({ path: destFile, sessionId });
@@ -166,6 +169,16 @@ export async function syncConversations(sourceDir, destDir, options = {}) {
                 result.summarized++;
             }
             catch (error) {
+                // Write a structured error sentinel (#96): distinct from the empty
+                // zero-exchange sentinel so a stale failure can self-heal on the next
+                // sync run past the retry threshold. The marker also keeps the error
+                // text on disk for post-hoc diagnosis. Best-effort — if the sentinel
+                // write itself fails, fall through and surface the original error.
+                try {
+                    const summaryPath = filePath.replace('.jsonl', '-summary.txt');
+                    fs.writeFileSync(summaryPath, formatErrorSentinel(error), 'utf-8');
+                }
+                catch { }
                 result.errors.push({
                     file: filePath,
                     error: `Summary generation failed: ${error instanceof Error ? error.message : String(error)}`

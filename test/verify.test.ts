@@ -82,6 +82,43 @@ describe('verifyIndex', () => {
     expect(result.missing[0].reason).toBe('No summary file');
   });
 
+  it('flags conversations with an error sentinel as missing so repair re-attempts them (#96)', async () => {
+    const { formatErrorSentinel } = await import('../src/summary-sentinel.js');
+    const projectArchive = path.join(archiveDir, 'test-project');
+    fs.mkdirSync(projectArchive, { recursive: true });
+
+    const conversationPath = path.join(projectArchive, 'errored-conversation.jsonl');
+    const summaryPath = conversationPath.replace('.jsonl', '-summary.txt');
+    const messages = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'Hi' }, timestamp: '2024-01-01T00:00:00Z' }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'Hello' }, timestamp: '2024-01-01T00:00:01Z' })
+    ];
+    fs.writeFileSync(conversationPath, messages.join('\n'));
+    fs.writeFileSync(summaryPath, formatErrorSentinel(new Error('Transient outage')), 'utf-8');
+
+    const result = await verifyIndex();
+    expect(result.missing.length).toBe(1);
+    expect(result.missing[0].path).toBe(conversationPath);
+    expect(result.missing[0].reason).toMatch(/error sentinel/i);
+  });
+
+  it('does not flag conversations with real summaries as missing', async () => {
+    const projectArchive = path.join(archiveDir, 'test-project');
+    fs.mkdirSync(projectArchive, { recursive: true });
+
+    const conversationPath = path.join(projectArchive, 'summarized.jsonl');
+    const summaryPath = conversationPath.replace('.jsonl', '-summary.txt');
+    const messages = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'Hi' }, timestamp: '2024-01-01T00:00:00Z' }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'Hello' }, timestamp: '2024-01-01T00:00:01Z' })
+    ];
+    fs.writeFileSync(conversationPath, messages.join('\n'));
+    fs.writeFileSync(summaryPath, 'A real summary of the conversation.', 'utf-8');
+
+    const result = await verifyIndex();
+    expect(result.missing.length).toBe(0);
+  });
+
   it('detects orphaned database entries', async () => {
     // Initialize database
     const db = initDatabase();

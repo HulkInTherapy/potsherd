@@ -7,6 +7,7 @@ import { initEmbeddings, generateExchangeEmbedding } from './embeddings.js';
 import { summarizeConversation } from './summarizer.js';
 import { ConversationExchange } from './types.js';
 import { getArchiveDir, getExcludedProjects, getConversationSourceDirs, findJsonlFiles } from './paths.js';
+import { formatErrorSentinel, shouldQueueForSummary } from './summary-sentinel.js';
 
 // Set max output tokens for Claude SDK (used by summarizer)
 process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000';
@@ -131,7 +132,7 @@ export async function indexConversations(
 
     // Batch summarize conversations in parallel (unless --no-summaries)
     if (!noSummaries) {
-      const needsSummary = toProcess.filter(c => !fs.existsSync(c.summaryPath));
+      const needsSummary = toProcess.filter(c => shouldQueueForSummary(c.summaryPath));
 
       if (needsSummary.length > 0) {
         console.log(`  Generating ${needsSummary.length} summaries (concurrency: ${concurrency})...`);
@@ -144,6 +145,8 @@ export async function indexConversations(
             console.log(`  ✓ ${conv.file}: ${wordCount} words`);
             return summary;
           } catch (error) {
+            // Write an error sentinel so the failure is retryable on a later run (#96).
+            try { fs.writeFileSync(conv.summaryPath, formatErrorSentinel(error), 'utf-8'); } catch {}
             console.log(`  ✗ ${conv.file}: ${error}`);
             return null;
           }
@@ -230,11 +233,17 @@ export async function indexSession(sessionId: string, concurrency: number = 1, n
       if (exchanges.length > 0) {
         // Generate summary (unless --no-summaries)
         const summaryPath = archivePath.replace('.jsonl', '-summary.txt');
-        if (!noSummaries && !fs.existsSync(summaryPath)) {
+        if (!noSummaries && shouldQueueForSummary(summaryPath)) {
           fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
-          const summary = await summarizeConversation(exchanges, sessionIdForSummary(exchanges));
-          fs.writeFileSync(summaryPath, summary, 'utf-8');
-          console.log(`Summary: ${summary.split(/\s+/).length} words`);
+          try {
+            const summary = await summarizeConversation(exchanges, sessionIdForSummary(exchanges));
+            fs.writeFileSync(summaryPath, summary, 'utf-8');
+            console.log(`Summary: ${summary.split(/\s+/).length} words`);
+          } catch (error) {
+            // Write an error sentinel so the failure is retryable on a later run (#96).
+            try { fs.writeFileSync(summaryPath, formatErrorSentinel(error), 'utf-8'); } catch {}
+            console.log(`Summary failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
 
         // Index
@@ -342,7 +351,7 @@ export async function indexUnprocessed(concurrency: number = 1, noSummaries: boo
 
   // Batch process summaries (unless --no-summaries)
   if (!noSummaries) {
-    const needsSummary = unprocessed.filter(c => !fs.existsSync(c.summaryPath));
+    const needsSummary = unprocessed.filter(c => shouldQueueForSummary(c.summaryPath));
     if (needsSummary.length > 0) {
       console.log(`Generating ${needsSummary.length} summaries (concurrency: ${concurrency})...\n`);
 
@@ -354,6 +363,8 @@ export async function indexUnprocessed(concurrency: number = 1, noSummaries: boo
           console.log(`  ✓ ${conv.project}/${conv.file}: ${wordCount} words`);
           return summary;
         } catch (error) {
+          // Write an error sentinel so the failure is retryable on a later run (#96).
+          try { fs.writeFileSync(conv.summaryPath, formatErrorSentinel(error), 'utf-8'); } catch {}
           console.log(`  ✗ ${conv.project}/${conv.file}: ${error}`);
           return null;
         }

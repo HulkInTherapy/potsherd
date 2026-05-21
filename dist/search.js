@@ -1,5 +1,6 @@
 import { initDatabase } from './db.js';
 import { initEmbeddings, generateQueryEmbedding } from './embeddings.js';
+import { isErroredSentinel } from './summary-sentinel.js';
 import fs from 'fs';
 import readline from 'readline';
 /**
@@ -174,11 +175,15 @@ export async function searchConversations(query, options = {}) {
     db.close();
     return results.map((row) => {
         const exchange = exchangeFromRow(row);
-        // Try to load summary if available
+        // Try to load summary if available. Skip error sentinels (#96) so failed
+        // summarizations don't surface as the conversation's summary in results.
         const summaryPath = row.archive_path.replace('.jsonl', '-summary.txt');
         let summary;
         if (fs.existsSync(summaryPath)) {
-            summary = fs.readFileSync(summaryPath, 'utf-8').trim();
+            const raw = fs.readFileSync(summaryPath, 'utf-8');
+            if (!isErroredSentinel(raw)) {
+                summary = raw.trim();
+            }
         }
         // Create snippet (first 200 chars, collapse newlines)
         const snippetText = exchange.userMessage.substring(0, 200).replace(/\s+/g, ' ').trim();
