@@ -95,12 +95,14 @@ export function readCleanupStatus(dir?: string): CleanupStatus {
   if (managed.exists && typeof managed.json?.['cleanupPeriodDays'] === 'number') {
     editable = false;
     reason = `an enterprise-managed policy at ${managed.path} sets cleanupPeriodDays; a user setting cannot override it`;
+  } else if (user.exists && user.jsonc) {
+    // Checked before the parse error, because a JSONC file also fails to parse
+    // and "contains comments" is the message that tells the user what to do.
+    editable = false;
+    reason = `${user.path} contains comments, so rewriting it as JSON would drop them`;
   } else if (user.exists && user.parseError) {
     editable = false;
     reason = `${user.path} is not valid JSON (${user.parseError})`;
-  } else if (user.exists && user.jsonc) {
-    editable = false;
-    reason = `${user.path} contains comments, so rewriting it as JSON would drop them`;
   }
 
   return { effective, declared, source, files: { managed, local, user }, editable, reason };

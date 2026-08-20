@@ -1,5 +1,5 @@
 import { Theme } from './theme.js';
-import { clip, elide } from './format.js';
+import { clip, elide, elideMiddle } from './format.js';
 
 /**
  * One monospace grid, used by every verb. A "card" is:
@@ -42,10 +42,23 @@ export class Card {
 
   constructor(private readonly t: Theme) {}
 
-  /** `potsherd audit · ~/.claude · 21 aug 2026` */
+  /**
+   * `potsherd audit · ~/.claude · 21 aug 2026`. Middle parts are paths, so
+   * they elide in the middle when the terminal is narrow: the last segment of
+   * a path identifies it, the middle rarely does.
+   */
   heading(verb: string, ...parts: string[]): this {
-    const bits = [`potsherd ${verb}`, ...parts.filter(Boolean)];
-    this.lines.push(this.t.dim(bits.join(` ${this.t.sep} `)));
+    const head = `potsherd ${verb}`;
+    const rest = parts.filter(Boolean);
+    const sep = ` ${this.t.sep} `;
+    let budget = this.t.width - head.length - sep.length * rest.length;
+    const shown = rest.map((p) => {
+      const share = Math.max(8, Math.floor(budget / Math.max(1, rest.length)));
+      const out = p.length > share ? elideMiddle(p, share, this.t.ellip) : p;
+      budget -= out.length;
+      return out;
+    });
+    this.lines.push(this.t.dim([head, ...shown].join(sep)));
     return this;
   }
 

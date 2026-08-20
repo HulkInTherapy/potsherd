@@ -35,7 +35,7 @@ export function renderAuditCard(r: AuditReport, t: Theme = new Theme()): string 
   rows.push({
     label: 'sessions ever started',
     value: f.num(r.sessionsEver),
-    note: historyRange(r),
+    note: historyRange(r, t),
   });
   rows.push({ label: 'still on disk', value: f.num(r.onDisk) });
   rows.push({
@@ -58,7 +58,7 @@ export function renderAuditCard(r: AuditReport, t: Theme = new Theme()): string 
   card.rows(rows).blank();
 
   const sweepRows: Row[] = [];
-  const doomed = r.nextSweep.length;
+  const doomed = r.nextSweepWithin7Days;
   const soon = r.nextSweepWithinOneDay;
   sweepRows.push({
     label: 'next sweep will delete',
@@ -80,6 +80,12 @@ export function renderAuditCard(r: AuditReport, t: Theme = new Theme()): string 
   });
   card.rows(sweepRows).blank();
 
+  if (r.warnings.length) {
+    for (const w of r.warnings.slice(0, 3)) card.text(t.dim(`note: ${w}`));
+    if (r.warnings.length > 3) card.text(t.dim(`note: ${r.warnings.length - 3} more (see --json)`));
+    card.blank();
+  }
+
   if (r.deleted > 0) {
     card.text(`the prompts from all ${f.num(r.deleted)} are recoverable from history.jsonl.`);
     card.text('run  potsherd rescue  to archive what is left and rebuild the ghosts.');
@@ -90,21 +96,15 @@ export function renderAuditCard(r: AuditReport, t: Theme = new Theme()): string 
     card.text('no sessions found yet. run Claude Code once, then audit again.');
   }
 
-  if (r.warnings.length) {
-    card.blank();
-    for (const w of r.warnings.slice(0, 3)) card.text(t.dim(`note: ${w}`));
-    if (r.warnings.length > 3) card.text(t.dim(`note: ${r.warnings.length - 3} more (see --json)`));
-  }
-
   return card.toString();
 }
 
 /** `nov 2025 -> aug 2026`, or a single month when the range is short. */
-function historyRange(r: AuditReport): string {
+function historyRange(r: AuditReport, t: Theme): string {
   if (!r.historyFirstTs || !r.historyLastTs) return '';
   const a = f.monthYear(r.historyFirstTs);
   const b = f.monthYear(r.historyLastTs);
-  return a === b ? a : `${a} → ${b}`;
+  return a === b ? a : `${a} ${t.arrow} ${b}`;
 }
 
 /**
@@ -114,7 +114,7 @@ function historyRange(r: AuditReport): string {
 export function renderSweepList(r: AuditReport, t: Theme = new Theme(), limit = 10): string {
   if (r.nextSweep.length === 0) return '';
   const card = new Card(t);
-  card.blank().text(`sessions the sweep takes next:`);
+  card.blank().text('sessions the sweep takes next:');
   for (const s of r.nextSweep.slice(0, limit)) {
     const when = s.daysLeft <= 0 ? 'at next startup' : s.daysLeft === 1 ? 'in 1 day' : `in ${s.daysLeft} days`;
     const label = s.title ?? `${basename(s.project)}-${s.id.slice(0, 8)}`;

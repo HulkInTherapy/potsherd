@@ -1,5 +1,6 @@
 import {
   consent,
+  format as fmt,
   paths,
   readCleanupStatus,
   rescue,
@@ -47,7 +48,7 @@ export async function runRescue(o: RescueOptions): Promise<number> {
 
   // The consent flow. Never runs for --dry-run, --no-settings, or a non-TTY
   // without --yes, which is what makes the SessionStart hook safe.
-  const extras: ReceiptExtras = { settingsChanged: null };
+  const extras: ReceiptExtras = { settingsChanged: null, guardInstalled: consent.guardInstalled(o.claudeDir) };
   const wantSettings = o.settings !== false && !o.dryRun;
   if (wantSettings) {
     const status = readCleanupStatus(o.claudeDir);
@@ -88,7 +89,8 @@ export async function runRescue(o: RescueOptions): Promise<number> {
 
   print(renderRescueReceipt(result, t, extras));
   if (extras.settingsBackup) {
-    print(`  ${t.dim('backup:')} ${paths.tildify(extras.settingsBackup)}`);
+    const shown = fmt.elideMiddle(paths.tildify(extras.settingsBackup), Math.max(24, t.width - 11), t.ellip);
+    print(`  ${t.dim('backup:')} ${shown}`);
   }
   return 0;
 }

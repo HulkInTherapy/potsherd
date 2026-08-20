@@ -87,7 +87,7 @@ export function proposeGuardHook(
   const p = claudePaths(dir).settings;
   const before = st.files.user.text ?? '{}\n';
 
-  if (st.files.user.exists && (st.files.user.parseError || st.files.user.jsonc)) {
+  if (st.files.user.exists && (st.files.user.jsonc || st.files.user.parseError)) {
     return {
       path: p,
       before,

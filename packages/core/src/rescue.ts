@@ -64,6 +64,8 @@ export interface RescueResult {
   sidechainsArchived: number;
   memoryFilesArchived: number;
   sessionIndexesArchived: number;
+  /** True when this run took a fresh copy of history.jsonl. */
+  historyArchived: boolean;
 
   ghostsBuilt: number;
   ghostsUpdated: number;
@@ -104,6 +106,7 @@ async function rescueUnlocked(opts: RescueOptions, root: string): Promise<Rescue
     sidechainsArchived: 0,
     memoryFilesArchived: 0,
     sessionIndexesArchived: 0,
+    historyArchived: false,
     ghostsBuilt: 0,
     ghostsUpdated: 0,
     ghostPrompts: 0,
@@ -121,7 +124,7 @@ async function rescueUnlocked(opts: RescueOptions, root: string): Promise<Rescue
   const db = opts.dryRun ? openDb({ root, file: ':memory:' }) : openDb({ root });
   try {
     if (!opts.ghostsOnly) {
-      copyPass(db, disk.projectsDir, dest, result, opts);
+      copyPass(db, disk.projectsDir, cp.history, dest, result, opts);
     }
     await ghostPass(db, src, disk, result, opts);
 
@@ -155,13 +158,20 @@ async function rescueUnlocked(opts: RescueOptions, root: string): Promise<Rescue
 function copyPass(
   db: Db,
   projectsDir: string,
+  historyPath: string,
   dest: string,
   result: RescueResult,
   opts: RescueOptions,
 ): void {
-  if (!fs.existsSync(projectsDir)) return;
-
   const files = collectSourceFiles(projectsDir);
+
+  // history.jsonl is archived too, and it matters more than any single
+  // transcript: it is the only surviving record of the 299 sessions the sweep
+  // already took, and nothing else can rebuild them if it is ever rotated.
+  if (fs.existsSync(historyPath)) {
+    files.unshift({ abs: historyPath, rel: 'history.jsonl', kind: 'history' });
+  }
+  if (files.length === 0) return;
   const known = new Map<string, { sha256: string; bytes: number; source_mtime: number }>();
   for (const row of db
     .prepare('SELECT source_path, sha256, bytes, source_mtime FROM archive_files')
@@ -263,7 +273,7 @@ function copyPass(
   }
 }
 
-type SourceKind = 'session' | 'sidechain' | 'memory' | 'index' | 'other';
+type SourceKind = 'session' | 'sidechain' | 'memory' | 'index' | 'history' | 'other';
 
 interface SourceFile {
   abs: string;
@@ -317,6 +327,7 @@ function countKind(result: RescueResult, kind: SourceKind, copied: boolean): voi
   else if (kind === 'sidechain') result.sidechainsArchived++;
   else if (kind === 'memory') result.memoryFilesArchived++;
   else if (kind === 'index') result.sessionIndexesArchived++;
+  else if (kind === 'history') result.historyArchived = true;
 }
 
 /** Rebuild every deleted session from the prompts that outlived it. */

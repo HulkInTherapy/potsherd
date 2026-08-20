@@ -17,6 +17,7 @@ export interface ReceiptExtras {
   settingsTo?: number;
   settingsBackup?: string | null;
   settingsSkippedReason?: string;
+  /** Whether the SessionStart guard hook is already in place. */
   guardInstalled?: boolean;
 }
 
@@ -70,18 +71,30 @@ export function renderRescueReceipt(
   card.blank();
   if (r.dryRun) {
     card.text('nothing was written. run  potsherd rescue  to do it for real.');
+    return card.toString();
+  }
+
+  card.text(`archive: ${f.elideMiddle(tildify(r.archiveDir), Math.max(24, t.width - 11), t.ellip)}`);
+  // The next verb is whichever one this machine still needs. Pointing at a verb
+  // that would be a no-op here is how a tour turns into noise.
+  if (extras.settingsChanged !== true) {
+    card.text('run  potsherd rescue --yes  to stop the sweep deleting any more.');
+  } else if (!extras.guardInstalled) {
+    card.text('run  potsherd guard  to take a copy at every startup, automatically.');
   } else {
-    card.text(`archive: ${tildify(r.archiveDir)}`);
-    card.text('run  potsherd ls  to see the archive with titles instead of uuids.');
+    card.text('run  potsherd audit  to confirm nothing is due for deletion.');
   }
   return card.toString();
 }
 
 function sessionNote(r: RescueResult): string {
   const bits: string[] = [];
-  if (r.sidechainsArchived) bits.push(`${f.num(r.sidechainsArchived)} sidechains`);
-  if (r.memoryFilesArchived) bits.push(`${f.num(r.memoryFilesArchived)} memory notes`);
-  if (r.sessionIndexesArchived) bits.push(`${f.num(r.sessionIndexesArchived)} indexes`);
+  const n = (count: number, one: string, many = one + 's') =>
+    `${f.num(count)} ${f.plural(count, one, many)}`;
+  if (r.sidechainsArchived) bits.push(n(r.sidechainsArchived, 'sidechain'));
+  if (r.memoryFilesArchived) bits.push(n(r.memoryFilesArchived, 'memory note'));
+  if (r.sessionIndexesArchived) bits.push(n(r.sessionIndexesArchived, 'index', 'indexes'));
+  if (r.historyArchived) bits.push('history.jsonl');
   return bits.join(' · ');
 }
 

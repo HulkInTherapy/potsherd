@@ -1,5 +1,5 @@
 import process from 'node:process';
-import readline from 'node:readline';
+import * as readline from 'node:readline/promises';
 import { Theme } from '@potsherd/core';
 
 /**
@@ -66,15 +66,25 @@ export function fail(err: unknown, o: GlobalOptions): never {
   process.exit(1);
 }
 
-/** A [y/N] prompt. Returns false immediately when stdin is not a terminal. */
+/**
+ * A [y/N] prompt. Returns the default without asking when stdin is not a
+ * terminal, and treats Ctrl+C / Ctrl+D as the default too — walking away from a
+ * question about someone's settings file means no, not an error.
+ */
 export async function confirm(question: string, opts: { default?: boolean } = {}): Promise<boolean> {
-  if (!process.stdin.isTTY) return opts.default ?? false;
+  const fallback = opts.default ?? false;
+  if (!process.stdin.isTTY) return fallback;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
     const suffix = opts.default ? '[Y/n]' : '[y/N]';
-    const answer = (await rl.question(`${question} ${suffix} `)).trim().toLowerCase();
-    if (!answer) return opts.default ?? false;
+    const raw = await rl.question(`${question} ${suffix} `);
+    const answer = raw.trim().toLowerCase();
+    if (!answer) return fallback;
     return answer === 'y' || answer === 'yes';
+  } catch {
+    // AbortError from Ctrl+C, or EOF from Ctrl+D.
+    process.stdout.write('\n');
+    return fallback;
   } finally {
     rl.close();
   }

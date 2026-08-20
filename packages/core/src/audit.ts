@@ -64,7 +64,10 @@ export interface AuditReport {
   projectsWithSessions: number;
   projectDirs: number;
 
+  /** Every session on disk, soonest deletion first. `--json` and `--sweep`. */
   nextSweep: DoomedSession[];
+  /** The headline count: how many the sweep takes within a week. */
+  nextSweepWithin7Days: number;
   nextSweepWithinOneDay: number;
   cleanupPeriodDays: number | null;
   cleanupPeriodEffective: number;
@@ -161,26 +164,23 @@ export function computeAudit(input: AuditInput): AuditReport {
   // Days until the sweep takes each surviving transcript. Claude Code compares
   // the file's mtime, not its creation date, so a resumed session resets it.
   const period = cleanup.effective;
-  const nextSweep: DoomedSession[] = [];
-  for (const s of disk.sessions) {
-    const ageDays = Math.floor((now.getTime() - s.mtime.getTime()) / DAY_MS);
-    const daysLeft = period - ageDays;
-    if (daysLeft <= 7) {
-      nextSweep.push({
-        id: s.sessionId,
-        title: s.title,
-        project: s.project,
-        daysLeft,
-        bytes: s.bytes,
-        mtime: s.mtime.toISOString(),
-      });
-    }
-  }
-  nextSweep.sort((a, b) => a.daysLeft - b.daysLeft);
+  const nextSweep: DoomedSession[] = disk.sessions
+    .map((s) => ({
+      id: s.sessionId,
+      title: s.title,
+      project: s.project,
+      daysLeft: period - Math.floor((now.getTime() - s.mtime.getTime()) / DAY_MS),
+      bytes: s.bytes,
+      mtime: s.mtime.toISOString(),
+    }))
+    .sort((a, b) => a.daysLeft - b.daysLeft);
 
   if (!disk.exists) warnings.push(`no projects directory at ${cp.projects}`);
   if (!history.exists) warnings.push(`no history.jsonl at ${cp.history} — ghosts cannot be rebuilt`);
-  if (history.malformed > 0) warnings.push(`${history.malformed} malformed lines in history.jsonl`);
+  if (history.malformed > 0) {
+    const n = history.malformed;
+    warnings.push(`${n} malformed ${n === 1 ? 'line' : 'lines'} in history.jsonl (skipped)`);
+  }
   for (const bad of index.malformed) warnings.push(`unreadable sessions-index.json: ${bad}`);
   for (const s of [...disk.sessions, ...disk.sidechains]) {
     if (s.error) warnings.push(`unreadable transcript ${s.sourcePath}: ${s.error}`);
@@ -224,6 +224,7 @@ export function computeAudit(input: AuditInput): AuditReport {
     projectDirs: disk.projects.length,
 
     nextSweep,
+    nextSweepWithin7Days: nextSweep.filter((s) => s.daysLeft <= 7).length,
     nextSweepWithinOneDay: nextSweep.filter((s) => s.daysLeft <= 1).length,
     cleanupPeriodDays: cleanup.declared,
     cleanupPeriodEffective: cleanup.effective,

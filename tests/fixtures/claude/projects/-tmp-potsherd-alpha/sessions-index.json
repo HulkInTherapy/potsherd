@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "sessionId": "11111111-1111-4111-8111-111111111111",
+      "fullPath": "/Users/zebra/randomness/potsherd/tests/fixtures/claude/projects/-tmp-potsherd-alpha/11111111-1111-4111-8111-111111111111.jsonl",
+      "fileMtime": 1785575120000,
+      "firstPrompt": "how do we pin the pgbouncer prepared-statement setting?",
+      "summary": "Pin pgbouncer prepared-statement handling",
+      "messageCount": 6,
+      "created": "2026-08-01T09:00:00.000Z",
+      "modified": "2026-08-01T09:05:20.000Z",
+      "gitBranch": "main",
+      "projectPath": "/tmp/potsherd-alpha",
+      "isSidechain": false
+    },
+    {
+      "sessionId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "fullPath": "/Users/zebra/randomness/potsherd/tests/fixtures/claude/projects/-tmp-potsherd-alpha/cccccccc-cccc-4ccc-8ccc-cccccccccccc.jsonl",
+      "fileMtime": 1780394400000,
+      "firstPrompt": "set up the alpha migration runner",
+      "summary": "Alpha migration runner",
+      "messageCount": 12,
+      "created": "2026-06-02T09:00:00.000Z",
+      "modified": "2026-06-02T10:00:00.000Z",
+      "gitBranch": "main",
+      "projectPath": "/tmp/potsherd-alpha",
+      "isSidechain": false
+    }
+  ]
+}

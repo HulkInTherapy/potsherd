@@ -1,0 +1,10 @@
+{"display":"how do we pin the pgbouncer prepared-statement setting?","pastedContents":{},"timestamp":1785574805000,"project":"/tmp/potsherd-alpha","sessionId":"11111111-1111-4111-8111-111111111111"}
+{"display":"ship it","pastedContents":{},"timestamp":1785575100000,"project":"/tmp/potsherd-alpha","sessionId":"11111111-1111-4111-8111-111111111111"}
+{"display":"scaffold the gamma service","pastedContents":{},"timestamp":1778400000000,"project":"/tmp/potsherd-gamma","sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"display":"add the retry policy","pastedContents":{},"timestamp":1778401800000,"project":"/tmp/potsherd-gamma","sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"display":"why is the retry budget 3?","pastedContents":{},"timestamp":1778403600000,"project":"/tmp/potsherd-gamma","sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"display":"gamma deploy is failing on the health check","pastedContents":{},"timestamp":1778486400000,"project":"/tmp/potsherd-gamma","sessionId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}
+{"display":"roll it back","pastedContents":{},"timestamp":1778487600000,"project":"/tmp/potsherd-gamma","sessionId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}
+{"display":"set up the alpha migration runner","pastedContents":{},"timestamp":1780390800000,"project":"/tmp/potsherd-alpha","sessionId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc"}
+{"display":"orphan prompt with no session","timestamp":1747000000000,"project":"/tmp/potsherd-gamma"}
+not json at all

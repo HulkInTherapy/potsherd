@@ -35,6 +35,8 @@ export async function runAudit(o: AuditOptions): Promise<number> {
         bytes: s.bytes,
         mtime: s.mtime,
       })),
+      nextSweepWithin7Days: report.nextSweepWithin7Days,
+      nextSweepWithinOneDay: report.nextSweepWithinOneDay,
       cleanupPeriodDays: report.cleanupPeriodDays,
       cleanupPeriodEffective: report.cleanupPeriodEffective,
       cleanupPeriodSource: report.cleanupPeriodSource,
