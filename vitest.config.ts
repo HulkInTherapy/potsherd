@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts', 'packages/*/src/**/*.test.ts'],
     environment: 'node',
+    setupFiles: ['tests/setup.ts'],
     // Rescue and settings tests write real files under a temp dir and take a
     // process-wide lock; running them in one process keeps that honest.
     pool: 'forks',

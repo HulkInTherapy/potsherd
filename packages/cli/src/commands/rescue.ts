@@ -48,7 +48,11 @@ export async function runRescue(o: RescueOptions): Promise<number> {
 
   // The consent flow. Never runs for --dry-run, --no-settings, or a non-TTY
   // without --yes, which is what makes the SessionStart hook safe.
-  const extras: ReceiptExtras = { settingsChanged: null, guardInstalled: consent.guardInstalled(o.claudeDir) };
+  const extras: ReceiptExtras = {
+    settingsChanged: null,
+    guardInstalled: consent.guardInstalled(o.claudeDir),
+    settingsEffective: readCleanupStatus(o.claudeDir).effective,
+  };
   const wantSettings = o.settings !== false && !o.dryRun;
   if (wantSettings) {
     const status = readCleanupStatus(o.claudeDir);
@@ -73,6 +77,7 @@ export async function runRescue(o: RescueOptions): Promise<number> {
         const { backup } = consent.applyProposal(proposal);
         extras.settingsChanged = true;
         extras.settingsBackup = backup;
+        extras.settingsEffective = days;
       } else {
         extras.settingsChanged = false;
       }

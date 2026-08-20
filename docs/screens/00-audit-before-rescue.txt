@@ -1,0 +1,13 @@
+potsherd audit · ~/.potsherd/ar…nual-2026-08-21 · 21 aug 2026
+
+  sessions ever started        329   nov 2025 → aug 2026
+  still on disk                 30
+  deleted by 30-day sweep      299   91%
+  prompts lost               2,971
+  projects wiped entirely       33   lexaiLMS · Veyu-Outreach-Engine · …
+
+  next sweep will delete        10   sessions in ≤ 7 days   (3 within one day)
+  cleanupPeriodDays          unset   → 30 (default)
+
+  the prompts from all 299 are recoverable from history.jsonl.
+  run  potsherd rescue  to archive what is left and rebuild the ghosts.

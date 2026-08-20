@@ -1,0 +1,23 @@
+potsherd doctor --privacy · 21 aug 2026
+
+  reads (never modified):
+    ~/.claude/projects
+    ~/.claude/history.jsonl
+    ~/.claude/projects/-Users-zebra…y-Crimes-cog/sessions-index.json
+    ~/.claude/projects/-Users-zebra…entic-claude/sessions-index.json
+    ~/.claude/projects/-Users-zebra…cts-anilearn/sessions-index.json
+    ~/.claude/projects/-Users-zebra-hive/sessions-index.json
+    ~/.claude/settings.json
+    ~/.claude/settings.local.json  (absent)
+    /Library/Application Support/ClaudeCode/managed-settings.json  (absent)
+
+  writes:
+    ~/.potsherd
+    ~/.potsherd/archive
+    ~/.potsherd/potsherd.db
+
+  writes only after an explicit y at a diff:
+    ~/.claude/settings.json
+      cleanupPeriodDays, and one SessionStart hook entry
+
+  no network. no telemetry. no account.

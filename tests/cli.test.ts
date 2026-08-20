@@ -34,6 +34,9 @@ function run(args: string[], env: Record<string, string> = {}): RunResult {
   try {
     const stdout = execFileSync('node', [bin, ...args], {
       encoding: 'utf8',
+      // POTSHERD_DIR and CLAUDE_CONFIG_DIR come from tests/setup.ts and point
+      // at a throwaway sandbox, so a missing --potsherd-dir can never reach the
+      // machine's real archive.
       env: { ...process.env, NO_COLOR: '1', ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -164,6 +167,37 @@ describe('potsherd cli', () => {
 
     expect(run(['guard', '--remove', '--yes', '--claude-dir', claude]).code).toBe(0);
     expect(run(['guard', '--status', '--json', '--claude-dir', claude]).stdout).toContain('"installed": false');
+  });
+
+  it('guard --status says whether the installed hook can actually run', () => {
+    const claude = copyFixtureClaude();
+    created.push(path.dirname(claude));
+
+    run(['guard', '--yes', '--claude-dir', claude]);
+    const ok = JSON.parse(run(['guard', '--status', '--json', '--claude-dir', claude]).stdout) as {
+      installed: boolean; runnable: boolean; command: string;
+    };
+    expect(ok.installed).toBe(true);
+    expect(ok.runnable).toBe(true);
+
+    // Break it the way a moved checkout or a global uninstall would.
+    const settings = path.join(claude, 'settings.json');
+    const j = JSON.parse(fs.readFileSync(settings, 'utf8')) as {
+      hooks: { SessionStart: { hooks: { command: string }[] }[] };
+    };
+    for (const entry of j.hooks.SessionStart) {
+      for (const h of entry.hooks) {
+        if (h.command.includes('rescue')) {
+          h.command = 'node "/nowhere/potsherd.js" rescue --yes --quiet --no-settings';
+        }
+      }
+    }
+    fs.writeFileSync(settings, JSON.stringify(j, null, 2));
+
+    const broken = run(['guard', '--status', '--claude-dir', claude]);
+    expect(broken.code).toBe(1);
+    expect(broken.stdout).toContain('broken');
+    expect(broken.stdout).toContain('potsherd guard --remove');
   });
 
   it('doctor reports zero fatal parse errors on the fixture', () => {

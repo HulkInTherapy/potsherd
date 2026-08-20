@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { consent, looksLikeJsonc, readCleanupStatus, unifiedDiff } from '@potsherd/core';
-import { copyFixtureClaude, readJson, rmrf } from './helpers.js';
+import { consent, looksLikeJsonc, readCleanupStatus, resolveHookCommand, unifiedDiff } from '@potsherd/core';
+import { copyFixtureClaude, readJson, rmrf, tempDir } from './helpers.js';
 
 const created: string[] = [];
 
@@ -188,6 +188,55 @@ describe('guard hook proposal', () => {
     const p = consent.proposeGuardHook(claude);
     expect(p.safe).toBe(false);
     expect(consent.manualInstructions(p, 'guard').join('\n')).toContain('SessionStart');
+  });
+});
+
+describe('guard command resolution', () => {
+  it('prefers potsherd on PATH, because that survives an upgrade', () => {
+    const dir = path.join(tempDir('potsherd-bin-'), 'bin');
+    created.push(path.dirname(dir));
+    fs.mkdirSync(dir, { recursive: true });
+    const fake = path.join(dir, 'potsherd');
+    fs.writeFileSync(fake, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const saved = process.env['PATH'];
+    try {
+      process.env['PATH'] = dir;
+      const r = resolveHookCommand('rescue --yes', '/somewhere/potsherd.js');
+      expect(r.via).toBe('path');
+      expect(r.command).toBe('potsherd rescue --yes');
+    } finally {
+      process.env['PATH'] = saved;
+    }
+  });
+
+  it('falls back to an absolute path, so the hook is never a no-op', () => {
+    const dir = tempDir('potsherd-bin-');
+    created.push(dir);
+    const entry = path.join(dir, 'potsherd.js');
+    fs.writeFileSync(entry, '');
+
+    const saved = process.env['PATH'];
+    try {
+      process.env['PATH'] = path.join(dir, 'definitely-empty');
+      const r = resolveHookCommand('rescue --yes', entry);
+      expect(r.via).toBe('absolute');
+      expect(r.command).toBe(`node "${entry}" rescue --yes`);
+    } finally {
+      process.env['PATH'] = saved;
+    }
+  });
+
+  it('recognises its own hook whichever form it was installed in', () => {
+    const claude = scratch();
+    consent.applyProposal(
+      consent.proposeGuardHook(claude, { command: 'node "/opt/x/potsherd.js" rescue --yes --quiet --no-settings' }),
+    );
+    expect(consent.guardInstalled(claude)).toBe(true);
+    expect(consent.installedGuardCommand(claude)).toContain('/opt/x/potsherd.js');
+    // And can take it back out again.
+    consent.applyProposal(consent.proposeGuardHook(claude, { remove: true }));
+    expect(consent.guardInstalled(claude)).toBe(false);
   });
 });
 

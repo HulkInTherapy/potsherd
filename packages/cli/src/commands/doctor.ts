@@ -26,7 +26,7 @@ export interface DoctorOptions extends GlobalOptions {
  * rather than written by hand so it can never drift from the code.
  */
 export async function runDoctor(o: DoctorOptions): Promise<number> {
-  const report = await audit(o.claudeDir);
+  const report = await audit(o.claudeDir, new Date(), o.potsherdDir ? { potsherdDir: o.potsherdDir } : {});
   const root = paths.potsherdDir(o.potsherdDir);
   const dbFile = paths.dbPath(root);
   const dbExists = fs.existsSync(dbFile);
@@ -57,14 +57,20 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     const t = themeFrom(o);
     const card = new Card(t);
     card.heading('doctor --privacy', fmt.date(new Date())).blank();
+    // Paths are the one thing here that can outrun any terminal, so they elide
+    // in the middle: the last segment is what identifies a file.
+    const pathW = Math.max(24, t.width - 16);
+    const show = (p: string) => fmt.elideMiddle(paths.tildify(p), pathW, t.ellip);
+
     card.text('reads (never modified):');
-    for (const p of dedupe(report.pathsRead)) card.raw(`    ${paths.tildify(p)}${fs.existsSync(p) ? '' : t.dim('   (absent)')}`);
-    card.blank().text('writes:');
-    for (const p of written) card.raw(`    ${paths.tildify(p)}`);
-    card.blank().text('writes only after an explicit y at a diff:');
-    for (const p of consented) {
-      card.raw(`    ${paths.tildify(p)}   ${t.dim('cleanupPeriodDays, and one SessionStart hook entry')}`);
+    for (const p of dedupe(report.pathsRead)) {
+      card.raw(`    ${show(p)}${fs.existsSync(p) ? '' : t.dim('  (absent)')}`);
     }
+    card.blank().text('writes:');
+    for (const p of written) card.raw(`    ${show(p)}`);
+    card.blank().text('writes only after an explicit y at a diff:');
+    for (const p of consented) card.raw(`    ${show(p)}`);
+    card.raw(`      ${t.dim('cleanupPeriodDays, and one SessionStart hook entry')}`);
     card.blank().text('no network. no telemetry. no account.');
     print(card.toString());
     return 0;
@@ -116,17 +122,20 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     { label: 'rescue runs', value: fmt.num(counts['rescue_log'] ?? 0) },
   ]);
 
+  // Every record type, always. A parser that silently drops a type is how an
+  // archive tool loses the thing you were looking for, so nothing is hidden
+  // behind a "N more" here.
   card.blank().text('record types seen (head/tail scan):');
-  const types = Object.entries(unknownTypes).sort((a, b) => b[1] - a[1]);
-  for (const [type, n] of types.slice(0, 12)) {
-    card.raw(`    ${type.padEnd(22)}${String(n).padStart(6)}`);
+  for (const [type, n] of Object.entries(unknownTypes).sort((a, b) => b[1] - a[1])) {
+    card.raw(`    ${type.padEnd(24)}${fmt.num(n).padStart(7)}`);
   }
-  if (types.length > 12) card.raw(`    ${t.dim(`${types.length - 12} more (see --json)`)}`);
 
   card.blank().text('adapters:');
   for (const [name, status] of Object.entries(adapterStatus())) {
-    const mark = status.supported ? t.ok('ready') : t.dim('phase ' + status.phase);
-    card.raw(`    ${name.padEnd(12)}${mark.padEnd(status.supported ? 14 : 20)}${t.dim(paths.tildify(status.path))}`);
+    // Pad the plain text and colour afterwards: padEnd counts escape bytes.
+    const label = status.supported ? 'ready' : `phase ${status.phase}`;
+    const mark = status.supported ? t.ok(label.padEnd(10)) : t.dim(label.padEnd(10));
+    card.raw(`    ${name.padEnd(12)}${mark}${t.dim(paths.tildify(status.path))}`);
   }
 
   const fatal = report.warnings.filter((w) => w.startsWith('unreadable transcript'));

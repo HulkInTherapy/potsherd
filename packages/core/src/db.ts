@@ -213,6 +213,13 @@ export function open(opts: OpenOptions = {}): Db {
   if (!opts.readonly) {
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
+    // The database holds prompt text, so it is owner-only like the archive.
+    // WAL creates two sidecar files; all three get the same treatment.
+    if (file !== ':memory:') {
+      for (const f of [file, `${file}-wal`, `${file}-shm`]) {
+        try { fs.chmodSync(f, 0o600); } catch { /* not created yet */ }
+      }
+    }
   }
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');

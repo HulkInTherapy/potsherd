@@ -3,6 +3,7 @@ import { scanClaudeDisk, type DiskScan, type ScannedFile } from './claude/scan.j
 import { readHistory, type HistoryScan } from './claude/history.js';
 import { readSessionsIndexes, type SessionIndexScan } from './claude/sessions-index.js';
 import { readCleanupStatus, CLAUDE_DEFAULT_CLEANUP_DAYS, type CleanupStatus } from './claude/settings.js';
+import { readArchiveState, type ArchiveState } from './archive-state.js';
 
 /**
  * `potsherd audit` — the first command, and the only one most people will ever
@@ -83,6 +84,13 @@ export interface AuditReport {
   memoryFiles: number;
   sessionsIndexFiles: number;
 
+  /**
+   * What potsherd has already rescued, read from ~/.potsherd read-only. Null
+   * before the first rescue. `audit` still writes nothing: it opens the
+   * database only if the file is already there, and only for reading.
+   */
+  archive: ArchiveState | null;
+
   /** Every record `type` seen in the head/tail windows, with counts. */
   recordTypes: Record<string, number>;
 
@@ -97,29 +105,44 @@ export interface AuditInput {
   history: HistoryScan;
   index: SessionIndexScan;
   cleanup: CleanupStatus;
+  archive: ArchiveState | null;
   claudeDir: string;
   now: Date;
 }
 
-export async function collectAudit(dir?: string, now = new Date()): Promise<AuditInput> {
+export interface AuditOptions {
+  /** Overrides ~/.potsherd when looking for what has already been rescued. */
+  potsherdDir?: string;
+}
+
+export async function collectAudit(
+  dir?: string,
+  now = new Date(),
+  opts: AuditOptions = {},
+): Promise<AuditInput> {
   const root = claudeDir(dir);
   const disk = scanClaudeDisk(root, { titles: true });
   const history = await readHistory(root);
   const index = readSessionsIndexes(root);
   const cleanup = readCleanupStatus(root);
-  return { disk, history, index, cleanup, claudeDir: root, now };
+  const archive = readArchiveState(opts.potsherdDir);
+  return { disk, history, index, cleanup, archive, claudeDir: root, now };
 }
 
-export async function audit(dir?: string, now = new Date()): Promise<AuditReport> {
+export async function audit(
+  dir?: string,
+  now = new Date(),
+  opts: AuditOptions = {},
+): Promise<AuditReport> {
   const started = Date.now();
-  const input = await collectAudit(dir, now);
+  const input = await collectAudit(dir, now, opts);
   const report = computeAudit(input);
   report.timings.totalMs = Date.now() - started;
   return report;
 }
 
 export function computeAudit(input: AuditInput): AuditReport {
-  const { disk, history, index, cleanup, claudeDir: root, now } = input;
+  const { disk, history, index, cleanup, archive, claudeDir: root, now } = input;
   const cp = claudePaths(root);
   const warnings: string[] = [];
 
@@ -240,6 +263,7 @@ export function computeAudit(input: AuditInput): AuditReport {
     memoryFiles: disk.projects.reduce((a, p) => a + p.memoryFiles, 0),
     sessionsIndexFiles: index.files.length,
 
+    archive,
     recordTypes,
     pathsRead,
     timings: { scanMs: disk.scanMs, historyMs: history.scanMs, totalMs: 0 },

@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -42,3 +42,11 @@ for (const t of targets) {
 }
 
 writeFileSync(path.join(here, 'dist', '.gitkeep'), '');
+
+// The published package carries its own licence and credit. The originals live
+// at the repo root; npm only packs files inside the package directory.
+const repo = path.resolve(here, '..', '..');
+for (const file of ['LICENSE', 'NOTICE', 'README.md']) {
+  const from = path.join(repo, file);
+  if (existsSync(from)) copyFileSync(from, path.join(here, file));
+}

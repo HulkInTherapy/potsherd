@@ -1,6 +1,8 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { audit, renderAuditCard, Theme, stripAnsi } from '@potsherd/core';
-import { FIXTURE_CLAUDE, IDS } from './helpers.js';
+import { audit, rescue, renderAuditCard, Theme, stripAnsi } from '@potsherd/core';
+import { copyFixtureClaude, FIXTURE_CLAUDE, IDS, rmrf, tempDir } from './helpers.js';
 
 const NOW = new Date('2026-08-21T12:00:00.000Z');
 
@@ -146,6 +148,48 @@ describe('audit card', () => {
     const out = renderAuditCard(r, new Theme({ color: false, ascii: true, width }));
     // eslint-disable-next-line no-control-regex
     expect(/[^\x00-\x7F]/.test(out)).toBe(false);
+  });
+
+  it('tells you to rescue before you have, and what it rescued after', async () => {
+    const before = await audit(FIXTURE_CLAUDE, NOW);
+    const beforeOut = renderAuditCard(before, new Theme({ color: false, width }));
+    expect(before.archive).toBeNull();
+    expect(beforeOut).toContain('run  potsherd rescue');
+    expect(beforeOut).toContain('recoverable from history.jsonl');
+
+    const root = tempDir('potsherd-audit-');
+    try {
+      await rescue({ claudeDir: FIXTURE_CLAUDE, root });
+      const after = await audit(FIXTURE_CLAUDE, NOW, { potsherdDir: root });
+      const afterOut = renderAuditCard(after, new Theme({ color: false, width }));
+
+      expect(after.archive?.ghosts).toBe(3);
+      expect(afterOut).toContain('3 ghosts rebuilt');
+      // The card must never tell you to run something you have already run.
+      expect(afterOut).not.toContain('recoverable from history.jsonl');
+      expect(afterOut.trimEnd().split('\n').pop()).toMatch(/potsherd (rescue --yes|guard)/);
+    } finally {
+      rmrf(root);
+    }
+  });
+
+  it('stops calling it the 30-day sweep once the user has turned it off', async () => {
+    const claude = copyFixtureClaude();
+    try {
+      fs.writeFileSync(
+        path.join(claude, 'settings.json'),
+        JSON.stringify({ cleanupPeriodDays: 3650 }, null, 2),
+      );
+      const r = await audit(claude, NOW);
+      const out = renderAuditCard(r, new Theme({ color: false, width }));
+      expect(out).not.toContain('3650-day sweep');
+      expect(out).toContain('already deleted');
+      // A settings value never gets a thousands separator.
+      expect(out).toContain('3650');
+      expect(out).not.toContain('3,650');
+    } finally {
+      rmrf(path.dirname(claude));
+    }
   });
 
   it('says something useful when there is no claude directory at all', async () => {

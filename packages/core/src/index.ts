@@ -3,11 +3,13 @@ export * as format from './format.js';
 export * as db from './db.js';
 export * as lock from './lock.js';
 export * as consent from './consent.js';
+export { onPath, resolveHookCommand, type BinResolution } from './resolve-bin.js';
 
 export { Theme, stripAnsi, type ThemeOptions } from './theme.js';
 export { Card, table, noteWidth, INDENT, type Row } from './render.js';
 
-export { audit, computeAudit, collectAudit, type AuditReport, type AuditInput, type DoomedSession, type WipedProject } from './audit.js';
+export { readArchiveState, type ArchiveState } from './archive-state.js';
+export { audit, computeAudit, collectAudit, type AuditOptions, type AuditReport, type AuditInput, type DoomedSession, type WipedProject } from './audit.js';
 export { renderAuditCard, renderSweepList } from './render/audit-card.js';
 
 export { rescue, sha256File, type RescueOptions, type RescueResult, type RescueProgress } from './rescue.js';

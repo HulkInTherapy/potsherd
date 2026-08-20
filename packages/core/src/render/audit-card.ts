@@ -39,7 +39,13 @@ export function renderAuditCard(r: AuditReport, t: Theme = new Theme()): string 
   });
   rows.push({ label: 'still on disk', value: f.num(r.onDisk) });
   rows.push({
-    label: `deleted by ${r.cleanupPeriodEffective}-day sweep`,
+    // Name the culprit only while it is still the culprit. Once the user has
+    // raised cleanupPeriodDays, "deleted by 3650-day sweep" would be a lie
+    // about sessions the 30-day default took months ago.
+    label:
+      r.cleanupPeriodEffective === 30
+        ? 'deleted by 30-day sweep'
+        : 'already deleted',
     value: f.num(r.deleted),
     note: r.deleted > 0 ? f.pct(r.deleted, r.sessionsEver) : '',
     tone: r.deleted > 0 ? 'accent' : 'none',
@@ -70,13 +76,16 @@ export function renderAuditCard(r: AuditReport, t: Theme = new Theme()): string 
   });
   sweepRows.push({
     label: 'cleanupPeriodDays',
-    value: r.cleanupPeriodDays === null ? 'unset' : f.num(r.cleanupPeriodDays),
+    // A settings value, not a quantity: no thousands separator.
+    value: r.cleanupPeriodDays === null ? 'unset' : String(r.cleanupPeriodDays),
     note:
       r.cleanupPeriodDays === null
         ? `${t.arrow} ${r.cleanupPeriodEffective} (default)`
         : r.cleanupPeriodSource !== 'user'
           ? `${t.arrow} ${r.cleanupPeriodEffective} (${r.cleanupPeriodSource})`
-          : '',
+          : r.cleanupPeriodEffective >= 365
+            ? 'the sweep is effectively off'
+            : '',
   });
   card.rows(sweepRows).blank();
 
@@ -86,17 +95,48 @@ export function renderAuditCard(r: AuditReport, t: Theme = new Theme()): string 
     card.blank();
   }
 
-  if (r.deleted > 0) {
-    card.text(`the prompts from all ${f.num(r.deleted)} are recoverable from history.jsonl.`);
-    card.text('run  potsherd rescue  to archive what is left and rebuild the ghosts.');
-  } else if (r.onDisk > 0) {
-    card.text('nothing has been deleted yet.');
-    card.text('run  potsherd rescue  to archive what you have before the sweep runs.');
-  } else {
-    card.text('no sessions found yet. run Claude Code once, then audit again.');
-  }
+  card.raw(closing(r, t));
 
   return card.toString();
+}
+
+/**
+ * The last two lines: what is true, then the one command that changes it.
+ * Which command that is depends on what this machine has already done.
+ */
+function closing(r: AuditReport, t: Theme): string {
+  const say = (...lines: string[]) => lines.map((l) => '  ' + f.clip(l, Math.max(20, t.width - 2))).join('\n');
+
+  if (r.onDisk === 0 && r.deleted === 0) {
+    return say('no sessions found yet. run Claude Code once, then audit again.');
+  }
+
+  const rescued = r.archive;
+  if (!rescued || rescued.rescues === 0) {
+    return r.deleted > 0
+      ? say(
+          `the prompts from all ${f.num(r.deleted)} are recoverable from history.jsonl.`,
+          'run  potsherd rescue  to archive what is left and rebuild the ghosts.',
+        )
+      : say(
+          'nothing has been deleted yet.',
+          'run  potsherd rescue  to archive what you have before the sweep runs.',
+        );
+  }
+
+  const missing = r.deleted - rescued.ghosts;
+  const state =
+    `${f.num(rescued.ghosts)} ghosts rebuilt ${t.sep} ` +
+    `${f.bytes(rescued.archivedBytes)} archived ${t.sep} ` +
+    `last rescue ${rescued.lastRescueAt ? f.date(rescued.lastRescueAt) : 'unknown'}`;
+
+  if (missing > 0) {
+    return say(state, `run  potsherd rescue  ${t.arrow} ${f.num(missing)} sessions are not archived yet.`);
+  }
+  if (r.cleanupPeriodEffective < 365) {
+    return say(state, 'run  potsherd rescue --yes  to stop the sweep taking any more.');
+  }
+  return say(state, 'run  potsherd guard  to take a copy at every startup, automatically.');
 }
 
 /** `nov 2025 -> aug 2026`, or a single month when the range is short. */

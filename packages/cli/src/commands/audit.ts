@@ -12,7 +12,7 @@ export interface AuditOptions extends GlobalOptions {
  * `npx` runs on a stranger's machine.
  */
 export async function runAudit(o: AuditOptions): Promise<number> {
-  const report = await audit(o.claudeDir);
+  const report = await audit(o.claudeDir, new Date(), o.potsherdDir ? { potsherdDir: o.potsherdDir } : {});
 
   if (o.json) {
     printJson({
@@ -60,6 +60,7 @@ export async function runAudit(o: AuditOptions): Promise<number> {
       projectDirs: report.projectDirs,
       projectsWithSessions: report.projectsWithSessions,
       timings: report.timings,
+      archive: report.archive,
       warnings: report.warnings,
     });
     return 0;

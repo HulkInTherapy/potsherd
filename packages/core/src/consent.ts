@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { claudePaths } from './paths.js';
+import { resolveHookCommand, type BinResolution } from './resolve-bin.js';
 import {
   POTSHERD_CLEANUP_DAYS,
   readCleanupStatus,
@@ -32,9 +33,13 @@ export interface SettingsProposal {
   noop: boolean;
 }
 
-export const GUARD_COMMAND = 'potsherd rescue --yes --quiet --no-settings';
+/** The arguments the guard hook runs, whatever binary path reaches them. */
+export const GUARD_ARGS = 'rescue --yes --quiet --no-settings';
+/** The portable form, used in docs and when potsherd is on PATH. */
+export const GUARD_COMMAND = `potsherd ${GUARD_ARGS}`;
 const GUARD_MATCHER = 'startup|resume';
-const GUARD_MARKER = 'potsherd rescue';
+/** Recognises our entry however it was spelled: on PATH, or an absolute path. */
+const GUARD_MARKER = GUARD_ARGS;
 
 export function proposeCleanupPeriod(
   dir?: string,
@@ -139,14 +144,27 @@ export function proposeGuardHook(
   };
 }
 
+/** The command `guard` will install on this machine, and how it found it. */
+export function guardCommandFor(entry?: string): BinResolution {
+  return resolveHookCommand(GUARD_ARGS, entry);
+}
+
 export function guardInstalled(dir?: string): boolean {
+  return installedGuardCommand(dir) !== null;
+}
+
+/** The exact command string currently installed, or null. */
+export function installedGuardCommand(dir?: string): string | null {
   const st = readCleanupStatus(dir);
   const hooks = st.files.user.json?.['hooks'] as Record<string, unknown> | undefined;
   const list = hooks?.['SessionStart'];
-  if (!Array.isArray(list)) return false;
-  return (list as HookEntry[]).some((e) =>
-    (e.hooks ?? []).some((h) => typeof h.command === 'string' && h.command.includes(GUARD_MARKER)),
-  );
+  if (!Array.isArray(list)) return null;
+  for (const entry of list as HookEntry[]) {
+    for (const h of entry.hooks ?? []) {
+      if (typeof h.command === 'string' && h.command.includes(GUARD_MARKER)) return h.command;
+    }
+  }
+  return null;
 }
 
 export function applyProposal(

@@ -6,3 +6,8 @@ dist/
 coverage/
 .tmp/
 .potsherd/
+
+# copied into packages/cli at build time from the repo root
+packages/cli/LICENSE
+packages/cli/NOTICE
+packages/cli/README.md

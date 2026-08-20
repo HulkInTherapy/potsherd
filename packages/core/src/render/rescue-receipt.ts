@@ -15,6 +15,12 @@ export interface ReceiptExtras {
   settingsChanged: boolean | null;
   settingsFrom?: number | null;
   settingsTo?: number;
+  /**
+   * The cleanupPeriodDays actually in force right now. The receipt reports
+   * this rather than assuming the sweep is on whenever it did not ask: a user
+   * who set the key last week must not be told their sessions are at risk.
+   */
+  settingsEffective?: number;
   settingsBackup?: string | null;
   settingsSkippedReason?: string;
   /** Whether the SessionStart guard hook is already in place. */
@@ -32,7 +38,7 @@ export function renderRescueReceipt(
 
   card.rows([
     {
-      label: r.dryRun ? 'files that would be copied' : 'files copied',
+      label: r.dryRun ? 'files to copy' : 'files copied',
       value: f.num(r.filesCopied),
       note: r.filesCopied ? f.bytes(r.bytesCopied) : 'nothing new since last rescue',
       tone: r.filesCopied ? 'ok' : 'none',
@@ -77,7 +83,8 @@ export function renderRescueReceipt(
   card.text(`archive: ${f.elideMiddle(tildify(r.archiveDir), Math.max(24, t.width - 11), t.ellip)}`);
   // The next verb is whichever one this machine still needs. Pointing at a verb
   // that would be a no-op here is how a tour turns into noise.
-  if (extras.settingsChanged !== true) {
+  const sweepOff = extras.settingsChanged === true || (extras.settingsEffective ?? 30) >= 365;
+  if (!sweepOff) {
     card.text('run  potsherd rescue --yes  to stop the sweep deleting any more.');
   } else if (!extras.guardInstalled) {
     card.text('run  potsherd guard  to take a copy at every startup, automatically.');
@@ -106,24 +113,32 @@ function sweepRow(t: Theme, e: ReceiptExtras): {
 } {
   if (e.settingsChanged === true) {
     return {
-      label: '30-day sweep',
+      label: 'the sweep',
       value: 'off',
       note: `cleanupPeriodDays ${e.settingsFrom ?? 'unset'} ${t.arrow} ${e.settingsTo}`,
       tone: 'ok',
     };
   }
+  const days = e.settingsEffective ?? e.settingsFrom ?? 30;
+  // A year or more is not a sweep anyone needs warning about.
+  const off = days >= 365;
+
   if (e.settingsChanged === false) {
     return {
-      label: '30-day sweep',
-      value: 'on',
-      note: `still ${e.settingsFrom ?? 30} days — rescue again before it runs`,
-      tone: 'warn',
+      label: 'the sweep',
+      value: off ? 'off' : 'on',
+      note: off
+        ? `cleanupPeriodDays ${days}`
+        : `still ${days} days — rescue again before it runs`,
+      tone: off ? 'ok' : 'warn',
     };
   }
   return {
-    label: '30-day sweep',
-    value: 'on',
-    note: e.settingsSkippedReason ?? 'not asked (--no-settings)',
-    tone: 'warn',
+    label: 'the sweep',
+    value: off ? 'off' : 'on',
+    note: off
+      ? `cleanupPeriodDays ${days}`
+      : (e.settingsSkippedReason ?? 'not asked (--no-settings)'),
+    tone: off ? 'ok' : 'warn',
   };
 }

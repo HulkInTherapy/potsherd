@@ -1,0 +1,12 @@
+potsherd rescue · ~/.potsherd/archive/claude · 21 aug 2026
+
+  files copied                 277   327 MB
+  already archived               0   327 MB total on disk
+  sessions                      30   197 sidechains · 45 memory notes · 4 index…
+  ghosts rebuilt               299
+  prompts recovered          2,971   19 with titles
+
+  the sweep                    off   cleanupPeriodDays unset → 3650
+
+  archive: ~/.potsherd/archive/claude
+  run  potsherd guard  to take a copy at every startup, automatically.
