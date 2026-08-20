@@ -21,3 +21,9 @@ the main session rather than by a worker wave. The one part of `07` that applies
 `07-ORCHESTRATION.md` is binding: the main session is an orchestrator that writes no product
 code. Each phase runs as serial prerequisite → parallel wave in git worktrees → integration
 worker → fresh verifier worker. Each phase gets its own `WAVE.md` in this format.
+
+## defects found after the phase-0 commits
+
+| # | defect | found by | status |
+|---|---|---|---|
+| D1 | `tests/audit.test.ts` "computes days left from mtime" depends on the fixture's mtime, which git does not preserve. Passes locally (the generator sets mtimes), fails on a fresh clone: `expected 30 to be 10`. The test must set the mtime itself on a temp copy. | GitHub Actions, all 4 matrix legs | open — fix pass |
