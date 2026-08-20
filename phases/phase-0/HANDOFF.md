@@ -161,8 +161,27 @@ author this phase, per `06`'s review rule).
 
 | item | why it is open | picked up by |
 |---|---|---|
+| literal `npx potsherd audit` from the npm registry | the package is not published, so the registry path cannot be exercised. Verified instead by `npm pack` + `npm i -g` inside `node:22-bookworm-slim`: audit / rescue ×2 / doctor all exit 0 and the native `better-sqlite3` prebuild loads | phase 7 (release) |
+| fresh macOS user account | not created; a clean `$HOME` was simulated instead | phase 7 |
 | `vec_exchanges` / `vec_cards` tables | need the `sqlite-vec` extension, which phase 0 does not depend on | phase 1 (migration 3) |
 | redaction | out of scope for phase 0 by the phase file | phase 1 T1.4 |
 | codex / cursor / pi / gemini / opencode / copilot | `doctor` lists them as "phase 1" / "phase 6" with the path it would look in | phases 1 and 6 |
 | `ls` | `rescue`'s next-verb line points at `guard`, not `ls`, because `ls` does not exist yet | phase 2 |
 | real PNG screenshots | `docs/screens/` holds exact terminal text captures at 80 cols; PNGs and the asciinema cast are phase 7's deliverable | phase 7 |
+
+## the screens, and why they are not from the live machine
+
+`docs/screens/*.txt` and every code block in the README are **real, verbatim output** of the real
+binary — but run against a **synthetic demo corpus**, not the developer's `~/.claude`. The corpus
+is built by `scripts/make-demo-corpus.mjs` to reproduce the reference machine's measured counts
+exactly (330 / 31 / 299 / 2,971 / 33 wiped / 197 sidechains / 21 titled / 3 sdk / 10 doomed, 3
+within a day) with neutral project names and `/home/dev` paths.
+
+The reason is in the ground rules: the real corpus is client work, and the repository is public.
+The numbers are the product; the client names are not ours to publish. `scripts/make-screens.sh`
+regenerates all six screens and **fails the build** if any of them contains a real project name,
+a `/Users/` path, or a line over 80 characters. Three consecutive runs are byte-identical.
+
+Byte totals are the one figure the demo corpus cannot reproduce — it holds about a megabyte, not
+329 MB — so the README attributes every size and timing to the reference machine explicitly and
+cites this file for them.
