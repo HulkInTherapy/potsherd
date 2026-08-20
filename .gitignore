@@ -11,3 +11,6 @@ coverage/
 packages/cli/LICENSE
 packages/cli/NOTICE
 packages/cli/README.md
+
+# agent worktrees
+.claude/
