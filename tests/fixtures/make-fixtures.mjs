@@ -26,6 +26,13 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, 'claude');
 
+// `sessions-index.json` records an absolute path. Writing the real one would
+// bake this checkout's location into a committed file, so the fixture would
+// differ on every machine and CI's reproducibility check could never pass.
+// Nothing reads this field; a stable fake keeps the fixture byte-identical
+// everywhere.
+const NOTIONAL_HOME = '/home/dev/.claude';
+
 const ALIVE = '11111111-1111-4111-8111-111111111111';
 const SDK = '22222222-2222-4222-8222-222222222222';
 const GHOST_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -256,7 +263,7 @@ fs.writeFileSync(
       entries: [
         {
           sessionId: ALIVE,
-          fullPath: `${root}/projects/${slug(ALPHA)}/${ALIVE}.jsonl`,
+          fullPath: `${NOTIONAL_HOME}/projects/${slug(ALPHA)}/${ALIVE}.jsonl`,
           fileMtime: ms('2026-08-01T09:05:20.000Z'),
           firstPrompt: 'how do we pin the pgbouncer prepared-statement setting?',
           summary: 'Pin pgbouncer prepared-statement handling',
@@ -269,7 +276,7 @@ fs.writeFileSync(
         },
         {
           sessionId: GHOST_C,
-          fullPath: `${root}/projects/${slug(ALPHA)}/${GHOST_C}.jsonl`,
+          fullPath: `${NOTIONAL_HOME}/projects/${slug(ALPHA)}/${GHOST_C}.jsonl`,
           fileMtime: ms('2026-06-02T10:00:00.000Z'),
           firstPrompt: 'set up the alpha migration runner',
           summary: 'Alpha migration runner',
