@@ -32,11 +32,11 @@ to a careful port rather than a merge.
 | stage | task | worker | branch | status | notes |
 |---|---|---|---|---|---|
 | serial | T1.1 fork + green baseline | worker | merged to main | **done** | `f240d42`. 146 tests (96 phase-0 unchanged + 50 new). Phase-0 verbs byte-identical, proved by `cmp`. |
-| parallel | T1.2 claude adapter (full parse, sidechains, titles, sdk) | worker | worktree | running | |
-| parallel | T1.3a codex adapter | worker | worktree | running | two parallel streams double-count turns |
-| parallel | T1.3b cursor adapter | worker | worktree | running | hardest; scope decided: `~/.cursor` only |
-| parallel | T1.3c pi adapter | worker | worktree | running | linearise the branch tree |
-| parallel | T1.4 redaction | worker | worktree | running | ported rule packs + entropy |
+| parallel | T1.2 claude adapter (full parse, sidechains, titles, sdk) | worker | merged | **done** | 227 files, 0 fatal errors, 1,294 exchanges, 0 empty userText |
+| parallel | T1.3a codex adapter | worker | merged | **done** | `response_item` is authoritative; 1.9 MB line streamed, images elided |
+| parallel | T1.3b cursor adapter | worker | merged | **done** | cwd recovered from inside `~/.cursor`; timezone trap caught |
+| parallel | T1.3c pi adapter | worker | merged | **done** | file-order linearisation proved from pi's own source |
+| parallel | T1.4 redaction | worker | merged | **done** | 6/6 planted, 0 false positives |
 | integration | T1.5 index + find (fts5, vec, rrf) | — | `task/T1.5-index` | pending | net-new; needs adapters + redaction |
 | integration | T1.6 eval queries | — | `task/T1.6-evals` | pending | 10 known-answer queries |
 | verify | fresh verifier vs the definition of done | — | — | pending | never the author |
@@ -99,3 +99,4 @@ submitted** — no agent submits anything anywhere.
 | F15 | **cursor's cwd IS recoverable from `~/.cursor` alone** — absolute paths in the session's own tool inputs, accepted only when `cursorSlug(candidate) === projectSlug`. This resolves both real projects including `Users-zebra-maths-practice` → `/Users/zebra/maths_practice`, the underscore case that slug inversion can never reach. So the scope decision cost less than feared | T1.3b | |
 | F16 | **timezone trap:** `new Date("… (UTC+5:30)")` silently drops the offset and parses in the host zone, so the same transcript would index 5.5 h apart on this laptop and on UTC CI. `parseCursorTimestamp()` reads the offset explicitly | T1.3b | worth checking every adapter for this class of bug |
 | F17 | permanently unknowable for cursor from `~/.cursor` alone: title, model, gitBranch, entrypoint, agentName, `toolCalls[].result`/`isError`, `parentUuid`. All left undefined rather than invented; `doctor` states them | T1.3b | honest gap, per the scope decision |
+| F18 | redaction landed with 6/6 planted secrets masked and 0 false positives across the 200-line clean fixture — see the T1.4 commit for the ported rule pack and its licence | T1.4 | |
