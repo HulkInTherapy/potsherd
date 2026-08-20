@@ -1,0 +1,18 @@
+potsherd
+Copyright (c) 2026 potsherd contributors
+
+This product includes software developed as part of:
+
+  episodic-memory — https://github.com/obra/episodic-memory
+  Copyright (c) Jesse Vincent
+  Licensed under the MIT License.
+
+potsherd's engine (`packages/core`) is a hard fork of episodic-memory. The
+upstream revision the fork was taken from is recorded below once the fork
+lands (phase 1); generic fixes made here are prepared as upstream pull
+requests under `docs/upstream/`.
+
+  upstream: (recorded in phase 1 — see phases/phase-1/HANDOFF.md)
+
+Third-party dependencies retain their own licenses; see the `licenses`
+section of each package's `package.json` and `node_modules`.
