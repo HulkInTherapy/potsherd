@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": true,
+    "paths": { "@potsherd/core": ["../core/src/index.ts"] }
+  },
+  "include": ["src/**/*.ts"]
+}

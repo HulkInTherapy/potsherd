@@ -1,0 +1,51 @@
+{
+  "name": "potsherd",
+  "version": "0.1.0",
+  "description": "Rescue, index, search, interrogate and re-enter every coding-agent session on your machine. Local-first.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://github.com/HulkInTherapy/potsherd",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HulkInTherapy/potsherd.git"
+  },
+  "bugs": "https://github.com/HulkInTherapy/potsherd/issues",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "cursor",
+    "session",
+    "history",
+    "transcript",
+    "memory",
+    "search",
+    "archive",
+    "cli",
+    "mcp"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "potsherd": "./bin/potsherd.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@potsherd/core": "workspace:*",
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}
