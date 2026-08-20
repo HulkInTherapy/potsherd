@@ -77,3 +77,12 @@ submitted** — no agent submits anything anywhere.
 - [ ] `NOTICE` and readme credit present; upstream sha recorded.
 - [ ] a draft PR to obra/episodic-memory with the sidechain-flag change prepared in
       `docs/upstream/` (not submitted).
+
+## findings the wave produced that need action
+
+| # | finding | found by | action |
+|---|---|---|---|
+| F1 | `parser/claude.ts` omits the human-prompt rule's "has a `text` item" clause. Claude writes tool-returned images as their own `type:"user"` record carrying the prompt's `promptId` and no text; 11 exist in the corpus and each split one turn in two. The adapter folds them back, but where a split segment has no tool call its assistant text is dropped **before the adapter can see it** | T1.2 | one-clause fix in `parser/claude.ts` — T1.5 integration |
+| F2 | `artifact-comment-monitor` is a sixteenth claude record type, in no draft of `research/formats.md` | T1.2 | fold into formats.md |
+| F3 | `research/formats.md` says "`agent-name` records name the subagent". False: all 24 live in two **top-level** transcripts and hold the session's own name. No subagent file in the corpus has one | T1.2 | correct formats.md |
+| F4 | **the reference corpus is not static during the build** — the parallel workers' own subagent transcripts are being written into `~/.claude` as they run (197 sidechains at phase 0, 210 mid-wave). Exact-count assertions must run against the frozen `~/.potsherd/archive-manual-2026-08-21`; the live tree only supports floors | T1.2 | binding on the verifier |
