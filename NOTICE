@@ -4,15 +4,33 @@ Copyright (c) 2026 potsherd contributors
 This product includes software developed as part of:
 
   episodic-memory — https://github.com/obra/episodic-memory
-  Copyright (c) Jesse Vincent
+  Copyright (c) 2025 Jesse Vincent
   Licensed under the MIT License.
 
 potsherd's engine (`packages/core`) is a hard fork of episodic-memory. The
-upstream revision the fork was taken from is recorded below once the fork
-lands (phase 1); generic fixes made here are prepared as upstream pull
-requests under `docs/upstream/`.
+upstream revision the fork was taken from is:
 
-  upstream: (recorded in phase 1 — see phases/phase-1/HANDOFF.md)
+  upstream: obra/episodic-memory
+  tag:      v1.4.2
+  commit:   10757690210574421f1df5f35835af8d0c74d984
+  date:     2026-05-21
+
+That revision is reachable from this repository as the fetch-only git remote
+`upstream-episodic`, so `git log upstream-episodic/main` and
+`git diff 1075769..upstream-episodic/main -- src/` keep working:
+
+  git remote add upstream-episodic https://github.com/obra/episodic-memory.git
+  git fetch upstream-episodic --no-tags \
+    'refs/heads/main:refs/remotes/upstream-episodic/main'
+
+No upstream commit is merged into this history. Files were hand-ported into
+potsherd's layer layout and each one carries a provenance header naming the
+upstream path and revision. `docs/upstream/PORT-LOG.md` lists every upstream
+source file and records whether it was taken verbatim, adapted, or refused,
+and why.
+
+Generic fixes made here are prepared as upstream pull requests under
+`docs/upstream/` and are not submitted by any agent.
 
 Third-party dependencies retain their own licenses; see the `licenses`
 section of each package's `package.json` and `node_modules`.

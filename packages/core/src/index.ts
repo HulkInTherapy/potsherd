@@ -39,4 +39,29 @@ export {
   type SettingsFile,
 } from './claude/settings.js';
 
+// ---------------------------------------------------------------- phase 1
+// Ported from obra/episodic-memory v1.4.2 (MIT, (c) 2025 Jesse Vincent).
+// See NOTICE for the upstream revision and docs/upstream/PORT-LOG.md for what
+// was taken, what was adapted and what was refused.
+
+export type {
+  Harness,
+  SessionStatus,
+  SessionRecord,
+  Exchange,
+  ExchangeToolCall,
+  SessionSource,
+  ParseOptions,
+  ParseResult,
+  Adapter,
+  AdapterStub,
+} from './adapters/types.js';
+export { HARNESSES, isAdapter } from './adapters/types.js';
+
+export * as parser from './parser/index.js';
+export * as embeddings from './embeddings.js';
+export * as search from './search/index.js';
+export * as markers from './markers.js';
+export * as codexVersion from './codex/version.js';
+
 export const VERSION = '0.1.0';
