@@ -62,7 +62,9 @@ jobs:
           node -e '
             const a = require("/tmp/potsherd.json");
             const b = require("/tmp/verify.json");
-            for (const k of ["sessionsEver","onDisk","deleted","promptsLost","promptsSurviving"]) {
+            // sidechainFiles is in the list on purpose: a subagent transcript
+            // must never be counted as a session, under either layout.
+            for (const k of ["sessionsEver","onDisk","deleted","promptsLost","promptsSurviving","sidechainFiles"]) {
               if (a[k] !== b[k]) {
                 console.error(`${k}: potsherd ${a[k]} vs verify ${b[k]}`);
                 process.exit(1);
@@ -70,6 +72,29 @@ jobs:
             }
             console.log("agree:", JSON.stringify(b));
           '
+
+      # The honesty contract: the python audit --verify prints must recompute
+      # the same four numbers, on a machine with no checkout.
+      - name: audit --verify recomputes the same numbers
+        shell: bash
+        run: |
+          node packages/cli/bin/potsherd.js audit --verify --json \
+            --claude-dir tests/fixtures/claude \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["snippet"])' > /tmp/snippet.sh
+          CLAUDE_CONFIG_DIR=tests/fixtures/claude sh /tmp/snippet.sh > /tmp/snippet.out
+          cat /tmp/snippet.out
+          python3 - <<'EOF'
+          import json, re
+          got = dict((m.group(1).strip(), int(m.group(2)))
+                     for m in (re.match(r"^(.*?)\s+(\d+)$", l.strip())
+                               for l in open("/tmp/snippet.out")) if m)
+          want = json.load(open("/tmp/potsherd.json"))
+          pairs = [("sessions ever started", "sessionsEver"), ("still on disk", "onDisk"),
+                   ("deleted", "deleted"), ("prompts lost", "promptsLost")]
+          for label, key in pairs:
+              assert got[label] == want[key], (label, got[label], want[key])
+          print("audit --verify agrees:", got)
+          EOF
 
       - name: audit is safe on a machine with no claude code at all
         shell: bash

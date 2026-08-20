@@ -24,8 +24,11 @@ potsherd audit · ~/.claude · 21 aug 2026
 
 That output is from one real machine on 21 August 2026. Yours will be different.
 `audit` reads; it writes nothing, needs no key, makes no network request, and
-took **0.31 s** on that machine's 346 MB archive — it reads the first and last
-64 KB of each transcript and nothing in between.
+took **0.23 s** on that machine's **329 MB** of transcripts — it reads the first
+and last 64 KB of each file and nothing in between. Both figures come straight
+out of `potsherd audit --json` on that machine (`.bytes`, formatted the way the
+card formats bytes, and the median `.timings.totalMs` over five runs); no number
+in this readme is typed in by hand.
 
 > **Status: v0.1.0, phase 0 of 8.** Today potsherd rescues. Search, cards, `ask`
 > and `graft` land in the phases that follow — see [the roadmap](#roadmap).
@@ -53,6 +56,7 @@ Counts what you have, what you have lost, and what goes next.
 npx potsherd audit
 npx potsherd audit --sweep          # name the sessions the next sweep takes
 npx potsherd audit --json | jq .deleted
+npx potsherd audit --verify         # the python that checks these numbers
 ```
 
 ### `potsherd rescue`
@@ -117,14 +121,33 @@ The union matters: SDK-driven sessions (`entrypoint: sdk-ts`) never write to
 `history.jsonl`, so counting history alone quietly omits them.
 
 You do not have to trust potsherd to check potsherd.
-[`scripts/verify-audit.py`](scripts/verify-audit.py) recomputes all four with
-the Python standard library and nothing else:
+
+```bash
+potsherd audit --verify
+```
+
+prints a self-contained Python snippet — standard library only, no checkout, no
+potsherd — that recomputes all four numbers from your own files, plus the four
+definitions it implements. Paste it into a shell, or pipe it into one:
+
+```bash
+potsherd audit --verify --json | jq -r .snippet | sh
+```
+
+With a checkout of this repository,
+[`scripts/verify-audit.py`](scripts/verify-audit.py) is the same computation
+with `--json` and `--claude-dir`:
 
 ```bash
 python3 scripts/verify-audit.py
+python3 scripts/verify-audit.py --json --claude-dir ~/backup/.claude
 ```
 
-If the two ever disagree, the Python script is right and potsherd has a bug.
+Both exclude subagent transcripts (the `.jsonl` files under a `subagents/`
+directory): a subagent transcript belongs to the session that spawned it, so
+counting one as a session would inflate "still on disk".
+
+If the two ever disagree, the Python is right and potsherd has a bug.
 
 ## What is not recoverable
 

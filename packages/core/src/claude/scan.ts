@@ -15,6 +15,8 @@ const HEAD_BYTES = 64 * 1024;
 const TAIL_BYTES = 64 * 1024;
 /** When the tail holds no `ai-title`, look further back before giving up. */
 const TAIL_ESCALATED_BYTES = 1024 * 1024;
+/** Subagent transcripts live under a directory with this name, at either depth. */
+export const SIDECHAIN_DIR = 'subagents';
 
 export interface ScannedFile {
   /** Session id from the filename (top level) or the enclosing dir (sidechain). */
@@ -60,7 +62,19 @@ export interface DiskScan {
   scanMs: number;
 }
 
-export function scanClaudeDisk(dir?: string, opts: { titles?: boolean } = {}): DiskScan {
+export interface ScanOptions {
+  /** Escalate the tail window looking for a late `ai-title`. `audit` only. */
+  titles?: boolean;
+  /**
+   * Read anything out of the files at all. `rescue` needs only the session ids,
+   * which are filenames, and the paths — so it opens nothing. On a 345 MB
+   * corpus that is 234 file opens and up to 128 KB read from each of them, and
+   * it was the single largest cost in the SessionStart hook's budget.
+   */
+  content?: boolean;
+}
+
+export function scanClaudeDisk(dir?: string, opts: ScanOptions = {}): DiskScan {
   const started = Date.now();
   const cp = claudePaths(dir);
   const projectsDir = cp.projects;
@@ -100,20 +114,31 @@ export function scanClaudeDisk(dir?: string, opts: { titles?: boolean } = {}): D
           sessionId: child.name.slice(0, -'.jsonl'.length),
           isSidechain: false,
           titles: opts.titles !== false,
+          content: opts.content !== false,
         });
         out.sessions.push(f);
         out.totalBytes += f.bytes;
       } else if (child.isDirectory()) {
-        // <session-uuid>/subagents/agent-*.jsonl
-        const subDir = path.join(projDir, child.name, 'subagents');
+        // Two layouts have been seen for subagent transcripts:
+        //   <slug>/<session-uuid>/subagents/agent-*.jsonl   (this corpus)
+        //   <slug>/subagents/agent-*.jsonl                  (plans/phases T0.1)
+        // Both are sidechains. Missing the second would count every subagent
+        // transcript as a session and inflate "still on disk", so both are
+        // recognised here and both are excluded from `sessions`.
+        const nested = child.name === SIDECHAIN_DIR;
+        const subDir = nested ? path.join(projDir, child.name) : path.join(projDir, child.name, SIDECHAIN_DIR);
         if (!fs.existsSync(subDir)) continue;
         for (const sub of readdirSafe(subDir)) {
           if (!sub.endsWith('.jsonl')) continue;
+          const fileId = sub.slice(0, -'.jsonl'.length);
           const f = scanFile(path.join(subDir, sub), slug, {
-            sessionId: child.name,
-            fileId: sub.slice(0, -'.jsonl'.length),
+            // With no enclosing session directory the parent session is
+            // whatever the records say; the filename is only an agent name.
+            sessionId: nested ? fileId : child.name,
+            fileId,
             isSidechain: true,
             titles: false,
+            content: opts.content !== false,
           });
           out.sidechains.push(f);
           out.totalBytes += f.bytes;
@@ -130,7 +155,14 @@ export function scanClaudeDisk(dir?: string, opts: { titles?: boolean } = {}): D
 export function scanFile(
   file: string,
   slug: string,
-  opts: { sessionId: string; fileId?: string; isSidechain: boolean; titles: boolean },
+  opts: {
+    sessionId: string;
+    fileId?: string;
+    isSidechain: boolean;
+    titles: boolean;
+    /** When false, stat the file and read none of it. */
+    content?: boolean;
+  },
 ): ScannedFile {
   const rec: ScannedFile = {
     sessionId: opts.sessionId,
@@ -157,6 +189,7 @@ export function scanFile(
     const st = fs.statSync(file);
     rec.bytes = st.size;
     rec.mtime = st.mtime;
+    if (opts.content === false) return rec;
     fd = fs.openSync(file, 'r');
 
     const headText = readAt(fd, 0, Math.min(HEAD_BYTES, st.size));

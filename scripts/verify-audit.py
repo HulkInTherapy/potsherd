@@ -27,6 +27,14 @@ import os
 import sys
 
 
+SIDECHAIN_DIR = "subagents"
+
+
+def is_sidechain(path: str) -> bool:
+    """True for a subagent transcript, at whatever depth it sits."""
+    return SIDECHAIN_DIR in path.split(os.sep)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--claude-dir", default=os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
@@ -37,11 +45,26 @@ def main() -> int:
     history_path = os.path.join(root, "history.jsonl")
     projects = os.path.join(root, "projects")
 
-    # 1. every session id with a transcript still on disk
-    on_disk = {
-        os.path.basename(f)[: -len(".jsonl")]
+    # 1. every session id with a transcript still on disk.
+    #
+    # Subagent ("sidechain") transcripts are NOT sessions: they belong to the
+    # session that spawned them, and counting one would inflate "still on disk"
+    # and hide a deleted session. Two layouts have been observed —
+    #   projects/<slug>/<session-uuid>/subagents/agent-*.jsonl
+    #   projects/<slug>/subagents/agent-*.jsonl
+    # — and the glob below (one level deep) matches neither. The filter is belt
+    # and braces so that widening the glob can never quietly change the count.
+    session_files = [
+        f
         for f in glob.glob(os.path.join(projects, "*", "*.jsonl"))
-    }
+        if not is_sidechain(f)
+    ]
+    on_disk = {os.path.basename(f)[: -len(".jsonl")] for f in session_files}
+    sidechains = [
+        f
+        for f in glob.glob(os.path.join(projects, "*", "**", "*.jsonl"), recursive=True)
+        if is_sidechain(f)
+    ]
 
     # 2. every session id and prompt count in history.jsonl (streamed)
     prompts_by_session: dict[str, int] = {}
@@ -88,6 +111,7 @@ def main() -> int:
         "promptsSurviving": prompts_surviving,
         "historyLines": history_lines,
         "historySessions": len(prompts_by_session),
+        "sidechainFiles": len(sidechains),
     }
 
     if args.as_json:

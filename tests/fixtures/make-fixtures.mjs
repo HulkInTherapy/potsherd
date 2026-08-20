@@ -10,7 +10,8 @@
  *
  *   - one titled session whose ai-title was rewritten 5 times
  *   - one SDK session (entrypoint sdk-ts) with no title at all
- *   - one sidechain under <session>/subagents/
+ *   - two sidechains, one under <session>/subagents/ and one under
+ *     <project>/subagents/, because both layouts exist and neither is a session
  *   - one sessions-index.json and one memory/ note
  *   - a history.jsonl holding 3 sessions with no transcript left (the ghosts)
  *   - every record type observed in the real corpus, including the ones that
@@ -43,6 +44,9 @@ fs.mkdirSync(path.join(root, 'projects', slug(ALPHA)), { recursive: true });
 fs.mkdirSync(path.join(root, 'projects', slug(BETA)), { recursive: true });
 fs.mkdirSync(path.join(root, 'projects', slug(ALPHA), 'memory'), { recursive: true });
 fs.mkdirSync(path.join(root, 'projects', slug(ALPHA), ALIVE, 'subagents'), { recursive: true });
+// The second sidechain layout, described by plans/phases/phase-0-rescue.md T0.1:
+// subagents/ directly under the project dir rather than under a session dir.
+fs.mkdirSync(path.join(root, 'projects', slug(BETA), 'subagents'), { recursive: true });
 
 const jsonl = (records) => records.map((r) => JSON.stringify(r)).join('\n') + '\n';
 
@@ -174,6 +178,39 @@ fs.writeFileSync(
       parentUuid: 's1',
       timestamp: '2026-08-01T09:01:40.000Z',
       message: { role: 'assistant', content: [{ type: 'text', text: 'Config is correct.' }] },
+    },
+  ]),
+);
+
+// The same file under the flatter layout. Neither potsherd nor
+// scripts/verify-audit.py may ever count one of these as a session: a
+// subagent transcript is part of its parent session, not a session of its own,
+// and counting it would inflate "still on disk" and deflate "deleted".
+fs.writeFileSync(
+  path.join(root, 'projects', slug(BETA), 'subagents', 'agent-02.jsonl'),
+  jsonl([
+    { type: 'agent-name', sessionId: SDK, agentName: 'changelog-reader', isSidechain: true },
+    {
+      sessionId: SDK,
+      cwd: BETA,
+      entrypoint: 'sdk-ts',
+      isSidechain: true,
+      type: 'user',
+      uuid: 'q1',
+      promptId: 'qp1',
+      timestamp: '2026-08-02T11:00:02.000Z',
+      message: { role: 'user', content: 'list the entries under 2.1.x' },
+    },
+    {
+      sessionId: SDK,
+      cwd: BETA,
+      entrypoint: 'sdk-ts',
+      isSidechain: true,
+      type: 'assistant',
+      uuid: 'q2',
+      parentUuid: 'q1',
+      timestamp: '2026-08-02T11:00:07.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Eleven entries.' }] },
     },
   ]),
 );

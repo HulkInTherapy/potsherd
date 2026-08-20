@@ -115,10 +115,28 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   ]);
   card.blank();
   card.rows([
-    { label: 'sessions on disk', value: fmt.num(report.onDiskFiles), note: `${fmt.num(report.titledSessions)} titled · ${fmt.num(report.sdkSessions)} sdk` },
+    {
+      label: 'sessions on disk',
+      value: fmt.num(report.onDiskFiles),
+      // The live corpus's size belongs to this row, not to `files archived`.
+      note: `${fmt.num(report.titledSessions)} titled · ${fmt.num(report.sdkSessions)} sdk · ${fmt.bytes(report.bytes)}`,
+    },
     { label: 'sidechains on disk', value: fmt.num(report.sidechainFiles), note: 'subagent transcripts' },
-    { label: 'ghosts stored', value: fmt.num(counts['ghosts'] ?? 0), note: `${fmt.num(counts['ghost_prompts'] ?? 0)} prompts` },
-    { label: 'files archived', value: fmt.num(counts['archive_files'] ?? 0), note: fmt.bytes(report.bytes) + ' of source' },
+    {
+      label: 'ghosts stored',
+      value: fmt.num(counts['ghosts'] ?? 0),
+      note: `${fmt.num(counts['ghost_prompts'] ?? 0)} ${fmt.plural(counts['ghost_prompts'] ?? 0, 'prompt')}`,
+    },
+    {
+      // The count is of archived files, so the size beside it must be the
+      // archive's, not the live corpus's — printing report.bytes here made the
+      // row contradict the rescue receipt that had just run.
+      label: 'files archived',
+      value: fmt.num(counts['archive_files'] ?? 0),
+      note: report.archive && report.archive.archivedFiles > 0
+        ? fmt.bytes(report.archive.archivedBytes) + ' of source, byte-exact'
+        : 'nothing archived yet — run potsherd rescue',
+    },
     { label: 'rescue runs', value: fmt.num(counts['rescue_log'] ?? 0) },
   ]);
 
@@ -148,7 +166,11 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   }]);
   for (const w of report.warnings.slice(0, 4)) card.text(t.dim(`note: ${w}`));
 
-  card.blank().text('run  potsherd doctor --privacy  to see every path potsherd reads and writes.');
+  card.blank().fix(
+    'potsherd doctor --privacy',
+    'to see every path potsherd reads and writes.',
+    'for every path it touches.',
+  );
   print(card.toString());
   return fatal.length ? 1 : 0;
 }

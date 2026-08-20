@@ -201,6 +201,23 @@ CREATE VIRTUAL TABLE IF NOT EXISTS ghost_prompts_fts USING fts5(
 );
 `,
   },
+  {
+    version: 3,
+    name: 'sync-state',
+    up: `
+-- A tiny key/value note of what the last pass over a source looked like, so a
+-- pass that provably cannot have changed anything can be skipped. Today it
+-- holds one row: the fingerprint of the inputs the ghost rebuild reads
+-- (history.jsonl's size and mtime, the session ids on disk, and the
+-- sessions-index files). Anything that could change a ghost changes the
+-- fingerprint, so a stale value can only ever cost work, never correctness.
+CREATE TABLE IF NOT EXISTS sync_state (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`,
+  },
 ];
 
 export function open(opts: OpenOptions = {}): Db {

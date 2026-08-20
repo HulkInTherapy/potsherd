@@ -1,4 +1,4 @@
-import { audit, renderAuditCard, renderSweepList } from '@potsherd/core';
+import { audit, paths, renderAuditCard, renderSweepList, renderVerify, verifyInfo } from '@potsherd/core';
 import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
 
 export interface AuditOptions extends GlobalOptions {
@@ -12,6 +12,20 @@ export interface AuditOptions extends GlobalOptions {
  * `npx` runs on a stranger's machine.
  */
 export async function runAudit(o: AuditOptions): Promise<number> {
+  // `--verify` reads nothing at all: it hands over the python that recomputes
+  // the four numbers from the user's own files, and gets out of the way. It is
+  // the honesty contract in plans/05 §honesty, and it must keep working on a
+  // machine that reached potsherd through npx and has no checkout.
+  if (o.verify) {
+    const dir = paths.claudeDir(o.claudeDir);
+    if (o.json) {
+      printJson(verifyInfo(dir));
+      return 0;
+    }
+    print(renderVerify(paths.tildify(dir), themeFrom(o)));
+    return 0;
+  }
+
   const report = await audit(o.claudeDir, new Date(), o.potsherdDir ? { potsherdDir: o.potsherdDir } : {});
 
   if (o.json) {

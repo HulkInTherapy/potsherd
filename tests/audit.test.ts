@@ -1,8 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { audit, rescue, renderAuditCard, Theme, stripAnsi } from '@potsherd/core';
-import { copyFixtureClaude, FIXTURE_CLAUDE, IDS, rmrf, tempDir } from './helpers.js';
+import { copyFixtureClaude, FIXTURE_CLAUDE, FIXTURE_MTIMES, IDS, rmrf, setMtime, tempDir } from './helpers.js';
 
 const NOW = new Date('2026-08-21T12:00:00.000Z');
 
@@ -57,15 +59,53 @@ describe('audit', () => {
   });
 
   it('computes days left from mtime, and flags what the sweep takes next', async () => {
-    const r = await audit(FIXTURE_CLAUDE, NOW);
-    // alive mtime 1 aug, sdk mtime 2 aug, now 21 aug, period 30 days.
-    const alive = r.nextSweep.find((s) => s.id === IDS.alive);
-    expect(alive?.daysLeft).toBe(10);
-    // nextSweep lists every live session, soonest first, for --sweep and --json.
-    expect(r.nextSweep.map((s) => s.id)).toEqual([IDS.alive, IDS.sdk]);
-    // The headline counts only the ones inside the week the card advertises.
-    expect(r.nextSweepWithin7Days).toBe(0);
-    expect(r.nextSweepWithinOneDay).toBe(0);
+    // Hermetic on purpose. Git does not record mtimes, so on a fresh clone the
+    // fixture's transcripts are as old as the checkout and this test would read
+    // whatever CI happened to stamp on them. The ages are set here, in the
+    // test, on a throwaway copy — never inherited from the working tree.
+    const claude = copyFixtureClaude();
+    try {
+      setMtime(path.join(claude, `projects/-tmp-potsherd-alpha/${IDS.alive}.jsonl`), '2026-08-01T09:05:20.000Z');
+      setMtime(path.join(claude, `projects/-tmp-potsherd-beta/${IDS.sdk}.jsonl`), '2026-08-02T11:00:09.000Z');
+
+      const r = await audit(claude, NOW);
+      // alive mtime 1 aug, sdk mtime 2 aug, now 21 aug, period 30 days.
+      const alive = r.nextSweep.find((s) => s.id === IDS.alive);
+      expect(alive?.daysLeft).toBe(10);
+      const sdk = r.nextSweep.find((s) => s.id === IDS.sdk);
+      expect(sdk?.daysLeft).toBe(11);
+      // nextSweep lists every live session, soonest first, for --sweep and --json.
+      expect(r.nextSweep.map((s) => s.id)).toEqual([IDS.alive, IDS.sdk]);
+      // The headline counts only the ones inside the week the card advertises.
+      expect(r.nextSweepWithin7Days).toBe(0);
+      expect(r.nextSweepWithinOneDay).toBe(0);
+    } finally {
+      rmrf(path.dirname(claude));
+    }
+  });
+
+  it('reads no session age off the checked-out fixture', async () => {
+    // The regression guard for the above: a fresh `git clone` stamps every
+    // fixture file with the checkout time, so touching them must change nothing
+    // any test asserts. If this fails, some test has started trusting a working
+    // tree mtime again and CI will go red on a clean machine.
+    const claude = copyFixtureClaude();
+    try {
+      // Stand in for the checkout stamping every file with "now".
+      for (const rel of Object.keys(FIXTURE_MTIMES)) {
+        setMtime(path.join(claude, rel), NOW.toISOString());
+      }
+      const r = await audit(claude, NOW);
+      // Counts, prompts and wiped projects are all mtime-independent.
+      expect(r.sessionsEver).toBe(5);
+      expect(r.onDisk).toBe(2);
+      expect(r.deleted).toBe(3);
+      expect(r.promptsLost).toBe(6);
+      // Only the sweep arithmetic moves, and it moves to "the full period".
+      expect(r.nextSweep.map((s) => s.daysLeft)).toEqual([30, 30]);
+    } finally {
+      rmrf(path.dirname(claude));
+    }
   });
 
   it('tolerates a malformed history line and one with no sessionId', async () => {
@@ -197,5 +237,113 @@ describe('audit card', () => {
     const out = renderAuditCard(r, new Theme({ color: false, width }));
     expect(out).toContain('--claude-dir');
     expect(r.sessionsEver).toBe(0);
+  });
+});
+
+
+/**
+ * A subagent transcript is part of the session that spawned it, never a session
+ * of its own. Two layouts exist in the wild — `<slug>/<session>/subagents/` on
+ * this corpus, `<slug>/subagents/` in plans/phases/phase-0-rescue.md T0.1 — and
+ * counting either as a session would inflate "still on disk" and hide a
+ * deleted session. potsherd and the standalone python must agree on that, on
+ * both layouts, or the honesty contract is worthless.
+ */
+describe('sidechains are not sessions', () => {
+  const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const verifier = path.join(repo, 'scripts', 'verify-audit.py');
+
+  it('finds both sidechain layouts and counts neither as a session', async () => {
+    const r = await audit(FIXTURE_CLAUDE, NOW);
+    // agent-01 under <session>/subagents/, agent-02 under <project>/subagents/.
+    expect(r.sidechainFiles).toBe(2);
+    expect(r.onDisk).toBe(2);
+    expect(r.onDiskFiles).toBe(2);
+    expect(r.sessionsEver).toBe(5);
+    const ids = new Set(r.nextSweep.map((s) => s.id));
+    expect(ids).toEqual(new Set([IDS.alive, IDS.sdk]));
+    expect([...ids].some((id) => id.startsWith('agent-'))).toBe(false);
+  });
+
+  it('agrees with scripts/verify-audit.py on the same corpus', async () => {
+    let raw: string;
+    try {
+      raw = execFileSync('python3', [verifier, '--json', '--claude-dir', FIXTURE_CLAUDE], {
+        encoding: 'utf8',
+      });
+    } catch (err) {
+      // A machine with no python3 cannot run the cross-check; CI always can.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw err;
+    }
+    const v = JSON.parse(raw) as Record<string, number>;
+    const r = await audit(FIXTURE_CLAUDE, NOW);
+    expect(v['sessionsEver']).toBe(r.sessionsEver);
+    expect(v['onDisk']).toBe(r.onDisk);
+    expect(v['deleted']).toBe(r.deleted);
+    expect(v['promptsLost']).toBe(r.promptsLost);
+    expect(v['promptsSurviving']).toBe(r.promptsSurviving);
+    // And it saw the sidechains without counting them.
+    expect(v['sidechainFiles']).toBe(r.sidechainFiles);
+  });
+
+  it('still refuses to count a sidechain when a project has only sidechains', async () => {
+    const claude = copyFixtureClaude();
+    try {
+      const dir = path.join(claude, 'projects', '-tmp-potsherd-delta', 'subagents');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, 'agent-09.jsonl'),
+        JSON.stringify({ type: 'agent-name', agentName: 'lone', isSidechain: true }) + '\n',
+      );
+      const r = await audit(claude, NOW);
+      expect(r.onDisk).toBe(2);
+      expect(r.sessionsEver).toBe(5);
+      expect(r.sidechainFiles).toBe(3);
+    } finally {
+      rmrf(path.dirname(claude));
+    }
+  });
+});
+
+describe('audit --verify', () => {
+  it('prints python that needs no checkout and no potsherd', async () => {
+    const { VERIFY_SNIPPET, renderVerify } = await import('@potsherd/core');
+    // Nothing outside the standard library, and nothing from potsherd.
+    expect(VERIFY_SNIPPET).not.toContain('potsherd');
+    expect(VERIFY_SNIPPET.match(/^import .*/gm)).toEqual(['import glob, json, os']);
+    expect(VERIFY_SNIPPET).toContain('subagents');
+
+    const out = renderVerify('~/.claude', new Theme({ color: false, width: 80 }));
+    expect(out).toContain('sessions ever started');
+    expect(out).toContain('prompts lost');
+    expect(out).toContain('scripts/verify-audit.py');
+  });
+
+  it('recomputes the four numbers the same way audit does', async () => {
+    const { VERIFY_SNIPPET } = await import('@potsherd/core');
+    // Strip the `python3 - <<'PY' ... PY` heredoc down to the program itself.
+    const body = VERIFY_SNIPPET.split('\n').slice(1, -1).join('\n');
+    let raw: string;
+    try {
+      raw = execFileSync('python3', ['-c', body], {
+        encoding: 'utf8',
+        env: { ...process.env, CLAUDE_CONFIG_DIR: FIXTURE_CLAUDE },
+      });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw err;
+    }
+    const got = Object.fromEntries(
+      raw.trim().split('\n').map((l) => {
+        const m = /^(.*?)\s+(\d+)$/.exec(l.trim())!;
+        return [m[1]!.trim(), Number(m[2])];
+      }),
+    );
+    const r = await audit(FIXTURE_CLAUDE, NOW);
+    expect(got['sessions ever started']).toBe(r.sessionsEver);
+    expect(got['still on disk']).toBe(r.onDisk);
+    expect(got['deleted']).toBe(r.deleted);
+    expect(got['prompts lost']).toBe(r.promptsLost);
   });
 });

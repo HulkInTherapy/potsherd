@@ -3,7 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, afterEach, describe, expect, it } from 'vitest';
+import { format } from '@potsherd/core';
 import { copyFixtureClaude, FIXTURE_CLAUDE, rmrf, tempDir } from './helpers.js';
+
+const bytes = format.bytes;
 
 /**
  * Exercises the shipped binary rather than the library: these are the exact
@@ -207,6 +210,87 @@ describe('potsherd cli', () => {
     const j = JSON.parse(r.stdout) as { fatalErrors: number; recordTypes: Record<string, number> };
     expect(j.fatalErrors).toBe(0);
     expect(Object.keys(j.recordTypes).length).toBeGreaterThan(5);
+  });
+
+  it('doctor sizes the archive by the archive, not by the live corpus', () => {
+    // `files archived 2 · 88 B of source` printed right after rescue reported
+    // 277 B copied: the count was of archived files, the size of ~/.claude.
+    const claude = copyFixtureClaude();
+    created.push(path.dirname(claude));
+    const root = scratchRoot();
+
+    const dry = run(['doctor', '--claude-dir', claude, '--potsherd-dir', root, '--width', '100']);
+    expect(dry.stdout).toContain('nothing archived yet');
+
+    const rescued = run(['rescue', '--yes', '--no-settings', '--json', '--claude-dir', claude, '--potsherd-dir', root]);
+    const bytesArchived = (JSON.parse(rescued.stdout) as { bytesArchived: number }).bytesArchived;
+
+    const doc = run(['doctor', '--json', '--claude-dir', claude, '--potsherd-dir', root]);
+    const j = JSON.parse(doc.stdout) as { corpus: { bytes: number } };
+    // The two figures really are different; the row must use the archive's.
+    expect(bytesArchived).not.toBe(j.corpus.bytes);
+
+    const human = run(['doctor', '--claude-dir', claude, '--potsherd-dir', root, '--width', '100']);
+    const row = human.stdout.split('\n').find((l) => l.includes('files archived'))!;
+    expect(row).toContain(bytes(bytesArchived));
+    expect(row).not.toContain(bytes(j.corpus.bytes));
+  });
+
+  it('audit --verify prints runnable python, writes nothing and exits 0', () => {
+    const root = path.join(scratchRoot(), 'nested');
+    const r = run(['audit', '--verify', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("python3 - <<'PY'");
+    expect(r.stdout).toContain('sessions ever started');
+    expect(r.stdout).toContain('scripts/verify-audit.py');
+    // --verify is still `audit`: it must not create ~/.potsherd either.
+    expect(fs.existsSync(root)).toBe(false);
+
+    const j = JSON.parse(
+      run(['audit', '--verify', '--json', '--claude-dir', FIXTURE_CLAUDE]).stdout,
+    ) as { snippet: string; scriptPath: string };
+    expect(j.scriptPath).toBe('scripts/verify-audit.py');
+    expect(j.snippet).toContain('history.jsonl');
+  });
+
+  it('the audit card keeps its closing command whole at 60 columns', () => {
+    const r = run(['audit', '--claude-dir', FIXTURE_CLAUDE, '--width', '60']);
+    expect(r.code).toBe(0);
+    const lines = r.stdout.trimEnd().split('\n');
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(60);
+    const last = lines[lines.length - 1]!;
+    expect(last.endsWith('…')).toBe(false);
+    expect(last).toMatch(/run {2}potsherd (audit|rescue|guard)(?: --[a-z-]+)?(?: {2}\S|$)/);
+  });
+
+  it('does not write "all 1" or "1 prompts" anywhere', () => {
+    // One deleted session, one stored prompt: every count is pluralised.
+    const claude = copyFixtureClaude();
+    created.push(path.dirname(claude));
+    const projects = path.join(claude, 'projects');
+    // Give the two gamma ghosts their transcripts back, so exactly one session
+    // is deleted and that session typed exactly one prompt.
+    for (const [slug, id] of [
+      ['-tmp-potsherd-gamma', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+      ['-tmp-potsherd-gamma', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'],
+    ] as const) {
+      fs.mkdirSync(path.join(projects, slug), { recursive: true });
+      fs.writeFileSync(
+        path.join(projects, slug, `${id}.jsonl`),
+        JSON.stringify({ type: 'user', sessionId: id, timestamp: '2026-08-01T00:00:00.000Z' }) + '\n',
+      );
+    }
+    const card = run(['audit', '--claude-dir', claude, '--width', '100']).stdout;
+    expect(card).toContain('deleted by 30-day sweep');
+    expect(card).not.toContain('all 1 are');
+    expect(card).toMatch(/that one session/);
+
+    const root = scratchRoot();
+    run(['rescue', '--yes', '--no-settings', '--quiet', '--claude-dir', claude, '--potsherd-dir', root]);
+    const doc = run(['doctor', '--claude-dir', claude, '--potsherd-dir', root, '--width', '100']).stdout;
+    const ghosts = doc.split('\n').find((l) => l.includes('ghosts stored'))!;
+    expect(ghosts).toMatch(/1 {2,}1 prompt$/);
+    expect(ghosts).not.toContain('1 prompts');
   });
 
   it('doctor --privacy names every path read and written', () => {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { archiveDir, claudeDir, claudePaths, potsherdDir } from './paths.js';
-import { scanClaudeDisk } from './claude/scan.js';
+import { scanClaudeDisk, SIDECHAIN_DIR } from './claude/scan.js';
 import { readHistory } from './claude/history.js';
 import { readSessionsIndexes } from './claude/sessions-index.js';
 import { open as openDb, type Db } from './db.js';
@@ -61,6 +61,12 @@ export interface RescueResult {
   bytesArchived: number;
 
   sessionsArchived: number;
+  /**
+   * Session transcripts in the archive after this run, new and unchanged
+   * together. The receipt needs it: `sessions archived 0` on a second run is
+   * true but reads as an empty archive without the total beside it.
+   */
+  sessionsInArchive: number;
   sidechainsArchived: number;
   memoryFilesArchived: number;
   sessionIndexesArchived: number;
@@ -103,6 +109,7 @@ async function rescueUnlocked(opts: RescueOptions, root: string): Promise<Rescue
     bytesCopied: 0,
     bytesArchived: 0,
     sessionsArchived: 0,
+    sessionsInArchive: 0,
     sidechainsArchived: 0,
     memoryFilesArchived: 0,
     sessionIndexesArchived: 0,
@@ -116,7 +123,11 @@ async function rescueUnlocked(opts: RescueOptions, root: string): Promise<Rescue
     warnings: [],
   };
 
-  const disk = scanClaudeDisk(src, { titles: false });
+  // rescue needs the session *ids* (which are filenames) and nothing that
+  // lives inside the transcripts, so the scan reads no file contents at all.
+  // Opening 234 files and reading 128 KB out of each was most of the
+  // SessionStart hook's wall time and bought this command nothing.
+  const disk = scanClaudeDisk(src, { titles: false, content: false });
   if (!disk.exists) {
     result.warnings.push(`no projects directory at ${cp.projects}`);
   }
@@ -305,12 +316,17 @@ function collectSourceFiles(projectsDir: string): SourceFile[] {
             });
           }
         } else {
-          const subDir = path.join(dir, e.name, 'subagents');
+          // Both observed sidechain layouts: <slug>/<session>/subagents/… and
+          // <slug>/subagents/…. Archiving one and not the other would leave
+          // half the subagent transcripts to the sweep.
+          const nested = e.name === SIDECHAIN_DIR;
+          const subDir = nested ? path.join(dir, e.name) : path.join(dir, e.name, SIDECHAIN_DIR);
+          const relDir = nested ? path.join(slug, e.name) : path.join(slug, e.name, SIDECHAIN_DIR);
           for (const s of readdirSafe(subDir)) {
             if (!s.endsWith('.jsonl')) continue;
             out.push({
               abs: path.join(subDir, s),
-              rel: path.join(slug, e.name, 'subagents', s),
+              rel: path.join(relDir, s),
               kind: 'sidechain',
             });
           }
@@ -322,6 +338,9 @@ function collectSourceFiles(projectsDir: string): SourceFile[] {
 }
 
 function countKind(result: RescueResult, kind: SourceKind, copied: boolean): void {
+  // Totals are counted whether or not this run had to copy the file: a
+  // transcript that was already byte-identical is still in the archive.
+  if (kind === 'session') result.sessionsInArchive++;
   if (!copied) return;
   if (kind === 'session') result.sessionsArchived++;
   else if (kind === 'sidechain') result.sidechainsArchived++;
@@ -330,14 +349,90 @@ function countKind(result: RescueResult, kind: SourceKind, copied: boolean): voi
   else if (kind === 'history') result.historyArchived = true;
 }
 
+/**
+ * A fingerprint of every input the ghost rebuild reads. If it is unchanged
+ * since the last rescue, no ghost can have changed either, and the whole pass
+ * — streaming history.jsonl and re-writing several thousand ghost_prompts rows
+ * — can be skipped. The guard hook runs this at every Claude Code startup, so
+ * the unchanged case is the common case.
+ *
+ * The inputs are exactly the three things `ghostPass` consults:
+ *   - history.jsonl's size and mtime (its content is the prompts)
+ *   - which session ids have a transcript on disk (a deletion makes a ghost)
+ *   - every sessions-index.json's size and mtime (they carry ghost titles)
+ * Anything that could change a ghost changes this string. A stale fingerprint
+ * can therefore only ever cost work, never correctness.
+ */
+function ghostFingerprint(
+  historyPath: string,
+  disk: { sessions: { sessionId: string }[]; projects?: { dir: string; hasSessionsIndex: boolean }[] },
+): string | null {
+  let hs: fs.Stats;
+  try {
+    hs = fs.statSync(historyPath);
+  } catch {
+    return null; // no history.jsonl: always take the slow path, and warn.
+  }
+  const parts = [`history:${hs.size}:${Math.floor(hs.mtimeMs)}`];
+  const ids = disk.sessions.map((s) => s.sessionId).sort();
+  parts.push(`sessions:${ids.length}:${crypto.createHash('sha256').update(ids.join('\n')).digest('hex')}`);
+  for (const proj of (disk.projects ?? []).filter((p) => p.hasSessionsIndex)) {
+    const p = path.join(proj.dir, 'sessions-index.json');
+    try {
+      const st = fs.statSync(p);
+      parts.push(`index:${p}:${st.size}:${Math.floor(st.mtimeMs)}`);
+    } catch {
+      parts.push(`index:${p}:gone`);
+    }
+  }
+  return crypto.createHash('sha256').update(parts.sort().join('\n')).digest('hex');
+}
+
+const GHOST_FINGERPRINT_KEY = 'claude:ghosts';
+
+/** What the ghosts already in the database add up to, without rebuilding them. */
+function ghostTotals(db: Db): {
+  ghosts: number;
+  prompts: number;
+  promptRows: number;
+  withTitles: number;
+} {
+  const g = db
+    .prepare(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(prompt_count), 0) AS prompts,
+              COALESCE(SUM(title IS NOT NULL), 0) AS titled FROM ghosts`,
+    )
+    .get() as { n: number; prompts: number; titled: number };
+  const rows = db.prepare('SELECT COUNT(*) AS n FROM ghost_prompts').get() as { n: number };
+  return { ghosts: g.n, prompts: g.prompts, promptRows: rows.n, withTitles: g.titled };
+}
+
 /** Rebuild every deleted session from the prompts that outlived it. */
 async function ghostPass(
   db: Db,
   src: string,
-  disk: { sessions: { sessionId: string }[] },
+  disk: { sessions: { sessionId: string }[]; projects?: { dir: string; hasSessionsIndex: boolean }[] },
   result: RescueResult,
   opts: RescueOptions,
 ): Promise<void> {
+  // The fast path. It reports the same totals the slow path would, read out of
+  // the database, so the receipt says "3 in the archive, none new" rather than
+  // pretending this run found nothing.
+  const fingerprint = opts.dryRun ? null : ghostFingerprint(claudePaths(src).history, disk);
+  if (fingerprint) {
+    const seen = db
+      .prepare('SELECT value FROM sync_state WHERE key = ?')
+      .get(GHOST_FINGERPRINT_KEY) as { value: string } | undefined;
+    const totals = ghostTotals(db);
+    if (seen?.value === fingerprint && totals.ghosts > 0) {
+      result.ghostsUpdated = totals.ghosts;
+      result.promptsRecovered = totals.prompts;
+      result.ghostPrompts = totals.promptRows;
+      result.ghostsWithTitles = totals.withTitles;
+      return;
+    }
+  }
+
   const history = await readHistory(src, { withPrompts: true });
   if (!history.exists) {
     result.warnings.push('no history.jsonl — nothing to rebuild ghosts from');
@@ -448,6 +543,13 @@ async function ghostPass(
       }
     });
     orphanRun();
+
+    if (fingerprint) {
+      db.prepare(
+        `INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ).run(GHOST_FINGERPRINT_KEY, fingerprint, result.ranAt);
+    }
   }
 }
 

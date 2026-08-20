@@ -46,15 +46,21 @@ function main(argv: string[]): void {
     program
       .command('audit')
       .description('count what Claude Code has already deleted, and what it deletes next')
-      .option('--sweep', 'also list the sessions the next sweep will take, by title'),
+      .option('--sweep', 'also list the sessions the next sweep will take, by title')
+      .option('--verify', 'print standalone python that recomputes the four numbers, then exit'),
   ).addHelpText('after', `
 example:
   potsherd audit
   potsherd audit --json | jq .deleted
-  potsherd audit --claude-dir ~/backup/.claude`);
+  potsherd audit --claude-dir ~/backup/.claude
+  potsherd audit --verify                            # check potsherd without potsherd
+  potsherd audit --verify --json | jq -r .snippet | sh   # ...and run it now`);
   audit.action(async (opts: Record<string, unknown>) => {
     const o = globals(program, audit, opts);
-    await run(() => runAudit({ ...o, sweep: Boolean(opts['sweep']) }), o);
+    await run(
+      () => runAudit({ ...o, sweep: Boolean(opts['sweep']), verify: Boolean(opts['verify']) }),
+      o,
+    );
   });
 
   const rescue = addGlobals(

@@ -82,7 +82,9 @@ export class Card {
   row(r: Row): this {
     const labelW = this.labelWidth();
     const noteW = Math.max(0, this.t.width - INDENT.length - labelW - VALUE_W - GAP);
-    const label = r.label.length > labelW ? elide(r.label, labelW) : r.label.padEnd(labelW);
+    // elide() may come back shorter than labelW (it trims before the ellipsis),
+    // so pad afterwards or the value column stops being a column.
+    const label = (r.label.length > labelW ? elide(r.label, labelW) : r.label).padEnd(labelW);
     const rawValue = r.value ?? '';
     const value = rawValue.length > VALUE_W ? rawValue : rawValue.padStart(VALUE_W);
     const note = r.note ? clip(r.note, noteW) : '';
@@ -101,6 +103,33 @@ export class Card {
   next(command: string, why: string): this {
     this.lines.push(`${INDENT}${this.t.dim('run')}  ${command}  ${this.t.dim(why)}`);
     return this;
+  }
+
+  /**
+   * A line that must never be truncated. Give the variants longest first; the
+   * first one that fits at this width is printed whole. Only if none fits is
+   * the shortest one clipped, and that is a bug in the phrasing, not here.
+   */
+  fit(...variants: string[]): this {
+    const max = Math.max(20, this.t.width - INDENT.length);
+    for (const v of variants) {
+      if (v.length <= max) {
+        this.lines.push(INDENT + v);
+        return this;
+      }
+    }
+    this.lines.push(INDENT + clip(variants[variants.length - 1] ?? '', max));
+    return this;
+  }
+
+  /**
+   * The last line of every card is the fix, and plans/05 requires it to stay
+   * complete: half a command cannot be typed. The explanation is what gives
+   * ground at 60 columns — pass the long one first and shorter ones after —
+   * and the command itself is printed bare rather than clipped.
+   */
+  fix(command: string, ...whys: string[]): this {
+    return this.fit(...whys.map((w) => `run  ${command}  ${w}`), `run  ${command}`);
   }
 
   toString(): string {

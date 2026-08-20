@@ -27,12 +27,37 @@ export function tempDir(prefix = 'potsherd-test-'): string {
 }
 
 /**
+ * The transcript mtimes the sweep tests reason about, relative to the fixture
+ * root. They live here and not in the fixture because **git does not preserve
+ * mtimes**: on a fresh clone every fixture file is stamped with the checkout
+ * time, so a test that reads a date off the working tree passes on the machine
+ * that generated the fixture and fails in CI. Any test whose result depends on
+ * a file's age must set that age itself.
+ */
+export const FIXTURE_MTIMES: Record<string, string> = {
+  [`projects/-tmp-potsherd-alpha/${IDS.alive}.jsonl`]: '2026-08-01T09:05:20.000Z',
+  [`projects/-tmp-potsherd-beta/${IDS.sdk}.jsonl`]: '2026-08-02T11:00:09.000Z',
+};
+
+/** Stamp one file with a known mtime (and atime), for sweep arithmetic. */
+export function setMtime(file: string, when: string): void {
+  const d = new Date(when);
+  fs.utimesSync(file, d, d);
+}
+
+/**
  * A writable copy of the committed fixture. Tests that exercise rescue or the
  * settings consent flow must never mutate the fixture in the repo.
+ *
+ * The copy is stamped with `FIXTURE_MTIMES`, so every test that copies the
+ * fixture gets the same session ages whatever the checkout did.
  */
 export function copyFixtureClaude(): string {
   const dir = path.join(tempDir(), 'claude');
   fs.cpSync(FIXTURE_CLAUDE, dir, { recursive: true });
+  for (const [rel, when] of Object.entries(FIXTURE_MTIMES)) {
+    setMtime(path.join(dir, rel), when);
+  }
   return dir;
 }
 

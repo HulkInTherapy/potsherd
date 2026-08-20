@@ -66,10 +66,12 @@ export async function runRescue(o: RescueOptions): Promise<number> {
       extras.settingsFrom = status.declared;
     } else if (!proposal.safe) {
       extras.settingsChanged = null;
+      extras.settingsRefused = true;
       extras.settingsSkippedReason = proposal.reason ?? 'settings.json cannot be edited safely';
       if (!o.json && !o.quiet) {
         print('');
         for (const line of consent.manualInstructions(proposal, 'cleanup', days)) print(line);
+        print('');
       }
     } else {
       const approved = o.yes ? true : await askForSettings(proposal.diff, days, status.effective, o);

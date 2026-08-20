@@ -12,7 +12,7 @@ Stop the bleeding and produce the first shareable number.
 | deliverable | state | where |
 |---|---|---|
 | repo per `00-README.md` layout, MIT, `NOTICE`, CI (macos+ubuntu, node 22+24) | done | repo root, `.github/workflows/ci.yml` |
-| `potsherd audit [--json] [--sweep] [--claude-dir]` | done | `packages/cli/src/commands/audit.ts` |
+| `potsherd audit [--json] [--sweep] [--verify] [--claude-dir]` | done | `packages/cli/src/commands/audit.ts` |
 | `potsherd rescue [--yes] [--dry-run] [--dest] [--no-settings] [--ghosts-only] [--quiet] [--json]` | done | `packages/cli/src/commands/rescue.ts` |
 | `potsherd guard [--remove] [--status] [--yes] [--json]` | done | `packages/cli/src/commands/guard.ts` |
 | `potsherd doctor [--privacy] [--json]` | done (added; `06` requires it) | `packages/cli/src/commands/doctor.ts` |
@@ -22,7 +22,10 @@ Stop the bleeding and produce the first shareable number.
 
 ### the numbers, measured on the reference machine 21 aug 2026
 
-`potsherd audit` and `scripts/verify-audit.py` agree exactly:
+`potsherd audit` and `scripts/verify-audit.py` agree exactly. Every figure below
+is what `potsherd audit --json` prints (`bytes` formatted by `core/src/format.ts`
+`bytes()`, wall time the median `timings.totalMs` over five runs) — nothing here
+is typed in by hand:
 
 ```
 sessions ever started   330      nov 2025 → aug 2026
@@ -30,7 +33,7 @@ still on disk            31
 deleted                 299      91%
 prompts lost          2,971
 projects wiped           33      lexaiLMS · Veyu-Outreach-Engine · …
-audit wall time        0.31 s    on 346 MB
+audit wall time        0.23 s    on 329 MB
 ```
 
 `potsherd rescue` on the frozen safety copy: **277 files, 327 MB archived, 299 ghosts rebuilt,
@@ -83,12 +86,20 @@ audit wall time        0.31 s    on 346 MB
 
 1. **The schema is already the whole of `03 §3`.** `packages/core/src/db.ts` creates `sessions`,
    `exchanges`, `tool_calls`, `ghosts`, `ghost_prompts`, `cards`, `tags`, `pins`, `links`,
-   `rescue_log`, `archive_files`, and all four FTS5 tables, in two versioned migrations. Phase 1
-   adds rows, not tables. `vec_exchanges` / `vec_cards` are the only things left (they need the
-   `sqlite-vec` extension) — add them as migration 3.
+   `rescue_log`, `archive_files`, `sync_state`, and all four FTS5 tables, in **three** versioned
+   migrations. Phase 1 adds rows, not tables. `vec_exchanges` / `vec_cards` are the only things
+   left (they need the `sqlite-vec` extension) — add them as **migration 4**.
 2. **`archive_files` is the incremental-sync ledger.** `(source_path → sha256, bytes,
    source_mtime)`. The fast path is a stat comparison; only a size/mtime change triggers a hash.
    Phase 1's `index` should use `sessions.source_mtime` / `source_offset` the same way.
+   **`sync_state` is the same idea one level up:** one row per pass, holding a fingerprint of
+   everything that pass reads. `claude:ghosts` covers history.jsonl's size and mtime, the set of
+   session ids on disk, and every sessions-index.json's size and mtime; when it matches, the ghost
+   rebuild is skipped and its totals are read back out of `ghosts` / `ghost_prompts` so the receipt
+   is unchanged. Phase 1's `index` should add its own key rather than re-parsing every transcript
+   at every startup. Also note `scanClaudeDisk(dir, { content: false })`: rescue needs session ids,
+   which are filenames, so it opens no transcripts at all. Those two changes took the guard hook
+   from a 0.33 s median to 0.11 s on the 345 MB reference corpus.
 3. **The archive is the fallback source.** When `~/.claude` loses a file, `~/.potsherd/archive/
    claude/<slug>/…` still has it, byte-exact. Phase 1's adapters should read the archive when the
    source path is gone and mark those sessions `status: archived`.
@@ -109,8 +120,10 @@ audit wall time        0.31 s    on 346 MB
 8. **The fixture is generated, not pasted.** `node tests/fixtures/make-fixtures.mjs` regenerates
    `tests/fixtures/claude/`; CI fails if the output differs from what is committed. Extend the
    generator, not the fixture. It already covers a titled session with 5 title rewrites, an SDK
-   session with no title, a sidechain, a `sessions-index.json`, a memory note, three ghosts, a
-   malformed history line and a sessionless history line.
+   session with no title, **two** sidechains (one under `<session>/subagents/`, one under
+   `<project>/subagents/` — both layouts exist and neither may ever be counted as a session), a
+   `sessions-index.json`, a memory note, three ghosts, a malformed history line and a sessionless
+   history line.
 9. **`potsherd` is installed globally on this machine** from the tarball, and the SessionStart
    guard hook is live in `~/.claude/settings.json`. Re-run
    `cd packages/cli && npm pack && npm install -g ./potsherd-0.1.0.tgz` after changing the CLI, or
