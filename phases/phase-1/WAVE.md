@@ -31,15 +31,41 @@ to a careful port rather than a merge.
 
 | stage | task | worker | branch | status | notes |
 |---|---|---|---|---|---|
-| serial | T1.1 fork + green baseline | — | `task/T1.1-fork` | pending | gates everything; upstream sha `1075769`, tag v1.4.2 |
-| parallel | T1.2 claude adapter (full parse, sidechains, titles, sdk) | — | `task/T1.2-claude` | pending | |
-| parallel | T1.3a codex adapter | — | `task/T1.3a-codex` | pending | two parallel streams double-count turns |
-| parallel | T1.3b cursor adapter | — | `task/T1.3b-cursor` | pending | hardest; scope decision on VS Code sqlite |
-| parallel | T1.3c pi adapter | — | `task/T1.3c-pi` | pending | linearise by last record in file order |
-| parallel | T1.4 redaction | — | `task/T1.4-redact` | pending | secretlint rule packs + entropy |
+| serial | T1.1 fork + green baseline | worker | merged to main | **done** | `f240d42`. 146 tests (96 phase-0 unchanged + 50 new). Phase-0 verbs byte-identical, proved by `cmp`. |
+| parallel | T1.2 claude adapter (full parse, sidechains, titles, sdk) | worker | worktree | running | |
+| parallel | T1.3a codex adapter | worker | worktree | running | two parallel streams double-count turns |
+| parallel | T1.3b cursor adapter | worker | worktree | running | hardest; scope decided: `~/.cursor` only |
+| parallel | T1.3c pi adapter | worker | worktree | running | linearise the branch tree |
+| parallel | T1.4 redaction | worker | worktree | running | ported rule packs + entropy |
 | integration | T1.5 index + find (fts5, vec, rrf) | — | `task/T1.5-index` | pending | net-new; needs adapters + redaction |
 | integration | T1.6 eval queries | — | `task/T1.6-evals` | pending | 10 known-answer queries |
 | verify | fresh verifier vs the definition of done | — | — | pending | never the author |
+
+## what T1.1 actually delivered
+
+Ported: `parser/` (claude + codex → `Exchange[]`), `embeddings.ts` (cache moved to
+`paths.modelsDir()`, offline-verified at 301 ms), `adapters/types.ts` (the contract, `03 §2` field
+for field), `search/` (the cosine identity, an injection-safe filter builder with **both**
+`is_sidechain = 0` lines gone), `markers.ts`, `codex/version.ts`, `cards/sentinel.ts`.
+
+Refused, with reasons in `docs/upstream/PORT-LOG.md`: `db.ts` and all upstream SQL, `paths.ts`,
+`file-lock.ts`, `sync.ts`, six `*-cli.ts` + seven `cli/*.js`, `doctor.ts`, `logging.ts`, the
+barrel, and `search.ts` itself. `summarizer.ts` and `mcp-server.ts` were not cheap to port; the
+parts worth copying in phases 2 and 5 are written down instead.
+
+**Three places the port improved on upstream rather than copying it:**
+1. the exchange boundary uses the human-prompt rule, not "any `type:user`" — the latter is what
+   produced the old 3,321-prompt miscount;
+2. tool results are paired by `tool_use_id`; upstream has a `TODO` and drops every result;
+3. sidechains are parsed as sessions in their own right, with `parentSessionId` and `agentName`.
+
+**The trap every adapter author was warned about:** a sidechain's `session.id` is
+`${parentSessionId}:${basename}`. The `sessionId` field inside a subagent transcript holds the
+PARENT's id, so using it raw collides on the primary key.
+
+`docs/upstream/PR-sidechain-flag.md` holds the prepared upstream pull request (title, body, diff)
+removing the hard-coded `AND e.is_sidechain = 0` at `src/search.ts:165` and `:188`. **Not
+submitted** — no agent submits anything anywhere.
 
 ## definition of done (from `plans/phases/phase-1-foundation.md`)
 
