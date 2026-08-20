@@ -50,6 +50,12 @@ jobs:
           node tests/fixtures/make-fixtures.mjs
           git diff --exit-code -- tests/fixtures/claude
 
+      # The readme and docs/screens/ publish the reference machine's numbers as
+      # real output. They only stay real while the demo corpus still produces
+      # them, so the generator checks itself and CI runs the check.
+      - name: the demo corpus still hits its targets
+        run: node scripts/make-demo-corpus.mjs
+
       # audit must agree with the standalone verifier on any corpus, including
       # an empty one and the committed fixture.
       - name: audit agrees with verify-audit.py

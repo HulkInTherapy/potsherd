@@ -1,0 +1,41 @@
+potsherd doctor · potsherd 0.1.0 · node v24.9.0
+
+  claude dir                         ~/.claude
+  potsherd dir                       ~/.potsherd
+  database                           schema v3 of v3
+
+  sessions on disk              31   21 titled · 3 sdk · 539 KB
+  sidechains on disk           197   subagent transcripts
+  ghosts stored                299   2,971 prompts
+  files archived               278   1.1 MB of source, byte-exact
+  rescue runs                    1
+
+  record types seen (head/tail scan):
+    user                        675
+    assistant                   436
+    agent-name                  197
+    file-history-snapshot        88
+    queue-operation              63
+    ai-title                     63
+    atis-latch                   49
+    system                       36
+    last-prompt                  31
+    mode                         31
+    permission-mode              31
+    attachment                   31
+    summary                      31
+    frame-link                   28
+    file-history-delta           25
+
+  adapters:
+    claude      ready     ~/.claude/projects
+    codex       phase 1   ~/.codex/sessions
+    cursor      phase 1   ~/.cursor/projects
+    pi          phase 1   ~/.pi/agent/sessions
+    gemini      phase 6   ~/.gemini/tmp
+    opencode    phase 6   ~/.local/share/opencode
+    copilot     phase 6   ~/.copilot/session-state
+
+  fatal parse errors             0   none
+
+  run  potsherd doctor --privacy  to see every path potsherd reads and writes.

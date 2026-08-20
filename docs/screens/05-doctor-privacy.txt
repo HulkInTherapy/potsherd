@@ -3,10 +3,10 @@ potsherd doctor --privacy · 21 aug 2026
   reads (never modified):
     ~/.claude/projects
     ~/.claude/history.jsonl
-    ~/.claude/projects/-Users-zebra…y-Crimes-cog/sessions-index.json
-    ~/.claude/projects/-Users-zebra…entic-claude/sessions-index.json
-    ~/.claude/projects/-Users-zebra…cts-anilearn/sessions-index.json
-    ~/.claude/projects/-Users-zebra-hive/sessions-index.json
+    ~/.claude/projects/-home-dev-agent-runner/sessions-index.json
+    ~/.claude/projects/-home-dev-crm-ingest/sessions-index.json
+    ~/.claude/projects/-home-dev-notes-api/sessions-index.json
+    ~/.claude/projects/-home-dev-payments-api/sessions-index.json
     ~/.claude/settings.json
     ~/.claude/settings.local.json  (absent)
     /Library/Application Support/ClaudeCode/managed-settings.json  (absent)

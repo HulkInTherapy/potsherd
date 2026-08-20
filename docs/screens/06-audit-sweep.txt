@@ -1,0 +1,36 @@
+potsherd audit · ~/.claude · 21 aug 2026
+
+  sessions ever started        330   nov 2025 → aug 2026
+  still on disk                 31
+  deleted by 30-day sweep      299   91%
+  prompts lost               2,971
+  projects wiped entirely       33   payments-api · crm-ingest · agent-runner
+
+  next sweep will delete        10   sessions in ≤ 7 days   (3 within one day)
+  cleanupPeriodDays          unset   → 30 (default)
+
+  the prompts from all 299 are recoverable from history.jsonl.
+  run  potsherd rescue  to archive what is left and rebuild the ghosts.
+
+  sessions the sweep takes next:
+    in 1 day        Move markdown renderer to a background job
+    in 1 day        Rewrite invoice renderer to stream
+    in 1 day        Speed up config loader
+    in 2 days       Find the leak in feature flag client
+    in 3 days       Add a timeout to file uploader
+    in 4 days       Stop health check double-writing
+    in 5 days       Speed up pdf splitter
+    in 6 days       Move seed script to a background job
+    in 7 days       Investigate terraform module regression
+    in 7 days       Stop webhook receiver double-writing
+    in 8 days       Make crawler idempotent
+    in 9 days       Add a timeout to csv importer
+    in 10 days      search-index-d3fe8113
+    in 11 days      Harden schema validator against bad input
+    in 12 days      Pin job scheduler behind a feature flag
+    in 13 days      mobile-shell-59c74bdb
+    in 14 days      Rewrite pdf splitter to stream
+    in 15 days      Investigate queue consumer regression
+    in 16 days      infra-terraform-f97a816e
+    in 17 days      infra-terraform-ab85c2b7
+    11 more
