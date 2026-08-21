@@ -75,7 +75,43 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     process.stderr.write(`potsherd-mcp: unhandled rejection: ${String(err)}\n`);
   });
 
-  await server.connect(new StdioServerTransport());
+  /**
+   * D14 — a line that is not JSON gets an answer.
+   *
+   * The SDK's `ReadBuffer` throws on a malformed frame, `StdioServerTransport`
+   * catches it and calls `onerror`, and the default `onerror` is nothing at
+   * all. So a client that wrote a truncated frame got: no reply, no error, no
+   * log line — the server stayed up and perfectly silent, and the client sat
+   * on that request id until somebody restarted it. Measured: `initialize`
+   * replied, the malformed line produced zero bytes on stdout and zero on
+   * stderr, and a subsequent good request was answered normally.
+   *
+   * JSON-RPC 2.0 says exactly what to send here: `-32700 Parse error`, with
+   * `id: null`, because the id was inside the bytes we could not parse. That
+   * does not unblock the client's own request id — nothing can, the id is
+   * unknowable — but it turns "no response ever" into "the last thing you sent
+   * was not JSON", which is the difference between a hang and a bug report.
+   */
+  const transport = new StdioServerTransport();
+  transport.onerror = (err: Error) => {
+    const parseError = /JSON|Unexpected|Unterminated|token/i.test(err.message);
+    process.stderr.write(`potsherd-mcp: ${parseError ? 'unparseable frame' : 'transport error'}: ${err.message}\n`);
+    if (!parseError) return;
+    // One whole line, written between frames, so it cannot land inside one.
+    process.stdout.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32700,
+          message: `Parse error: ${err.message}`,
+          data: { note: 'the id was inside the bytes that could not be parsed, so this reply carries none. Resend the request.' },
+        },
+      }) + '\n',
+    );
+  };
+
+  await server.connect(transport);
   process.stderr.write(
     `potsherd-mcp ${VERSION} ready · 6 tools · index ${potsherdDir ?? '~/.potsherd'}\n`,
   );

@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -446,6 +446,63 @@ describe('the two tools that write, and the four that do not', () => {
       expect(textOf(r)).toMatch(/letters, digits/);
     } finally {
       await close();
+    }
+  });
+});
+
+describe('the stdio transport', () => {
+  /**
+   * D14. A line that is not JSON produced NO reply at all — not even the
+   * `-32700` JSON-RPC 2.0 prescribes. The SDK's ReadBuffer throws,
+   * StdioServerTransport catches and calls `onerror`, and the default
+   * `onerror` does nothing. The server stayed up and perfectly silent, and the
+   * client that sent the frame waited for its id forever.
+   */
+  it('answers an unparseable frame with -32700 and stays up', { timeout: 60_000 }, async () => {
+    const mcpBin = path.join(repo, 'packages', 'mcp', 'dist', 'index.js');
+    const child = spawn(process.execPath, [mcpBin, '--potsherd-dir', root], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, NO_COLOR: '1' },
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d: Buffer) => { out += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { err += d.toString(); });
+    const send = (s: string): void => { child.stdin.write(s + '\n'); };
+    const settle = async (): Promise<void> => {
+      await new Promise((r) => setTimeout(r, 900));
+    };
+
+    try {
+      send(JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'initialize',
+        params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '0' } },
+      }));
+      await settle();
+      const afterInit = out.length;
+      expect(afterInit, 'initialize was not answered').toBeGreaterThan(0);
+
+      // Truncated: valid up to the missing closing brace.
+      send('{"jsonrpc":"2.0","id":2,"method":"tools/list"');
+      await settle();
+      const reply = out.slice(afterInit);
+      expect(reply, 'the client got nothing back at all').not.toBe('');
+      const parsed = JSON.parse(reply.trim().split('\n')[0]!) as {
+        error: { code: number; message: string };
+        id: null;
+      };
+      expect(parsed.error.code).toBe(-32700);
+      // `id: null`, because the id was inside the bytes that would not parse.
+      expect(parsed.id).toBe(null);
+      expect(err).toMatch(/unparseable frame/);
+
+      // …and the session survives it, which is the rule the server is under.
+      const before = out.length;
+      send(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }));
+      await settle();
+      expect(out.slice(before)).toContain('potsherd_find');
+    } finally {
+      child.kill('SIGKILL');
     }
   });
 });

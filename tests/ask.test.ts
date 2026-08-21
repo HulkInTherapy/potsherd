@@ -1942,6 +1942,39 @@ describe('T5.6 --readers-in', () => {
     db.close();
   });
 
+  it('names a missing "version" as missing, not as "vundefined"', async () => {
+    // D12. `String(undefined)` is `"undefined"`, and the message read
+    //   potsherd: … is a vundefined reader file and this potsherd (0.4.0) reads v1
+    // for the commonest case there is: a file with `kind` right and no
+    // `version` at all, which is what a hand-edited recording looks like.
+    const { root, db } = seedDb();
+    const target = await recordWithOutputs(db, root, QUESTION, [RECORDED]);
+    const file = JSON.parse(fs.readFileSync(target, 'utf8')) as Record<string, unknown>;
+
+    delete file['version'];
+    fs.writeFileSync(target, JSON.stringify(file, null, 2));
+    await expect(replayReaders(db, QUESTION, { root }, target)).rejects.toThrow(
+      /has no "version"/,
+    );
+    await expect(replayReaders(db, QUESTION, { root }, target)).rejects.not.toThrow(
+      /vundefined/,
+    );
+
+    // A version from the future still reads as a version, with a number.
+    fs.writeFileSync(target, JSON.stringify({ ...file, version: 7 }, null, 2));
+    await expect(replayReaders(db, QUESTION, { root }, target)).rejects.toThrow(
+      /is a v7 reader file/,
+    );
+
+    // And a version that is not a number says what it found instead of
+    // printing it after a `v`.
+    fs.writeFileSync(target, JSON.stringify({ ...file, version: '1' }, null, 2));
+    await expect(replayReaders(db, QUESTION, { root }, target)).rejects.toThrow(
+      /"version" here is "1"/,
+    );
+    db.close();
+  });
+
   it('a reader that found nothing replays as a reader that found nothing', async () => {
     const { root, db } = seedDb();
     const target = await recordWithOutputs(db, root, QUESTION, [
