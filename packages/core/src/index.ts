@@ -424,6 +424,53 @@ export {
 } from './cards/schema.js';
 export { renderCardRun, type CardRunOptions as CardRunCardOptions } from './render/card-run.js';
 
+// ---------------------------------------------------------------- phase 4
+// L7 — `ask`: shortlist → readers → synthesizer → the code-level citation
+// filter (`03` §8, phase-4 T4.1). `filterAnswer` is the whole claim and is
+// exported so it can be tested, and audited, without a backend.
+export {
+  ask,
+  filterAnswer,
+  excerptUnits,
+  excerptText,
+  normaliseQuote,
+  quoteOccursIn,
+  matchSpan,
+  quotableText,
+  MIN_UNIT_CHARS,
+  ANSWER_MAX_WORDS,
+  ASK_CONCURRENCY,
+  ASK_K,
+  ASK_MAX_USD,
+  ASK_SCAN,
+  ASK_SESSION_CHARS,
+  ASK_TOP_EXCHANGES,
+  MIN_QUOTE_CHARS,
+  READER_GHOST_NOTE,
+  READER_SYSTEM,
+  STRICT_MIN_EVIDENCE,
+  SYNTH_SYSTEM,
+  type AskDrop,
+  type AskDropReason,
+  type AskEvidence,
+  type AskOptions,
+  type AskProgress,
+  type AskReaderFn,
+  type AskReaderInput,
+  type AskReaderOutput,
+  type AskReaderQuote,
+  type AskReaderReport,
+  type AskRefusal,
+  type AskResult,
+  type AskSentence,
+  type AskStep,
+  type EvidenceSource,
+  type FilterOutput,
+  type ProposedEvidence,
+  type ProposedSentence,
+} from './ask.js';
+export { renderAsk, clipQuote, maskSafeCut, QUOTE_CHARS, type AskRenderOptions } from './render/ask.js';
+
 // ------------------------------------------------------------------ phase 4
 export {
   OPEN_THREAD_LABEL,
@@ -434,5 +481,46 @@ export {
   type CandidateOptions as OpenThreadCandidateOptions,
   type ConfirmOptions as OpenThreadConfirmOptions,
 } from './open-threads.js';
+
+// ---------------------------------------------------------------- phase 4
+// L7 — `graft`: the token-budgeted re-entry brief (`03` §8, T4.3).
+export {
+  ABOUT_K,
+  CITATION_RE,
+  DEFAULT_BUDGET,
+  GRAFT_SYSTEM,
+  GRAFT_WRITE_PATH_NOTE,
+  GraftError,
+  MIN_BUDGET,
+  SLICE_CHARS,
+  buildPrompt,
+  cardOnlyBody,
+  clipSafe,
+  collectSource,
+  copyToClipboard,
+  counterFor,
+  countTokens,
+  enforceBudget,
+  ensureGraftDir,
+  graft,
+  graftDir,
+  graftPath,
+  resolveCitations,
+  resolveTarget,
+  safeCut,
+  sourceLine,
+  type BudgetPass,
+  type CitationPass,
+  type ClipOutcome,
+  type Counter,
+  type GraftCitation,
+  type GraftOptions,
+  type GraftPath,
+  type GraftReport,
+  type GraftResult,
+  type GraftSource,
+  type TokenCount,
+} from './graft.js';
+export { graftJson, renderGraft } from './render/graft.js';
 
 export { VERSION } from './version.js';

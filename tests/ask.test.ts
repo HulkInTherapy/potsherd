@@ -1003,7 +1003,10 @@ describe('clipQuote', () => {
 describe('the numbers this verb is built to', () => {
   it('matches the plan', () => {
     expect(ASK_K).toBe(6);
-    expect(ASK_MAX_USD).toBe(0.1);
+    // Raised 0.10 -> 0.50 on measurement: five real k=6 runs cost $0.037-$0.123
+    // api-equivalent, so 0.10 aborted correct runs before the synthesizer.
+    // See 04-DECISIONS.md, 21 aug 2026.
+    expect(ASK_MAX_USD).toBe(0.5);
     expect(ANSWER_MAX_WORDS).toBe(150);
     expect(STRICT_MIN_EVIDENCE).toBe(2);
     expect(QUOTE_CHARS).toBe(90);

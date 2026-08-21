@@ -1,6 +1,6 @@
 import process from 'node:process';
 import { Command, Option } from 'commander';
-import { Theme } from '@potsherd/core';
+import { Theme, ASK_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
 import { fail, print, type GlobalOptions } from './output.js';
 import { runAudit } from './commands/audit.js';
 import { runRescue } from './commands/rescue.js';
@@ -15,6 +15,8 @@ import { runCard } from './commands/card.js';
 import { runTag, splitTagOperands } from './commands/tag.js';
 import { runPin } from './commands/pin.js';
 import { runLink } from './commands/link.js';
+import { runAsk } from './commands/ask.js';
+import { runGraft } from './commands/graft.js';
 
 import { VERSION } from '@potsherd/core';
 export { VERSION };
@@ -268,6 +270,72 @@ filters, one example each — they compose, and all of them are AND:
     );
   });
 
+  const ask = addFilters(
+    addGlobals(
+      program
+        .command('ask')
+        .description('answer a question from your own history, with citations that resolve')
+        .argument('<question>', 'what you want to know'),
+    )
+      .option('--file <path>', 'only sessions that touched a path containing this')
+      .addOption(new Option('--k <n>', 'sessions to read').argParser(Number).default(ASK_K))
+      .option('--strict', 'refuse rather than answer when fewer than 2 quotes survive')
+      .addOption(
+        new Option('--max-usd <n>', 'stop before crossing this')
+          .argParser(Number)
+          .default(ASK_MAX_USD),
+      )
+      .option('--model <name>', 'synthesizer model (default sonnet-class)')
+      .option('--reader-model <name>', 'reader model (default haiku-class)')
+      .addOption(
+        new Option('--concurrency <n>', 'model calls in flight at once')
+          .argParser(Number)
+          .default(ASK_CONCURRENCY),
+      )
+      .addOption(
+        new Option('--vectors <mode>', 'the vector half of the shortlist (default on)')
+          .choices(['auto', 'on', 'off']),
+      )
+      // NO `.default('auto')` here, unlike `find`. `ask` defaults to
+      // vectors-ON in the library and a commander default would silently
+      // override it — which it did, for four real runs that all came back
+      // "0 answered" on a bm25-only shortlist. See `vectorMode()` in
+      // packages/cli/src/commands/ask.ts.
+      .option('--no-vec', 'text search only — the same as --vectors off'),
+  ).addHelpText('after', `
+example:
+  potsherd ask "how did we handle pgbouncer with prepared statements?"
+  potsherd ask "what did we decide about the pooler?" --project api --since 30d
+  potsherd ask "what is the capital of france" --strict     # refuses, exit 2
+  potsherd ask "the pooler decision" --json | jq '.evidence | length'
+  potsherd ask "why did we drop the queue?" --k 10 --max-usd 0.25
+
+every sentence in ANSWER carries an evidence number. a sentence whose citation
+does not resolve to a real quote in a real exchange is dropped by code before
+the answer is printed — see  potsherd ask "…" --debug  for what was dropped.
+
+exit codes:  0 answered  ·  1 nothing matched  ·  2 --strict refused`);
+  ask.action(async (question: string, opts: Record<string, unknown>) => {
+    const o = globals(program, ask, opts);
+    await run(
+      () =>
+        runAsk({
+          ...o,
+          ...filterFlags(opts),
+          question,
+          strict: Boolean(opts['strict']),
+          vec: opts['vec'] !== false,
+          ...(opts['k'] !== undefined ? { k: opts['k'] } : {}),
+          ...(opts['maxUsd'] !== undefined ? { maxUsd: opts['maxUsd'] } : {}),
+          ...(opts['concurrency'] !== undefined ? { concurrency: opts['concurrency'] } : {}),
+          ...(opts['model'] ? { model: String(opts['model']) } : {}),
+          ...(opts['readerModel'] ? { readerModel: String(opts['readerModel']) } : {}),
+          ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
+        }),
+      o,
+    );
+  });
+
   const ls = addFilters(
     addGlobals(
       program
@@ -397,6 +465,56 @@ example:
           ...(opts['from'] !== undefined ? { from: opts['from'] } : {}),
           ...(opts['to'] !== undefined ? { to: opts['to'] } : {}),
           md: Boolean(opts['md']),
+        }),
+      o,
+    );
+  });
+
+
+  const graftCmd = addGlobals(
+    program
+      .command('graft')
+      .description('a token-budgeted brief from one past session, ready to paste into an agent')
+      .argument('<session>', 'a session id, the first 8 characters of one, or a query')
+      .option('--about <topic>', 'only the exchanges about this topic')
+      .addOption(
+        new Option('--budget <n>', 'hard ceiling on the brief, in tokens')
+          .argParser(Number)
+          .default(1200),
+      )
+      .option('--clip', 'copy the brief to the system clipboard')
+      .option('--no-model', 'no model call — the card verbatim, labelled unsummarised')
+      .option('--model <name>', 'haiku, sonnet, opus, or an explicit model id')
+      .addOption(
+        new Option('--backend <name>', 'force a backend instead of detecting one')
+          .choices(['agent-sdk', 'codex', 'api']),
+      ),
+  ).addHelpText('after', `
+example:
+  potsherd graft 4c9339e0 --about pgbouncer --budget 800
+  potsherd graft "instagram client" --clip
+  potsherd graft 4c9339e0 --json | jq -r .brief
+
+the brief is written to ./.potsherd/graft-<id8>.md in the current directory —
+the one place potsherd writes outside ~/.potsherd — and that directory gets a
+generated .gitignore. an existing .gitignore is never overwritten.
+
+with no claude, no codex and no ANTHROPIC_API_KEY, graft still writes a brief:
+the stored card verbatim, labelled unsummarised. --no-model asks for that path.`);
+  graftCmd.action(async (session: string, opts: Record<string, unknown>) => {
+    const o = globals(program, graftCmd, opts);
+    await run(
+      () =>
+        runGraft({
+          ...o,
+          target: session,
+          ...(opts['about'] !== undefined ? { about: String(opts['about']) } : {}),
+          ...(opts['budget'] !== undefined ? { budget: Number(opts['budget']) } : {}),
+          clip: Boolean(opts['clip']),
+          // commander turns `--no-model` into `model: false`, and
+          // `--model haiku` into `model: 'haiku'`. Both are wanted.
+          ...(opts['model'] !== undefined ? { model: opts['model'] as boolean | string } : {}),
+          ...(opts['backend'] !== undefined ? { backend: String(opts['backend']) } : {}),
         }),
       o,
     );

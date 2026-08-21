@@ -84,7 +84,7 @@ import { onPath } from './resolve-bin.js';
 // `tests/llm.test.ts` asserts this constant against the CLI command files that
 // actually reach `Llm.open` — the guard that exists precisely so a verb cannot
 // start calling a model without the privacy receipt saying so.
-export const MODEL_CALL_VERBS: readonly string[] = ['card', 'graft'];
+export const MODEL_CALL_VERBS: readonly string[] = ['card', 'ask', 'graft'];
 
 /**
  * Verbs that are guaranteed to make no model call and open no socket.

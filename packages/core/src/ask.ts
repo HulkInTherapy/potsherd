@@ -81,8 +81,23 @@ import type { SearchFilters } from './search/filters.js';
 /** `03` §8 / phase-4 risks: sessions read by default. `--k` is the knob. */
 export const ASK_K = 6;
 
-/** phase-4 T4.1: the default ceiling, in dollars. */
-export const ASK_MAX_USD = 0.1;
+/**
+ * The default ceiling, in dollars.
+ *
+ * `plans/phases/phase-4-ask-and-graft.md` proposed `--max-usd 0.10`. Five real
+ * `k=6` runs measured **$0.037–$0.123** api-equivalent, so 0.10 fired *on
+ * correct usage* — it aborted a normal run before the synthesizer, having
+ * already paid for six readers. A cap that trips on the thing it is meant to
+ * permit teaches users to pass `--max-usd` blindly, which is worse than no cap.
+ *
+ * Raised to 0.50 on that measurement (`04-DECISIONS.md`, 21 aug 2026): above
+ * every run we have seen with real headroom, still a genuine ceiling.
+ *
+ * Note that on the subscription path this is an **estimate of api-equivalent
+ * spend**, not money charged — the agent SDK reports a constant
+ * `input_tokens: 10`, which `llm.ts` discards and labels `est.`
+ */
+export const ASK_MAX_USD = 0.5;
 
 /** Model calls in flight at once. Concurrency 6 realises ~4.9x (`03` §12). */
 export const ASK_CONCURRENCY = 6;

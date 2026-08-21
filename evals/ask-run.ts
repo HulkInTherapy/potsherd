@@ -1026,13 +1026,13 @@ async function main(): Promise<void> {
     const corpus = dbCorpus(db);
     for (const g of golds) {
       const t0 = Date.now();
-      const result = await ask(db, g.question, { k: o.k, root, strict: false } as unknown as AskOptions);
+      const result = await ask(db, g.question, { k: o.k, root, strict: false });
       const ms = Date.now() - t0;
       goldRows.push({ gold: g, result, faults: checkCitations(result, corpus), coverage: checkCoverage(result, g), ms });
     }
     for (const d of decoyCases) {
       const t0 = Date.now();
-      const result = await ask(db, d.question, { k: o.k, root, strict: true } as unknown as AskOptions);
+      const result = await ask(db, d.question, { k: o.k, root, strict: true });
       const ms = Date.now() - t0;
       const cli = runCliStrict(d.question, root, o.k);
       decoyRows.push({

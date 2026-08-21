@@ -1106,13 +1106,58 @@ describe('the per-call deadline (T2.7 D1)', () => {
  * into claiming "no network" for a whole phase.
  */
 describe('which verbs may call a model (T2.7 D2)', () => {
-  it('no command outside MODEL_CALL_VERBS reaches Llm.open', () => {
+  /**
+   * Phase 4 proved this scan was too shallow. `ask` genuinely calls a model,
+   * and grepping `packages/cli/src/commands/ask.ts` finds nothing: it opens the
+   * backend inside `packages/core/src/ask.ts`, one import away. So the guard
+   * said `ask` was offline while it was reading transcripts to a model —
+   * *precisely* the drift this test exists to prevent, in the one shape it
+   * could not see.
+   *
+   * The scan now follows the command's `@potsherd/core` imports through the
+   * barrel into the module that actually implements them. That is a
+   * strengthening: nothing that used to be caught stops being caught.
+   */
+  const barrelExports = (): Map<string, string> => {
+    const barrel = fs.readFileSync(
+      path.resolve(process.cwd(), 'packages/core/src/index.ts'),
+      'utf-8',
+    );
+    const map = new Map<string, string>();
+    for (const m of barrel.matchAll(/export\s*\{([^}]*)\}\s*from\s*'\.\/([^']+)\.js'/g)) {
+      const mod = path.resolve(process.cwd(), 'packages/core/src', `${m[2]}.ts`);
+      for (const raw of m[1].split(',')) {
+        const name = raw.replace(/\btype\b/, '').split(/\s+as\s+/)[0]?.trim();
+        if (name) map.set(name, mod);
+      }
+    }
+    return map;
+  };
+
+  it('no command outside MODEL_CALL_VERBS reaches Llm.open, directly or through core', () => {
+    const exportsMap = barrelExports();
     const dir = path.resolve(process.cwd(), 'packages/cli/src/commands');
     const found: string[] = [];
     for (const file of fs.readdirSync(dir)) {
       if (!file.endsWith('.ts')) continue;
       const src = fs.readFileSync(path.join(dir, file), 'utf-8');
-      if (/\bLlm\.open\(/.test(src)) found.push(file.replace(/\.ts$/, ''));
+      let reaches = /\bLlm\.open\(/.test(src);
+      if (!reaches) {
+        for (const imp of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*'@potsherd\/core'/g)) {
+          for (const raw of imp[1].split(',')) {
+            const name = raw.replace(/\btype\b/, '').split(/\s+as\s+/)[0]?.trim();
+            const mod = name ? exportsMap.get(name) : undefined;
+            // `llm.ts` *defines* `Llm`, so importing a constant or a type from
+            // it is not reaching a model — `doctor` imports `MODEL_CALL_VERBS`
+            // and `OFFLINE_VERBS` precisely in order to say who does.
+            if (!mod || mod.endsWith(`${path.sep}llm.ts`) || !fs.existsSync(mod)) continue;
+            // And an import only counts if the command actually calls it.
+            if (!name || !new RegExp(`\\b${name}\\s*\\(`).test(src)) continue;
+            if (/\bLlm\.open\(/.test(fs.readFileSync(mod, 'utf-8'))) reaches = true;
+          }
+        }
+      }
+      if (reaches) found.push(file.replace(/\.ts$/, ''));
     }
     expect(found.sort()).toEqual([...MODEL_CALL_VERBS].sort());
   });
