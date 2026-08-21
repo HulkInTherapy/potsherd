@@ -1,0 +1,111 @@
+T4.1 — reference-corpus runs, as NUMBERS ONLY
+=============================================
+
+`plans/00` ground rules: committed artefacts use the synthetic corpus, never
+the live one; a real-corpus run is cited by its kept `--potsherd-dir` and its
+numbers, and its transcript-derived prose stays out of the repo. So this file
+holds the numbers and the outputs themselves stay beside the corpus:
+
+    corpus   /Users/zebra/randomness/potsherd-T4.1-corpus
+    outputs  /Users/zebra/randomness/potsherd-T4.1-corpus/runs/
+    re-run   sh phases/phase-4/evidence-T4.1/run.sh <name> "<question>"
+
+Corpus: 236 sessions · 1,406 exchanges · 299 ghosts · 2,971 ghost prompts ·
+0 cards · schema v8 · 1,406 vectors. Machine: this one, agent-SDK backend on
+the user's subscription — so every `$` figure is an **api-equivalent, not money
+spent**, and every one of them is `est.` (the SDK reports a constant
+`input_tokens: 10`, which `llm.ts` discards below a tenth of its own chars/3.6
+figure; see `IMPLAUSIBLE_TOKEN_FACTOR`).
+
+
+the wall-time measurement `03 §12` needs
+----------------------------------------
+
+`03 §12` asks for **ask p50 < 20 s and < $0.05 per question at k=6**. On the
+subscription path, measured here, neither holds and the shortfall is not close:
+
+    k=6, readers haiku-class at concurrency 6, synthesizer sonnet-class
+
+    wall           57 s  ·  92 s  ·  93 s  ·  100 s  ·  183 s      (5 runs)
+    of which recall  1.1 s – 12.2 s   (the vector arm; ~350 ms is the forward
+                                       pass, the rest is the six-list fan-out
+                                       over 236 sessions)
+    per reader     18 s – 85 s, six in parallel
+    spend        $0.061 – $0.123 est. for the readers alone
+                 $0.15 est. for a whole k=2 run including the synthesizer
+
+The reason is the one `03 §12` already records for `card`: a real haiku-class
+call through the agent SDK is 60–160 s, not the few seconds the target was
+written against. Six of them in parallel realise ~4.9x, so the reader fan-out
+alone cannot finish in 20 s. **The target was written before any agent-SDK call
+had been measured. Reported as a miss rather than met by narrowing k.**
+
+`< $0.05 per question` is also missed, and it is missed in a way that has a
+consequence: **`--max-usd`'s planned default of 0.10 aborts a normal k=6 run
+before the synthesizer.** That is the designed behaviour working (phase-4
+ruling: abort before the synthesizer rather than print an ungrounded answer),
+and it fired on a real run:
+
+    q1-ratelimit, --max-usd default 0.10
+      6 readers  ·  2 found  ·  $0.123 est.  ·  92 s  ·  exit 2
+      "stopped at the cost ceiling · the readers alone spent $0.123 est.
+       and the synthesizer never ran."
+
+The default is left at 0.10 because the phase plan sets it there. The
+measurement says it should be about **0.30** for k=6 on the api path, and that
+on the subscription path the figure it compares against is not money at all.
+For the orchestrator to decide.
+
+
+the runs
+--------
+
+  q1-ratelimit  (a question one surviving session answers)
+    shortlist   6 of 50 candidate sessions · 5 ghosts, 1 session
+    readers     6 · 1 found · 5 not-found · 0 failed
+    filter      2 evidence lines proposed, 2 kept, 0 dropped
+                2 sentences proposed, 2 kept, 0 dropped
+    answer      2 sentences, both cited; it corrected the question's premise
+                rather than accepting it
+    wall        93 s (measured)  ·  $0.073 est.  ·  7 calls  ·  exit 0
+    file        runs/diag-vec.txt  (--json)
+
+  q1-ratelimit  (the same question, at the 0.10 default)
+    readers     6 · 2 found · 4 not-found · 0 failed
+    abort       budget, before the synthesizer
+    wall        92 s (measured)  ·  $0.123 est.  ·  6 calls  ·  exit 2
+    file        runs/q1-ratelimit.txt
+
+  diag-k2       (the same question at k=2, to isolate bug 1)
+    readers     2 · 1 found · 1 not-found · 0 failed
+    filter      1 evidence line kept
+    wall        ~71 s  ·  $0.150 est.  ·  3 calls  ·  exit 0
+    file        runs/diag-k2.json
+
+  diag-k6       (before the `--vectors` fix — the bm25-only shortlist)
+    readers     6 · 0 found · 6 not-found · 0 failed
+    wall        ~379 s of model time, 6 calls  ·  $0.061 est.  ·  exit 1
+    file        runs/diag-k6.json
+
+  fanout-probe / fanout-probe-ratelimit
+    six raw reader replies each, at concurrency 6, with the model's own text.
+    The first is six honest ghost refusals; the second is one `found: true`
+    among five refusals.
+
+Readers that **failed** (threw — a timeout, a dead backend, a budget ceiling):
+**0 across every run above.** Every `found: false` in these numbers is a reader
+that answered and said the excerpts did not address the question, and the
+`error` field on `AskResult.readers[]` exists so those two are never conflated.
+
+
+a defect in `llm.ts` this exposed, not fixed here
+-------------------------------------------------
+
+`Budget.admit` is checked before a call and `Budget.record` after it, so **at
+concurrency 6 all six readers pass `admit` against a spend of $0** before any
+of them records anything. The ceiling is therefore enforced *between* batches,
+not within one, and a k=6 run can overshoot `--max-usd` by up to one full batch
+before `ask` sees it. `ask` catches the overshoot after the fan-out and aborts
+before the synthesizer, which is why no run here spent past the ceiling by more
+than the readers' own cost — but the race is in `llm.ts`, is not T4.1's file,
+and affects `card --all` at concurrency the same way.

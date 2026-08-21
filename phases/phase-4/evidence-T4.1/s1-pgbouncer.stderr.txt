@@ -1,0 +1,2 @@
+  filter: nothing dropped
+--- exit=0 wall=74s   cmd: potsherd ask "how do we pin the pgbouncer prepared-statement setting?" --max-usd 0.50

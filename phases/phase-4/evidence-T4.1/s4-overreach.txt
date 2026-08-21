@@ -1,0 +1,16 @@
+potsherd ask "why did we choose transaction pooling over session pooling, who a…
+
+ANSWER
+  The available excerpts show transaction pooling was configured and deployed,
+  but they contain no stated rationale for choosing it over session pooling.
+  [1][2] No approver or approval record appears in the excerpts. [1][2] No
+  latency figures or cost measurements appear in the excerpts. [1][2]
+
+EVIDENCE
+  [1] potsherd-alpha/11111111  1 aug 14:30  "Set statement_cache_size to 0 and…"
+  [2] potsherd-alpha/11111111  1 aug 14:35  "Done, pushed to main."
+
+  6 of 7 sessions read · 1 answered · 1m 35s · $0.099 est.
+  searched 6 of 7 matching sessions; raise --k to widen
+
+  next  potsherd graft 11111111

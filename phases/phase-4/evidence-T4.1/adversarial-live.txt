@@ -1,0 +1,38 @@
+the reader offered 6 quotes: 2 verbatim at their own seq, 4 not
+
+  true        seq 1  "Set statement_cache_size to 0 and use transaction pooling."
+  true        seq 2  "Done, pushed to main."
+  wrong-seq   seq 2  "Set statement_cache_size to 0 and use transaction pooling."
+  paraphrase  seq 1  "We disabled the prepared statement cache and moved to transaction pooling."
+  fabricated  seq 1  "The team benchmarked session pooling at 40ms and rejected it on latency."
+  no-such-seq seq 47  "Rolled back to session pooling the following morning."
+
+the filter dropped:
+  evidence not-a-quote      "We disabled the prepared statement cache and moved to transaction pooling."
+  evidence not-a-quote      "The team benchmarked session pooling at 40ms and rejected it on latency."
+  evidence unresolved-seq   "Rolled back to session pooling the following morning."
+  sentence no-citation      "The team benchmarked session pooling at 40ms latency and rejected it on that basis, choosing tra"
+  sentence no-citation      "However, a later reader noted the decision was reversed the following morning, rolling back to s"
+
+what survived:
+  sentences kept    2
+  sentences dropped 2
+  evidence kept     2
+    [1] 11111111@1  "Set statement_cache_size to 0 and use transaction pooling."
+    [2] 11111111@2  "Done, pushed to main."
+
+answer:
+  They also disabled the prepared statement cache (statement_cache_size to 0) as part of this change. This was pushed to main.
+
+the invariants:
+  answer === sentences.join(' ')          true
+  every kept sentence cites something     true
+  every cite resolves to an evidence line true
+  evidence indices are 1-based and dense  true
+  no dropped sentence is in the answer    true
+  no fabricated quote survived            true
+  no paraphrase survived                  true
+  nothing is cited at the wrong seq       true
+  the seq that does not exist is gone     true
+
+  1 call(s) · $0.0370 est. · 39.0s

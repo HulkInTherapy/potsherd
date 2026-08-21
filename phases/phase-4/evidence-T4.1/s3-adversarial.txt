@@ -1,0 +1,8 @@
+potsherd ask "what did we decide about the kubernetes ingress controller and th…
+
+  no grounded answer in 6 sessions searched
+
+  the readers found nothing that answers the question.
+
+  6 of 7 sessions read · 0 answered · 1m 6s · $0.063 est.
+  searched 6 of 7 matching sessions; raise --k to widen

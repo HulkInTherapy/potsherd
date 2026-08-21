@@ -1,0 +1,2 @@
+  filter: nothing dropped
+--- exit=0 wall=97s   cmd: potsherd ask "why did we choose transaction pooling over session pooling, who approved it, and what did it cost in latency?" --max-usd 0.50
