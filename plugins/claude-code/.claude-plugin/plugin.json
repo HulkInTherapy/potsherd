@@ -20,7 +20,5 @@
     "archive",
     "rescue",
     "mcp"
-  ],
-  "hooks": "./hooks/hooks.json",
-  "mcpServers": "./.mcp.json"
+  ]
 }
