@@ -10,6 +10,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   TIMEOUT_RETRIES,
   MODEL_CALL_VERBS,
+  OFFLINE_VERBS,
   CARD_MODEL,
   CHARS_PER_TOKEN,
   Llm,
@@ -1280,5 +1281,50 @@ describe('which verbs may call a model (T2.7 D2)', () => {
       if (reaches) found.push(file.replace(/\.ts$/, ''));
     }
     expect(found.sort()).toEqual([...MODEL_CALL_VERBS].sort());
+  });
+
+  /**
+   * The other direction, which nothing checked.
+   *
+   * The test above asks "does any verb outside the list call a model?" — the
+   * false-negative direction. It cannot see a verb that is in *neither* list,
+   * and `unpin` was exactly that for two phases: registered at
+   * `packages/cli/src/index.ts` and named in neither `MODEL_CALL_VERBS` nor
+   * `OFFLINE_VERBS`, so `doctor --privacy` answered "is unpin safe to run on a
+   * client's laptop?" by saying nothing at all.
+   *
+   * `OFFLINE_VERBS`'s own doc comment says the list is written out rather than
+   * left as "everything else" because "an answer by omission is not one". A
+   * list with a hole in it is an answer by omission. So the union of the two
+   * has to cover every command the CLI registers, and a new verb now fails
+   * here — at the moment it is registered — rather than shipping into a
+   * receipt that quietly skips it.
+   */
+  it('every registered command is in one of the two privacy lists', () => {
+    const src = fs.readFileSync(
+      path.resolve(process.cwd(), 'packages/cli/src/index.ts'),
+      'utf-8',
+    );
+    const registered = [...src.matchAll(/\.command\('([a-z-]+)'\)/g)].map((m) => m[1]);
+
+    // Non-vacuous: if the scrape ever stops matching, this fails rather than
+    // passing over an empty set.
+    expect(registered.length).toBeGreaterThanOrEqual(16);
+    expect(registered).toContain('unpin');
+    expect(registered).toContain('doctor');
+
+    const disclosed = new Set([...MODEL_CALL_VERBS, ...OFFLINE_VERBS]);
+    const undisclosed = registered.filter((v) => !disclosed.has(v));
+    expect(undisclosed).toEqual([]);
+
+    // And no list may name a verb that does not exist, which is the same drift
+    // running the other way.
+    const known = new Set(registered);
+    expect([...disclosed].filter((v) => !known.has(v))).toEqual([]);
+
+    // The two lists are disjoint: a verb cannot both call a model and be
+    // guaranteed to open no socket.
+    const both = MODEL_CALL_VERBS.filter((v) => OFFLINE_VERBS.includes(v));
+    expect(both).toEqual([]);
   });
 });

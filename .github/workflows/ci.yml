@@ -56,6 +56,110 @@ jobs:
       - name: the demo corpus still hits its targets
         run: node scripts/make-demo-corpus.mjs
 
+      # `plans/06` makes gate (a) of the ask evals the one that must be 100% or
+      # the build fails, and `evals/ask-selftest.ts` is what proves the scorer
+      # behind it: sixteen hand-built results, no model, no index, no `ask`,
+      # each one required to fail the single gate it is named for. Nothing ran
+      # it — not `pnpm test`, not CI — so a scorer that had stopped scoring
+      # would have been found by a person reading output, if at all. It exits
+      # non-zero when any case is judged wrongly.
+      - name: the ask eval scorer still scores
+        run: npx tsx evals/ask-selftest.ts
+
+      # The privacy receipt is the one published artefact that can lie about
+      # what the product does, and it has: `doctor --privacy` once said "no
+      # network" after potsherd had started sending transcript text to a model.
+      # It happened a second time, quietly. The live command was corrected in
+      # phase 4 — it discloses `ask`, `graft` and the `./.potsherd/graft-<id8>.md`
+      # write into your own project — but `docs/screens/05-doctor-privacy.txt`
+      # and the copy of it in the readme were never regenerated, so the two
+      # public copies went on naming only `card` and listing only the four
+      # `~/.potsherd` paths for the whole of phase 4.
+      #
+      # Nothing caught it because nothing in CI has ever run
+      # `scripts/make-screens.sh`. This step is the guard: it rebuilds the
+      # receipt from the demo corpus with the same binary a user would run,
+      # and fails if the committed screen or the readme has drifted from it.
+      # The one-time correction was worth less than this step.
+      - name: the published privacy receipt still matches the live one
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$PWD"
+          # `pwd -P` because on macOS /tmp is a symlink to /private/tmp: HOME would
+          # be the symlinked path and the working directory the resolved one, and
+          # `tildify` would then fail to fold the graft path back to `~`.
+          home="$(cd "${RUNNER_TEMP:-/tmp}" && pwd -P)/privacy-receipt"
+          rm -rf "$home"
+
+          # Synthetic corpus, throwaway HOME. This repository is public and the
+          # machine the numbers were measured on holds a named third party's
+          # work, so no check here may ever touch a real ~/.claude.
+          node scripts/make-demo-corpus.mjs "$home/.claude" >/dev/null
+
+          # A stub `claude` on the demo PATH, for the same reason
+          # scripts/make-screens.sh plants one: `--privacy` resolves which
+          # binary would receive a call, and without this it would resolve to
+          # whatever the runner image happens to have. It is never executed.
+          mkdir -p "$home/.claude/local" "$home/work/demo-project"
+          printf '#!/bin/sh\nexit 0\n' > "$home/.claude/local/claude"
+          chmod +x "$home/.claude/local/claude"
+
+          # The capture order from make-screens.sh, in miniature: `rescue`
+          # first, because it is what creates ~/.claude/settings.json, and the
+          # receipt reports whether that file is present.
+          ( cd "$home" && env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR HOME="$home" \
+              node "$repo/packages/cli/bin/potsherd.js" rescue --yes >/dev/null )
+
+          # From a project directory inside the demo HOME, because the graft
+          # line is relative to the working directory and a capture run from
+          # the checkout would print the runner's own path.
+          ( cd "$home/work/demo-project" \
+            && env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR -u NO_COLOR -u FORCE_COLOR \
+                 HOME="$home" PATH="$home/.claude/local:$PATH" \
+                 node "$repo/packages/cli/bin/potsherd.js" \
+                 doctor --privacy --width 80 --no-color ) > "$home/live.txt"
+
+          # Everything in the receipt is fixed by the corpus except the date in
+          # the heading, which is today's from the system clock. That is real
+          # output rather than a caption, so it is normalised rather than
+          # pinned — a screen regenerated on a different day must still pass.
+          undate() { sed -E '1s/·[^·]*$/· <date>/' "$1"; }
+
+          screen=docs/screens/05-doctor-privacy.txt
+          if ! diff -u <(undate "$screen") <(undate "$home/live.txt"); then
+            echo
+            echo "The published privacy receipt no longer matches what the product does."
+            echo "Above, '-' is what $screen claims and '+' is what the live"
+            echo "command prints. Regenerate with:  bash scripts/make-screens.sh"
+            exit 1
+          fi
+
+          # And the readme carries a verbatim copy of that same screen. A
+          # correct screen beside a stale readme is the same defect with a
+          # second address, so the copy is compared byte for byte.
+          python3 - "$screen" README.md <<'PY'
+          import pathlib, sys
+          screen = pathlib.Path(sys.argv[1]).read_text().rstrip('\n').split('\n')
+          lines = pathlib.Path(sys.argv[2]).read_text().split('\n')
+          start = next((i for i, l in enumerate(lines)
+                        if l.startswith('potsherd doctor --privacy ·')), None)
+          if start is None:
+              sys.exit('README.md no longer quotes the privacy receipt at all.')
+          end = next(i for i in range(start, len(lines)) if lines[i].startswith('```'))
+          quoted = lines[start:end]
+          # The heading date is normalised here too, for the same reason.
+          norm = lambda b: ['potsherd doctor --privacy · <date>'] + b[1:]
+          if norm(quoted) != norm(screen):
+              import difflib
+              print('\n'.join(difflib.unified_diff(
+                  norm(screen), norm(quoted), 'docs/screens', 'README.md', lineterm='')))
+              sys.exit("README.md's copy of the privacy receipt has drifted from the screen.")
+          print(f'readme quotes the receipt verbatim ({len(quoted)} lines)')
+          PY
+
+          echo "the published privacy receipt matches the live command"
+
       # audit must agree with the standalone verifier on any corpus, including
       # an empty one and the committed fixture.
       - name: audit agrees with verify-audit.py

@@ -255,6 +255,99 @@ const CASES: Case[] = [
     ),
   },
   {
+    // `quote-case` had no case. It is the fault that says a quotation is a
+    // quotation: the quote is word-for-word right and the capitalisation is
+    // not, which means somebody's renderer or somebody's model retyped the
+    // record instead of copying it. `quoteOccurs` returns 'case-only' for
+    // exactly this and nothing in the selftest ever made it do so.
+    name: 'a quote that matches only after case folding',
+    want: 'fail-a',
+    run: withGoldResult(
+      result({
+        answer: 'It held to three hundred and eighty a second.',
+        sentences: [{ text: 'It held to three hundred and eighty a second.', cites: [1] }],
+        // The fixture says "It holds to three hundred and eighty a second."
+        // This is that sentence with its capitals flattened — every word
+        // right, the record changed.
+        evidence: [ev(RAMP, 1, 'it holds to three hundred and eighty a second.', 1)],
+      }),
+      STUB,
+    ),
+  },
+  {
+    // `index-shape`, half one: not 1-based. The EVIDENCE block is numbered for
+    // a reader to follow `[1]` down to `[1]`, and a zero or a negative breaks
+    // the only thing the numbering is for.
+    name: 'an evidence index that is not 1-based',
+    want: 'fail-a',
+    run: withGoldResult(
+      result({
+        answer: 'It held to three hundred and eighty a second.',
+        sentences: [{ text: 'It held to three hundred and eighty a second.', cites: [0] }],
+        evidence: [ev(RAMP, 1, 'It holds to three hundred and eighty a second.', 0)],
+      }),
+      STUB,
+    ),
+  },
+  {
+    // `index-shape`, half two: the same number twice. Two different quotes
+    // both printed as `[1]` means a reader following a citation lands on
+    // whichever one the renderer happened to draw, and the claim can be
+    // checked against the wrong record.
+    name: 'two evidence lines sharing one index',
+    want: 'fail-a',
+    run: withGoldResult(
+      result({
+        answer: 'It held to three hundred and eighty a second.',
+        sentences: [{ text: 'It held to three hundred and eighty a second.', cites: [1] }],
+        evidence: [
+          ev(RAMP, 1, 'It holds to three hundred and eighty a second.', 1),
+          ev(OOM, 1, 'The limit is 512Mi and the heap alone reaches it under load', 1),
+        ],
+      }),
+      STUB,
+    ),
+  },
+  {
+    // B4. Gate (a) reported `{"lines":0,"faults":0,"rate":1,"pass":true}` — a
+    // perfect score on nothing, because a run that emits no evidence cannot
+    // have a citation fault. Gate (b) caught this particular shape, so it was
+    // never a green build; it was a number that meant nothing standing in for
+    // the strictest gate in the suite. Here gate (b) is held clean on purpose
+    // so that (a) is the only thing that can fail, which is the selftest's own
+    // rule: each case fails the gate it is named for.
+    name: 'every result is empty — gate (a) must not report 100% on no evidence',
+    want: 'fail-a',
+    run: () => {
+      const empty = result({ answer: '', sentences: [], evidence: [] });
+      const rows: GoldRow[] = GOLD.map((g) => ({
+        gold: g,
+        result: empty,
+        faults: checkCitations(empty, STUB),
+        // Coverage forced clean: this case is about gate (a) alone.
+        coverage: {
+          sessions: true,
+          phrase: true,
+          covered: true,
+          allSessions: true,
+          seqsHit: 1,
+          seqsWanted: 1,
+        } as GoldRow['coverage'],
+        ms: 1,
+      }));
+      const decoys = DECOYS.map((d) => decoyRow(d, true, STRICT_EXIT));
+      const v = verdictFor(rows, decoys, GOLD.map(honestOverlap), DECOYS.map(soundDecoy));
+      return {
+        pass: v.pass,
+        a: v.citations.pass,
+        b: v.coverage.pass,
+        c: v.decoys.pass,
+        set: v.set.pass,
+        why: `lines ${v.citations.lines}, faults ${v.citations.faults}, rate ${v.citations.rate}`,
+      };
+    },
+  },
+  {
     name: 'answer holds a sentence that is not in sentences[]',
     want: 'fail-a',
     run: withGoldResult(

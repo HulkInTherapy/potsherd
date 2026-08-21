@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { db as store } from '@potsherd/core';
 import {
   ANSWER_MAX_WORDS,
+  trimToWordBudget,
+  wordCount,
   ASK_K,
   ASK_MAX_USD,
   ASK_SESSION_CHARS,
@@ -24,7 +26,11 @@ import {
 } from '../packages/core/src/ask.js';
 import { matchSpan, quotableText } from '../packages/core/src/ask.js';
 import { QUOTE_CHARS, clipQuote, maskSafeCut, renderAsk } from '../packages/core/src/render/ask.js';
-import { OPEN_THREAD_LABEL } from '../packages/core/src/open-threads.js';
+import {
+  NO_MODEL_NOTE,
+  OPEN_THREAD_LABEL,
+  openThreadCandidates,
+} from '../packages/core/src/open-threads.js';
 import { Theme, stripAnsi } from '../packages/core/src/theme.js';
 import { Llm, type Backend, type SendRequest, type SendResult, type Transport } from '../packages/core/src/llm.js';
 import type { Transcript, TranscriptUnit } from '../packages/core/src/cards/transcript.js';
@@ -534,6 +540,453 @@ function synthReply(sentences: ProposedSentence[], evidence: { n: number; sessio
   return JSON.stringify({ evidence, answer: sentences.map((s) => ({ text: s.text, cites: s.cites })) });
 }
 
+/**
+ * The open-thread fixture, laid on top of {@link seedDb}.
+ *
+ * `ask()`'s own end-to-end tests all pass `openThreads: false`, so the whole
+ * open-thread path — the model pass and what the caller does with its verdicts
+ * — was reachable from `ask()` in production and from nothing in this file.
+ * That is how `tryOpenThreads` came to return `confirmed` unfiltered while
+ * `open-threads.ts` documented the opposite ("confirmed:false candidates are
+ * dropped by the caller"), and how a real run printed
+ *
+ *     possible open thread · decided in alpha, not seen in beta
+ *         no model was available to confirm this, so it is unconfirmed and
+ *         not shown.
+ *
+ * — a note saying "not shown" while being shown — next to a candidate whose
+ * note was *the model rejected this*. With T4.2's measurement that only 1–2 of
+ * 8 candidates are worth raising, the unconfirmed path was showing roughly six
+ * false threads for every real one, and the model pass was decorative.
+ *
+ * The fixture is the same shape as `tests/open-threads.test.ts`'s: two
+ * projects that share a vocabulary and a file, a decision recorded in one, and
+ * no matching decision in the other. Its cards and its sibling session are
+ * written *after* `seedDb` publishes `exchanges_fts`, so the sibling's filler
+ * exchanges stay out of the shortlist and `ask` still retrieves exactly the
+ * one session the other tests here retrieve.
+ */
+const SIBLING_TOPICS = ['pgbouncer', 'prepared statements', 'connection pooling', 'postgres'];
+const SIBLING_FILES = ['db/pool.ts', 'db/migrate.ts'];
+const DECIDED_WHAT =
+  'disable prepared statements when pgbouncer runs in transaction pooling mode';
+const DECIDED_WHY = 'pgbouncer cannot route a prepared statement to the same backend twice';
+const SIBLING_SESSION = '5a5a5a5a-1111-4111-8111-111111111111';
+
+function withOpenThreadMaterial(db: ReturnType<typeof store.open>): void {
+  const card = db.prepare(
+    `INSERT INTO cards (session_id, title, summary, topics, decisions, files, outcome,
+        open_threads, source)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+  );
+  // A: the session `ask` answers from. Its decision cites seq 12, which is a
+  // real exchange in `seedDb`, so the positive half of the claim is checkable.
+  card.run(
+    POOLER, 'the pooler', 'what happened',
+    JSON.stringify(SIBLING_TOPICS),
+    JSON.stringify([{ what: DECIDED_WHAT, why: DECIDED_WHY, evidence_seq: [12] }]),
+    JSON.stringify(SIBLING_FILES), 'shipped', '[]', 'transcript',
+  );
+
+  // B: a sibling project, same files and topics, a different decision. This is
+  // the project the decision was "never seen in".
+  db.prepare(
+    'INSERT INTO sessions (id, harness, project, started_at, status) VALUES (?,?,?,?,?)',
+  ).run(SIBLING_SESSION, 'claude', '/tmp/Meghbrain', '2026-07-01T10:00:00.000Z', 'archived');
+  db.prepare(
+    'INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text) VALUES (?,?,?,?,?,?)',
+  ).run(`${SIBLING_SESSION}#2`, SIBLING_SESSION, 2, '2026-07-01T12:00:00.000Z', 'q', 'a');
+  card.run(
+    SIBLING_SESSION, 'the importer', 'what happened',
+    JSON.stringify(SIBLING_TOPICS),
+    JSON.stringify([
+      { what: 'move the nightly ingest onto a cron schedule', why: '', evidence_seq: [2] },
+    ]),
+    JSON.stringify(SIBLING_FILES), 'shipped', '[]', 'transcript',
+  );
+}
+
+/** The synthesizer reply every open-thread test below reuses. */
+const SYNTH_OK = synthReply(
+  [{ text: 'The client cache was set to zero rather than changing the pooler mode.', cites: [1] }],
+  [{ n: 1, session_id: POOLER, seq: 12, quote: REAL_QUOTE }],
+);
+
+/**
+ * The open-thread path through `ask()`, which nothing exercised.
+ *
+ * Every case here is non-vacuous by construction: each one asserts that
+ * `openThreadCandidates` on the same database raises at least one candidate
+ * *before* looking at what `ask` did with it, so a fixture that quietly stopped
+ * generating candidates fails loudly instead of passing empty.
+ */
+/**
+ * The word budget, enforced in code.
+ *
+ * `ANSWER_MAX_WORDS` was prompt-only: `grep` found it at one line of the
+ * synthesizer prompt and in a `toBe(150)` test, and nothing anywhere compared
+ * an answer against it. A real run came back at **163 words** — a 17-line
+ * ANSWER block and 40 lines in total, against `05`'s "compact enough to
+ * screenshot whole" and its 80x24 box.
+ *
+ * Asking the model nicely is not how the citation rule works and it is not how
+ * this one works either. `filterAnswer` drops whole trailing sentences, which
+ * is the enforcement that does not create a second dishonesty: a sentence cut
+ * mid-thought would carry a citation while saying something the evidence does
+ * not support, whereas a whole sentence was checked on its own and can be
+ * removed on its own.
+ */
+describe('the answer holds ANSWER_MAX_WORDS, in code', () => {
+  it('pins the constant, and now something actually reads it', () => {
+    // The test that already existed. It is kept because `plans/08` rule 3 says
+    // a constant encoding a measured trade-off needs a test that fails when it
+    // moves — but on its own it constrained nothing about any answer.
+    expect(ANSWER_MAX_WORDS).toBe(150);
+  });
+
+  const sentence = (words: number, tag: string): string =>
+    `${tag} ` + Array.from({ length: words - 2 }, (_, i) => `w${i}`).join(' ') + ' end.';
+
+  it('counts words the way a reader does', () => {
+    expect(wordCount('')).toBe(0);
+    expect(wordCount('   ')).toBe(0);
+    expect(wordCount('one')).toBe(1);
+    expect(wordCount('  two  words \n here ')).toBe(3);
+    expect(wordCount(sentence(40, 'a'))).toBe(40);
+  });
+
+  it('drops whole trailing sentences rather than cutting one in half', () => {
+    const input = [
+      { text: sentence(80, 'first'), cites: [1] },
+      { text: sentence(60, 'second'), cites: [2] },
+      { text: sentence(50, 'third'), cites: [3] },
+    ];
+    const { kept, trimmed } = trimToWordBudget(input, ANSWER_MAX_WORDS);
+
+    expect(kept).toHaveLength(2);
+    expect(trimmed).toEqual([input[2]!.text]);
+    // Every kept sentence is byte-identical to what went in. Nothing was cut,
+    // shortened, re-wrapped or ellipsised — the whole point of the choice.
+    expect(kept.map((k) => k.text)).toEqual([input[0]!.text, input[1]!.text]);
+    expect(wordCount(kept.map((k) => k.text).join(' '))).toBeLessThanOrEqual(ANSWER_MAX_WORDS);
+  });
+
+  it('takes the whole tail once the budget is spent, not just the long bits', () => {
+    const input = [
+      { text: sentence(140, 'first'), cites: [1] },
+      { text: sentence(40, 'second'), cites: [2] },
+      { text: sentence(4, 'third'), cites: [3] }, // would have fitted
+    ];
+    const { kept, trimmed } = trimToWordBudget(input, ANSWER_MAX_WORDS);
+    expect(kept).toHaveLength(1);
+    // A four-word recap printed straight after the sentence that was supposed
+    // to set it up is a non-sequitur, so it goes with the rest of the tail.
+    expect(trimmed).toEqual([input[1]!.text, input[2]!.text]);
+  });
+
+  it('keeps a single over-long sentence rather than printing nothing', () => {
+    const one = [{ text: sentence(400, 'only'), cites: [1] }];
+    const { kept, trimmed } = trimToWordBudget(one, ANSWER_MAX_WORDS);
+    // An empty ANSWER block is a silent refusal, and `05` has a loud one.
+    expect(kept).toEqual(one);
+    expect(trimmed).toEqual([]);
+  });
+
+  it('is a no-op on an answer that already fits', () => {
+    const input = [
+      { text: sentence(20, 'a'), cites: [1] },
+      { text: sentence(20, 'b'), cites: [2] },
+    ];
+    const { kept, trimmed } = trimToWordBudget(input, ANSWER_MAX_WORDS);
+    expect(kept).toEqual(input);
+    expect(trimmed).toEqual([]);
+  });
+
+  it('enforces it inside filterAnswer, and takes the orphaned evidence with it', () => {
+    // Three real, resolving citations. Nothing here fails the citation check;
+    // the only thing that can remove a sentence is the budget.
+    const long = (n: number, tag: string): string => sentence(n, tag);
+    const out = filterAnswer(
+      [
+        { text: long(80, 'first'), cites: [1] },
+        { text: long(60, 'second'), cites: [2] },
+        { text: long(50, 'third'), cites: [3] },
+      ],
+      [
+        { index: 1, sessionId: POOLER, seq: 12, quote: REAL_QUOTE },
+        { index: 2, sessionId: NOTES, seq: 3, quote: 'we left the queue alone this week' },
+        { index: 3, sessionId: POOLER, seq: 12, quote: REAL_QUOTE.slice(0, 40) },
+      ],
+      sources(),
+    );
+
+    // Nothing failed the citation check.
+    expect(out.dropped).toEqual([]);
+    expect(out.trimmed).toHaveLength(1);
+    expect(out.sentences).toHaveLength(2);
+    expect(wordCount(out.sentences.map((x) => x.text).join(' '))).toBeLessThanOrEqual(
+      ANSWER_MAX_WORDS,
+    );
+
+    // The receipt shrinks with the answer. Evidence [3] was cited only by the
+    // trimmed sentence, so it falls out through the `uncited` path — leaving
+    // it in would print a quote for a claim that is no longer on the screen.
+    expect(out.evidence).toHaveLength(2);
+    expect(out.evidence.map((e) => e.index)).toEqual([1, 2]);
+    expect(out.drops.filter((d) => d.reason === 'over-budget')).toHaveLength(1);
+    expect(out.drops.some((d) => d.reason === 'uncited')).toBe(true);
+  });
+
+  it('holds the cap end to end, through ask()', async () => {
+    const { root, db } = seedDb();
+    const readerLlm = Llm.open({
+      transport: new Scripted('agent-sdk', [READER_OK]),
+      model: 'haiku',
+    });
+    // A synthesizer that ignores the prompt's word ceiling, which is the whole
+    // reason the ceiling cannot live in the prompt.
+    const llm = Llm.open({
+      transport: new Scripted('agent-sdk', [
+        synthReply(
+          [
+            { text: sentence(90, 'first'), cites: [1] },
+            { text: sentence(90, 'second'), cites: [1] },
+            { text: sentence(90, 'third'), cites: [1] },
+          ],
+          [{ n: 1, session_id: POOLER, seq: 12, quote: REAL_QUOTE }],
+        ),
+      ]),
+      model: 'sonnet',
+    });
+
+    const r = await ask(db, 'how did we handle pgbouncer with prepared statements?', {
+      root,
+      llm,
+      readerLlm,
+      openThreads: false,
+    });
+
+    // 270 words in; the cap holds.
+    expect(wordCount(r.answer)).toBeLessThanOrEqual(ANSWER_MAX_WORDS);
+    expect(r.sentences).toHaveLength(1);
+    expect(r.trimmed).toHaveLength(2);
+    // `answer` is still exactly the kept sentences joined — the invariant the
+    // rest of this file rests on is not weakened by the cap.
+    expect(r.answer).toBe(r.sentences.map((x) => x.text).join(' '));
+    // And a trimmed sentence is not a dropped one: they are different events.
+    expect(r.dropped).toEqual([]);
+
+    // The screen says the answer was held, rather than stopping silently.
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).toContain('2 sentences trimmed');
+    expect(text).toContain('answer held to 150 words');
+
+    db.close();
+    await llm.close();
+    await readerLlm.close();
+  });
+
+  it('keeps the whole run inside 80x24, which is what the cap is for', async () => {
+    const { root, db } = seedDb();
+    const readerLlm = Llm.open({
+      transport: new Scripted('agent-sdk', [READER_OK]),
+      model: 'haiku',
+    });
+    const llm = Llm.open({
+      transport: new Scripted('agent-sdk', [
+        synthReply(
+          [
+            { text: sentence(90, 'first'), cites: [1] },
+            { text: sentence(90, 'second'), cites: [1] },
+            { text: sentence(90, 'third'), cites: [1] },
+          ],
+          [{ n: 1, session_id: POOLER, seq: 12, quote: REAL_QUOTE }],
+        ),
+      ]),
+      model: 'sonnet',
+    });
+    const r = await ask(db, 'how did we handle pgbouncer with prepared statements?', {
+      root,
+      llm,
+      readerLlm,
+      openThreads: false,
+    });
+    const lines = stripAnsi(
+      renderAsk(r, new Theme({ color: false, width: 80 }), new Date()),
+    ).split('\n');
+    // `05` §4: "output is compact enough to screenshot whole". 24 is the box.
+    expect(lines.length).toBeLessThanOrEqual(24);
+    for (const l of lines) expect([...l].length).toBeLessThanOrEqual(80);
+
+    db.close();
+    await llm.close();
+    await readerLlm.close();
+  });
+});
+
+describe('ask() open threads', () => {
+  const QUESTION = 'how did we handle pgbouncer with prepared statements?';
+
+  /** `ask()` with the open-thread pass on, and `confirmReply` scripted for it. */
+  async function askWithThreads(confirmReply: string | Error) {
+    const { root, db } = seedDb();
+    withOpenThreadMaterial(db);
+
+    // The fixture has to be capable of producing a thread, or nothing below
+    // means anything. This is the guard against a vacuous pass.
+    const candidates = openThreadCandidates(db, [POOLER]);
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates[0]!.what).toBe(DECIDED_WHAT);
+
+    const readerLlm = Llm.open({
+      transport: new Scripted('agent-sdk', [READER_OK]),
+      model: 'haiku',
+    });
+    // One transport, two calls: the synthesizer first, then the open-thread
+    // confirmation — `ask` hands its own synth llm to `tryOpenThreads`.
+    const llm = Llm.open({
+      transport: new Scripted('agent-sdk', [SYNTH_OK, confirmReply]),
+      model: 'sonnet',
+    });
+    const r = await ask(db, QUESTION, { root, llm, readerLlm, openThreads: true });
+    // The sibling session is not in the shortlist, so the answer half of the
+    // run is the same one the tests above make.
+    expect(r.searched).toBe(1);
+    expect(r.refused).toBe(false);
+    db.close();
+    await llm.close();
+    await readerLlm.close();
+    return { r, candidates };
+  }
+
+  const verdicts = (results: { i: number; confirmed: boolean; note: string }[]): string =>
+    JSON.stringify({ results });
+
+  it('shows nothing when the model returns no verdict for any candidate', async () => {
+    const { r, candidates } = await askWithThreads(verdicts([]));
+
+    // The bug: before the fix this was `candidates.length`, every one of them
+    // carrying `confirmed: false`.
+    expect(r.openThreads).toEqual([]);
+    expect(candidates.length).toBeGreaterThan(0);
+
+    // And nothing reaches the screen, which is where a reader would have met it.
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).not.toContain(OPEN_THREAD_LABEL);
+    expect(text).not.toContain(DECIDED_WHAT);
+  });
+
+  it('shows nothing when the model rejects the candidate outright', async () => {
+    const { r } = await askWithThreads(
+      verdicts([
+        { i: 0, confirmed: false, note: 'meghbrain already handles the pooler in its own config.' },
+      ]),
+    );
+
+    // A candidate the model *rejected*, printed anyway, is what made the whole
+    // model pass decorative. The screen is asserted before the array because
+    // the screen is where a reader met it: `render/ask.ts` prints every element
+    // of `openThreads` and has never looked at `confirmed`, by design — the
+    // drop is the caller's job and this is the test that says so.
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).not.toContain('already handles the pooler');
+    expect(text).not.toContain(OPEN_THREAD_LABEL);
+    expect(r.openThreads).toEqual([]);
+  });
+
+  it('never prints the note that says it is not being shown', async () => {
+    // The line that gave the bug away: `NO_MODEL_NOTE` reads "…so it is
+    // unconfirmed and not shown", and a build that renders that sentence is
+    // contradicting itself in the user's own terminal.
+    expect(NO_MODEL_NOTE).toContain('not shown');
+
+    // The confirmation call fails outright, which is the reachable form of
+    // "nothing could be confirmed" when a model *is* configured: every
+    // candidate comes back unconfirmed, carrying a note that says so.
+    const { r, candidates } = await askWithThreads(new Error('the backend went away'));
+    expect(candidates.length).toBeGreaterThan(0);
+
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).not.toContain('not shown');
+    expect(text).not.toContain('unconfirmed');
+    expect(text).not.toContain(OPEN_THREAD_LABEL);
+    expect(r.openThreads).toEqual([]);
+  });
+
+  it('shows the confirmed thread, and only it', async () => {
+    const { r, candidates } = await askWithThreads(
+      verdicts([{ i: 0, confirmed: true, note: 'meghbrain still opens raw connections here.' }]),
+    );
+
+    expect(r.openThreads).toHaveLength(1);
+    const t = r.openThreads[0]!;
+    expect(t.confirmed).toBe(true);
+    expect(t.what).toBe(DECIDED_WHAT);
+    expect(t.project).toBe('/tmp/Fulcrum');
+    expect(t.otherProject).toBe('/tmp/Meghbrain');
+    // Cited or dropped applies here too: the positive half points at a real
+    // exchange of the session `ask` answered from.
+    expect(t.evidenceSeqs).toEqual([12]);
+    expect(t.sessionId).toBe(POOLER);
+    // Every field except `confirmed` and `note` is the rule pass's own.
+    expect(t.what).toBe(candidates[0]!.what);
+    expect(t.why).toBe(candidates[0]!.why);
+
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).toContain(OPEN_THREAD_LABEL);
+    expect(text).toContain('meghbrain still opens raw connections here.');
+  });
+
+  it('keeps the confirmed one and drops the rejected one from the same batch', async () => {
+    // Two candidates in one confirmation call, one verdict each. This is the
+    // case the filter has to get right per-item rather than all-or-nothing.
+    const { root, db } = seedDb();
+    withOpenThreadMaterial(db);
+    // A second decision in A, same shape, so the batch carries two.
+    const second = 'pin the pooler pool_size to twelve for the importer workers';
+    db.prepare('UPDATE cards SET decisions = ? WHERE session_id = ?').run(
+      JSON.stringify([
+        { what: DECIDED_WHAT, why: DECIDED_WHY, evidence_seq: [12] },
+        { what: second, why: 'twelve workers, one connection each', evidence_seq: [11] },
+      ]),
+      POOLER,
+    );
+
+    const candidates = openThreadCandidates(db, [POOLER]);
+    expect(candidates).toHaveLength(2);
+    const rejected = candidates.findIndex((c) => c.what === second);
+    expect(rejected).toBeGreaterThanOrEqual(0);
+    const kept = 1 - rejected;
+
+    const readerLlm = Llm.open({
+      transport: new Scripted('agent-sdk', [READER_OK]),
+      model: 'haiku',
+    });
+    const llm = Llm.open({
+      transport: new Scripted('agent-sdk', [
+        SYNTH_OK,
+        verdicts([
+          { i: kept, confirmed: true, note: 'meghbrain still opens raw connections here.' },
+          { i: rejected, confirmed: false, note: 'meghbrain sets pool_size in its own compose file.' },
+        ]),
+      ]),
+      model: 'sonnet',
+    });
+    const r = await ask(db, QUESTION, { root, llm, readerLlm, openThreads: true });
+
+    expect(r.openThreads).toHaveLength(1);
+    expect(r.openThreads[0]!.what).toBe(candidates[kept]!.what);
+    expect(r.openThreads.map((t) => t.what)).not.toContain(second);
+
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).not.toContain('own compose file');
+
+    db.close();
+    await llm.close();
+    await readerLlm.close();
+  });
+});
+
 describe('ask() end to end', () => {
   it('answers, and answer is exactly the kept sentences joined', async () => {
     const { root, db } = seedDb();
@@ -804,6 +1257,7 @@ function resultFrom(
     answer: out.sentences.map((s) => s.text).join(' '),
     sentences: out.sentences,
     dropped: out.dropped,
+    trimmed: out.trimmed,
     evidence: out.evidence,
     openThreads: [],
     searched: extra.searched,
@@ -953,6 +1407,7 @@ describe('a refusal says why', () => {
     answer: '',
     sentences: [],
     dropped: [],
+    trimmed: [],
     evidence: [],
     openThreads: [],
     searched: 6,

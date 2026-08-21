@@ -89,6 +89,27 @@ shot() {
   node "$bin" "$@" --width 80 --no-color >"$screens/$out" 2>/dev/null
 }
 
+# `doctor --privacy` is the one screen whose output depends on the *working
+# directory* and not only on HOME: `graft` writes its brief into the project
+# you run it in, so the receipt lists `<cwd>/.potsherd/graft-<id8>.md`. Captured
+# from the repo, that line renders this developer's checkout path — which is
+# how the receipt below came to say `/Users/…/potsher…8dcc386/` the first time
+# it was regenerated, and is the same class of fact about the capturing machine
+# that the stub `claude` above exists to keep off these screens.
+#
+# So the doctor screens are captured from a project directory inside the demo
+# HOME, where `tildify` renders it as `~/work/demo-project` like every other
+# path here. `graft` is never run; only the path is printed.
+project="$demo/work/demo-project"
+mkdir -p "$project"
+
+shot_in_project() {
+  local out="$1"; shift
+  echo "  $out  <-  potsherd $*  (from ~/work/demo-project)"
+  ( cd "$project" && node "$bin" "$@" --width 80 --no-color ) \
+    >"$screens/$out" 2>/dev/null
+}
+
 echo "capturing screens against $HOME/.claude"
 shot 01-audit.txt        audit
 shot 06-audit-sweep.txt  audit --sweep
@@ -125,8 +146,8 @@ shot 11-show.txt         show 9c4d2f18
 shot 13-find-redacted.txt find "redacted aws"
 
 # Last, so that both doctor screens report on an index that exists.
-shot 04-doctor.txt       doctor
-shot 05-doctor-privacy.txt doctor --privacy
+shot_in_project 04-doctor.txt       doctor
+shot_in_project 05-doctor-privacy.txt doctor --privacy
 
 # ---------------------------------------------------------------- assertions
 #

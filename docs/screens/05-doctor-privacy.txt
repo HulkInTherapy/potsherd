@@ -1,4 +1,4 @@
-potsherd doctor --privacy · 21 aug 2026
+potsherd doctor --privacy · 22 aug 2026
 
   reads (never modified):
     ~/.claude/projects
@@ -22,6 +22,8 @@ potsherd doctor --privacy · 21 aug 2026
     ~/.potsherd/archive
     ~/.potsherd/potsherd.db
     ~/.potsherd/models
+    ~/work/demo-project/.potsherd/graft-<id8>.md
+      the graft path only when you run graft, in the directory you run it in
 
   writes only after an explicit y at a diff:
     ~/.claude/settings.json
@@ -35,12 +37,13 @@ potsherd doctor --privacy · 21 aug 2026
     index, no counts, no identifiers.
 
   only these verbs call a model:
-    potsherd card        writes the cards; one call per slice
-    later phases add ask and graft, which send the same slices.
+    potsherd card      writes the cards; one call per slice
+    potsherd ask       one call, over the shortlist it retrieved
+    potsherd graft     one call, to compress one session into a brief
 
   these never do, and open no socket at all:
     audit, rescue, guard, index, ls, find, show, stats, tag, pin,
-    link, doctor
+    unpin, link, doctor
 
   who receives them:
     your own Claude subscription, via ~/.claude/local/claude

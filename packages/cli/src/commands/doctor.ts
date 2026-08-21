@@ -145,13 +145,13 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     card.blank().text('only these verbs call a model:');
     const verbNote: Record<string, string> = {
       card: 'writes the cards; one call per slice',
+      ask: 'one call, over the shortlist it retrieved',
       graft: 'one call, to compress one session into a brief',
     };
     for (const verb of MODEL_CALL_VERBS) {
       const note = verbNote[verb];
       card.raw(`    potsherd ${verb.padEnd(8)}${note ? `  ${note}` : ''}`.trimEnd());
     }
-    card.raw(`    ${t.dim('phase 4 adds')} ask${t.dim(', which sends the same slices.')}`);
     card.blank().text('these never do, and open no socket at all:');
     // Wrapped, not elided: the whole value of this line is that a reader can
     // find their verb in it, and `ls…w, stats` is a list with the answer cut

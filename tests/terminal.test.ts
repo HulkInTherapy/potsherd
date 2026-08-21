@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Theme, toAscii } from '@potsherd/core';
+import { Theme, toAscii, VERSION } from '@potsherd/core';
 import { copyFixtureClaude, IDS, rmrf, tempDir } from './helpers.js';
 
 /**
@@ -324,5 +324,52 @@ describe('index reports the run, not the index', () => {
       '--width', '80', '--claude-dir', c.claude, '--potsherd-dir', c.pot]);
     expect(r.stdout).toContain('ghosts indexed');
     expect(r.stdout).toContain('run potsherd rescue');
+  });
+});
+
+/**
+ * The version a user reads must be true.
+ *
+ * `packages/core/src/version.ts` said the product had "exactly one literal now
+ * and a test that pins it to the manifest npm actually publishes". The literal
+ * was real; the test was not, and nobody had written it. So the tag went to
+ * v0.3.0 and then v0.4.0 while `potsherd --version` went on printing `0.2.0` —
+ * the number a user quotes in a bug report, disagreeing with the number `npm
+ * install potsherd@0.4.0` would have put on their disk.
+ *
+ * This is `plans/08` rule 1 in its smallest form: a number a user reads must
+ * be measured, or labelled `est.`. A version is a fact about the artefact, not
+ * an estimate, so there is no reading of this where it is merely cosmetic.
+ *
+ * Four things have to agree, and the test names all four rather than checking
+ * a pair, because the last drift was between the pair nobody was checking: the
+ * shipped binary's `--version` output, `VERSION` in core, and the two package
+ * manifests. `doctor`'s heading prints the same string and is checked with
+ * them, since that is where a pasted bug report usually gets its number.
+ */
+describe('the version a user reads', () => {
+  const manifest = (rel: string): { version: string } =>
+    JSON.parse(fs.readFileSync(path.join(repo, rel), 'utf-8')) as { version: string };
+
+  it('is the same string in core, in both manifests, and out of the binary', () => {
+    // The manifest npm publishes is the one a user installs, so it is the
+    // authority the other three are checked against.
+    const cli = manifest('packages/cli/package.json').version;
+    expect(manifest('packages/core/package.json').version).toBe(cli);
+    expect(VERSION).toBe(cli);
+
+    expect(run(['--version']).stdout.trim()).toBe(cli);
+
+    const doc = run(['doctor', '--no-color', '--width', '80',
+      '--claude-dir', claudeDir, '--potsherd-dir', potsherdDir]);
+    expect(doc.stdout).toContain(`potsherd ${cli}`);
+  });
+
+  it('is a plain semver triple, so it can be compared with a git tag', () => {
+    // `0.2.0` was still being printed at tag `v0.4.0`. Nothing in the suite can
+    // reach the tag list of the repository a user cloned, but it can insist the
+    // string is the shape a tag is made from, so that comparing the two is a
+    // one-line check rather than a parse.
+    expect(manifest('packages/cli/package.json').version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });
