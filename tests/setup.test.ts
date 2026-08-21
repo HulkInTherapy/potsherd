@@ -570,9 +570,30 @@ describe('the verb', () => {
   it('refuses to register a server that is not built', async () => {
     write(cursorConfig(), THREE_OTHERS);
     const before = fs.readFileSync(cursorConfig(), 'utf8');
-    const { code, out } = await capture(() =>
-      runSetup({ ...base, clients: ['cursor'], yes: true, width: 80 }),
-    );
+    // This test must describe a machine where the server is not built, and it
+    // used to do that by relying on `packages/mcp` not existing in the tree.
+    // T5.1 then built it, and the test started asserting the opposite of what
+    // it meant — it was measuring the checkout, not the behaviour. Resolution
+    // starts from `process.argv[1]`, so pointing that at a scratch directory
+    // with no workspace above it *is* the unbuilt machine, on any checkout.
+    // The entry must *exist*: resolution falls back to `process.cwd()` for a
+    // path that does not, which would land back in this checkout and resolve
+    // the very build we are pretending is absent.
+    const elsewhere = path.join(home, 'installed', 'bin');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    const fakeBin = path.join(elsewhere, 'potsherd.js');
+    fs.writeFileSync(fakeBin, '');
+    const argv1 = process.argv[1];
+    process.argv[1] = fakeBin;
+    let code: number;
+    let out: string;
+    try {
+      ({ code, out } = await capture(() =>
+        runSetup({ ...base, clients: ['cursor'], yes: true, width: 80 }),
+      ));
+    } finally {
+      process.argv[1] = argv1;
+    }
     expect(out).toContain('not built on this machine');
     expect(code).toBe(1);
     expect(fs.readFileSync(cursorConfig(), 'utf8')).toBe(before);
