@@ -6,6 +6,7 @@ import { runAudit } from './commands/audit.js';
 import { runRescue } from './commands/rescue.js';
 import { runGuard } from './commands/guard.js';
 import { runDoctor } from './commands/doctor.js';
+import { runIndex } from './commands/index.js';
 
 export const VERSION = '0.1.0';
 
@@ -116,6 +117,38 @@ example:
     );
   });
 
+  const index = addGlobals(
+    program
+      .command('index')
+      .description('parse, redact and index every transcript on this machine')
+      .option('--full', 're-read every transcript, ignoring what has not changed')
+      .option('--incremental', 'only what changed since the last run (the default)')
+      .option('--harness <list>', 'only these harnesses: claude,codex,cursor,pi')
+      .option('--no-embed', 'skip embeddings entirely — text search only, no model, no network')
+      .option('--session <id>', 'index one session id and nothing else')
+      .option('-q, --quiet', 'print nothing on success (for hooks)'),
+  ).addHelpText('after', `
+example:
+  potsherd index
+  potsherd index --full
+  potsherd index --harness claude --no-embed        # offline, fts only
+  potsherd index --json | jq .totals`);
+  index.action(async (opts: Record<string, unknown>) => {
+    const o = globals(program, index, opts);
+    await run(
+      () =>
+        runIndex({
+          ...o,
+          full: Boolean(opts['full']),
+          incremental: Boolean(opts['incremental']),
+          embed: opts['embed'] !== false,
+          ...(opts['harness'] ? { harness: String(opts['harness']) } : {}),
+          ...(opts['session'] ? { session: String(opts['session']) } : {}),
+        }),
+      o,
+    );
+  });
+
   const doctor = addGlobals(
     program
       .command('doctor')
@@ -180,6 +213,7 @@ function tour(): void {
     ['audit', 'how many sessions Claude Code has already deleted'],
     ['rescue', 'archive what is left; rebuild the deleted ones as ghosts'],
     ['guard', 'take a copy at every startup, before the sweep can run'],
+    ['index', 'parse, redact and index every transcript, ready to search'],
     ['doctor', 'what potsherd can see, and every path it reads or writes'],
   ];
   print('');

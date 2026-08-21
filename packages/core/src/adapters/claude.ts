@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { archiveDir, claudeDir, claudePaths, potsherdDir } from '../paths.js';
 import { SIDECHAIN_DIR } from '../claude/scan.js';
+import { formatDoctorLine } from '../doctor-line.js';
 import { parseClaudeTranscript, exchangeId } from '../parser/claude.js';
 import { readJsonlLines, parseJsonLine } from '../parser/jsonl.js';
 import { isRecord, uniq } from '../parser/content.js';
@@ -144,6 +145,35 @@ export interface ClaudeParseResult extends ParseResult {
   continuationsFolded: number;
   /** Ditto, but with no prompt ahead of them in this batch, so dropped. */
   orphanContinuations: number;
+}
+
+/**
+ * The `doctor` line for claude. Counts come from `discover()`, so what doctor
+ * says and what `index` would read can never disagree.
+ *
+ * `claude      ready     ~/.claude/projects            30 sessions · 197 sidechains`
+ */
+export function doctorLine(options: DiscoverOptions = {}): string {
+  const dir = sourceDir(options.claudeDir);
+  let found: ClaudeSessionSource[] = [];
+  try {
+    found = discover(options);
+  } catch {
+    found = [];
+  }
+  const exists = fs.existsSync(dir);
+  const sidechains = found.filter((f) => f.isSidechain).length;
+  const archived = found.filter((f) => f.status === 'archived').length;
+  const sessions = found.length - sidechains;
+  const parts = [`${sessions} session${sessions === 1 ? '' : 's'}`];
+  if (sidechains > 0) parts.push(`${sidechains} sidechains`);
+  if (archived > 0) parts.push(`${archived} from the archive`);
+  return formatDoctorLine({
+    harness: 'claude',
+    status: exists || found.length > 0 ? 'ready' : 'absent',
+    dir,
+    note: exists || found.length > 0 ? parts.join(' \u00b7 ') : 'Claude Code not installed',
+  });
 }
 
 export const claudeAdapter: Adapter = {

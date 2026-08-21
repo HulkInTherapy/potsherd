@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import process from 'node:process';
 
 import type {
   Adapter,
@@ -15,7 +14,8 @@ import type {
 import { parseCodexTranscript } from '../parser/codex.js';
 import { parseJsonLine, readJsonlLines } from '../parser/jsonl.js';
 import { isRecord, uniq } from '../parser/content.js';
-import { expandTilde, home, tildify } from '../paths.js';
+import { codexDir, codexPaths, tildify } from '../paths.js';
+import { formatDoctorLine } from '../doctor-line.js';
 import {
   MIN_CODEX_VERSION,
   parseCodexCliVersion,
@@ -109,24 +109,13 @@ import {
 
 // ---------------------------------------------------------------- paths
 
-/** `~/.codex`, honouring `CODEX_HOME` and an explicit override. */
-export function codexDir(override?: string): string {
-  if (override) return path.resolve(expandTilde(override));
-  const env = process.env['CODEX_HOME'];
-  if (env && env.trim()) return path.resolve(expandTilde(env.trim()));
-  return path.join(home(), '.codex');
-}
-
-/** Codex's own files, all read-only to us (`00-README.md`, ground rules). */
-export function codexPaths(dir = codexDir()) {
-  return {
-    root: dir,
-    sessions: path.join(dir, 'sessions'),
-    /** Upstream feature; absent on many machines. Discovered when present. */
-    archived: path.join(dir, 'archived_sessions'),
-    sessionIndex: path.join(dir, 'session_index.jsonl'),
-  };
-}
+/**
+ * `codexDir()` (honouring `CODEX_HOME`) and `codexPaths()` now live in
+ * `paths.ts` beside `claudeDir()`, so `doctor --privacy` can enumerate every
+ * path potsherd reads from one module (finding F9). They are re-exported here
+ * because this is where a reader of the codex adapter looks for them.
+ */
+export { codexDir, codexPaths } from '../paths.js';
 
 /**
  * `rollout-<ts>-<uuid>.jsonl` and nothing else. `$CODEX_HOME` also holds
@@ -629,6 +618,37 @@ export function renderCodexDoctorLine(report: CodexDoctorReport): string {
     parts.push(`${report.unreadable.length} unreadable header${report.unreadable.length === 1 ? '' : 's'}`);
   }
   return `codex     ${parts.join(' \u00b7 ')}   ${tildify(report.sourceDir)}`;
+}
+
+/**
+ * The same facts as {@link renderCodexDoctorLine}, in the shared column shape
+ * `doctor` prints the other three harnesses in.
+ */
+export function doctorLine(report: CodexDoctorReport): string {
+  if (!report.present) {
+    return formatDoctorLine({
+      harness: 'codex',
+      status: 'absent',
+      dir: report.sourceDir,
+      note: 'Codex CLI not installed',
+    });
+  }
+  const parts = [`${report.sessions} session${report.sessions === 1 ? '' : 's'}`];
+  if (report.sessions > 0) parts.push(formatBytes(report.bytes));
+  if (report.titled > 0) parts.push(`${report.titled} titled`);
+  if (report.archived > 0) parts.push(`${report.archived} archived`);
+  const versions = Object.keys(report.versions).sort();
+  if (versions.length > 0) parts.push(`cli ${versions.join(', ')}`);
+  if (report.unsupportedVersions.length > 0) {
+    parts.push(`${report.unsupportedVersions.join(', ')} < ${MIN_CODEX_VERSION}`);
+  }
+  if (report.unreadable.length > 0) parts.push(`${report.unreadable.length} unreadable`);
+  return formatDoctorLine({
+    harness: 'codex',
+    status: 'ready',
+    dir: report.sourceDir,
+    note: parts.join(' \u00b7 '),
+  });
 }
 
 function formatBytes(n: number): string {

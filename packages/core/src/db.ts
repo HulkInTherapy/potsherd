@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { dbPath, potsherdDir } from './paths.js';
+import { createVecTables } from './vec.js';
 
 /**
  * One SQLite file, `~/.potsherd/potsherd.db`, WAL mode.
@@ -27,7 +28,16 @@ export type Db = Database.Database;
 interface Migration {
   version: number;
   name: string;
-  up: string;
+  /** Plain SQL. Exactly one of `up` / `run` is set. */
+  up?: string;
+  /**
+   * A migration that may legitimately decline. It returns false when the thing
+   * it needs is not on this machine; the version is then **not** recorded, so
+   * the next `open()` tries again. Only migration 4 (the `sqlite-vec` loadable
+   * extension) uses this — see `vec.ts` for why a native extension may never be
+   * allowed to fail an index run.
+   */
+  run?: (db: Db) => boolean;
 }
 
 const MIGRATIONS: Migration[] = [
@@ -218,6 +228,20 @@ CREATE TABLE IF NOT EXISTS sync_state (
 );
 `,
   },
+  {
+    version: 4,
+    name: 'vec',
+    // The last two tables of `03 §3`:
+    //   vec_exchanges USING vec0(id TEXT PRIMARY KEY, embedding FLOAT[384])
+    //   vec_cards     USING vec0(session_id TEXT PRIMARY KEY, embedding FLOAT[384])
+    // vec0 comes from `sqlite-vec`, a loadable native extension and an
+    // *optional* dependency. When it is not there this migration declines
+    // rather than throwing: `index` still runs and simply writes no vectors
+    // (exactly what `--no-embed` means), `find` uses fts5 alone, and `doctor`
+    // says which of the two you are getting. Never crash someone's index
+    // because a native extension did not load.
+    run: createVecTables,
+  },
 ];
 
 export function open(opts: OpenOptions = {}): Db {
@@ -260,7 +284,12 @@ export function migrate(db: Db): number {
     if (applied.has(m.version)) continue;
     db.exec('BEGIN');
     try {
-      db.exec(m.up);
+      const done = m.up !== undefined ? (db.exec(m.up), true) : m.run!(db);
+      if (!done) {
+        // Declined, not failed. Nothing is recorded, so the next open retries.
+        db.exec('ROLLBACK');
+        continue;
+      }
       record.run(m.version, m.name, new Date().toISOString());
       db.exec('COMMIT');
       ran++;

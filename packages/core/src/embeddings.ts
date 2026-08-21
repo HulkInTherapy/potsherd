@@ -63,9 +63,9 @@ export interface EmbeddingsOptions {
 }
 
 type Pipeline = (
-  input: string,
+  input: string | string[],
   opts: { pooling: 'mean'; normalize: boolean },
-) => Promise<{ data: Float32Array | number[] }>;
+) => Promise<{ data: Float32Array | number[]; dims?: number[] }>;
 
 let pipelinePromise: Promise<Pipeline> | null = null;
 
@@ -166,20 +166,72 @@ export async function generateQueryEmbedding(
 }
 
 /**
- * Embed one exchange. The concatenation format is upstream's and the stored
- * vectors depend on it — change it and {@link EMBEDDING_VERSION} must move too.
+ * The exact string an exchange is embedded as. Upstream's concatenation
+ * format, and the stored vectors depend on it — change it and
+ * {@link EMBEDDING_VERSION} must move too.
  */
+export function exchangeText(
+  userText: string,
+  assistantText: string,
+  toolNames?: readonly string[],
+): string {
+  let combined = `User: ${userText}\n\nAssistant: ${assistantText}`;
+  if (toolNames && toolNames.length > 0) {
+    combined += `\n\nTools: ${toolNames.join(', ')}`;
+  }
+  return combined;
+}
+
+/** Embed one exchange. */
 export async function generateExchangeEmbedding(
   userText: string,
   assistantText: string,
   toolNames?: readonly string[],
   options: EmbeddingsOptions = {},
 ): Promise<number[]> {
-  let combined = `User: ${userText}\n\nAssistant: ${assistantText}`;
-  if (toolNames && toolNames.length > 0) {
-    combined += `\n\nTools: ${toolNames.join(', ')}`;
+  return generateEmbedding(exchangeText(userText, assistantText, toolNames), options);
+}
+
+export interface ExchangeInput {
+  userText: string;
+  assistantText: string;
+  toolNames?: readonly string[];
+}
+
+/**
+ * Embed a batch in one forward pass.
+ *
+ * `index` has thousands of exchanges to embed and one call per exchange spends
+ * most of its time in per-call overhead rather than in the model. Batching is
+ * safe here for one specific reason: transformers.js's `pooling: 'mean'`
+ * averages **under the attention mask**, so the padding a batch introduces does
+ * not reach the vector — a batched embedding is identical to the single-input
+ * one, which `tests/embeddings.test.ts` asserts rather than assumes.
+ *
+ * Falls back to one call per input if the runtime ever returns a shape other
+ * than `[n, 384]`; a slower index is always better than a wrong vector.
+ */
+export async function generateExchangeEmbeddings(
+  items: readonly ExchangeInput[],
+  options: EmbeddingsOptions = {},
+): Promise<number[][]> {
+  if (items.length === 0) return [];
+  const texts = items.map((i) =>
+    exchangeText(i.userText, i.assistantText, i.toolNames).substring(0, MAX_INPUT_CHARS),
+  );
+  const pipe = await getPipeline(options);
+  const output = await pipe(texts, { pooling: 'mean', normalize: true });
+  const data = output.data as Float32Array;
+  if (data.length !== texts.length * EMBEDDING_DIMENSIONS) {
+    const out: number[][] = [];
+    for (const text of texts) out.push(await generateEmbedding(text, options));
+    return out;
   }
-  return generateEmbedding(combined, options);
+  const out: number[][] = [];
+  for (let i = 0; i < texts.length; i += 1) {
+    out.push(Array.from(data.slice(i * EMBEDDING_DIMENSIONS, (i + 1) * EMBEDDING_DIMENSIONS)));
+  }
+  return out;
 }
 
 /** `Float32Array` blob in the layout `vec0` expects, for `vec_exchanges`. */

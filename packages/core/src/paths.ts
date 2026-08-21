@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import type { Harness } from './adapters/types.js';
 
 /**
  * Every path potsherd reads or writes is resolved here, so `doctor --privacy`
@@ -9,6 +10,13 @@ import process from 'node:process';
  * READ-ONLY inputs:  ~/.claude, ~/.codex, ~/.cursor, ~/.pi, ~/.gemini
  * WRITABLE:          ~/.potsherd  (and, with explicit consent, exactly one key
  *                    plus one hook entry in ~/.claude/settings.json)
+ *
+ * Each harness's root also honours that harness's own environment variable
+ * (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) or, where the harness has none,
+ * potsherd's test override (`POTSHERD_CURSOR_DIR`, `POTSHERD_PI_DIR`). The
+ * four adapters landed in parallel with these resolvers inside them (finding
+ * F9); they live here now and the adapters re-export them, so `doctor
+ * --privacy` can enumerate every path potsherd can read from one module.
  */
 
 export function home(): string {
@@ -61,6 +69,99 @@ export function claudePaths(dir = claudeDir()) {
     localSettings: path.join(dir, 'settings.local.json'),
     sessions: path.join(dir, 'sessions'),
   };
+}
+
+// ------------------------------------------------- the other harnesses (F9)
+
+/** `~/.codex`, honouring `CODEX_HOME` and an explicit override. */
+export function codexDir(override?: string): string {
+  if (override) return path.resolve(expandTilde(override));
+  const env = process.env['CODEX_HOME'];
+  if (env && env.trim()) return path.resolve(expandTilde(env.trim()));
+  return path.join(home(), '.codex');
+}
+
+/** Codex's own files, all read-only to us (`00-README.md`, ground rules). */
+export function codexPaths(dir = codexDir()) {
+  return {
+    root: dir,
+    sessions: path.join(dir, 'sessions'),
+    /** Upstream feature; absent on many machines. Discovered when present. */
+    archived: path.join(dir, 'archived_sessions'),
+    sessionIndex: path.join(dir, 'session_index.jsonl'),
+  };
+}
+
+/**
+ * `~/.cursor`. Cursor defines no environment variable of its own, so
+ * `POTSHERD_CURSOR_DIR` exists purely so `doctor` and the tests can point at a
+ * fixture tree instead of the developer's real one.
+ */
+export function cursorDir(override?: string): string {
+  if (override) return path.resolve(expandTilde(override));
+  const env = process.env['POTSHERD_CURSOR_DIR'];
+  if (env && env.trim()) return path.resolve(expandTilde(env.trim()));
+  return path.join(home(), '.cursor');
+}
+
+export function cursorPaths(dir = cursorDir()) {
+  return { root: dir, projects: path.join(dir, 'projects') };
+}
+
+export function cursorProjectsDir(override?: string): string {
+  return cursorPaths(cursorDir(override)).projects;
+}
+
+/** `~/.pi`, overridable by `POTSHERD_PI_DIR` for the same reason as cursor. */
+export function piDir(override?: string): string {
+  if (override) return path.resolve(expandTilde(override));
+  const env = process.env['POTSHERD_PI_DIR'];
+  if (env && env.trim()) return path.resolve(expandTilde(env.trim()));
+  return path.join(home(), '.pi');
+}
+
+export function piPaths(dir = piDir()) {
+  return { root: dir, sessions: path.join(dir, 'agent', 'sessions') };
+}
+
+export function piSessionsDir(override?: string): string {
+  return piPaths(piDir(override)).sessions;
+}
+
+/** Harnesses potsherd knows of but cannot parse yet — `doctor` names the path. */
+export function geminiDir(): string {
+  return path.join(home(), '.gemini');
+}
+export function opencodeDir(): string {
+  return path.join(home(), '.local', 'share', 'opencode');
+}
+export function copilotDir(): string {
+  return path.join(home(), '.copilot');
+}
+
+export interface HarnessSourceDir {
+  harness: Harness;
+  /** The directory the adapter walks. */
+  dir: string;
+  /** The environment variable that moves it, if the harness has one. */
+  env?: string;
+}
+
+/**
+ * Every directory potsherd can read a transcript from, in `doctor`'s order.
+ * One list, so `doctor --privacy` can never drift from what the adapters
+ * actually open.
+ */
+export function harnessSourceDirs(overrides: { claudeDir?: string } = {}): HarnessSourceDir[] {
+  return [
+    { harness: 'claude', dir: claudePaths(claudeDir(overrides.claudeDir)).projects, env: 'CLAUDE_CONFIG_DIR' },
+    { harness: 'codex', dir: codexPaths().sessions, env: 'CODEX_HOME' },
+    { harness: 'cursor', dir: cursorProjectsDir(), env: 'POTSHERD_CURSOR_DIR' },
+    { harness: 'pi', dir: piSessionsDir(), env: 'POTSHERD_PI_DIR' },
+    { harness: 'gemini', dir: path.join(geminiDir(), 'tmp') },
+    { harness: 'opencode', dir: opencodeDir() },
+    { harness: 'copilot', dir: path.join(copilotDir(), 'session-state') },
+  ];
 }
 
 /** Enterprise-managed settings, which override the user's own. */

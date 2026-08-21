@@ -2,12 +2,25 @@ import fs from 'node:fs';
 import process from 'node:process';
 import {
   audit,
+  claude as claudeAdapter,
+  codex as codexAdapter,
+  countsJson,
+  cursor as cursorAdapter,
   db as store,
   paths,
+  pi as piAdapter,
   format as fmt,
   Card,
   consent,
+  redactionRow,
+  storedRecordTypes,
+  storedRedactionCounts,
+  vecStatus,
+  emptyCounts,
   type AuditReport,
+  type RecordTypeRow,
+  type RedactionCounts,
+  type VecStatus,
 } from '@potsherd/core';
 import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
 
@@ -33,19 +46,34 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
 
   const counts: Record<string, number> = {};
   let schema = 0;
+  let redaction: RedactionCounts = emptyCounts();
+  let indexedTypes: RecordTypeRow[] = [];
+  let vec: VecStatus = { available: false, reason: 'no database yet — run potsherd index' };
+  let indexedAt: string | null = null;
   if (dbExists) {
+    // Read-only: `doctor` never migrates, never writes, and never takes the
+    // lock, so it is safe to run while an index is in flight.
     const db = store.open({ root, readonly: true });
     try {
       schema = store.schemaVersion(db);
-      for (const table of ['sessions', 'exchanges', 'ghosts', 'ghost_prompts', 'cards', 'tags', 'pins', 'links', 'archive_files', 'rescue_log']) {
+      for (const table of ['sessions', 'exchanges', 'tool_calls', 'ghosts', 'ghost_prompts', 'cards', 'tags', 'pins', 'links', 'archive_files', 'rescue_log', 'vec_exchanges']) {
         counts[table] = store.count(db, table);
       }
+      redaction = storedRedactionCounts(db);
+      indexedTypes = storedRecordTypes(db);
+      vec = vecStatus(db);
+      const row = db.prepare('SELECT MAX(indexed_at) AS at FROM sessions').get() as { at: string | null };
+      indexedAt = row?.at ?? null;
+    } catch {
+      // A database written by a newer potsherd, or one being migrated right
+      // now. Say what is readable rather than failing the whole verb.
     } finally {
       db.close();
     }
   }
 
   const unknownTypes = collectRecordTypes(report);
+  const adapters = await adapterStatus(o);
   const written = [root, paths.archiveDir(root), dbFile];
   const consented = [paths.claudePaths(report.claudeDir).settings];
 
@@ -95,8 +123,21 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
         sessionsIndexFiles: report.sessionsIndexFiles,
         memoryFiles: report.memoryFiles,
       },
+      index: {
+        indexedAt,
+        sessions: counts['sessions'] ?? 0,
+        exchanges: counts['exchanges'] ?? 0,
+        toolCalls: counts['tool_calls'] ?? 0,
+        vectors: counts['vec_exchanges'] ?? 0,
+        vec,
+      },
+      redaction: countsJson(redaction),
       recordTypes: unknownTypes,
-      adapters: adapterStatus(),
+      // Exact per-(harness, version, type) counts, from the last `index` run.
+      // `recordTypes` above is the audit's head/tail estimate and stays for
+      // machines that have never indexed.
+      indexedRecordTypes: indexedTypes,
+      adapters,
       guard: { installed: consent.guardInstalled(o.claudeDir) },
       cleanupPeriodDays: report.cleanupPeriodEffective,
       fatalErrors: report.warnings.filter((w) => w.startsWith('unreadable transcript')).length,
@@ -140,21 +181,65 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     { label: 'rescue runs', value: fmt.num(counts['rescue_log'] ?? 0) },
   ]);
 
+  card.blank();
+  card.rows([
+    {
+      label: 'sessions indexed',
+      value: fmt.num(counts['sessions'] ?? 0),
+      note: indexedAt
+        ? `${fmt.num(counts['exchanges'] ?? 0)} ${fmt.plural(counts['exchanges'] ?? 0, 'exchange')} · ` +
+          `${fmt.num(counts['tool_calls'] ?? 0)} tool ${fmt.plural(counts['tool_calls'] ?? 0, 'call')}`
+        : 'nothing indexed yet — run potsherd index',
+      tone: indexedAt ? 'none' : 'dim',
+    },
+    {
+      label: 'ghost prompts indexed',
+      value: fmt.num(counts['ghost_prompts'] ?? 0),
+      note: 'searchable in ghost_prompts_fts',
+    },
+    // `03` §5: doctor reports redaction counts by type. The numbers are read
+    // back out of the index rather than remembered, so they cannot drift.
+    redactionRow(redaction, t, card.noteWidth()),
+    {
+      label: 'vectors',
+      value: vec.available ? fmt.num(counts['vec_exchanges'] ?? 0) : '—',
+      note: vec.available
+        ? `sqlite-vec ${vec.version ?? 'loaded'} · bge-small, 384-d`
+        : `no vector index: ${vec.reason ?? 'sqlite-vec unavailable'} — text search still works`,
+      tone: vec.available ? 'ok' : 'dim',
+    },
+  ]);
+
   // Every record type, always. A parser that silently drops a type is how an
   // archive tool loses the thing you were looking for, so nothing is hidden
-  // behind a "N more" here.
-  card.blank().text('record types seen (head/tail scan):');
-  for (const [type, n] of Object.entries(unknownTypes).sort((a, b) => b[1] - a[1])) {
-    card.raw(`    ${type.padEnd(24)}${fmt.num(n).padStart(7)}`);
+  // behind a "N more" here. Once `index` has run these are exact counts per
+  // (harness, version, type); before that they are the audit's head/tail
+  // estimate over claude alone.
+  if (indexedTypes.length > 0) {
+    card.blank().text('record types not consumed, per harness and version:');
+    for (const row of indexedTypes) {
+      const left = `${row.harness} ${row.type}`;
+      const mark = row.novel ? t.warn('new') : t.dim('known');
+      card.raw(
+        `    ${fmt.elide(left, 28).padEnd(28)}${fmt.num(row.count).padStart(7)}   ` +
+          `${t.dim(fmt.elide(row.version, 10).padEnd(10))} ${mark}`,
+      );
+    }
+    card.text(t.dim('"new" means no note in research/formats.md describes it yet.'));
+  } else {
+    card.blank().text('record types seen (head/tail scan — run potsherd index for exact counts):');
+    for (const [type, n] of Object.entries(unknownTypes).sort((a, b) => b[1] - a[1])) {
+      card.raw(`    ${type.padEnd(24)}${fmt.num(n).padStart(7)}`);
+    }
   }
 
   card.blank().text('adapters:');
-  for (const [name, status] of Object.entries(adapterStatus())) {
-    // Pad the plain text and colour afterwards: padEnd counts escape bytes.
-    const label = status.supported ? 'ready' : `phase ${status.phase}`;
-    const mark = status.supported ? t.ok(label.padEnd(10)) : t.dim(label.padEnd(10));
-    card.raw(`    ${name.padEnd(12)}${mark}${t.dim(paths.tildify(status.path))}`);
+  for (const a of adapters) {
+    // Clipped, never wrapped: `render.ts`'s one rule.
+    const line = fmt.clip(a.line, Math.max(20, t.width - 4));
+    card.raw(`    ${a.supported ? line : t.dim(line)}`);
   }
+  card.text(t.dim(fmt.clip(cursorAdapter.CURSOR_DOCTOR_NOTE, Math.max(20, t.width - 4))));
 
   const fatal = report.warnings.filter((w) => w.startsWith('unreadable transcript'));
   card.blank();
@@ -181,19 +266,79 @@ function collectRecordTypes(report: AuditReport): Record<string, number> {
   return report.recordTypes;
 }
 
-interface AdapterStatus { supported: boolean; phase: number; path: string }
+interface AdapterStatus {
+  harness: string;
+  supported: boolean;
+  /** The phase that will support it. 1 for the four that now do. */
+  phase: number;
+  path: string;
+  /** The adapter's own one-liner — every adapter owns the words about itself. */
+  line: string;
+}
 
-function adapterStatus(): Record<string, AdapterStatus> {
-  const h = paths.home();
-  return {
-    claude: { supported: true, phase: 0, path: `${h}/.claude/projects` },
-    codex: { supported: false, phase: 1, path: `${h}/.codex/sessions` },
-    cursor: { supported: false, phase: 1, path: `${h}/.cursor/projects` },
-    pi: { supported: false, phase: 1, path: `${h}/.pi/agent/sessions` },
-    gemini: { supported: false, phase: 6, path: `${h}/.gemini/tmp` },
-    opencode: { supported: false, phase: 6, path: `${h}/.local/share/opencode` },
-    copilot: { supported: false, phase: 6, path: `${h}/.copilot/session-state` },
+/**
+ * The adapter block.
+ *
+ * Each supported adapter exports its own `doctorLine()`, because the facts
+ * worth printing differ per harness — codex has a cli version, cursor has
+ * fields it can never recover, claude has sidechains — and the adapter is the
+ * only place that knows them. `doctor` supplies the block, not the sentences.
+ */
+async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
+  const out: AdapterStatus[] = [];
+  const claudeOptions = {
+    ...(o.claudeDir ? { claudeDir: o.claudeDir } : {}),
+    ...(o.potsherdDir ? { potsherdDir: o.potsherdDir } : {}),
   };
+  out.push({
+    harness: 'claude',
+    supported: true,
+    phase: 1,
+    path: claudeAdapter.sourceDir(o.claudeDir),
+    line: claudeAdapter.doctorLine(claudeOptions),
+  });
+
+  const codexReport = await codexAdapter.codexDoctor();
+  out.push({
+    harness: 'codex',
+    supported: true,
+    phase: 1,
+    path: codexReport.sourceDir,
+    line: codexAdapter.doctorLine(codexReport),
+  });
+
+  out.push({
+    harness: 'cursor',
+    supported: true,
+    phase: 1,
+    path: cursorAdapter.cursorProjectsDir(),
+    line: cursorAdapter.doctorLine(),
+  });
+
+  out.push({
+    harness: 'pi',
+    supported: true,
+    phase: 1,
+    path: piAdapter.sourceDir(),
+    line: piAdapter.doctorLine(),
+  });
+
+  // Not yet written. `doctor` still names the directory it would read, so a
+  // user of one of these knows potsherd has not silently ignored them.
+  for (const [harness, dir] of [
+    ['gemini', paths.harnessSourceDirs().find((h) => h.harness === 'gemini')?.dir ?? ''],
+    ['opencode', paths.opencodeDir()],
+    ['copilot', paths.harnessSourceDirs().find((h) => h.harness === 'copilot')?.dir ?? ''],
+  ] as const) {
+    out.push({
+      harness,
+      supported: false,
+      phase: 6,
+      path: dir,
+      line: `${harness.padEnd(12)}${'phase 6'.padEnd(10)}${paths.tildify(dir).padEnd(28)}  not yet parsed`,
+    });
+  }
+  return out;
 }
 
 function dedupe(xs: string[]): string[] {

@@ -38,9 +38,7 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import process from 'node:process';
 
 import type {
   Adapter,
@@ -51,6 +49,8 @@ import type {
   SessionRecord,
   SessionSource,
 } from './types.js';
+import { cursorDir, cursorProjectsDir } from '../paths.js';
+import { formatDoctorLine } from '../doctor-line.js';
 import { readJsonlLines, parseJsonLine } from '../parser/jsonl.js';
 import { exchangeId } from '../parser/claude.js';
 import { filesFromToolInput, isRecord, stringifyToolInput, uniq } from '../parser/content.js';
@@ -70,27 +70,12 @@ export const CURSOR_DOCTOR_NOTE =
   "they live in VS Code's workspaceStorage, which potsherd does not read.";
 
 /**
- * `~/.cursor`. This belongs in `paths.ts` beside `claudeDir()`; it is local to
- * this file only so that the four adapters landing in parallel do not all edit
- * the same module. `POTSHERD_CURSOR_DIR` exists so `doctor` and the tests can
- * point at a fixture tree.
+ * `cursorDir()` (overridable by `POTSHERD_CURSOR_DIR`) and
+ * `cursorProjectsDir()` moved to `paths.ts` beside `claudeDir()` in T1.5, so
+ * `doctor --privacy` enumerates every readable path from one module (F9).
+ * Re-exported here because this is where a reader of the adapter looks.
  */
-export function cursorDir(override?: string): string {
-  if (override) return path.resolve(expandTilde(override));
-  const env = process.env.POTSHERD_CURSOR_DIR;
-  if (env && env.trim()) return path.resolve(expandTilde(env.trim()));
-  return path.join(os.homedir(), '.cursor');
-}
-
-function expandTilde(p: string): string {
-  if (p === '~') return os.homedir();
-  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
-  return p;
-}
-
-export function cursorProjectsDir(override?: string): string {
-  return path.join(cursorDir(override), 'projects');
-}
+export { cursorDir, cursorProjectsDir } from '../paths.js';
 
 /**
  * Cursor's project-directory slug: leading separators dropped, then every `/`
@@ -677,6 +662,33 @@ function joinText(content: readonly unknown[], bump: (k: string) => void, role: 
 
 function isoFromMs(ms: number): string {
   return new Date(ms).toISOString();
+}
+
+/**
+ * The `doctor` line for cursor. The caveats live in {@link CURSOR_DOCTOR_NOTE},
+ * which `doctor` prints under the block: they are verified absences, not a
+ * health warning about this machine.
+ */
+export function doctorLine(dirOverride?: string): string {
+  const dir = cursorProjectsDir(dirOverride);
+  let found: SessionSource[] = [];
+  try {
+    found = discover(dirOverride);
+  } catch {
+    found = [];
+  }
+  const exists = fs.existsSync(dir);
+  const sidechains = found.filter((f) => f.isSidechain).length;
+  const sessions = found.length - sidechains;
+  const parts = [`${sessions} session${sessions === 1 ? '' : 's'}`];
+  if (sidechains > 0) parts.push(`${sidechains} sidechains`);
+  parts.push('no titles, no tool results');
+  return formatDoctorLine({
+    harness: 'cursor',
+    status: exists || found.length > 0 ? 'ready' : 'absent',
+    dir,
+    note: exists || found.length > 0 ? parts.join(' \u00b7 ') : 'Cursor not installed',
+  });
 }
 
 export const cursorAdapter: Adapter = {

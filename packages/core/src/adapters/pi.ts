@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import process from 'node:process';
-import { home, tildify } from '../paths.js';
+import { piSessionsDir } from '../paths.js';
+import { formatDoctorLine } from '../doctor-line.js';
 import type {
   Adapter,
   Exchange,
@@ -130,20 +130,17 @@ const HANDLED_ROLES = new Set(['user', 'assistant', 'toolResult']);
 export const DISPLAY_NAME = 'pi';
 
 /**
- * `~/.pi`, overridable by `POTSHERD_PI_DIR` so tests never read the
- * developer's real one. pi's directory is a **read-only input** (`00-README`
- * ground rules): potsherd never writes a byte under it.
+ * `piDir()` (overridable by `POTSHERD_PI_DIR`, so tests never read the
+ * developer's real one) moved to `paths.ts` in T1.5 beside `claudeDir()`, so
+ * `doctor --privacy` enumerates every readable path from one module (F9). pi's
+ * directory is a **read-only input** (`00-README` ground rules): potsherd never
+ * writes a byte under it.
  */
-export function piDir(override?: string): string {
-  if (override) return path.resolve(override);
-  const env = process.env['POTSHERD_PI_DIR'];
-  if (env && env.trim()) return path.resolve(env.trim());
-  return path.join(home(), '.pi');
-}
+export { piDir } from '../paths.js';
 
 /** The directory `discover()` walks — reported by `doctor` even when empty. */
 export function sourceDir(override?: string): string {
-  return path.join(piDir(override), 'agent', 'sessions');
+  return piSessionsDir(override);
 }
 
 /**
@@ -164,7 +161,7 @@ export function doctorLine(override?: string): string {
   const exists = fs.existsSync(dir);
   const status = exists ? 'ready' : 'absent';
   const note = exists ? `${sessions} session${sessions === 1 ? '' : 's'}` : 'pi not installed';
-  return `${'pi'.padEnd(12)}${status.padEnd(10)}${tildify(dir).padEnd(28)}  ${note}`;
+  return formatDoctorLine({ harness: 'pi', status, dir, note });
 }
 
 /**

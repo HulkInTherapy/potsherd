@@ -58,6 +58,65 @@ export type {
 } from './adapters/types.js';
 export { HARNESSES, isAdapter } from './adapters/types.js';
 
+// The five adapters (L0). Each was deliberately left out of this barrel during
+// the parallel wave so five workers could not collide on one line (F8/F13);
+// integration adds them. Namespaced rather than flattened because every
+// adapter exports `discover`, `parse` and `sourceDir`.
+export * as claude from './adapters/claude.js';
+export * as codex from './adapters/codex.js';
+export * as cursor from './adapters/cursor.js';
+export * as pi from './adapters/pi.js';
+export { claudeAdapter } from './adapters/claude.js';
+export { codexAdapter } from './adapters/codex.js';
+export { cursorAdapter } from './adapters/cursor.js';
+export { piAdapter } from './adapters/pi.js';
+
+// L2 — redaction. Runs before anything is written to the index (`03` §5).
+export * as redaction from './redact.js';
+export {
+  redact,
+  redactText,
+  redactExchange,
+  maskFor,
+  secretDigest,
+  containsMask,
+  emptyCounts,
+  tally,
+  addCounts,
+  countsJson,
+  redactionRow,
+  redactionLine,
+  MASK_RE,
+  SECRET_TYPES,
+  type SecretType,
+  type RedactionHit,
+  type RedactionResult,
+  type RedactionCounts,
+} from './redact.js';
+
+// L1/L4 — adapter output into the store, and the store's own vector table.
+export {
+  ingestSession,
+  ingestGhosts,
+  indexAll,
+  adapterSpecs,
+  storedRedactionCounts,
+  storedRecordTypes,
+  readIndexState,
+  writeIndexState,
+  type IngestOptions,
+  type IngestSessionResult,
+  type IndexOptions,
+  type IndexReport,
+  type IndexProgress,
+  type HarnessReport,
+  type EmbeddingReport,
+  type GhostSyncResult,
+  type RecordTypeRow,
+  type AdapterSpec,
+} from './ingest.js';
+export { vecStatus, vecAvailable, type VecStatus } from './vec.js';
+
 export * as parser from './parser/index.js';
 export * as embeddings from './embeddings.js';
 export * as search from './search/index.js';

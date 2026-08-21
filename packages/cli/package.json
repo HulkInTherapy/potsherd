@@ -47,5 +47,9 @@
   "devDependencies": {
     "@potsherd/core": "workspace:*",
     "@types/better-sqlite3": "^7.6.13"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "sqlite-vec": "^0.1.9"
   }
 }

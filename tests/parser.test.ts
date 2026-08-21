@@ -191,6 +191,79 @@ describe('claude parser', () => {
     const r = await parseClaudeTranscript(ALIVE);
     expect(r.exchanges.every((e) => e.redacted === false)).toBe(true);
   });
+
+  /**
+   * Finding F1. The human-prompt rule has three clauses — `type:"user"`, a
+   * `promptId`, and content that is a string or holds a `text` item with no
+   * `tool_result` item — and this parser used to implement only two and a half
+   * of them. Claude code writes the images a tool returned as their own
+   * `type:"user"` record carrying the *originating prompt's* `promptId` and a
+   * content array of nothing but `image` blocks; 11 exist in the reference
+   * corpus and each one split a turn in two.
+   *
+   * The fixture below is the case no adapter can repair afterwards: the split
+   * segment holds assistant text and makes **no** tool call, so `finalize()`'s
+   * "no user text and no tool calls" guard threw the whole segment away and the
+   * assistant's real answer was lost before `adapters/claude.ts` ever saw the
+   * exchanges. One exchange, both answers, nothing dropped.
+   */
+  it('does not start an exchange on a payload-only user record (F1)', async () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'f1.jsonl');
+    const base = { sessionId: 'f1-session', cwd: '/tmp/f1', version: '2.1.237' };
+    const ts = (s: number) => `2026-08-01T09:00:0${s}.000Z`;
+    fs.writeFileSync(
+      file,
+      [
+        { ...base, type: 'user', promptId: 'p1', uuid: 'a', timestamp: ts(0), message: { role: 'user', content: 'what does the chart say?' } },
+        { ...base, type: 'assistant', uuid: 'b', timestamp: ts(1), message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/tmp/f1/chart.png' } }] } },
+        { ...base, type: 'user', promptId: 'p1', uuid: 'c', timestamp: ts(2), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'read 1 image' }] } },
+        // The payload record: promptId set, no tool_result item, no text item.
+        { ...base, type: 'user', promptId: 'p1', uuid: 'd', timestamp: ts(3), message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBOR' } }] } },
+        // The answer, with no tool call to keep its segment alive.
+        { ...base, type: 'assistant', uuid: 'e', timestamp: ts(4), message: { role: 'assistant', content: [{ type: 'text', text: 'The trend is up and to the right.' }] } },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join('\n') + '\n',
+    );
+
+    const r = await parseClaudeTranscript(file);
+    rmrf(dir);
+
+    expect(r.exchanges).toHaveLength(1);
+    expect(r.session.counts.userPrompts).toBe(1);
+    const only = r.exchanges[0]!;
+    expect(only.userText).toBe('what does the chart say?');
+    expect(only.assistantText).toBe('The trend is up and to the right.');
+    expect(only.toolCalls.map((t) => [t.name, t.result])).toEqual([['Read', 'read 1 image']]);
+  });
+
+  it('still starts an exchange on a prompt whose content is a text block (F1)', async () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'f1b.jsonl');
+    const base = { sessionId: 'f1b-session', cwd: '/tmp/f1', version: '2.1.237' };
+    fs.writeFileSync(
+      file,
+      [
+        // A block list with a `text` item is a prompt; a leading image beside
+        // it (a pasted screenshot) must not disqualify it.
+        { ...base, type: 'user', promptId: 'p1', uuid: 'a', timestamp: '2026-08-01T09:00:00.000Z', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'x' } }, { type: 'text', text: 'first' }] } },
+        { ...base, type: 'assistant', uuid: 'b', timestamp: '2026-08-01T09:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'one' }] } },
+        { ...base, type: 'user', promptId: 'p2', uuid: 'c', timestamp: '2026-08-01T09:00:02.000Z', message: { role: 'user', content: [{ type: 'text', text: 'second' }] } },
+        { ...base, type: 'assistant', uuid: 'd', timestamp: '2026-08-01T09:00:03.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'two' }] } },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join('\n') + '\n',
+    );
+
+    const r = await parseClaudeTranscript(file);
+    rmrf(dir);
+
+    expect(r.exchanges.map((e) => [e.userText, e.assistantText])).toEqual([
+      ['first', 'one'],
+      ['second', 'two'],
+    ]);
+  });
 });
 
 /**

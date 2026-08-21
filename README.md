@@ -257,6 +257,11 @@ potsherd's engine is a fork of
 (MIT). See [NOTICE](NOTICE). Generic fixes are prepared as upstream pull
 requests under `docs/upstream/`.
 
+The secret-detection rules potsherd redacts with are ported from
+[gitleaks](https://github.com/gitleaks/gitleaks) (MIT, © 2019 Zachary Rice) and
+[secretlint](https://github.com/secretlint/secretlint) (MIT, © 2020 Secretlint).
+Neither is a runtime dependency.
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
