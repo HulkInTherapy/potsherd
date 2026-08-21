@@ -1,0 +1,10 @@
+{"query": "pgbouncer transaction pooling", "expected_session_prefix": "0a2fbf9b", "expected_harness": "claude", "note": "exact terms, titled session"}
+{"query": "csv importer backpressure", "expected_session_prefix": "a82ceb72", "expected_harness": "claude", "note": "two terms, one in the prompt and one in the answer"}
+{"query": "webhook rate limited by the gateway", "expected_session_prefix": "a0c57a31", "expected_harness": "claude", "note": "untitled session — must be findable without a title"}
+{"query": "dark mode semantic tokens", "expected_session_prefix": "e2749f91", "expected_harness": "claude", "note": "terms split across the prompt and the answer"}
+{"query": "checkout test fails one run in six", "expected_session_prefix": "a86656f1", "expected_harness": "claude", "note": "long natural-language query"}
+{"query": "tree shaking icon set", "expected_session_prefix": "4ae3102b", "expected_harness": "claude", "note": "SIDECHAIN — only the subagent transcript contains these words"}
+{"query": "liveness probe restarting the pod", "expected_session_prefix": "94f91303", "expected_harness": "claude", "note": "exact terms, titled session"}
+{"query": "reciprocal rank fusion k", "expected_session_prefix": "cbcfda7e", "expected_harness": "claude", "note": "one-letter token next to a phrase"}
+{"query": "brother laser printer driver", "expected_session_prefix": "e6aa5ba7", "expected_harness": "claude", "note": "GHOST — prompts only, rebuilt from history.jsonl"}
+{"query": "billing cron blocks the nightly backup", "expected_session_prefix": "4ddd4b1f", "expected_harness": "claude", "note": "GHOST — the whole session was deleted by the sweep"}

@@ -6,7 +6,7 @@ export * as consent from './consent.js';
 export { onPath, resolveHookCommand, type BinResolution } from './resolve-bin.js';
 
 export { Theme, stripAnsi, type ThemeOptions } from './theme.js';
-export { Card, table, noteWidth, INDENT, type Row } from './render.js';
+export { Card, table, fitLine, noteWidth, INDENT, type Row } from './render.js';
 
 export { readArchiveState, type ArchiveState } from './archive-state.js';
 export { audit, computeAudit, collectAudit, type AuditOptions, type AuditReport, type AuditInput, type DoomedSession, type WipedProject } from './audit.js';
@@ -121,6 +121,54 @@ export {
   type AdapterSpec,
 } from './ingest.js';
 export { vecStatus, vecAvailable, type VecStatus } from './vec.js';
+
+// L6 — recall, browse and the counters behind `find`, `ls`, `show` and `stats`.
+export {
+  recall,
+  ftsQuery,
+  resumeCommand,
+  projectName,
+  fallbackTitle,
+  displayTitleOf,
+  idTag,
+  sessionMeta,
+  fromSessionRow,
+  fromGhostRow,
+  vectorState,
+  LISTS,
+  PER_SESSION,
+  type ListName,
+  type RecallHit,
+  type RecallSession,
+  type RecallResult,
+  type RecallOptions,
+  type VectorState,
+  type SessionRow,
+  type GhostRow,
+} from './recall.js';
+export {
+  listSessions,
+  resolveSession,
+  showSession,
+  type BrowseSession,
+  type ListOptions,
+  type ListResult,
+  type ResolvedSession,
+  type ShowOptions,
+  type ShowResult,
+  type ShownExchange,
+} from './browse.js';
+export {
+  stats as sessionStats,
+  type StatsReport,
+  type StatsOptions,
+  type HarnessStats,
+  type FreshnessStats,
+} from './stats.js';
+export { renderFind, snippetLine } from './render/find.js';
+export { renderLs, marker } from './render/ls.js';
+export { renderShow, renderShowMarkdown } from './render/show.js';
+export { renderStats } from './render/stats.js';
 
 export * as parser from './parser/index.js';
 export * as embeddings from './embeddings.js';

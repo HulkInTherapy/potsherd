@@ -122,6 +122,44 @@ export function joinFit(items: string[], max: number, sepChar = ' · ', ellip = 
   return out;
 }
 
+/**
+ * Soft-wrap prose to a width, breaking on spaces and never mid-word unless a
+ * single word is longer than the line.
+ *
+ * The design system says a *table* never wraps (plans/05) — a wrapped table is
+ * unreadable and unscreenshottable. Prose is the opposite: `potsherd show` is a
+ * reader, and clipping someone's own prompt at column 78 would throw away the
+ * half they were looking for. So tables clip and prose wraps, and this is the
+ * only place that wraps.
+ */
+export function wrap(s: string, width: number): string[] {
+  const max = Math.max(8, width);
+  const out: string[] = [];
+  for (const paragraph of s.replace(/\r/g, '').split('\n')) {
+    if (paragraph.trim() === '') {
+      out.push('');
+      continue;
+    }
+    let line = '';
+    for (const word of paragraph.split(/[ \t]+/).filter(Boolean)) {
+      if (!line) {
+        line = word;
+      } else if (line.length + 1 + word.length <= max) {
+        line += ' ' + word;
+      } else {
+        out.push(line);
+        line = word;
+      }
+      while (line.length > max) {
+        out.push(line.slice(0, max));
+        line = line.slice(max);
+      }
+    }
+    if (line) out.push(line);
+  }
+  return out;
+}
+
 export function plural(n: number, one: string, many = one + 's'): string {
   return n === 1 ? one : many;
 }

@@ -13,6 +13,8 @@
 export { l2DistanceToCosineSimilarity, rrfScore, RRF_K } from './similarity.js';
 export {
   buildExchangeFilters,
+  buildGhostFilters,
+  buildSessionFilters,
   hasMetadataFilters,
   knnCandidates,
   validateISODate,
