@@ -2,8 +2,8 @@
   "mcpServers": {
     "potsherd": {
       "type": "stdio",
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/../../packages/mcp/dist/index.js"]
+      "command": "sh",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/potsherd-mcp"]
     }
   }
 }

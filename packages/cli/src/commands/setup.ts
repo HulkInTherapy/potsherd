@@ -99,7 +99,7 @@ export async function runSetup(o: SetupOptions): Promise<number> {
     print(t.dim('  and silently gives the model nothing, which is worse than no'));
     print(t.dim(`  stanza at all. so potsherd ${o.dryRun ? 'would refuse' : 'refuses'} to write it.`));
     print('');
-    print('  build it first:  pnpm build      (or:  npm i -g potsherd)');
+    print('  build it first:  pnpm install && pnpm build');
   }
 
   for (const plan of todo) {
@@ -205,7 +205,14 @@ function printPlan(
     );
   }
   if (plan.detection.verified === 'docs') {
-    print(`  ${t.warn('note')}   ${plan.label}'s schema is unverified: ${plan.detection.evidenceNote}`);
+    // D11: this printed on one line and ran to 179 characters at --width 80,
+    // unwrapped and unelided, on the same screen where `runs` elides to
+    // exactly 80 and `tools` wraps. It is a sentence, so it wraps: eliding a
+    // reason to fit leaves half a reason, and `05` gives every line 80 columns.
+    const note = `${plan.label}'s schema is unverified: ${plan.detection.evidenceNote}`;
+    const lines = fmt.wrap(note, Math.max(24, t.width - 9));
+    print(`  ${t.warn('note')}   ${lines[0] ?? ''}`);
+    for (const l of lines.slice(1)) print(`         ${l}`);
   }
   print('');
   for (const raw of plan.diff.split('\n')) {
@@ -256,6 +263,7 @@ function status(o: SetupOptions, wanted: setup.ClientId[]): number {
   }
 
   let broken = 0;
+  let docsOnly = 0;
   print('');
   for (const d of rows) {
     const runnable = setup.commandRunnable(d.registeredCommand);
@@ -267,14 +275,37 @@ function status(o: SetupOptions, wanted: setup.ClientId[]): number {
           ? t.warn('registered but broken')
           : t.ok('registered');
     if (d.registered && runnable === false) broken++;
-    print(`  ${d.label.padEnd(20)}${state}`);
+    // D8. The write path, `--dry-run` and `--json` all carry the unverified
+    // label; `--status` printed a bare `registered` for all seven and so was
+    // the one surface where four schemas potsherd has never seen a real file
+    // of looked exactly like three it has. `--status` is the verb somebody
+    // runs *later*, to check — it is the surface that most needs to carry it.
+    const unverified = d.verified === 'docs';
+    if (unverified) docsOnly++;
+    print(`  ${d.label.padEnd(20)}${state}${unverified ? t.warn('  · schema unverified') : ''}`);
     print(`  ${' '.repeat(20)}${t.dim(fmt.elideMiddle(paths.tildify(d.path), Math.max(24, t.width - 24), t))}`);
+    if (unverified) {
+      // The reason, wrapped rather than elided: it is a sentence, not a path,
+      // and half a sentence is not evidence.
+      for (const l of fmt.wrap(d.evidenceNote, Math.max(24, t.width - 24))) {
+        print(`  ${' '.repeat(20)}${t.dim(l)}`);
+      }
+    }
     if (d.registered && runnable === false) {
       print(`  ${' '.repeat(20)}${t.dim('that command does not run from here; re-run  potsherd setup')}`);
     }
   }
   print('');
   print(`  ${t.dim('registered means the stanza is in that file, not that the client has read it.')}`);
+  if (docsOnly) {
+    // Wrapped, not clipped: `05` gives every line of this screen 80 columns,
+    // and this sentence is longer than one of them.
+    const note =
+      `schema unverified means potsherd has never read a real config for ` +
+      `${docsOnly === 1 ? 'that client' : 'those clients'}; the stanza follows ` +
+      `the published documentation and nothing more.`;
+    for (const l of fmt.wrap(note, Math.max(24, t.width - 2))) print(`  ${t.dim(l)}`);
+  }
   print('');
   return broken ? 1 : 0;
 }

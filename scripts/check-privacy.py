@@ -56,11 +56,44 @@ even when it is "only a path", because the directory name is the private fact.
 WHAT THIS SCRIPT CAN AND CANNOT CHECK
 =====================================
 
-No regex recognises prose. Family (1) is caught only by its known vocabulary
-(CORPUS_TOPICS) and family (2) not at all. So this guard is a floor, not a
-ceiling: passing it does not mean a file is clean, it means the file does not
-carry any leak we have already seen. When you add a real-corpus run to the repo,
-read what you are committing.
+No regex recognises prose. This guard is a floor, not a ceiling: passing it does
+not mean a file is clean, it means the file carries no leak we have already
+seen. When you add a real-corpus run to the repo, read what you are committing.
+
+Rule by rule, what it catches and what it does not:
+
+  home-path ...... catches `/Users/<user>/x` and `/home/<user>/x`, in slash and
+                   Claude-Code-slug form, on any account not in
+                   PLACEHOLDER_USERS. `..` is resolved before the own-tree
+                   exemption is applied, so `/Users/x/randomness/../Client` no
+                   longer passes as "the repo's own tree".
+                   STILL OPEN: `~/x`, `$HOME/x` and a bare relative slug --
+                   `Some-Client/notes.md` is a private path with no home
+                   directory in front of it and nothing here will see it.
+                   Windows paths (`C:` + backslashes) are not matched either.
+
+  project-name ... an exact-substring list. Exact is the whole weakness: the
+                   list held `Meghavi` and `format.ts` shipped `Second-Brain`
+                   for a year, because a different substring of the same
+                   private name is a different string. Adding a name catches
+                   that name and teaches nothing about the next one.
+
+  corpus-id ...... hashed, so the guard can ban an id without publishing it.
+                   Catches the ids we know about, in short and uuid form.
+                   STILL OPEN: an id nobody has told this file about looks
+                   exactly like a synthetic one, because it is 8 hex
+                   characters. There is no test that distinguishes them. If you
+                   paste a real id, this will not save you.
+
+  corpus-title ... hashed word n-grams, scanned across one line break so a
+                   wrapped comment is still one title.
+                   STILL OPEN: same as ids -- only titles already listed, and
+                   only near-verbatim. Reword a title and it passes.
+
+  corpus-topic ... a known-vocabulary list, and the same exact-substring
+                   weakness as project-name. It is the only thing standing
+                   between family (1) and the repository, and family (1) is
+                   free-form prose. Treat it as a reminder, not a filter.
 
 
 ALLOW vs DEBT
@@ -77,6 +110,7 @@ ratchet rather than a place to hide things.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 import sys
@@ -89,7 +123,13 @@ REPO = Path(__file__).resolve().parent.parent
 # Home-directory paths, in both the `/Users/name/x` and the Claude Code project
 # slug `-Users-name-x` form. Matched broadly, then filtered by is_private_home()
 # below, because whether a home path is a leak depends on where it points.
-HOME_PATH = re.compile(r'[-/]Users[-/][A-Za-z0-9_.]+(?:[-/][A-Za-z0-9_.]+)*')
+#
+# `home` as well as `Users`: a Linux machine's private tree is `/home/<user>/x`
+# and its Claude Code slug is `-home-<user>-x`, and until T5.9 neither was
+# matched at all. Every `/home/...` in this repo today is `dev` or `x`, both
+# documented placeholders, so widening it costs nothing and closes a whole
+# platform.
+HOME_PATH = re.compile(r'[-/](?:Users|home)[-/][A-Za-z0-9_.]+(?:[-/][A-Za-z0-9_.]+)*')
 
 # Names that are documented stand-ins, not accounts. `x`, `me` and `dana` are
 # used by packages/core docstrings; `example` is what the scrubbed docs use.
@@ -107,6 +147,20 @@ OWN_TREE_ROOTS = ('randomness', '.potsherd')
 def is_private_home(token: str) -> bool:
     """True when a `/Users/...` or `-Users-...` token names somebody's private tree."""
     parts = re.split(r'[-/]', token.lstrip('-/'))
+    # `..` escapes the own-tree exemption. `/Users/zebra/randomness/../Client`
+    # matched OWN_TREE_ROOTS on segment 3 and was waved through, while naming a
+    # sibling of the repo -- which is exactly the private tree this rule exists
+    # for. Resolve the traversal first, then decide.
+    resolved: list[str] = []
+    for seg in parts:
+        if seg == '.':
+            continue
+        if seg == '..':
+            if resolved:
+                resolved.pop()
+            continue
+        resolved.append(seg)
+    parts = resolved
     # parts == ['Users', <account>, <first segment>, ...]
     if len(parts) < 2:
         return False
@@ -143,6 +197,87 @@ CORPUS_TOPICS = [
     'DM_master_assignment', 'class_worksheets', 'infant cry',
 ]
 
+# ------------------------------------------------- family (2): corpus identity
+#
+# THE PROBLEM WITH LISTING A LEAK IN ORDER TO BAN IT. `REAL_PROJECT_NAMES` gets
+# away with it: a project name is already public in the sense that it is a word.
+# A session id is not -- it is the join key back to a transcript, and writing it
+# into a public guard in order to ban it publishes the thing.
+#
+# So the ids and titles below are stored as truncated SHA-256, and the guard
+# hashes what it finds. It can therefore say "line 462 carries a live-corpus
+# session id" without ever carrying one itself. Adding a new one costs a
+# `sha256(...).hexdigest()[:12]`, and the comment beside it says where it came
+# from without saying what it is.
+#
+# One such id -- named in `plans/06` as a real session, with a real title -- was
+# shipping in six committed files when T5.9 found it, including
+# `packages/cli/src/index.ts`'s `--help` examples and `commands/show.ts`'s error
+# message. Family (2) was, until then, "not checked at all". The `--help` and
+# docstring copy now uses the demo corpus's own `9c4d2f18`, which is generated
+# from a seeded PRNG and is the id `docs/screens/11-show.txt` already shows.
+
+def _h(s: str) -> str:
+    return hashlib.sha256(s.encode()).hexdigest()[:12]
+
+
+# Truncated hashes of live-corpus session/thread ids, in both the 8-character
+# short form and any full uuid form they have appeared in.
+REAL_CORPUS_ID_HASHES = {
+    '1f658710d374',  # plans/06, the session whose title is pinned below
+    '74818f5256a7',  # plans/06, cited beside it
+    '0bcfa8fe5899',  # the same short id padded into a uuid, as a test used it
+}
+
+# Any hex run long enough to be an id. Checked by hash, both whole and by its
+# first 8 characters, because a short id is what actually gets pasted.
+HEXISH = re.compile(r'\b[0-9a-f]{8,}(?:-[0-9a-f]{4}){0,3}(?:-[0-9a-f]{12})?\b')
+
+
+def find_corpus_id(line: str) -> list[str]:
+    hits = []
+    for m in HEXISH.finditer(line):
+        tok = m.group(0)
+        for form in (tok, tok[:8]):
+            if _h(form) in REAL_CORPUS_ID_HASHES:
+                hits.append(f'{form[:4]}… (a live-corpus session id)')
+                break
+    return hits
+
+
+# Truncated hashes of live-corpus session TITLES, normalised to lower-case
+# words. A title is family (2) and family (1) at once: it indexes a transcript
+# and it says what somebody was building.
+REAL_CORPUS_TITLE_HASHES = {
+    '35229ba8d0ef',  # plans/06 names it as the title of a real session
+}
+# The word-lengths of the titles above, so a line is only scanned at the sizes
+# that could match.
+TITLE_LENGTHS = (5,)
+
+WORDS = re.compile(r'[a-z0-9]+')
+
+
+def find_corpus_title(line: str, nxt: str = '') -> list[str]:
+    """Match across a line break, because a title wraps in a comment.
+
+    `// … a session called "Build X chat-only` / `// client"` is one title and
+    two lines, and a per-line scan sees neither half. So each line is scanned
+    together with the one after it, and only matches that *start* in the first
+    line are reported -- otherwise every hit would be counted twice.
+    """
+    head = WORDS.findall(line.lower())
+    words = head + WORDS.findall(nxt.lower())
+    hits = []
+    for n in TITLE_LENGTHS:
+        for i in range(len(words) - n + 1):
+            if i >= len(head):
+                break
+            if _h(' '.join(words[i:i + n])) in REAL_CORPUS_TITLE_HASHES:
+                hits.append(f'{words[i]} …{n - 1} more (a live-corpus session title)')
+    return hits
+
+
 RULES: dict[str, dict] = {
     'home-path': {
         'why': 'an absolute home path or project slug naming a directory that is not this repo',
@@ -152,6 +287,15 @@ RULES: dict[str, dict] = {
     'project-name': {
         'why': 'a project directory name off a real machine',
         'find': lambda line: [n for n in REAL_PROJECT_NAMES if n in line],
+    },
+    'corpus-id': {
+        'why': 'a session/thread id that indexes a live transcript',
+        'find': find_corpus_id,
+    },
+    'corpus-title': {
+        'why': 'a live-corpus session title',
+        'find': find_corpus_title,
+        'lookahead': True,
     },
     'corpus-topic': {
         'why': 'subject matter that is here only because it was in a live corpus',
@@ -210,6 +354,15 @@ DEBT: list[tuple[str, str, int, str]] = [
     ('packages/core/src/recall.ts', 'home-path', 1, 'RESERVED: slug docstring'),
     ('packages/core/src/recall.ts', 'project-name', 2, 'RESERVED: slug docstring'),
     ('packages/mcp/src/tools/find.ts', 'project-name', 2, 'RESERVED: tool description'),
+
+    # ---- T5.9 added the `corpus-title` rule and it found these four. They are
+    # not copy: each one records a ranking decision that was MEASURED against
+    # that session, and renaming the example would leave a comment that cites
+    # evidence nobody ever gathered. The honest fix is to re-derive the same
+    # four rules against the demo corpus and rewrite the comments from that run
+    # -- a measurement, not an edit, and not this task's.
+    ('packages/core/src/recall.ts', 'corpus-title', 4,
+     'ranking rationale measured against that session; re-derive, do not rename'),
     ('packages/mcp/src/tools/ls.ts', 'project-name', 1, 'RESERVED: tool description'),
 
     # ---- Asserts the literal text of `find --help`, which lives in
@@ -266,7 +419,64 @@ def allowed(path: str, rule: str) -> str | None:
     return None
 
 
+# ------------------------------------------------------------------ selftest
+
+# (label, line, rules it must trip). A guard nobody has watched fail is a guard
+# nobody has watched. Every one of these was NOT CAUGHT before T5.9; the four
+# CONTROL rows are the things the header promises are not leaks, and a rule that
+# starts catching one of them has become useless in a different direction.
+SELFTEST: list[tuple[str, str, tuple[str, ...]]] = [
+    ('a live-corpus session uuid',
+     'see session 85ef9531-1c4a-4f2b-9d3e-7a6b5c4d3e2f', ('corpus-id',)),
+    ('the same id in short form',
+     'potsherd show 85ef9531', ('corpus-id',)),
+    ('a live-corpus session title',
+     'a session called "Build Instagram chat-only client" wins', ('corpus-title',)),
+    ('a title wrapped across a comment',
+     '// … a session called "Build Instagram chat-only\n// client" wins',
+     ('corpus-title',)),
+    ('a Linux home path',
+     'wrote /home/hjolt/Some-Private-Client/notes.md', ('home-path',)),
+    ('a Linux project slug',
+     'projects/-home-hjolt-Some-Private-Client', ('home-path',)),
+    ('a traversal out of the own-tree exemption',
+     '/Users/zebra/randomness/../Some-Private-Client/notes.md', ('home-path',)),
+    ('CONTROL this repository\'s own checkout path',
+     '/Users/zebra/randomness/potsherd/packages/core', ()),
+    ('CONTROL a demo-corpus id',
+     'potsherd show 9c4d2f18', ()),
+    ('CONTROL a git sha',
+     'commit b86bf59aa1c2d3e4f5061728394a5b6c7d8e9f01', ()),
+    ('CONTROL placeholder home directories',
+     'HOME=/home/dev/.claude and /Users/example/work', ()),
+]
+
+
+def selftest() -> int:
+    bad = []
+    for label, text, expect in SELFTEST:
+        lines = text.split('\n')
+        got = set()
+        for rule, spec in RULES.items():
+            for n, line in enumerate(lines):
+                nxt = lines[n + 1] if n + 1 < len(lines) else ''
+                hits = spec['find'](line, nxt) if spec.get('lookahead') else spec['find'](line)
+                if hits:
+                    got.add(rule)
+        if got != set(expect):
+            bad.append(f'  {label}\n      expected {sorted(expect)}, got {sorted(got)}')
+        print(f"  {'ok  ' if got == set(expect) else 'FAIL'}  {label}"
+              f"{'  [' + ', '.join(sorted(got)) + ']' if got else ''}")
+    if bad:
+        print('\nSELFTEST FAILED:\n' + '\n'.join(bad))
+        return 1
+    print(f'\n  {len(SELFTEST)} probes, all as expected.')
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if '--selftest' in argv[1:]:
+        return selftest()
     files = argv[1:] or tracked_files()
     found: dict[tuple[str, str], list[tuple[int, str]]] = {}
     swept = 0
@@ -283,8 +493,13 @@ def main(argv: list[str]) -> int:
         for rule, spec in RULES.items():
             if allowed(path, rule):
                 continue
-            for n, line in enumerate(text.splitlines(), 1):
-                for hit in spec['find'](line):
+            lines = text.splitlines()
+            for n, line in enumerate(lines, 1):
+                # `find` takes the next line too when it declares a second
+                # parameter, so a rule can span a wrapped comment.
+                hits = (spec['find'](line, lines[n] if n < len(lines) else '')
+                        if spec.get('lookahead') else spec['find'](line))
+                for hit in hits:
                     found.setdefault((path, rule), []).append((n, hit))
 
     pinned = {(path, rule): (count, why) for path, rule, count, why in DEBT}

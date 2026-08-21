@@ -622,9 +622,23 @@ describe('the verb', () => {
    */
   it('keeps to 80 columns, whatever the path lengths', async () => {
     fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
+    // D11: the `note` line of a docs-only client's consent screen ran to 179
+    // characters, unwrapped and unelided, while `runs` on the same screen
+    // elided to exactly 80 and `tools` wrapped. The list below did not reach
+    // it, because in a throwaway home none of the four docs-only clients has
+    // a directory and so none of their plans is ever printed. Making them
+    // exist is what makes this test see the screen the user sees.
+    for (const dir of [['.gemini'], ['.copilot'], ['.pi', 'agent'], ['.config', 'opencode']]) {
+      fs.mkdirSync(path.join(home, ...dir), { recursive: true });
+    }
     const runs = [
       () => runSetup({ ...base, all: true, status: true, width: 80 }),
       () => runSetup({ ...base, all: true, dryRun: true, width: 80 }),
+      // Each docs-only client on its own, which is the form the verifier ran.
+      () => runSetup({ ...base, clients: ['pi'], dryRun: true, width: 80 }),
+      () => runSetup({ ...base, clients: ['gemini'], dryRun: true, width: 80 }),
+      () => runSetup({ ...base, clients: ['opencode'], dryRun: true, width: 80 }),
+      () => runSetup({ ...base, clients: ['copilot'], dryRun: true, width: 80 }),
     ];
     for (const r of runs) {
       const { out } = await capture(r);
@@ -668,6 +682,46 @@ describe('the verb', () => {
     expect(cursor.registered).toBe(false);
     expect(cursor.otherServers).toEqual(['linear', 'playwright', 'sentry']);
     expect(fs.readFileSync(cursorConfig(), 'utf8')).toBe(THREE_OTHERS);
+  });
+
+  /**
+   * D8. The unverified label reached the write path, `--dry-run` and `--json`,
+   * and not `--status` — where all seven clients printed `registered`
+   * identically. `--status` is the verb somebody runs *later*, to check what is
+   * where; a screen that flattens "potsherd has read a real config of this
+   * shape" and "potsherd has only read the documentation" into one word is the
+   * one screen most likely to be believed.
+   */
+  it('--status carries the unverified label, and says what it means', async () => {
+    const { out } = await capture(() =>
+      runSetup({ ...base, all: true, status: true, width: 80 }),
+    );
+    const lines = out.split('\n');
+    for (const spec of CLIENTS) {
+      // startsWith, not includes: the label `pi` is a substring of
+      // `GitHub Copilot CLI`.
+      const i = lines.findIndex((l) => l.trimStart().startsWith(spec.label));
+      expect(i, spec.label).toBeGreaterThanOrEqual(0);
+      // The label sits on the client's own line, where a reader scanning the
+      // column of states cannot miss it.
+      expect(/unverified/.test(lines[i]!), `${spec.label} line: ${lines[i]!}`)
+        .toBe(spec.verified === 'docs');
+      if (spec.verified === 'docs') {
+        // …and the reason follows, in the client's own block.
+        const block = lines.slice(i, i + 6).join(' ');
+        expect(block, spec.label).toContain(spec.evidenceNote.slice(0, 19));
+      }
+    }
+    // One footer sentence explaining the word, only when the word appears.
+    expect(out).toMatch(/schema unverified means potsherd has never read a real config/);
+  });
+
+  it('--status says nothing about verification when every client is verified', async () => {
+    const verified = CLIENTS.filter((c) => c.verified !== 'docs').map((c) => c.id);
+    const { out } = await capture(() =>
+      runSetup({ ...base, clients: [...verified], status: true, width: 80 }),
+    );
+    expect(out).not.toMatch(/unverified/);
   });
 
   it('--status reports a registered stanza that would no longer spawn', async () => {

@@ -459,10 +459,10 @@ example:
       .option('--md', 'markdown, for pasting into an issue or a note'),
   ).addHelpText('after', `
 example:
-  potsherd show 85ef9531
-  potsherd show 85ef9531 --from 12 --to 18
-  potsherd show 85ef9531 --md > session.md
-  potsherd show 85ef9531 --json | jq -r '.exchanges[].userText'`);
+  potsherd show 9c4d2f18
+  potsherd show 9c4d2f18 --from 12 --to 18
+  potsherd show 9c4d2f18 --md > session.md
+  potsherd show 9c4d2f18 --json | jq -r '.exchanges[].userText'`);
   show.action(async (session: string, opts: Record<string, unknown>) => {
     const o = globals(program, show, opts);
     await run(

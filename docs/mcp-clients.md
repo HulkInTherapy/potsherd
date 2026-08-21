@@ -13,9 +13,12 @@ potsherd_ls      sessions by title, newest first
 potsherd_tag     your own tags on a session
 ```
 
-Six, not fifty-four. Everything except `potsherd_tag` is read-only, and nothing
-writes outside `~/.potsherd` except `potsherd_graft`'s brief, which lands in the
-directory you ran the client from.
+Six, not fifty-four. Four of them only read. The two that write are
+`potsherd_tag`, which puts your labels in the index, and `potsherd_graft`,
+which saves its brief as `./.potsherd/graft-<id8>.md` in the directory you ran
+the client from — the only potsherd write outside `~/.potsherd`. Both are
+annotated `readOnlyHint: false`, so a client that asks before running a write
+tool will ask before running either.
 
 ## the one command
 
@@ -70,6 +73,8 @@ Two forms work, and `setup` picks between them the way `guard` does:
 |---|---|---|
 | `potsherd-mcp` | it is on your `PATH` | survives an upgrade, reads best in a diff |
 | `/abs/path/to/node /abs/path/to/packages/mcp/dist/index.js` | it is not | pinned to this install |
+
+(Inside the two plugins the same server is launched through `bin/potsherd-mcp`, which resolves the bundle and, when there is none, writes the three paths it tried to the server log rather than dying with a module-not-found trace and taking all six tools with it silently.)
 
 The absolute `node` in the second form is deliberate. Several of these clients
 are GUI applications launched from Finder or a desktop entry, and those inherit

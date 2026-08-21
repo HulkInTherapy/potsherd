@@ -35,21 +35,35 @@ Component cost, from `claude plugin details potsherd@potsherd`:
 
 ## Install
 
-### 1. You need a `potsherd` binary
+### 1. You need a `potsherd` binary — build it from a checkout
 
-**Install this first.** The plugin ships configuration, not a program. A
-marketplace install is a git clone, and this repository gitignores `dist/`, so
-a clone contains no built binary and no `node_modules`:
+**Do this first.** The plugin ships configuration, not a program. A marketplace
+install is a git clone, and this repository gitignores `dist/`, so a clone
+contains no built binary and no `node_modules`.
+
+> **`potsherd` is not published to npm.** `npm i -g potsherd` is a 404 today,
+> and every earlier version of this file, of the shim's error message and of
+> the `SessionStart` hook printed it anyway. Publishing is phase 7's. Until
+> then the only instruction that works is the one below.
 
 ```sh
-npm i -g potsherd
+git clone https://github.com/HulkInTherapy/potsherd
+cd potsherd
+pnpm install && pnpm build
 ```
 
-From a checkout, `pnpm install && pnpm build` does the same job.
+Then install the plugin **from that checkout** (`/plugin marketplace add
+<the path you just cloned into>`), so that `bin/potsherd` finds the bundle two
+directories up from itself. Installing from `HulkInTherapy/potsherd` on GitHub
+clones a *second* copy with no `dist/` in it, and that copy is what the plugin
+will look beside.
 
-Without one of those the hooks take no copy and `/potsherd` runs nothing. Both
-say so rather than failing quietly — the hook prints a `systemMessage` naming
-the problem, and the shim exits `127` listing the three places it looked.
+Without a built potsherd the hooks take no copy, `/potsherd` runs nothing, and
+**all six MCP tools are absent** — which also leaves `session-archaeologist`
+holding nothing but `Read`, so it answers "not found" to everything. None of
+that is silent: the hook prints a `systemMessage` naming the problem, the shim
+exits `127` listing the three places it looked, and `bin/potsherd-mcp` writes
+the same list to the MCP server log.
 
 ### 2. Add the marketplace and install the plugin
 
@@ -81,7 +95,14 @@ this runs the code you just changed rather than your installed copy.
 
 ## Which potsherd runs
 
-`bin/potsherd` and both hooks resolve in this order:
+`bin/potsherd` decides, and it is the **only** thing that decides. The three
+hooks call it and resolve nothing themselves. Until T5.9 they each carried
+their own copy of the logic below, inline in `hooks.json`, with steps 1–3
+reversed — so on a machine with `0.1.0` on `PATH` and `0.4.0` in the checkout,
+every hook ran `0.1.0`, `index` did not exist, and the error went to
+`/dev/null`. Nothing was indexed and nothing said so.
+
+The order:
 
 1. `${CLAUDE_PLUGIN_ROOT}/dist/potsherd.js` — vendored in the plugin
 2. `${CLAUDE_PLUGIN_ROOT}/../../packages/cli/…` — the surrounding checkout, if built
@@ -98,6 +119,26 @@ need `dist/` plus a `node_modules` with `better-sqlite3` and `sqlite-vec` built
 for your platform. The esbuild bundle is a single file but still resolves those
 two through `createRequire`, so it is not self-contained. That is why step 1 of
 the install is not optional.
+
+### …and what happens when it is too old
+
+Landing on step 3 can find a `potsherd` that runs but predates the verb the
+hook needs. `SessionStart` therefore asks it directly — `index --help`, the
+exact verb `SessionEnd` will run — and if that fails it says so in a
+`systemMessage` naming the version it found, instead of promising a copy it
+cannot take. A capability probe rather than a version comparison, because the
+question is "can it do this?", not "what number does it call itself?".
+
+It costs a **measured 128–146 ms** on `SessionStart` with nothing else to do,
+over three runs of ten (28 ms before it existed; almost all of the difference
+is Node starting the bundle, which nothing can make cheaper). It runs once per
+session, before the detached `rescue`.
+
+`SessionEnd` cannot talk at all — Claude Code discards its `systemMessage` by
+design — so when it fails it appends a line to
+`~/.potsherd/hook-failures.log`, and the next `SessionStart` reads that line
+out and clears the file. Between the probe and the log there is no path where a
+hook fails and nobody is told.
 
 ---
 
@@ -161,20 +202,22 @@ to your `settings.json`. If you are using this plugin you do not need `guard`.
 |---|---|
 | `~/.claude/**` | read only |
 | `~/.potsherd/**` | read and write — the archive, index and config |
-| `~/.potsherd/models/` | written once, on first index: a 33 MB local embedding model |
+| `~/.potsherd/models/` | written once, on first index: a 32.4 MB local embedding model |
+| `~/.potsherd/hook-failures.log` | appended by `SessionEnd` when it could not index; read out and cleared by the next `SessionStart` |
 | `./.potsherd/graft-<id>.md` | written by `graft` only, in the cwd, when you ask for it |
+| `/tmp/potsherd-readers-*.json` | written by `/potsherd ask`, which routes through `ask --readers-out` / `--readers-in`. Holds the shortlisted excerpts, redacted exactly as they would be sent to a model. |
 
 Run `potsherd doctor --privacy` for the authoritative list; it is checked in CI.
 
 Two things worth knowing before you enable anything:
 
-- The **first** `SessionEnd` after install downloads the 33 MB embedding model
+- The **first** `SessionEnd` after install downloads the 32.4 MB embedding model
   (`Xenova/bge-small-en-v1.5`). It is detached, so it never delays a session.
   You are told before it happens: the `SessionStart` hook checks whether the
   model is on disk and warns you if it is not, because `SessionEnd` itself
   cannot — Claude Code discards a `SessionEnd` hook's `systemMessage` by
-  design. The check costs about 4 ms and prints nothing once the model is
-  cached. If you would rather it never happened, disable the `SessionEnd` hook
+  design. The pure-shell model check costs about 4 ms and prints nothing once
+  the model is cached; the capability probe beside it costs 128–146 ms (above). If you would rather it never happened, disable the `SessionEnd` hook
   (see below) and index by hand with `--no-embed`; the cost is vector search on
   new sessions.
 - Model calls happen only for `card`, `ask` and `graft`. The hooks call a model

@@ -4,7 +4,7 @@ description: Run potsherd against your own archive of past coding-agent sessions
 argument-hint: <verb> [args]
 arguments: verb rest
 disable-model-invocation: true
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/potsherd *), Read
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/potsherd *), Read, Write
 ---
 
 # /potsherd
@@ -21,6 +21,10 @@ that silently ran the wrong build against the user's archive is worse than one t
 This is the same reason `potsherd guard` writes an absolute `node "<path>"` into its hook.
 
 If `$verb` is empty, run `BIN` with no arguments — that prints the tour — and stop.
+
+`Read` and `Write` are here for one thing only: the `ask` round trip below reads the file
+`ask --readers-out` wrote and writes the reader outputs back into it. Do not read or write
+anything else.
 
 ## how to report
 
@@ -87,63 +91,76 @@ This is the verb the plugin exists for, so do not just print it and stop.
 readers found. Run through the binary it takes **40–183 s, p50 about 100 s**, because each of
 those seven calls goes out through the agent SDK.
 
-Inside Claude Code you do not have to pay that. Run the shortlist with the binary and the readers
-with **your own Agent tool**, in parallel, in a single message. That is what `03` §8 means by
-*"or inside claude code the native Agent tool via the skill"*.
+Inside Claude Code you do not have to pay for the six. The binary has a seam for exactly this:
 
-**Route to the binary instead — `BIN ask "<question>" $rest` — when any of these is true:**
-`$rest` contains `--strict`; the user asked for the citation-checked answer; the user wants
-`--json`; or you ran the fast path and it produced nothing. Say that it will take a minute or two
-before you start it.
+- `BIN ask "…" --readers-out <file>` records what the readers would be given and stops. It makes
+  **zero model calls** — not "skips them", *cannot make one*: the recorder is passed in as the
+  reader function, so no reader backend is constructed at all. It needs no `claude` binary.
+- you run the six readers with **your own Agent tool**, in parallel, in one message, for free.
+- `BIN ask "…" --readers-in <file>` makes the **one** synthesizer call, then runs the citation
+  filter in code over its reply, dropping every quote that does not resolve against the live
+  transcript bytes.
 
-Otherwise:
+**That last clause is the whole point, and it is new.** Earlier versions of this route rebuilt the
+shortlist by hand out of `find --json` and `show --json`, checked quotes by *reading* them, and
+had to end every answer by admitting it was the weaker guarantee. `--readers-in` runs the same
+`filterAnswer` the binary path runs. **Do not print a caveat about the citation filter, and do not
+tell the user to re-run `potsherd ask` for a checked answer. They already have one.**
 
-### 1. shortlist — the binary, no model, well under a second
+`--strict` and `--json` need no special case either: pass them straight through to the
+`--readers-in` call and they behave exactly as they do on the binary path.
 
-```
-BIN find "<the question>" --json --limit 6 --vectors on
-```
+**Route to the plain binary — `BIN ask "<question>" $rest` — only when** you cannot dispatch
+Agents. Say that it will take a minute or two before you start it.
 
-`--limit 6` and `--vectors on` are not decoration. `recall` derives its candidate depth from
-`limit`, so a wider limit silently re-orders the top six — measured, in `ask.ts`. And `ask`
-defaults vectors **on** where `find` defaults to `auto`. Those two flags are what make this
-shortlist the same shortlist `BIN ask` would have used. Do not change them.
+### 0. build the flag string once, and the path once
 
-Exit 1 means nothing matched. Say so, offer one narrower and one wider phrasing, and stop.
+Two things must be identical across the two calls or the replay refuses:
 
-### 2. targets — at most six
+- **the filters.** `--readers-in` rebuilds the live shortlist and compares it to the recorded one;
+  any difference at all — a `--project` on one call and not the other, a different `--k` — is a
+  refusal, not a partial match. So decide `$rest` once and paste the same string into both
+  commands. Pass the filters the user typed and no others.
+- **the question**, character for character, including the quoting.
 
-Walk `sessions[]` in the order returned. For each, collect the distinct `hits[].sessionId`
-values, highest `score` first, and append them. Stop at six distinct session ids.
+Pick one scratch path and reuse it: `/tmp/potsherd-readers-<four hex digits you choose>.json`.
+Fresh digits each run, so two questions in one session cannot collide.
 
-**Use `hits[].sessionId`, never the block's `id`.** A block is a *conversation*: `recall` files a
-parent and its subagents together. A subagent is indexed as its own session, and the hit that
-matched may be the subagent's. Taking the block id hands a reader the wrong transcript and puts
-the wrong session id on the answer.
-
-A block that matched only on its title or its card has no hit with a `seq`. It is still worth
-reading: use its own `id`.
-
-### 3. excerpts — one command per target
+### 1. record — one command, no model call, no cost
 
 ```
-BIN show <sessionId> --json --from <lo> --to <hi>
+BIN ask "<the question>" $rest --readers-out /tmp/potsherd-readers-<hex>.json
 ```
 
-`lo = max(1, lowest hit seq − 1)`, `hi = highest hit seq + 1`, widened outward to at most **six**
-exchanges. No seq at all (title or card match): `--from 1 --to 4`.
+It prints the shortlist it recorded, one line per target, and `no model call was made (0)`. Print
+that receipt. Exit non-zero, or `nothing matched`, means the shortlist is empty: say so, offer one
+narrower and one wider phrasing, and stop.
 
-Note whether the response says the session is a ghost (`ghostPrompts` is present and
-`exchanges` is empty). That changes the reader's contract.
+Then `Read` the file. It is one JSON object:
 
-### 4. readers — one Agent per target, all dispatched in one message
+| field | what it is |
+|---|---|
+| `question` | the question **as redacted for sending**. Use this in the reader prompts, not the raw one. |
+| `k`, `sessionIds` | the shortlist. Do not edit either. |
+| `targets[]` | one entry per session to read |
 
-Dispatch them **together**, in a single message with one Agent tool call per target, so they run
-in parallel. Six sequential agents is the slow path you came here to avoid.
+Each `targets[]` entry carries `sessionId`, `id8`, `project`, `harness`, `isSidechain`, `isGhost`,
+`excerpts` (already windowed, capped and redacted) and `seqs` (the seq numbers a reader may cite).
+Everything a reader needs is in there. **Do not run `find` or `show` yourself to build this** —
+the binary derives the shortlist with `recall` tuned to `k`, and a hand-built one is a different
+shortlist that `--readers-in` will reject.
 
-Give each agent the excerpts inline — it must not have to go and fetch them — and this contract,
-which is `READER_SYSTEM` from `packages/core/src/ask.ts`, quoted so the readers here behave
-exactly as the readers there do:
+### 2. readers — one Agent per target, all dispatched in one message
+
+Dispatch them **together**, in a single message with one Agent tool call per entry in `targets`,
+so they run in parallel. Six sequential agents is the slow path you came here to avoid.
+
+Give each agent its target's `excerpts` inline — it must not have to go and fetch them — along
+with `question`, `id8`, `project`, `harness`, whether it is a subagent transcript, and its `seqs`
+as the list of citable seq numbers. A reader may cite no seq that is not on that list.
+
+Then this contract, which is `READER_SYSTEM` from `packages/core/src/ask.ts`, quoted so the
+readers here behave exactly as the readers there do:
 
 > You are given one session's excerpts with seq numbers. Answer the question using only quotes
 > from the excerpts. Output json {found: bool, quotes:[{seq, ts, text}], answer_fragment}. If the
@@ -161,44 +178,44 @@ exactly as the readers there do:
 > it, and the claim it was meant to support is discarded with it. Two to four short quotes is the
 > right size for an answer.
 
-For a **ghost** target, append:
+When the target's `isGhost` is true, append:
 
 > These excerpts are PROMPTS ONLY. This session was deleted by Claude Code's 30-day sweep and
 > rebuilt from history; the assistant's replies are gone and are not recoverable. You may say
 > what was asked. You may not say, or imply, what was answered or what was done.
 
-Also tell each agent the question, the session's `id8`, its project, its harness, whether it is a
-subagent transcript, and the list of citable seq numbers. A reader may cite no seq that is not on
-that list.
+An agent that fails is one session that contributed nothing — not a failed run. Give it
+`{"found": false, "quotes": [], "answer_fragment": ""}` in step 3 and carry on with the rest.
 
-An agent that fails is one session that contributed nothing — not a failed run. Note it and
-carry on with the rest.
+### 3. write the outputs back into the same file
 
-### 5. check every quote, then answer
+`Write` the file back with one new top-level key, `outputs`: an array with **one entry per entry
+in `targets`, in any order**, each of them the agent's JSON plus the `sessionId` it came from:
 
-Before a quote reaches the screen, find it in the `show --json` output you already hold for that
-`sessionId` and that `seq`. Ignore differences of whitespace, case and quote glyphs; nothing else.
-**Drop any quote you cannot locate, and drop any sentence whose only support was a dropped
-quote.** Do not repair a near-miss into a match.
-
-Then print:
-
-```
-ANSWER
-  <at most ~120 words. every sentence carries an evidence number.>
-
-EVIDENCE
-  [1]  <id8>  seq <n>  <date>   "<the quote, ~90 chars then …>"
-  [2]  <id8>  seq <n>  <date>   "<…>"
-
-  read six sessions in <n>s · quotes checked against the excerpts above, not by potsherd's
-  citation filter — for the code-checked answer, run:  potsherd ask "<the question>"
+```json
+"outputs": [
+  { "sessionId": "<the target's sessionId, in full>",
+    "found": true,
+    "quotes": [{ "seq": 12, "ts": null, "text": "<copied character for character>" }],
+    "answer_fragment": "<one or two sentences>" }
+]
 ```
 
-That last line is not optional and it is not a disclaimer to soften. The binary's `ask` verifies
-every citation **in code**, after the model has replied, and drops what does not resolve. This
-fast path verifies them by reading. It is roughly six times quicker and it is a weaker guarantee,
-and the user is entitled to know which one they just got.
+Change nothing else in the file. `question`, `k`, `sessionIds` and `targets` are what the replay
+checks itself against; edit one and the run refuses.
+
+### 4. answer — one model call, citations checked in code
+
+```
+BIN ask "<the question>" $rest --readers-in /tmp/potsherd-readers-<hex>.json
+```
+
+Same question, same `$rest`, same path. **Print what it prints** — the answer, the evidence lines,
+the cost and timing footer — and add nothing. It has already dropped every quote that did not
+resolve, and its footer already says how many sessions were read and what it cost.
+
+If it refuses with a stale-file error, the filters or the question drifted between the two calls.
+Re-record from step 1 rather than editing the file.
 
 ---
 

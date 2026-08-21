@@ -28,7 +28,7 @@ export interface ShowCommandOptions extends GlobalOptions {
  */
 export async function runShow(o: ShowCommandOptions): Promise<number> {
   const ref = o.session?.trim();
-  if (!ref) throw new UserError('show needs a session id', 'potsherd show 85ef9531');
+  if (!ref) throw new UserError('show needs a session id', 'potsherd show 9c4d2f18');
 
   const { db } = openIndex(o);
   try {

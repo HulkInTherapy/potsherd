@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -99,17 +99,85 @@ describe('the tool list', () => {
     }
   });
 
-  it('is read-only everywhere except potsherd_tag', async () => {
+  it('annotates readOnlyHint from what the tool does, not from a list', async () => {
+    // D5. `potsherd_graft` was annotated `readOnlyHint: true` and creates
+    // `./.potsherd/graft-<id8>.md` and a `.gitignore` in the user's project.
+    // `readOnlyHint` is the machine-readable field a client reads to decide
+    // what may run WITHOUT ASKING, so that annotation let a model put files in
+    // somebody's repository with no prompt.
+    //
+    // The old shape of this test — `readOnlyHint === !WRITE_TOOLS.includes()`
+    // plus `expect(WRITE_TOOLS).toEqual(['potsherd_tag'])` — could not catch
+    // it: both halves came out of the same wrong constant. So the list is
+    // checked against behaviour instead, in `writes exactly the tools it says
+    // it writes` below and in `--selftest`.
     const { client, close } = await connect();
     try {
       const listed = await listTools(client);
       for (const t of listed.tools) {
         expect(t.annotations?.readOnlyHint, t.name).toBe(!WRITE_TOOLS.includes(t.name));
       }
-      expect(WRITE_TOOLS).toEqual(['potsherd_tag']);
+      expect(WRITE_TOOLS).toEqual(['potsherd_graft', 'potsherd_tag']);
     } finally {
       await close();
     }
+  });
+
+  it('says in its instructions which tools write, and does not claim only one does', async () => {
+    // The server's `instructions` reach every client verbatim, and they said
+    // "potsherd_tag is the only tool here that writes anything" while
+    // potsherd_graft was writing files into the user's project.
+    const { client, close } = await connect();
+    try {
+      const instructions = client.getInstructions() ?? '';
+      expect(instructions).not.toMatch(/only tool here that writes/);
+      expect(instructions).toMatch(/potsherd_graft creates/);
+    } finally {
+      await close();
+    }
+  });
+
+  it('--selftest keeps to 80 columns and elides with an ellipsis', () => {
+    // D11. `--selftest` is a verification command named in the phase file, and
+    // `05` governs the screens it prints. It ran to 130 characters, hard-cut
+    // mid-word by ad-hoc `.slice(0, 56)` calls with no ellipsis — a reader
+    // could not tell a truncated path from a wrong one — and it took no
+    // --width.
+    const mcpBin = path.join(repo, 'packages', 'mcp', 'dist', 'index.js');
+    const at = (width?: number): string[] =>
+      execFileSync(
+        process.execPath,
+        [mcpBin, '--selftest', ...(width === undefined ? [] : ['--width', String(width)])],
+        { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] },
+      ).split('\n');
+
+    // The default is 80, with no flag — the form the phase file names.
+    for (const line of at()) expect([...line].length, line).toBeLessThanOrEqual(80);
+
+    // Whatever `--width` says, and whatever the paths are.
+    for (const width of [60, 100]) {
+      const lines = at(width).filter((l) => l.length > 0);
+      expect(lines.length).toBeGreaterThan(10);
+      for (const line of lines) {
+        expect([...line].length, `width ${String(width)}: ${line}`).toBeLessThanOrEqual(width);
+      }
+    }
+
+    // And nothing is cut without saying so: every line that a narrow run
+    // shortened carries an ellipsis. A hard cut mid-word reads as a wrong
+    // value, not a clipped one.
+    const wide = at(400);
+    const narrow = at(60);
+    expect(narrow).toHaveLength(wide.length);
+    let shortened = 0;
+    narrow.forEach((line, i) => {
+      const full = wide[i]!;
+      // Timings and temp paths differ between runs; only length is compared.
+      if ([...line].length >= [...full].length) return;
+      shortened++;
+      expect(line, `cut without an ellipsis: ${line}`).toContain('…');
+    });
+    expect(shortened, 'nothing was shortened at --width 60').toBeGreaterThan(5);
   });
 
   it('advertises a json schema for every tool, with the contract fields in it', async () => {
@@ -282,7 +350,7 @@ describe('potsherd_read pagination', () => {
   });
 });
 
-describe('potsherd_tag is the only tool that writes', () => {
+describe('the two tools that write, and the four that do not', () => {
   it('adds, normalises, reads back and removes', async () => {
     const { client, close } = await connect();
     try {
@@ -308,6 +376,67 @@ describe('potsherd_tag is the only tool that writes', () => {
     }
   });
 
+  it('writes exactly the tools it says it writes', { timeout: 60_000 }, async () => {
+    // The structural half of D5: which tools write is decided by watching,
+    // not by reading `WRITE_TOOLS`. Annotate a writer read-only, or list a
+    // reader as a writer, and this fails whichever way the constant is edited.
+    const witness = tempDir('potsherd-mcp-writes-');
+    try {
+      const observed: string[] = [];
+      const listing = (): string => {
+        const out: string[] = [];
+        const walk = (dir: string, rel = ''): void => {
+          for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+            a.name.localeCompare(b.name),
+          )) {
+            const key = rel ? `${rel}/${e.name}` : e.name;
+            if (e.isDirectory()) walk(path.join(dir, e.name), key);
+            else out.push(`${key}:${String(fs.statSync(path.join(dir, e.name)).size)}`);
+          }
+        };
+        walk(witness);
+        return out.join('|');
+      };
+
+      const { client, close } = await connectInMemory(
+        makeContext({ potsherdDir: root, env: { ...OFFLINE }, cwd: witness }),
+        'mcp.test.writes',
+      );
+      try {
+        const id = await anySession(client);
+        const calls: [string, Record<string, unknown>][] = [
+          ['potsherd_find', { query: 'pooler', limit: 1 }],
+          ['potsherd_read', { session: id }],
+          ['potsherd_ls', { limit: 1 }],
+          ['potsherd_graft', { session: id.slice(0, 8), budget: 300 }],
+          ['potsherd_tag', { session: id, add: ['writewitness'] }],
+        ];
+        for (const [name, args] of calls) {
+          const before = listing();
+          const tagsBefore = JSON.stringify(await call(client, 'potsherd_tag', { session: id }));
+          await callRaw(client, name, args);
+          const tagsAfter = JSON.stringify(await call(client, 'potsherd_tag', { session: id }));
+          if (listing() !== before || tagsAfter !== tagsBefore) observed.push(name);
+        }
+        await call(client, 'potsherd_tag', { session: id, remove: ['writewitness'] });
+
+        expect(observed.sort()).toEqual([...WRITE_TOOLS].sort());
+
+        const listed = await listTools(client);
+        for (const t of listed.tools) {
+          if (!calls.some(([n]) => n === t.name)) continue;
+          expect(t.annotations?.readOnlyHint, `${t.name} readOnlyHint`).toBe(
+            !observed.includes(t.name),
+          );
+        }
+      } finally {
+        await close();
+      }
+    } finally {
+      rmrf(witness);
+    }
+  });
+
   it('rejects a string that no tag can be made of', async () => {
     const { client, close } = await connect();
     try {
@@ -317,6 +446,63 @@ describe('potsherd_tag is the only tool that writes', () => {
       expect(textOf(r)).toMatch(/letters, digits/);
     } finally {
       await close();
+    }
+  });
+});
+
+describe('the stdio transport', () => {
+  /**
+   * D14. A line that is not JSON produced NO reply at all — not even the
+   * `-32700` JSON-RPC 2.0 prescribes. The SDK's ReadBuffer throws,
+   * StdioServerTransport catches and calls `onerror`, and the default
+   * `onerror` does nothing. The server stayed up and perfectly silent, and the
+   * client that sent the frame waited for its id forever.
+   */
+  it('answers an unparseable frame with -32700 and stays up', { timeout: 60_000 }, async () => {
+    const mcpBin = path.join(repo, 'packages', 'mcp', 'dist', 'index.js');
+    const child = spawn(process.execPath, [mcpBin, '--potsherd-dir', root], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, NO_COLOR: '1' },
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d: Buffer) => { out += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { err += d.toString(); });
+    const send = (s: string): void => { child.stdin.write(s + '\n'); };
+    const settle = async (): Promise<void> => {
+      await new Promise((r) => setTimeout(r, 900));
+    };
+
+    try {
+      send(JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'initialize',
+        params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '0' } },
+      }));
+      await settle();
+      const afterInit = out.length;
+      expect(afterInit, 'initialize was not answered').toBeGreaterThan(0);
+
+      // Truncated: valid up to the missing closing brace.
+      send('{"jsonrpc":"2.0","id":2,"method":"tools/list"');
+      await settle();
+      const reply = out.slice(afterInit);
+      expect(reply, 'the client got nothing back at all').not.toBe('');
+      const parsed = JSON.parse(reply.trim().split('\n')[0]!) as {
+        error: { code: number; message: string };
+        id: null;
+      };
+      expect(parsed.error.code).toBe(-32700);
+      // `id: null`, because the id was inside the bytes that would not parse.
+      expect(parsed.id).toBe(null);
+      expect(err).toMatch(/unparseable frame/);
+
+      // …and the session survives it, which is the rule the server is under.
+      const before = out.length;
+      send(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }));
+      await settle();
+      expect(out.slice(before)).toContain('potsherd_find');
+    } finally {
+      child.kill('SIGKILL');
     }
   });
 });
@@ -669,6 +855,9 @@ describe('the three phrasings', () => {
   it('names its cost where the cost is not free', () => {
     expect(shipped.ASK_DESCRIPTION).toMatch(/40 to 180 seconds/);
     expect(shipped.ASK_DESCRIPTION).toMatch(/costs money/);
-    expect(shipped.TAG_DESCRIPTION).toMatch(/ONLY POTSHERD TOOL THAT WRITES/);
+    expect(shipped.TAG_DESCRIPTION).toMatch(/ONLY POTSHERD TOOL THAT WRITES TO THE INDEX/);
+    // D5: graft writes into the user's project, and the description that a
+    // model reads before calling it has to say so in the same register.
+    expect(shipped.GRAFT_DESCRIPTION).toMatch(/IT WRITES TO THE USER'S PROJECT/);
   });
 });

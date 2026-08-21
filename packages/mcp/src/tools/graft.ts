@@ -142,27 +142,38 @@ export function registerGraft(server: McpServer, ctx: ServerContext): void {
       description: GRAFT_DESCRIPTION,
       inputSchema: graftInput,
       annotations: {
-        // **The one place the pinned contract and MCP's own vocabulary pull in
-        // different directions, resolved in the contract's favour.**
+        // **This tool writes a file into the user's project, so it is not
+        // read-only, whatever the prose around it once said.**
         //
-        // `WAVE.md`: *every tool is read-only except `potsherd_tag`* — and, in
-        // the next clause, *nothing writes outside `~/.potsherd` except
-        // `potsherd_graft`'s brief, which lands in the cwd*. So the contract
-        // knows this tool creates a file and calls it read-only anyway, which
-        // fixes what "read-only" means here: it modifies **no state anything
-        // else reads** — not the index, not the archive, not a transcript, not
-        // a tag. `potsherd_tag` is the only tool on this server that changes
-        // something a later call can see.
+        // It was annotated `readOnlyHint: true` until T5.9, on the reasoning
+        // that it "modifies no state anything else reads" — not the index, not
+        // the archive, not a transcript, not a tag. That reading is wrong for
+        // this field. `readOnlyHint` is not documentation; it is the
+        // machine-readable safety annotation clients use to decide what may run
+        // WITHOUT ASKING. Annotated true, a model could create
+        // `./.potsherd/graft-<id8>.md` and a `./.potsherd/.gitignore` in
+        // somebody's repository with no prompt. The verifier watched it happen:
         //
-        // MCP's `readOnlyHint` is defined more broadly, as "does not modify its
-        // environment", and by that reading a new `./.potsherd/graft-<id8>.md`
-        // is a modification. Four other workers are compiling against the
-        // pinned wording, so it is followed and the divergence is reported
-        // rather than resolved unilaterally — see `registration-T5.1.txt`. The
-        // honesty is not lost: the description says the tool writes a brief,
-        // and every reply carries `path`, `wrote` and `writeNote` saying
-        // exactly what landed where.
-        readOnlyHint: true,
+        //     project dir before: []      project dir after: [".potsherd"]
+        //     written by a tool annotated readOnlyHint:true:
+        //       [".gitignore", "graft-c2f68b40.md"]
+        //
+        // MCP defines the field as "does not modify its environment", and
+        // creating two files in the cwd is modifying the environment. The
+        // narrower in-house reading of "read-only" is a fine thing to say in a
+        // description; it is not a thing to say in this field.
+        //
+        // `WAVE.md` pinned the opposite ("every tool is read-only except
+        // `potsherd_tag`") while its own next clause admitted the write
+        // ("nothing writes outside `~/.potsherd` except `potsherd_graft`'s
+        // brief, which lands in the cwd"). The contract contradicted itself;
+        // the annotation follows the behaviour.
+        //
+        readOnlyHint: false,
+        // The path is `graft-<id8>.md`, derived from the session, so a second
+        // graft of the same session replaces its own file and nothing else's.
+        // Not idempotent, though: `via === 'model'` means the brief is
+        // regenerated and the bytes need not match.
         destructiveHint: false,
         idempotentHint: false,
         openWorldHint: true,

@@ -1942,6 +1942,39 @@ describe('T5.6 --readers-in', () => {
     db.close();
   });
 
+  it('names a missing "version" as missing, not as "vundefined"', async () => {
+    // D12. `String(undefined)` is `"undefined"`, and the message read
+    //   potsherd: … is a vundefined reader file and this potsherd (0.4.0) reads v1
+    // for the commonest case there is: a file with `kind` right and no
+    // `version` at all, which is what a hand-edited recording looks like.
+    const { root, db } = seedDb();
+    const target = await recordWithOutputs(db, root, QUESTION, [RECORDED]);
+    const file = JSON.parse(fs.readFileSync(target, 'utf8')) as Record<string, unknown>;
+
+    delete file['version'];
+    fs.writeFileSync(target, JSON.stringify(file, null, 2));
+    await expect(replayReaders(db, QUESTION, { root }, target)).rejects.toThrow(
+      /has no "version"/,
+    );
+    await expect(replayReaders(db, QUESTION, { root }, target)).rejects.not.toThrow(
+      /vundefined/,
+    );
+
+    // A version from the future still reads as a version, with a number.
+    fs.writeFileSync(target, JSON.stringify({ ...file, version: 7 }, null, 2));
+    await expect(replayReaders(db, QUESTION, { root }, target)).rejects.toThrow(
+      /is a v7 reader file/,
+    );
+
+    // And a version that is not a number says what it found instead of
+    // printing it after a `v`.
+    fs.writeFileSync(target, JSON.stringify({ ...file, version: '1' }, null, 2));
+    await expect(replayReaders(db, QUESTION, { root }, target)).rejects.toThrow(
+      /"version" here is "1"/,
+    );
+    db.close();
+  });
+
   it('a reader that found nothing replays as a reader that found nothing', async () => {
     const { root, db } = seedDb();
     const target = await recordWithOutputs(db, root, QUESTION, [
@@ -1957,5 +1990,110 @@ describe('T5.6 --readers-in', () => {
     expect(transport.sent).toHaveLength(0);
     db.close();
     await llm.close();
+  });
+});
+
+/**
+ * T5.9 / D15 — the plugin skill has to *use* the seam, not describe one.
+ *
+ * T5.6 shipped `--readers-out` / `--readers-in` and T5.2 §2 said that when
+ * they landed, `skills/potsherd/SKILL.md` should replace its hand-rolled
+ * fan-out with them and delete the "checked by reading" caveat. `plugins/**`
+ * was reserved from both tasks, so nobody made that edit: `grep -rn
+ * 'readers-out' plugins/` matched nothing, the skill still rebuilt the
+ * shortlist out of `find --json` and `show --json`, and it still ended every
+ * answer telling the user to re-run `potsherd ask` for a citation-checked one
+ * — which the round trip now gives them.
+ *
+ * These assertions are about the skill file, because the skill file is the
+ * product here. The last one is the load-bearing one: it reads the field names
+ * the skill tells a model to use out of the prose and checks them against the
+ * keys the recorder actually writes, so the instructions cannot drift away
+ * from the format without failing.
+ */
+describe('the plugin skill routes ask through --readers-out / --readers-in', () => {
+  const skillPath = path.join(
+    path.dirname(new URL(import.meta.url).pathname),
+    '..',
+    'plugins',
+    'claude-code',
+    'skills',
+    'potsherd',
+    'SKILL.md',
+  );
+  const skill = (): string => fs.readFileSync(skillPath, 'utf8');
+  const QUESTION = 'how did we handle pgbouncer with prepared statements?';
+
+  /** A recording and nothing else, exactly as step 1 of the skill produces. */
+  async function recordOnly(
+    db: ReturnType<typeof store.open>,
+    root: string,
+    question: string,
+  ): Promise<string> {
+    const target = path.join(scratch('potsherd-skill-'), 'readers.json');
+    await writeReadersFile(db, question, { root }, target);
+    return target;
+  }
+
+  it('names both halves of the round trip', () => {
+    const text = skill();
+    expect(text).toMatch(/--readers-out/);
+    expect(text).toMatch(/--readers-in/);
+  });
+
+  it('no longer rebuilds the shortlist by hand', () => {
+    const text = skill();
+    const ask = text.slice(text.indexOf('## ask'), text.indexOf('## rescue and guard'));
+    // The three commands the old route ran to reconstruct what --readers-out
+    // records in one call. Rebuilding it by hand produces a different
+    // shortlist, which --readers-in refuses.
+    expect(ask).not.toMatch(/BIN find .*--limit 6/);
+    expect(ask).not.toMatch(/BIN show <sessionId> --json/);
+  });
+
+  it('does not disclaim the citation filter it now runs', () => {
+    const text = skill();
+    const ask = text.slice(text.indexOf('## ask'), text.indexOf('## rescue and guard'));
+    // The exact sentence T5.6 §6 said could go, and the weaker-guarantee
+    // language around it. `--readers-in` runs `filterAnswer` in code.
+    expect(ask).not.toMatch(/citation filter — for the code-checked answer/);
+    expect(ask).not.toMatch(/it is a weaker guarantee/);
+    expect(ask).not.toMatch(/quotes checked against the excerpts above/);
+  });
+
+  it('warns that the filters must match across the two calls', () => {
+    const ask = skill();
+    expect(ask).toMatch(/filters/i);
+    expect(ask).toMatch(/same \$rest|identical across the two calls|paste the same string/i);
+  });
+
+  it('says --strict and --json need no special case any more', () => {
+    const text = skill();
+    const ask = text.slice(text.indexOf('## ask'), text.indexOf('## rescue and guard'));
+    expect(ask).toMatch(/`--strict` and `--json` need no special case/);
+  });
+
+  it('describes the file with the field names the recorder actually writes', async () => {
+    const { root, db } = seedDb();
+    const target = await recordOnly(db, root, QUESTION);
+    const file = JSON.parse(fs.readFileSync(target, 'utf8')) as {
+      targets: Record<string, unknown>[];
+    };
+    db.close();
+
+    const text = skill();
+    const ask = text.slice(text.indexOf('## ask'), text.indexOf('## rescue and guard'));
+    // Every per-target field the skill tells a model to hand its readers has
+    // to be a field the recorder puts there.
+    const real = new Set(Object.keys(file.targets[0]!));
+    for (const named of ['sessionId', 'id8', 'project', 'harness', 'isSidechain', 'isGhost', 'excerpts', 'seqs']) {
+      expect(ask, `skill names ${named}`).toContain(named);
+      expect(real, `recorder writes ${named}`).toContain(named);
+    }
+    // And the shape it tells the model to write back is the shape the replay
+    // reads: `sessionId` plus AskReaderOutput.
+    for (const named of ['outputs', 'found', 'quotes', 'answer_fragment']) {
+      expect(ask, `skill names ${named}`).toContain(named);
+    }
   });
 });

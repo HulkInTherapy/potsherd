@@ -1,15 +1,12 @@
 #!/bin/sh
 # The potsherd this plugin runs.
 #
-# `skills/potsherd/SKILL.md` pre-approves exactly this path
-# (`allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/potsherd *)`) and routes all
-# fifteen verbs through it, so every `/potsherd <verb>` arrives here. Since
-# T5.9 `hooks/session-start.sh` and `hooks/session-end.sh` arrive here too:
-# before that each hook re-implemented the resolution below inline in
-# `hooks.json`, in the opposite order, and so let the stale 0.1.0 on PATH
-# answer for a 0.4.0 checkout -- exactly the case this header warns about.
+# This is the Codex twin of `plugins/claude-code/bin/potsherd`, and it is
+# deliberately byte-for-byte the same logic. Both plugins' hooks call their own
+# copy of this file and nothing else: before T5.9 each hook re-implemented
+# resolution inline in `hooks.json`, in the opposite order, and got it wrong.
 #
-# Resolution order, and why it is not phase 0's order:
+# Resolution order, and why it is not `resolve-bin.ts`'s order:
 #
 #   `resolve-bin.ts` prefers `potsherd` on PATH, because it is installing a
 #   command into the *user's* settings.json, where a portable spelling survives
@@ -20,7 +17,7 @@
 #   was written on, PATH held 0.1.0 while the checkout beside it was 0.4.0.
 #   So: this plugin's own potsherd first, PATH only as a last resort.
 #
-#   1. vendored inside the plugin        (T5.6's packaging, if it lands)
+#   1. vendored inside the plugin        (packaging, if it ever lands)
 #   2. the working copy this plugin was checked out inside, once built
 #   3. a global install on PATH
 #   4. nothing -- and then it says so, loudly, and exits non-zero
@@ -35,17 +32,16 @@
 # `sqlite-vec` at runtime through `createRequire`, so it needs a `node_modules`
 # beside it with those two built for the host platform. A git clone of this
 # repository has neither `dist/` (gitignored) nor `node_modules/`, which is why
-# a marketplace install falls through to step 3. And step 3 is empty too:
-# potsherd is NOT published to npm, so a global install is something only
-# somebody who already built a checkout can have. Every version of this file
-# before T5.9 printed `npm i -g potsherd` as the fix; it is a 404. Making step 1
-# work for a marketplace install requires a packaging change to `packages/cli`
-# -- reserved ground, and reported rather than taken.
+# a marketplace install falls through to step 3, and why the README tells you
+# to build from the checkout. And step 3 is empty too: potsherd is NOT
+# published to npm, so a global install is something only somebody who already
+# built a checkout can have, and there is no install command for this file to
+# print.
 set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-# 1. vendored: plugins/claude-code/dist/potsherd.js
+# 1. vendored: plugins/codex/dist/potsherd.js
 if [ -f "$ROOT/dist/potsherd.js" ]; then
   exec node "$ROOT/dist/potsherd.js" "$@"
 fi
@@ -77,8 +73,5 @@ Build it from a checkout:
 
 then install this plugin from that checkout, so that step 2 finds the
 bundle beside it.
-
-A marketplace install gets none of the three on its own: dist/ is gitignored
-and the bundle needs better-sqlite3 and sqlite-vec built for this platform.
 EOF
 exit 127

@@ -1,0 +1,57 @@
+#!/bin/sh
+# The MCP server this plugin runs.
+#
+# `.mcp.json` used to name `${CLAUDE_PLUGIN_ROOT}/../../packages/mcp/dist/index.js`
+# directly. In a marketplace install that file does not exist — `dist/` is
+# gitignored — so `node` died with a module-not-found stack trace before the
+# server ever spoke MCP, all six tools vanished from the client, and the only
+# symptom was a tool list that was simply shorter. `session-archaeologist`,
+# whose `tools:` are five `mcp__plugin_potsherd_potsherd__*` entries plus
+# `Read`, was left holding `Read` and answered "not found" to everything.
+#
+# An MCP server that fails to start is invisible by design, so the least this
+# can do is put a sentence a human can act on into the server log instead of a
+# stack trace. Same three places as `bin/potsherd`, same order, same reasons —
+# see that file's header.
+set -u
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# 1. vendored inside the plugin
+if [ -f "$ROOT/dist/mcp.js" ]; then
+  exec node "$ROOT/dist/mcp.js" "$@"
+fi
+
+# 2. the surrounding checkout
+if [ -f "$ROOT/../../packages/mcp/dist/index.js" ]; then
+  exec node "$ROOT/../../packages/mcp/dist/index.js" "$@"
+fi
+
+# 3. a global install
+if command -v potsherd-mcp >/dev/null 2>&1; then
+  exec potsherd-mcp "$@"
+fi
+
+# 4. nothing. Say which three places were tried, and what it costs.
+cat >&2 <<EOF
+potsherd: no MCP server to run, so this client has NO potsherd tools.
+
+Looked in three places:
+  1. $ROOT/dist/mcp.js                            (vendored in the plugin)
+  2. $ROOT/../../packages/mcp/dist/index.js       (the surrounding checkout)
+  3. potsherd-mcp on PATH                         (a global install)
+
+All six tools — potsherd_find, potsherd_read, potsherd_ask, potsherd_graft,
+potsherd_ls, potsherd_tag — are therefore absent, and the
+session-archaeologist agent is left with no tools but Read.
+
+potsherd is not published to npm yet, so there is no install command.
+Build it from a checkout:
+
+  git clone https://github.com/HulkInTherapy/potsherd
+  cd potsherd && pnpm install && pnpm build
+
+then install this plugin from that checkout, so that step 2 finds the
+bundle beside it.
+EOF
+exit 127

@@ -67,7 +67,7 @@ It compresses one past session into a short cited brief under a token budget and
 
 Give it a session id from potsherd_find or potsherd_ls, and set about to narrow the brief to one topic when the session covered several. budget is the token ceiling for the brief itself, not for the call.
 
-It also saves the brief as ./.potsherd/graft-<id>.md in the project directory, when it has one, so the user can reread it later — the reply tells you the exact path, or tells you nothing was written. It changes nothing else on disk.
+IT WRITES TO THE USER'S PROJECT. It saves the brief as ./.potsherd/graft-<id>.md, creating ./.potsherd/ and a .gitignore inside it if they are not there, so the user can reread it later — the reply tells you the exact path, or tells you nothing was written. That is the only thing it writes, and the only potsherd write outside ~/.potsherd; it changes nothing else on disk.
 
 It works with no model backend at all — the brief is then assembled from the stored card, is labelled unsummarised, and is still cited. Do NOT use it to summarise the current session, and do NOT use it as a search: it re-enters one session you have already chosen.`;
 
@@ -79,7 +79,7 @@ It has NO query parameter and does not search text. If the user gave you words t
 
 export const TAG_DESCRIPTION = `USE THIS when the user asks to label, tag, group, categorise or un-tag a session so it can be found again later — "tag that one postgres", "call this the pooler session", "drop the infra tag off it".
 
-THIS IS THE ONLY POTSHERD TOOL THAT WRITES ANYTHING. Every other one is read-only. It adds and removes tags on a single session in one transaction and returns the tags that session carries afterwards, so you can report the result rather than assume it.
+THIS IS THE ONLY POTSHERD TOOL THAT WRITES TO THE INDEX. Four of the six read and nothing else; potsherd_graft is the other writer, and it writes a file into the project rather than the index. It adds and removes tags on a single session in one transaction and returns the tags that session carries afterwards, so you can report the result rather than assume it.
 
 It changes nothing else: not the transcript, not the index, not the session's title. Tags are lower-cased and may hold letters, digits and - . _ / only.
 

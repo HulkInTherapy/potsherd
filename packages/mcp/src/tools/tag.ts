@@ -87,13 +87,15 @@ export function registerTag(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
     'potsherd_tag',
     {
-      title: 'Tag a session (the only tool that writes)',
+      title: 'Tag a session (the only tool that writes to the index)',
       description: TAG_DESCRIPTION,
       inputSchema: tagInput,
       annotations: {
-        // The only `readOnlyHint: false` on this server. A client that colours
-        // write tools differently, or asks before running them, is reading
-        // this field and it must be honest.
+        // One of the two `readOnlyHint: false` tools on this server —
+        // `potsherd_graft` is the other, because it creates a file in the
+        // user's project. A client that colours write tools differently, or
+        // asks before running them, is reading this field and it must be
+        // honest.
         readOnlyHint: false,
         // It adds and removes labels. Nothing it touches is unrecoverable and
         // the same call twice leaves the same tags.

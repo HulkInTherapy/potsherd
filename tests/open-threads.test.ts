@@ -658,7 +658,7 @@ function candidate(over: Partial<OpenThreadCandidate> = {}): OpenThreadCandidate
     ts: '2026-07-01T17:00:00.000Z',
     evidenceSeqs: [7],
     otherProject: BRAINSTORE,
-    otherSessionIds: ['85ef9531-0000-4000-8000-000000000000'],
+    otherSessionIds: ['9c4d2f18-0000-4000-8000-000000000000'],
     overlap: { files: ['db/pool.ts'], topics: ['pgbouncer'] },
     score: 4,
     ...over,

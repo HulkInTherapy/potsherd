@@ -117,11 +117,25 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   // preserved — but it is a write, so it is listed.
   const mcpConfigs = setup.setupWritePaths();
   const consented = [settingsFile, ...mcpConfigs];
+  // AND, BESIDE EACH OF THEM, A BACKUP. Every consented write copies the file
+  // it is about to change to `<file>.potsherd-bak-<UTC>` first. That is a file
+  // potsherd creates in somebody else's directory, and until T5.9 this receipt
+  // named the eight configs and said nothing about the eight copies — while
+  // claiming, two lines below, that "every other server in those files is
+  // preserved", which reads as an exhaustive account of what setup does to
+  // them. `03` §11 says this receipt lists every path written; these are paths
+  // written.
+  const backups = consented.map((p) => `${p}.potsherd-bak-<UTC>`);
 
   if (o.privacy) {
     const network = networkDisclosure();
     if (o.json) {
-      printJson({ reads, writes: written, writesWithConsent: consented, network });
+      printJson({
+        reads,
+        writes: written,
+        writesWithConsent: [...consented, ...backups],
+        network,
+      });
       return 0;
     }
     const t = themeFrom(o);
@@ -155,6 +169,10 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     for (const p of mcpConfigs) card.raw(`    ${show(p)}`);
     card.raw(`      ${t.dim('one "potsherd" MCP server entry each, from potsherd setup.')}`);
     card.raw(`      ${t.dim('every other server in those files is preserved.')}`);
+    card.raw(`    ${t.dim('…and beside each of those')} ${String(consented.length)}${t.dim(':')}  <that file>.potsherd-bak-<UTC>`);
+    card.raw(`      ${t.dim('a copy of the file as it was, taken before potsherd changes it.')}`);
+    card.raw(`      ${t.dim('one per write. potsherd never reads them back and never removes')}`);
+    card.raw(`      ${t.dim('them; delete them yourself once you are happy with the change.')}`);
     // The largest privacy-relevant thing potsherd does is no longer "reads
     // your files": from phase 2 on it *sends* some of them. A receipt that
     // still said "no network" would be the worst class of bug this project

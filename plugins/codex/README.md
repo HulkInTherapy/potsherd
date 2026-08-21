@@ -43,20 +43,28 @@ finds nothing. **[docs]**
 
 ## Install
 
-### 1. You need a `potsherd` binary — install this first
+### 1. You need a `potsherd` binary — build it from a checkout
 
 The plugin ships configuration, not a program.
 
+> **`potsherd` is not published to npm.** `npm i -g potsherd` is a 404 today,
+> and this file used to print it as the install command. Publishing is
+> phase 7's. Until then the only instruction that works is the one below.
+
 ```sh
-npm i -g potsherd
+git clone https://github.com/HulkInTherapy/potsherd
+cd potsherd
+pnpm install && pnpm build
 ```
 
-From a checkout, `pnpm install && pnpm build` does the same job.
+Then add the plugin **from that checkout**, so that `bin/potsherd` finds the
+bundle two directories up from itself. Adding it from GitHub clones a *second*
+copy with no `dist/` in it, and that copy is the one the plugin looks beside.
 
-Without one, the `SessionEnd` hook indexes nothing. It does not fail quietly:
-the `SessionStart` hook prints a `systemMessage` naming the problem. **[disk]** —
-that message was produced by running the real hook command with no `potsherd`
-reachable.
+Without a built potsherd the `SessionEnd` hook indexes nothing and the MCP
+server exposes no tools. It does not fail quietly: the `SessionStart` hook
+prints a `systemMessage` naming the problem. **[disk]** — that message was
+produced by running the real hook command with no `potsherd` reachable.
 
 ### 2. Add the plugin
 
@@ -153,9 +161,18 @@ the plugin root and let the child process resolve a relative argument against
 it:
 
 ```json
-{ "type": "stdio", "command": "node",
-  "args": ["../../packages/mcp/dist/index.js"], "cwd": "." }
+{ "type": "stdio", "command": "sh",
+  "args": ["bin/potsherd-mcp"], "cwd": "." }
 ```
+
+`bin/potsherd-mcp` is the same three-place resolution `bin/potsherd` does, and
+it exists for the same reason. Naming
+`../../packages/mcp/dist/index.js` here directly — which this file used to —
+means that in a marketplace install, where `dist/` is gitignored and absent,
+`node` dies with a module-not-found stack trace before the server speaks MCP
+and all six tools are simply missing from the client with no explanation. The
+shim writes the three paths it tried, and the build command, to the server log
+instead.
 
 **Two warnings about this file, both honest:**
 
@@ -192,7 +209,7 @@ that is addressed. The hooks are unaffected.
 | hook commands receive `PLUGIN_ROOT`, `PLUGIN_DATA`, and the compat aliases `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA` | **[docs]** — injected verbatim in `codex-rs/hooks/src/engine/discovery.rs`, with the source comment *"For OOTB compat with existing plugins that use this env var."* |
 | **there is no `CODEX_PROJECT_DIR`** and no `CODEX_PLUGIN_ROOT` | **[docs]** — the project directory arrives as `cwd` in the hook's stdin JSON |
 | hooks are **on by default** — no flag, no opt-in | **[docs]** — `Feature::CodexHooks`, key `hooks`, `Stage::Stable`, `default_enabled: true` |
-| the shell logic in both commands, in every branch | **[disk]** — both commands were extracted from this `hooks.json` and executed against a throwaway `HOME` |
+| the shell logic in both commands, in every branch | **[disk]** — both commands were extracted from this `hooks.json` and executed against a throwaway `HOME`. Since T5.9 each `command` is one line that `exec sh`s the matching `hooks/*.sh`; `tests/hooks.test.ts` extracts and runs them the same way, on a machine built with a stale `0.1.0` first on `PATH` |
 | `index --session <codex-thread-id>` resolves a real Codex thread | **[disk]** — run against the real rollout file in `~/.codex/sessions/2026/07/21/`; the thread landed in the index as harness `codex` |
 
 The one thing **[inferred]**: that Codex actually fires these two events for a
@@ -254,12 +271,29 @@ generated output schema for `session-start` and **none** for `session-end`.
 bluntly: *"Exit codes and `systemMessage` are ignored."*
 
 So anything the user must be told about work `SessionEnd` is going to do has to
-be said at `SessionStart`, before the fact. There are two such things:
+be said at `SessionStart`, before the fact — and anything `SessionEnd` finds
+out too late has to be written down for the *next* `SessionStart` to read. That
+is what `~/.potsherd/hook-failures.log` is: `SessionEnd` appends a line to it
+when it could not index, `SessionStart` reads it out and clears it. Three
+things get said:
 
 1. **No runnable `potsherd`** — then `SessionEnd` will index nothing, and you
    should know before you rely on it.
-2. **The embedding model is not on disk yet** — then the first `SessionEnd`
-   after install downloads **33 MB** of `Xenova/bge-small-en-v1.5`, detached, in
+2. **A `potsherd` too old for the verb.** Resolution can land on a global
+   install that predates `index` — on the machine this was written on, `PATH`
+   held `0.1.0` while the checkout beside it was `0.4.0`. So `SessionStart`
+   asks the resolved binary directly, `index --help`, and reports the version
+   it found if that fails. A capability probe, not a version comparison: the
+   question is "can it do this?". Costs a **measured 128–133 ms**, once per
+   thread, over three runs of ten (17 ms before it existed; almost all of the
+   difference is Node starting the bundle).
+
+   Both hooks reach that binary through `bin/potsherd` and resolve nothing
+   themselves. Before T5.9 each re-implemented the resolution inline in
+   `hooks.json` with the order reversed, which is how `0.1.0` came to answer
+   for `0.4.0` with the error going to `/dev/null` and the hook exiting `0`.
+3. **The embedding model is not on disk yet** — then the first `SessionEnd`
+   after install downloads **32.4 MB** of `Xenova/bge-small-en-v1.5`, detached, in
    the background. `index --quiet` is what the hook runs and `--quiet` prints
    nothing, so without this warning the download is completely silent. The hook
    probes for a cached model in pure shell — the same directory and the same
@@ -305,7 +339,8 @@ This plugin holds to it: **it never writes to `~/.codex`.**
 |---|---|
 | `~/.codex/sessions/**` | read only |
 | `~/.potsherd/**` | read and write — the archive, index and config |
-| `~/.potsherd/models/` | written once, on first index: a 33 MB local embedding model |
+| `~/.potsherd/models/` | written once, on first index: a 32.4 MB local embedding model |
+| `~/.potsherd/hook-failures.log` | appended by `SessionEnd` when it could not index; read out and cleared by the next `SessionStart` |
 
 Codex's transcripts live at
 `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<thread-id>.jsonl`. **[disk]** —

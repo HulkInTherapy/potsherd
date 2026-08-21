@@ -3,7 +3,7 @@
 Claude Code deletes your session transcripts after 30 days. It does not tell you.
 
 ```
-npx potsherd audit
+npx potsherd audit          # at release. today: see Install — the package is not published yet
 ```
 
 ```
@@ -402,7 +402,7 @@ model, no download and no network, and `find` works on day one without it —
 every search screen in this readme was taken against a `--no-embed` index.
 
 Vectors are what let `find "the pooler decision"` match a session that never
-used those words. They cost a one-off model download (`bge-small`, 33 MB on
+used those words. They cost a one-off model download (`bge-small`, 32.4 MB on
 disk once cached) that `index` announces before it starts, and minutes on the
 first run. You can add them later: `potsherd index` again without `--no-embed`
 fills in what is pending.
@@ -534,6 +534,10 @@ potsherd doctor --privacy · 22 aug 2026
     ~/.pi/agent/settings.json
       one "potsherd" MCP server entry each, from potsherd setup.
       every other server in those files is preserved.
+    …and beside each of those 8:  <that file>.potsherd-bak-<UTC>
+      a copy of the file as it was, taken before potsherd changes it.
+      one per write. potsherd never reads them back and never removes
+      them; delete them yourself once you are happy with the change.
 
   leaves this machine:
     redacted slices of your transcripts, sent to a model as the
@@ -653,20 +657,25 @@ Being clear about this before you find out yourself:
 
 ## Install
 
-Nothing is required for `audit`:
+> **potsherd is not on npm yet.** `npx potsherd` and `npm i -g potsherd` are
+> both 404 today — publishing is phase 7's job. The `npx` line at the top of
+> this readme is what `audit` will be at release; the commands below are what
+> works now. Nothing else in this readme depends on the registry: every screen
+> in it was captured from a checkout.
 
 ```bash
-npx potsherd audit
+git clone https://github.com/HulkInTherapy/potsherd
+cd potsherd
+pnpm install && pnpm build
+
+node packages/cli/bin/potsherd.js audit
+node packages/cli/bin/potsherd.js rescue
+node packages/cli/bin/potsherd.js index --no-embed
+node packages/cli/bin/potsherd.js find "something you argued about in june"
 ```
 
-For the verbs that write, install it:
-
-```bash
-npm install -g potsherd
-potsherd rescue
-potsherd index --no-embed
-potsherd find "something you argued about in june"
-```
+`potsherd setup --claude` (and the plugin) write the absolute path to that
+`bin/potsherd.js` into their config, so nothing depends on a global install.
 
 Requires Node 22 or newer. `CLAUDE_CONFIG_DIR` is honoured; `--claude-dir`
 overrides it. Every verb takes `--json`, `--no-color`, `--ascii` and `--width`.

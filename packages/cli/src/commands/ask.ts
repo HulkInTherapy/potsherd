@@ -552,8 +552,18 @@ function readReadersFile(abs: string): ReadersFile {
     );
   }
   if (parsed['version'] !== READERS_FILE_VERSION) {
+    // D12: `String(undefined)` is `"undefined"`, and this read
+    // `is a vundefined reader file` for the commonest case of all — a file
+    // that has `kind` right and no `version` at all, which is what a
+    // hand-edited or half-written recording looks like. A missing field and a
+    // field from the future are different problems and get different
+    // sentences; only a number is ever printed after a `v`.
+    const v = parsed['version'];
     throw new UserError(
-      `${abs} is a v${String(parsed['version'])} reader file and this potsherd (${VERSION}) reads v${READERS_FILE_VERSION}`,
+      typeof v === 'number'
+        ? `${abs} is a v${String(v)} reader file and this potsherd (${VERSION}) reads v${String(READERS_FILE_VERSION)}`
+        : `${abs} has no "version" — this potsherd (${VERSION}) reads v${String(READERS_FILE_VERSION)} reader files` +
+          `${v === undefined ? '' : `, and "version" here is ${JSON.stringify(v)}`}`,
       `potsherd ask "…" --readers-out ${abs}    # re-record with this build`,
     );
   }

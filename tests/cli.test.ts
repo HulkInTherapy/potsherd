@@ -348,6 +348,36 @@ describe('potsherd cli', () => {
     expect(out).not.toMatch(/^\s*no network[,.]/m);
   });
 
+  /**
+   * D6. Every consented write copies the file it is about to change to
+   * `<file>.potsherd-bak-<UTC>` first — seven `setup` configs plus
+   * `settings.json`, eight files potsherd creates in other tools' directories.
+   * The receipt named the eight configs, said "every other server in those
+   * files is preserved", and never mentioned the eight copies. `03` §11 says
+   * it lists every path written.
+   */
+  it('doctor --privacy discloses the backup it leaves beside every config', () => {
+    const root = scratchRoot();
+    const r = run(['doctor', '--privacy', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root, '--width', '100']);
+    // The suffix as `backupPath()` actually spells it, so a rename breaks this.
+    expect(r.stdout).toContain('.potsherd-bak-');
+    // …and it is disclosed under consent, with the other consented writes.
+    const consentBlock = r.stdout.slice(r.stdout.indexOf('explicit y at a diff'));
+    expect(consentBlock).toContain('.potsherd-bak-');
+    expect(consentBlock).toMatch(/beside each of those \d+/);
+  });
+
+  it('doctor --privacy --json lists the backups among the consented writes', () => {
+    const root = scratchRoot();
+    const r = run(['doctor', '--privacy', '--json', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    const j = JSON.parse(r.stdout) as { writesWithConsent: string[] };
+    const configs = j.writesWithConsent.filter((p) => !p.includes('.potsherd-bak-'));
+    const backups = j.writesWithConsent.filter((p) => p.includes('.potsherd-bak-'));
+    // One backup per consented file, and each names the file it sits beside.
+    expect(backups).toHaveLength(configs.length);
+    for (const c of configs) expect(backups).toContain(`${c}.potsherd-bak-<UTC>`);
+  });
+
   it('doctor --privacy --json carries the same disclosure', () => {
     const root = scratchRoot();
     const r = run(['doctor', '--privacy', '--json', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
