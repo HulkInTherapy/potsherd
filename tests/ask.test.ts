@@ -24,6 +24,7 @@ import {
 } from '../packages/core/src/ask.js';
 import { matchSpan, quotableText } from '../packages/core/src/ask.js';
 import { QUOTE_CHARS, clipQuote, maskSafeCut, renderAsk } from '../packages/core/src/render/ask.js';
+import { OPEN_THREAD_LABEL } from '../packages/core/src/open-threads.js';
 import { Theme, stripAnsi } from '../packages/core/src/theme.js';
 import { Llm, type Backend, type SendRequest, type SendResult, type Transport } from '../packages/core/src/llm.js';
 import type { Transcript, TranscriptUnit } from '../packages/core/src/cards/transcript.js';
@@ -816,6 +817,51 @@ function resultFrom(
     ms: 12_400,
   };
 }
+
+describe('an open thread is checkable in the terminal, not only in --json', () => {
+  // The rule pass drops any decision whose evidence_seq does not resolve, so
+  // by construction every open thread that reaches the renderer has one. The
+  // renderer used to print `<project>/<id8>  <date>` and no seq, which left
+  // the one claim potsherd makes about an *absence* as the one claim a reader
+  // could not go and check. This fails if the seq stops being printed.
+  const thread = {
+    what: 'transaction pooling was chosen over session pooling',
+    why: 'prepared statements were breaking',
+    sessionId: POOLER,
+    id8: POOLER.slice(0, 8),
+    project: 'api',
+    ts: '2026-08-01T14:30:00Z',
+    evidenceSeqs: [12, 19] as readonly number[],
+    otherProject: 'web',
+    otherSessionIds: [],
+    overlap: { files: [] as readonly string[], topics: ['pooling'] as readonly string[] },
+    score: 2.1,
+    confirmed: true,
+    note: 'the pooler decision never reached web',
+  };
+
+  it('prints the seq the claim rests on, and labels the claim advisory', () => {
+    // renderAsk returns early when no sentence survived the filter, which is
+    // right — open threads are context attached to an answer, not an answer.
+    // So this needs a real grounded answer to reach the OPEN THREADS block.
+    const base = filterAnswer(
+      [{ text: 'The client cache was set to zero rather than changing the pooler mode.', cites: [1] }],
+      [{ index: 1, sessionId: POOLER, seq: 12, quote: REAL_QUOTE }],
+      sources(),
+    );
+    expect(base.sentences.length).toBe(1);
+    const r = {
+      ...resultFrom(base, { question: 'the pooler decision', searched: 2, matching: 2 }),
+      openThreads: [thread],
+    };
+    const text = stripAnsi(
+      renderAsk(r, new Theme({ color: false, width: 80 }), new Date('2026-08-21T00:00:00Z')),
+    );
+    expect(text).toContain('@12,19');
+    expect(text).toContain(OPEN_THREAD_LABEL);
+    for (const line of text.split('\n')) expect(line.length).toBeLessThanOrEqual(80);
+  });
+});
 
 describe('renderAsk', () => {
   const out = filterAnswer(

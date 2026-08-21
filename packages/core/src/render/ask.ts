@@ -162,7 +162,12 @@ function threadLines(o: OpenThread, t: Theme, now: Date): string[] {
   const head = `${t.warn(OPEN_THREAD_LABEL)} ${t.sep} decided in ${o.project}, not seen in ${o.otherProject}`;
   const out = [INDENT + f.clip(head, t.width, t)];
   for (const line of f.wrap(o.what, width - 4)) out.push(INDENT + '    ' + line);
-  const src = `${o.project}/${o.id8}  ${o.ts ? f.shortDateTime(o.ts, now) : t.dash}`;
+  // "Cited or dropped" has to survive the render, not just the rule pass. The
+  // rule pass drops any decision whose evidence_seq does not resolve — and then
+  // this line used to show no seq at all, so the one claim potsherd makes about
+  // an *absence* was the one claim a reader could not go and check.
+  const seqs = o.evidenceSeqs.length ? `@${o.evidenceSeqs.join(',')}` : '';
+  const src = `${o.project}/${o.id8}${seqs}  ${o.ts ? f.shortDateTime(o.ts, now) : t.dash}`;
   out.push(INDENT + '    ' + t.dim(f.clip(src, width - 4, t)));
   if (o.note.trim()) {
     for (const line of f.wrap(o.note.trim(), width - 4)) out.push(INDENT + '    ' + t.dim(line));
