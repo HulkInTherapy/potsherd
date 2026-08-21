@@ -80,10 +80,10 @@ import { onPath } from './resolve-bin.js';
  * single entry point every call goes through, and `tests/llm.test.ts` asserts
  * that no command outside {@link MODEL_CALL_VERBS} reaches `Llm.open`.
  */
-// T4.1 adds `'ask'` to this list at integration. `graft` is here because
-// `tests/llm.test.ts` asserts this constant against the CLI command files that
-// actually reach `Llm.open` — the guard that exists precisely so a verb cannot
-// start calling a model without the privacy receipt saying so.
+// `ask` and `graft` joined `card` here at phase 4 integration. The list is
+// asserted by `tests/llm.test.ts` against the CLI command files that actually
+// reach `Llm.open` — the guard that exists precisely so a verb cannot start
+// calling a model without the privacy receipt saying so.
 export const MODEL_CALL_VERBS: readonly string[] = ['card', 'ask', 'graft'];
 
 /**
@@ -92,6 +92,13 @@ export const MODEL_CALL_VERBS: readonly string[] = ['card', 'ask', 'graft'];
  * Named explicitly rather than left as "everything else", because "which of
  * these is safe to run on a client's laptop" is the question the receipt is
  * read to answer, and an answer by omission is not one.
+ *
+ * `unpin` was answered by omission for two phases: registered in the CLI and
+ * missing from both lists, so the receipt said nothing either way about it —
+ * the exact failure the paragraph above says the list exists to prevent.
+ * `tests/llm.test.ts` now asserts that these two lists together cover every
+ * command the CLI registers, which is the only form of this list that keeps
+ * its own promise.
  */
 export const OFFLINE_VERBS: readonly string[] = [
   'audit',
@@ -104,6 +111,7 @@ export const OFFLINE_VERBS: readonly string[] = [
   'stats',
   'tag',
   'pin',
+  'unpin',
   'link',
   'doctor',
 ];
