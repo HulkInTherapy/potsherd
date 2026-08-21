@@ -424,4 +424,15 @@ export {
 } from './cards/schema.js';
 export { renderCardRun, type CardRunOptions as CardRunCardOptions } from './render/card-run.js';
 
+// ------------------------------------------------------------------ phase 4
+export {
+  OPEN_THREAD_LABEL,
+  openThreadCandidates,
+  confirmOpenThreads,
+  type OpenThreadCandidate,
+  type OpenThread,
+  type CandidateOptions as OpenThreadCandidateOptions,
+  type ConfirmOptions as OpenThreadConfirmOptions,
+} from './open-threads.js';
+
 export { VERSION } from './version.js';
