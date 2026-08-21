@@ -170,13 +170,63 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
     expect(c.project).toBe(FULCRUM);
     expect(c.otherProject).toBe(MEGHBRAIN);
     // Cited or dropped: the positive half of the claim is checkable.
-    expect(c.evidenceSeq).toBe(7);
+    // Was `expect(c.evidenceSeq).toBe(7)` — changed in T4.5 (D3) because the
+    // field is now every resolving seq, not the lowest one. Same seq, new shape.
+    expect(c.evidenceSeqs).toEqual([7]);
     expect(c.id8).toBe(a.slice(0, 8));
     expect(c.ts).toBe('2026-07-01T17:00:00.000Z'); // the cited exchange's ts, not the session's
     expect(c.otherSessionIds.length).toBe(1);
     expect(c.overlap.topics).toContain('pgbouncer');
     expect(c.overlap.files).toContain('db/pool.ts');
     expect(c.score).toBeGreaterThan(0);
+  });
+
+  // --- D3 (T4.5). `CardClaim.evidence_seq` is `number[]`; T4.2 pinned the
+  // candidate to the lowest resolving seq alone, so a decision citing three
+  // exchanges arrived carrying one and the other two were unreachable from the
+  // thread. These two tests are what stops it narrowing again.
+  it('carries every citation the decision made, not just the lowest', () => {
+    const db = memDb();
+    const a = addCard(db, {
+      project: FULCRUM,
+      topics: SIBLING_TOPICS,
+      files: SIBLING_FILES,
+      decisions: [{ ...DECIDED, seq: [7, 12, 31] }],
+    });
+    addCard(db, {
+      project: MEGHBRAIN,
+      topics: SIBLING_TOPICS,
+      files: SIBLING_FILES,
+      decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
+    });
+
+    const c = openThreadCandidates(db, [a])[0]!;
+    expect(c.evidenceSeqs).toEqual([7, 12, 31]);
+    // The timestamp is still the first resolving exchange's, unchanged by the
+    // widening, so a reader lands where T4.2's candidate pointed them.
+    expect(c.ts).toBe('2026-07-01T17:00:00.000Z');
+  });
+
+  it('keeps only the seqs that resolve, so every one of them can be read', () => {
+    const db = memDb();
+    const a = addCard(db, {
+      project: FULCRUM,
+      topics: SIBLING_TOPICS,
+      files: SIBLING_FILES,
+      decisions: [{ ...DECIDED, seq: [7, 999] }],
+      // 999 is cited by the card and is not an exchange of this session.
+      exchangeSeqs: [7],
+    });
+    addCard(db, {
+      project: MEGHBRAIN,
+      topics: SIBLING_TOPICS,
+      files: SIBLING_FILES,
+      decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
+    });
+
+    const c = openThreadCandidates(db, [a])[0]!;
+    expect(c.evidenceSeqs).toEqual([7]);
+    expect(c.evidenceSeqs).not.toContain(999);
   });
 
   it('produces nothing when B did contain the decision, in different words', () => {
@@ -606,7 +656,7 @@ function candidate(over: Partial<OpenThreadCandidate> = {}): OpenThreadCandidate
     id8: '4c9339e0',
     project: FULCRUM,
     ts: '2026-07-01T17:00:00.000Z',
-    evidenceSeq: 7,
+    evidenceSeqs: [7],
     otherProject: MEGHBRAIN,
     otherSessionIds: ['85ef9531-0000-4000-8000-000000000000'],
     overlap: { files: ['db/pool.ts'], topics: ['pgbouncer'] },
@@ -680,7 +730,7 @@ describe('T4.2 model pass — advisory, batched, and overruled in code', () => {
       }),
     ]);
     // The ruling: the prompt is not the guard, the code is.
-    const out = await confirmOpenThreads([candidate({ evidenceSeq: null })], {
+    const out = await confirmOpenThreads([candidate({ evidenceSeqs: [] })], {
       llm: Llm.open({ transport: t }),
     });
     expect(out[0]!.confirmed).toBe(false);
@@ -697,7 +747,7 @@ describe('T4.2 model pass — advisory, batched, and overruled in code', () => {
             note: 'yes.',
             what: 'something the model made up',
             otherProject: '/Users/zebra/not-a-project',
-            evidenceSeq: 4242,
+            evidenceSeqs: [4242],
           },
         ],
       }),
@@ -705,7 +755,7 @@ describe('T4.2 model pass — advisory, batched, and overruled in code', () => {
     const out = await confirmOpenThreads([candidate()], { llm: Llm.open({ transport: t }) });
     expect(out[0]!.what).toBe(DECIDED.what);
     expect(out[0]!.otherProject).toBe(MEGHBRAIN);
-    expect(out[0]!.evidenceSeq).toBe(7);
+    expect(out[0]!.evidenceSeqs).toEqual([7]);
   });
 
   it('discards a verdict for a candidate it never sent', async () => {
@@ -832,7 +882,7 @@ describe('T4.2 no-LLM ruling', () => {
     // The candidate's own fields survive intact, so a caller that wanted to
     // print them anyway still could.
     expect(out[0]!.what).toBe(DECIDED.what);
-    expect(out[0]!.evidenceSeq).toBe(7);
+    expect(out[0]!.evidenceSeqs).toEqual([7]);
   });
 
   it('NO_MODEL_NOTE says plainly that nothing was confirmed', () => {

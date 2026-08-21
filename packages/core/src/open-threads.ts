@@ -51,8 +51,24 @@ export interface OpenThreadCandidate {
   id8: string;
   project: string;
   ts: string;
-  /** the card seq the decision cited, so the claim stays checkable */
-  evidenceSeq: number | null;
+  /**
+   * Every card seq the decision cited **that resolves to a real exchange**,
+   * ascending (the card's own `evidence_seq` is sorted on parse), so the claim
+   * stays checkable.
+   *
+   * Never empty on a raised candidate: a decision with no resolving citation
+   * is dropped by rule 2 before it gets here, and the model pass refuses to
+   * confirm one anyway. `CardClaim.evidence_seq` is `number[]`, and T4.2 pinned
+   * this to the lowest resolving seq alone — a decision citing three exchanges
+   * arrived carrying one, and the other two were unreachable from the thread.
+   * Widened in T4.5 (D3); the name is plural so a consumer that was reading a
+   * number breaks loudly rather than quietly. Nothing had shipped it: open
+   * threads are new in phase 4 and `v0.4.0` predates them.
+   *
+   * {@link OpenThreadCandidate.ts} still comes from the *first* resolving seq —
+   * the exchange a reader lands on first.
+   */
+  evidenceSeqs: readonly number[];
   /** the project it was never seen in */
   otherProject: string;
   /** that project's sessions that share the files/topics */
@@ -566,18 +582,25 @@ export function openThreadCandidates(
 
       for (const d of a.decisions) {
         // 2 — cited, and the citation resolves to a real exchange.
-        let seq: number | null = null;
+        //
+        // *Every* resolving seq is kept (D3). A decision that cites three
+        // exchanges is a claim a reader can check three ways, and stopping at
+        // the first threw two of them away. Unresolvable seqs are still
+        // dropped here: an `id8@seq` a reader cannot follow is worse than one
+        // fewer citation.
+        const seqs: number[] = [];
         let ts = a.ts;
         for (const s of d.seqs) {
           const row = seqExists.get(sessionId, s) as { ts: string | null } | undefined;
           if (!row) continue;
-          seq = s;
           // The ts a reader lands on when they follow `id8@seq`, which is the
-          // thing being cited. Session start is the fallback.
-          if (row.ts) ts = row.ts;
-          break;
+          // thing being cited — the *first* resolving one, so the timestamp on
+          // a widened candidate is the same one T4.2's candidate carried.
+          // Session start is the fallback.
+          if (seqs.length === 0 && row.ts) ts = row.ts;
+          seqs.push(s);
         }
-        if (seq === null) continue;
+        if (seqs.length === 0) continue;
 
         // 3 and 4 — the decision's topic, and its presence in B.
         const dTokens = new Set(contentTokens(`${d.what} ${d.why}`));
@@ -603,7 +626,7 @@ export function openThreadCandidates(
           id8: idTag(sessionId),
           project: a.project,
           ts,
-          evidenceSeq: seq,
+          evidenceSeqs: seqs,
           otherProject: project,
           otherSessionIds,
           overlap: { files: overlapFiles, topics: overlapTopics },
@@ -808,7 +831,7 @@ export async function confirmOpenThreads(
     if (!v) return { ...c, confirmed: false, note: 'the model returned no verdict for this one.' };
     // The guard, in code. A decision the card cannot cite is not confirmable
     // however confidently the model confirmed it.
-    if (v.confirmed && c.evidenceSeq === null) {
+    if (v.confirmed && c.evidenceSeqs.length === 0) {
       return {
         ...c,
         confirmed: false,
