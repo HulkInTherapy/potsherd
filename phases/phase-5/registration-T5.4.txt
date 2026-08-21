@@ -1,0 +1,483 @@
+T5.4 — codex plugin, and the privacy string that went false — REGISTRATION
+branch: task/T5.4-codex   ·   cut from 0683133   ·   written 22 aug 2026
+
+Files this task owns and delivers:
+  packages/cli/src/commands/doctor.ts        (JOB 2 — the receipt paragraph only)
+  plugins/claude-code/hooks/hooks.json       (JOB 2 — SessionStart warning only)
+  docs/screens/05-doctor-privacy.txt         (JOB 2 — regenerated)
+  README.md                                  (JOB 2 — the privacy block only)
+  plugins/codex/.codex-plugin/plugin.json    (JOB 1)
+  plugins/codex/.mcp.json                    (JOB 1)
+  plugins/codex/hooks/hooks.json             (JOB 1)
+  plugins/codex/README.md                    (JOB 1)
+  phases/phase-5/registration-T5.4.txt       (this file)
+
+No CLI flag was added. Nothing else under `packages/` was touched. Nothing was
+installed into `~/.codex` or `~/.claude`; §6 gives the throwaway paths.
+Baseline: `pnpm install && pnpm build` clean, 1,041 tests green before, 1,041
+green after.
+
+Two jobs, committed separately. Job 2 first, because it was the one that must
+not be skipped.
+
+
+================================================================================
+0. JOB 2 — THE RECEIPT STOPPED BEING TRUE, AND NOW IS AGAIN
+================================================================================
+
+This closes T5.3's registration §8, which raised the gap and left the choice
+open. Option (b) was taken: reword the receipt so the sentence is true on every
+path. Option (a) — README-only disclosure — was rejected because the receipt is
+the artefact users are told to trust (`03 §11`: "`potsherd doctor --privacy`
+lists every path read and every path written"), and a README footnote does not
+repair a false line inside it.
+
+BEFORE (packages/cli/src/commands/doctor.ts, and both copies that quote it):
+
+  no other network, except the one-off embedding-model download that
+  `potsherd index` announces before it starts and `--no-embed` skips.
+
+AFTER:
+
+  no other network, except the one-off embedding-model download.
+  `potsherd index` names it before it starts, but `--quiet` and
+  `--json` suppress that line, and `--quiet` is how the plugin's
+  SessionEnd hook runs it — so its SessionStart hook warns you first.
+  `--no-embed` skips the download entirely.
+
+WHY IT WAS FALSE. `runIndex` takes an `onModelDownload` callback and the
+callback's second statement is:
+
+    if (o.json || o.quiet) return;
+
+so the announcement is suppressed under both flags. T5.3's SessionEnd hook runs
+`index --session "$ID" --quiet`, detached, and measured one firing pulling
+33 MB of `Xenova/bge-small-en-v1.5` with nothing shown to the user. The
+receipt's claim was true only of the path a human types by hand.
+
+This is the third receipt in this project to drift false — `doctor --privacy`
+once still said "no network" after the product had started calling a model, and
+`index` once printed "index holds no secrets" while the index held masks
+(`plans/08` rule 1). Note that `--json` was ALSO always silent and the original
+sentence never covered it either; the reworded line names both flags.
+
+NOT NARROWED TO FIT. Pinning the hook to `--no-embed` would kill vector search
+for every newly-ended session. That is a product decision, not a bug fix, and
+T5.3 was right to refuse it.
+
+
+================================================================================
+1. JOB 2, PART TWO — THE SILENCE ITSELF, AND WHY IT MOVED TO SessionStart
+================================================================================
+
+The brief asked whether the hook could surface a one-line `systemMessage` the
+first time a download happens. It cannot — not on `SessionEnd`.
+
+  code.claude.com/docs/en/hooks.md, SessionEnd, verbatim:
+    "Discards universal fields: Yes - `systemMessage` is discarded"
+    "SessionEnd hooks have no decision control. They can only produce side
+     effects through `terminalSequence`. Exit codes and `systemMessage` are
+     ignored."
+
+So the announcement was moved to where it can be heard AND where it is more
+useful — `SessionStart`, BEFORE the download rather than during it.
+
+  SessionStart, same page, verbatim:
+    "`systemMessage`: A message shown to the user. On `UserPromptSubmit`,
+     `UserPromptExpansion`, and `SessionStart`, Claude sees it as context."
+
+WHAT WAS ADDED. One clause in the existing SessionStart rescue hook, after the
+binary resolution and before the detached `rescue`:
+
+    MD="${POTSHERD_DIR:-$HOME/.potsherd}/models"
+    [ -n "$(find "$MD/Xenova/bge-small-en-v1.5/onnx" \
+            -name '*.onnx' -size +1000k 2>/dev/null | head -1)" ] \
+      || printf '{…"systemMessage":"…%s…"}\n' "$MD"
+
+It is a pure-shell restatement of `isModelCached()` in
+`packages/core/src/embeddings.ts` — same directory, same ">1 MB `.onnx`" test —
+so it needs no Node startup. It fires only while the model is absent, which in
+practice means once, and it names the size, the model id, the target directory
+and the way to opt out.
+
+  MEASURED COST                  20 runs      per run
+    probe alone, model absent      84 ms       4.2 ms
+    probe alone, model cached      77 ms       3.9 ms
+
+  Against T5.3's measured 6.5 – 10.5 ms SessionStart, that is ~4 ms added on
+  every start and no change to what the hook does. Not slow, and not noisy:
+  it emits nothing once the model is on disk.
+
+VERIFIED BY EXECUTION, not by reading. The command was extracted from
+`hooks.json` and run under a throwaway `HOME` in all three states:
+
+    model absent   -> valid JSON, hookEventName SessionStart, 509-char
+                      systemMessage, correct models directory interpolated
+    stub .onnx     -> still warns (the >1 MB test is what makes this correct;
+                      a partial download must not read as cached)
+    model cached   -> EMPTY. silent.
+
+`hooks.json` was rewritten programmatically rather than by hand, so the
+four-level quoting (JSON file -> shell string -> printf format -> JSON payload)
+is machine-generated. The diff is one line.
+
+THE ONE THING NOT FIXED, AND IT IS NOT MINE TO FIX. This warning does not cover
+a user who runs `potsherd index --quiet` or `--json` by hand from a script; for
+them the download is still silent, and the reworded receipt now says so
+explicitly rather than implying otherwise.
+
+
+================================================================================
+2. JOB 2 — SCREENS AND THE README
+================================================================================
+
+`bash scripts/make-screens.sh` was run with `POTSHERD_SCREENS_NO_MODEL=1`, which
+keeps the committed `14-ask.txt` and `15-graft.txt` and skips the ~6-minute card
+pass. Neither of those two screens is affected by this change.
+
+All 15 assertions passed: "15 screens, widest line 80 characters, no forbidden
+strings, no unredacted credentials, no cut masks".
+
+THREE screens came back modified. Only ONE was kept:
+
+  05-doctor-privacy.txt   KEPT     the reworded paragraph, 2 lines -> 5
+  07-index.txt            REVERTED  `full index 263ms` -> `272ms`
+  09-find.txt             REVERTED  `bm25 · 10ms` -> `11ms`
+
+The two reverted diffs are one measured millisecond each, which the script's own
+header predicts as unavoidable per-machine noise. Reverted with
+`git checkout --`, so the committed screens for those two are byte-identical to
+0683133.
+
+The README carries the receipt twice. Only the fenced privacy block — the one CI
+diffs against the live command — was edited. Phase 7 owns the README rewrite and
+nothing else in it was touched.
+
+  LEFT ALONE ON PURPOSE, README line 406, in the `index` section:
+    "…a one-off model download (`bge-small`, 33 MB on disk once cached) that
+     `index` announces before it starts…"
+  That sentence is about the command a human runs, where it remains true, and
+  it is outside the privacy block this task was scoped to. Flagged, not edited.
+
+
+================================================================================
+3. DEFECTS FOUND AND NOT FIXED (per the brief: report, do not fix)
+================================================================================
+
+(a) plugins/claude-code/README.md IS NOW STALE, AND IT IS RESERVED GROUND.
+    Its "What it does to your machine" section says, verbatim:
+
+      "Be aware of one gap: `doctor --privacy` describes this as a download
+       'that `potsherd index` announces before it starts', and that is true
+       when you run `index` by hand — but the hook runs `index --quiet` in the
+       background, so on the hook path **there is no announcement**."
+
+    Both halves are now wrong: the receipt no longer says that, and the hook
+    path now DOES announce, at SessionStart. `plugins/claude-code/**` is
+    reserved except `hooks/hooks.json`, so it was not touched. This is the
+    highest-priority follow-up in this file — it is a disclosure that now
+    understates what the product does, which is the benign direction, but it
+    quotes a string that no longer exists.
+
+(b) `potsherd mcp` IS NOT A VERB, though `03 §9` lists it.
+    `03 §9` gives the CLI as "... ask · graft · export · mcp". The real verb
+    list is `audit rescue guard index find ask ls tag pin unpin link show graft
+    stats card doctor`, and `potsherd mcp` exits with `unknown command 'mcp'`.
+    `export` is absent too. Consequence for this task: a codex or claude-code
+    plugin installed from a marketplace has NO PATH fallback for its MCP server
+    the way its hooks do, because there is no global command that speaks MCP.
+    `packages/mcp` is T5.1's ground.
+
+(c) `packages/mcp` DOES NOT EXIST AT 0683133. Both plugins' `.mcp.json` point
+    into it. Expected — T5.1 is live — but it means the MCP half of BOTH
+    plugins is unexecutable on this commit, and neither was tested.
+
+(d) `rescue` IS CLAUDE-ONLY, and nothing says so at the surface.
+    `const HARNESS = 'claude'` in `packages/core/src/rescue.ts`, and it reads
+    only `claudeDir()`. It has no `--harness` flag, unlike `index`. This is
+    correct behaviour — rescue exists because Claude Code sweeps — but it is
+    why the codex plugin has no rescue hook, and a reader of `03 §9` would not
+    guess it.
+
+
+================================================================================
+4. JOB 1 — THE CODEX PLUGIN. WHAT IS REAL AND WHAT IS NOT
+================================================================================
+
+`codex` IS NOT INSTALLED ON THIS MACHINE. `which codex` -> not found. The
+plugin has never been loaded by Codex and no `codex` command in its README has
+been run. Everything below is labelled.
+
+WHAT THE PHASE FILE ASSUMED, AND WHAT IS ACTUALLY THERE. Deliverable 3 says:
+
+  "`plugins/codex/.codex-plugin/plugin.json` with the same mcp + hook
+   (`codex features enable plugin_hooks` documented)."
+
+  MANIFEST PATH          REAL. `.codex-plugin/plugin.json` is first in codex's
+                         own discovery list, and `.claude-plugin/plugin.json`
+                         is second — codex reads Claude Code manifests too.
+  HOOKS                  REAL, and BETTER than assumed: hooks are Stable and
+                         default_enabled: true. 11 events, incl. SessionStart
+                         and SessionEnd.
+  `codex features enable plugin_hooks`   ** A FOURTH PHANTOM FLAG **
+
+** THE FOURTH FLAG THE PLAN ASSUMED THAT DOES NOT DO ANYTHING **
+
+`04-DECISIONS.md` already records three flags the plan assumed and that do not
+exist. This is a fourth, and it is a nastier shape than the other three,
+because it does not error — it succeeds and is then discarded.
+
+  codex-rs/features/src/lib.rs:
+      FeatureSpec {
+          id: Feature::PluginHooks,
+          key: "plugin_hooks",
+          stage: Stage::Removed,
+          default_enabled: false,
+      },
+
+  and, in the config loader:
+      "plugin_hooks" => {
+          continue;
+      }
+
+`plugin_hooks` is a REMOVED compatibility flag. Because the key is still
+registered, `codex features enable plugin_hooks` passes validation, writes
+`features.plugin_hooks = true` into the user's `config.toml`, and prints that
+it enabled the feature. The loader then hits that `continue` and throws it away.
+
+  ACTION FOR THE ORCHESTRATOR: phase-5 deliverable 3 and
+  `research/memory-research.md` §4 both instruct documenting this command.
+  Documenting it would tell users to write a dead key into their config. The
+  codex README documents it as a thing NOT to run, and explains why. Both plan
+  lines should be corrected per `00-README.md` rule 5.
+
+  Plugin-bundled hooks need no flag: `Feature::CodexHooks`, key `hooks`,
+  `Stage::Stable`, `default_enabled: true`.
+
+
+================================================================================
+5. JOB 1 — THE T5.3 TRAP, CHECKED FOR IN CODEX. IT IS NOT THERE.
+================================================================================
+
+T5.3 §3 is the warning: `claude plugin validate` passed a manifest that Claude
+Code refused to load, because declaring `"hooks": "./hooks/hooks.json"`
+duplicated a conventionally-discovered file and the WHOLE PLUGIN was dropped.
+The brief said to assume codex has its own version of that trap and to prefer
+declaring less.
+
+Codex has the same three conventions — and, read in source, not the same trap:
+
+  codex-rs/core-plugins/src/loader.rs
+      const DEFAULT_HOOKS_CONFIG_FILE: &str = "hooks/hooks.json";
+      const DEFAULT_MCP_CONFIG_FILE:   &str = ".mcp.json";
+      const DEFAULT_SKILLS_DIR_NAME:   &str = "skills";
+
+      match &manifest_paths.hooks {
+          Some(PluginManifestHooks::Paths(paths)) => { … }
+          …
+          None => {
+              let default_path = plugin_root.join(DEFAULT_HOOKS_CONFIG_FILE);
+              if default_path.as_path().is_file() { … }
+          }
+      }
+
+The declared key and the conventional probe are MUTUALLY EXCLUSIVE match arms.
+Declare it and the default branch never runs; omit it and the default path is
+probed. So in codex, unlike Claude Code, declaring is survivable.
+
+DECISION: declare nothing anyway. `plugin.json` carries no `skills`, no
+`mcpServers`, no `hooks`, no `apps`, no `commands` — only identity and
+`interface`. The files sit at the conventional paths. Both routes work; the one
+that cannot double-load was chosen, and it costs nothing.
+
+Corroborated on disk: every OpenAI-shipped manifest under
+`~/.codex/plugins/cache/` (`visualize`, `browser`, `slack`, `documents`, `pdf`,
+`presentations`, `spreadsheets`, `template-creator`) declares `"skills"`
+explicitly and NONE declares `mcpServers` or `hooks`.
+
+A second rule that would have bitten a declared path: every path value must
+begin with `./`, and `resolve_manifest_path` drops the field with only a
+`tracing::warn!` if it does not — no error, no non-zero exit. Another silent
+one. This manifest declares no paths, so it cannot trip it.
+
+
+================================================================================
+6. JOB 1 — WHAT WAS ACTUALLY EXECUTED, AND WHERE
+================================================================================
+
+Nothing was installed into `~/.codex`. `~/.codex` was read only, and only as a
+transcript corpus. Throwaway paths, all under
+/private/tmp/claude-501/-Users-zebra-randomness/
+169ced20-27ee-4647-9d2c-8fac9217f6bd/scratchpad/ :
+
+  codexhome/          throwaway HOME for the codex hook runs; `.codex` inside
+                      it is a SYMLINK to the real ~/.codex (read-only input)
+  codex-verify/       throwaway --potsherd-dir for the index runs
+  fakehome/           throwaway HOME for the claude-code hook runs (job 2)
+  nodebin/            a PATH containing ONLY a `node` symlink, so the hooks'
+                      `command -v potsherd` branch could be forced to miss
+
+THE REAL CODEX CORPUS. `~/.codex/sessions` holds exactly one rollout:
+
+    ~/.codex/sessions/2026/07/21/rollout-2026-07-21T19-35-33-<thread-id>.jsonl
+    2.0 MB
+
+confirming the documented path pattern
+`sessions/YYYY/MM/DD/rollout-<timestamp>-<thread-id>.jsonl` against a real file.
+
+  potsherd index --harness codex --no-embed --potsherd-dir <scratch>
+      codex   1   1 session · 2 exchanges · 1 re-read
+      exchanges indexed   2   12 tool calls · 0 redacted
+      incremental index  55ms
+
+  1 of 1 sessions on disk. Full coverage, not a sample.
+
+  potsherd index --session <thread-id> --no-embed --potsherd-dir <scratch>
+      codex   1   1 session · 2 exchanges
+      -> the SessionEnd hook's exact command resolves a real codex thread id.
+
+THE HOOKS THEMSELVES, extracted from `plugins/codex/hooks/hooks.json` and run:
+
+  SessionStart, model absent        valid JSON, correct models dir
+  SessionStart, no potsherd anywhere  valid JSON, the no-binary warning
+  SessionStart, model cached        EMPTY — silent
+  SessionEnd, fed a real codex SessionEnd payload on stdin
+       {"session_id":"…","cwd":"/tmp","hook_event_name":"SessionEnd",
+        "reason":"other","transcript_path":null}
+       -> returned 0 immediately, and the detached index landed the thread:
+          sessions in the throwaway index: 1
+          harness/id: codex 019f84ff
+
+  So the SessionEnd hook is verified END TO END against real codex data, on
+  everything except codex itself firing it.
+
+(id truncated to 8 chars. No codex project name, thread title or transcript
+prose appears in any committed file, per the brief.)
+
+
+================================================================================
+7. JOB 1 — THE ONE DESIGN FORCED BY CODEX, AND THE RISK IN IT
+================================================================================
+
+** ${PLUGIN_ROOT} IS NOT INTERPOLATED INTO AN MCP SERVER'S command/args. **
+
+Claude Code's `.mcp.json` interpolates `${CLAUDE_PLUGIN_ROOT}` (T5.3 §0 verified
+it). Codex does not: `codex-rs/codex-mcp/src/plugin_config.rs` contains no
+placeholder substitution at all. What it does instead:
+
+    if let PluginMcpSource::Host { root } = source
+        && let Some(JsonValue::String(cwd)) = object.get("cwd")
+        && !Path::new(cwd).is_absolute()
+    {
+        object.insert("cwd".to_string(),
+            JsonValue::String(root.join(cwd).display().to_string()));
+    }
+
+A relative `cwd` is joined with the plugin root; `command` and `args` are passed
+through untouched. So the only way to reach a file near the plugin without
+interpolation is to pin `cwd` and let the child resolve a relative argument:
+
+    { "type": "stdio", "command": "node",
+      "args": ["../../packages/mcp/dist/index.js"], "cwd": "." }
+
+`"type": "stdio"` is accepted — `plugin_config.rs` explicitly matches
+`"http" | "streamable_http" | "streamable-http" | "stdio"`. The file may use a
+`{"mcpServers": {…}}` wrapper or a bare map; `PluginMcpFile` is an untagged enum
+over both. The wrapper is used, matching the claude-code plugin.
+
+  THE RISK, STATED PLAINLY: pinning `cwd` means the MCP server does NOT inherit
+  the user's project directory. `graft` writes its brief to `./.potsherd/
+  graft-<id>.md` in the working directory, so on codex it would land beside the
+  plugin instead of beside the user's code. This is UNTESTED — `packages/mcp`
+  does not exist on this commit — and it is written up in the codex README as
+  the thing to check first. If codex turns out to interpolate `${PLUGIN_ROOT}`
+  after all, an interpolated absolute path is strictly better and the fix is a
+  two-line edit.
+
+ENV VARS FOR HOOK COMMANDS, verbatim from
+codex-rs/hooks/src/engine/discovery.rs:
+
+    env.insert("PLUGIN_ROOT".to_string(), plugin_root_value.clone());
+    // For OOTB compat with existing plugins that use this env var.
+    env.insert("CLAUDE_PLUGIN_ROOT".to_string(), plugin_root_value);
+    env.insert("PLUGIN_DATA".to_string(), plugin_data_root_value.clone());
+    // For OOTB compat with existing plugins that use this env var.
+    env.insert("CLAUDE_PLUGIN_DATA".to_string(), plugin_data_root_value);
+
+There is NO `CODEX_PROJECT_DIR` and no `CODEX_PLUGIN_ROOT`. The project
+directory arrives as `cwd` on the hook's stdin. The hooks here take
+`${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}` so either name works.
+
+Note the shape of the SessionEnd session id is the same as Claude Code's —
+`session_id` on stdin — so T5.3's `sed` extraction was reused unchanged, and it
+is the id that `index --session` resolves (§6).
+
+
+================================================================================
+8. JOB 1 — WHAT THE CODEX PLUGIN DELIBERATELY DOES NOT DO
+================================================================================
+
+  NO rescue hook.        `rescue` is hard-coded to the claude harness (§3d) and
+                         reads only `~/.claude`. Running it from a codex plugin
+                         would archive nothing of codex's. Codex also shows no
+                         sign of a 30-day sweep — it has `archived_sessions/`
+                         and explicit `codex archive` / `codex delete`
+                         subcommands, i.e. deletion on request, not on a timer.
+                         So the premise that makes `rescue` urgent for Claude
+                         Code does not hold for codex.
+
+  NO skills, NO agent.   The claude-code plugin ships both. Codex has its own
+                         skills format; shipping an unverified one was out of
+                         scope for a deliverable specified as "the same mcp +
+                         hook". No `skills/` directory exists, so codex's
+                         conventional skills probe finds nothing.
+
+  NO marketplace file.   Codex's marketplace manifest format was NOT verified.
+                         `codex plugin marketplace add` takes a local path,
+                         `owner/repo[@ref]`, or a git URL — that much is in the
+                         source — but whether it would read this repository's
+                         root `.claude-plugin/marketplace.json` is unknown. The
+                         README labels the whole install stanza accordingly.
+                         Writing a guessed marketplace manifest at the repo
+                         root would also collide with T5.6's ground.
+
+  SessionStart does no work. It only says the two things SessionEnd cannot:
+                         no runnable potsherd, and the pending 33 MB download.
+                         Codex's SessionEnd is advisory — "their output won't
+                         steer Codex or keep the thread open", and there is a
+                         generated output schema for session-start and NONE for
+                         session-end. Identical constraint to Claude Code's,
+                         and the same fix as §1.
+
+
+================================================================================
+9. ACCEPTANCE
+================================================================================
+
+  [x] JOB 2 — the receipt no longer asserts an announcement it does not make.
+      Reworded, screen regenerated, README block matched, CI-checked pair kept
+      in step. 1,041 tests green.
+
+  [x] JOB 2 — the download IS now announced on the hook path, at SessionStart
+      rather than SessionEnd, because SessionEnd discards `systemMessage`.
+      Verified by executing the hook in all three states. ~4 ms.
+
+  [x] JOB 1 — plugins/codex/** delivered: manifest, MCP config, hooks, README.
+      Both hooks executed for real; SessionEnd verified end to end against a
+      real ~/.codex thread.
+
+  [x] JOB 1 — every key labelled [docs] / [disk] / [inferred] in the README,
+      and the unverified ones named rather than buried.
+
+  [ ] NOT DONE, AND NOT DOABLE HERE: `codex` is not installed. The plugin has
+      never been loaded by codex; `codex plugin marketplace add`, `codex plugin
+      add` and `codex plugin list` were never run; the MCP server was never
+      started, because `packages/mcp` does not exist on this commit. The phase
+      file's T5.4 line — "install locally per inherited readme; run `search`
+      from codex" — is NOT satisfied and is recorded OPEN.
+
+  [ ] OPEN FOR THE ORCHESTRATOR: §3(a), the stale disclosure in
+      plugins/claude-code/README.md, which is reserved ground.
+
+  [ ] OPEN FOR THE ORCHESTRATOR: two plan lines that instruct documenting
+      `codex features enable plugin_hooks` (§4).

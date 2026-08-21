@@ -1,0 +1,28 @@
+{
+  "description": "potsherd: index each codex thread as it ends, and say up front what the first index will download.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "R=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; command -v potsherd >/dev/null 2>&1 || [ -f \"$R/bin/potsherd.js\" ] || [ -f \"$R/../../packages/cli/bin/potsherd.js\" ] || { printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\"},\"systemMessage\":\"potsherd: this plugin found no runnable potsherd, so the SessionEnd hook will NOT index this thread. Install it with  npm i -g potsherd  — see the plugin README.\"}\\n'; exit 0; }; MD=\"${POTSHERD_DIR:-$HOME/.potsherd}/models\"; [ -n \"$(find \"$MD/Xenova/bge-small-en-v1.5/onnx\" -name '*.onnx' -size +1000k 2>/dev/null | head -1)\" ] || printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\"},\"systemMessage\":\"potsherd: no embedding model on this machine yet. When this thread ends, the SessionEnd hook runs index --quiet, which downloads one: 33 MB, Xenova/bge-small-en-v1.5, into %s. Once, detached, in the background. index --quiet prints nothing on its own, and SessionEnd cannot show you anything, which is why you are told now instead. To skip it: delete the SessionEnd entry from hooks.json and index by hand with --no-embed.\"}\\n' \"$MD\"; exit 0"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "ID=$(sed -n 's/.*\"session_id\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' | head -1); [ -n \"$ID\" ] || exit 0; R=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if command -v potsherd >/dev/null 2>&1; then P=potsherd; A=; elif [ -f \"$R/bin/potsherd.js\" ]; then P=node; A=\"$R/bin/potsherd.js\"; elif [ -f \"$R/../../packages/cli/bin/potsherd.js\" ]; then P=node; A=\"$R/../../packages/cli/bin/potsherd.js\"; else exit 0; fi; CFG=\"${POTSHERD_DIR:-$HOME/.potsherd}/config.json\"; if grep -q '\"cardOnEnd\"[[:space:]]*:[[:space:]]*true' \"$CFG\" 2>/dev/null; then CARD=1; else CARD=; fi; (trap '' HUP; \"$P\" ${A:+\"$A\"} index --session \"$ID\" --quiet; [ -n \"$CARD\" ] && \"$P\" ${A:+\"$A\"} card \"$ID\" --quiet --yes) </dev/null >/dev/null 2>&1 & exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}
