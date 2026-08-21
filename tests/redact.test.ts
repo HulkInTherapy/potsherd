@@ -705,14 +705,31 @@ describe('performance', () => {
     while (big.length < 10 * 1024 * 1024) big += chunk;
     big = big.slice(0, 10 * 1024 * 1024);
 
+    // A bare wall-clock bar measures the machine, not the redactor. This one sat
+    // at 10 s against a 3.5 s idle run — 2.9x of headroom — and duly failed at
+    // 10 s while four other agents were building on the same laptop. So the bar
+    // is calibrated against a trivially-linear pass over the same bytes: under
+    // load both numbers stretch together, while catastrophic backtracking (the
+    // thing this test exists to catch, and which costs *minutes*) still blows
+    // through it by orders of magnitude.
+    const c0 = performance.now();
+    let linear = 0;
+    for (let i = 0; i < big.length; i += 1) linear += big.charCodeAt(i) & 1;
+    const baselineMs = performance.now() - c0;
+
     const t0 = performance.now();
     const { hits } = redact(big);
     const ms = performance.now() - t0;
     const mbps = 10 / (ms / 1000);
+    const bar = Math.max(10_000, baselineMs * 120);
     // eslint-disable-next-line no-console
-    console.log(`  redact: 10 MB in ${ms.toFixed(0)} ms (${mbps.toFixed(1)} MB/s), ${hits.length} hits`);
+    console.log(
+      `  redact: 10 MB in ${ms.toFixed(0)} ms (${mbps.toFixed(1)} MB/s), ${hits.length} hits` +
+        ` · linear baseline ${baselineMs.toFixed(0)} ms, bar ${bar.toFixed(0)} ms`,
+    );
+    expect(linear).toBeGreaterThan(0);
     expect(hits.length).toBeGreaterThan(0);
-    expect(ms).toBeLessThan(10_000);
+    expect(ms).toBeLessThan(bar);
   });
 
   it('does not backtrack on the shapes that hang naive scanners', () => {
