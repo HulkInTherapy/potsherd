@@ -5,11 +5,8 @@ import {
   buildSessionFilters,
   type SearchFilters,
 } from '../search/filters.js';
-<<<<<<< HEAD
 import { slugify } from '../paths.js';
-=======
 import { ghostProjectSlug } from './transcript.js';
->>>>>>> worktree-agent-ae47177303e600daf
 import {
   CARD_MODEL,
   estimate,
