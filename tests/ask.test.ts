@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { db as store } from '@potsherd/core';
 import {
   ANSWER_MAX_WORDS,
+  trimToWordBudget,
+  wordCount,
   ASK_K,
   ASK_MAX_USD,
   ASK_SESSION_CHARS,
@@ -618,6 +620,210 @@ const SYNTH_OK = synthReply(
  * *before* looking at what `ask` did with it, so a fixture that quietly stopped
  * generating candidates fails loudly instead of passing empty.
  */
+/**
+ * The word budget, enforced in code.
+ *
+ * `ANSWER_MAX_WORDS` was prompt-only: `grep` found it at one line of the
+ * synthesizer prompt and in a `toBe(150)` test, and nothing anywhere compared
+ * an answer against it. A real run came back at **163 words** — a 17-line
+ * ANSWER block and 40 lines in total, against `05`'s "compact enough to
+ * screenshot whole" and its 80x24 box.
+ *
+ * Asking the model nicely is not how the citation rule works and it is not how
+ * this one works either. `filterAnswer` drops whole trailing sentences, which
+ * is the enforcement that does not create a second dishonesty: a sentence cut
+ * mid-thought would carry a citation while saying something the evidence does
+ * not support, whereas a whole sentence was checked on its own and can be
+ * removed on its own.
+ */
+describe('the answer holds ANSWER_MAX_WORDS, in code', () => {
+  it('pins the constant, and now something actually reads it', () => {
+    // The test that already existed. It is kept because `plans/08` rule 3 says
+    // a constant encoding a measured trade-off needs a test that fails when it
+    // moves — but on its own it constrained nothing about any answer.
+    expect(ANSWER_MAX_WORDS).toBe(150);
+  });
+
+  const sentence = (words: number, tag: string): string =>
+    `${tag} ` + Array.from({ length: words - 2 }, (_, i) => `w${i}`).join(' ') + ' end.';
+
+  it('counts words the way a reader does', () => {
+    expect(wordCount('')).toBe(0);
+    expect(wordCount('   ')).toBe(0);
+    expect(wordCount('one')).toBe(1);
+    expect(wordCount('  two  words \n here ')).toBe(3);
+    expect(wordCount(sentence(40, 'a'))).toBe(40);
+  });
+
+  it('drops whole trailing sentences rather than cutting one in half', () => {
+    const input = [
+      { text: sentence(80, 'first'), cites: [1] },
+      { text: sentence(60, 'second'), cites: [2] },
+      { text: sentence(50, 'third'), cites: [3] },
+    ];
+    const { kept, trimmed } = trimToWordBudget(input, ANSWER_MAX_WORDS);
+
+    expect(kept).toHaveLength(2);
+    expect(trimmed).toEqual([input[2]!.text]);
+    // Every kept sentence is byte-identical to what went in. Nothing was cut,
+    // shortened, re-wrapped or ellipsised — the whole point of the choice.
+    expect(kept.map((k) => k.text)).toEqual([input[0]!.text, input[1]!.text]);
+    expect(wordCount(kept.map((k) => k.text).join(' '))).toBeLessThanOrEqual(ANSWER_MAX_WORDS);
+  });
+
+  it('takes the whole tail once the budget is spent, not just the long bits', () => {
+    const input = [
+      { text: sentence(140, 'first'), cites: [1] },
+      { text: sentence(40, 'second'), cites: [2] },
+      { text: sentence(4, 'third'), cites: [3] }, // would have fitted
+    ];
+    const { kept, trimmed } = trimToWordBudget(input, ANSWER_MAX_WORDS);
+    expect(kept).toHaveLength(1);
+    // A four-word recap printed straight after the sentence that was supposed
+    // to set it up is a non-sequitur, so it goes with the rest of the tail.
+    expect(trimmed).toEqual([input[1]!.text, input[2]!.text]);
+  });
+
+  it('keeps a single over-long sentence rather than printing nothing', () => {
+    const one = [{ text: sentence(400, 'only'), cites: [1] }];
+    const { kept, trimmed } = trimToWordBudget(one, ANSWER_MAX_WORDS);
+    // An empty ANSWER block is a silent refusal, and `05` has a loud one.
+    expect(kept).toEqual(one);
+    expect(trimmed).toEqual([]);
+  });
+
+  it('is a no-op on an answer that already fits', () => {
+    const input = [
+      { text: sentence(20, 'a'), cites: [1] },
+      { text: sentence(20, 'b'), cites: [2] },
+    ];
+    const { kept, trimmed } = trimToWordBudget(input, ANSWER_MAX_WORDS);
+    expect(kept).toEqual(input);
+    expect(trimmed).toEqual([]);
+  });
+
+  it('enforces it inside filterAnswer, and takes the orphaned evidence with it', () => {
+    // Three real, resolving citations. Nothing here fails the citation check;
+    // the only thing that can remove a sentence is the budget.
+    const long = (n: number, tag: string): string => sentence(n, tag);
+    const out = filterAnswer(
+      [
+        { text: long(80, 'first'), cites: [1] },
+        { text: long(60, 'second'), cites: [2] },
+        { text: long(50, 'third'), cites: [3] },
+      ],
+      [
+        { index: 1, sessionId: POOLER, seq: 12, quote: REAL_QUOTE },
+        { index: 2, sessionId: NOTES, seq: 3, quote: 'we left the queue alone this week' },
+        { index: 3, sessionId: POOLER, seq: 12, quote: REAL_QUOTE.slice(0, 40) },
+      ],
+      sources(),
+    );
+
+    // Nothing failed the citation check.
+    expect(out.dropped).toEqual([]);
+    expect(out.trimmed).toHaveLength(1);
+    expect(out.sentences).toHaveLength(2);
+    expect(wordCount(out.sentences.map((x) => x.text).join(' '))).toBeLessThanOrEqual(
+      ANSWER_MAX_WORDS,
+    );
+
+    // The receipt shrinks with the answer. Evidence [3] was cited only by the
+    // trimmed sentence, so it falls out through the `uncited` path — leaving
+    // it in would print a quote for a claim that is no longer on the screen.
+    expect(out.evidence).toHaveLength(2);
+    expect(out.evidence.map((e) => e.index)).toEqual([1, 2]);
+    expect(out.drops.filter((d) => d.reason === 'over-budget')).toHaveLength(1);
+    expect(out.drops.some((d) => d.reason === 'uncited')).toBe(true);
+  });
+
+  it('holds the cap end to end, through ask()', async () => {
+    const { root, db } = seedDb();
+    const readerLlm = Llm.open({
+      transport: new Scripted('agent-sdk', [READER_OK]),
+      model: 'haiku',
+    });
+    // A synthesizer that ignores the prompt's word ceiling, which is the whole
+    // reason the ceiling cannot live in the prompt.
+    const llm = Llm.open({
+      transport: new Scripted('agent-sdk', [
+        synthReply(
+          [
+            { text: sentence(90, 'first'), cites: [1] },
+            { text: sentence(90, 'second'), cites: [1] },
+            { text: sentence(90, 'third'), cites: [1] },
+          ],
+          [{ n: 1, session_id: POOLER, seq: 12, quote: REAL_QUOTE }],
+        ),
+      ]),
+      model: 'sonnet',
+    });
+
+    const r = await ask(db, 'how did we handle pgbouncer with prepared statements?', {
+      root,
+      llm,
+      readerLlm,
+      openThreads: false,
+    });
+
+    // 270 words in; the cap holds.
+    expect(wordCount(r.answer)).toBeLessThanOrEqual(ANSWER_MAX_WORDS);
+    expect(r.sentences).toHaveLength(1);
+    expect(r.trimmed).toHaveLength(2);
+    // `answer` is still exactly the kept sentences joined — the invariant the
+    // rest of this file rests on is not weakened by the cap.
+    expect(r.answer).toBe(r.sentences.map((x) => x.text).join(' '));
+    // And a trimmed sentence is not a dropped one: they are different events.
+    expect(r.dropped).toEqual([]);
+
+    // The screen says the answer was held, rather than stopping silently.
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).toContain('2 sentences trimmed');
+    expect(text).toContain('answer held to 150 words');
+
+    db.close();
+    await llm.close();
+    await readerLlm.close();
+  });
+
+  it('keeps the whole run inside 80x24, which is what the cap is for', async () => {
+    const { root, db } = seedDb();
+    const readerLlm = Llm.open({
+      transport: new Scripted('agent-sdk', [READER_OK]),
+      model: 'haiku',
+    });
+    const llm = Llm.open({
+      transport: new Scripted('agent-sdk', [
+        synthReply(
+          [
+            { text: sentence(90, 'first'), cites: [1] },
+            { text: sentence(90, 'second'), cites: [1] },
+            { text: sentence(90, 'third'), cites: [1] },
+          ],
+          [{ n: 1, session_id: POOLER, seq: 12, quote: REAL_QUOTE }],
+        ),
+      ]),
+      model: 'sonnet',
+    });
+    const r = await ask(db, 'how did we handle pgbouncer with prepared statements?', {
+      root,
+      llm,
+      readerLlm,
+      openThreads: false,
+    });
+    const lines = stripAnsi(
+      renderAsk(r, new Theme({ color: false, width: 80 }), new Date()),
+    ).split('\n');
+    // `05` §4: "output is compact enough to screenshot whole". 24 is the box.
+    expect(lines.length).toBeLessThanOrEqual(24);
+    for (const l of lines) expect([...l].length).toBeLessThanOrEqual(80);
+
+    db.close();
+    await llm.close();
+    await readerLlm.close();
+  });
+});
+
 describe('ask() open threads', () => {
   const QUESTION = 'how did we handle pgbouncer with prepared statements?';
 
@@ -1051,6 +1257,7 @@ function resultFrom(
     answer: out.sentences.map((s) => s.text).join(' '),
     sentences: out.sentences,
     dropped: out.dropped,
+    trimmed: out.trimmed,
     evidence: out.evidence,
     openThreads: [],
     searched: extra.searched,
@@ -1200,6 +1407,7 @@ describe('a refusal says why', () => {
     answer: '',
     sentences: [],
     dropped: [],
+    trimmed: [],
     evidence: [],
     openThreads: [],
     searched: 6,

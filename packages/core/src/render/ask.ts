@@ -4,7 +4,7 @@ import * as f from '../format.js';
 import { MASK_RE } from '../redact.js';
 import { ELISION_RE } from '../redact-elide.js';
 import { OPEN_THREAD_LABEL, type OpenThread } from '../open-threads.js';
-import { STRICT_MIN_EVIDENCE, type AskEvidence, type AskResult } from '../ask.js';
+import { ANSWER_MAX_WORDS, STRICT_MIN_EVIDENCE, type AskEvidence, type AskResult } from '../ask.js';
 
 /**
  * `potsherd ask` — moment 4 of `plans/05`: ANSWER / EVIDENCE / OPEN THREADS,
@@ -273,6 +273,20 @@ function footer(r: AskResult, t: Theme, opts: AskRenderOptions): string[] {
       INDENT +
         t.dim(
           `${f.num(r.dropped.length)} ${f.plural(r.dropped.length, 'sentence')} dropped ${t.sep} no citation that resolves`,
+        ),
+    );
+  }
+  // Trimmed sentences are counted, like dropped ones, and labelled with the
+  // rule that took them rather than lumped in with the citation drops above.
+  // The two are different events and a reader has to be able to tell them
+  // apart: a dropped sentence could not be stood behind, a trimmed one could
+  // and did not fit. Saying so is also the only thing that keeps the cap
+  // honest — an answer that quietly stops is an answer pretending it finished.
+  if (r.trimmed.length > 0) {
+    out.push(
+      INDENT +
+        t.dim(
+          `${f.num(r.trimmed.length)} ${f.plural(r.trimmed.length, 'sentence')} trimmed ${t.sep} answer held to ${f.num(ANSWER_MAX_WORDS)} words`,
         ),
     );
   }

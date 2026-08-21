@@ -111,7 +111,22 @@ export const ASK_TOP_EXCHANGES = 4;
 /** How deep recall looks so `matching` can be reported honestly. */
 export const ASK_SCAN = 50;
 
-/** phase-4 T4.1: the synthesizer's word ceiling for ANSWER. */
+/**
+ * phase-4 T4.1: the word ceiling for ANSWER, **enforced in code**.
+ *
+ * It was prompt-only for the whole of T4.1: the number appeared in the
+ * synthesizer's instructions and nowhere else, and `tests/ask.test.ts` pinned
+ * the literal with `toBe(150)` without anything checking an answer against it.
+ * A real run came back at **163 words**, a 17-line ANSWER block and 40 lines
+ * total, against `05`'s "legible whole at 80x24".
+ *
+ * Asking a model nicely is not how any other rule in this file works. A
+ * sentence without a resolving citation is dropped by {@link filterAnswer},
+ * not by the prompt, for exactly the reason `plans/08` rule 1 gives: the model
+ * is not the thing that makes the claim true. So this is enforced the same
+ * way, by {@link trimToWordBudget}, and the prompt keeps the number only as a
+ * hint that saves a round trip.
+ */
 export const ANSWER_MAX_WORDS = 150;
 
 /** `--strict` refuses below this many surviving evidence lines. */
@@ -196,6 +211,13 @@ export interface AskResult {
   sentences: AskSentence[];
   /** Sentences the code dropped for want of a citation. Never in `answer`. */
   dropped: string[];
+  /**
+   * Whole sentences cut from the tail to hold {@link ANSWER_MAX_WORDS}, in the
+   * order they were written. Separate from {@link AskResult.dropped} because
+   * the two are not the same event and the render says so: a dropped sentence
+   * failed the citation check, a trimmed one passed it and did not fit.
+   */
+  trimmed: string[];
   evidence: AskEvidence[];
   openThreads: OpenThread[];
   /** Sessions actually read by a reader. */
@@ -290,7 +312,9 @@ export type AskDropReason =
   /** Real, resolved, and no surviving sentence cites it. */
   | 'uncited'
   /** A sentence left citing nothing that survived. */
-  | 'no-citation';
+  | 'no-citation'
+  /** A whole sentence cut from the tail to hold {@link ANSWER_MAX_WORDS}. */
+  | 'over-budget';
 
 export interface AskDrop {
   kind: 'evidence' | 'sentence';
@@ -497,8 +521,70 @@ export interface EvidenceSource {
 export interface FilterOutput {
   sentences: AskSentence[];
   dropped: string[];
+  /** See {@link AskResult.trimmed}. */
+  trimmed: string[];
   evidence: AskEvidence[];
   drops: AskDrop[];
+}
+
+/** Words, the way a reader counts them: runs of non-space. */
+export function wordCount(text: string): number {
+  return text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
+}
+
+/**
+ * Hold {@link ANSWER_MAX_WORDS} by dropping **whole trailing sentences**.
+ *
+ * The choice, and why it is the only honest one available here:
+ *
+ *   - **Truncating mid-thought is its own dishonesty.** "We moved the pooler
+ *     to transaction mode because prepared statements were" is a sentence that
+ *     says something different from the one the evidence supports, and it
+ *     would carry a citation while doing it. Every other rule in this file
+ *     exists to stop the printed text saying more than the transcript does;
+ *     a cut sentence makes it say something else entirely.
+ *   - **A trailing sentence is individually droppable.** Each one carries its
+ *     own `cites`, was already checked against a resolving quote on its own,
+ *     and is not depended on by the sentences before it. Dropping one leaves
+ *     the rest exactly as true as it was.
+ *   - **Trailing, not best-fit.** Taking sentences out of the middle to fit
+ *     more in would reorder an argument the model built in sequence. The tail
+ *     is where a synthesizer puts its recap, so the tail is the cheapest cut.
+ *
+ * **The first sentence is never dropped.** If one sentence alone exceeds the
+ * budget, the answer is one over-long sentence rather than nothing: an empty
+ * ANSWER block is a silent refusal, and `05`'s honesty contract has a real
+ * refusal path (`--strict`) that says so out loud instead. This is a cap on
+ * how much is said, not a licence to say nothing.
+ */
+export function trimToWordBudget(
+  sentences: readonly AskSentence[],
+  maxWords: number = ANSWER_MAX_WORDS,
+): { kept: AskSentence[]; trimmed: string[] } {
+  const kept: AskSentence[] = [];
+  const trimmed: string[] = [];
+  let words = 0;
+  for (const s of sentences) {
+    // Once the budget is spent the rest of the tail goes with it, including a
+    // short sentence that would have squeezed in. A six-word recap that
+    // survives because it is short, printed straight after the sentence that
+    // was supposed to explain it, reads as a non-sequitur — and "the answer
+    // stops here" is easier to trust than "the answer stops here except for
+    // the short bits".
+    if (trimmed.length > 0) {
+      trimmed.push(s.text);
+      continue;
+    }
+    const n = wordCount(s.text);
+    // `kept.length === 0`: the first sentence goes in whatever it costs.
+    if (kept.length > 0 && words + n > maxWords) {
+      trimmed.push(s.text);
+      continue;
+    }
+    kept.push(s);
+    words += n;
+  }
+  return { kept, trimmed };
 }
 
 /**
@@ -606,9 +692,28 @@ export function filterAnswer(
     kept.push({ text, cites });
   }
 
+  // ---- 2b. the word budget, in code.
+  //
+  // Before step 3 on purpose. Trimming after the renumbering would leave the
+  // EVIDENCE block carrying quotes for sentences that are no longer printed —
+  // the citations would outlive the claims, the numbering would have gaps, and
+  // the block would be longer than the answer it belongs to. Cutting here
+  // means a trimmed sentence's evidence falls out through the `uncited` path
+  // below like any other evidence nothing cites, and the receipt shrinks with
+  // the answer instead of contradicting it.
+  const budget = trimToWordBudget(kept);
+  for (const text of budget.trimmed) {
+    drops.push({ kind: 'sentence', reason: 'over-budget', text });
+  }
+  // A new binding rather than mutating `kept` in place. Emptying and refilling
+  // the array is correct only while `trimToWordBudget` returns a fresh one, and
+  // that is an invariant living in another function — it aliased on the first
+  // attempt at this and silently produced an empty answer.
+  const within = budget.kept;
+
   // ---- 3. evidence nothing cites, and the renumbering.
   const citedOld = new Set<number>();
-  for (const s of kept) for (const c of s.cites) citedOld.add(c);
+  for (const s of within) for (const c of s.cites) citedOld.add(c);
   for (const [oldIndex, ev] of survivors) {
     if (!citedOld.has(oldIndex)) {
       drops.push({
@@ -625,7 +730,7 @@ export function filterAnswer(
   // [1] then [2] down the EVIDENCE block reads them in the order the prose
   // used them rather than in whatever order the model happened to list them.
   const order: number[] = [];
-  for (const s of kept) for (const c of s.cites) if (!order.includes(c)) order.push(c);
+  for (const s of within) for (const c of s.cites) if (!order.includes(c)) order.push(c);
 
   const remap = new Map<number, number>();
   const evidence: AskEvidence[] = order.map((oldIndex, i) => {
@@ -633,12 +738,12 @@ export function filterAnswer(
     return { ...survivors.get(oldIndex)!, index: i + 1 };
   });
 
-  const sentences: AskSentence[] = kept.map((s) => ({
+  const sentences: AskSentence[] = within.map((s) => ({
     text: s.text,
     cites: dedupe(s.cites.map((c) => remap.get(c)!)).sort((a, b) => a - b),
   }));
 
-  return { sentences, dropped, evidence, drops };
+  return { sentences, dropped, trimmed: budget.trimmed, evidence, drops };
 }
 
 function dedupe(ns: readonly number[]): number[] {
@@ -916,6 +1021,7 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
     question: q,
     answer: '',
     sentences: [],
+    trimmed: [],
     dropped: [],
     evidence: [],
     openThreads: [],
@@ -1050,6 +1156,7 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
       answer: sentences.map((s) => s.text).join(' '),
       sentences,
       dropped: filtered.dropped,
+      trimmed: refused ? [] : filtered.trimmed,
       evidence: refused ? [] : filtered.evidence,
       openThreads,
       searched: targets.length,
