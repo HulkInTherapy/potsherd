@@ -462,6 +462,84 @@ describe('every citation resolves, or it is not printed', () => {
     expect(pass.text).not.toMatch(/,\s*\]/);
   });
 
+  it('checks the shorthand second seq in [id8@24, 158], which was displayed and never checked', () => {
+    // **T4.7a G6.** T4.3 taught the pattern to see `[id8@24, id8@158]`, and it
+    // does. But a model that has written the id once shortens the second
+    // reference at least as often as it repeats it, and neither `158` nor
+    // `@158` is an `id8@seq` token — so `158` sat *inside the citation group*,
+    // was shown to the reader, was never resolved against the index, and never
+    // appeared in `GraftResult.citations`. That is the precise failure T4.3
+    // itself named as worse than a dropped citation: an unchecked one.
+    const real = seqOf(pgbouncerId);
+    const pass = resolveCitations(db, `- two exchanges [${ID.pgbouncer}@${real}, 999123]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.citations).toHaveLength(2);
+    expect(pass.citations.find((c) => c.seq === 999123)!.resolves).toBe(false);
+    expect(pass.text).not.toContain('999123');
+    expect(pass.text).toContain(`[${ID.pgbouncer}@${real}]`);
+  });
+
+  it('checks the [id8@24, @158] shorthand too', () => {
+    const real = seqOf(pgbouncerId);
+    const pass = resolveCitations(db, `- two exchanges [${ID.pgbouncer}@${real}, @999124]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.citations).toHaveLength(2);
+    expect(pass.citations.find((c) => c.seq === 999124)!.resolves).toBe(false);
+    expect(pass.text).not.toContain('999124');
+  });
+
+  it('resolves a shorthand seq that is real, and shows it expanded', () => {
+    const a = seqOf(pgbouncerId, 0);
+    const b = seqOf(pgbouncerId, 1);
+    const pass = resolveCitations(db, `- two exchanges [${ID.pgbouncer}@${a}, ${b}]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.citations.map((c) => c.seq).sort((x, y) => x - y)).toEqual([a, b].sort((x, y) => x - y));
+    expect(pass.citations.every((c) => c.resolves)).toBe(true);
+    // The reader is shown the canonical form, which is what they should have
+    // been shown in the first place.
+    expect(pass.text).toContain(`[${ID.pgbouncer}@${a}, ${ID.pgbouncer}@${b}]`);
+    expect(pass.droppedLines).toHaveLength(0);
+  });
+
+  it('leaves a bracket that is not a citation group completely alone', () => {
+    const real = seqOf(pgbouncerId);
+    const pass = resolveCitations(db, `- a list [a, 1, b] and a note [see 4] [${ID.pgbouncer}@${real}]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.text).toContain('[a, 1, b]');
+    expect(pass.text).toContain('[see 4]');
+    expect(pass.citations).toHaveLength(1);
+  });
+
+  it('does not truncate an eight-digit seq into a seq that was never written', () => {
+    // **T4.7a G7.** `CITATION_RE` bounded the seq at `\d{1,7}`, which did not
+    // *refuse* `[id8@12345678]` — it matched the first seven digits, and
+    // `--json` then reported `{"seq":1234567,"resolves":false}`: a number that
+    // appears nowhere in the brief and nowhere in the transcript. A citation
+    // checker that fabricates a citation of its own is worse than the
+    // fabrication it was checking.
+    const pass = resolveCitations(db, `- a fabricated source [${ID.pgbouncer}@12345678]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.citations).toHaveLength(1);
+    expect(pass.citations[0]!.seq).toBe(12345678);
+    expect(pass.citations[0]!.resolves).toBe(false);
+    expect(pass.droppedLines).toHaveLength(1);
+    expect(pass.text.trim()).toBe('');
+  });
+
+  it('reports an absurdly long seq as itself, unresolved, rather than as Infinity', () => {
+    const pass = resolveCitations(db, `- nonsense [${ID.pgbouncer}@${'9'.repeat(40)}]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.citations).toHaveLength(1);
+    expect(pass.citations[0]!.resolves).toBe(false);
+    expect(Number.isFinite(pass.citations[0]!.seq)).toBe(true);
+  });
+
   it('leaves no empty bracket behind when every citation in a group is invented', () => {
     const pass = resolveCitations(db, `- nothing real here [${ID.pgbouncer}@111111, ${ID.pgbouncer}@222222] tail`, {
       sessionId: pgbouncerId,
@@ -484,7 +562,21 @@ describe('every citation resolves, or it is not printed', () => {
     expect(pass.droppedLines).toHaveLength(1);
   });
 
-  it('drops any bullet with no citation at all, and keeps prose that is not a claim', () => {
+  it('drops an uncited bullet AND uncited prose, and keeps only structure', () => {
+    // **CHANGED BY T4.7a G3, and the assertion on the prose line is flipped on
+    // purpose.** This test used to assert that
+    // `'The session settled a pooling question.'` *survived*, on the reasoning
+    // that prose is potsherd's own text rather than an assertion about the
+    // transcript. That reasoning was wrong for the model path, which is where
+    // nearly all prose in a brief comes from: `isClaim` was a bullet-only
+    // rule, so a model's uncited paragraph sailed through, and a model's
+    // paragraph carrying a *fabricated* citation was kept while the fabricated
+    // citation was silently deleted — the product's answer to a fake source
+    // being to erase the evidence that it was fake. Every brief is headed
+    // "every claim carries `[id8@seq]`", and the reader of that header is the
+    // agent the brief gets pasted into, so the filter now covers what the
+    // header claims. Structure — headings, bold labels, rules, fences, blanks
+    // — asserts nothing and still stays.
     const real = seqOf(pgbouncerId);
     const pass = resolveCitations(
       db,
@@ -496,20 +588,66 @@ describe('every citation resolves, or it is not printed', () => {
       ].join('\n'),
       { sessionId: pgbouncerId },
     );
-    // Potsherd's own prose and its own headings are not assertions about the
-    // transcript, so they stay. The uncited bullet is an assertion, so it goes.
-    expect(pass.text).toContain('The session settled a pooling question.');
+    expect(pass.text).not.toContain('The session settled a pooling question.');
     expect(pass.text).toContain('**decided**');
     expect(pass.text).toContain(`[${ID.pgbouncer}@${real}]`);
     expect(pass.text).not.toContain('definitely fixed the load test');
-    expect(pass.droppedLines).toEqual(['- and also we definitely fixed the load test']);
+    expect(pass.droppedLines).toEqual([
+      'The session settled a pooling question.',
+      '- and also we definitely fixed the load test',
+    ]);
   });
 
-  it('the card-only summary survives the rule that drops uncited bullets', async () => {
+  it('takes out a prose claim whose only citation was fabricated, evidence and all', () => {
+    // The shape G3 called worse than a bare uncited claim: the claim was kept,
+    // the false citation deleted, and a dangling " ." left where it had been.
+    const pass = resolveCitations(
+      db,
+      'We migrated the whole fleet to Aurora Serverless v2 [4c9339e0aaaa@999].',
+      { sessionId: pgbouncerId },
+    );
+    expect(pass.text.trim()).toBe('');
+    expect(pass.droppedLines).toHaveLength(1);
+    expect(pass.citations).toEqual([{ id8: '4c9339e0aaaa', seq: 999, resolves: false }]);
+  });
+
+  it('keeps a prose claim that cites — the rule is cited-or-dropped, not bulleted', () => {
+    const real = seqOf(pgbouncerId);
+    const pass = resolveCitations(
+      db,
+      `The pooler question was settled in this session [${ID.pgbouncer}@${real}].`,
+      { sessionId: pgbouncerId },
+    );
+    expect(pass.text).toContain('The pooler question was settled in this session');
+    expect(pass.droppedLines).toHaveLength(0);
+  });
+
+  it('the card-only body no longer emits the summary it could not cite', async () => {
+    // **CHANGED BY T4.7a G3.** This test used to assert the card's summary
+    // *survived* the citation pass. Under the widened filter it is what it
+    // always was — an assertion about the session with no seq behind it, the
+    // card schema giving `evidence_seq` to `decisions` and `open_threads` and
+    // to nothing else — so the header's promise and the brief's contents now
+    // agree. `cardOnlyBody` drops it at the source rather than emit it to be
+    // deleted, because potsherd's own line appearing in `droppedLines` would
+    // report a fabrication that never happened.
     const r = await graft(db, pgbouncerId, { llm: null, cwd: workdir() });
-    // The summary has no seq of its own and must not be mistaken for a claim
-    // the citation pass should delete.
-    expect(r.brief).toContain('Chased a prepared-statement error under the pooler');
+    expect(r.brief).not.toContain('Chased a prepared-statement error under the pooler');
+    expect(r.droppedLines).toHaveLength(0);
+    // What a returning reader came for is still all there, and still cited.
+    expect(r.brief).toContain('use transaction pooling');
+    expect(r.brief).toContain('nobody re-ran the load test after the switch');
+    expect(r.citations.length).toBeGreaterThan(0);
+    expect(r.citations.every((c) => c.resolves)).toBe(true);
+    // The header's promise, asserted rather than trusted: every line of the
+    // brief either carries a citation or is structure/potsherd's own frame.
+    const body = r.brief
+      .split('\n')
+      .filter((l) => l.trim())
+      .filter((l) => !/^(#|>|---|source: |Brief from a past session)/.test(l))
+      .filter((l) => !/^\s*\*\*[^*]+\*\*:?\s*$/.test(l));
+    expect(body.length).toBeGreaterThan(0);
+    for (const line of body) expect(line).toMatch(/\[[0-9a-f]{6,40}@\d+\]/);
   });
 
   it('checks a bare id8@seq with no brackets at all', () => {

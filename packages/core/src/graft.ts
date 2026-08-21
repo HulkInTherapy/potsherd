@@ -487,7 +487,13 @@ export function resolveCitations(db: Db, text: string, o: { sessionId?: string }
     // would match it, and the bullet would read as *uncited* — kept, unchecked,
     // and carrying a citation that is visibly not one. Strip the placeholder
     // first and let the bullet rule below decide the line's fate.
-    const cleaned = line.replace(/\[?\s*[0-9a-f]{6,40}@<[^>\]]*>\s*\]?/gi, '').trimEnd();
+    // T4.7a G6: `[id8@24, 158]` and `[id8@24, @158]` are rewritten into the
+    // canonical `[id8@24, id8@158]` *before* the scan, so the shorthand seq is
+    // checked like any other rather than displayed inside a citation group
+    // that nothing ever looked at.
+    const cleaned = expandCitationGroups(
+      line.replace(/\[?\s*[0-9a-f]{6,40}@<[^>\]]*>\s*\]?/gi, ''),
+    ).trimEnd();
     const found = [...cleaned.matchAll(new RegExp(CITATION_RE.source, 'gi'))];
     let anyResolved = false;
     let out = cleaned;
@@ -518,12 +524,58 @@ export function resolveCitations(db: Db, text: string, o: { sessionId?: string }
 }
 
 /**
+ * Lines that are **structure**, not assertion: they say nothing about the
+ * transcript, so there is nothing for them to cite.
+ *
+ * The list is short and closed on purpose. Everything not on it is a claim.
+ */
+const STRUCTURAL: readonly RegExp[] = [
+  /^\s*$/, //                                blank
+  /^\s*#{1,6}\s+/, //                        # heading
+  /^\s*\*\*[^*\n]+\*\*:?\s*$/, //            **decided**, **left open**
+  /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/, //       --- rule
+  /^\s*(?:```|~~~)/, //                      fence
+  /^\s*[-*+]\s*$/, //                        an empty bullet marker
+];
+
+/**
  * A line that asserts something about the transcript, and therefore owes a
- * citation. Every list item is one; a heading or a paragraph of potsherd's own
- * prose is not.
+ * citation (**T4.7a G3**).
+ *
+ * This used to be `/^\s*(?:[-*+]|\d+[.)])\s+\S/` — a *bullet* rule. Prose
+ * bypassed the filter entirely, which meant the two worst shapes both
+ * survived:
+ *
+ * ```text
+ * in : "We migrated the whole fleet to Aurora Serverless v2 last quarter."
+ * out: "We migrated the whole fleet to Aurora Serverless v2 last quarter."
+ *
+ * in : "We migrated to Aurora Serverless v2 [4c9339e0aaaa@999]."
+ * out: "We migrated to Aurora Serverless v2 ."
+ * ```
+ *
+ * The second is the worse one: the claim is **kept**, the false citation
+ * **silently deleted**, and a dangling ` .` left where the evidence used to
+ * be. The product's answer to a fabricated source was to erase the proof that
+ * it had been fabricated.
+ *
+ * Meanwhile every brief is headed *"every claim carries `[id8@seq]`, the
+ * exchange it came from"*, and the reader of that header is the **agent the
+ * brief gets pasted into**. A header that promises a guarantee the filter only
+ * applies to bullets is a lie told to a machine that will act on it. The
+ * ruling was to widen the filter rather than weaken the header, so:
+ * everything that is not {@link STRUCTURAL} is a claim, prose included.
+ *
+ * Measured on the card-only path before committing to this: the pgbouncer
+ * fixture brief loses its card summary line and its `files:` line, and keeps
+ * every decision and open thread with their citations intact. That is a real
+ * cost and it is the right one — the summary is an assertion about the
+ * session with no seq behind it, which is exactly what the header says cannot
+ * be in there. `cardOnlyBody` therefore no longer emits either line rather
+ * than emit them to be deleted; see the note there.
  */
 function isClaim(line: string): boolean {
-  return /^\s*(?:[-*+]|\d+[.)])\s+\S/.test(line);
+  return !STRUCTURAL.some((re) => re.test(line));
 }
 
 /**
@@ -546,7 +598,12 @@ function tidyBrackets(line: string): string {
 }
 
 function citationResolves(db: Db, id8: string, seq: number, expected?: string): boolean {
-  if (!Number.isInteger(seq) || seq < 0) return false;
+  // `Number.isSafeInteger`, not `isInteger` (T4.7a G7): now that the seq is
+  // `\d+`, a 40-digit one parses to 1e39 — integral, but a float whose value
+  // is not the digits that were written. Nothing that far outside the range of
+  // real seq numbers can resolve, and pretending to have checked it would be
+  // the same lie in a larger box.
+  if (!Number.isSafeInteger(seq) || seq < 0) return false;
   const needle = id8.toLowerCase();
   // The common case by far: the model cited the session it was given.
   if (expected && expected.toLowerCase().startsWith(needle)) {
@@ -1012,7 +1069,22 @@ export function cardOnlyBody(src: GraftSource): string[] {
   }
 
   const c = src.card.card;
-  if (c.summary.trim()) out.push(c.summary.trim());
+  // **T4.7a G3.** The card's `summary` used to be emitted here as a bare
+  // paragraph, and the bullet-only claim filter let it through uncited. It is
+  // an assertion about the session with no `evidence_seq` behind it — the card
+  // schema gives seqs to `decisions` and `open_threads` and to nothing else —
+  // so under the widened filter it is a claim that cannot cite, and the brief's
+  // own header says a claim that cannot cite does not get printed.
+  //
+  // It is not emitted rather than emitted-then-deleted, because a line potsherd
+  // wrote itself appearing in `droppedLines` would tell the reader that a
+  // *fabrication* was caught, which is not what happened. The same goes for
+  // `files:`, which the card carries without seqs.
+  //
+  // The cost, measured on the pgbouncer fixture: the card-only brief loses two
+  // lines and keeps every decision and open thread with its citations. The
+  // decisions are the part a returning reader came for, and they are the part
+  // `cards/verify.ts` resolved against the transcript.
   if (c.decisions.length) {
     out.push('', '**decided**');
     for (const d of c.decisions) {
@@ -1030,7 +1102,6 @@ export function cardOnlyBody(src: GraftSource): string[] {
       if (text) out.push(`- ${text} [${src.id8}@${ex.seq}]`);
     }
   }
-  if (c.files.length) out.push('', `files: ${c.files.slice(0, 8).map((f) => `\`${f}\``).join(', ')}`);
   return out;
 }
 
