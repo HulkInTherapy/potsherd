@@ -379,6 +379,57 @@ describe('the two model tools with no backend', () => {
     await expect(runAsk(ctx(), { question: '   ' })).rejects.toThrow(/needs a question/);
   });
 
+  it('takes its deadline from the environment', () => {
+    expect(makeContext({ env: {}, cwd: project }).askTimeoutMs).toBe(240_000);
+    expect(
+      makeContext({ env: { POTSHERD_MCP_ASK_TIMEOUT_MS: '1500' }, cwd: project }).askTimeoutMs,
+    ).toBe(1_500);
+    // Nonsense falls back rather than disabling the ceiling.
+    expect(
+      makeContext({ env: { POTSHERD_MCP_ASK_TIMEOUT_MS: 'soon' }, cwd: project }).askTimeoutMs,
+    ).toBe(240_000);
+  });
+
+  /**
+   * The deadline returns a **tool error**, never an empty answer.
+   *
+   * `ask`'s readers report `found: false` when their promise rejects, which is
+   * the right behaviour for one dead reader and the wrong one for an aborted
+   * run: six cancelled calls would otherwise be synthesised into "nothing in
+   * your history addresses this", which is a confident wrong answer.
+   *
+   * A key that cannot work plus a one-millisecond ceiling reaches that path
+   * without a usable backend and without a completed request.
+   */
+  it('potsherd_ask returns a tool error when it runs past its deadline', async () => {
+    const timed = makeContext({
+      potsherdDir: root,
+      cwd: project,
+      env: { ANTHROPIC_API_KEY: 'sk-ant-not-a-key', POTSHERD_MCP_ASK_TIMEOUT_MS: '1' },
+    });
+    // Nothing leaves the machine. The api transport builds its client from
+    // `process.env`, so pointing the base url at a closed local port makes
+    // every reader fail on connect instead of reaching anthropic.com with a
+    // key that was never real — which is a test that would be slow, would
+    // depend on the network, and would knock on somebody's door to prove a
+    // timeout.
+    const savedBase = process.env['ANTHROPIC_BASE_URL'];
+    process.env['ANTHROPIC_BASE_URL'] = 'http://127.0.0.1:1';
+    const { client, close } = await connectInMemory(timed, 'mcp.test');
+    try {
+      const r = await callRaw(client, 'potsherd_ask', { question: 'pgbouncer', k: 1 });
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toMatch(/gave up after/);
+      expect(textOf(r)).toMatch(/no answer is being guessed at/);
+      // Whatever happened, it is not an answer.
+      expect(textOf(r)).not.toMatch(/"sentences"/);
+    } finally {
+      await close();
+      if (savedBase === undefined) delete process.env['ANTHROPIC_BASE_URL'];
+      else process.env['ANTHROPIC_BASE_URL'] = savedBase;
+    }
+  }, 30_000);
+
   it('potsherd_graft still produces a cited brief on the card-only path', async () => {
     const { client, close } = await connect();
     try {
