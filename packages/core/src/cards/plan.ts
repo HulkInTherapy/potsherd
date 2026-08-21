@@ -5,6 +5,7 @@ import {
   buildSessionFilters,
   type SearchFilters,
 } from '../search/filters.js';
+import { slugify } from '../paths.js';
 import {
   CARD_MODEL,
   estimate,
@@ -216,9 +217,11 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
         harness: r.harness,
         title: r.title,
         project: r.project,
-        // Ghosts have no `project_slug` column; `project` is what `rescue`
-        // recovered and the mirror path is derived from it.
-        projectSlug: r.project,
+        // Ghosts have no `project_slug` column — `rescue` recovers a cwd, not
+        // a slug — so it is derived the same way Claude Code derives its own,
+        // and a ghost's card lands beside the sessions from the same project
+        // rather than in a directory of its own spelling.
+        projectSlug: r.project ? slugify(r.project) : null,
         units: r.prompts,
         chars: r.chars + r.prompts * SEQ_HEADER_CHARS,
         carded: r.carded > 0,

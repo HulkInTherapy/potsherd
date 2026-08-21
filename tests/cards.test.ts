@@ -908,6 +908,25 @@ describe('the run', () => {
     db.close();
   });
 
+  it('gives a ghost the same mirror directory as the sessions from its project', () => {
+    const db = seededDb(scratch());
+    db.prepare(
+      `INSERT INTO ghosts (session_id, harness, project, first_ts, last_ts, prompt_count)
+       VALUES ('g1', 'claude', '/Users/zebra/Fulcrum', '2026-08-01T00:00:00.000Z', '2026-08-01T01:00:00.000Z', 9)`,
+    ).run();
+    for (let i = 0; i < 9; i++) {
+      db.prepare(
+        `INSERT INTO ghost_prompts (id, session_id, seq, ts, text) VALUES (?, 'g1', ?, '2026-08-01T00:00:00.000Z', 'a prompt')`,
+      ).run(`g1-${i}`, i);
+    }
+    const ghost = planCards(db, {}).targets.find((t) => t.kind === 'ghost')!;
+    db.close();
+    // `rescue` recovers a cwd, not a slug; the target carries Claude Code's own
+    // spelling of it so T2.3's cards land beside this project's sessions.
+    expect(ghost.projectSlug).toBe('-Users-zebra-Fulcrum');
+    expect(safeSlug(ghost.projectSlug)).toBe('-Users-zebra-Fulcrum');
+  });
+
   it('defers ghosts to T2.3 rather than carding them from the wrong loader', async () => {
     const root = scratch();
     const db = runnableDb(root);
