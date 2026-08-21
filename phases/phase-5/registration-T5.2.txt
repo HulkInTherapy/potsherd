@@ -1,0 +1,424 @@
+T5.2 — claude code skills + session-archaeologist agent — REGISTRATION
+branch: task/T5.2-skills   ·   cut from 6a58271   ·   written 22 aug 2026
+
+Files this task owns and delivers:
+  plugins/claude-code/skills/potsherd/SKILL.md
+  plugins/claude-code/skills/remembering-sessions/SKILL.md
+  plugins/claude-code/agents/session-archaeologist.md
+  phases/phase-5/registration-T5.2.txt                      (this file)
+
+Nothing under `packages/` was read-modify-written. No CLI flag was added. The
+plugin was NOT installed into `~/.claude` — that is the user's to do, and
+section 3 tells them how.
+
+Baseline confirmed on this branch: `pnpm install && pnpm build` clean.
+
+
+================================================================================
+0. PINNED — VERIFIED AGAINST CLAUDE CODE 2.1.239
+================================================================================
+
+`claude --version` → `2.1.239 (Claude Code)`. Phase 5's risk section asks for
+the version to be pinned because these field names drift; this is it. Every
+field used in the three files was checked twice — once against the live docs
+(code.claude.com/docs/en/skills.md, /sub-agents.md, /mcp.md) and once against
+real installed plugins on this machine, which is the stronger of the two
+because a field that appears in Anthropic's own shipped example demonstrably
+loads.
+
+  FIELD                        WHERE           STATUS    SECOND SOURCE
+  name                         skill + agent   VERIFIED  official example-plugin
+  description                  skill + agent   VERIFIED  official example-plugin
+  allowed-tools                skill           VERIFIED  official example-plugin
+  arguments                    skill           VERIFIED  docs (skills.md)
+  argument-hint                skill           VERIFIED  official example-plugin
+  disable-model-invocation     skill           VERIFIED  28 occurrences installed
+  user-invocable               skill           VERIFIED  14 occurrences installed
+  context: fork / agent /      skill           VERIFIED  docs only — used ONLY as
+    background                                           a commented fallback
+  model                        agent           VERIFIED  claude-security plugin
+  tools                        agent           VERIFIED  claude-security plugin
+  color                        agent           VERIFIED  claude-security plugin
+  ${CLAUDE_PLUGIN_ROOT}                        VERIFIED  docs (skills.md)
+
+The second sources, by path (all read-only):
+  /Users/zebra/.claude/plugins/marketplaces/claude-plugins-official/plugins/
+      example-plugin/skills/example-command/SKILL.md
+      example-plugin/skills/example-skill/SKILL.md
+      claude-security/agents/explore.md
+      claude-security/agents/scan-researcher.md
+      plugin-dev/skills/mcp-integration/SKILL.md              (line 194)
+
+TWO THINGS THE PHASE FILE GOT RIGHT AND I ALMOST "CORRECTED":
+
+  1. `arguments: verb rest` is a REAL skill field — named positional arguments,
+     substituted as `$verb` and `$rest` in the body. It is NOT a misspelling of
+     `argument-hint`; both exist and both are used here, for different jobs.
+  2. `allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/potsherd *)` — the SPACE
+     before the `*` is right for a skill. The `Bash(git:*)` colon form seen in
+     settings files is a different syntax; skills.md's own example is
+     `Bash(${CLAUDE_SKILL_DIR}/scripts/render.sh *)`. Written exactly as the
+     phase file has it.
+
+ONE SEMANTIC THAT MATTERS AND IS EASY TO GET BACKWARDS:
+
+  `allowed-tools` **PRE-APPROVES**; it does not restrict. Listed tools skip the
+  permission prompt for the turn that invoked the skill; every unlisted tool is
+  still callable and still governed by normal permissions. So on `/potsherd`
+  it buys exactly what phase 0 learned to want — the binary runs without a
+  prompt — and on `remembering-sessions` it would buy nothing, which is why
+  that file has no `allowed-tools` at all.
+
+
+================================================================================
+1. FIVE THINGS ANOTHER WORKER OR THE INTEGRATOR MUST ADD
+================================================================================
+
+1a. `plugins/claude-code/bin/potsherd` — THE SHIM. NOBODY OWNS THIS.
+--------------------------------------------------------------------------------
+The WAVE table assigns `.claude-plugin/**`, `hooks/**`, `.mcp.json` and
+`marketplace.json` to T5.3 and `skills/**` + `agents/**` to me. `bin/**` is in
+neither column, and `/potsherd` does not run without it. Flagging rather than
+creating it, because it is outside my four delivered paths.
+
+What it has to be:
+
+    plugins/claude-code/bin/potsherd          # mode 0755
+    ------------------------------------------------------------------
+    #!/bin/sh
+    # Reach this plugin's own potsherd. Never the one on PATH.
+    exec node "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)/dist/potsherd.js" "$@"
+
+And a REAL CONSTRAINT on how `dist/` gets there, measured on the built bundle:
+
+    packages/cli/dist/potsherd.js is a single esbuild file, and it still
+    resolves `better-sqlite3` and `sqlite-vec` at runtime through
+    `createRequire`. Copying the one .js file is not enough — it needs a
+    `node_modules` beside it with better-sqlite3 built for the host platform.
+    (`@anthropic-ai/claude-agent-sdk`, `@anthropic-ai/sdk` and
+    `@huggingface/transformers` are dynamic `import()` and are optional.)
+
+    So the two workable shapes are:
+      (i)  the plugin vendors `dist/` + a real `node_modules` (per-platform), or
+      (ii) `bin/potsherd` execs the installed npm package, and the plugin
+           declares `potsherd` as a prerequisite.
+    (ii) is smaller and (i) is the one that honours "`potsherd` on PATH may be
+    stale or absent". T5.6's packaging decision, not mine.
+
+    Interim, for the manual tests in section 3: symlink the shim at the repo's
+    own built binary. Section 3 step 1 does exactly this.
+
+1b. PLUGIN NAME MUST BE `potsherd`   → T5.3, `.claude-plugin/plugin.json`
+1c. MCP SERVER KEY MUST BE `potsherd` → T5.3, `.mcp.json`
+--------------------------------------------------------------------------------
+Not a preference. Claude Code names a plugin-bundled MCP server's tools
+
+    mcp__plugin_<plugin-name>_<server-name>__<tool-name>
+
+(docs/en/mcp.md; any character outside `A-Za-z0-9_-` becomes `_`). The
+archaeologist's `tools:` line names all four of its tools in full, so plugin
+name `potsherd` + server key `potsherd` is what makes these resolve:
+
+    mcp__plugin_potsherd_potsherd__potsherd_find
+    mcp__plugin_potsherd_potsherd__potsherd_read
+    mcp__plugin_potsherd_potsherd__potsherd_ls
+    mcp__plugin_potsherd_potsherd__potsherd_ask
+
+If T5.3 names either of them anything else, the agent silently has no tools —
+it will not fail to load, it will just find nothing, which is the worst
+failure mode available. **Change either name and you must change line 5 of
+`agents/session-archaeologist.md` in the same commit.**
+
+1d. THE SIX TOOL NAMES                → T5.1, `packages/mcp`
+--------------------------------------------------------------------------------
+Written against `phases/phase-5/WAVE.md`'s pinned contract exactly:
+`potsherd_find`, `potsherd_read`, `potsherd_ask`, `potsherd_graft`,
+`potsherd_ls`, `potsherd_tag`. The agent uses four of them and takes the
+`find` result shape from the CLI's `--json`: `sessions[]`, each with `hits[]`
+carrying `sessionId`, `seq`, `ts`, `score`. If the MCP server reshapes that,
+tell me and step 3 of the agent's method needs rewording.
+
+1e. TWO TOOLS DELIBERATELY WITHHELD FROM THE AGENT
+--------------------------------------------------------------------------------
+The phase file says "tools: the mcp tools + Read". `03` §9 is narrower and says
+"tools: the mcp search/read/ask". I followed `03` §9 and added `potsherd_ls`:
+
+  - `potsherd_tag` — the ONLY write tool in the six-tool contract. A background
+    agent the model dispatches without being asked must not be able to write
+    the user's tags.
+  - `potsherd_graft` — writes `./.potsherd/graft-<id8>.md` into the cwd. It is
+    the one path potsherd writes outside `~/.potsherd`, it is disclosed in the
+    privacy receipt, and CI fails if that receipt drifts. A model-invoked agent
+    creating files in the user's repository unasked is not a thing to ship.
+    `graft` stays where the user asked for it: `/potsherd graft`.
+  - `potsherd_ls` — added. Read-only, and it is how the agent answers "have I
+    been here before" without spending a ~100 s `ask`.
+
+If the orchestrator wants the phase file's literal wording instead, the change
+is one line and this paragraph is the argument against it.
+
+
+================================================================================
+2. THE ONE THING THAT COULD NOT BE BUILT — `readerFn` FROM MARKDOWN
+================================================================================
+
+ASKED FOR PLAINLY, SO ANSWERED PLAINLY:
+
+  **A SKILL.md cannot supply `readerFn`. Not partially, not with a workaround.**
+
+`AskOptions.readerFn` is a TypeScript function passed to `ask(db, question, o)`
+by a TypeScript caller. A SKILL.md is markdown: its only executable surfaces are
+(a) Bash commands, and (b) Claude Code's own tools. Neither can hand a closure
+to a library function inside a `node` process it did not write. The T4.4
+interface is correct and complete — it is simply an interface for a *program*,
+and phase 5's claude-code surface is not a program. Nothing in `packages/cli`
+exposes it either: `potsherd ask` has fourteen flags and not one of them takes
+reader input or emits reader input.
+
+WHAT THE SKILL DOES INSTEAD, AND WHAT IT COSTS
+
+`skills/potsherd/SKILL.md` reproduces the *shape* of the fan-out in markdown:
+
+    BIN find --json --limit 6 --vectors on   →  the shortlist  (binary, no model)
+    BIN show --json --from --to  ×6          →  the excerpts   (binary, no model)
+    six native Agent calls in one message    →  the readers    (parallel, free)
+    the main context                         →  the synthesizer
+
+with `READER_SYSTEM` quoted verbatim out of `ask.ts` so the readers behave
+identically, and with `--limit 6 --vectors on` pinned because `recall` derives
+candidate depth from `limit` (a wider limit re-orders the top six — that is
+`ask.ts`'s own measured comment) and `ask` defaults vectors on where `find`
+defaults to auto.
+
+**What is lost is `filterAnswer`.** That is the code-level citation filter that
+runs after the synthesizer replies and deletes any quote that does not resolve
+to real bytes at the `(sessionId, seq)` it names, plus any sentence left with no
+surviving evidence. It is the product's central claim — `00`'s "cited or
+dropped", `05`'s honesty contract — and it is enforced *by code, not by trust*,
+which is exactly the property markdown cannot reproduce. The skill therefore
+checks quotes by reading, prints a last line saying so, and routes to
+`potsherd ask` for the code-checked answer. It does not claim the guarantee.
+
+THE FIX — TWO FLAGS, BOTH PURE CLI-LAYER, NO CORE CHANGE AT ALL
+
+Not built here (`packages/**` is RESERVED and the brief says report, do not
+add). Specified precisely because it is small, and because it turns the fast
+path from "weaker" into "identical, twenty times quicker".
+
+  potsherd ask "<q>" [filters] --readers-out <path>
+      Runs the shortlist and the excerpt build, writes JSON to <path>, exits 0.
+      **Makes no model call.**  <path> holds:
+          { "question": "...", "targets": [ AskReaderInput, ... ] }
+      i.e. the exact `input` object T4.4 documents, one per shortlisted session,
+      already carrying `excerpts`, `seqs`, `isGhost`, `isSidechain`.
+
+  potsherd ask "<q>" [filters] --readers-in <path>
+      Skips shortlist and readers. Reads <path>:
+          [ { "sessionId": "...", ...AskReaderOutput }, ... ]
+      and runs the synthesizer, `filterAnswer`, open threads and the normal
+      renderer. **One model call.**
+
+Both are implementable *entirely through the existing public `AskOptions`*,
+inside `packages/cli/src/commands/ask.ts`, with no edit to `ask.ts`:
+
+  --readers-out : pass a `readerFn` that records `input` into an array and
+                  returns `{found:false, quotes:[], answer_fragment:''}`.
+                  Every reader reports nothing, so `ask` hits its own
+                  `answered.length === 0` early return and never reaches the
+                  synthesizer. Write the array. Zero model calls, by
+                  construction rather than by a flag check.
+  --readers-in  : pass a `readerFn` that looks the recorded output up by
+                  `input.sessionId` and returns it, `{found:false,…}` when
+                  absent. `ask` then does the whole of the rest of its job
+                  unchanged — including `filterAnswer`.
+
+The two together are the first real *use* of the T4.4 interface, and they are
+what a SKILL.md can drive: two Bash calls with an Agent fan-out between them.
+When they land, replace steps 1–3 and 5 of the `ask` route in
+`skills/potsherd/SKILL.md` with them and delete the "checked by reading"
+caveat — the guarantee becomes the shipped one.
+
+Estimated size: ~40 lines in one CLI file, plus tests. Suggest T5.7 or phase 7.
+
+
+================================================================================
+3. THE MANUAL TEST SCRIPT — WHAT TO TYPE, WHAT TO SEE
+================================================================================
+
+`07` assigns these to the orchestrator because they need an interactive
+session. Steps 1–7 need only T5.3's manifest and the shim; steps 8–11 also need
+T5.1's MCP server. Do 1–7 first — they close three DoD boxes on their own.
+
+Numbers below are the reference machine's; substitute your own.
+
+--- 0. before you start ------------------------------------------------------
+    cd <repo>
+    git checkout task/T5.2-skills      # or the integrated branch
+    pnpm install && pnpm build
+    node packages/cli/bin/potsherd.js --version
+  SEE: 0.4.0        (or whatever the integrated version is)
+
+  If the archive is not indexed yet, index it now — every step below reads it:
+    node packages/cli/bin/potsherd.js index
+    node packages/cli/bin/potsherd.js stats
+  SEE: a non-zero session count. If it says "nothing indexed yet", stop; the
+       tests below will all report an empty archive and prove nothing.
+
+--- 1. the shim (section 1a — interim form) ----------------------------------
+    mkdir -p plugins/claude-code/bin
+    printf '#!/bin/sh\nexec node "%s" "$@"\n' \
+      "$(pwd)/packages/cli/bin/potsherd.js" > plugins/claude-code/bin/potsherd
+    chmod +x plugins/claude-code/bin/potsherd
+    ./plugins/claude-code/bin/potsherd --version
+  SEE: the same version string as step 0.
+  DO NOT COMMIT this file — it hard-codes an absolute path. It is scaffolding
+  for the test, and section 1a is the real thing.
+
+--- 2. load the plugin -------------------------------------------------------
+    claude --plugin-dir plugins/claude-code
+  then, in the session:
+    /help
+  SEE: `potsherd` in the skills/commands list.
+  SEE: `remembering-sessions` is **NOT** listed. That is `user-invocable: false`
+       working. If it IS listed, the field did not take — record it and tell me.
+
+--- 3. /potsherd with no verb ------------------------------------------------
+  TYPE: /potsherd
+  SEE: the thirteen-line tour, beginning
+         potsherd 0.4.0  — your coding-agent sessions, rescued and searchable
+       and ending
+         start here:  potsherd audit
+  SEE: no permission prompt for the Bash call. That is `allowed-tools`
+       pre-approving `${CLAUDE_PLUGIN_ROOT}/bin/potsherd *`. **If you are
+       prompted, record it** — it means the variable did not expand in
+       `allowed-tools`, and the fix is to widen the pattern in T5.3's plugin
+       settings rather than in this file.
+
+--- 4. /potsherd find  [DoD box 1 of 4] --------------------------------------
+  TYPE: /potsherd find <a word you know is in your archive>
+  SEE: the `find` table — titles, project, date, harness, the snippet with the
+       match highlighted — printed as the binary printed it, NOT re-rendered
+       into a bullet list. If it came back as bullets, the "how to report"
+       section is being ignored; record the transcript.
+  SEE: ghosts and subagent rows included by default.
+  ALSO TRY: /potsherd find <a word that is in NO session>
+  SEE: the no-match output and exit 1 surfaced, not a hallucinated result.
+
+--- 5. /potsherd graft  [DoD box 2 of 4 — MOMENT 5, THE MAGIC] ---------------
+  Pick a session in a DIFFERENT project from the one you are sitting in, at
+  least a few weeks old. `potsherd ls --since 60d --limit 40` to choose one.
+
+  TYPE: /potsherd graft <id8> --about <topic>
+  SEE: (a) the brief printed, ≤ ~1,200 tokens, last line
+           source: <harness> <id> · <n> exchanges · <date>
+       (b) a **Read tool call** on `./.potsherd/graft-<id8>.md` immediately
+           after. This is the whole test. If the file is written and printed
+           but never Read, the skill did the CLI's job and not its own.
+       (c) one sentence naming what it now knows and where it came from.
+
+  THEN, in the SAME session, ask a question that only that brief can answer:
+  TYPE: given that, what should I do about <the thing the brief decided>?
+  SEE: an answer that uses the brief's specifics and cites the session id.
+  RECORD BOTH TURNS. This is the screen capture `05` calls the demo, and the
+  DoD box "`/potsherd graft <x>` visibly changes the next answer in the same
+  claude session".
+
+--- 6. /potsherd ask — the fan-out  [DoD box 3 of 4] -------------------------
+  TYPE: /potsherd ask "<a real question about your own history>"
+  SEE, in order:
+       (a) ONE Bash call: `... find "<q>" --json --limit 6 --vectors on`
+       (b) up to six Bash calls: `... show <id> --json --from <n> --to <n>`
+       (c) **one message containing six Agent tool calls** — they must be in a
+           single message. Six sequential agents is the failure this whole
+           route exists to avoid; if you see them one at a time, record it.
+       (d) ANSWER / EVIDENCE, evidence lines shaped
+             [1]  <id8>  seq <n>  <date>   "<quote…>"
+       (e) the last line naming the weaker guarantee and offering
+             potsherd ask "<the question>"
+  TIME IT. Expect well under a minute. The binary path is 40–183 s, p50 ~100 s;
+  if the fast path is not several times quicker there is no reason to have it.
+
+  THEN, for comparison, run the binary directly in a terminal:
+    node packages/cli/bin/potsherd.js ask "<the same question>"
+  Compare the two EVIDENCE lists. They should overlap heavily — same shortlist,
+  same reader contract. Where they differ, the difference is `filterAnswer`,
+  and that is section 2.
+
+--- 7. --strict routes to the binary -----------------------------------------
+  TYPE: /potsherd ask "what is the capital of france" --strict
+  SEE: the skill runs `... ask "..." --strict` through the BINARY (not the
+       Agent fan-out), and surfaces the refusal, exit 2.
+
+--- 8. the MCP server is connected -------------------------------------------
+  (needs T5.1 + T5.3)
+  TYPE: /mcp
+  SEE: `potsherd` connected, six tools.
+  SEE the tool names carry the prefix `mcp__plugin_potsherd_potsherd__`. If the
+  prefix differs, section 1b/1c fired — fix the names before step 9, or step 9
+  fails for a reason that has nothing to do with the description.
+
+--- 9. THE DESCRIPTION TEST  [DoD box 4 of 4] --------------------------------
+  This is the one phase 5's risk section asks for three phrasings of. All three
+  are in `skills/remembering-sessions/SKILL.md` as YAML comments; exactly one is
+  uncommented at a time. **Restart claude between candidates** — descriptions
+  are read at startup.
+
+  Candidate C is shipped (uncommented). Test C first.
+
+  For EACH candidate, start a fresh session and type these four, each in its
+  own new session (a fired skill in turn 1 contaminates turn 2):
+
+    P1  what did we decide about <topic> last month?
+    P2  remind me why we dropped <thing>
+    P3  we talked about this before — what was the conclusion?
+    P4  what does <a generic technical term> do?          ← NEGATIVE CONTROL
+
+  SEE, for P1–P3: a **Skill tool call named `remembering-sessions`**, then an
+       **Agent block labelled `session-archaeologist`**, WITHOUT you having
+       asked for either. Then an answer carrying `<id8>` and a date.
+  SEE, for P4: NO skill call. A description that fires on a general knowledge
+       question is a failure too — it will fire on everything and be turned off.
+
+  SCORE: 3 positives fired / 1 negative held = pass. Record which candidates
+  scored what; that table is the phase-5 handoff's most useful artefact and it
+  is the only way to know the shipped description is the right one.
+
+--- 10. the archaeologist behaves ---------------------------------------------
+  In the transcript of a fired P1–P3, check inside the agent block:
+  SEE: `potsherd_find` called FIRST, with no `project`/`since` filter on the
+       first call.
+  SEE: `potsherd_ask` NOT called, unless find+read genuinely did not settle it.
+       If the agent opens with `potsherd_ask`, the turn took ~100 s and the
+       method section is being ignored — record it.
+  SEE: the returned block is ANSWER / SOURCES, under 600 words.
+  SEE: if any source is a ghost, the answer says what was ASKED and never what
+       was answered.
+
+--- 11. the safety rails -------------------------------------------------------
+  TYPE: /potsherd rescue
+  SEE: `... rescue --no-settings` — and **no `--yes` anywhere**. Then a receipt,
+       then a sentence sending you to your own terminal for the settings diff.
+  TYPE: /potsherd guard
+  SEE: `... guard --status` only. Nothing installed, nothing written.
+  If you see `--yes` on either, that is a stop-ship; record the transcript.
+
+
+================================================================================
+4. WHAT I DID NOT DO, AND WHY
+================================================================================
+
+- **Did not install the plugin.** `~/.claude` is a read-only input and this
+  plugin's install is the user's act. Section 3 step 2 uses `--plugin-dir`,
+  which loads from the repo without installing anything.
+- **Did not run any of section 3.** Every step needs an interactive claude
+  session; `07` and the WAVE file both assign these to the orchestrator. What I
+  could check non-interactively I did: the binary's version, its tour, its
+  no-index error path, the built bundle's runtime requires, and every
+  frontmatter field against two independent sources.
+- **Did not create `plugins/claude-code/bin/potsherd`.** Outside my four
+  delivered paths and unowned in the WAVE table. Section 1a.
+- **Did not add `--readers-out` / `--readers-in`.** `packages/**` is RESERVED.
+  Section 2 specifies them completely.
+- **No real project name, session title or transcript prose appears in any of
+  the three files.** Every example is a placeholder (`<project>`, `<id8>`,
+  `<topic>`). The repo is public and the reference corpus is not mine to quote.
