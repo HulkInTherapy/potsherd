@@ -242,7 +242,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       const mark = row.novel ? t.warn('new') : t.dim('known');
       const versions = row.versions === 1 ? '1 version' : `${row.versions} versions`;
       card.raw(
-        `    ${fmt.elide(left, 30).padEnd(30)}${fmt.num(row.count).padStart(7)}   ` +
+        `    ${fmt.elide(left, 30).padEnd(30)}${fmt.num(row.count).padStart(7)}  ` +
           `${t.dim(versions.padEnd(11))} ${mark}`,
       );
     }
