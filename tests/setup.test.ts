@@ -163,6 +163,29 @@ describe('where the MCP server is', () => {
     expect(res.file).toBe(path.join(root, 'packages', 'mcp', 'dist', 'index.js'));
   });
 
+  it('resolves the nearest checkout, not an outer one it happens to sit inside', () => {
+    const outer = path.join(home, 'outer');
+    write(path.join(outer, 'package.json'), '{}\n');
+    fs.mkdirSync(path.join(outer, 'packages'), { recursive: true });
+    const inner = path.join(outer, '.worktrees', 'wt');
+    write(path.join(inner, 'package.json'), '{}\n');
+    const cliBin = write(path.join(inner, 'packages', 'cli', 'bin', 'potsherd.js'), '// stub\n');
+
+    expect(findMcpEntry(cliBin).file).toBe(path.join(inner, 'packages', 'mcp', 'dist', 'index.js'));
+  });
+
+  /**
+   * An installed copy with nothing built and no checkout above it has no build
+   * directory to name, so it names none: the fallback is the bin the install
+   * should have put on PATH, marked as not there.
+   */
+  it('names no path at all when there is no checkout to build in', () => {
+    const bin = write(path.join(home, 'node_modules', 'potsherd', 'bin', 'potsherd.js'), '// stub\n');
+    expect(findMcpEntry(bin)).toEqual({ file: null, exists: false });
+    const res = resolveMcpServer(bin, { PATH: '' });
+    expect(res).toEqual({ command: MCP_BIN, args: [], via: 'assumed', exists: false });
+  });
+
   it('finds a registry install under node_modules/@potsherd/mcp', () => {
     const root = path.join(home, 'lib');
     const entry = write(path.join(root, 'node_modules', '@potsherd', 'mcp', 'dist', 'index.js'), '// stub\n');

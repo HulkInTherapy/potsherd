@@ -9,6 +9,14 @@ import { format as fmt, paths } from '@potsherd/core';
 import * as setup from '../../../core/src/setup.js';
 import { confirm, print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 
+/**
+ * The flags the commander block registers, in help order.
+ *
+ * Re-exported here so registering the verb needs one import from one module,
+ * and so the flag list can never drift from the client list it is built from.
+ */
+export const SETUP_CLIENTS: readonly setup.ClientId[] = setup.CLIENT_IDS;
+
 export interface SetupOptions extends GlobalOptions {
   /** The clients named on the command line, in `CLIENTS` order. */
   clients?: setup.ClientId[];
@@ -81,7 +89,11 @@ export async function runSetup(o: SetupOptions): Promise<number> {
   if (unbuilt && todo.length) {
     print('');
     print(`  ${t.warn('the potsherd MCP server is not built on this machine.')}`);
-    print(`  it would be  ${paths.tildify(resolution.file ?? '')}`);
+    if (resolution.file) {
+      print(`  it would be  ${fmt.elideMiddle(paths.tildify(resolution.file), Math.max(32, t.width - 15), t)}`);
+    } else {
+      print(`  no ${setup.MCP_BIN} on your PATH, and no checkout to build it from.`);
+    }
     print('');
     print(t.dim('  a stanza pointing at a binary that is not there looks installed'));
     print(t.dim('  and silently gives the model nothing, which is worse than no'));
@@ -91,11 +103,10 @@ export async function runSetup(o: SetupOptions): Promise<number> {
   }
 
   for (const plan of todo) {
-    printPlan(plan, o, t, resolution);
+    printPlan(plan, o, t, resolution, unbuilt);
 
     if (o.dryRun) {
       print(`  ${t.dim('dry run: nothing was written.')}`);
-      print('');
       continue;
     }
     if (unbuilt) {
@@ -169,15 +180,24 @@ function printPlan(
   o: SetupOptions,
   t: ReturnType<typeof themeFrom>,
   resolution: setup.McpResolution,
+  unbuilt = false,
 ): void {
   const verb = plan.action === 'remove' ? 'remove' : plan.action === 'update' ? 're-point' : 'add';
+  const prep = plan.action === 'remove' ? 'from' : plan.action === 'update' ? 'in' : 'to';
   print('');
-  print(`  potsherd will ${verb} one MCP server in ${plan.label}.`);
+  print(
+    unbuilt
+      ? `  once it is built, this is what potsherd would ${verb} ${prep} ${plan.label}.`
+      : `  potsherd will ${verb} one MCP server ${prep} ${plan.label}.`,
+  );
   print('');
-  print(`  file   ${paths.tildify(plan.path)}`);
+  const pathW = Math.max(24, t.width - 11);
+  print(`  file   ${fmt.elideMiddle(paths.tildify(plan.path), pathW, t)}`);
   if (plan.action !== 'remove') {
     print(`  runs   ${fmt.elideMiddle(commandLine(resolution), Math.max(32, t.width - 11), t)}`);
-    print(`  tools  ${TOOLS.join(', ')}`);
+    const tools = fmt.wrap(TOOLS.join(', '), Math.max(24, t.width - 9));
+    print(`  tools  ${tools[0] ?? ''}`);
+    for (const l of tools.slice(1)) print(`         ${l}`);
   }
   if (plan.keeps.length) {
     // The single most important thing this screen can say: your other servers
@@ -190,7 +210,14 @@ function printPlan(
     print(`  ${t.warn('note')}   ${plan.label}'s schema is unverified: ${plan.detection.evidenceNote}`);
   }
   print('');
-  for (const line of plan.diff.split('\n')) {
+  for (const raw of plan.diff.split('\n')) {
+    // The two file headers carry a path and nothing else, and a path is the one
+    // thing here that can outrun any terminal. They elide in the middle like
+    // every other path potsherd prints; `--json` still carries the whole diff.
+    const line =
+      raw.startsWith('--- ') || raw.startsWith('+++ ')
+        ? raw.slice(0, 4) + fmt.elideMiddle(raw.slice(4), Math.max(24, t.width - 6), t)
+        : raw;
     const tone =
       line.startsWith('+') && !line.startsWith('+++')
         ? t.ok(line)

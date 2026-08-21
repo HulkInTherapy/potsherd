@@ -91,8 +91,19 @@ export function resolveMcpServer(
   if (found) return { command: MCP_BIN, args: [], via: 'path', file: found, exists: true };
 
   const local = findMcpEntry(entry);
-  const via = local.exists ? 'local' : 'assumed';
-  return { command: process.execPath, args: [local.file], via, file: local.file, exists: local.exists };
+  if (local.file) {
+    return {
+      command: process.execPath,
+      args: [local.file],
+      via: local.exists ? 'local' : 'assumed',
+      file: local.file,
+      exists: local.exists,
+    };
+  }
+  // No checkout to point at either: this is an installed copy whose `mcp`
+  // package is missing, so the honest answer is the bin the install *should*
+  // have put on PATH, marked as not there.
+  return { command: MCP_BIN, args: [], via: 'assumed', exists: false };
 }
 
 /**
@@ -103,27 +114,39 @@ export function resolveMcpServer(
  * assumed layout is the one `phases/phase-5-surfaces.md` verifies against:
  * `node packages/mcp/dist/index.js`.
  */
-export function findMcpEntry(entry: string | undefined): { file: string; exists: boolean } {
+export function findMcpEntry(entry: string | undefined): { file: string | null; exists: boolean } {
   const start = entry && fs.existsSync(entry) ? path.dirname(path.resolve(entry)) : process.cwd();
   let dir = start;
-  let root: string | null = null;
+  let workspace: string | null = null;
+
   for (let i = 0; i < 8; i++) {
     for (const rel of [MCP_ENTRY_RELATIVE, MCP_PACKAGE_RELATIVE]) {
       const candidate = path.join(dir, rel);
       if (fs.existsSync(candidate)) return { file: candidate, exists: true };
     }
-    // The fallback root has to be *potsherd's* root, not whatever package the
-    // entry happened to be loaded from: under a test runner `argv[1]` sits deep
-    // inside `node_modules`, and naming a path in there would be a confident
-    // lie about where the server will be.
-    if (root === null && !dir.split(path.sep).includes('node_modules') && fs.existsSync(path.join(dir, 'package.json'))) {
-      root = dir;
+    // The fallback root has to be the *workspace* root, not the first package
+    // above the entry: from `packages/cli/bin/potsherd.js` that would be
+    // `packages/cli`, and `packages/cli/packages/mcp/dist/index.js` is a
+    // confident lie about where the server will be. A directory holding both a
+    // `package.json` and a `packages/` is the checkout; nothing under
+    // `node_modules` qualifies, because that is an installed copy, not a build.
+    // The *nearest* such directory wins, so a worktree checked out inside
+    // another checkout resolves to itself rather than to its parent.
+    if (
+      workspace === null &&
+      !dir.split(path.sep).includes('node_modules') &&
+      fs.existsSync(path.join(dir, 'package.json')) &&
+      fs.existsSync(path.join(dir, 'packages'))
+    ) {
+      workspace = dir;
     }
     const up = path.dirname(dir);
     if (up === dir) break;
     dir = up;
   }
-  return { file: path.join(root ?? start, MCP_ENTRY_RELATIVE), exists: false };
+  // Null rather than a guess: an installed copy with no `packages/` anywhere
+  // above it has no build directory to name, and `resolveMcpServer` says so.
+  return { file: workspace ? path.join(workspace, MCP_ENTRY_RELATIVE) : null, exists: false };
 }
 
 // -------------------------------------------------------------- the clients
