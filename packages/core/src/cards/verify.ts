@@ -39,8 +39,9 @@ import { cosine, rankedWindows } from './vectors.js';
  * a compliment to the extractor.
  */
 
-/** `phase-2` T2.2 §4: below this against every cited exchange, the claim goes. */
-export const EVIDENCE_COSINE = 0.5;
+/** `03` §6: below this against every cited exchange, the claim goes. Raised
+ * from 0.5 on 2026-08-21: 38 of 74 mis-cited controls cleared 0.5. */
+export const EVIDENCE_COSINE = 0.6;
 
 /** Window size for the containment comparison, in characters. */
 export const EVIDENCE_WINDOW_CHARS = 1_800;
