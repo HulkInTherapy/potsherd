@@ -13,9 +13,12 @@ potsherd_ls      sessions by title, newest first
 potsherd_tag     your own tags on a session
 ```
 
-Six, not fifty-four. Everything except `potsherd_tag` is read-only, and nothing
-writes outside `~/.potsherd` except `potsherd_graft`'s brief, which lands in the
-directory you ran the client from.
+Six, not fifty-four. Four of them only read. The two that write are
+`potsherd_tag`, which puts your labels in the index, and `potsherd_graft`,
+which saves its brief as `./.potsherd/graft-<id8>.md` in the directory you ran
+the client from — the only potsherd write outside `~/.potsherd`. Both are
+annotated `readOnlyHint: false`, so a client that asks before running a write
+tool will ask before running either.
 
 ## the one command
 

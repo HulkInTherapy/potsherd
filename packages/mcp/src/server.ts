@@ -29,8 +29,24 @@ export const TOOLS = [
   'potsherd_tag',
 ] as const;
 
-/** Every tool but `potsherd_tag` reads and does not write. */
-export const WRITE_TOOLS: readonly string[] = ['potsherd_tag'];
+/**
+ * The tools that write, and therefore the tools annotated
+ * `readOnlyHint: false`.
+ *
+ * This said `['potsherd_tag']` until T5.9, with the comment "Every tool but
+ * `potsherd_tag` reads and does not write". `potsherd_graft` creates
+ * `./.potsherd/graft-<id8>.md` and a `./.potsherd/.gitignore` beside it in the
+ * user's project, and has since it was written, so the comment was false and
+ * the annotation derived from it told every client that a tool which creates
+ * files in a repository is safe to auto-approve.
+ *
+ * The list is not documentation to be kept in step by hand. `--selftest`
+ * watches the project directory across every `tools/call` and fails unless the
+ * tools observed to write are exactly the tools named here — so a tool added
+ * to this list without writing, or removed from it while still writing, is
+ * caught by running the server rather than by reading it.
+ */
+export const WRITE_TOOLS: readonly string[] = ['potsherd_graft', 'potsherd_tag'];
 
 export function createServer(ctx: ServerContext): McpServer {
   const server = new McpServer(
@@ -44,7 +60,10 @@ export function createServer(ctx: ServerContext): McpServer {
         'potsherd_find for words, potsherd_ls for a period or a label, potsherd_read for the ' +
         'exact exchanges, potsherd_graft to carry a past session into this one, and ' +
         'potsherd_ask (slow, ~100s) only when the first four cannot answer. ' +
-        'potsherd_tag is the only tool here that writes anything.',
+        'Four of the six only read. The two that write say so in their ' +
+        'readOnlyHint: potsherd_tag changes labels in the index, and ' +
+        'potsherd_graft creates ./.potsherd/graft-<id8>.md in the current ' +
+        'project — it is the only tool that writes outside ~/.potsherd.',
     },
   );
 
