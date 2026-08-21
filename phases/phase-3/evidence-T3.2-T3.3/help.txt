@@ -1,0 +1,63 @@
+$ potsherd find --help
+Usage: potsherd find [options] <query>
+
+search every prompt, every subagent and every deleted session
+
+Arguments:
+  query                  the words to look for
+
+Options:
+  --json                 machine-readable output, same data as the human view
+  --no-color             disable colour (NO_COLOR is honoured too)
+  --ascii                ASCII-only glyphs, for terminals without a unicode
+                         font
+  --width <n>            render for this terminal width
+  --claude-dir <path>    read Claude Code data from here (CLAUDE_CONFIG_DIR is
+                         honoured)
+  --potsherd-dir <path>  potsherd's own directory (default ~/.potsherd)
+  --debug                print full errors
+  --file <path>          only sessions that touched a path containing this
+  --vectors <mode>       the vector half of the hybrid (choices: "auto", "on",
+                         "off", default: "auto")
+  --no-vec               text search only — the same as --vectors off
+  --explain              show the per-list ranks and scores behind the order
+  --project <name>       only this project (a directory name is enough)
+  --harness <name>       claude, codex, cursor or pi
+  --since <when>         on or after this date, or a span like 30d / 6w
+  --until <when>         on or before this date
+  --branch <name>        only sessions on this git branch
+  --tag <tag>            only sessions carrying this tag
+  --sidechains <mode>    subagent transcripts (choices: "include", "only",
+                         "exclude", default: "include")
+  --ghosts <mode>        sessions Claude Code deleted, rebuilt from history
+                         (choices: "include", "only", "exclude", default:
+                         "include")
+  --status <state>       index status (choices: "live", "archived", "ghost")
+  --pinned               only pinned sessions
+  --linked-to <id>       only sessions linked to this one, from either side of
+                         the link
+  --untitled             only sessions with no card and no title from the
+                         harness
+  --limit <n>            how many to show
+  -h, --help             display help for command
+
+example:
+  potsherd find "pgbouncer"
+  potsherd find "vedic astrology" --json | jq -r '.sessions[0].resume'
+  potsherd find "the pooler decision" --vectors on   # force semantic search
+  potsherd find "pgbouncer" --explain                # why this order
+
+filters, one example each — they compose, and all of them are AND:
+  --project Fulcrum          only that project (a directory name is enough)
+  --harness claude           claude, codex, cursor, pi, gemini, opencode
+  --since "last week"        2026-08-01 / 2026-08 / 30d / today / in july
+  --until 2026-08-15         the same forms; the day itself is included
+  --tag postgres             sessions you tagged
+  --branch feat/pooler       the git branch the session ran on ("feat/*" ok)
+  --file "%/db/%"            sessions that touched a matching path
+  --sidechains only          what the subagents did (default: include)
+  --ghosts only              only what Claude Code deleted (default: include)
+  --pinned                   only the ones you starred
+  --status archived          live, archived or ghost
+
+  potsherd find "supabase" --file "%/db/%" --harness claude --since 30d

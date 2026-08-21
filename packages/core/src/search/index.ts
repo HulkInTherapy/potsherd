@@ -12,6 +12,10 @@
  */
 export { l2DistanceToCosineSimilarity, rrfScore, RRF_K } from './similarity.js';
 export {
+  branchClause,
+  branchParam,
+  likePattern,
+  FILE_TOUCHED_SQL,
   buildExchangeFilters,
   buildGhostFilters,
   buildSessionFilters,
@@ -35,3 +39,17 @@ export {
   type MatchSnippet,
   type WordSpan,
 } from './snippet.js';
+export {
+  parseWhen,
+  whenEdge,
+  WHEN_FORMS,
+  type WhenRange,
+} from './when.js';
+export {
+  explain,
+  solveWeights,
+  type Explain,
+  type HitExplain,
+  type ListExplain,
+  type SessionExplain,
+} from './explain.js';

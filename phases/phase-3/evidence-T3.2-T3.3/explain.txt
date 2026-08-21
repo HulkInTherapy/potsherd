@@ -1,0 +1,75 @@
+# T3.3 --explain at 80 columns. Note #1 is bm25-ranked SECOND.
+$ potsherd find database migration --explain --no-color --width 80 --limit 3
+potsherd find "database migration" · 3 sessions · bm25 · 15ms
+
+  rrf 1/(k+rank), k=60 · 1/4 lists matched · lighter weight = that list relaxed
+
+  1  0.0144  Liveness probe keeps restarting the pod                    94f91303
+     exchange 2                                                           0.0097
+       exchanges_fts     r2   bm25 -3.25   ×0.60   0.0097 100%
+     exchange 1                                                           0.0094
+       exchanges_fts     r4   bm25 -2.36   ×0.60   0.0094 100%
+     0.0144 = 0.0097 best + 0.0047 corroboration
+
+  2  0.0098  Rewrite the CSV importer as a stream                       a82ceb72
+     exchange 2                                                           0.0098
+       exchanges_fts     r1   bm25 -4.68   ×0.60   0.0098 100%
+     0.0098 = 0.0098 best
+
+  3  0.0095  Refund flow writes two ledger rows                         2d6b91ae
+     exchange 2                                                           0.0095
+       exchanges_fts     r3   bm25 -2.83   ×0.60   0.0095 100%
+     0.0095 = 0.0095 best
+
+  #1 leads #2 by 0.0045 · 2 hits against 1, not a better one
+  slowest list exchanges_fts 3ms · the same numbers are in --json
+
+[exit 0] widest line: 80 characters
+
+# The same at --width 60 --ascii: the raw column goes, the arithmetic stays.
+$ potsherd find database migration --explain --no-color --ascii --width 60 --limit 3
+potsherd find "database migration" | 3 sessions | bm25 | 7ms
+
+  rrf 1/(k+rank), k=60 | 1/4 lists matched | ...
+
+  1  0.0144  Liveness probe keeps restarting th...  94f91303
+     exchange 2                                       0.0097
+       exchanges_fts     r2   x0.60   0.0097 100%
+     exchange 1                                       0.0094
+       exchanges_fts     r4   x0.60   0.0094 100%
+     0.0144 = 0.0097 best + 0.0047 corroboration
+
+  2  0.0098  Rewrite the CSV importer as a stream   a82ceb72
+     exchange 2                                       0.0098
+       exchanges_fts     r1   x0.60   0.0098 100%
+     0.0098 = 0.0098 best
+
+  3  0.0095  Refund flow writes two ledger rows     2d6b91ae
+     exchange 2                                       0.0095
+       exchanges_fts     r3   x0.60   0.0095 100%
+     0.0095 = 0.0095 best
+
+  #1 leads #2 by 0.0045 | 2 hits against 1, not a better one
+  slowest list exchanges_fts 1ms | ...
+
+[exit 0] widest line: 60 characters
+
+# A title hit and two body hits in one ledger.
+$ potsherd find pgbouncer prepared statements --explain --no-color --width 80
+potsherd find "pgbouncer prepared statements" · 1 session · bm25 · 7ms
+
+  rrf 1/(k+rank), k=60 · 2/4 lists matched · lighter weight = that list relaxed
+
+  1  0.0246  Pin the pgbouncer prepared-statement setting               0a2fbf9b
+     title                                                                0.0164
+       titles            r1   title match  ×1.00   0.0164 100%
+     exchange 2                                                           0.0098
+       exchanges_fts     r1   bm25 -10.21  ×0.60   0.0098 100%
+     exchange 1                                                           0.0097
+       exchanges_fts     r2   bm25 -5.38   ×0.60   0.0097 100%
+     0.0246 = 0.0164 best + 0.0082 corroboration (capped)
+
+  slowest list exchanges_fts 1ms · the same numbers are in --json
+
+[exit 0] widest line: 80 characters
+

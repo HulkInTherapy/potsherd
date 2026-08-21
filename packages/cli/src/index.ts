@@ -229,15 +229,29 @@ example:
           .choices(['auto', 'on', 'off'])
           .default('auto'),
       )
-      .option('--no-vec', 'text search only — the same as --vectors off'),
+      .option('--no-vec', 'text search only — the same as --vectors off')
+      .option('--explain', 'show the per-list ranks and scores behind the order'),
   ).addHelpText('after', `
 example:
   potsherd find "pgbouncer"
   potsherd find "vedic astrology" --json | jq -r '.sessions[0].resume'
-  potsherd find "instagram" --sidechains only        # what the subagents did
-  potsherd find "canon driver" --ghosts only         # only what was deleted
-  potsherd find "rls policy" --project Fulcrum --since 30d
-  potsherd find "the pooler decision" --vectors on   # force semantic search`);
+  potsherd find "the pooler decision" --vectors on   # force semantic search
+  potsherd find "pgbouncer" --explain                # why this order
+
+filters, one example each — they compose, and all of them are AND:
+  --project Fulcrum          only that project (a directory name is enough)
+  --harness claude           claude, codex, cursor, pi, gemini, opencode
+  --since "last week"        2026-08-01 / 2026-08 / 30d / today / in july
+  --until 2026-08-15         the same forms; the day itself is included
+  --tag postgres             sessions you tagged
+  --branch feat/pooler       the git branch the session ran on ("feat/*" ok)
+  --file "%/db/%"            sessions that touched a matching path
+  --sidechains only          what the subagents did (default: include)
+  --ghosts only              only what Claude Code deleted (default: include)
+  --pinned                   only the ones you starred
+  --status archived          live, archived or ghost
+
+  potsherd find "supabase" --file "%/db/%" --harness claude --since 30d`);
   find.action(async (query: string, opts: Record<string, unknown>) => {
     const o = globals(program, find, opts);
     await run(
@@ -247,6 +261,7 @@ example:
           ...filterFlags(opts),
           query,
           vec: opts['vec'] !== false,
+          explain: Boolean(opts['explain']),
           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
         }),
       o,
