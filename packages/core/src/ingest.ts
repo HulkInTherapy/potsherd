@@ -32,7 +32,7 @@ import {
   generateExchangeEmbedding,
   isModelCached,
 } from './embeddings.js';
-import { loadVec, vecStatus, vecTablesExist, type VecStatus } from './vec.js';
+import { loadVec, vecAvailable, vecStatus, vecTablesExist, type VecStatus } from './vec.js';
 import { modelsDir, potsherdDir } from './paths.js';
 
 /**
@@ -284,7 +284,10 @@ function clearExchanges(db: Db, sessionId: string): void {
   );
   for (const row of rows) unindex.run(row.rowid, row.user_text, row.assistant_text);
 
-  if (vecTablesExist(db)) {
+  // Both conditions: the table can be in `sqlite_master` while this particular
+  // connection has not loaded vec0, and then the DELETE raises "no such module".
+  // `ingestSession` is exported and may be called without `indexAll`'s setup.
+  if (vecAvailable(db) && vecTablesExist(db)) {
     const dropVec = db.prepare('DELETE FROM vec_exchanges WHERE id = ?');
     for (const row of rows) dropVec.run(row.id);
   }
