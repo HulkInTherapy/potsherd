@@ -18,9 +18,12 @@ import {
   MASK_RE,
   addCounts,
   emptyCounts,
+  elideExchange,
+  emptyElisions,
   redactExchange,
   redact,
   tally,
+  type Elisions,
   type RedactionCounts,
   type SecretType,
 } from './redact.js';
@@ -154,6 +157,8 @@ export interface IngestSessionResult {
   /** Exchanges where at least one rule fired. */
   redactedExchanges: number;
   counts: RedactionCounts;
+  /** Binary payloads dropped before redaction ever saw them. */
+  elisions: Elisions;
 }
 
 /**
@@ -177,9 +182,19 @@ export function ingestSession(
   let redactedExchanges = 0;
   let toolCallCount = 0;
 
+  const elisions = emptyElisions();
   const redacted: Exchange[] = [];
   for (const exchange of parsed.exchanges) {
-    const { exchange: clean, hits } = redactExchange(exchange);
+    // Binary payloads are elided *before* redaction, never by it. A base64
+    // image in a tool result is not a credential and no scanner can read it as
+    // anything but 500 KB of maximum-entropy noise: measured on the reference
+    // corpus, images alone accounted for 98.6% of every mask potsherd emitted.
+    // `redact-elide.ts` has the argument in full; the codex adapter has done
+    // the same thing at its own layer since T1.3.
+    const { exchange: lean, elisions: e } = elideExchange(exchange);
+    const { exchange: clean, hits } = redactExchange(lean);
+    elisions.binaryParts += e.binaryParts;
+    elisions.charsElided += e.charsElided;
     tally(hits, counts);
     if (clean.redacted) redactedExchanges += 1;
     toolCallCount += clean.toolCalls.length;
@@ -199,6 +214,7 @@ export function ingestSession(
     toolCalls: toolCallCount,
     redactedExchanges,
     counts,
+    elisions,
   };
 }
 

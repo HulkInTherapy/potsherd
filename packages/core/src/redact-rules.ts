@@ -144,6 +144,101 @@ const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 const HEX_RE = /^[0-9a-fA-F]+$/;
 const NUMERIC_RE = /^[0-9_+-]+$/;
 
+// -------------------------------------------------- entropy-rule exclusions
+//
+// Each of these answers a false-positive class *measured* on the reference
+// corpus by `scripts/redaction-benchmark.mjs`, and each is named and commented
+// so a future reader can audit — or delete — one of them on its own merits.
+//
+// The load-bearing property of all of them: they apply **only to a bare token
+// the entropy rule found lying in the text with no context**. A value that is
+// assigned to a secret-named key, sent in an `Authorization` header or put in
+// a url's userinfo is claimed by a rule that runs earlier and never consults
+// this list. So "exclude uuids" cannot let `API_KEY=<uuid>` through, and
+// "exclude `toolu_…`" cannot let `ANTHROPIC_API_KEY=toolu_…` through. Both are
+// planted cases in `tests/fixtures/secrets/planted.jsonl`.
+
+/**
+ * **E1 — minted object ids.** Model apis and agent harnesses stamp every
+ * message, request, tool use and run with a random id under a fixed prefix.
+ * They are the densest high-entropy shape in an agent transcript by an order
+ * of magnitude — `toolu_014ZfaccgxvcYNpcTLq8qvkR` and its kin — and none of
+ * them is a credential: they are handed out in api *responses*, they appear in
+ * public logs, and they authorise nothing.
+ *
+ * Prefixes, and who mints them:
+ *   toolu_ srvtoolu_ msg_ req_          anthropic messages api
+ *   chatcmpl- fc_ call_ run_ step_
+ *   thread_ asst_ resp_ evt_            openai
+ *   exec- exec_ agent- sess_ session_   agent harnesses (claude code, codex)
+ *   task_ job_ turn_ conv_ snapshot-    harness bookkeeping
+ *
+ * Deliberately *not* here: `sk_`, `rk_`, `ghp_`, `xoxb-`, `npm_`, `AKIA`,
+ * `sk-ant-`, `tvly-` — every one of those prefixes means the opposite.
+ */
+const MINTED_ID_RE =
+  /^(?:toolu|srvtoolu|msg|req|resp|call|fc|run|step|thread|asst|evt|sess|session|exec|job|task|turn|conv|agent|snapshot|chatcmpl)[-_]/i;
+
+/**
+ * **E5 — ULIDs.** 26 characters of Crockford base32, the first 10 encoding a
+ * millisecond timestamp. log2(26) = 4.70, so a ULID can and does clear the 4.5
+ * bar. Sortable ids, not secrets; the alphabet excludes I, L, O and U on
+ * purpose, which is what makes the shape recognisable.
+ */
+const ULID_RE = /^[0-7][0-9ABCDEFGHJKMNPQRSTVWXYZ]{25}$/;
+
+/**
+ * **E6 — prose wearing a token's clothes.** The single largest surviving false
+ * positive on the reference corpus once images were elided: url slugs.
+ *
+ *     …%2Fy-combinator_reducto-has-just-raised-a-75m-series-b-activity-7383909473913880576-ba7M
+ *
+ * That is 87 characters over a wide alphabet, so its Shannon entropy is 4.9 —
+ * comfortably "random" by the measure in `03` §5 — and it is a LinkedIn
+ * permalink. Shannon entropy on a single short sample cannot tell *random*
+ * from *varied*, and English is very varied.
+ *
+ * What separates them is **runs**. A base64 or base62 credential draws each
+ * character independently, so a run of 7 consecutive same-case letters has
+ * probability ≈ (26/64)^7 ≈ 1 in 900 per position; two disjoint such runs in
+ * one 40-character token is well under 1%. English words are nothing but such
+ * runs — `combinator`, `activity`, `whatsapp`, `killmonger`.
+ *
+ * So: two runs of ≥ 7 same-case letters, or one run of ≥ 12, and the token is
+ * text. Both numbers were checked against the corpus rather than chosen: at
+ * ≥ 7/×2 every tavily key, every planted secret and every base64 fixture value
+ * survives (their longest same-case run is 4), and the slug class disappears.
+ */
+const SAMECASE_RUN_MIN = 7;
+const SAMECASE_RUNS_NEEDED = 2;
+const SAMECASE_RUN_ALONE = 12;
+
+function looksLikeProse(token: string): boolean {
+  let long = 0;
+  for (const run of token.match(/[a-z]+|[A-Z]+/g) ?? []) {
+    if (run.length >= SAMECASE_RUN_ALONE) return true;
+    if (run.length >= SAMECASE_RUN_MIN) long += 1;
+  }
+  return long >= SAMECASE_RUNS_NEEDED;
+}
+
+/**
+ * **E7 — alphabet constants.** `0123456789ABCDEFGHJKMNPQRSTVWXYZ` is the
+ * Crockford base32 table; every base32/base58/base62 encoder in every codebase
+ * declares one, and with no repeated character it scores a perfect log2(n)
+ * entropy — the highest possible.
+ *
+ * The test is exactly "no character occurs twice". Drawing 24 characters from
+ * a 62-character alphabet without a single repeat happens with probability
+ * ≈ 1%, and from base64url's 64 with probability ≈ 1.4%; combined with the
+ * 24-character floor and with the fact that a credential in any real context
+ * is claimed by an earlier rule, this is a safe trade for a class that is
+ * otherwise permanently unmaskable-looking.
+ */
+function looksLikeAlphabetConstant(token: string): boolean {
+  return token.length >= 24 && new Set(token).size === token.length;
+}
+
 /**
  * Placeholder values. Ported from gitleaks' `stopwords` list and secretlint's
  * dummy-value handling, trimmed to the ones that actually occur in coding
@@ -251,16 +346,36 @@ export function valueLooksLikeSecret(value: string): boolean {
   return true;
 }
 
-/** Entropy-rule allowlist: shapes that are high-entropy but never secret. */
+/**
+ * Entropy-rule allowlist: shapes that are high-entropy but never secret.
+ *
+ * Every `return false` is an exclusion rule with a letter, defined above with
+ * the class it was measured against. Read the block comment there before
+ * adding, removing or relaxing one.
+ *
+ * This is consulted **only** by the bare-token entropy rule. It is not part of
+ * `valueLooksLikeSecret`, so nothing here can excuse a value that appears in a
+ * credential-shaped position.
+ */
 export function entropyCandidateAllowed(token: string): boolean {
   if (token.length < ENTROPY_MIN_LENGTH) return false;
+  // E2 — uuids. Session ids, request ids, trace ids. Capped at 4.0 bits by
+  // their alphabet anyway; excluded explicitly so the intent is readable.
   if (UUID_RE.test(token)) return false;
-  // Hex digests — git sha1s, sha256 sums, md5s. Capped at 4.0 bits by their
-  // alphabet anyway; excluded explicitly so the intent is readable.
+  // E2b — a uuid under a prefix: `exec-<uuid>`, `agent-<uuid>`, `snapshot-…`.
+  if (UUID_RE.test(token.replace(/^[A-Za-z][A-Za-z0-9]{0,15}[-_]/, ''))) return false;
+  // E3 — hex digests: git sha1s, sha256 sums, md5s, content hashes.
   if (HEX_RE.test(token)) return false;
+  // E4 — a hex digest under a prefix (`sha256-…` without the SRI base64 body,
+  // `blake3-…`, `md5-…`). The base64 SRI form is an ALLOW_SPAN, above.
+  if (/^(?:sha1|sha256|sha384|sha512|md5|blake3|crc32|xxh64)[-_:]/i.test(token)) return false;
   if (NUMERIC_RE.test(token)) return false;
   if (MASK_FRAGMENT_RE.test(token)) return false;
   if (PLACEHOLDER_RE.test(token)) return false;
+  if (MINTED_ID_RE.test(token)) return false;         // E1
+  if (ULID_RE.test(token)) return false;              // E5
+  if (looksLikeProse(token)) return false;            // E6
+  if (looksLikeAlphabetConstant(token)) return false; // E7
   return true;
 }
 
@@ -361,6 +476,103 @@ const genericAssignmentRule: Rule = {
       const start = v.index + v[0].lastIndexOf(value);
       out.push({ start, end: start + value.length, value });
       anchor.lastIndex = start + value.length;
+    }
+    return out;
+  },
+};
+
+/**
+ * `Authorization: Bearer <token>` — a credential *context* rather than a
+ * credential *shape*.
+ *
+ * The rule exists to make the entropy exclusions above safe to hold. They all
+ * assume that a value in a position that shouts "credential" is claimed by an
+ * earlier rule; `KEY=`, `?token=` and `https://user:pw@` were already covered,
+ * and the http authorization header was the hole. It matters more now than it
+ * did before T1.4b: a `Bearer toolu_…`-shaped token is excluded by E1 as a
+ * bare token, and must not be excluded here.
+ *
+ * The name is not masked, only the credential, so a redacted transcript still
+ * says which scheme was used.
+ */
+const BEARER_RE =
+  /(?:^|[^A-Za-z0-9_-])(?:Bearer|Token|ApiKey|Api-Key|Basic|DPoP)[ \t]+([A-Za-z0-9+/._~-]{16,512}={0,2})/g;
+
+const bearerRule: Rule = regexRule(
+  'authorization-bearer',
+  'generic',
+  '03 §5 (credential context), given the shape of gitleaks generic-api-key (MIT)',
+  BEARER_RE,
+  {
+    group: 1,
+    // Same value screen as the `KEY=` rule: `Bearer ${token}`, `Bearer <TOKEN>`
+    // and `Bearer your-token-here` are documentation, not credentials.
+    validate: (value) => valueLooksLikeSecret(value),
+  },
+);
+
+/**
+ * The entropy rule from `03` §5 — ≥ 4.5 bits over tokens of ≥ 20 characters —
+ * written as a scanner rather than as one regex.
+ *
+ * `03` fixes the threshold and the length floor and both are honoured
+ * unchanged. What T1.4b changed is **what counts as a token**, because that
+ * was never specified and the naive reading was doing the damage:
+ *
+ *   1. `=` is base64 *padding*, so it is only a token character at the end.
+ *      Before, `ANTHROPIC_VERTEX_PROJECT_ID=gpu-reservation-sarvam` was one
+ *      "token" — a variable glued to its value — and scored 4.7.
+ *   2. `/` and `.` remain separators, so a long path or a dotted hostname is
+ *      not one token. (Unchanged from T1.4; the reasoning is that a real
+ *      base64 secret containing `/` still leaves a ≥ 23-character run, and 23
+ *      is the shortest string that can reach 4.5 bits at all.)
+ *   3. Transcripts are json-inside-json, so the text often carries a *literal*
+ *      backslash-n where a newline belongs. `\ntvly-dev-…` used to yield the
+ *      token `ntvly-dev-…` — the same secret with a different first character,
+ *      and therefore a different sha8 and a different mask. Escape residue is
+ *      trimmed, which is a correctness fix for the "same secret, same mask"
+ *      guarantee and not only a cosmetic one.
+ *   4. Percent-escape residue (`%2F` leaving `2F…`) and leading/trailing
+ *      separators are trimmed for the same reason.
+ *
+ * Shape exclusions live in {@link entropyCandidateAllowed}.
+ */
+const ENTROPY_TOKEN = /[A-Za-z0-9+_-]{20,}={0,2}/g;
+
+/** Characters a `\x` json escape leaves glued to the front of a token. */
+const ESCAPE_LETTERS = 'ntrbfv';
+
+const highEntropyRule: Rule = {
+  id: 'high-entropy-token',
+  type: 'entropy',
+  source: '03 §5 (4.5 bits / 20 chars) + gitleaks entropy allowlists (MIT)',
+  scan(text: string): RuleMatch[] {
+    const out: RuleMatch[] = [];
+    const rx = new RegExp(ENTROPY_TOKEN.source, ENTROPY_TOKEN.flags);
+    let m: RegExpExecArray | null;
+    while ((m = rx.exec(text)) !== null) {
+      let start = m.index;
+      let value = m[0];
+      // `\n`, `\t`, `\r` written literally by an outer json encoder.
+      if (start > 0 && text[start - 1] === '\\' && ESCAPE_LETTERS.includes(value[0] ?? '')) {
+        start += 1;
+        value = value.slice(1);
+      }
+      // `%2F`, `%3D` — the `%` is a separator, but the two hex digits that
+      // complete the escape are not part of the token that follows it.
+      if (start > 0 && text[start - 1] === '%' && /^[0-9A-Fa-f]{2}/.test(value)) {
+        start += 2;
+        value = value.slice(2);
+      }
+      // Leading and trailing separators belong to the surrounding text.
+      const lead = value.length - value.replace(/^[-_+]+/, '').length;
+      start += lead;
+      value = value.slice(lead).replace(/[-_+]+$/, '');
+
+      if (value.length < ENTROPY_MIN_LENGTH) continue;
+      if (!entropyCandidateAllowed(value)) continue;
+      if (shannonEntropy(value) < ENTROPY_THRESHOLD) continue;
+      out.push({ start, end: start + value.length, value });
     }
     return out;
   },
@@ -525,27 +737,12 @@ export const RULES: Rule[] = [
     },
   ),
 
-  // ---- generic assignment (03 §5) ----------------------------------------
+  // ---- credential context (03 §5) ----------------------------------------
+  bearerRule,
   genericAssignmentRule,
 
   // ---- entropy (03 §5) ---------------------------------------------------
-  regexRule(
-    // Shannon ≥ 4.5 over tokens ≥ 20 chars, last so that anything a named rule
-    // understands is reported under its real type.
-    //
-    // `/` and `.` are token *separators* here rather than token characters:
-    // including them turns every long absolute path and every dotted hostname
-    // into one high-entropy "token", which is the biggest false-positive source
-    // in a coding transcript. A real base64 secret containing `/` still leaves a
-    // ≥ 23-character run, and 23 is the shortest string that can reach 4.5 bits
-    // at all.
-    'high-entropy-token',
-    'entropy',
-    '03 §5 (4.5 bits / 20 chars) + gitleaks entropy allowlists (MIT)',
-    /[A-Za-z0-9+_=-]{20,}/g,
-    {
-      validate: (value) =>
-        entropyCandidateAllowed(value) && shannonEntropy(value) >= ENTROPY_THRESHOLD,
-    },
-  ),
+  // Last, so that anything a named rule understands is reported under its real
+  // type and a bare token is the fallback rather than the default.
+  highEntropyRule,
 ];
