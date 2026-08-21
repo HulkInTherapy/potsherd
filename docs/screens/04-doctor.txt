@@ -1,8 +1,8 @@
-potsherd doctor · potsherd 0.1.0 · node v24.9.0
+potsherd doctor · potsherd 0.4.0 · node v24.9.0
 
   claude dir                         ~/.claude
   potsherd dir                       ~/.potsherd
-  database                           schema v4 of v4
+  database                           schema v8 of v8
 
   sessions on disk              31   21 titled · 3 sdk · 545 KB
   sidechains on disk           197   subagent transcripts
@@ -15,15 +15,15 @@ potsherd doctor · potsherd 0.1.0 · node v24.9.0
   secrets masked                 5   aws 1 · gcp 1 · github 1 · stripe 1 · …
   vectors                        0   sqlite-vec v0.1.9 · bge-small, 384-d
 
-  record types the parsers did not consume:
-    claude file-history-snapshot       90   5 versions  known
-    claude queue-operation             62   5 versions  known
-    claude atis-latch                  48   5 versions  known
-    claude last-prompt                 31   5 versions  known
-    claude mode                        31   5 versions  known
-    claude permission-mode             31   5 versions  known
-    claude frame-link                  28   5 versions  known
-    claude file-history-delta          21   5 versions  known
+  record types the parsers did not consume, over the whole index:
+    claude file-history-snapshot                           90  5 versions  known
+    claude queue-operation                                 62  5 versions  known
+    claude atis-latch                                      48  5 versions  known
+    claude last-prompt                                     31  5 versions  known
+    claude mode                                            31  5 versions  known
+    claude permission-mode                                 31  5 versions  known
+    claude frame-link                                      28  5 versions  known
+    claude file-history-delta                              21  5 versions  known
   "new" means no note in research/formats.md describes it yet.
 
   adapters:

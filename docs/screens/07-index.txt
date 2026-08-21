@@ -1,4 +1,4 @@
-potsherd index · ~/.potsherd · 21 aug 2026
+potsherd index · ~/.potsherd · 22 aug 2026
 
   claude                       228   31 sessions · 197 sidechains · 439 exchang…
   codex                          0   not installed — ~/.codex/sessions
@@ -7,9 +7,9 @@ potsherd index · ~/.potsherd · 21 aug 2026
 
   exchanges indexed            439   242 tool calls · 2 redacted
   ghosts indexed               299   2,971 prompts, searchable
-  secrets masked                 5   aws 1 · gcp 1 · github 1 · stripe 1 · …
+  masked this run                5   aws 1 · gcp 1 · github 1 · stripe 1 · …
   vectors                        —   skipped (--no-embed) · text search only
 
-  full index                 251ms   228 parsed · 0 unchanged · 545 KB
+  full index                 266ms   228 parsed · 0 unchanged · 545 KB
 
   run  potsherd doctor  for parse coverage and every path read.

@@ -1,4 +1,4 @@
-potsherd stats · ~/.potsherd · 21 aug 2026
+potsherd stats · ~/.potsherd · 22 aug 2026
 
   harness  sessions  subagents  ghosts  exchanges   bytes  span
   claude         31        197     299        439  545 KB  nov 2025 → aug 2026
@@ -8,8 +8,8 @@ potsherd stats · ~/.potsherd · 21 aug 2026
   ghosts                       299   2,971 prompts recovered · no assistant side
   secrets masked                 5   aws 1 · gcp 1 · github 1 · stripe 1 · …
 
-  indexed                   21 aug   228 transcripts · up to date
+  indexed                   22 aug   228 transcripts · up to date
   vectors                        0   bge-small · 439 pending · hybrid search on
-  database                  1.9 MB   ~/.potsherd/potsherd.db
+  database                  2.0 MB   ~/.potsherd/potsherd.db
 
   run  potsherd ls  to read the archive by title, newest first.

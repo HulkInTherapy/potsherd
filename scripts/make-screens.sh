@@ -158,11 +158,24 @@ shot_in_project 05-doctor-privacy.txt doctor --privacy
 # The readme is checked here too, and not only the screens. It is the same
 # promise — no real project, no real client, no real path — and the readme is
 # the file most likely to acquire one by hand.
-python3 - "$screens" "$repo/README.md" <<'PY'
+#
+# `doctor`'s heading and its `database` line are the two published *numbers*
+# that describe the build rather than the corpus, and both had gone stale: the
+# committed screen said `potsherd 0.1.0` and `schema v4 of v4` for the whole of
+# phases 2, 3 and 4, against a shipped 0.4.0 and eight migrations. They are
+# passed in here from the binary and the built store so the assertion below can
+# say so out loud rather than leaving it to whoever next reads the screen.
+version="$(node "$bin" --version)"
+schema="$(node -e 'import(process.argv[1]).then((m) => console.log(m.latestSchemaVersion()))' \
+  "$repo/packages/core/dist/db.js")"
+
+python3 - "$screens" "$repo/README.md" "$version" "$schema" <<'PY'
 import re, sys, pathlib
 
 screens = pathlib.Path(sys.argv[1])
 readme = pathlib.Path(sys.argv[2])
+version = sys.argv[3].strip()
+schema = sys.argv[4].strip()
 expected = [
     '01-audit.txt', '02-rescue.txt', '03-audit-after.txt',
     '04-doctor.txt', '05-doctor-privacy.txt', '06-audit-sweep.txt',
@@ -230,6 +243,52 @@ if find.exists():
 red = screens / '13-find-redacted.txt'
 if red.exists() and '‹redacted:' not in red.read_text(encoding='utf-8'):
     bad.append('13-find-redacted.txt: no mask on it — nothing was redacted')
+
+# A mask is one atom. Half of one on a published screen says potsherd cut a
+# credential's own marker in two, which reads as corrupt output and invites the
+# reader to think half of something leaked. `render/find.ts` and
+# `search/snippet.ts` both hold the cut back to the mask's edge; this is the
+# assertion that says so on the artefact rather than only in a unit test.
+# `‹` and `›` are reserved for the two markers and cannot occur in base64, in a
+# shell token or in a json key (redact.ts, redact-elide.ts), so an unbalanced
+# one on a line is a cut mask and nothing else. Balance rather than a regex,
+# because the cut can land on either side: `‹redacted…` from the tail and
+# `…auth:201b2d22›` from the head are the same defect.
+for name in expected + ['README.md']:
+    p = readme if name == 'README.md' else screens / name
+    if not p.exists():
+        continue
+    for i, line in enumerate(p.read_text(encoding='utf-8').splitlines(), 1):
+        depth = 0
+        for ch in line:
+            if ch == '‹':
+                depth += 1
+            elif ch == '›':
+                depth -= 1
+                if depth < 0:
+                    break
+        if depth != 0:
+            bad.append(f'{name}:{i}: a mask was cut in half\n    {line.strip()}')
+            break
+
+# The two numbers on `doctor` that describe the *build* and not the corpus.
+# Both had gone stale — a published `potsherd 0.1.0 · schema v4 of v4` against
+# a shipped 0.4.0 and eight migrations — and nothing said so, because every
+# other number on that screen is fixed by the demo corpus and kept being right.
+doctor = screens / '04-doctor.txt'
+if doctor.exists():
+    text = doctor.read_text(encoding='utf-8')
+    head = text.splitlines()[0] if text.splitlines() else ''
+    if f'potsherd {version}' not in head:
+        bad.append(
+            f'04-doctor.txt: heading says {head!r}, but the binary is {version}'
+        )
+    want_schema = f'schema v{schema} of v{schema}'
+    if want_schema not in text:
+        bad.append(
+            f'04-doctor.txt: no {want_schema!r} line — '
+            'the published schema version is not the one the store migrates to'
+        )
 
 if bad:
     print('\n'.join('  FAIL  ' + b for b in bad))
