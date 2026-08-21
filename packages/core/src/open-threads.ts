@@ -265,9 +265,27 @@ interface LoadedCard {
   topics: string[];
   files: string[];
   decisions: Claim[];
-  /** Everything in this card that could count as B having mentioned something. */
-  mentions: string[];
+  /**
+   * Everything in this card that could count as B having mentioned something,
+   * tokenised **once at load**.
+   *
+   * The inner loop of the rule pass is (sessions × projects × decisions ×
+   * every mention in the project), which on the reference corpus is ~10^6
+   * comparisons. Re-tokenising the same fifty strings inside it is the
+   * difference between `ask` printing open threads in milliseconds and
+   * printing them noticeably late.
+   */
+  mentions: Set<string>[];
   /** topics ∪ file path segments, as a token set. */
+  tokens: Set<string>;
+  paths: Set<string>;
+  /** `contentTokens` of each topic label, for the overlap report. */
+  topicTokens: string[][];
+}
+
+/** Every card of one project, plus the union of what they are about. */
+interface ProjectPool {
+  cards: LoadedCard[];
   tokens: Set<string>;
   paths: Set<string>;
 }
@@ -376,9 +394,12 @@ function loadCards(db: Db): LoadedCard[] {
       // What counts as B having seen it: a decision, or an open thread. An
       // open thread in B saying the same words is B *knowing about* the
       // question, and "never seen in B" is then false.
-      mentions: [...decisions.map((d) => d.what), ...threads.map((t) => t.what)],
+      mentions: [...decisions.map((d) => d.what), ...threads.map((t) => t.what)].map(
+        (m) => new Set(contentTokens(m)),
+      ),
       tokens,
       paths: new Set(files.map(normalisePath).filter(Boolean)),
+      topicTokens: topics.map((t) => contentTokens(t)),
     });
   }
   return out;
@@ -459,11 +480,20 @@ export function openThreadCandidates(
   // Project B, as one pooled view per project. Pooling is right: "never seen
   // in meghbrain" is a claim about the project, and checking each of its
   // sessions separately would raise the same candidate once per session.
-  const projects = new Map<string, LoadedCard[]>();
+  //
+  // Pooled once, before the session loop, and not once per session: the pools
+  // do not depend on A, and rebuilding them inside would make the rule pass
+  // quadratic in the size of the archive for no reason.
+  const projects = new Map<string, ProjectPool>();
   for (const c of cards) {
-    const list = projects.get(c.project);
-    if (list) list.push(c);
-    else projects.set(c.project, [c]);
+    let pool = projects.get(c.project);
+    if (!pool) {
+      pool = { cards: [], tokens: new Set(), paths: new Set() };
+      projects.set(c.project, pool);
+    }
+    pool.cards.push(c);
+    for (const t of c.tokens) pool.tokens.add(t);
+    for (const p of c.paths) pool.paths.add(p);
   }
 
   const seqExists = db.prepare(
@@ -479,23 +509,18 @@ export function openThreadCandidates(
     if (a.ghost) continue; // 1
     if (a.decisions.length === 0) continue;
 
-    for (const [project, bCards] of projects) {
+    for (const [project, pool] of projects) {
       if (sameProject(project, a.project)) continue;
+      const { cards: bCards, tokens: bTokens, paths: bPaths } = pool;
 
       // 5 — are these two projects related at all?
-      const bTokens = new Set<string>();
-      const bPaths = new Set<string>();
-      for (const b of bCards) {
-        for (const t of b.tokens) bTokens.add(t);
-        for (const p of b.paths) bPaths.add(p);
-      }
       const sharedTokens = [...a.tokens].filter((t) => bTokens.has(t));
       const sharedPaths = [...a.paths].filter((p) => bPaths.has(p));
       if (sharedPaths.length === 0 && sharedTokens.length < MIN_PROJECT_OVERLAP) continue;
 
       const sharedSet = new Set(sharedTokens);
-      const overlapTopics = a.topics.filter((t) =>
-        contentTokens(t).some((tok) => sharedSet.has(tok)),
+      const overlapTopics = a.topics.filter((_t, i) =>
+        (a.topicTokens[i] ?? []).some((tok) => sharedSet.has(tok)),
       );
       const overlapFiles = a.files.filter((f) => bPaths.has(normalisePath(f)));
       // Which of B's sessions actually carry the overlap, so the reader is
@@ -533,7 +558,7 @@ export function openThreadCandidates(
         let best = 0;
         for (const b of bCards) {
           for (const m of b.mentions) {
-            const c = tokenCosine(dTokens, new Set(contentTokens(m)));
+            const c = tokenCosine(dTokens, m);
             if (c > best) best = c;
             if (best >= MENTION_COSINE) break;
           }
