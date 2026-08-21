@@ -95,6 +95,13 @@ overlap the measured negatives outright, so *no threshold on this statistic sepa
 from "B used these words."* `MIN_ANCHOR_TOKENS` and the model pass are what make open threads safe,
 not the cosine.
 
+**And the demo corpus is materially easier than the real world, which the screenshot must not
+imply otherwise.** T4.8 measured both. On the *unmodified* demo corpus the rule pass raised 5
+candidates index-wide, **0** from `ask`'s shortlist and **0** confirmed — `ask` printed no OPEN
+THREADS block at all. Only after a sibling project containing a genuine unshared decision was added
+did it raise 8 / 3 / **2 confirmed**. A true positive constructed to exist is of course found. The
+comparable number is the unmodified row, and it **agrees with T4.2 rather than beating it**.
+
 ---
 
 ## the definition of done, rated honestly
@@ -103,14 +110,14 @@ not the cosine.
 |---|---|
 | `06` standard met, ask evals green | **PASS** — evals green; the two `06` sub-boxes that failed are now fixed |
 | ask p50 < 20 s and < $0.05 api path, k=6 | **FAIL, recorded with its measurement and reason** (`03 §12` corrected) |
-| the screenshot: one `ask` with an open-thread catch in `docs/screens/` | **OPEN** — assigned to T4.8; `05` requires a *real* catch and one may not be honestly producible |
+| the screenshot: one `ask` with an open-thread catch in `docs/screens/` | **PASS** — `docs/screens/14-ask.txt`, a genuine model-confirmed catch with resolving seqs. `15-graft.txt` added too. Both asserted by `make-screens.sh`, which now exits 0 for the first time since before phase 4 |
 | `ask` conforms to `05` and legible whole at 80×24 | **FAIL** — 80 columns is clean; **25–33 rows against 24.** `ANSWER_MAX_WORDS` is now enforced in code (167→129 words), but the EVIDENCE block is 4–8 entries and the cap has no authority over it. Half the overflow was never the answer's |
 | all tests pass; CI green macos + ubuntu | **PASS locally** (1,033). CI: verified config, not observed |
 | verification commands run and pasted into the handoff | **PASS** — this file |
 | `doctor` 0 fatal parse errors, unknown types with counts | **PASS** on the real corpus, 1,508 exchanges: `fatal parse errors 0`, 10 unknown types listed |
 | no write outside `~/.potsherd` (`doctor --privacy`) | **PASS** — live receipt discloses `./.potsherd/graft-<id8>.md` and names `ask` + `graft`; the published copy is now guarded by CI |
 | every new verb has `--json` and `--help` with one example | **PASS** — both carry 3–5 examples; both `--json` match the pinned interfaces |
-| no number in a readme/doc/screenshot not produced by a command | **PARTIAL** — the privacy receipt is fixed and guarded; `docs/screens/04-doctor.txt` still publishes `0.1.0` / `schema v4` and is assigned to T4.8 |
+| no number in a readme/doc/screenshot not produced by a command | **PASS** — the privacy receipt is fixed and CI-guarded; `04-doctor.txt` corrected `potsherd 0.1.0 · schema v4 of v4` → `0.4.0 · v8`, verified against the binary and the built store, and guarded three ways |
 | `03 §12` targets met or the miss recorded | **PASS** — recorded with measurements |
 
 ---
@@ -186,9 +193,9 @@ an array and silently produced an **empty ANSWER** on three real runs.
 |---|---|
 | `ask` p50 ~100 s vs the 20 s target — structural, `03 §12` corrected | 7 re-check |
 | `ask` output is 25–33 rows against `05`'s 24 — the EVIDENCE block, not the answer | 7 |
-| the open-thread screenshot; a genuine catch may not be honestly producible | T4.8, then 7 |
-| `docs/screens/04-doctor.txt` publishes `potsherd 0.1.0` and `schema v4 of v4` | T4.8 |
-| `scripts/make-screens.sh` fails its own assertion: `13-find-redacted.txt` elides mid-mask, `09-find.txt` reshuffles on bm25 ties | T4.8, else 7 |
+| **model-path screenshots are not capturable**: `claude -p` says `Not logged in` under a relocated `HOME`, and the real `HOME` puts a machine path on `graft`'s receipt. `15-graft.txt` is the `--no-model` path. A `POTSHERD_HARNESS_HOME` escape hatch in `llm.ts` fixes both and would let CI regenerate them | 5 or 7 |
+| `scripts/make-screens.sh` **deletes a screen before regenerating it**, so an interrupted run destroys committed artefacts — the orchestrator hit this and had to `git checkout`. Write to a temp file and move into place | 7 |
+| `ask`'s footer restates itself: `6 of 65 sessions read · …` then `searched 6 of 65 matching sessions; raise --k to widen` | 7 polish |
 | `--max-usd` is a ceiling to within **one call's actual cost** — an estimate that is too low is not catchable by any pre-call gate | 7 |
 | open-thread precision measured at **n = 8**; too small to generalise, and the cosine's positive side is n = 0 | 7 |
 | `evals/ask-selftest.ts` still has no case for `quote-empty` or `answer-missing` | 7 |
