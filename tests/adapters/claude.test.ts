@@ -305,7 +305,9 @@ describe('image payloads that are not prompts', () => {
     rmrf(dir);
 
     expect(result.exchanges).toHaveLength(1);
-    expect(result.continuationsFolded).toBe(1);
+    // T1.5 fixed the missing clause in `parser/claude.ts` (finding F1), so the
+    // split never happens and the adapter's repair pass has nothing to fold.
+    expect(result.continuationsFolded).toBe(0);
     const [only] = result.exchanges;
     expect(only?.userText).toBe('read the chart and tell me the trend');
     // The answer belongs to the prompt that asked for it, not to the payload.

@@ -247,28 +247,22 @@ function push(
  *
  * `formats.md`'s human-prompt rule has three clauses: `type:"user"`, a
  * `promptId`, **and** content that is a string or holds a `text` item with no
- * `tool_result` item. `parser/claude.ts` implements the first two and the
- * `tool_result` half of the third, which is enough for every ordinary turn —
- * but claude code also writes the *images* a tool returned as their own
- * `type:"user"` record, carrying the originating prompt's `promptId` and a
- * content array of nothing but `image` blocks. Eleven such records exist in
- * this corpus. They pass the parser's test, open a new exchange, and leave it
- * with an empty `userText` while the assistant turns that really answered the
- * prompt land in the wrong exchange.
+ * `tool_result` item. T1.2 found `parser/claude.ts` implementing only the first
+ * two and the `tool_result` half of the third, so the *images* a tool returned
+ * — written as their own `type:"user"` record carrying the originating
+ * prompt's `promptId` and a content array of nothing but `image` blocks, 11 of
+ * them in this corpus — passed the test, opened a new exchange and left it with
+ * an empty `userText`. Worse, where the split segment made no tool call the
+ * parser's own `finalize()` guard discarded it, and its assistant text was lost
+ * before this adapter could ever see it. That is finding F1; T1.5 fixed the
+ * clause in `parser/claude.ts`, so on a full parse this pass now folds nothing.
  *
- * The parser is T1.1's file and is not edited here, so the adapter repairs the
- * split instead: an exchange with no user text is not a prompt, and its
- * assistant text, tool calls and files belong to the exchange before it. Seqs
- * are renumbered contiguously afterwards so `exchanges.at(-1).seq` remains a
- * valid `fromSeq` for the next incremental run.
- *
- * One residue this cannot reach: when the split segment holds assistant text
- * and **no** tool call, the parser's own `finalize()` guard discards it before
- * the adapter ever sees it, and that text is simply lost. It does not happen in
- * this corpus — all eleven splits are followed by tool use — but the real fix
- * is one clause in `parser/claude.ts`: a human prompt's content must be a
- * string or hold a `text` item, not merely lack a `tool_result` one. When that
- * lands, `continuationsFolded` goes to zero and this pass becomes a no-op.
+ * It stays because it is still reachable, and cheap: an **incremental** run
+ * resumes at a byte offset that can fall between a prompt and its answer, and
+ * `pi` and `cursor` transcripts can open a turn the same way. An exchange with
+ * no user text is not a prompt — its assistant text, tool calls and files
+ * belong to the exchange before it. Seqs are renumbered contiguously afterwards
+ * so `exchanges.at(-1).seq` remains a valid `fromSeq` for the next run.
  */
 function foldContinuations(
   exchanges: Exchange[],

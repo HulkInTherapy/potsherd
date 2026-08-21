@@ -193,11 +193,22 @@ export async function parseClaudeTranscript(
       const text = extractTypedText(content);
       const results = toolResultBlocks(content);
 
-      // A human prompt: `type:user` with promptId set, content that is not a
-      // tool_result (`03` §2). A string content has no blocks at all, so it is
-      // a prompt by construction.
+      // A human prompt: `type:"user"`, `promptId` present, and `message.content`
+      // is a string or a list with a `text` item and **no** `tool_result` item
+      // (`03` §2 and `research/formats.md`). All three clauses matter. Claude
+      // code writes the images a tool returned as their own `type:"user"`
+      // record carrying the originating prompt's `promptId` and a content array
+      // of nothing but `image` blocks: it has no `tool_result`, so the first
+      // two clauses alone admit it, it opens an exchange with no user text, and
+      // the assistant turns that really answered the prompt are filed under
+      // that empty exchange — or, when the split segment makes no tool call,
+      // dropped outright by `finalize()`. Eleven such records exist in the
+      // reference corpus.
       const isHumanPrompt =
-        typeof parsed.promptId === 'string' && parsed.promptId.length > 0 && results.length === 0;
+        typeof parsed.promptId === 'string' &&
+        parsed.promptId.length > 0 &&
+        results.length === 0 &&
+        hasTextItem(content);
 
       if (isHumanPrompt) {
         finalize();
@@ -341,6 +352,17 @@ function statBytes(absolute: string): number {
 function toolUseBlocks(content: unknown): Record<string, unknown>[] {
   if (!Array.isArray(content)) return [];
   return content.filter((b): b is Record<string, unknown> => isRecord(b) && b.type === 'tool_use');
+}
+
+/**
+ * The third clause of the human-prompt rule: `message.content` is a string, or
+ * a list holding a `text` item. A list of nothing but `image` / `thinking` /
+ * `tool_result` blocks is a payload record, never a prompt.
+ */
+function hasTextItem(content: unknown): boolean {
+  if (typeof content === 'string') return true;
+  if (!Array.isArray(content)) return false;
+  return content.some((b) => isRecord(b) && b.type === 'text' && typeof b.text === 'string');
 }
 
 function toolResultBlocks(content: unknown): Record<string, unknown>[] {

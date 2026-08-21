@@ -100,3 +100,15 @@ submitted** — no agent submits anything anywhere.
 | F16 | **timezone trap:** `new Date("… (UTC+5:30)")` silently drops the offset and parses in the host zone, so the same transcript would index 5.5 h apart on this laptop and on UTC CI. `parseCursorTimestamp()` reads the offset explicitly | T1.3b | worth checking every adapter for this class of bug |
 | F17 | permanently unknowable for cursor from `~/.cursor` alone: title, model, gitBranch, entrypoint, agentName, `toolCalls[].result`/`isError`, `parentUuid`. All left undefined rather than invented; `doctor` states them | T1.3b | honest gap, per the scope decision |
 | F18 | redaction landed with 6/6 planted secrets masked and 0 false positives across the 200-line clean fixture — see the T1.4 commit for the ported rule pack and its licence | T1.4 | |
+
+## format questions the wave left genuinely open
+
+| question | why it is open | who should close it |
+|---|---|---|
+| exact per-(harness, version, record type) claude counts over the frozen corpus | the adapter computes them; nobody has run it and saved the output | T1.5a's `doctor` output goes in the handoff |
+| should `artifact-comment-monitor` join `IGNORED_RECORD_TYPES`? | it currently reports as novel forever | phase 2, once we know whether it carries anything |
+| codex `<user_instructions>` (the AGENTS.md wrapper) | declared in the format but appears 0 times on this machine, so its shape is unverified | phase 6, or the first user who has one |
+| pi's declared-but-unseen v3 types (`compaction`, `branch_summary`, `bashExecution`) and multi-child `parentId` | exist only in synthetic fixtures; no real file has them | whenever a real one appears |
+| cursor per-version coverage | there is no version marker anywhere in `~/.cursor`, so it is structurally impossible | never — documented as a known limit |
+| `parser/claude.ts`'s header comment still says sidechains take `agentName` from an `agent-name` record, which F3 disproved | the code reads the record wherever it appears, so the comment is inert but stale | T1.5a, while fixing F1 in the same file |
+| the definition of done says "31 + 197 claude files"; the frozen snapshot has **30** + 197 (it predates this session's own transcript) | the live tree only supports floors — see F4 | verifier: assert 30 + 197 frozen, >= 31 live |
