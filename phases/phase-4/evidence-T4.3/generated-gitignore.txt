@@ -1,0 +1,3 @@
+# written by `potsherd graft`. these are briefs cut from your own past
+# sessions; they are yours, but they are not source, so they are ignored.
+*

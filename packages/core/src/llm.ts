@@ -80,7 +80,11 @@ import { onPath } from './resolve-bin.js';
  * single entry point every call goes through, and `tests/llm.test.ts` asserts
  * that no command outside {@link MODEL_CALL_VERBS} reaches `Llm.open`.
  */
-export const MODEL_CALL_VERBS: readonly string[] = ['card'];
+// T4.1 adds `'ask'` to this list at integration. `graft` is here because
+// `tests/llm.test.ts` asserts this constant against the CLI command files that
+// actually reach `Llm.open` — the guard that exists precisely so a verb cannot
+// start calling a model without the privacy receipt saying so.
+export const MODEL_CALL_VERBS: readonly string[] = ['card', 'graft'];
 
 /**
  * Verbs that are guaranteed to make no model call and open no socket.

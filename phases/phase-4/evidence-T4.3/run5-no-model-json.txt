@@ -1,0 +1,41 @@
+{
+  "sessionId": "3ec2f5ca-6972-4d62-a093-5537ff4114d6",
+  "id8": "3ec2f5ca",
+  "project": "Fulcrum",
+  "harness": "claude",
+  "about": null,
+  "exchanges": 9,
+  "date": "2026-08-13",
+  "budget": 1200,
+  "tokens": 368,
+  "estimated": true,
+  "brief": "# Reconciling founder visions for Veyu AI's next move\n\nBrief from a past session. Written by potsherd; every claim carries `[3ec2f5ca@seq]`, the exchange it came from.\n\n> **unsummarised.** No model call was made — no model was used. What follows is the stored card and transcript verbatim, not a summary.\n\nUser described Veyu AI's failed service attempts and strategic confusion. Claude proposed Fulcrum—an intelligence system to research and score monthly product cycles using code and media levers. Cofounder Rachit proposed a service-focused 81-day revenue plan. Claude reconciled both by recommending Way 1 (DM-conversion stack) as cycle one with a locked offer, single ICP, and immediate launch.\n\n**left open**\n- Whether to launch Fulcrum research sweep with forced 72-hour decision clock on AI products, scoring matrix, and single top pick [3ec2f5ca@5]\n- Whether to lock Way 1 (DM-conversion stack) as cycle one and send reconciled plan to Rachit (offer, ICP, start date, Gurgaon trigger) [3ec2f5ca@7]\n- How to respond to Rachit's tweet about 'bro has trust issues' and what it signals for team alignment [3ec2f5ca@9]\n\nfiles: `/Users/zebra/Meghavi-Second-Brain/04-Startup/`, `/Users/zebra/Downloads/Veyu-Money-Plan-for-Meghavi.pdf`\n\n---\n\nsource: claude 3ec2f5ca-6972-4d62-a093-5537ff4114d6 · 9 exchanges · 2026-08-13\n",
+  "path": "/private/tmp/claude-501/-Users-zebra-randomness/169ced20-27ee-4647-9d2c-8fac9217f6bd/scratchpad/wd1/.potsherd/graft-3ec2f5ca.md",
+  "clipped": false,
+  "citations": [
+    {
+      "id8": "3ec2f5ca",
+      "seq": 5,
+      "resolves": true
+    },
+    {
+      "id8": "3ec2f5ca",
+      "seq": 7,
+      "resolves": true
+    },
+    {
+      "id8": "3ec2f5ca",
+      "seq": 9,
+      "resolves": true
+    }
+  ],
+  "spend": {
+    "calls": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "usd": 0,
+    "ms": 0,
+    "estimatedInputCalls": 0
+  },
+  "ms": 30
+}

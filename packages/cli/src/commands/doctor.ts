@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import nodePath from 'node:path';
 import process from 'node:process';
 import {
   VERSION,
@@ -92,7 +93,18 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     .harnessSourceDirs(o.claudeDir ? { claudeDir: o.claudeDir } : {})
     .map((h) => h.dir);
   const reads = dedupe([...report.pathsRead, ...harnessReads]);
-  const written = [root, paths.archiveDir(root), dbFile, paths.modelsDir(root)];
+  const written = [
+    root,
+    paths.archiveDir(root),
+    dbFile,
+    paths.modelsDir(root),
+    // `graft` is the one verb that writes outside ~/.potsherd: the brief lands
+    // in the project you run it in, which is the entire point of the verb.
+    // `03` §11 says this receipt lists *every* path written — and it has
+    // under-reported once already, when it still said "no network" after the
+    // product had started calling a model. So it lists this one.
+    nodePath.join(process.cwd(), '.potsherd', 'graft-<id8>.md'),
+  ];
   const consented = [paths.claudePaths(report.claudeDir).settings];
 
   if (o.privacy) {
@@ -115,6 +127,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     }
     card.blank().text('writes:');
     for (const p of written) card.raw(`    ${show(p)}`);
+    card.raw(`      ${t.dim('the graft path only when you run graft, in the directory you run it in')}`);
     card.blank().text('writes only after an explicit y at a diff:');
     for (const p of consented) card.raw(`    ${show(p)}`);
     card.raw(`      ${t.dim('cleanupPeriodDays, and one SessionStart hook entry')}`);
@@ -130,10 +143,15 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     card.raw('    index, no counts, no identifiers.');
 
     card.blank().text('only these verbs call a model:');
+    const verbNote: Record<string, string> = {
+      card: 'writes the cards; one call per slice',
+      graft: 'one call, to compress one session into a brief',
+    };
     for (const verb of MODEL_CALL_VERBS) {
-      card.raw(`    potsherd ${verb}${verb === 'card' ? '        writes the cards; one call per slice' : ''}`);
+      const note = verbNote[verb];
+      card.raw(`    potsherd ${verb.padEnd(8)}${note ? `  ${note}` : ''}`.trimEnd());
     }
-    card.raw(`    ${t.dim('later phases add')} ask ${t.dim('and')} graft${t.dim(', which send the same slices.')}`);
+    card.raw(`    ${t.dim('phase 4 adds')} ask${t.dim(', which sends the same slices.')}`);
     card.blank().text('these never do, and open no socket at all:');
     // Wrapped, not elided: the whole value of this line is that a reader can
     // find their verb in it, and `ls…w, stats` is a list with the answer cut
