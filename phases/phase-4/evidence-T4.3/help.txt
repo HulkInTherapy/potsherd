@@ -1,0 +1,39 @@
+Usage: potsherd graft [options] <session>
+
+a token-budgeted brief from one past session, ready to paste into an agent
+
+Arguments:
+  session                a session id, the first 8 characters of one, or a
+                         query
+
+Options:
+  --about <topic>        only the exchanges about this topic
+  --budget <n>           hard ceiling on the brief, in tokens (default: 1200)
+  --clip                 copy the brief to the system clipboard
+  --no-model             no model call — the card verbatim, labelled
+                         unsummarised
+  --model <name>         haiku, sonnet, opus, or an explicit model id
+  --backend <name>       force a backend instead of detecting one (choices:
+                         "agent-sdk", "codex", "api")
+  --json                 machine-readable output, same data as the human view
+  --no-color             disable colour (NO_COLOR is honoured too)
+  --ascii                ASCII-only glyphs, for terminals without a unicode
+                         font
+  --width <n>            render for this terminal width
+  --claude-dir <path>    read Claude Code data from here (CLAUDE_CONFIG_DIR is
+                         honoured)
+  --potsherd-dir <path>  potsherd's own directory (default ~/.potsherd)
+  --debug                print full errors
+  -h, --help             display help for command
+
+example:
+  potsherd graft 4c9339e0 --about pgbouncer --budget 800
+  potsherd graft "instagram client" --clip
+  potsherd graft 4c9339e0 --json | jq -r .brief
+
+the brief is written to ./.potsherd/graft-<id8>.md in the current directory —
+the one place potsherd writes outside ~/.potsherd — and that directory gets a
+generated .gitignore. an existing .gitignore is never overwritten.
+
+with no claude, no codex and no ANTHROPIC_API_KEY, graft still writes a brief:
+the stored card verbatim, labelled unsummarised. --no-model asks for that path.

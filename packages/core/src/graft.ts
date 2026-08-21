@@ -1,0 +1,1036 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import { spawnSync } from 'node:child_process';
+
+import type { Db } from './db.js';
+import type { Harness } from './adapters/types.js';
+import { resolveSession, showSession, type ShowResult } from './browse.js';
+import { readCard, type StoredCard } from './cards/write.js';
+import { PROMPTS_ONLY } from './cards/ghost.js';
+import { projectName } from './recall.js';
+import { recall } from './recall.js';
+import {
+  CHARS_PER_TOKEN,
+  emptySpend,
+  tokensForText,
+  type Backend,
+  type Llm,
+  type Spend,
+} from './llm.js';
+import { MASK_RE } from './redact.js';
+import { ELISION_RE } from './redact-elide.js';
+
+/**
+ * `graft` — one session from a month ago, compressed to fit in a live agent's
+ * context window, with citations that were checked in code.
+ *
+ * `plans/05` calls this moment 5, "the magic": the user runs one command and
+ * the agent visibly knows a thing from a month ago in another project. The
+ * whole trick is that the brief is **short, cited, and honest about its
+ * budget**, and each of those three is enforced here rather than requested of
+ * the model:
+ *
+ *   - **short** — {@link enforceBudget} measures the finished brief and trims
+ *     it until it is under `--budget`. A model asked for 1,200 tokens returns
+ *     1,900 often enough that "asked nicely" is not a ceiling. The number the
+ *     verb prints is the number of the text that was written to disk.
+ *   - **cited** — every `[id8@seq]` in the reply is resolved against the index
+ *     ({@link resolveCitations}). One that names an exchange that does not
+ *     exist is removed, and any line left with no surviving citation is
+ *     dropped. `03`'s ground rule is *cited or dropped*, and a compression call
+ *     paraphrasing beyond its evidence is the default failure of this shape.
+ *   - **honest** — `tokens` is `est.` unless the api path counted it, and
+ *     {@link GraftResult.estimated} says which. This project shipped a
+ *     "7m 26s" estimate before a 55-minute run; a token count that is quietly
+ *     an estimate is the same bug in a smaller box.
+ *
+ * ## It works on a plane
+ *
+ * A re-entry verb that needs the network is a re-entry verb that does not work
+ * when you most want it. With no backend — or with `--no-model` — `graft`
+ * still writes a brief, assembled from the card in code, labelled
+ * `unsummarised (no model call)` in its own header. The citations in that path
+ * come from the card's own `evidence_seq`, which `cards/verify.ts` already
+ * resolved once, and are resolved again here anyway.
+ *
+ * ## Ghosts
+ *
+ * A ghost is a session Claude Code deleted: `history.jsonl` kept the prompts
+ * and nothing kept the replies. A brief built from one that did not say so
+ * would imply the assistant's side is known when it is not, so the ghost
+ * banner is written in code above the body and is never something the model
+ * can omit.
+ */
+
+// ------------------------------------------------------------------ shape
+
+export interface GraftCitation {
+  id8: string;
+  seq: number;
+  /** Whether that `id8@seq` names an exchange (or ghost prompt) that exists. */
+  resolves: boolean;
+}
+
+export interface GraftResult {
+  sessionId: string;
+  id8: string;
+  project: string;
+  harness: Harness;
+  about: string | null;
+  exchanges: number;
+  date: string;
+  budget: number;
+  tokens: number;
+  /** True when `tokens` is chars/3.6 rather than a count from the api. */
+  estimated: boolean;
+  brief: string;
+  path: string;
+  clipped: boolean;
+  citations: GraftCitation[];
+  spend: Spend;
+  ms: number;
+}
+
+/** How a brief got made, for the receipt and for the report. */
+export type GraftPath = 'model' | 'card-only';
+
+export interface GraftOptions {
+  /** `--about <topic>`: slice the transcript to the exchanges about this. */
+  about?: string | null;
+  /** `--budget <n>`: a hard ceiling on the finished brief. */
+  budget?: number;
+  /** `--clip`: copy to the system clipboard, failing softly. */
+  clip?: boolean;
+  /** Where `./.potsherd/` goes. Defaults to the process's cwd. */
+  cwd?: string;
+  /** Set false to compute a brief without touching the filesystem (tests). */
+  write?: boolean;
+  /**
+   * The model. Omit and `graft` runs the card-only path — which is also what
+   * happens when the caller has no backend at all.
+   */
+  llm?: Llm | null;
+  /** potsherd root, so `recall`'s embedder is found under `--potsherd-dir`. */
+  root?: string;
+  /** Exchanges to pull for `--about`. Default {@link ABOUT_K}. */
+  k?: number;
+  /** Injected for tests; the real one shells out to pbcopy/xclip/wl-copy. */
+  clipboard?: (text: string) => ClipOutcome;
+  /** Injected for tests; the real one is `Date`. */
+  now?: Date;
+}
+
+export interface ClipOutcome {
+  ok: boolean;
+  /** `pbcopy`, `xclip`, `wl-copy`, or null when none was found. */
+  tool: string | null;
+  /** One printable line when `ok` is false. Never an error. */
+  note?: string;
+}
+
+/** `--budget`'s default, from `plans/phases/phase-4` T4.3. */
+export const DEFAULT_BUDGET = 1_200;
+
+/** Exchanges pulled for `--about`. Three is what a brief can quote from. */
+export const ABOUT_K = 6;
+
+/** Below this a budget cannot hold a source line and one bullet. */
+export const MIN_BUDGET = 60;
+
+/**
+ * `4c9339e0@12` — the citation the brief carries inline, wherever it appears.
+ *
+ * Deliberately **not** anchored to its brackets. The canonical shape is
+ * `[4c9339e0@12]`, and that is what the prompt asks for, but a model that has
+ * two exchanges to cite writes `[4c9339e0@24, 4c9339e0@158]` about a third of
+ * the time — and a bracket-anchored pattern matches neither of those, so the
+ * whole line reads as *uncited* and sails past the check untouched. That is
+ * the worst possible outcome for this regex: not a dropped citation, an
+ * unchecked one. Matching the `id8@seq` token itself catches every form.
+ */
+export const CITATION_RE = /([0-9a-f]{6,40})@(\d{1,7})/gi;
+
+/**
+ * The one line every brief ends with, and the reason a pasted brief is still
+ * attributable three tools later.
+ */
+export function sourceLine(o: {
+  harness: string;
+  sessionId: string;
+  exchanges: number;
+  date: string;
+}): string {
+  const n = o.exchanges;
+  return `source: ${o.harness} ${o.sessionId} · ${n} exchange${n === 1 ? '' : 's'} · ${o.date}`;
+}
+
+// --------------------------------------------------------------- counting
+
+export interface TokenCount {
+  tokens: number;
+  /** False only when the api actually counted them. */
+  estimated: boolean;
+}
+
+/**
+ * The number the acceptance criterion is measured against.
+ *
+ * *"measure with the sdk's count_tokens when on api path; chars/3.6
+ * otherwise"* — so this returns the flag as well as the number, and every
+ * surface that prints the number prints the flag beside it.
+ *
+ * The api path is the only one that can count: the agent-sdk and codex
+ * transports speak to a harness, not to `/v1/messages/count_tokens`, and their
+ * own usage numbers describe the *call*, not this string. Asking them would be
+ * inventing a measurement, which is the thing `05`'s honesty contract exists
+ * to forbid.
+ */
+export async function countTokens(
+  text: string,
+  o: { backend?: Backend; model?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<TokenCount> {
+  const fallback = { tokens: tokensForText(text), estimated: true };
+  if (o.backend !== 'api') return fallback;
+  const env = o.env ?? process.env;
+  const apiKey = env['ANTHROPIC_API_KEY'];
+  if (!apiKey) return fallback;
+  try {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey, maxRetries: 1 });
+    const counted = await client.messages.countTokens({
+      model: o.model ?? 'claude-haiku-4-5',
+      messages: [{ role: 'user', content: text }],
+    });
+    const n = (counted as { input_tokens?: number }).input_tokens;
+    if (typeof n === 'number' && n > 0) return { tokens: n, estimated: false };
+    return fallback;
+  } catch {
+    // A count that failed is not a run that failed. The estimator is always
+    // available and always says so.
+    return fallback;
+  }
+}
+
+/** A counter with the backend already bound, for {@link enforceBudget}. */
+export type Counter = (text: string) => Promise<TokenCount>;
+
+export function counterFor(llm: Llm | null | undefined, env?: NodeJS.ProcessEnv): Counter {
+  const backend = llm?.backend;
+  const model = llm?.model;
+  return (text) =>
+    countTokens(text, {
+      ...(backend ? { backend } : {}),
+      ...(model ? { model } : {}),
+      ...(env ? { env } : {}),
+    });
+}
+
+// ------------------------------------------------------------ mask safety
+
+/**
+ * Where a cut may fall, so a redaction mask is never sliced in half.
+ *
+ * `‹redacted:aws:9f2b1c04›` and `‹elided:image/png:109362 bytes›` are the two
+ * spans potsherd writes into text it will later cut. Half of one of those is
+ * not a shorter mask — it is `‹redacted:aws:9f2b` followed by nothing, which
+ * reads as content, survives a copy-paste into an issue, and looks exactly
+ * like a leaked prefix of a key. Phase 2's screenshot script is currently
+ * failing its own assertion for this reason, so the rule is enforced here:
+ * a cut index inside a mask or an elision is pushed back to that span's start.
+ */
+export function safeCut(text: string, at: number): number {
+  if (at >= text.length) return text.length;
+  if (at <= 0) return 0;
+  for (const re of [MASK_RE, ELISION_RE]) {
+    const scan = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+    let m: RegExpExecArray | null;
+    while ((m = scan.exec(text)) !== null) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (at > start && at < end) return start;
+      if (start > at) break;
+    }
+  }
+  return at;
+}
+
+/** Cut to at most `maxChars`, never through a mask, never mid-word. */
+export function clipSafe(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  let at = safeCut(text, maxChars);
+  const back = text.lastIndexOf(' ', at);
+  if (back > at - 24 && back > 0) at = safeCut(text, back);
+  return text.slice(0, at).trimEnd();
+}
+
+// -------------------------------------------------------------- citations
+
+/**
+ * Resolve every `[id8@seq]` the brief carries, and take out the ones that lie.
+ *
+ * `plans/phases/phase-4` T4.3's acceptance is two words long — *citations
+ * resolve* — and the only way to mean it is to check them after the model has
+ * spoken. A compression call that reads well while citing seq 47 of a session
+ * with 31 exchanges is the failure this catches, and `EVIDENCE_COSINE` exists
+ * in `cards/verify.ts` because that failure is the *default* behaviour of this
+ * shape, not an unlucky one.
+ *
+ * The rule is `00-README.md`'s: **cited or dropped**. An unresolvable citation
+ * is removed from the text, and a line left holding no resolving citation goes
+ * with it — because what remains would be an uncited claim about the user's
+ * own history, which is precisely what this project refuses to emit. Every
+ * citation the model wrote is still reported in {@link GraftResult.citations},
+ * with `resolves` telling the truth about each.
+ */
+export interface CitationPass {
+  text: string;
+  citations: GraftCitation[];
+  /** Lines removed because nothing in them resolved. */
+  droppedLines: string[];
+}
+
+export function resolveCitations(db: Db, text: string, o: { sessionId?: string } = {}): CitationPass {
+  const seen = new Map<string, boolean>();
+  const citations: GraftCitation[] = [];
+
+  const check = (id8: string, seq: number): boolean => {
+    const key = `${id8.toLowerCase()}@${seq}`;
+    const cached = seen.get(key);
+    if (cached !== undefined) return cached;
+    const ok = citationResolves(db, id8, seq, o.sessionId);
+    seen.set(key, ok);
+    citations.push({ id8: id8.toLowerCase(), seq, resolves: ok });
+    return ok;
+  };
+
+  const lines = text.split('\n');
+  const kept: string[] = [];
+  const droppedLines: string[] = [];
+
+  for (const line of lines) {
+    // A model handed the template `[<id8>@<seq>]` sometimes returns it
+    // verbatim, placeholder and all. `<seq>` is not a number, so nothing below
+    // would match it, and the bullet would read as *uncited* — kept, unchecked,
+    // and carrying a citation that is visibly not one. Strip the placeholder
+    // first and let the bullet rule below decide the line's fate.
+    const cleaned = line.replace(/\[?\s*[0-9a-f]{6,40}@<[^>\]]*>\s*\]?/gi, '').trimEnd();
+    const found = [...cleaned.matchAll(new RegExp(CITATION_RE.source, 'gi'))];
+    let anyResolved = false;
+    let out = cleaned;
+    for (const m of found) {
+      const ok = check(m[1] as string, Number(m[2]));
+      if (ok) anyResolved = true;
+      else out = out.replace(m[0], '');
+    }
+    out = tidyBrackets(out);
+
+    if (!anyResolved) {
+      // `00-README.md`: **cited or dropped.** A *claim* with no citation left
+      // standing does not get printed — and a bullet is always a claim. Prose
+      // and headings are not (the card-only path's summary and its `**decided**`
+      // rule are potsherd's own text, not an assertion about the transcript),
+      // so those survive and only a bullet is held to the rule.
+      if (isClaim(cleaned)) {
+        if (cleaned.trim()) droppedLines.push(cleaned.trim());
+        continue;
+      }
+      kept.push(out);
+      continue;
+    }
+    kept.push(out.replace(/[ \t]{2,}/g, ' ').trimEnd());
+  }
+
+  return { text: kept.join('\n'), citations, droppedLines };
+}
+
+/**
+ * A line that asserts something about the transcript, and therefore owes a
+ * citation. Every list item is one; a heading or a paragraph of potsherd's own
+ * prose is not.
+ */
+function isClaim(line: string): boolean {
+  return /^\s*(?:[-*+]|\d+[.)])\s+\S/.test(line);
+}
+
+/**
+ * Clean up after a citation was cut out of a bracket group.
+ *
+ * Removing `4c9339e0@158` from `[4c9339e0@24, 4c9339e0@158]` leaves
+ * `[4c9339e0@24, ]`, and removing both leaves `[, ]`. Neither is something a
+ * reader should ever see, and the empty pair is worse than the stray comma:
+ * it looks like a citation that failed to render rather than one that was
+ * never true.
+ */
+function tidyBrackets(line: string): string {
+  return line
+    .replace(/,\s*(?=[,\]])/g, '')
+    .replace(/\[\s*,\s*/g, '[')
+    .replace(/\s*,\s*\]/g, ']')
+    .replace(/\[\s*\]/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trimEnd();
+}
+
+function citationResolves(db: Db, id8: string, seq: number, expected?: string): boolean {
+  if (!Number.isInteger(seq) || seq < 0) return false;
+  const needle = id8.toLowerCase();
+  // The common case by far: the model cited the session it was given.
+  if (expected && expected.toLowerCase().startsWith(needle)) {
+    return seqExists(db, expected, seq);
+  }
+  const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const row = db
+    .prepare(
+      `SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\'
+       UNION ALL
+       SELECT session_id AS id FROM ghosts WHERE session_id LIKE ? ESCAPE '\\'
+       LIMIT 8`,
+    )
+    .all(`${escaped}%`, `${escaped}%`) as { id: string }[];
+  return row.some((r) => seqExists(db, r.id, seq));
+}
+
+function seqExists(db: Db, sessionId: string, seq: number): boolean {
+  const ex = db
+    .prepare('SELECT 1 AS ok FROM exchanges WHERE session_id = ? AND seq = ? LIMIT 1')
+    .get(sessionId, seq) as { ok: number } | undefined;
+  if (ex) return true;
+  const gp = db
+    .prepare('SELECT 1 AS ok FROM ghost_prompts WHERE session_id = ? AND seq = ? LIMIT 1')
+    .get(sessionId, seq) as { ok: number } | undefined;
+  return Boolean(gp);
+}
+
+// ----------------------------------------------------------------- budget
+
+export interface BudgetPass {
+  brief: string;
+  tokens: number;
+  estimated: boolean;
+  /** Body lines removed to get under the ceiling. */
+  trimmed: number;
+}
+
+/**
+ * The ceiling, enforced after the fact.
+ *
+ * `--budget` is a promise about what will be pasted into someone's context
+ * window, and a promise the code does not check is a hope. A model asked for
+ * 1,200 tokens returns 1,900 often enough that the over-budget path is the
+ * normal path, not the exceptional one — so this trims, from the end of the
+ * body, one line at a time, re-measuring after each cut, and never touches the
+ * header or the `source:` line. Those two are what make the brief citable at
+ * all; a brief trimmed into anonymity is worse than a brief that says it was
+ * trimmed.
+ *
+ * When the header and the source line alone will not fit — a `--budget 20` —
+ * the last resort is a mask-safe character cut, which is the only case where
+ * a brief comes back without its trailer.
+ */
+export async function enforceBudget(o: {
+  head: string[];
+  body: string[];
+  tail: string[];
+  budget: number;
+  count: Counter;
+}): Promise<BudgetPass> {
+  const body = [...o.body];
+  let trimmed = 0;
+
+  const assemble = (note: boolean): string => {
+    const parts = [...o.head];
+    if (body.length) parts.push('', ...body);
+    if (note) parts.push('', `_trimmed ${trimmed} line${trimmed === 1 ? '' : 's'} to fit --budget ${o.budget}._`);
+    parts.push('', ...o.tail);
+    return parts.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+  };
+
+  let text = assemble(false);
+  let measured = await o.count(text);
+  if (measured.tokens <= o.budget) {
+    return { brief: text, tokens: measured.tokens, estimated: measured.estimated, trimmed: 0 };
+  }
+
+  // Trim by the **estimator**, verify with the **counter**.
+  //
+  // On the api path `count` is a network round trip, and one per dropped line
+  // would turn a reply that came back 3x too long into forty of them. The
+  // estimator is free, so it picks the cut; the counter only has to agree at
+  // the end. `drift` is how far apart the two were on this exact text, so the
+  // estimator aims at a target scaled to the counter's own view rather than at
+  // a number it is systematically wrong about. On the subscription path the
+  // two are the same function, `drift` is 1, and this is one measurement.
+  for (let round = 0; round < 8 && body.length > 0; round++) {
+    const drift = measured.tokens / Math.max(1, tokensForText(text));
+    const target = o.budget / Math.min(2, Math.max(0.5, drift));
+    while (body.length > 0 && tokensForText(assemble(trimmed > 0)) > target) {
+      body.pop();
+      trimmed += 1;
+    }
+    text = assemble(trimmed > 0);
+    measured = await o.count(text);
+    if (measured.tokens <= o.budget) {
+      return { brief: text, tokens: measured.tokens, estimated: measured.estimated, trimmed };
+    }
+  }
+
+  // Nothing left to drop and still over: the budget is smaller than the
+  // header. Cut characters, and never through a mask.
+  const perToken = CHARS_PER_TOKEN;
+  let chars = Math.max(1, Math.floor(o.budget * perToken));
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const cut = clipSafe(text, chars).trimEnd() + '\n';
+    measured = await o.count(cut);
+    if (measured.tokens <= o.budget) {
+      return { brief: cut, tokens: measured.tokens, estimated: measured.estimated, trimmed };
+    }
+    chars = Math.max(1, Math.floor(chars * 0.8));
+    text = cut;
+  }
+  return { brief: text, tokens: measured.tokens, estimated: measured.estimated, trimmed };
+}
+
+// ------------------------------------------------------------- the source
+
+interface Target {
+  sessionId: string;
+  kind: 'session' | 'ghost';
+  /** How the target was named: an id the user typed, or a query we ranked. */
+  via: 'id' | 'query';
+}
+
+export class GraftError extends Error {
+  readonly name = 'GraftError';
+  constructor(message: string, readonly fix: string) {
+    super(message);
+  }
+}
+
+/**
+ * A session id, a prefix of one, or a query — whichever the user typed.
+ *
+ * The id form goes through `browse.resolveSession`, the same resolver `show`,
+ * `tag`, `pin` and `link` use, so `potsherd graft 4c9339e0` and
+ * `potsherd show 4c9339e0` can never disagree about which session that is.
+ * Only when that finds nothing does this fall through to `recall`, which is
+ * the query form the spec asks for: *"a session id, or a query (then the top
+ * session)"*.
+ */
+export async function resolveTarget(db: Db, target: string, o: { root?: string } = {}): Promise<Target> {
+  const needle = target?.trim() ?? '';
+  if (!needle) throw new GraftError('graft needs a session id or a query', 'potsherd graft 4c9339e0');
+
+  const direct = resolveSession(db, needle);
+  if (direct && !direct.ambiguous) return { sessionId: direct.id, kind: direct.kind, via: 'id' };
+
+  const found = await recall(db, needle, {}, { limit: 1, ...(o.root ? { root: o.root } : {}) });
+  const top = found.sessions[0];
+  if (!top) {
+    if (direct?.ambiguous) {
+      throw new GraftError(
+        `"${needle}" matches ${direct.ambiguous.length} sessions`,
+        `potsherd graft ${direct.ambiguous[0]!.id}`,
+      );
+    }
+    throw new GraftError(
+      `nothing in the index matches "${needle}"`,
+      'potsherd find "' + needle + '"    # widen the words, then graft the id',
+    );
+  }
+  return { sessionId: top.id, kind: top.kind, via: 'query' };
+}
+
+/** What goes into the prompt, and what the card-only path renders directly. */
+export interface GraftSource {
+  sessionId: string;
+  show: ShowResult;
+  card: StoredCard | null;
+  isGhost: boolean;
+  id8: string;
+  /** The exchanges `--about` selected, best first. Empty when no topic. */
+  slice: { seq: number; ts: string | null; text: string }[];
+  /** Exchanges (or prompts) the whole session holds. */
+  exchanges: number;
+  date: string;
+  harness: Harness;
+  project: string;
+  title: string;
+}
+
+/** How much of one exchange reaches the prompt. Longer than this is a log. */
+export const SLICE_CHARS = 1_800;
+
+export async function collectSource(
+  db: Db,
+  sessionId: string,
+  o: { about?: string | null; k?: number; root?: string } = {},
+): Promise<GraftSource> {
+  const show = showSession(db, sessionId);
+  if (!show) {
+    throw new GraftError(
+      `session ${sessionId.slice(0, 8)} is in the index but has no body`,
+      'potsherd index --full',
+    );
+  }
+  const isGhost = show.session.status === 'ghost' || Boolean(show.ghostPrompts);
+  const card = readCard(db, sessionId);
+  const id8 = sessionId.slice(0, 8);
+
+  const slice: GraftSource['slice'] = [];
+  const about = o.about?.trim();
+  if (about) {
+    const hits = await recall(
+      db,
+      about,
+      { sessionId },
+      { limit: 1, perSession: Math.max(1, o.k ?? ABOUT_K), ...(o.root ? { root: o.root } : {}) },
+    );
+    const wanted = hits.hits.filter((h) => h.sessionId === sessionId && typeof h.seq === 'number');
+    for (const h of wanted.slice(0, o.k ?? ABOUT_K)) {
+      const user = h.userText?.trim() ?? '';
+      const assistant = h.assistantText?.trim() ?? '';
+      const text = isGhost
+        ? user
+        : [user && `you: ${user}`, assistant && `agent: ${assistant}`].filter(Boolean).join('\n');
+      slice.push({ seq: h.seq as number, ts: h.ts ?? null, text: clipSafe(text, SLICE_CHARS) });
+    }
+    slice.sort((a, b) => a.seq - b.seq);
+  }
+
+  const s = show.session;
+  const when = s.endedAt ?? s.startedAt ?? null;
+  return {
+    sessionId,
+    show,
+    card,
+    isGhost,
+    id8,
+    slice,
+    exchanges: show.total,
+    date: when ? when.slice(0, 10) : 'unknown date',
+    harness: s.harness,
+    project: projectName(s.project),
+    title: s.displayTitle,
+  };
+}
+
+// ------------------------------------------------------------- the prompt
+
+export const GRAFT_SYSTEM =
+  'You compress one past coding session into a re-entry brief for a different agent ' +
+  'that has never seen it. You are not summarising for a human reader; you are handing ' +
+  'a colleague the facts they need to continue work.';
+
+/**
+ * The one call.
+ *
+ * Two instructions do the work and both are about citations. Every factual
+ * line must carry `[id8@seq]`, and the model is told the exact seq numbers it
+ * is allowed to use — because a model that is not given the list invents
+ * plausible ones, and {@link resolveCitations} then deletes the line it wrote.
+ * Telling it the legal set up front is cheaper than throwing the answer away.
+ */
+export function buildPrompt(src: GraftSource, o: { about?: string | null; budget: number }): string {
+  const lines: string[] = [];
+  const about = o.about?.trim();
+  // The budget the model is asked for is under the ceiling, because the trim
+  // that follows is a fallback, not the plan.
+  const askFor = Math.max(80, Math.floor(o.budget * 0.75));
+
+  lines.push(`Session ${src.id8} · ${src.harness} · project ${src.project || 'unknown'} · ${src.date}`);
+  lines.push(`Title: ${src.title}`);
+  if (src.isGhost) {
+    lines.push(
+      'THIS SESSION IS A GHOST: only the user prompts survive. The assistant side was deleted ' +
+        'and is not recoverable. Never state what the assistant answered, decided or did.',
+    );
+  }
+  lines.push('');
+
+  if (src.card) {
+    const c = src.card.card;
+    lines.push('## card');
+    if (c.summary) lines.push(c.summary);
+    if (c.decisions.length) {
+      lines.push('', 'decisions:');
+      for (const d of c.decisions) {
+        lines.push(`- ${d.what}${d.why ? ` — ${d.why}` : ''}  seq ${d.evidence_seq.join(', ')}`);
+      }
+    }
+    if (c.open_threads.length) {
+      lines.push('', 'open threads:');
+      for (const t of c.open_threads) lines.push(`- ${t.what}  seq ${t.evidence_seq.join(', ')}`);
+    }
+    if (c.files.length) lines.push('', `files: ${c.files.join(', ')}`);
+    if (c.topics.length) lines.push(`topics: ${c.topics.join(', ')}`);
+    lines.push('', `outcome: ${c.outcome}${src.card.source === PROMPTS_ONLY ? ' (prompts only)' : ''}`);
+    lines.push('');
+  }
+
+  if (src.slice.length) {
+    lines.push(`## exchanges about "${about}"`);
+    for (const ex of src.slice) {
+      lines.push('', `[seq ${ex.seq}${ex.ts ? ` · ${ex.ts.slice(0, 10)}` : ''}]`, ex.text);
+    }
+    lines.push('');
+  }
+
+  const legal = legalSeqs(src);
+  lines.push('## your task');
+  lines.push(
+    about
+      ? `Write a re-entry brief about "${about}", drawn only from the material above.`
+      : 'Write a re-entry brief, drawn only from the material above.',
+  );
+  lines.push(
+    `Hard rules:`,
+    `- At most ${askFor} tokens. Shorter is better. No preamble, no sign-off, no headings.`,
+    `- Markdown bullets only, one fact per bullet.`,
+    `- Every bullet ends with a citation: a literal open bracket, ${src.id8}, an at sign, the seq number, a close bracket. ` +
+      `Write the actual number. A bullet you send with the word "seq" still in it will be deleted.`,
+    `- Two sources on one bullet are written as two separate bracket pairs, never inside one pair.`,
+    legal.length
+      ? `- The ONLY legal seq numbers are: ${legal.join(', ')}. A bullet you cannot cite from that list is a bullet you must not write.`
+      : `- You have no seq numbers to cite. Write nothing but the single line: NONE.`,
+    `- State decisions and open threads. Do not restate the title.`,
+    src.isGhost
+      ? `- Say nothing about what the assistant replied; only what the user asked for.`
+      : `- Prefer what was decided and why over what was tried.`,
+    `- No secrets. Text of the form ‹redacted:…› is a mask; copy it verbatim or leave it out.`,
+  );
+  return lines.join('\n');
+}
+
+function legalSeqs(src: GraftSource): number[] {
+  const out = new Set<number>();
+  for (const ex of src.slice) out.add(ex.seq);
+  if (src.card) {
+    for (const d of src.card.card.decisions) for (const s of d.evidence_seq) out.add(s);
+    for (const t of src.card.card.open_threads) for (const s of t.evidence_seq) out.add(s);
+  }
+  if (out.size === 0) {
+    // No topic and no card: offer the first and last few exchanges, which is
+    // what a brief with nothing else to go on can honestly cite.
+    const seqs = src.show.exchanges.map((e) => e.seq);
+    const prompts = src.show.ghostPrompts?.map((p) => p.seq) ?? [];
+    for (const s of [...seqs, ...prompts].slice(0, 12)) out.add(s);
+  }
+  return [...out].sort((a, b) => a - b).slice(0, 40);
+}
+
+// ---------------------------------------------------------- the card path
+
+/**
+ * The brief with no model in it.
+ *
+ * `RULINGS`: if the compression call is unavailable, `graft` produces a brief
+ * from the card alone rather than failing, *clearly labelled as unsummarised*.
+ * Nothing here is written by a model, so nothing here can be a paraphrase: the
+ * bullets are the card's own verified claims with their own `evidence_seq`
+ * turned into `[id8@seq]`, and they go through the same citation pass as the
+ * model path's do.
+ */
+export function cardOnlyBody(src: GraftSource): string[] {
+  const out: string[] = [];
+  const cite = (seqs: readonly number[]): string =>
+    seqs.length ? ` ${seqs.map((s) => `[${src.id8}@${s}]`).join(' ')}` : '';
+
+  if (!src.card) {
+    const units = src.show.ghostPrompts
+      ? src.show.ghostPrompts.map((p) => ({ seq: p.seq, text: p.text }))
+      : src.show.exchanges.map((e) => ({ seq: e.seq, text: e.userText }));
+    const chosen = src.slice.length
+      ? src.slice.map((s) => ({ seq: s.seq, text: s.text }))
+      : units.slice(0, 8);
+    for (const u of chosen) {
+      const text = clipSafe(u.text.replace(/\s+/g, ' ').trim(), 200);
+      if (text) out.push(`- ${text} [${src.id8}@${u.seq}]`);
+    }
+    return out;
+  }
+
+  const c = src.card.card;
+  if (c.summary.trim()) out.push(c.summary.trim());
+  if (c.decisions.length) {
+    out.push('', '**decided**');
+    for (const d of c.decisions) {
+      out.push(`- ${d.what}${d.why ? ` — ${d.why}` : ''}${cite(d.evidence_seq)}`);
+    }
+  }
+  if (c.open_threads.length) {
+    out.push('', '**left open**');
+    for (const t of c.open_threads) out.push(`- ${t.what}${cite(t.evidence_seq)}`);
+  }
+  if (src.slice.length) {
+    out.push('', '**from the transcript**');
+    for (const ex of src.slice) {
+      const text = clipSafe(ex.text.replace(/\s+/g, ' ').trim(), 220);
+      if (text) out.push(`- ${text} [${src.id8}@${ex.seq}]`);
+    }
+  }
+  if (c.files.length) out.push('', `files: ${c.files.slice(0, 8).map((f) => `\`${f}\``).join(', ')}`);
+  return out;
+}
+
+// ------------------------------------------------------------------ paths
+
+/** `./.potsherd` in the working directory — the one write outside `~/.potsherd`. */
+export function graftDir(cwd: string = process.cwd()): string {
+  return path.join(cwd, '.potsherd');
+}
+
+export function graftPath(id8: string, cwd: string = process.cwd()): string {
+  return path.join(graftDir(cwd), `graft-${id8}.md`);
+}
+
+/**
+ * The line `potsherd doctor --privacy` needs from this phase.
+ *
+ * `03` §11: *`potsherd doctor --privacy` lists every path read and every path
+ * written*. `graft` adds a write path that is **not** under `~/.potsherd` — it
+ * is in the user's current project, which is the entire point of the verb —
+ * and a privacy receipt that omits it is under-reporting. `doctor --privacy`
+ * once said "no network" after the product had started calling a model; this
+ * constant exists so the same omission cannot happen twice.
+ */
+export const GRAFT_WRITE_PATH_NOTE = './.potsherd/graft-<id8>.md  (the current directory, when you run graft)';
+
+const GITIGNORE_BODY = [
+  '# written by `potsherd graft`. these are briefs cut from your own past',
+  '# sessions; they are yours, but they are not source, so they are ignored.',
+  '*',
+  '',
+].join('\n');
+
+/**
+ * Create `./.potsherd/.gitignore`, and **never clobber one that exists.**
+ *
+ * A user who has written their own rules into that file has said something
+ * about their repository, and a memory tool that silently overwrites it has
+ * done the one thing `00-README.md`'s first ground rule forbids in a different
+ * directory. If the file is there, it is left exactly as it is.
+ */
+export function ensureGraftDir(cwd: string = process.cwd()): { dir: string; wroteGitignore: boolean } {
+  const dir = graftDir(cwd);
+  fs.mkdirSync(dir, { recursive: true });
+  const ignore = path.join(dir, '.gitignore');
+  if (fs.existsSync(ignore)) return { dir, wroteGitignore: false };
+  fs.writeFileSync(ignore, GITIGNORE_BODY, { mode: 0o600 });
+  return { dir, wroteGitignore: true };
+}
+
+// -------------------------------------------------------------- clipboard
+
+const CLIP_TOOLS: readonly { bin: string; args: string[] }[] = [
+  { bin: 'pbcopy', args: [] },
+  { bin: 'wl-copy', args: [] },
+  { bin: 'xclip', args: ['-selection', 'clipboard'] },
+  { bin: 'xsel', args: ['--clipboard', '--input'] },
+];
+
+/**
+ * `--clip`, failing softly.
+ *
+ * The spec's parenthesis is the whole design: *(pbcopy/xclip/wl-copy, fail
+ * softly)*. No clipboard tool on the machine is not an error — the brief is
+ * already on disk and already on screen, and exiting non-zero over a missing
+ * `xclip` would fail a run that did everything the user asked. It prints a
+ * note and moves on.
+ */
+export function copyToClipboard(text: string): ClipOutcome {
+  for (const tool of CLIP_TOOLS) {
+    // No shell. `spawnSync(bin, args, { shell: true })` is how a filename with
+    // a space in it becomes two arguments, and node deprecated it (DEP0190)
+    // for exactly that reason. A binary that is not installed comes back as
+    // ENOENT here, which is the probe.
+    const r = spawnSync(tool.bin, tool.args, { input: text, encoding: 'utf8' });
+    const code = (r.error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === 'ENOENT') continue;
+    if (!r.error && r.status === 0) return { ok: true, tool: tool.bin };
+    return {
+      ok: false,
+      tool: tool.bin,
+      note: `${tool.bin} did not take it (${r.error?.message ?? `exit ${r.status ?? '?'}`}) — the brief is on disk either way`,
+    };
+  }
+  return {
+    ok: false,
+    tool: null,
+    note: 'no clipboard tool found (pbcopy, wl-copy, xclip, xsel) — the brief is on disk',
+  };
+}
+
+// ------------------------------------------------------------------ graft
+
+/** Everything the renderer needs beyond {@link GraftResult}. */
+export interface GraftReport extends GraftResult {
+  /** `model` or `card-only`. `05`'s honesty contract: say which produced it. */
+  via: GraftPath;
+  /** Why the card-only path was taken, when it was. */
+  reason: string | null;
+  isGhost: boolean;
+  title: string;
+  /** Body lines the budget pass removed. */
+  trimmed: number;
+  /** Lines removed because every citation on them was invented. */
+  droppedLines: string[];
+  clip: ClipOutcome | null;
+  wroteGitignore: boolean;
+}
+
+export async function graft(db: Db, target: string, o: GraftOptions = {}): Promise<GraftReport> {
+  const started = Date.now();
+  const budget = Math.max(MIN_BUDGET, Math.floor(o.budget ?? DEFAULT_BUDGET));
+  const about = o.about?.trim() || null;
+  const cwd = o.cwd ?? process.cwd();
+  const write = o.write !== false;
+
+  const resolved = await resolveTarget(db, target, o.root ? { root: o.root } : {});
+  const src = await collectSource(db, resolved.sessionId, {
+    about,
+    ...(o.k !== undefined ? { k: o.k } : {}),
+    ...(o.root ? { root: o.root } : {}),
+  });
+
+  const llm = o.llm ?? null;
+  const count = counterFor(llm);
+  let via: GraftPath = 'card-only';
+  let reason: string | null = null;
+  let raw = '';
+  let spend: Spend = emptySpend();
+
+  if (llm) {
+    try {
+      const r = await llm.text({
+        prompt: buildPrompt(src, { about, budget }),
+        system: GRAFT_SYSTEM,
+        // The ceiling is enforced after the fact anyway; this is the guard
+        // against a model that decides to write an essay.
+        maxOutputTokens: Math.max(256, Math.floor(budget * 1.5)),
+        label: 'graft',
+      });
+      raw = r.text.trim();
+      spend = llm.spend;
+      if (raw && raw.toUpperCase() !== 'NONE') via = 'model';
+      else {
+        reason = 'the model found nothing it could cite';
+        raw = '';
+      }
+    } catch (err) {
+      // A brief that needs the network is a brief that does not work on a
+      // plane. Fall back to the card, and say so on the face of the brief.
+      reason = `the model call failed (${(err as Error)?.message ?? String(err)})`;
+      spend = llm.spend;
+      raw = '';
+    }
+  } else {
+    reason = 'no model was used';
+  }
+
+  const bodyLines = via === 'model' ? raw.split('\n') : cardOnlyBody(src);
+  const pass = resolveCitations(db, bodyLines.join('\n'), { sessionId: src.sessionId });
+
+  const head = buildHead(src, { about, via, reason, budget });
+  const tail = buildTail(src, pass);
+  const budgeted = await enforceBudget({
+    head,
+    body: pass.text.split('\n').filter((l, i, a) => !(l.trim() === '' && a[i - 1]?.trim() === '')),
+    tail,
+    budget,
+    count,
+  });
+
+  let outPath = graftPath(src.id8, cwd);
+  let wroteGitignore = false;
+  if (write) {
+    const dir = ensureGraftDir(cwd);
+    wroteGitignore = dir.wroteGitignore;
+    fs.writeFileSync(outPath, budgeted.brief, { mode: 0o600 });
+  } else {
+    outPath = '';
+  }
+
+  let clip: ClipOutcome | null = null;
+  if (o.clip) clip = (o.clipboard ?? copyToClipboard)(budgeted.brief);
+
+  return {
+    sessionId: resolved.sessionId,
+    id8: src.id8,
+    project: src.project,
+    harness: src.harness,
+    about,
+    exchanges: src.exchanges,
+    date: src.date,
+    budget,
+    tokens: budgeted.tokens,
+    estimated: budgeted.estimated,
+    brief: budgeted.brief,
+    path: outPath,
+    clipped: clip?.ok ?? false,
+    citations: pass.citations,
+    spend,
+    ms: Date.now() - started,
+    via,
+    reason,
+    isGhost: src.isGhost,
+    title: src.title,
+    trimmed: budgeted.trimmed,
+    droppedLines: pass.droppedLines,
+    clip,
+    wroteGitignore,
+  };
+}
+
+function buildHead(
+  src: GraftSource,
+  o: { about: string | null; via: GraftPath; reason: string | null; budget: number },
+): string[] {
+  const head: string[] = [];
+  head.push(`# ${src.title}`);
+  head.push('');
+  head.push(
+    o.about
+      ? `Brief from a past session, about **${o.about}**. Written by potsherd; every claim carries \`[${src.id8}@seq]\`, the exchange it came from.`
+      : `Brief from a past session. Written by potsherd; every claim carries \`[${src.id8}@seq]\`, the exchange it came from.`,
+  );
+  if (src.isGhost) {
+    head.push('');
+    head.push(
+      '> **prompts only.** This session was deleted; `history.jsonl` kept what the user asked ' +
+        'and nothing kept what the assistant answered. Nothing below describes the assistant ' +
+        "side — it is not recoverable.",
+    );
+  }
+  if (o.via === 'card-only') {
+    head.push('');
+    head.push(
+      `> **unsummarised.** No model call was made${o.reason ? ` — ${o.reason}` : ''}. ` +
+        'What follows is the stored card and transcript verbatim, not a summary.',
+    );
+  }
+  return head;
+}
+
+function buildTail(src: GraftSource, pass: CitationPass): string[] {
+  const tail: string[] = ['---', ''];
+  const bad = pass.citations.filter((c) => !c.resolves).length;
+  if (bad > 0) {
+    tail.push(
+      `_${bad} citation${bad === 1 ? '' : 's'} named an exchange this index does not have, ` +
+        `and ${bad === 1 ? 'it was' : 'they were'} dropped._`,
+      '',
+    );
+  }
+  // Always the last line. `plans/phases/phase-4` T4.3, and it is what makes a
+  // brief pasted into a third tool still attributable.
+  tail.push(
+    sourceLine({
+      harness: src.harness,
+      sessionId: src.sessionId,
+      exchanges: src.exchanges,
+      date: src.date,
+    }),
+  );
+  return tail;
+}

@@ -1,0 +1,21 @@
+`pnpm typecheck` — run WITH the section-1 and section-2 blocks of
+registration-T4.3.txt applied to the two RESERVED files, then reverted.
+
+This is the proof that the registration blocks are correct and complete: with
+them in place both packages typecheck clean. On the branch as committed,
+`packages/core/src/index.ts` and `packages/cli/src/index.ts` are untouched, so
+`packages/cli/src/commands/graft.ts` does not resolve its imports and
+`pnpm typecheck` reports 8 errors in that one file — every one of them an
+unexported member. That is the wave's designed state; the orchestrator's
+integration commit clears it.
+
+exit 0
+
+> potsherd-monorepo@0.0.0 typecheck /Users/zebra/randomness/potsherd/.claude/worktrees/agent-a129283aef5299a63
+> pnpm -r --filter "./packages/*" typecheck
+
+Scope: 2 of 3 workspace projects
+packages/core typecheck$ tsc -p tsconfig.json --noEmit
+packages/core typecheck: Done
+packages/cli typecheck$ tsc -p tsconfig.json --noEmit
+packages/cli typecheck: Done

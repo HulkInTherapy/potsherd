@@ -1,0 +1,181 @@
+T4.3 `graft` — registration blocks for the integrator.
+Paste these verbatim. Nothing else in either RESERVED file needs to change.
+
+================================================================================
+1.  packages/core/src/index.ts
+================================================================================
+Append at the end of the phase-4 section (or just above the final
+`export { VERSION } from './version.js';` line):
+
+// ---------------------------------------------------------------- phase 4
+// L7 — `graft`: the token-budgeted re-entry brief (`03` §8, T4.3).
+export {
+  ABOUT_K,
+  CITATION_RE,
+  DEFAULT_BUDGET,
+  GRAFT_SYSTEM,
+  GRAFT_WRITE_PATH_NOTE,
+  GraftError,
+  MIN_BUDGET,
+  SLICE_CHARS,
+  buildPrompt,
+  cardOnlyBody,
+  clipSafe,
+  collectSource,
+  copyToClipboard,
+  counterFor,
+  countTokens,
+  enforceBudget,
+  ensureGraftDir,
+  graft,
+  graftDir,
+  graftPath,
+  resolveCitations,
+  resolveTarget,
+  safeCut,
+  sourceLine,
+  type BudgetPass,
+  type CitationPass,
+  type ClipOutcome,
+  type Counter,
+  type GraftCitation,
+  type GraftOptions,
+  type GraftPath,
+  type GraftReport,
+  type GraftResult,
+  type GraftSource,
+  type TokenCount,
+} from './graft.js';
+export { graftJson, renderGraft } from './render/graft.js';
+
+================================================================================
+2.  packages/cli/src/index.ts
+================================================================================
+(a) add to the imports from './commands/…':
+
+import { runGraft } from './commands/graft.js';
+
+(b) the commander block. Place it after the `show` block, so the help order
+    reads find -> show -> graft:
+
+  const graftCmd = addGlobals(
+    program
+      .command('graft')
+      .description('a token-budgeted brief from one past session, ready to paste into an agent')
+      .argument('<session>', 'a session id, the first 8 characters of one, or a query')
+      .option('--about <topic>', 'only the exchanges about this topic')
+      .addOption(
+        new Option('--budget <n>', 'hard ceiling on the brief, in tokens')
+          .argParser(Number)
+          .default(1200),
+      )
+      .option('--clip', 'copy the brief to the system clipboard')
+      .option('--no-model', 'no model call — the card verbatim, labelled unsummarised')
+      .option('--model <name>', 'haiku, sonnet, opus, or an explicit model id')
+      .addOption(
+        new Option('--backend <name>', 'force a backend instead of detecting one')
+          .choices(['agent-sdk', 'codex', 'api']),
+      ),
+  ).addHelpText('after', `
+example:
+  potsherd graft 4c9339e0 --about pgbouncer --budget 800
+  potsherd graft "instagram client" --clip
+  potsherd graft 4c9339e0 --json | jq -r .brief
+
+the brief is written to ./.potsherd/graft-<id8>.md in the current directory —
+the one place potsherd writes outside ~/.potsherd — and that directory gets a
+generated .gitignore. an existing .gitignore is never overwritten.
+
+with no claude, no codex and no ANTHROPIC_API_KEY, graft still writes a brief:
+the stored card verbatim, labelled unsummarised. --no-model asks for that path.`);
+  graftCmd.action(async (session: string, opts: Record<string, unknown>) => {
+    const o = globals(program, graftCmd, opts);
+    await run(
+      () =>
+        runGraft({
+          ...o,
+          target: session,
+          ...(opts['about'] !== undefined ? { about: String(opts['about']) } : {}),
+          ...(opts['budget'] !== undefined ? { budget: Number(opts['budget']) } : {}),
+          clip: Boolean(opts['clip']),
+          // commander turns `--no-model` into `model: false`, and
+          // `--model haiku` into `model: 'haiku'`. Both are wanted.
+          ...(opts['model'] !== undefined ? { model: opts['model'] as boolean | string } : {}),
+          ...(opts['backend'] !== undefined ? { backend: String(opts['backend']) } : {}),
+        }),
+      o,
+    );
+  });
+
+================================================================================
+3.  packages/cli/src/commands/doctor.ts  —  THE PRIVACY LINE
+================================================================================
+NOT RESERVED, and T4.3 has already made this edit on `task/T4.3-graft`.
+It is recorded here so the integrator can see it in one place, and so it
+survives a cherry-pick of the three product files.
+
+`graft` writes a path that is NOT under ~/.potsherd. `03` §11 requires
+`doctor --privacy` to list every path written, and this receipt has
+under-reported once already (it said "no network" after the product had
+started calling a model). The change, in `runDoctor`:
+
+  BEFORE
+    const written = [root, paths.archiveDir(root), dbFile, paths.modelsDir(root)];
+
+  AFTER
+    const written = [
+      root,
+      paths.archiveDir(root),
+      dbFile,
+      paths.modelsDir(root),
+      // `graft` is the one verb that writes outside ~/.potsherd: the brief
+      // lands in the project you run it in, which is the entire point of the
+      // verb. `--privacy` lists every path written, so it lists this one.
+      path.join(process.cwd(), '.potsherd', 'graft-<id8>.md'),
+    ];
+
+plus, in the `--privacy` block, immediately after the `for (const p of written)`
+loop, the one line of prose that says the path is conditional:
+
+    card.raw(`      ${t.dim('the graft path only when you run graft, in the directory you run it in')}`);
+
+`packages/core/src/graft.ts` exports `GRAFT_WRITE_PATH_NOTE` holding
+"./.potsherd/graft-<id8>.md  (the current directory, when you run graft)"
+and `graftDir(cwd)` / `graftPath(id8, cwd)` if doctor would rather compute it.
+`doctor.ts` already imports `path` and `process`.
+
+================================================================================
+4.  MODEL_CALL_VERBS  —  CHANGED by T4.3, and T4.1 must merge into it
+================================================================================
+`packages/core/src/llm.ts` — NOT reserved — line 83 read:
+
+    export const MODEL_CALL_VERBS: readonly string[] = ['card'];
+
+and now reads:
+
+    export const MODEL_CALL_VERBS: readonly string[] = ['card', 'graft'];
+
+This was not optional. `tests/llm.test.ts` > "no command outside
+MODEL_CALL_VERBS reaches Llm.open" scans `packages/cli/src/commands/*.ts` for
+`Llm.open(` and asserts the result equals this constant — the guard T2.7 added
+so a verb cannot start calling a model without the privacy receipt saying so.
+Adding `commands/graft.ts` turns that test red until the constant names graft.
+
+**T4.1 hits the same test** the moment `commands/ask.ts` lands. The merged
+value is:
+
+    export const MODEL_CALL_VERBS: readonly string[] = ['card', 'ask', 'graft'];
+
+The same commit should extend `verbNote` in `packages/cli/src/commands/doctor.ts`
+with an `ask:` entry and delete the line below the loop:
+
+    card.raw(`    ${t.dim('phase 4 adds')} ask${t.dim(', which sends the same slices.')}`);
+
+================================================================================
+5.  verification, after integration
+================================================================================
+  pnpm build
+  node packages/cli/bin/potsherd.js graft --help
+  node packages/cli/bin/potsherd.js graft <id8> --potsherd-dir <ref> --no-model
+  node packages/cli/bin/potsherd.js graft <id8> --potsherd-dir <ref> --json | jq '.tokens, .budget, .estimated'
+  node packages/cli/bin/potsherd.js doctor --privacy | grep -i graft

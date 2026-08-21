@@ -1,0 +1,176 @@
+
+> potsherd-monorepo@0.0.0 test /Users/zebra/randomness/potsherd/.claude/worktrees/agent-a129283aef5299a63
+> vitest run
+
+
+ RUN  v2.1.9 /Users/zebra/randomness/potsherd/.claude/worktrees/agent-a129283aef5299a63
+
+ ✓ tests/cards.test.ts (98 tests) 3189ms
+   ✓ card --limit (T2.7 D6) > caps the targets the quote and the run share 591ms
+   ✓ potsherd show renders the card (T2.7 D3) > fits 80 and 60 columns and stays pure ascii under --ascii 693ms
+ ✓ tests/llm.test.ts (81 tests) 3967ms
+   ✓ codex backend plumbing > feeds the prompt on stdin and reads the answer from stdout 941ms
+   ✓ codex backend plumbing > reports a non-zero exit as something the user can act on 591ms
+   ✓ codex backend plumbing > never hangs: a silent backend hits the timeout 608ms
+   ✓ codex backend plumbing > sets the re-entrancy guard in the spawned environment 631ms
+   ✓ codex backend plumbing > runs in a scratch cwd, so no CLAUDE.md is ever loaded 624ms
+ ✓ tests/recall.test.ts (68 tests) 21659ms
+   ✓ recall: ghost vectors survive a second index — T3.6 > embeds a ghost recovered after the exchanges were already embedded 15611ms
+stdout | tests/redact.test.ts > performance > redacts 10 MB in the time an index pass can afford
+  redact: 10 MB in 1452 ms (6.9 MB/s), 4070 hits
+
+stdout | tests/redact.test.ts > performance > elides 10 MB of image-heavy transcript faster than it redacts it
+  elide: 10 MB in 47 ms (211.8 MB/s), dropped 13%; redact of what is left: 693 ms
+
+ ✓ tests/redact.test.ts (103 tests) 2537ms
+   ✓ performance > redacts 10 MB in the time an index pass can afford 1467ms
+   ✓ performance > elides 10 MB of image-heavy transcript faster than it redacts it 749ms
+ ✓ tests/graft.test.ts (43 tests) 210ms
+ ✓ tests/cli.test.ts (40 tests) 17351ms
+   ✓ potsherd cli > the hook command finishes fast on the second, unchanged run 574ms
+   ✓ potsherd cli > rescue --yes sets cleanupPeriodDays and keeps a backup 545ms
+   ✓ potsherd cli > guard installs and removes its hook 752ms
+   ✓ potsherd cli > guard --status says whether the installed hook can actually run 807ms
+   ✓ potsherd cli > doctor sizes the archive by the archive, not by the live corpus 1426ms
+   ✓ potsherd cli > audit --verify prints runnable python, writes nothing and exits 0 525ms
+   ✓ potsherd cli > the audit card keeps its closing command whole at 60 columns 416ms
+   ✓ potsherd cli > does not write "all 1" or "1 prompts" anywhere 949ms
+   ✓ potsherd cli > doctor --privacy discloses the model calls, not just the paths 304ms
+   ✓ potsherd cli > every verb has --help with at least one example 972ms
+   ✓ potsherd cli > honours CLAUDE_CONFIG_DIR when no --claude-dir is given 393ms
+   ✓ potsherd cli > index builds a searchable index from the fixture and is incremental after 1751ms
+   ✓ potsherd cli > index refuses two flags that ask for opposite things 443ms
+   ✓ potsherd cli > doctor reports redaction counts and the vector index after an index run 857ms
+   ✓ potsherd card > --dry-run --all prints sessions, tokens, cost and minutes, and exits 0 513ms
+   ✓ potsherd card > --dry-run --all --json carries the same four numbers 542ms
+   ✓ potsherd card > --dry-run still works on a machine with no claude, no codex and no key 357ms
+   ✓ potsherd card > a real run with no backend names both options and exits non-zero 360ms
+   ✓ potsherd card > says which sessions it needs rather than carding everything by accident 302ms
+   ✓ potsherd card > names a session reference it cannot resolve 305ms
+   ✓ version > reports the same version everywhere it is shown 322ms
+ ✓ tests/adapters/cursor.test.ts (43 tests) 50ms
+ ✓ tests/filters.test.ts (30 tests) 429ms
+ ✓ tests/adapters/claude.test.ts (19 tests) 104195ms
+   ✓ reference corpus (frozen, read-only) > parses every transcript with no fatal error and the expected counts 51144ms
+   ✓ live ~/.claude (read-only, floors only) > discovers at least the reference counts and parses them all 53007ms
+ ✓ tests/adapters/codex.test.ts (31 tests) 449ms
+ ✓ tests/index.test.ts (12 tests) 1120ms
+ ✓ tests/annotate-cli.test.ts (81 tests) 34545ms
+   ✓ tag > adds tags and finds the session again through ls --tag 574ms
+   ✓ tag > adds and removes in one invocation, with -tag surviving the argv parser 601ms
+   ✓ tag > lists what a session carries when given no +/- argument 389ms
+   ✓ tag > matches --tag whatever the case it was typed in, on both sides 583ms
+   ✓ tag > tags a ghost — the sessions worth marking are the deleted ones 2108ms
+   ✓ tag > says so and names the fix when the session id is not there 1330ms
+   ✓ tag > refuses a word with nothing tag-like in it 685ms
+   ✓ tag > --json carries the tags, the change and what it ignored 1052ms
+   ✓ pin > pins, marks the row with a star and finds it again through ls --pinned 1065ms
+   ✓ pin > is idempotent, and says it changed nothing rather than restamping it 830ms
+   ✓ pin > unpins again 976ms
+   ✓ pin > pins a ghost, which has no row in `sessions` to key on 696ms
+   ✓ link > links two sessions and finds each of them from the other side 631ms
+   ✓ link > links a ghost to a live session, and reads it from the ghost end 575ms
+   ✓ link > records the pair once, whichever way round it is typed again 778ms
+   ✓ link > --remove takes it away from either side 2115ms
+   ✓ ls --untitled > excludes the sessions the harness did name 592ms
+   ✓ ls --untitled > does not list a ghost that its recovered prompts already name 369ms
+   ✓ the filters compose > three at once means all three 730ms
+   ✓ the filters compose > four at once, mixing a link with a tag, a date and a harness 493ms
+   ✓ the filters compose > reports the filters it applied, so the screenshot says what it shows 520ms
+   ✓ the filters compose > every filter reaches --json unchanged 522ms
+   ✓ ls --resume-menu > is paste-able into a shell: every line is a command or a comment 704ms
+   ✓ ls --resume-menu > prints `claude --resume <id>  # <title>` with a real title 506ms
+   ✓ ls --resume-menu > says why potsherd does not write the titles into ~/.claude instead 1139ms
+   ✓ ls --resume-menu > never truncates a resume command, even at 60 columns 572ms
+   ✓ ls --resume-menu > offers no command for a session that cannot be resumed, and says how many 397ms
+   ✓ ls stays a screenshot with tags and pins on it > ls is pure ASCII under --ascii at 80 482ms
+   ✓ ls stays a screenshot with tags and pins on it > ls is pure ASCII under --ascii at 60 351ms
+   ✓ ls stays a screenshot with tags and pins on it > ls --pinned fits 80 columns 316ms
+   ✓ ls stays a screenshot with tags and pins on it > ls --pinned is pure ASCII under --ascii at 60 357ms
+   ✓ ls stays a screenshot with tags and pins on it > ls --tag postgres fits 80 columns 409ms
+   ✓ ls stays a screenshot with tags and pins on it > ls --tag postgres is pure ASCII under --ascii at 80 408ms
+   ✓ ls stays a screenshot with tags and pins on it > ls --tag postgres fits 60 columns 390ms
+   ✓ ls stays a screenshot with tags and pins on it > ls --linked-to is pure ASCII under --ascii at 60 357ms
+   ✓ ls stays a screenshot with tags and pins on it > ls --untitled fits 80 columns 310ms
+   ✓ ls stays a screenshot with tags and pins on it > pin is pure ASCII under --ascii at 60 312ms
+   ✓ ls stays a screenshot with tags and pins on it > shows the tags after the title and a ★ in front of a pinned one 334ms
+ ✓ tests/rescue.test.ts (24 tests) 2901ms
+ ✓ tests/adapters/pi.test.ts (29 tests) 392ms
+ ✓ tests/parser.test.ts (23 tests) 89ms
+ ✓ tests/query-cli.test.ts (45 tests) 75905ms
+   ✓ width: every verb fits the terminal it was designed for > ls fits 80 columns 1042ms
+   ✓ width: every verb fits the terminal it was designed for > ls fits 60 columns 755ms
+   ✓ width: every verb fits the terminal it was designed for > ls --ghosts only fits 80 columns 1558ms
+   ✓ width: every verb fits the terminal it was designed for > ls --ghosts only fits 60 columns 1392ms
+   ✓ width: every verb fits the terminal it was designed for > ls --sidechains only fits 80 columns 459ms
+   ✓ width: every verb fits the terminal it was designed for > ls --sidechains only fits 60 columns 1230ms
+   ✓ width: every verb fits the terminal it was designed for > find fits 80 columns 1461ms
+   ✓ width: every verb fits the terminal it was designed for > find fits 60 columns 2248ms
+   ✓ width: every verb fits the terminal it was designed for > find over boilerplate fits 80 columns 1709ms
+   ✓ width: every verb fits the terminal it was designed for > find over boilerplate fits 60 columns 2827ms
+   ✓ width: every verb fits the terminal it was designed for > find --ghosts only fits 80 columns 1824ms
+   ✓ width: every verb fits the terminal it was designed for > find --ghosts only fits 60 columns 1381ms
+   ✓ width: every verb fits the terminal it was designed for > stats fits 80 columns 2347ms
+   ✓ width: every verb fits the terminal it was designed for > stats fits 60 columns 3630ms
+   ✓ width: every verb fits the terminal it was designed for > show fits 80 columns 3334ms
+   ✓ width: every verb fits the terminal it was designed for > show fits 60 columns 2869ms
+   ✓ width: every verb fits the terminal it was designed for > show a ghost fits 80 columns 3018ms
+   ✓ width: every verb fits the terminal it was designed for > show a ghost fits 60 columns 2519ms
+   ✓ ls > shows titles rather than uuids 2260ms
+   ✓ ls > fits an 80x24 screenshot by default 2116ms
+   ✓ ls > marks the deleted sessions and says what is left of them 2154ms
+   ✓ ls > --json carries every column the table shows, and the id it does not 3123ms
+   ✓ ls > rejects a filter value it does not have, and names the ones it does 2112ms
+   ✓ find > prints the resume command for the harness 2354ms
+   ✓ find > states the limitation on a ghost hit rather than offering a dead command 2230ms
+   ✓ find > finds a subagent transcript by default 2425ms
+   ✓ find > --sidechains exclude turns that off again 2091ms
+   ✓ find > exits non-zero and suggests a verb when nothing matches 2118ms
+   ✓ find > --json carries the score, the lists and the snippet the human view showed 1947ms
+   ✓ find > --json says which session each hit belongs to 2681ms
+   ✓ find > shows the matched word rather than a pasted-screenshot placeholder 1442ms
+   ✓ find > every snippet line begins on a word, at 80 columns and at 60 1351ms
+   ✓ find > --ascii keeps the block inside 7-bit and inside the column 1137ms
+   ✓ find > says rescue, not silence, when the index has no ghosts to search 1361ms
+   ✓ find > says why a result is there when no snippet can show it 356ms
+   ✓ show > reads one session by an 8-character prefix 342ms
+   ✓ show > renders a ghost as prompts, and says the rest is gone 379ms
+   ✓ show > --md is markdown with the session id in it 340ms
+   ✓ show > names the candidates rather than guessing on an ambiguous prefix 631ms
+   ✓ show > says so plainly when the id is not there 791ms
+   ✓ stats > counts each harness, and the ghosts beside them 436ms
+   ✓ stats > --json carries the per-harness rows and the freshness check 679ms
+   ✓ the index has to exist first > says which command builds it 399ms
+ ✓ tests/audit.test.ts (26 tests) 1262ms
+   ✓ sidechains are not sessions > agrees with scripts/verify-audit.py on the same corpus 524ms
+ ✓ tests/terminal.test.ts (28 tests) 16345ms
+   ✓ --ascii > doctor emits no non-ASCII character 314ms
+   ✓ --ascii > doctor --privacy emits no non-ASCII character 422ms
+   ✓ --ascii > index emits no non-ASCII character 421ms
+   ✓ --ascii > stats emits no non-ASCII character 462ms
+   ✓ --ascii > ls emits no non-ASCII character 345ms
+   ✓ --ascii > find emits no non-ASCII character 505ms
+   ✓ --ascii > holds at 60 columns too, where more text has to be elided 4378ms
+   ✓ terminal width > doctor fits --width 60 392ms
+   ✓ terminal width > index fits --width 60 534ms
+   ✓ terminal width > find --explain fits --width 60 394ms
+   ✓ terminal width > doctor fits --width 80 379ms
+   ✓ terminal width > index fits --width 80 1000ms
+   ✓ terminal width > find --explain fits --width 80 603ms
+   ✓ doctor keeps the record type name > prints the whole name at --width 60 834ms
+   ✓ doctor keeps the record type name > prints the whole name at --width 80 502ms
+   ✓ index reports the run, not the index > never claims the index holds no secrets on the strength of one pass 1380ms
+ ✓ tests/consent.test.ts (23 tests) 163ms
+ ✓ tests/search-helpers.test.ts (20 tests) 10ms
+ ✓ tests/embeddings.test.ts (9 tests) 1048ms
+   ✓ embeddings > embeds offline once the model is cached 371ms
+   ✓ embeddings > embeds a batch equivalently, but not identically, to one at a time 578ms
+ ✓ tests/adapters.test.ts (6 tests) 6859ms
+   ✓ adapter contract > compiles standalone, under the strictest settings, importing nothing 6836ms
+ ✓ tests/inherited.test.ts (5 tests) 5ms
+
+ Test Files  23 passed (23)
+      Tests  887 passed (887)
+   Start at  21:21:58
+   Duration  302.73s (transform 2.52s, setup 337ms, collect 6.64s, tests 294.68s, environment 0ms, prepare 140ms)
+
