@@ -166,7 +166,13 @@ if (mode === 'pairs') {
       }
       const sharedTokens = [...a.tokens].filter((t) => bTokens.has(t));
       const sharedPaths = [...a.paths].filter((p) => bPaths.has(p));
-      if (sharedPaths.length === 0 && sharedTokens.length < MIN_PROJECT_OVERLAP) continue;
+      // The pool is generated at the LOOSEST structural setting (one shared
+      // token, one anchor token) rather than at the shipped one, so that the
+      // same hand-labelled set can score the shipped constants *and* the
+      // looser variants. Labelling only what the shipped rule already emits
+      // would make it impossible to find out that the shipped rule is too
+      // strict, which is half of what a control is for.
+      if (sharedPaths.length === 0 && sharedTokens.length < 1) continue;
 
       for (const d of a.decisions) {
         const seqs = Array.isArray(d.evidence_seq) ? d.evidence_seq : [];
@@ -174,7 +180,10 @@ if (mode === 'pairs') {
         if (seq === undefined) continue;
         const dTokens = new Set(contentTokens(`${d.what} ${d.why ?? ''}`));
         const anchor = [...dTokens].filter((t) => a.tokens.has(t) && bTokens.has(t));
-        if (anchor.length < MIN_ANCHOR_TOKENS) continue;
+        if (anchor.length < 1) continue;
+        const clearsShipped =
+          anchor.length >= MIN_ANCHOR_TOKENS &&
+          (sharedPaths.length > 0 || sharedTokens.length >= MIN_PROJECT_OVERLAP);
 
         // The mention bar, switched off: record the score instead of testing it.
         let bestCard = 0;
@@ -207,6 +216,7 @@ if (mode === 'pairs') {
           what: d.what,
           why: d.why ?? '',
           otherProject: project,
+          clearsShipped,
           anchor,
           sharedTokens: sharedTokens.length,
           sharedPaths,
