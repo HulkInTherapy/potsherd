@@ -75,6 +75,13 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
           score: s.score,
           hits: s.hits.map((h) => ({
             kind: h.kind,
+            // A block is a *conversation*, and a conversation can hold the
+            // parent and its subagents. Without the id of the session each hit
+            // came from, a `--json` consumer cannot tell a subagent's match
+            // from one of the parent's own exchanges — a distinction the human
+            // view makes and the API is supposed to carry.
+            sessionId: h.sessionId,
+            isSidechain: h.isSidechain,
             id: h.id ?? null,
             seq: h.seq ?? null,
             ts: h.ts ?? null,

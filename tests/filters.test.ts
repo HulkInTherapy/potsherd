@@ -424,10 +424,16 @@ describe('find --explain', () => {
     // numbers from the scores alone. If these two ever disagree, one of them is
     // lying about how the page was ordered.
     const solved = search.solveWeights(r.hits, r.k);
+    let compared = 0;
     for (const [list, w] of solved) {
       if (!w.solved) continue;
+      compared += 1;
       expect(w.weight).toBeCloseTo(r.weights[list] ?? 1, 9);
     }
+    // A cross-check that compares nothing is not a cross-check. Without this
+    // the loop passed on a solver that never solved a single list — which is
+    // exactly the failure it was written to catch.
+    expect(compared).toBeGreaterThan(0);
   });
 
   it('names which list ranked the top two, and when corroboration decided it',

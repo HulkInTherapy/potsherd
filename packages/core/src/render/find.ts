@@ -138,9 +138,16 @@ function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[]
   // with none of the query in it was the third of the T1.7 review's
   // complaints, and one good line beats a good line plus a puzzling one.
   const evidence = ordered.filter((h) => h.snippet.match);
-  for (const hit of (evidence.length > 0 ? evidence : ordered).slice(0, 2)) {
-    const rendered = snippetLine(hit, t, width - 2);
-    if (rendered) lines.push(INDENT + '  ' + rendered);
+  for (const hit of withMember(evidence.length > 0 ? evidence : ordered, s)) {
+    // Which member of the conversation said this. A block is a conversation,
+    // so its two snippet lines can come from the parent *or* from a subagent
+    // it spawned — and with nothing to mark the difference the reader is told
+    // the parent said something only the subagent ever said. Sidechains are
+    // the one thing no other tool surfaces; burying them under a parent's
+    // heading with no attribution is the same as not surfacing them.
+    const mark = memberMark(s, hit, t);
+    const rendered = snippetLine(hit, t, width - 2 - Theme.len(mark));
+    if (rendered) lines.push(INDENT + '  ' + mark + rendered);
   }
   // Why is this block on the screen? A snippet with a highlighted word answers
   // that by itself. When no snippet carries one — the title matched, or the
@@ -181,6 +188,42 @@ function quotableOrder(hits: RecallHit[]): RecallHit[] {
       return a.i - b.i;
     })
     .map((x) => x.hit);
+}
+
+/**
+ * Two snippet lines, and one of them belongs to the other member when there
+ * is one.
+ *
+ * A block is a *conversation*, and the two lines went to whichever hits quoted
+ * best — which for a parent with a hundred exchanges and a subagent with one
+ * is the parent's, twice, on volume alone. So the distinct result, the line
+ * only the subagent ever said, lost both lines to the session that merely
+ * spawned it. If the conversation has a hit from a member other than the one
+ * heading the block, that member gets the second line.
+ */
+function withMember(pool: readonly RecallHit[], s: RecallSession): RecallHit[] {
+  const top = pool.slice(0, 2);
+  if (top.some((h) => h.sessionId !== s.id)) return top;
+  const other = pool.find((h) => h.sessionId !== s.id);
+  if (!other) return top;
+  return top.length < 2 ? [...top, other] : [top[0]!, other];
+}
+
+/**
+ * Who earned this line, when it was not the session heading the block.
+ *
+ * `↳ subagent p4a` in front of a snippet the sidechain matched, `↑ parent
+ * 4ae3102b` in front of one the spawning session matched under a subagent's
+ * heading. Empty for the session named two lines up, which needs no label.
+ * The word is spelled out rather than left to a glyph: the reader has to be
+ * able to tell that the subagent, not its parent, is what matched.
+ */
+function memberMark(s: RecallSession, hit: RecallHit, t: Theme): string {
+  if (hit.sessionId === s.id) return '';
+  const who = hit.isSidechain
+    ? `${t.g('↳', '>')} subagent ${idTag(hit.sessionId)}`
+    : `${t.g('↑', '^')} parent ${idTag(hit.sessionId)}`;
+  return t.dim(`${who} `);
 }
 
 /** One line saying why a block with no quotable match is in the results. */
@@ -311,7 +354,12 @@ function markerLen(s: RecallSession): number {
 function footer(r: RecallResult, t: Theme): string {
   const parts: string[] = [];
   const ghosts = r.sessions.filter((s) => s.status === 'ghost').length;
-  const sidechains = r.sessions.filter((s) => s.isSidechain).length;
+  // A conversation counts as a subagent result when a subagent earned a line
+  // in it, whether or not the block is headed by the subagent — otherwise the
+  // footer says "0 from subagents" on a page whose answer came from one.
+  const sidechains = r.sessions.filter(
+    (s) => s.isSidechain || s.hits.some((h) => h.isSidechain && h.sessionId !== s.id),
+  ).length;
   if (ghosts) parts.push(`${f.num(ghosts)} ghost ${f.plural(ghosts, 'hit')}`);
   if (sidechains) parts.push(`${f.num(sidechains)} from subagents`);
   if (!r.vectors.used && r.vectors.reason) parts.push(r.vectors.reason);

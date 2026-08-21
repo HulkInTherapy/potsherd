@@ -1505,11 +1505,19 @@ export async function recall(
   sessions.sort((a, b) => b.score - a.score);
   sessions.length = Math.min(sessions.length, limit);
 
-  const shown = new Set(sessions.map((s) => s.id));
+  // The flat list is every hit that is on the page, in fused order. It used to
+  // be filtered by the *representative* session's id, which quietly threw away
+  // exactly the hits clustering exists to keep: a subagent's match shown under
+  // its parent's block was in `sessions[i].hits` and missing from `hits`, so
+  // anything counting the flat array — a `--json` consumer, and two of this
+  // repo's own tests — undercounted a clustered conversation and never saw a
+  // sidechain. Take the blocks' own hits instead, so the two views cannot
+  // disagree and every hit still names the session it came from.
+  const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => b.score - a.score);
   return {
     query,
     sessions,
-    hits: kept.filter((h) => shown.has(h.sessionId)),
+    hits: flat,
     vectors,
     lists: listReports,
     k,

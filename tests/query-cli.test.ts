@@ -187,6 +187,27 @@ describe('find', () => {
     expect(j.vectors.reason).toBeTruthy();
   });
 
+  /**
+   * **T3.6.** A block is a conversation, so a hit under it can belong to the
+   * session in the heading *or* to a subagent it spawned. The human view marks
+   * the difference; without `sessionId` on the hit `--json` could not, and a
+   * consumer had no way to tell which session actually matched.
+   */
+  it('--json says which session each hit belongs to', () => {
+    const j = JSON.parse(run(['find', 'the', '--json', '--limit', '20']).stdout) as {
+      sessions: { id: string; hits: { sessionId: string; isSidechain: boolean }[] }[];
+    };
+    for (const s of j.sessions) {
+      for (const h of s.hits) expect(typeof h.sessionId).toBe('string');
+    }
+    // …and it is a real distinction, not a field that always echoes the block.
+    const clustered = j.sessions.filter((s) => s.hits.some((h) => h.sessionId !== s.id));
+    expect(clustered.length).toBeGreaterThan(0);
+    expect(
+      clustered.some((s) => s.hits.some((h) => h.sessionId !== s.id && h.isSidechain)),
+    ).toBe(true);
+  });
+
   it('shows the matched word rather than a pasted-screenshot placeholder', () => {
     // The T1.7 review's sharpest complaint: a top-three result whose only
     // snippet was `[Image: source: /var/folders/…/clipboard-…]`, so nothing on

@@ -973,7 +973,14 @@ async function embedExchanges(
        ORDER BY rowid`,
     )
     .all(EMBEDDING_VERSION) as { id: string; user_text: string; assistant_text: string }[];
-  if (pending.length === 0) {
+  // Two populations need vectors, and they run out of work independently. The
+  // early return used to ask only the exchanges — so on every run after the
+  // first, when nothing in `exchanges` was stale, it returned *before* the
+  // ghost pass below and `vec_ghost_prompts` stayed empty forever for anyone
+  // who was upgrading rather than building an index from scratch. Which is
+  // everyone. Ask both, and leave only when neither has anything to do.
+  const ghostsPending = pendingGhostPrompts(db);
+  if (pending.length === 0 && ghostsPending === 0) {
     report.ms = Date.now() - started;
     return report;
   }
@@ -1060,18 +1067,48 @@ async function embedExchanges(
  * same way the exchange pass swallows them: the vectors that did get written
  * stay, and `find` keeps working on the text half.
  */
+/**
+ * Migration 8 declines on a machine without `sqlite-vec`, so the ghost vector
+ * table may simply not be there; that is `--no-embed` for ghosts, not an error.
+ */
+function ghostVecTable(db: Db): boolean {
+  return (
+    (
+      db
+        .prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'vec_ghost_prompts'`)
+        .get() as { n: number }
+    ).n > 0
+  );
+}
+
+/**
+ * How many recovered prompts still want a vector — the question that decides
+ * whether the embedding pass has work to do even when every exchange is
+ * already current. Same predicate as the pass itself, so the two cannot
+ * disagree about what "pending" means.
+ */
+function pendingGhostPrompts(db: Db): number {
+  try {
+    if (!ghostVecTable(db)) return 0;
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM ghost_prompts
+          WHERE (embedding_version IS NULL OR embedding_version != ?)
+            AND length(trim(text)) > 3`,
+      )
+      .get(EMBEDDING_VERSION) as { n: number };
+    return row.n;
+  } catch {
+    // No `embedding_version` column yet, or no table at all. Nothing pending.
+    return 0;
+  }
+}
+
 async function embedGhostPrompts(
   db: Db,
   embedOptions: { cacheDir: string; onProgress?: (fraction: number) => void },
 ): Promise<number> {
-  // Migration 8 declines on a machine without `sqlite-vec`, so the table may
-  // simply not be there; that is `--no-embed` for ghosts, not an error.
-  const hasTable = (
-    db
-      .prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'vec_ghost_prompts'`)
-      .get() as { n: number }
-  ).n;
-  if (!hasTable) return 0;
+  if (!ghostVecTable(db)) return 0;
   let pending: { id: string; text: string }[];
   try {
     pending = db

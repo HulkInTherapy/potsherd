@@ -14,11 +14,13 @@ import {
   indexAll,
   listSessions,
   recall,
+  renderFind,
   rescue,
   resolveSession,
   resumeCommand,
   sessionStats,
   showSession,
+  Theme,
   type Db,
 } from '@potsherd/core';
 import { rmrf, tempDir } from './helpers.js';
@@ -159,10 +161,18 @@ describe('recall: the fusion — T3.1', () => {
   it('keeps at most three hits from any one conversation', async () => {
     const r = await recall(db, 'the', {}, { vectors: false, limit: 20 });
     expect(r.hits.length).toBeGreaterThan(3);
-    const per = new Map<string, number>();
-    for (const h of r.hits) per.set(h.sessionId, (per.get(h.sessionId) ?? 0) + 1);
-    for (const [, n] of per) expect(n).toBeLessThanOrEqual(3);
+    // The budget is per *conversation*, and a conversation is a block — so the
+    // block is the only place it can honestly be counted. Counting the flat
+    // array by session id was the wrong unit *and* passed for the wrong
+    // reason: the array had been filtered to the representative session, so a
+    // clustered conversation's other members were not in it to be counted.
     for (const s of r.sessions) expect(s.hits.length).toBeLessThanOrEqual(3);
+    // Same hits, both views. If a subagent's hit is shown under its parent's
+    // block it is in the flat list too, or the two disagree about the page.
+    const total = r.sessions.reduce((n, s) => n + s.hits.length, 0);
+    expect(r.hits.length).toBe(total);
+    const inBlocks = new Set(r.sessions.flatMap((s) => s.hits));
+    expect(r.hits.every((h) => inBlocks.has(h))).toBe(true);
   });
 
   it('honours a smaller perSession budget', async () => {
@@ -190,6 +200,47 @@ describe('recall: the fusion — T3.1', () => {
     const block = r.sessions.find((s) => s.id.startsWith(ID.bundle))!;
     expect(block.isSidechain).toBe(true);
     expect(block.hits.some((h) => h.isSidechain)).toBe(true);
+  });
+
+  /**
+   * **T3.6.** The flat `hits` array was filtered by the *representative*
+   * session's id, so the moment a conversation clustered — the parent heads
+   * the block, the subagent contributes a hit — the subagent's hit vanished
+   * from it. Everything that counts the flat array (a `--json` consumer, the
+   * eval harness, this file's own diversification tests) was reading a page
+   * that had lost exactly the rows clustering exists to keep.
+   */
+  it('keeps every clustered member’s hit in the flat list, each naming its session', async () => {
+    const r = await recall(db, 'the', {}, { vectors: false, limit: 20 });
+    const clustered = r.sessions.filter((s) => s.hits.some((h) => h.sessionId !== s.id));
+    expect(clustered.length).toBeGreaterThan(0);
+    const fromOtherMembers = clustered.flatMap((s) => s.hits.filter((h) => h.sessionId !== s.id));
+    expect(fromOtherMembers.some((h) => h.isSidechain)).toBe(true);
+    // Present, and attributable: the id says which session actually matched.
+    for (const h of fromOtherMembers) {
+      expect(r.hits).toContain(h);
+      expect(h.sessionId).toBeTruthy();
+    }
+    expect(r.hits.length).toBe(r.sessions.reduce((n, s) => n + s.hits.length, 0));
+  });
+
+  /**
+   * **T3.6.** Two snippet lines per block, handed out in quoting order — so a
+   * parent with a hundred exchanges took both and the subagent's line, the one
+   * thing in the conversation nothing else says, never reached the screen
+   * under the parent's heading. Sidechains are most of what is on a real
+   * machine and the thing no other tool surfaces at all.
+   */
+  it('shows, and labels, the line a subagent earned under its parent’s heading', async () => {
+    const r = await recall(db, 'the', {}, { vectors: false, limit: 20 });
+    const block = r.sessions.find(
+      (s) => !s.isSidechain && s.hits.some((h) => h.isSidechain && h.sessionId !== s.id),
+    );
+    expect(block).toBeDefined();
+    const sub = block!.hits.find((h) => h.isSidechain && h.sessionId !== block!.id)!;
+    const out = renderFind(r, new Theme({ color: false, ascii: true, width: 80 }), new Date());
+    expect(out).toContain(`subagent ${idTag(sub.sessionId)}`);
+    expect(out).toContain('from subagents');
   });
 
   it('lets the best single hit decide, not the number of hits', async () => {
@@ -312,11 +363,14 @@ describe('recall: the tri-state filters', () => {
 });
 
 describe('recall: fusion', () => {
-  it('keeps at most three hits from one session (03 §7 diversification)', async () => {
+  it('keeps at most three hits from one conversation (03 §7 diversification)', async () => {
     const r = await recall(db, 'the', {}, { vectors: false, limit: 20 });
-    const perSession = new Map<string, number>();
-    for (const h of r.hits) perSession.set(h.sessionId, (perSession.get(h.sessionId) ?? 0) + 1);
-    expect(Math.max(...perSession.values())).toBeLessThanOrEqual(3);
+    // Per conversation, counted on the blocks, and cross-checked against the
+    // flat list so neither can quietly lose a clustered member's hit.
+    const perConversation = r.sessions.map((s) => s.hits.length);
+    expect(perConversation.length).toBeGreaterThan(0);
+    expect(Math.max(...perConversation)).toBeLessThanOrEqual(3);
+    expect(r.hits.length).toBe(perConversation.reduce((a, b) => a + b, 0));
   });
 
   it('honours a lower diversification cap', async () => {
@@ -733,4 +787,80 @@ describe.skipIf(!hasModel)('recall: the vector half — T3.1', () => {
     expect(r.lists.some((l) => l.list === 'vec_ghost_prompts')).toBe(false);
     expect(r.sessions.every((x) => x.status !== 'ghost')).toBe(true);
   }, 120_000);
+});
+
+/**
+ * **The upgrade path.** `embedExchanges` returned early when no exchange
+ * needed a vector — which is every run after the first — and the ghost pass
+ * lives *after* that return, so `vec_ghost_prompts` stayed empty forever for
+ * anyone who was not building an index from scratch. The whole ghost half of
+ * the fusion was measured in a state no upgrading user is ever in.
+ *
+ * The shape of the proof is the point: index once so every exchange is
+ * current, *then* add a ghost the way a later `rescue` would, then index
+ * again and demand the new ghost has a vector.
+ */
+describe.skipIf(!hasModel)('recall: ghost vectors survive a second index — T3.6', () => {
+  const NEW_GHOST = 't36-upgrade-path-ghost';
+
+  it('embeds a ghost recovered after the exchanges were already embedded', async () => {
+    const root = tempDir('potsherd-ghost-upgrade-');
+    dirs.push(root);
+    fs.symlinkSync(MODEL_CACHE, path.join(root, 'models'));
+    await rescue({ claudeDir: FIXTURE, root, ghostsOnly: true, quiet: true });
+    const first = await indexAll({
+      root,
+      claudeDir: FIXTURE,
+      harnesses: ['claude'],
+      embed: true,
+      full: true,
+    });
+    expect(first.embeddings.ghostPrompts).toBeGreaterThan(0);
+
+    const vdb2 = store.open({ root });
+    try {
+      const ghostVectors = (): number =>
+        (vdb2.prepare('SELECT COUNT(*) AS n FROM vec_ghost_prompts_rowids').get() as { n: number }).n;
+      const before = ghostVectors();
+      expect(before).toBeGreaterThan(0);
+
+      const session = (
+        vdb2.prepare('SELECT session_id AS s FROM ghost_prompts LIMIT 1').get() as { s: string }
+      ).s;
+      vdb2
+        .prepare(
+          `INSERT INTO ghost_prompts (id, session_id, seq, ts, text) VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(
+          NEW_GHOST,
+          session,
+          9999,
+          new Date().toISOString(),
+          'the espresso machine firmware refused to flash',
+        );
+
+      // The second run. Every exchange is already at the current embedding
+      // version — precisely the condition that used to skip the ghost pass.
+      const second = await indexAll({
+        root,
+        claudeDir: FIXTURE,
+        harnesses: ['claude'],
+        embed: true,
+      });
+      expect(second.embeddings.embedded).toBe(0);
+      expect(second.embeddings.ghostPrompts).toBe(1);
+
+      const stamped = vdb2
+        .prepare('SELECT embedding_version AS v FROM ghost_prompts WHERE id = ?')
+        .get(NEW_GHOST) as { v: number | null };
+      expect(stamped.v).not.toBeNull();
+      const vectored = vdb2
+        .prepare('SELECT COUNT(*) AS n FROM vec_ghost_prompts_rowids WHERE id = ?')
+        .get(NEW_GHOST) as { n: number };
+      expect(vectored.n).toBe(1);
+      expect(ghostVectors()).toBe(before + 1);
+    } finally {
+      vdb2.close();
+    }
+  }, 600_000);
 });
