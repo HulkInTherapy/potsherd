@@ -501,6 +501,10 @@ describe('the flags on the shipped binary', () => {
   it('--help documents every filter of 03 §7 with one example each', () => {
     const help = runCli(['find', '--help']).stdout;
     for (const example of [
+      // Still the real project name, because this asserts the literal text of
+      // `--help`, which lives in packages/cli/src/index.ts. Scrubbing one side
+      // without the other just makes the test lie. Pinned in
+      // scripts/check-privacy.py and assigned in registration-T5.7.txt.
       '--project Fulcrum',
       '--harness claude',
       '--since "last week"',

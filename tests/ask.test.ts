@@ -93,7 +93,7 @@ function sources(): EvidenceSource[] {
     {
       sessionId: POOLER,
       id8: 'sess-poo',
-      project: 'Fulcrum',
+      project: 'Ledger',
       harness: 'claude',
       isSidechain: false,
       isGhost: false,
@@ -102,7 +102,7 @@ function sources(): EvidenceSource[] {
     {
       sessionId: NOTES,
       id8: 'sess-not',
-      project: 'meghbrain',
+      project: 'brainstore',
       harness: 'claude',
       isSidechain: false,
       isGhost: true,
@@ -168,7 +168,7 @@ describe("the emitted quote is the transcript's bytes, not the model's", () => {
       {
         sessionId: POOLER,
         id8: 'sess-poo',
-        project: 'Fulcrum',
+        project: 'Ledger',
         harness: 'claude',
         isSidechain: false,
         isGhost: false,
@@ -221,7 +221,7 @@ describe("the emitted quote is the transcript's bytes, not the model's", () => {
       {
         sessionId: POOLER,
         id8: 'sess-poo',
-        project: 'Fulcrum',
+        project: 'Ledger',
         harness: 'claude',
         isSidechain: false,
         isGhost: false,
@@ -433,7 +433,7 @@ function adversarialSources(): EvidenceSource[] {
     {
       sessionId: 'sess-lunch-0001',
       id8: 'sess-lun',
-      project: 'meghbrain',
+      project: 'brainstore',
       harness: 'claude',
       isSidechain: false,
       isGhost: false,
@@ -518,7 +518,7 @@ function seedDb(): { root: string; db: ReturnType<typeof store.open> } {
     `INSERT INTO sessions (id, harness, title, project, project_slug, source_path, status,
         is_sidechain, started_at, ended_at, user_prompts, assistant_turns, bytes, indexed_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-  ).run(POOLER, 'claude', 'the pooler', '/tmp/Fulcrum', '-tmp-Fulcrum', '/tmp/x.jsonl', 'live', 0,
+  ).run(POOLER, 'claude', 'the pooler', '/tmp/Ledger', '-tmp-Ledger', '/tmp/x.jsonl', 'live', 0,
     '2026-08-04T09:00:00.000Z', '2026-08-04T10:00:00.000Z', 2, 2, 100, '2026-08-05T00:00:00.000Z');
   const ins = db.prepare(
     `INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text, files_touched)
@@ -885,7 +885,7 @@ describe('ask() open threads', () => {
   it('shows nothing when the model rejects the candidate outright', async () => {
     const { r } = await askWithThreads(
       verdicts([
-        { i: 0, confirmed: false, note: 'meghbrain already handles the pooler in its own config.' },
+        { i: 0, confirmed: false, note: 'brainstore already handles the pooler in its own config.' },
       ]),
     );
 
@@ -921,14 +921,14 @@ describe('ask() open threads', () => {
 
   it('shows the confirmed thread, and only it', async () => {
     const { r, candidates } = await askWithThreads(
-      verdicts([{ i: 0, confirmed: true, note: 'meghbrain still opens raw connections here.' }]),
+      verdicts([{ i: 0, confirmed: true, note: 'brainstore still opens raw connections here.' }]),
     );
 
     expect(r.openThreads).toHaveLength(1);
     const t = r.openThreads[0]!;
     expect(t.confirmed).toBe(true);
     expect(t.what).toBe(DECIDED_WHAT);
-    expect(t.project).toBe('/tmp/Fulcrum');
+    expect(t.project).toBe('/tmp/Ledger');
     expect(t.otherProject).toBe('/tmp/Meghbrain');
     // Cited or dropped applies here too: the positive half points at a real
     // exchange of the session `ask` answered from.
@@ -940,7 +940,7 @@ describe('ask() open threads', () => {
 
     const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
     expect(text).toContain(OPEN_THREAD_LABEL);
-    expect(text).toContain('meghbrain still opens raw connections here.');
+    expect(text).toContain('brainstore still opens raw connections here.');
   });
 
   it('keeps the confirmed one and drops the rejected one from the same batch', async () => {
@@ -972,8 +972,8 @@ describe('ask() open threads', () => {
       transport: new Scripted('agent-sdk', [
         SYNTH_OK,
         verdicts([
-          { i: kept, confirmed: true, note: 'meghbrain still opens raw connections here.' },
-          { i: rejected, confirmed: false, note: 'meghbrain sets pool_size in its own compose file.' },
+          { i: kept, confirmed: true, note: 'brainstore still opens raw connections here.' },
+          { i: rejected, confirmed: false, note: 'brainstore sets pool_size in its own compose file.' },
         ]),
       ]),
       model: 'sonnet',
@@ -1026,7 +1026,7 @@ describe('ask() end to end', () => {
     expect(r.dropped).toEqual(['This was reviewed again in September and reversed.']);
     expect(r.evidence).toHaveLength(1);
     expect(r.evidence[0]!.sessionId).toBe(POOLER);
-    expect(r.evidence[0]!.project).toBe('Fulcrum');
+    expect(r.evidence[0]!.project).toBe('Ledger');
     expect(r.refused).toBe(false);
     expect(r.searched).toBe(1);
     // The agent SDK's constant 10 is discarded by llm.ts, so the figure is est.
@@ -1641,7 +1641,7 @@ describe('T5.6 --readers-out', () => {
     const t0 = file.targets[0]!;
     expect(t0.sessionId).toBe(POOLER);
     expect(t0.id8).toBe(POOLER.slice(0, 8));
-    expect(t0.project).toBe('Fulcrum');
+    expect(t0.project).toBe('Ledger');
     expect(t0.harness).toBe('claude');
     expect(t0.isGhost).toBe(false);
     expect(t0.isSidechain).toBe(false);
@@ -1683,7 +1683,7 @@ describe('T5.6 --readers-out', () => {
       `INSERT INTO sessions (id, harness, title, project, project_slug, source_path, status,
           is_sidechain, started_at, ended_at, user_prompts, assistant_turns, bytes, indexed_at)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    ).run(POOLER, 'claude', 'the pooler', '/tmp/Fulcrum', '-tmp-Fulcrum', '/tmp/x.jsonl', 'live', 0,
+    ).run(POOLER, 'claude', 'the pooler', '/tmp/Ledger', '-tmp-Ledger', '/tmp/x.jsonl', 'live', 0,
       '2026-08-04T09:00:00.000Z', '2026-08-04T10:00:00.000Z', 2, 2, 100, '2026-08-05T00:00:00.000Z');
     db.prepare(
       `INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text, files_touched)
