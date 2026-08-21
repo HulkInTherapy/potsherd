@@ -1,11 +1,14 @@
+# Queries and titles below are neutralised: these were typed against, and name
+# sessions in, a live private corpus, and this repository is public. The numbers
+# and the shapes are the evidence and are untouched. See scripts/check-privacy.py.
   hybrid (auto)   recall@5   8/10  80%     recall@1   8/10  80%    p50 66ms  p95 228ms
   hybrid (always) recall@5   8/10  80%     recall@1   7/10  70%    p50 77ms  p95 150ms
 
   word overlap with the answer · mean 80% · worst 100% · flag above 60%
-  100% instagram chat only client  shares: instagram chat client
-  100% vedic astrology skill versions  shares: vedic astrology skill versions
-  100% harry potter house sorting  shares: harry potter house sorting
-  100% best linkedin posting times  shares: best linkedin posting times
+  100% message-only client build  shares: message-only client build
+  100% chart renderer skill versions  shares: chart renderer skill versions
+  100% quiz category sorting  shares: quiz category sorting
+  100% best posting times  shares: best posting times
   100% infinite context memory system for agents  shares: infinite context memory system agents
   100% clean up mac storage  shares: clean mac storage
   100% symbiote codex integration gaps  shares: symbiote codex integration gaps

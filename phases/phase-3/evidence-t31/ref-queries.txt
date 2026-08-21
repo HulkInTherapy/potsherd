@@ -1,11 +1,14 @@
+# Queries and titles below are neutralised: these were typed against, and name
+# sessions in, a live private corpus, and this repository is public. The numbers
+# and the shapes are the evidence and are untouched. See scripts/check-privacy.py.
 pgbouncer prepared statements
-what was the astrology session about
+what was the reporting session about
 handoff
 supabase migration
 canon printer driver
 the thing that kept timing out in ci
 why the build got so slow
-instagram chat only client
+message-only client build
 rate limited by the gateway
 session diversification in the ranker
 embedding model download

@@ -219,8 +219,11 @@ DEBT: list[tuple[str, str, int, str]] = [
 
     # ---- Phase records and pasted evidence from phases 0-4. T5.7 was scoped to
     # docs/, scripts/, ci.yml and phase-5, so it did not edit signed-off phase
-    # history. These are the highest-value items left: ref-queries.txt and
-    # evals-reference-set.txt hold QUERIES TYPED AGAINST THE LIVE CORPUS, which
+    # history. The two highest-value items -- ref-queries.txt and
+    # evals-reference-set.txt, which held QUERIES TYPED AGAINST THE LIVE CORPUS --
+    # were cleared at integration on 22 aug 2026; the ratchet asked for their DEBT
+    # lines to be deleted and they were. What remains is `packages/**` help copy and
+    # phase-0..4 evidence, which
     # is family (1) prose, not just a path. Re-running the evidence is the
     # honest fix for the pasted runs; the prose ones can be edited in place with
     # a note, the way this file's header describes.
@@ -230,8 +233,6 @@ DEBT: list[tuple[str, str, int, str]] = [
     ('phases/phase-2/VERIFICATION.md', 'project-name', 1, 'quotes a real prompt from the corpus'),
     ('phases/phase-3/evidence-T3.2-T3.3/help.txt', 'corpus-topic', 1, 'pasted --help, pairs with packages/cli'),
     ('phases/phase-3/evidence-T3.2-T3.3/help.txt', 'project-name', 1, 'pasted --help, pairs with packages/cli'),
-    ('phases/phase-3/evidence-t31/ref-queries.txt', 'corpus-topic', 1, 'a query typed against the live corpus'),
-    ('phases/phase-3/evidence-verify/evals-reference-set.txt', 'corpus-topic', 1, 'a query typed against the live corpus'),
     ('phases/phase-4/HANDOFF.md', 'project-name', 2, 'the line that recorded this debt in the first place'),
     ('phases/phase-4/evidence-T4.1/patch-tests.py', 'project-name', 2, 'a patch script against the pre-rename tests'),
     ('phases/phase-4/evidence-T4.3/doctor-privacy.txt', 'home-path', 1, 'pasted `doctor --privacy` over the live corpus'),
