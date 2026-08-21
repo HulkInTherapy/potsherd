@@ -54,3 +54,23 @@ fall below the ≥3-exchange / ≥5-prompt floor) = 324 calls, 2.5M in / 126k ou
 64 min serial or 9.9 min at concurrency 6**. Time is met with concurrency; cost is over on the api
 path only, which `04` Q4 already made the fallback. `03 §12` has been restated with the measurement
 and `04` carries the decision.
+
+## findings from the real runs
+
+| # | finding | found by | action |
+|---|---|---|---|
+| C1 | **the estimator was 7x wrong on time and 5x on cost.** `--dry-run` promised 7m26s/$2.66; the real run took 55m25s/$12.93 equivalent. `CALL_OVERHEAD_MS = 5400` was measured on a 10-token probe; a real 40k-char extraction takes 60–160 s (mean ~100). 198 calls x 100 s / 6 = 55 min exactly | T2.2 | T2.6 re-fits it against real calls and adds a self-correction from recorded runs |
+| C2 | **`llm.ts` reports 1,980 input tokens for 198 calls** — the agent sdk's `usage.input_tokens` excludes cache tokens, and `llm.ts` prefers the backend's number over its own estimate | T2.2 | T2.6 |
+| C3 | **the verify cosine bar of 0.5 was too loose.** Measured over 261 real claims: true claims median 0.70 against their own evidence, deliberately mis-cited controls median 0.50, and **38 of 74 controls still cleared 0.5**. At 0.6 controls fall to ~10% and true claims lose ~10% | T2.2 | `03 §6` raised to 0.6 |
+| C4 | **cards do not fix the recall fusion.** Clean A/B on one index: bm25 8/10, vectors 6/10, hybrid 6/10 both with and without cards. At recall@1 cards are slightly worse | T2.2 | phase 3 inherits it |
+| C5 | `recall.ts`'s `bm25Cards`/`vecCards` joined `sessions` only, so **ghost cards were written correctly and then unfindable** — and `--ghosts only` deleted the card lists outright | T2.2 predicted it, T2.3 confirmed and fixed it | fixed, with a regression test |
+| C6 | **the 120 s llm timeout default is too low** — 12 of the first 30 ghost calls timed out; the run needed `POTSHERD_LLM_TIMEOUT_MS=360000`. Real calls take 60–160 s, so the default cuts off the tail of a normal distribution | T2.3 | T2.6 owns `llm.ts` |
+| C7 | **ghost card summaries are the one field `verify` does not gate.** In ten spot-checks, eight were strictly prompt-side ("Requested…", "Asked for…") but two flattened instructions into accomplishments ("removed redundant elements, replaced website links"). Decisions and open threads are clean; no card guessed an outcome | T2.3, self-reported | fix before the tag |
+
+## the ghost-card result
+
+299 ghosts rescued from 2,971 prompts. **90 carded** (>= 5 prompts), 209 skipped as too short.
+`outcome: unknown` on **90/90**. `source: prompts-only` on **90/90**. Verified totals: **kept 430,
+dropped 54**, with 33 cards dropping something. The drop reasons are the point: **50 of 54 were
+`asked-not-decided`** — a prompt that asked about a decision rather than stating one. The rule
+fires on 11.8% of all 2,971 real prompts, so it discriminates rather than blanket-dropping.
