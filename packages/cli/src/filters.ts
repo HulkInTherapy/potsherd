@@ -1,5 +1,12 @@
 import fs from 'node:fs';
-import { db as store, paths, type Harness, type SessionStatus } from '@potsherd/core';
+import {
+  db as store,
+  normalizeTag,
+  paths,
+  resolveSession,
+  type Harness,
+  type SessionStatus,
+} from '@potsherd/core';
 import type { db as dbNs, search } from '@potsherd/core';
 import { UserError, type GlobalOptions } from './output.js';
 
@@ -35,6 +42,8 @@ export interface FilterFlags {
   sidechains?: string;
   ghosts?: string;
   pinned?: boolean;
+  linkedTo?: string;
+  untitled?: boolean;
   status?: string;
 }
 
@@ -60,11 +69,54 @@ export function parseFilters(db: Db, flags: FilterFlags, now = new Date()): Sear
   if (flags.until) out.until = parseWhen(flags.until, '--until', now);
   if (flags.branch) out.branch = flags.branch;
   if (flags.file) out.file = flags.file;
-  if (flags.tag) out.tag = flags.tag;
+  // The same normalisation the writer applies, so `--tag Postgres` finds what
+  // `potsherd tag <id> +postgres` wrote. Normalising on only one of the two
+  // sides is how a tag filter becomes a lottery.
+  if (flags.tag) out.tag = resolveTag(flags.tag);
   if (flags.pinned) out.pinned = true;
+  if (flags.linkedTo) out.linkedTo = resolveSessionRef(db, flags.linkedTo, '--linked-to');
+  if (flags.untitled) out.untitled = true;
   out.sidechains = tri('--sidechains', flags.sidechains);
   out.ghosts = tri('--ghosts', flags.ghosts);
   return out;
+}
+
+/** `--tag Postgres` -> `postgres`, or an error naming what a tag may contain. */
+function resolveTag(value: string): string {
+  const tag = normalizeTag(value);
+  if (!tag) {
+    throw new UserError(
+      `--tag "${value}" has nothing in it a tag can be made of (letters, digits, - . _ /)`,
+      'potsherd ls --tag postgres',
+    );
+  }
+  return tag;
+}
+
+/**
+ * `--linked-to 4c9339e0` -> the whole session id.
+ *
+ * The filter compares ids, and `links` stores whole ones, so the prefix a user
+ * reads off `ls` has to be resolved before it reaches SQL. Resolving here also
+ * means a typo is caught as a typo — "no session id starts with …" — instead
+ * of quietly matching nothing, which reads as "these two are not linked".
+ */
+function resolveSessionRef(db: Db, ref: string, flag: string): string {
+  const found = resolveSession(db, ref.trim());
+  if (!found) {
+    throw new UserError(
+      `${flag}: no session id starts with "${ref}"`,
+      'potsherd ls    # the ids are in  potsherd ls --json',
+    );
+  }
+  if (found.ambiguous) {
+    const shown = found.ambiguous.slice(0, 3).map((c) => c.id).join('\n        ');
+    throw new UserError(
+      `${flag}: "${ref}" matches ${found.ambiguous.length} sessions:\n        ${shown}`,
+      `potsherd ls ${flag} ${found.ambiguous[0]!.id}`,
+    );
+  }
+  return found.id;
 }
 
 function tri(flag: string, value: string | undefined): TriState {

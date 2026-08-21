@@ -1,4 +1,4 @@
-import { INDENT, fitLine, table } from '../render.js';
+import { INDENT, fitLine, table, type TableCellInput } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
 import type { BrowseSession, ListResult } from '../browse.js';
@@ -40,7 +40,7 @@ export function renderLs(result: ListResult, t: Theme = new Theme(), now = new D
   }
 
   const header = ['when', 'harness', 'project', 'title', 'status'].map((h) => t.dim(h));
-  const rows = [header, ...result.sessions.map((s) => row(s, t, now))];
+  const rows: TableCellInput[][] = [header, ...result.sessions.map((s) => row(s, t, now))];
 
   lines.push(
     ...table(t, rows, {
@@ -77,7 +77,12 @@ function headline(r: ListResult, t: Theme, now: Date): string {
   if (fl.since) parts.push(`since ${f.shortDate(fl.since, now)}`);
   if (fl.until) parts.push(`until ${f.shortDate(fl.until, now)}`);
   if (fl.branch) parts.push(fl.branch);
+  if (fl.tag) parts.push(`#${fl.tag}`);
   if (fl.pinned) parts.push('pinned');
+  // The eight characters the rest of the tool prints for a session, not the
+  // uuid: the heading is read, not copied.
+  if (fl.linkedTo) parts.push(`linked to ${fl.linkedTo.slice(0, 8)}`);
+  if (fl.untitled) parts.push('untitled');
   if (fl.status) parts.push(fl.status);
   parts.push(
     r.total === r.sessions.length
@@ -103,17 +108,34 @@ export function marker(s: BrowseSession, t: Theme): string {
   return '';
 }
 
-function row(s: BrowseSession, t: Theme, now: Date): string[] {
+/**
+ * The user's own tags, after the title and inside the title column.
+ *
+ * Not a column of their own: most sessions have none, and a column that is
+ * empty on fourteen rows out of fifteen is a column that costs the title
+ * fourteen characters for nothing. `#postgres` is legible with no legend and
+ * survives `--ascii` unchanged.
+ *
+ * Deliberately uncoloured. `table()` elides a cell that overruns its column
+ * using character arithmetic, so an ANSI escape inside a cell that might be
+ * cut is an escape that can be cut in half — and a half-written escape colours
+ * the rest of the screenshot.
+ */
+function tagCell(s: BrowseSession): string {
+  return s.tags.length > 0 ? '  ' + s.tags.map((tag) => `#${tag}`).join(' ') : '';
+}
+
+function row(s: BrowseSession, t: Theme, now: Date): TableCellInput[] {
   const when = s.endedAt ?? s.startedAt;
   // `↳12` after the title, not a column: a session that spawned twelve
   // subagents is still one conversation, and the twelve are one flag away.
   const kids = s.subagents > 0 ? `  ${t.g('↳', '>')}${f.num(s.subagents)}` : '';
-  const title = marker(s, t) + s.displayTitle + kids;
   return [
     when ? f.shortDate(when, now) : '—',
     s.harness,
     s.projectName,
-    title,
+    // `keep`: the title gives ground before the tags do. See `TableCell`.
+    { text: marker(s, t) + s.displayTitle + kids, keep: tagCell(s) },
     statusCell(s, t),
   ];
 }
@@ -131,6 +153,102 @@ function summary(r: ListResult, t: Theme): string {
   if (top > 0) parts.push(`${f.num(top)} ${f.plural(top, 'session')}`);
   if (r.sidechains > 0) parts.push(`${f.num(r.sidechains)} sidechains`);
   if (r.rolledUp > 0) parts.push(`${f.num(r.rolledUp)} subagents inside them`);
-  if (r.ghosts > 0) parts.push(`${f.num(r.ghosts)} ghosts, prompts only`);
+  if (r.ghosts > 0) parts.push(`${f.num(r.ghosts)} ${f.plural(r.ghosts, 'ghost')}, prompts only`);
   return f.joinFit(parts, t.width - INDENT.length, ` ${t.sep} `, t.ellip);
+}
+
+// ------------------------------------------------------------- resume menu
+
+/**
+ * `potsherd ls --resume-menu` — T2.5, and the one place potsherd hands a title
+ * back to the harness that lost it.
+ *
+ * The rejected design was `card --write-titles`, which would have written
+ * potsherd's titles into `~/.claude`'s own files. potsherd does not write into
+ * another tool's directory: those five directories are read-only inputs, a
+ * user who uninstalls potsherd must get their machine back exactly as it was,
+ * and a memory tool that edits the thing it is remembering has stopped being a
+ * record of it. So the titles come out here instead, as shell.
+ *
+ * **Every line is valid shell.** Comments start with `#`, everything else is a
+ * runnable command, so the whole block can be pasted into a terminal and only
+ * the line you want does anything. That is the acceptance test for this verb,
+ * and it is why the title moves to its own comment line at narrow widths
+ * rather than being squeezed to four characters: a resume command may never be
+ * elided, because half a uuid is a command that fails.
+ */
+export function renderResumeMenu(result: ListResult, t: Theme = new Theme(), now = new Date()): string {
+  const lines: string[] = [];
+  const resumable = result.sessions.filter((s) => s.resume);
+  const stranded = result.sessions.length - resumable.length;
+
+  lines.push(
+    comment(
+      t,
+      `potsherd ls --resume-menu ${t.sep} ${f.num(resumable.length)} of ${f.num(result.total)} ${f.plural(result.total, 'session')} ${t.sep} ${f.date(now)}`,
+      `potsherd ls --resume-menu ${t.sep} ${f.num(resumable.length)} resumable`,
+    ),
+  );
+  lines.push(
+    comment(
+      t,
+      'titles are potsherd\'s: it does not write into another tool\'s directory.',
+      'potsherd never writes into ~/.claude.',
+    ),
+  );
+
+  if (resumable.length === 0) {
+    lines.push(
+      comment(t, 'nothing here can be resumed — a deleted transcript has nothing to reopen.'),
+    );
+    lines.push(comment(t, 'run  potsherd show <id8>  to read one anyway'));
+    return lines.join('\n');
+  }
+
+  for (const s of resumable) {
+    const command = s.resume!;
+    const title = titleFor(s, t);
+    // Two spaces, `#`, one space — the gap that makes the comment read as a
+    // note on the command rather than part of it.
+    const budget = t.width - command.length - 4;
+    if (budget >= 12) {
+      lines.push(`${command}  ${t.dim(`# ${f.elide(title, budget, t)}`)}`);
+    } else {
+      // At 60 columns a 36-character uuid leaves no room for a title beside it.
+      // The title goes above rather than being cut to nothing.
+      lines.push(comment(t, title));
+      lines.push(command);
+    }
+  }
+
+  if (stranded > 0) {
+    lines.push(
+      comment(
+        t,
+        `${f.num(stranded)} more ${f.plural(stranded, 'session has', 'sessions have')} no transcript to reopen (ghosts, subagents).`,
+        `${f.num(stranded)} more cannot be resumed.`,
+      ),
+    );
+  }
+  lines.push(comment(t, 'run  potsherd show <id8>  to read one instead of resuming it'));
+  return lines.join('\n');
+}
+
+/** The title as `ls` would show it, pins and markers stripped: this is shell. */
+function titleFor(s: BrowseSession, t: Theme): string {
+  const kids = s.subagents > 0 ? ` ${t.g('↳', '>')}${f.num(s.subagents)}` : '';
+  const tags = s.tags.length > 0 ? ' ' + s.tags.map((tag) => `#${tag}`).join(' ') : '';
+  return (s.pinned ? `${t.star} ` : '') + s.displayTitle + kids + tags;
+}
+
+/**
+ * A `#` comment that fits the terminal. Longest variant first, same rule as
+ * {@link fitLine}: the phrasing gives ground, never the meaning.
+ */
+function comment(t: Theme, ...variants: string[]): string {
+  for (const v of variants) {
+    if (Theme.len(v) + 2 <= t.width) return t.dim(`# ${v}`);
+  }
+  const last = variants[variants.length - 1] ?? '';
+  return t.dim(`# ${f.clip(last, Math.max(4, t.width - 2), t)}`);
 }
