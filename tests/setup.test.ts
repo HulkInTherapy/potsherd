@@ -670,6 +670,46 @@ describe('the verb', () => {
     expect(fs.readFileSync(cursorConfig(), 'utf8')).toBe(THREE_OTHERS);
   });
 
+  /**
+   * D8. The unverified label reached the write path, `--dry-run` and `--json`,
+   * and not `--status` — where all seven clients printed `registered`
+   * identically. `--status` is the verb somebody runs *later*, to check what is
+   * where; a screen that flattens "potsherd has read a real config of this
+   * shape" and "potsherd has only read the documentation" into one word is the
+   * one screen most likely to be believed.
+   */
+  it('--status carries the unverified label, and says what it means', async () => {
+    const { out } = await capture(() =>
+      runSetup({ ...base, all: true, status: true, width: 80 }),
+    );
+    const lines = out.split('\n');
+    for (const spec of CLIENTS) {
+      // startsWith, not includes: the label `pi` is a substring of
+      // `GitHub Copilot CLI`.
+      const i = lines.findIndex((l) => l.trimStart().startsWith(spec.label));
+      expect(i, spec.label).toBeGreaterThanOrEqual(0);
+      // The label sits on the client's own line, where a reader scanning the
+      // column of states cannot miss it.
+      expect(/unverified/.test(lines[i]!), `${spec.label} line: ${lines[i]!}`)
+        .toBe(spec.verified === 'docs');
+      if (spec.verified === 'docs') {
+        // …and the reason follows, in the client's own block.
+        const block = lines.slice(i, i + 6).join(' ');
+        expect(block, spec.label).toContain(spec.evidenceNote.slice(0, 19));
+      }
+    }
+    // One footer sentence explaining the word, only when the word appears.
+    expect(out).toMatch(/schema unverified means potsherd has never read a real config/);
+  });
+
+  it('--status says nothing about verification when every client is verified', async () => {
+    const verified = CLIENTS.filter((c) => c.verified !== 'docs').map((c) => c.id);
+    const { out } = await capture(() =>
+      runSetup({ ...base, clients: [...verified], status: true, width: 80 }),
+    );
+    expect(out).not.toMatch(/unverified/);
+  });
+
   it('--status reports a registered stanza that would no longer spawn', async () => {
     write(cursorConfig(), JSON.stringify({
       mcpServers: { potsherd: { command: '/gone/potsherd-mcp', args: [] } },

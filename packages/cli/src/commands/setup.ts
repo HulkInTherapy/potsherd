@@ -256,6 +256,7 @@ function status(o: SetupOptions, wanted: setup.ClientId[]): number {
   }
 
   let broken = 0;
+  let docsOnly = 0;
   print('');
   for (const d of rows) {
     const runnable = setup.commandRunnable(d.registeredCommand);
@@ -267,14 +268,37 @@ function status(o: SetupOptions, wanted: setup.ClientId[]): number {
           ? t.warn('registered but broken')
           : t.ok('registered');
     if (d.registered && runnable === false) broken++;
-    print(`  ${d.label.padEnd(20)}${state}`);
+    // D8. The write path, `--dry-run` and `--json` all carry the unverified
+    // label; `--status` printed a bare `registered` for all seven and so was
+    // the one surface where four schemas potsherd has never seen a real file
+    // of looked exactly like three it has. `--status` is the verb somebody
+    // runs *later*, to check — it is the surface that most needs to carry it.
+    const unverified = d.verified === 'docs';
+    if (unverified) docsOnly++;
+    print(`  ${d.label.padEnd(20)}${state}${unverified ? t.warn('  · schema unverified') : ''}`);
     print(`  ${' '.repeat(20)}${t.dim(fmt.elideMiddle(paths.tildify(d.path), Math.max(24, t.width - 24), t))}`);
+    if (unverified) {
+      // The reason, wrapped rather than elided: it is a sentence, not a path,
+      // and half a sentence is not evidence.
+      for (const l of fmt.wrap(d.evidenceNote, Math.max(24, t.width - 24))) {
+        print(`  ${' '.repeat(20)}${t.dim(l)}`);
+      }
+    }
     if (d.registered && runnable === false) {
       print(`  ${' '.repeat(20)}${t.dim('that command does not run from here; re-run  potsherd setup')}`);
     }
   }
   print('');
   print(`  ${t.dim('registered means the stanza is in that file, not that the client has read it.')}`);
+  if (docsOnly) {
+    // Wrapped, not clipped: `05` gives every line of this screen 80 columns,
+    // and this sentence is longer than one of them.
+    const note =
+      `schema unverified means potsherd has never read a real config for ` +
+      `${docsOnly === 1 ? 'that client' : 'those clients'}; the stanza follows ` +
+      `the published documentation and nothing more.`;
+    for (const l of fmt.wrap(note, Math.max(24, t.width - 2))) print(`  ${t.dim(l)}`);
+  }
   print('');
   return broken ? 1 : 0;
 }
