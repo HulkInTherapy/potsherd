@@ -1,21 +1,21 @@
 ---
 name: remembering-sessions
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # THREE CANDIDATE DESCRIPTIONS. `03` §9 and phase 5's risk note both make this
 # one field the whole product: it is the only thing that decides whether the
 # model reaches for this skill unprompted. Exactly one may be uncommented.
 # The orchestrator tests all three (phase-5 DoD: "model-invoked recall fires on
 # a natural 'last time…' prompt without being asked").
 #
-# --- candidate A · trigger-list first -------------------------------------
+# === candidate A · trigger-list first =====================================
 # description: Search the user's own past coding-agent sessions instead of answering from memory. Use this whenever the user refers to earlier work — "last time", "before", "we discussed", "why did we", "what did we decide", "remind me", "that thing we did last month" — and whenever they treat something as shared history you have no record of. Returns an answer with the session ids and dates behind it.
 #
-# --- candidate B · capability first ---------------------------------------
+# === candidate B · capability first =======================================
 # description: The user's own history of coding-agent sessions — every prompt, every subagent transcript, and the sessions Claude Code's 30-day sweep already deleted — indexed and searchable on this machine. Use it BEFORE saying you do not know, do not have that context, or were not part of an earlier conversation. Triggers - "last time", "we discussed", "why did we", "what did we decide", "remind me", "in the other project".
 #
-# --- candidate C · imperative first · SHIPPED -----------------------------
+# === candidate C · imperative first · SHIPPED =============================
 description: Use BEFORE answering anything that refers to work done earlier, and BEFORE saying you do not know or were not there. Triggers on "last time", "before", "we discussed", "why did we", "what did we decide", "remind me", "in the other project", and on any question that assumes a shared history you have no record of. Searches every past Claude Code, Codex, Cursor and pi session on this machine — including subagent transcripts and the sessions the 30-day sweep deleted — and returns an answer with session ids and dates.
-# ---------------------------------------------------------------------------
+# ===========================================================================
 user-invocable: false
 # `allowed-tools` is deliberately absent. It PRE-APPROVES the tools it lists and
 # does not restrict anything, so the only thing it could buy here is skipping a
