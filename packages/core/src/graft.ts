@@ -721,8 +721,22 @@ export interface GraftSource {
   card: StoredCard | null;
   isGhost: boolean;
   id8: string;
-  /** The exchanges `--about` selected, best first. Empty when no topic. */
+  /**
+   * The exchanges that reach the prompt, in seq order.
+   *
+   * Populated by `--about` when there is a topic, and — since T4.7a G1 — by
+   * the {@link RECENT_K} recency default when there is **neither** a topic nor
+   * a card, which used to leave the prompt with no session content at all.
+   * {@link sliceVia} says which.
+   */
   slice: { seq: number; ts: string | null; text: string }[];
+  /**
+   * How {@link slice} was chosen: the `--about` topic, the recency default, or
+   * `null` when it is empty. The card-only path keys off this, so that a
+   * default slice — material selected for the *model*, both sides of each
+   * exchange — is not mistaken for a topic the user actually asked for.
+   */
+  sliceVia: 'about' | 'recent' | null;
   /** Exchanges (or prompts) the whole session holds. */
   exchanges: number;
   date: string;
@@ -751,6 +765,7 @@ export async function collectSource(
   const id8 = sessionId.slice(0, 8);
 
   const slice: GraftSource['slice'] = [];
+  let sliceVia: GraftSource['sliceVia'] = null;
   const about = o.about?.trim();
   if (about) {
     const hits = await recall(
@@ -766,9 +781,44 @@ export async function collectSource(
       const text = isGhost
         ? user
         : [user && `you: ${user}`, assistant && `agent: ${assistant}`].filter(Boolean).join('\n');
-      slice.push({ seq: h.seq as number, ts: h.ts ?? null, text: clipSafe(text, SLICE_CHARS) });
+      slice.push({
+        seq: h.seq as number,
+        ts: h.ts ?? null,
+        text: clipSafe(stripHarnessBoilerplate(text), SLICE_CHARS),
+      });
     }
     slice.sort((a, b) => a.seq - b.seq);
+    sliceVia = slice.length ? 'about' : null;
+  } else if (!card) {
+    // **T4.7a G1.** No topic and no card used to mean *no material*: the
+    // prompt was a header, a title and a list of rules, and the model could
+    // only reply "I don't have access to the session material…" — which
+    // `via === 'model'` then wrote to disk, and `--clip` put on the
+    // clipboard, as the user's re-entry brief.
+    //
+    // The tail of the session is what a brief with no topic is being asked
+    // for: *where did I leave off*. No embedder and no query are involved, so
+    // this works offline, with `--no-embed`, and on a session `recall` has
+    // never scored.
+    const units = show.ghostPrompts
+      ? show.ghostPrompts.map((p) => ({ seq: p.seq, ts: p.ts, user: p.text, assistant: '' }))
+      : show.exchanges.map((e) => ({
+          seq: e.seq,
+          ts: e.ts,
+          user: e.userText ?? '',
+          assistant: e.assistantText ?? '',
+        }));
+    for (const u of units.slice(-Math.max(1, o.k ?? RECENT_K))) {
+      const user = u.user.trim();
+      const assistant = u.assistant.trim();
+      const text = isGhost
+        ? user
+        : [user && `you: ${user}`, assistant && `agent: ${assistant}`].filter(Boolean).join('\n');
+      const cleaned = clipSafe(stripHarnessBoilerplate(text), SLICE_CHARS);
+      if (cleaned) slice.push({ seq: u.seq, ts: u.ts, text: cleaned });
+    }
+    slice.sort((a, b) => a.seq - b.seq);
+    sliceVia = slice.length ? 'recent' : null;
   }
 
   const s = show.session;
@@ -780,6 +830,7 @@ export async function collectSource(
     isGhost,
     id8,
     slice,
+    sliceVia,
     exchanges: show.total,
     date: when ? when.slice(0, 10) : 'unknown date',
     harness: s.harness,
@@ -805,6 +856,18 @@ export const GRAFT_SYSTEM =
  * Telling it the legal set up front is cheaper than throwing the answer away.
  */
 export function buildPrompt(src: GraftSource, o: { about?: string | null; budget: number }): string {
+  // **T4.7a G1, the backstop.** `graft()` never gets here without material,
+  // because it checks {@link hasMaterial} first and takes the card-only path
+  // instead. This throw is what makes "never sends a prompt with no session
+  // content" a property of the function rather than of one caller: a prompt
+  // with nothing in it can only produce a refusal, and a refusal written to
+  // `./.potsherd/graft-<id8>.md` is worse than no file at all.
+  if (!hasMaterial(src)) {
+    throw new GraftError(
+      `session ${src.id8} has no indexed material to compress`,
+      `potsherd index --full    # then: potsherd graft ${src.id8}`,
+    );
+  }
   const lines: string[] = [];
   const about = o.about?.trim();
   // The budget the model is asked for is under the ceiling, because the trim
@@ -842,7 +905,14 @@ export function buildPrompt(src: GraftSource, o: { about?: string | null; budget
   }
 
   if (src.slice.length) {
-    lines.push(`## exchanges about "${about}"`);
+    // Without a topic the heading used to interpolate `undefined` into
+    // `## exchanges about "undefined"`, because this branch was unreachable
+    // with no `--about` before G1 gave it a recency default.
+    lines.push(
+      about
+        ? `## exchanges about "${about}"`
+        : `## the last ${src.slice.length} exchange${src.slice.length === 1 ? '' : 's'} of the session`,
+    );
     for (const ex of src.slice) {
       lines.push('', `[seq ${ex.seq}${ex.ts ? ` · ${ex.ts.slice(0, 10)}` : ''}]`, ex.text);
     }
@@ -873,6 +943,21 @@ export function buildPrompt(src: GraftSource, o: { about?: string | null; budget
     `- No secrets. Text of the form ‹redacted:…› is a mask; copy it verbatim or leave it out.`,
   );
   return lines.join('\n');
+}
+
+/**
+ * Whether there is anything to compress (T4.7a G1).
+ *
+ * The two things {@link buildPrompt} can put session content into a prompt
+ * from are the card and the slice. With neither, everything the model sees is
+ * potsherd's own scaffolding — a session header, a title, and the rules — and
+ * the *only* honest reply to that prompt is a refusal. `graft` shipped for a
+ * phase writing exactly such refusals to disk as briefs, so this predicate is
+ * checked in two places rather than one: here, before the call is made, and
+ * inside {@link buildPrompt}, which throws rather than return an empty prompt.
+ */
+export function hasMaterial(src: GraftSource): boolean {
+  return Boolean(src.card) || src.slice.length > 0;
 }
 
 function legalSeqs(src: GraftSource): number[] {
@@ -917,7 +1002,10 @@ export function cardOnlyBody(src: GraftSource): string[] {
       ? src.slice.map((s) => ({ seq: s.seq, text: s.text }))
       : units.slice(0, 8);
     for (const u of chosen) {
-      const text = clipSafe(u.text.replace(/\s+/g, ' ').trim(), 200);
+      // T4.7a G5: `units` is raw transcript, so a harness wrapper reaches this
+      // path when `--about` matched nothing and there is no card. The slice is
+      // already stripped in `collectSource`; stripping twice is a no-op.
+      const text = clipSafe(stripHarnessBoilerplate(u.text).replace(/\s+/g, ' ').trim(), 200);
       if (text) out.push(`- ${text} [${src.id8}@${u.seq}]`);
     }
     return out;
@@ -1073,7 +1161,15 @@ export async function graft(db: Db, target: string, o: GraftOptions = {}): Promi
   let raw = '';
   let spend: Spend = emptySpend();
 
-  if (llm) {
+  // **T4.7a G1.** A model handed a prompt with no session content in it can
+  // only refuse, and `via = 'model'` would write that refusal out as the
+  // brief. `collectSource` now gives a cardless, topic-less session the tail
+  // of its own transcript, so this is reached only by a session that has no
+  // card, no exchanges and no ghost prompts — for which the honest answer is
+  // the card-only path saying so, not a model call that cannot succeed.
+  if (llm && !hasMaterial(src)) {
+    reason = 'the session has no indexed material to compress — nothing was sent to a model';
+  } else if (llm) {
     try {
       const r = await llm.text({
         prompt: buildPrompt(src, { about, budget }),

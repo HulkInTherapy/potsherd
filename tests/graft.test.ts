@@ -27,6 +27,7 @@ import {
   graft,
   graftDir,
   graftPath,
+  hasMaterial,
   resolveCitations,
   resolveTarget,
   safeCut,
@@ -64,12 +65,19 @@ const FIXTURE = path.join(here, '..', 'evals', 'fixture', 'claude');
 const ID = {
   pgbouncer: '0a2fbf9b',
   ghostPrinter: 'e6aa5ba7',
+  /**
+   * A real session with **no card** — nothing in `beforeAll` writes one for
+   * it. `graft <id>` with no `--about` on this session is the headline use
+   * case of the verb and the path T4.7a G1 found broken.
+   */
+  cardless: '0c68f4a1',
 } as const;
 
 let root: string;
 let db: Db;
 let pgbouncerId: string;
 let ghostId: string;
+let cardlessId: string;
 const dirs: string[] = [];
 
 /** A cwd for the `./.potsherd/` writes, so no test touches the repo. */
@@ -114,6 +122,9 @@ beforeAll(async () => {
     db.prepare('SELECT session_id AS id FROM ghosts WHERE session_id LIKE ?').get(
       `${ID.ghostPrinter}%`,
     ) as { id: string }
+  ).id;
+  cardlessId = (
+    db.prepare('SELECT id FROM sessions WHERE id LIKE ?').get(`${ID.cardless}%`) as { id: string }
   ).id;
 
   // One real card, so the card-only path and the prompt builder have the shape
@@ -161,6 +172,140 @@ const seqOf = (id: string, n = 0): number =>
   (db.prepare('SELECT seq FROM exchanges WHERE session_id = ? ORDER BY seq').all(id) as {
     seq: number;
   }[])[n]!.seq;
+
+// --------------------------------------------------- G1: never an empty prompt
+
+/**
+ * A transport that behaves the way a real model behaves, which a fixed-reply
+ * stub cannot: it **reads the prompt**, and if the prompt carries no session
+ * material it says so rather than inventing a brief.
+ *
+ * This is the whole of T4.7a G1 in one class. `graft <session>` with no
+ * `--about` on a session with no card built a prompt out of a header, a title
+ * and a list of rules — no transcript, no card, nothing — and the only reply
+ * available to a model given that is a refusal, which `via === 'model'` then
+ * wrote to `./.potsherd/graft-<id8>.md` and `--clip` copied to the clipboard.
+ * A stub with a canned reply cannot catch that, because a canned reply is not
+ * a function of the prompt. This one is.
+ */
+class PickyTransport implements Transport {
+  readonly sent: SendRequest[] = [];
+  closed = 0;
+  readonly backend: Backend = 'agent-sdk';
+
+  async send(req: SendRequest): Promise<SendResult> {
+    this.sent.push(req);
+    const prompt = req.prompt;
+    const beforeTask = prompt.split('## your task')[0] ?? '';
+    // `## card` or `## the last N exchanges …`: any section that is material.
+    if (!/^## /m.test(beforeTask)) {
+      return {
+        text:
+          `I don't have access to the session material. You've provided the session header ` +
+          'but not the transcript, logs, or notes from that session.\n' +
+          'Please provide the session material, and I will write the re-entry brief.',
+        inputTokens: 300,
+        outputTokens: 90,
+        usd: 0.002,
+      };
+    }
+    const legal = /The ONLY legal seq numbers are: ([\d, ]+)/.exec(prompt);
+    const seqs = (legal?.[1] ?? '')
+      .split(',')
+      .map((n) => Number(n.trim()))
+      .filter((n) => Number.isFinite(n));
+    const id8 = /^Session ([0-9a-f]{8})/m.exec(prompt)?.[1] ?? '';
+    return {
+      text: seqs
+        .slice(0, 3)
+        .map((s, i) => `- fact ${i + 1}, drawn from the material above [${id8}@${s}]`)
+        .join('\n'),
+      inputTokens: 900,
+      outputTokens: 120,
+      usd: 0.004,
+    };
+  }
+
+  async close(): Promise<void> {
+    this.closed++;
+  }
+}
+
+describe('a prompt never goes out with no session content in it', () => {
+  it('puts the tail of the transcript in the prompt when there is no --about and no card', async () => {
+    // The broken shape: `collectSource` populated `slice` only under
+    // `if (about)`, and `buildPrompt` included transcript text only under
+    // `if (src.slice.length)`. Card material only under `if (src.card)`. So a
+    // cardless session with no topic produced a prompt with neither.
+    const src = await collectSource(db, cardlessId, {});
+    expect(src.card).toBeNull();
+    expect(src.slice.length).toBeGreaterThan(0);
+    expect(src.sliceVia).toBe('recent');
+
+    const prompt = buildPrompt(src, { budget: DEFAULT_BUDGET });
+    const beforeTask = prompt.split('## your task')[0]!;
+    expect(beforeTask).toMatch(/^## the last \d+ exchanges? of the session$/m);
+    // Real transcript text, not just a heading — the first prompt of this
+    // fixture session, verbatim.
+    expect(prompt).toContain('the customer is charged twice');
+    // And never `## exchanges about "undefined"`, which is what the topic
+    // heading interpolated once this branch became reachable without a topic.
+    expect(prompt).not.toContain('undefined');
+  });
+
+  it('refuses to build a prompt at all when there is genuinely nothing to compress', async () => {
+    const src = await collectSource(db, cardlessId, {});
+    const empty = { ...src, card: null, slice: [], sliceVia: null } as typeof src;
+    expect(hasMaterial(empty)).toBe(false);
+    // A backstop in the function itself, not only in its one caller: a prompt
+    // with no material can only produce a refusal.
+    expect(() => buildPrompt(empty, { budget: DEFAULT_BUDGET })).toThrow(/no indexed material/);
+  });
+
+  it('writes a real brief, not the model saying it has nothing, on a cardless session', async () => {
+    const transport = new PickyTransport();
+    const llm = Llm.open({ transport });
+    const r = await graft(db, cardlessId, { budget: DEFAULT_BUDGET, llm, cwd: workdir() });
+    await llm.close();
+
+    // The exact failure, asserted against: the refusal must not be the brief.
+    expect(r.brief).not.toMatch(/I don't have access to the session material/);
+    expect(r.brief).not.toMatch(/Please provide the session material/);
+
+    expect(r.via).toBe('model');
+    expect(r.citations.length).toBeGreaterThan(0);
+    expect(r.citations.every((c) => c.resolves)).toBe(true);
+    expect(r.brief).toMatch(/^- fact 1, drawn from the material above \[/m);
+    // What went to disk is what was on screen, and it is attributable.
+    expect(fs.readFileSync(r.path, 'utf8')).toBe(r.brief);
+    expect(r.brief.trim().split('\n').pop()).toMatch(/^source: claude /);
+  });
+
+  it('never sends a prompt whose only sections are potsherd’s own rules', async () => {
+    const transport = new PickyTransport();
+    const llm = Llm.open({ transport });
+    await graft(db, cardlessId, { budget: DEFAULT_BUDGET, llm, cwd: workdir() });
+    await llm.close();
+    expect(transport.sent).toHaveLength(1);
+    const beforeTask = transport.sent[0]!.prompt.split('## your task')[0]!;
+    expect(beforeTask).toMatch(/^## /m);
+  });
+
+  it('still narrows to the topic when --about is given — the default is only a default', async () => {
+    const src = await collectSource(db, cardlessId, { about: 'double charge', root });
+    // `--about` still owns the slice; the recency default fires only when
+    // there is neither a topic nor a card.
+    expect(src.sliceVia === 'about' || src.slice.length === 0).toBe(true);
+  });
+
+  it('leaves a carded session alone — its prompt already had material', async () => {
+    const src = await collectSource(db, pgbouncerId, {});
+    expect(src.card).not.toBeNull();
+    expect(src.sliceVia).toBeNull();
+    expect(src.slice).toHaveLength(0);
+    expect(buildPrompt(src, { budget: DEFAULT_BUDGET })).toContain('## card');
+  });
+});
 
 // ----------------------------------------------------------------- budget
 
