@@ -1043,6 +1043,21 @@ describe('cards in the fusion', () => {
     expect(after.lists.some((l) => l.list === 'cards_fts')).toBe(true);
   });
 
+  it('names a session by its card, not by the title the harness guessed', async () => {
+    const root = scratch();
+    const db = seededDb(root);
+    // `sessions.title` is what Claude Code wrote a few turns in; the query
+    // matches it, so the session is found either way and only its *name*
+    // changes. (`seededDb` writes exchanges without their fts rows, so the
+    // title list is the one doing the finding here — which is the point.)
+    const before = await recall(db, 'seeded', {}, { root, vectors: false });
+    expect(before.sessions[0]!.displayTitle).toBe('seeded');
+    writeCard(db, root, RECORD());
+    const after = await recall(db, 'seeded', {}, { root, vectors: false });
+    db.close();
+    expect(after.sessions[0]!.displayTitle).toBe('switched the pooler');
+  });
+
   it('leaves the card lists out of an index that has never been carded', async () => {
     const root = scratch();
     const db = seededDb(root);

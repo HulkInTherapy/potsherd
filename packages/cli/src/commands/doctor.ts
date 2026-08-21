@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import process from 'node:process';
 import {
+  VERSION,
   audit,
   claude as claudeAdapter,
   codex as codexAdapter,
@@ -437,4 +438,4 @@ function dedupe(xs: string[]): string[] {
   return [...new Set(xs)];
 }
 
-export const VERSION_STRING = '0.1.0';
+export { VERSION as VERSION_STRING };

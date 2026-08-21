@@ -386,4 +386,4 @@ export {
 } from './cards/schema.js';
 export { renderCardRun, type CardRunOptions as CardRunCardOptions } from './render/card-run.js';
 
-export const VERSION = '0.1.0';
+export { VERSION } from './version.js';

@@ -33,11 +33,11 @@ import { modelsDir, potsherdDir } from './paths.js';
  * bm25(ghosts_fts), vec(exchanges), vec(cards) ), k=60, with session
  * diversification (max 3 exchanges per session in the top list).
  *
- * Four of those lists exist today and are fused here. The two `cards` lists are
- * phase 2's — `cards_fts` and `vec_cards` are created by migration 2/4 and are
- * empty until a card writer fills them, so they are named in {@link LISTS} and
- * left switched off rather than faked. Turning them on is adding two entries to
- * the same fusion loop.
+ * All of them are fused here from T2.2 on. The two `cards` lists were named in
+ * {@link LISTS} and switched off through phase 1 rather than faked, because a
+ * list with no rows behind it is not a list — it is a way to make a fusion look
+ * richer than it is. `potsherd card` fills them, and they still leave the set
+ * at query time on an index that has never run it.
  *
  * **Nothing here is upstream's.** obra/episodic-memory has no fts5 and no bm25
  * — its text search is `LIKE '%q%'` (`src/search.ts:180-190`) — so there was no
@@ -1259,6 +1259,7 @@ export function sessionMeta(db: Db, ids: readonly string[]): Map<string, Session
       `SELECT s.id, s.harness, s.title, s.project, s.started_at, s.ended_at, s.status,
               s.is_sidechain, s.parent_session_id, s.agent_name, s.git_branch,
               s.user_prompts, s.assistant_turns, s.bytes,
+              (SELECT c.title FROM cards c WHERE c.session_id = s.id) AS card_title,
               (SELECT COUNT(*) FROM exchanges e WHERE e.session_id = s.id) AS exchanges,
               (SELECT COUNT(*) FROM sessions c WHERE c.parent_session_id = s.id) AS subagents,
               (SELECT COUNT(*) FROM pins p WHERE p.session_id = s.id) AS pinned
@@ -1289,6 +1290,18 @@ export interface SessionRow {
   id: string;
   harness: Harness;
   title: string | null;
+  /**
+   * `cards.title`, when the session has been carded.
+   *
+   * Preferred over `sessions.title` wherever a session is named, which is
+   * `phase-2` deliverable 4 read literally: *"card title preferred over
+   * ai-title in all listings"*. The harness's own title is written a few turns
+   * in, from what the session looked like it was going to be about; the card's
+   * is written from the whole transcript and then checked against it. When
+   * both exist the second one is the better name, and `browse.ts` has said so
+   * since T2.4 — this makes `find` agree with `ls`.
+   */
+  card_title?: string | null;
   project: string | null;
   started_at: string | null;
   ended_at: string | null;
@@ -1321,12 +1334,14 @@ export interface GhostRow {
 }
 
 export function fromSessionRow(r: SessionRow): SessionMeta {
+  const carded = r.card_title?.replace(/\s+/g, ' ').trim();
+  const title = carded || r.title;
   return {
     id: r.id,
     kind: 'session',
     harness: r.harness,
-    title: r.title,
-    displayTitle: displayTitleOf(r.title, r.project, r.id, r.harness),
+    title,
+    displayTitle: displayTitleOf(title, r.project, r.id, r.harness),
     project: r.project,
     projectName: projectName(r.project),
     startedAt: r.started_at,

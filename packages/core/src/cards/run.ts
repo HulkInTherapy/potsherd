@@ -219,6 +219,13 @@ export async function runCards(
           abort.abort();
           return;
         }
+        // A session cancelled *because* another worker hit the ceiling is not
+        // a failure: it is a session that was never attempted. Counting it
+        // would turn one budget abort into six failed sessions and six error
+        // sentinels that re-queue for an hour, and it would bury the one
+        // message the user needs under five that mislead.
+        if (abort.signal.aborted && report.aborted) return;
+
         const message = err instanceof Error ? err.message : String(err);
         report.failed += 1;
         report.errors.push({ id: target.id, message });

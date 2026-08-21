@@ -562,3 +562,21 @@ describe('potsherd card', () => {
     expect(run([]).stdout).toContain('potsherd card');
   });
 });
+
+describe('version', () => {
+  it('matches the manifest npm publishes', () => {
+    // The version used to be four separate literals, and at tag v0.2.0 three of
+    // them still said 0.1.0. A version a user reads must never disagree with the
+    // tag they installed.
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(repo, 'packages', 'cli', 'package.json'), 'utf8'),
+    ) as { version: string };
+    expect(run(['--version']).stdout.trim()).toBe(manifest.version);
+  });
+
+  it('reports the same version everywhere it is shown', () => {
+    const v = run(['--version']).stdout.trim();
+    expect(run([]).stdout).toContain(v);
+    expect(run(['doctor', '--json', '--claude-dir', FIXTURE_CLAUDE]).stdout).toContain(`"${v}"`);
+  });
+});

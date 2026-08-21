@@ -16,7 +16,8 @@ import { runTag, splitTagOperands } from './commands/tag.js';
 import { runPin } from './commands/pin.js';
 import { runLink } from './commands/link.js';
 
-export const VERSION = '0.1.0';
+import { VERSION } from '@potsherd/core';
+export { VERSION };
 
 /**
  * The `potsherd` binary.
