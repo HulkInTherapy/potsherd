@@ -41,9 +41,26 @@ export function renderCardRun(
   o: CardRunOptions = {},
 ): string {
   const card = new Card(t);
+  const chargeable = o.chargeable ?? true;
   card
     .heading('card', ...(o.root ? [tildify(o.root)] : []), f.date(o.ranAt ?? new Date()))
     .blank();
+
+  // The cap first. A run that stopped at `--max-usd` before its first call has
+  // written nothing and failed nothing, and "nothing was carded" is the one
+  // thing it must not say: the user set a ceiling, hit it, and needs to be
+  // told that rather than left thinking their archive had nothing in it.
+  if (report.aborted) {
+    card.rows([
+      { label: 'cards written', value: f.num(report.written), note: `of ${f.num(report.aborted.total)} in scope` },
+      { label: chargeable ? 'cost' : 'equivalent cost', value: f.money(report.usd), tone: 'dim', note: 'before the ceiling stopped it' },
+    ]);
+    card.blank();
+    card.text(report.aborted.message, 'warn');
+    card.blank();
+    card.fix(report.aborted.fix, 'to carry on from where it stopped.', 'to carry on.');
+    return card.toString();
+  }
 
   if (report.written === 0 && report.failed === 0) {
     card.text('nothing was carded.').blank();
@@ -51,7 +68,6 @@ export function renderCardRun(
     return card.toString();
   }
 
-  const chargeable = o.chargeable ?? true;
   const overTime = report.ms / 1000 > TARGET_SECONDS;
   const overMoney = report.usd > TARGET_USD;
 
@@ -131,14 +147,6 @@ export function renderCardRun(
         : `$0 charged ${t.sep} what this would have cost on an api key`,
     },
   ]);
-
-  if (report.aborted) {
-    card.blank();
-    card.text(report.aborted.message, 'warn');
-    card.blank();
-    card.fix(report.aborted.fix, 'to carry on from where it stopped.', 'to carry on.');
-    return card.toString();
-  }
 
   const show = o.show ?? 6;
   const listed = report.cards.slice(0, show);

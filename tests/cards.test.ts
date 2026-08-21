@@ -1,5 +1,7 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { db as store } from '@potsherd/core';
 import {
@@ -56,6 +58,8 @@ import {
 } from '../packages/core/src/cards/write.js';
 import { elideMiddle, loadSessionTranscript, type Transcript, type TranscriptUnit } from '../packages/core/src/cards/transcript.js';
 import { recall } from '../packages/core/src/recall.js';
+import { renderCardRun } from '../packages/core/src/render/card-run.js';
+import { Theme } from '../packages/core/src/theme.js';
 import { rmrf, tempDir } from './helpers.js';
 
 /**
@@ -1045,5 +1049,119 @@ describe('cards in the fusion', () => {
     const r = await recall(db, 'pooler', {}, { root, vectors: false });
     db.close();
     expect(r.lists.some((l) => l.list === 'cards_fts')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------- receipt
+
+describe('the run receipt', () => {
+  const base = {
+    written: 0,
+    failed: 0,
+    deferred: 0,
+    verified: { kept: 0, dropped: 0 },
+    dropsByReason: { 'no-citation': 0, 'unresolved-seq': 0, 'no-match': 0 },
+    calls: 0,
+    usd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    unresolved: 0,
+    supplemented: 0,
+    degraded: 0,
+    ms: 0,
+    cards: [],
+    errors: [],
+  };
+  const t = new Theme({ color: false, width: 80 });
+
+  it('says the ceiling stopped it, not that there was nothing to card', () => {
+    const out = renderCardRun(
+      { ...base, aborted: { message: 'stopped at --max-usd 0.01: 0 of 35 done', fix: 'potsherd card --all --max-usd 2', done: 0, total: 35 } },
+      t,
+    );
+    expect(out).toContain('stopped at --max-usd');
+    expect(out).toContain('of 35 in scope');
+    expect(out).not.toContain('nothing was carded');
+  });
+
+  it('flags a run where the filter never bit', () => {
+    const out = renderCardRun({ ...base, written: 3, verified: { kept: 9, dropped: 0 } }, t);
+    expect(out).toContain('nothing was filtered');
+  });
+
+  it('flags a card that still cites an exchange that does not exist', () => {
+    const out = renderCardRun({ ...base, written: 1, unresolved: 2, verified: { kept: 1, dropped: 1 } }, t);
+    // The label alone: the note is clipped to the terminal's note width.
+    expect(out).toContain('unresolved seq');
+    expect(out).toMatch(/unresolved seq\s+2/);
+  });
+
+  it('fits 60 and 80 columns and is ascii-clean under --ascii', () => {
+    const report = {
+      ...base,
+      written: 2,
+      verified: { kept: 7, dropped: 3 },
+      dropsByReason: { 'no-citation': 1, 'unresolved-seq': 1, 'no-match': 1 },
+      cards: [
+        { id: 's1', kind: 'session' as const, title: 'switched the pooler', outcome: 'shipped', decisions: 2, openThreads: 1, kept: 4, dropped: 2, coverage: 0.9, supplemented: true, degraded: false, calls: 2, usd: 0.02, ms: 1_000, path: '/tmp/x.md' },
+      ],
+    };
+    for (const width of [60, 80]) {
+      for (const line of renderCardRun(report, new Theme({ color: false, width })).split('\n')) {
+        expect(line.length, `"${line}" at ${width}`).toBeLessThanOrEqual(width);
+      }
+    }
+    const ascii = renderCardRun(report, new Theme({ color: false, ascii: true, width: 80 }));
+    // eslint-disable-next-line no-control-regex
+    expect(/[^\x00-\x7F]/.test(ascii)).toBe(false);
+  });
+});
+
+// --------------------------------------------------------------- the verb
+
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const bin = path.join(repo, 'packages', 'cli', 'bin', 'potsherd.js');
+
+/** A PATH with nothing on it: no `claude`, no `codex`, no key. */
+function bare(): Record<string, string> {
+  return { PATH: '', ANTHROPIC_API_KEY: '', POTSHERD_LLM_BACKEND: '' };
+}
+
+function cli(args: string[], env: Record<string, string> = {}): { code: number; stdout: string } {
+  try {
+    return {
+      code: 0,
+      stdout: execFileSync(process.execPath, [bin, ...args], {
+        encoding: 'utf8',
+        env: { ...process.env, NO_COLOR: '1', ...env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    };
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string };
+    return { code: e.status ?? 1, stdout: e.stdout ?? '' };
+  }
+}
+
+describe('potsherd card --export', () => {
+  it('copies the mirror out without needing a backend or an index', () => {
+    const root = scratch();
+    const dest = scratch();
+    const db = seededDb(root);
+    writeCard(db, root, RECORD());
+    db.close();
+
+    const r = cli(['card', '--export', dest, '--potsherd-dir', root], bare());
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('1 card copied');
+    expect(fs.existsSync(path.join(dest, 'claude', '-tmp-p', 's1.md'))).toBe(true);
+  });
+
+  it('says where the cards would come from when there are none', () => {
+    const root = scratch();
+    const r = cli(['card', '--export', scratch(), '--potsherd-dir', root], bare());
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('no cards');
+    expect(r.stdout).toContain('potsherd card --all');
   });
 });
