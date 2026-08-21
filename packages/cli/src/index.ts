@@ -7,6 +7,10 @@ import { runRescue } from './commands/rescue.js';
 import { runGuard } from './commands/guard.js';
 import { runDoctor } from './commands/doctor.js';
 import { runIndex } from './commands/index.js';
+import { runFind } from './commands/find.js';
+import { runLs } from './commands/ls.js';
+import { runShow } from './commands/show.js';
+import { runStats } from './commands/stats.js';
 
 export const VERSION = '0.1.0';
 
@@ -30,6 +34,53 @@ function addGlobals(cmd: Command): Command {
     .option('--claude-dir <path>', 'read Claude Code data from here (CLAUDE_CONFIG_DIR is honoured)')
     .option('--potsherd-dir <path>', "potsherd's own directory (default ~/.potsherd)")
     .option('--debug', 'print full errors');
+}
+
+
+/**
+ * The filter flags of `03` §7. Registered identically on `find` and `ls` so the
+ * two verbs can never drift: whatever `ls --project X --since 30d` lists is
+ * exactly what `find q --project X --since 30d` searches.
+ */
+function addFilters(cmd: Command): Command {
+  return cmd
+    .option('--project <name>', 'only this project (a directory name is enough)')
+    .option('--harness <name>', 'claude, codex, cursor or pi')
+    .option('--since <when>', 'on or after this date, or a span like 30d / 6w')
+    .option('--until <when>', 'on or before this date')
+    .option('--branch <name>', 'only sessions on this git branch')
+    .option('--tag <tag>', 'only sessions carrying this tag')
+    .addOption(
+      new Option('--sidechains <mode>', 'subagent transcripts')
+        .choices(['include', 'only', 'exclude'])
+        .default('include'),
+    )
+    .addOption(
+      new Option('--ghosts <mode>', 'sessions Claude Code deleted, rebuilt from history')
+        .choices(['include', 'only', 'exclude'])
+        .default('include'),
+    )
+    .addOption(new Option('--status <state>', 'index status').choices(['live', 'archived', 'ghost']))
+    .option('--pinned', 'only pinned sessions')
+    .addOption(new Option('--limit <n>', 'how many to show').argParser(Number));
+}
+
+/** Pull the filter flags back off a parsed command, in one shape. */
+function filterFlags(opts: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...(opts['project'] ? { project: String(opts['project']) } : {}),
+    ...(opts['harness'] ? { harness: String(opts['harness']) } : {}),
+    ...(opts['since'] ? { since: String(opts['since']) } : {}),
+    ...(opts['until'] ? { until: String(opts['until']) } : {}),
+    ...(opts['branch'] ? { branch: String(opts['branch']) } : {}),
+    ...(opts['tag'] ? { tag: String(opts['tag']) } : {}),
+    ...(opts['file'] ? { file: String(opts['file']) } : {}),
+    ...(opts['status'] ? { status: String(opts['status']) } : {}),
+    ...(opts['sidechains'] ? { sidechains: String(opts['sidechains']) } : {}),
+    ...(opts['ghosts'] ? { ghosts: String(opts['ghosts']) } : {}),
+    pinned: Boolean(opts['pinned']),
+    ...(opts['limit'] !== undefined ? { limit: opts['limit'] } : {}),
+  };
 }
 
 function main(argv: string[]): void {
@@ -149,6 +200,104 @@ example:
     );
   });
 
+
+  const find = addFilters(
+    addGlobals(
+      program
+        .command('find')
+        .description('search every prompt, every subagent and every deleted session')
+        .argument('<query>', 'the words to look for'),
+    )
+      .option('--file <path>', 'only sessions that touched a path containing this')
+      .addOption(
+        new Option('--vectors <mode>', 'the vector half of the hybrid')
+          .choices(['auto', 'on', 'off'])
+          .default('auto'),
+      )
+      .option('--no-vec', 'text search only — the same as --vectors off'),
+  ).addHelpText('after', `
+example:
+  potsherd find "pgbouncer"
+  potsherd find "vedic astrology" --json | jq -r '.sessions[0].resume'
+  potsherd find "instagram" --sidechains only        # what the subagents did
+  potsherd find "canon driver" --ghosts only         # only what was deleted
+  potsherd find "rls policy" --project Fulcrum --since 30d
+  potsherd find "the pooler decision" --vectors on   # force semantic search`);
+  find.action(async (query: string, opts: Record<string, unknown>) => {
+    const o = globals(program, find, opts);
+    await run(
+      () =>
+        runFind({
+          ...o,
+          ...filterFlags(opts),
+          query,
+          vec: opts['vec'] !== false,
+          ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
+        }),
+      o,
+    );
+  });
+
+  const ls = addFilters(
+    addGlobals(
+      program
+        .command('ls')
+        .description('every session by title, newest first — ghosts and subagents included'),
+    ),
+  ).addHelpText('after', `
+example:
+  potsherd ls
+  potsherd ls --project Fulcrum --since 30d
+  potsherd ls --ghosts only --limit 40               # what the sweep took
+  potsherd ls --harness codex --json | jq -r '.sessions[].displayTitle'`);
+  ls.action(async (opts: Record<string, unknown>) => {
+    const o = globals(program, ls, opts);
+    await run(() => runLs({ ...o, ...filterFlags(opts) }), o);
+  });
+
+  const show = addGlobals(
+    program
+      .command('show')
+      .description('read one session end to end, by id or by any unambiguous prefix')
+      .argument('<session>', 'session id, or the first 8 characters of one')
+      .addOption(new Option('--from <n>', 'first exchange to print (1-based)').argParser(Number))
+      .addOption(new Option('--to <n>', 'last exchange to print').argParser(Number))
+      .option('--md', 'markdown, for pasting into an issue or a note'),
+  ).addHelpText('after', `
+example:
+  potsherd show 85ef9531
+  potsherd show 85ef9531 --from 12 --to 18
+  potsherd show 85ef9531 --md > session.md
+  potsherd show 85ef9531 --json | jq -r '.exchanges[].userText'`);
+  show.action(async (session: string, opts: Record<string, unknown>) => {
+    const o = globals(program, show, opts);
+    await run(
+      () =>
+        runShow({
+          ...o,
+          session,
+          ...(opts['from'] !== undefined ? { from: opts['from'] } : {}),
+          ...(opts['to'] !== undefined ? { to: opts['to'] } : {}),
+          md: Boolean(opts['md']),
+        }),
+      o,
+    );
+  });
+
+  const stats = addGlobals(
+    program
+      .command('stats')
+      .description('what is in the index: per-harness counts, redaction, freshness')
+      .option('--no-fresh', 'skip the per-file staleness check'),
+  ).addHelpText('after', `
+example:
+  potsherd stats
+  potsherd stats --json | jq '.harnesses[] | {harness, sessions, ghosts}'`);
+  stats.action(async (opts: Record<string, unknown>) => {
+    const o = globals(program, stats, opts);
+    await run(() => runStats({ ...o, fresh: opts['fresh'] !== false }), o);
+  });
+
   const doctor = addGlobals(
     program
       .command('doctor')
@@ -214,6 +363,10 @@ function tour(): void {
     ['rescue', 'archive what is left; rebuild the deleted ones as ghosts'],
     ['guard', 'take a copy at every startup, before the sweep can run'],
     ['index', 'parse, redact and index every transcript, ready to search'],
+    ['ls', 'every session by title, newest first — ghosts included'],
+    ['find', 'search every prompt, every subagent, every deleted session'],
+    ['show', 'read one session end to end'],
+    ['stats', 'what is in the index, per harness'],
     ['doctor', 'what potsherd can see, and every path it reads or writes'],
   ];
   print('');

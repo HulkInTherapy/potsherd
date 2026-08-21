@@ -170,13 +170,42 @@ export class Card {
 }
 
 /**
+ * A line that must never be truncated, outside a {@link Card}.
+ *
+ * Same rule as {@link Card.fit}: give the variants longest first and the first
+ * one that fits at this width is printed whole. Used for the "next verb" line
+ * every verb ends with (plans/05) — half a command cannot be typed, so the
+ * *explanation* is what gives ground at 60 columns, never the command.
+ */
+export function fitLine(t: Theme, ...variants: string[]): string {
+  const max = Math.max(20, t.width - INDENT.length);
+  for (const v of variants) {
+    if (Theme.len(v) <= max) return INDENT + v;
+  }
+  return INDENT + clip(variants[variants.length - 1] ?? '', max);
+}
+
+/**
  * A left-aligned column table for list output (`ls`, `find`). Columns size to
- * their content, the last column absorbs the remaining width and elides.
+ * their content; one column absorbs the remaining width and elides.
+ *
+ * By default that is the last column. `grow` moves it, which is what `ls`
+ * needs: the title is the column worth every spare character, and it is not the
+ * one on the right. `max` caps a column that would otherwise let one very long
+ * project path squeeze every other row.
  */
 export function table(
   t: Theme,
   rows: string[][],
-  opts: { align?: ('left' | 'right')[]; gap?: number; indent?: string } = {},
+  opts: {
+    align?: ('left' | 'right')[];
+    gap?: number;
+    indent?: string;
+    /** Index of the column that absorbs the leftover width. Default: the last. */
+    grow?: number;
+    /** Per-column ceiling, by index. */
+    max?: (number | undefined)[];
+  } = {},
 ): string[] {
   if (rows.length === 0) return [];
   const gap = opts.gap ?? 2;
@@ -184,12 +213,31 @@ export function table(
   const cols = Math.max(...rows.map((r) => r.length));
   const widths: number[] = [];
   for (let c = 0; c < cols; c++) {
-    widths[c] = Math.max(...rows.map((r) => Theme.len(r[c] ?? '')));
+    const content = Math.max(...rows.map((r) => Theme.len(r[c] ?? '')));
+    const cap = opts.max?.[c];
+    widths[c] = cap !== undefined ? Math.min(content, cap) : content;
   }
+  const grow = Math.min(Math.max(opts.grow ?? cols - 1, 0), cols - 1);
   const budget = t.width - indent.length - gap * (cols - 1);
-  const fixed = widths.slice(0, -1).reduce((a, b) => a + b, 0);
-  const lastMax = Math.max(8, budget - fixed);
-  widths[cols - 1] = Math.min(widths[cols - 1] ?? 0, lastMax);
+  const fixed = widths.reduce((a, b, i) => (i === grow ? a : a + b), 0);
+  const growMax = Math.max(8, budget - fixed);
+  widths[grow] = Math.min(widths[grow] ?? 0, growMax);
+
+  // At 60 columns the fixed columns alone can be wider than the whole
+  // terminal, and then shrinking only the grow column is not enough. Take the
+  // rest back from the right, which is where the least identifying information
+  // is — a date range gives ground before a harness name does. A table that
+  // wraps is unreadable and unscreenshottable (plans/05), so this loop has to
+  // succeed rather than nearly succeed.
+  const total = (): number => widths.reduce((a, b) => a + b, 0);
+  for (let c = cols - 1; c >= 0 && total() > budget; c--) {
+    if (c === grow) continue;
+    const over = total() - budget;
+    widths[c] = Math.max(3, (widths[c] ?? 0) - over);
+  }
+  if (total() > budget) {
+    widths[grow] = Math.max(3, (widths[grow] ?? 0) - (total() - budget));
+  }
 
   return rows.map((r) =>
     (indent +
