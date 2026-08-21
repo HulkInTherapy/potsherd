@@ -402,7 +402,7 @@ model, no download and no network, and `find` works on day one without it —
 every search screen in this readme was taken against a `--no-embed` index.
 
 Vectors are what let `find "the pooler decision"` match a session that never
-used those words. They cost a one-off model download (`bge-small`, 33 MB on
+used those words. They cost a one-off model download (`bge-small`, 32.4 MB on
 disk once cached) that `index` announces before it starts, and minutes on the
 first run. You can add them later: `potsherd index` again without `--no-embed`
 fills in what is pending.
