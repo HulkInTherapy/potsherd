@@ -1,4 +1,5 @@
 import type { Harness, SessionStatus } from '../adapters/types.js';
+import { LINKED_TO_SQL } from '../tags.js';
 
 /**
  * Search filters and the bound-parameter builder for them.
@@ -40,6 +41,19 @@ export interface SearchFilters {
   sidechains?: TriState;
   ghosts?: TriState;
   pinned?: boolean;
+  /**
+   * Sessions the user linked to this one, **from either side of the link**.
+   * `links` stores the pair as it was typed; meaning is undirected. See
+   * `tags.ts`'s `LINKED_TO_SQL`, which is the only place that knows the OR.
+   */
+  linkedTo?: string;
+  /**
+   * Sessions with nothing but their id to call them by: no card title, and no
+   * title from the harness. The Claude Agent SDK writes transcripts with no
+   * summary at all, so these are the sessions `potsherd card` should be
+   * pointed at first — which is what this filter is for (`phase-2` T2.4).
+   */
+  untitled?: boolean;
   sessionId?: string;
   /**
    * `live` (transcript still where the harness put it), `archived` (potsherd
@@ -49,6 +63,36 @@ export interface SearchFilters {
    */
   status?: SessionStatus;
 }
+
+/**
+ * "No card title and no harness title", for a session.
+ *
+ * `cards` is empty until T2.2 writes the first row, so today the second
+ * conjunct is always true and this reads as "the harness never named it".
+ * It is written against the finished table deliberately: the moment `card`
+ * starts writing, `--untitled` has to *stop* listing the sessions that now
+ * have one, with no second edit and no chance of the two drifting. A card row
+ * whose own title is empty names nothing, so it does not count as a title.
+ */
+const UNTITLED_SESSION_SQL = `COALESCE(TRIM(s.title), '') = ''
+       AND NOT EXISTS (SELECT 1 FROM cards c
+                        WHERE c.session_id = s.id AND COALESCE(TRIM(c.title), '') <> '')`;
+
+/**
+ * The same question for a ghost, which has one more way of being named: the
+ * prompts `rescue` recovered. `ls` titles a ghost with its first non-slash
+ * prompt (`recall.ts`'s `fromGhostRow`), so a ghost that has one is not
+ * untitled however empty `ghosts.title` is — hence the third conjunct, which
+ * mirrors that lookup exactly. Without it `--untitled` would list all 299
+ * ghosts on the reference machine and bury the sdk sessions it exists for.
+ */
+const UNTITLED_GHOST_SQL = `COALESCE(TRIM(g.title), '') = ''
+       AND NOT EXISTS (SELECT 1 FROM cards c
+                        WHERE c.session_id = g.session_id
+                          AND COALESCE(TRIM(c.title), '') <> '')
+       AND NOT EXISTS (SELECT 1 FROM ghost_prompts p
+                        WHERE p.session_id = g.session_id
+                          AND p.text NOT LIKE '/%' AND length(trim(p.text)) > 3)`;
 
 export interface BoundClause {
   /** Already prefixed with `AND `, or empty. Safe to interpolate. */
@@ -105,6 +149,13 @@ export function buildExchangeFilters(filters: SearchFilters = {}): BoundClause {
   if (filters.pinned) {
     parts.push('EXISTS (SELECT 1 FROM pins p WHERE p.session_id = e.session_id)');
   }
+  if (filters.linkedTo) {
+    parts.push(LINKED_TO_SQL('e.session_id'));
+    params.push(filters.linkedTo, filters.linkedTo);
+  }
+  // `s` is already in scope here — every exchange query joins `sessions`, which
+  // is what `s.project = ?` above relies on.
+  if (filters.untitled) parts.push(UNTITLED_SESSION_SQL);
 
   // include -> no clause at all. This is the line upstream does not have.
   const sidechains = filters.sidechains ?? 'include';
@@ -177,6 +228,11 @@ export function buildSessionFilters(filters: SearchFilters = {}): BoundClause {
   if (filters.pinned) {
     parts.push('EXISTS (SELECT 1 FROM pins p WHERE p.session_id = s.id)');
   }
+  if (filters.linkedTo) {
+    parts.push(LINKED_TO_SQL('s.id'));
+    params.push(filters.linkedTo, filters.linkedTo);
+  }
+  if (filters.untitled) parts.push(UNTITLED_SESSION_SQL);
 
   const sidechains = filters.sidechains ?? 'include';
   if (sidechains === 'only') parts.push('s.is_sidechain = 1');
@@ -235,6 +291,11 @@ export function buildGhostFilters(filters: SearchFilters = {}): BoundClause {
   if (filters.pinned) {
     parts.push('EXISTS (SELECT 1 FROM pins p WHERE p.session_id = g.session_id)');
   }
+  if (filters.linkedTo) {
+    parts.push(LINKED_TO_SQL('g.session_id'));
+    params.push(filters.linkedTo, filters.linkedTo);
+  }
+  if (filters.untitled) parts.push(UNTITLED_GHOST_SQL);
 
   return { sql: parts.length ? `AND ${parts.join(' AND ')}` : '', params };
 }
@@ -250,6 +311,8 @@ export function hasMetadataFilters(filters: SearchFilters = {}): boolean {
       filters.tag ||
       filters.file ||
       filters.pinned ||
+      filters.linkedTo ||
+      filters.untitled ||
       (filters.sidechains && filters.sidechains !== 'include'),
   );
 }

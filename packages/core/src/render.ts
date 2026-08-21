@@ -195,6 +195,51 @@ export function fitLine(t: Theme, ...variants: string[]): string {
 }
 
 /**
+ * A cell whose tail must survive the cut.
+ *
+ * `ls` renders a session's tags after its title, in the title column, and the
+ * title column is the one that gives ground when the terminal is narrow. Cut
+ * naively, `Offline queue replays stale writes #postgres #rls` becomes
+ * `Offline queue replays stale writes…` — the tags, which are the shortest and
+ * most exact thing on the row and the only part the *user* wrote, are the
+ * first thing thrown away.
+ *
+ * So `keep` is elided last: the head gives up characters until it cannot, and
+ * only then does the whole cell fall back to a plain elision.
+ */
+export interface TableCell {
+  text: string;
+  keep?: string;
+}
+
+export type TableCellInput = string | TableCell;
+
+/** The shortest head worth showing before the tail is abandoned too. */
+const MIN_HEAD = 6;
+
+function cellText(c: TableCellInput | undefined): string {
+  if (c === undefined) return '';
+  return typeof c === 'string' ? c : c.text + (c.keep ?? '');
+}
+
+function fitCell(t: Theme, c: TableCellInput | undefined, w: number): string {
+  const full = cellText(c);
+  if (Theme.len(full) <= w) return full;
+  if (typeof c === 'object' && c.keep) {
+    const room = w - Theme.len(c.keep);
+    if (room >= MIN_HEAD) {
+      // `elide` trims before it appends its ellipsis, so the head can come
+      // back short. Pad it back out, or the tails of two rows land in
+      // different columns and the block reads as ragged text rather than as
+      // one column of tags.
+      const head = elide(c.text, room, t);
+      return head + ' '.repeat(Math.max(0, room - Theme.len(head))) + c.keep;
+    }
+  }
+  return elide(full, w, t);
+}
+
+/**
  * A left-aligned column table for list output (`ls`, `find`). Columns size to
  * their content; one column absorbs the remaining width and elides.
  *
@@ -205,7 +250,7 @@ export function fitLine(t: Theme, ...variants: string[]): string {
  */
 export function table(
   t: Theme,
-  rows: string[][],
+  rows: TableCellInput[][],
   opts: {
     align?: ('left' | 'right')[];
     gap?: number;
@@ -222,7 +267,7 @@ export function table(
   const cols = Math.max(...rows.map((r) => r.length));
   const widths: number[] = [];
   for (let c = 0; c < cols; c++) {
-    const content = Math.max(...rows.map((r) => Theme.len(r[c] ?? '')));
+    const content = Math.max(...rows.map((r) => Theme.len(cellText(r[c]))));
     const cap = opts.max?.[c];
     widths[c] = cap !== undefined ? Math.min(content, cap) : content;
   }
@@ -253,8 +298,7 @@ export function table(
       r
         .map((cell, c) => {
           const w = widths[c] ?? 0;
-          const len = Theme.len(cell);
-          const clipped = len > w ? elide(cell, w, t) : cell;
+          const clipped = fitCell(t, cell, w);
           const pad = ' '.repeat(Math.max(0, w - Theme.len(clipped)));
           return opts.align?.[c] === 'right' ? pad + clipped : clipped + pad;
         })

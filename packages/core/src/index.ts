@@ -6,7 +6,7 @@ export * as consent from './consent.js';
 export { onPath, resolveHookCommand, type BinResolution } from './resolve-bin.js';
 
 export { Theme, stripAnsi, toAscii, type ThemeOptions } from './theme.js';
-export { Card, table, fitLine, noteWidth, INDENT, type Row } from './render.js';
+export { Card, table, fitLine, noteWidth, INDENT, type Row, type TableCell, type TableCellInput } from './render.js';
 
 export { readArchiveState, type ArchiveState } from './archive-state.js';
 export { audit, computeAudit, collectAudit, type AuditOptions, type AuditReport, type AuditInput, type DoomedSession, type WipedProject } from './audit.js';
@@ -165,8 +165,31 @@ export {
   type HarnessStats,
   type FreshnessStats,
 } from './stats.js';
+// L6 — the user's own annotations: tags, pins and links (`03 §8`, phase-2 T2.4).
+export {
+  allTags,
+  applyTags,
+  isPinned,
+  linkSessions,
+  linkedSessionIds,
+  normalizeTag,
+  parseTagArgs,
+  pinSession,
+  pinnedSessionIds,
+  sessionLinks,
+  sessionTags,
+  tagsForSessions,
+  unlinkSessions,
+  unpinSession,
+  LINKED_TO_SQL,
+  MAX_TAG_LENGTH,
+  type LinkChange,
+  type PinChange,
+  type SessionLink,
+  type TagChange,
+} from './tags.js';
 export { renderFind, snippetLine } from './render/find.js';
-export { renderLs, marker } from './render/ls.js';
+export { renderLs, renderResumeMenu, marker } from './render/ls.js';
 export { renderShow, renderShowMarkdown } from './render/show.js';
 export { renderStats } from './render/stats.js';
 

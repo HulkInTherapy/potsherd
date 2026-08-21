@@ -11,6 +11,9 @@ import { runFind } from './commands/find.js';
 import { runLs } from './commands/ls.js';
 import { runShow } from './commands/show.js';
 import { runStats } from './commands/stats.js';
+import { runTag, splitTagOperands } from './commands/tag.js';
+import { runPin } from './commands/pin.js';
+import { runLink } from './commands/link.js';
 
 export const VERSION = '0.1.0';
 
@@ -62,6 +65,8 @@ function addFilters(cmd: Command): Command {
     )
     .addOption(new Option('--status <state>', 'index status').choices(['live', 'archived', 'ghost']))
     .option('--pinned', 'only pinned sessions')
+    .option('--linked-to <id>', 'only sessions linked to this one, from either side of the link')
+    .option('--untitled', 'only sessions with no card and no title from the harness')
     .addOption(new Option('--limit <n>', 'how many to show').argParser(Number));
 }
 
@@ -79,11 +84,19 @@ function filterFlags(opts: Record<string, unknown>): Record<string, unknown> {
     ...(opts['sidechains'] ? { sidechains: String(opts['sidechains']) } : {}),
     ...(opts['ghosts'] ? { ghosts: String(opts['ghosts']) } : {}),
     pinned: Boolean(opts['pinned']),
+    untitled: Boolean(opts['untitled']),
+    ...(opts['linkedTo'] ? { linkedTo: String(opts['linkedTo']) } : {}),
     ...(opts['limit'] !== undefined ? { limit: opts['limit'] } : {}),
   };
 }
 
-function main(argv: string[]): void {
+function main(rawArgv: string[]): void {
+  // `potsherd tag <id> +postgres -infra` — `-infra` is the five short flags
+  // `-i -n -f -r -a` to any getopt-shaped parser, and `-v2` would match the
+  // program's own `-v/--version` and exit zero having printed a version
+  // number. So the tag operands are lifted out of argv before commander is
+  // constructed; see `splitTagOperands` for the rule, which is one sentence.
+  const { argv, ops: tagOperands } = splitTagOperands(rawArgv);
   const program = new Command();
 
   addGlobals(
@@ -242,17 +255,105 @@ example:
     addGlobals(
       program
         .command('ls')
-        .description('every session by title, newest first — ghosts and subagents included'),
+        .description('every session by title, newest first — ghosts and subagents included')
+        .option(
+          '--resume-menu',
+          'print  claude --resume <id>  # <title>  lines to paste into your shell',
+        ),
     ),
   ).addHelpText('after', `
 example:
   potsherd ls
   potsherd ls --project Fulcrum --since 30d
   potsherd ls --ghosts only --limit 40               # what the sweep took
-  potsherd ls --harness codex --json | jq -r '.sessions[].displayTitle'`);
+  potsherd ls --tag postgres --pinned --since 30d    # filters compose
+  potsherd ls --linked-to 4c9339e0                   # both ends of a link
+  potsherd ls --untitled                             # what to card next
+  potsherd ls --resume-menu                          # pick a session by title
+  potsherd ls --harness codex --json | jq -r '.sessions[].displayTitle'
+
+--resume-menu: potsherd does not write into another tool's directory.`);
   ls.action(async (opts: Record<string, unknown>) => {
     const o = globals(program, ls, opts);
-    await run(() => runLs({ ...o, ...filterFlags(opts) }), o);
+    await run(() => runLs({ ...o, ...filterFlags(opts), resumeMenu: Boolean(opts['resumeMenu']) }), o);
+  });
+
+  const tag = addGlobals(
+    program
+      .command('tag')
+      .description('add and remove your own tags on a session, in one go')
+      .argument('<session>', 'session id, or the first 8 characters of one')
+      .argument('[tags...]', '+tag to add, -tag to remove; none at all lists them'),
+  ).addHelpText('after', `
+example:
+  potsherd tag 4c9339e0                              # what it carries now
+  potsherd tag 4c9339e0 +postgres +infra
+  potsherd tag 4c9339e0 +postgres -mysql             # add and remove at once
+  potsherd ls --tag postgres
+  potsherd tag 4c9339e0 --json | jq -r '.tags[]'`);
+  tag.action(async (session: string, tags: string[], opts: Record<string, unknown>) => {
+    const o = globals(program, tag, opts);
+    // `-infra` never reaches commander (see splitTagOperands); what does reach
+    // the variadic argument is whatever the rewrite left behind, which for a
+    // well-formed invocation is nothing.
+    await run(() => runTag({ ...o, session, ops: [...tagOperands, ...tags] }), o);
+  });
+
+  const pin = addGlobals(
+    program
+      .command('pin')
+      .description('keep a session where you can find it; a ★ marks it in ls')
+      .argument('<session>', 'session id, or the first 8 characters of one'),
+  ).addHelpText('after', `
+example:
+  potsherd pin 4c9339e0
+  potsherd ls --pinned
+  potsherd pin 4c9339e0 --json | jq .pinnedAt`);
+  pin.action(async (session: string, opts: Record<string, unknown>) => {
+    const o = globals(program, pin, opts);
+    await run(() => runPin({ ...o, session }), o);
+  });
+
+  const unpin = addGlobals(
+    program
+      .command('unpin')
+      .description('remove a pin')
+      .argument('<session>', 'session id, or the first 8 characters of one'),
+  ).addHelpText('after', `
+example:
+  potsherd unpin 4c9339e0`);
+  unpin.action(async (session: string, opts: Record<string, unknown>) => {
+    const o = globals(program, unpin, opts);
+    await run(() => runPin({ ...o, session, remove: true }), o);
+  });
+
+  const link = addGlobals(
+    program
+      .command('link')
+      .description('record that two sessions are the same thread of work')
+      .argument('<a>', 'session id, or the first 8 characters of one')
+      .argument('<b>', 'the other one')
+      .option('--note <text>', 'why they belong together')
+      .option('--remove', 'delete the link again'),
+  ).addHelpText('after', `
+example:
+  potsherd link 4c9339e0 f1665f76 --note "same pgbouncer fix"
+  potsherd ls --linked-to 4c9339e0                   # finds it from either end
+  potsherd ls --linked-to f1665f76
+  potsherd link 4c9339e0 f1665f76 --remove`);
+  link.action(async (a: string, b: string, opts: Record<string, unknown>) => {
+    const o = globals(program, link, opts);
+    await run(
+      () =>
+        runLink({
+          ...o,
+          a,
+          b,
+          remove: Boolean(opts['remove']),
+          ...(opts['note'] ? { note: String(opts['note']) } : {}),
+        }),
+      o,
+    );
   });
 
   const show = addGlobals(
@@ -366,6 +467,9 @@ function tour(): void {
     ['ls', 'every session by title, newest first — ghosts included'],
     ['find', 'search every prompt, every subagent, every deleted session'],
     ['show', 'read one session end to end'],
+    ['tag', 'your own tags on a session: +postgres -mysql'],
+    ['pin', 'keep one where you can find it; ★ marks it in ls'],
+    ['link', 'record that two sessions are the same thread'],
     ['stats', 'what is in the index, per harness'],
     ['doctor', 'what potsherd can see, and every path it reads or writes'],
   ];
