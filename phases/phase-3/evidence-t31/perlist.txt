@@ -1,0 +1,7 @@
+npm warn Unknown project config "enable-pre-post-scripts". This will stop working in the next major version of npm.
+  vec_exchanges        median    4.0ms  max    8.0ms
+  exchanges_fts        median    3.0ms  max   27.0ms
+  vec_ghost_prompts    median    2.0ms  max    7.0ms
+  ghost_prompts_fts    median    1.0ms  max    3.0ms
+  titles               median    0.0ms  max    1.0ms
+  ghosts_fts           median    0.0ms  max    1.0ms

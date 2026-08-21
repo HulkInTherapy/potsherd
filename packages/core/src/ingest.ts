@@ -609,6 +609,14 @@ export interface EmbeddingReport {
   embedded: number;
   /** Exchanges already carrying a current vector. */
   upToDate: number;
+  /**
+   * Recovered prompts embedded this run (`vec_ghost_prompts`, schema 8).
+   *
+   * Counted apart from {@link embedded} because a ghost prompt is one sentence
+   * and an exchange is a whole turn: adding them together would make the
+   * per-item timing the eval prints meaningless.
+   */
+  ghostPrompts: number;
   /** Set when `enabled` but not `available`. */
   reason?: string;
   /** True when the model had to be fetched (~34 MB) during this run. */
@@ -936,6 +944,7 @@ async function embedExchanges(
     model: MODEL_ID,
     embedded: 0,
     upToDate: 0,
+    ghostPrompts: 0,
     downloaded: false,
     ms: 0,
   };
@@ -1029,8 +1038,86 @@ async function embedExchanges(
     options.onProgress?.({ phase: 'embed', done: Math.min(i + EMBED_CHUNK, pending.length), total: pending.length });
   }
 
+  report.ghostPrompts = await embedGhostPrompts(db, embedOptions);
+
   report.ms = Date.now() - started;
   return report;
+}
+
+/**
+ * The semantic half of the hybrid, for sessions whose transcript is gone.
+ *
+ * `03 §7` fuses five lists; a ghost could only ever appear in the two text
+ * ones, because nothing embedded a recovered prompt. RRF adds nothing for a
+ * list you are absent from, so a ghost collected two contributions where a live
+ * session collected five, and phase 3 measured the consequence: every
+ * ghost-only eval query fell out of the top five as soon as the vector lists
+ * were switched on, and raising the vector weight pushed them further out.
+ *
+ * A prompt is embedded in the same shape as an exchange with no answer —
+ * `exchangeText(text, '')` — so a ghost prompt and a live exchange land in the
+ * same geometry and one query embedding ranks both. Failures are swallowed the
+ * same way the exchange pass swallows them: the vectors that did get written
+ * stay, and `find` keeps working on the text half.
+ */
+async function embedGhostPrompts(
+  db: Db,
+  embedOptions: { cacheDir: string; onProgress?: (fraction: number) => void },
+): Promise<number> {
+  // Migration 8 declines on a machine without `sqlite-vec`, so the table may
+  // simply not be there; that is `--no-embed` for ghosts, not an error.
+  const hasTable = (
+    db
+      .prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'vec_ghost_prompts'`)
+      .get() as { n: number }
+  ).n;
+  if (!hasTable) return 0;
+  let pending: { id: string; text: string }[];
+  try {
+    pending = db
+      .prepare(
+        `SELECT id, text FROM ghost_prompts
+          WHERE (embedding_version IS NULL OR embedding_version != ?)
+            AND length(trim(text)) > 3
+          ORDER BY rowid`,
+      )
+      .all(EMBEDDING_VERSION) as { id: string; text: string }[];
+  } catch {
+    return 0;
+  }
+  if (pending.length === 0) return 0;
+
+  const dropVec = db.prepare('DELETE FROM vec_ghost_prompts WHERE id = ?');
+  const insertVec = db.prepare('INSERT INTO vec_ghost_prompts (id, embedding) VALUES (?, ?)');
+  const stamp = db.prepare('UPDATE ghost_prompts SET embedding_version = ? WHERE id = ?');
+  let embedded = 0;
+  for (let i = 0; i < pending.length; i += EMBED_CHUNK) {
+    const chunk = pending.slice(i, i + EMBED_CHUNK);
+    let vectors: number[][];
+    try {
+      vectors = [];
+      for (const row of chunk) {
+        vectors.push(await generateExchangeEmbedding(row.text, '', undefined, embedOptions));
+      }
+    } catch {
+      // Same contract as the exchange pass: what was written stays, and the
+      // text half of the search is unaffected.
+      return embedded;
+    }
+    const write = db.transaction(() => {
+      chunk.forEach((row, n) => {
+        const vector = vectors[n];
+        if (!vector) return;
+        dropVec.run(row.id);
+        insertVec.run(row.id, embeddingToBlob(vector));
+        stamp.run(EMBEDDING_VERSION, row.id);
+        embedded += 1;
+      });
+    });
+    write();
+  }
+
+  return embedded;
 }
 
 /**

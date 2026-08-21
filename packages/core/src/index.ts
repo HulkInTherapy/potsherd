@@ -137,6 +137,8 @@ export {
   vectorState,
   LISTS,
   PER_SESSION,
+  CORROBORATION,
+  WEIGHTS,
   type ListName,
   type RecallHit,
   type RecallSession,

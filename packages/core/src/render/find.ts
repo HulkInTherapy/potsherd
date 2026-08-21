@@ -379,7 +379,7 @@ function explainNotes(e: Explain, r: RecallResult): string[] {
   // Both of these change how a number on the screen should be read, so they
   // come before the decorative ones and are short enough to survive `--width 60`.
   if (r.relaxed) notes.push('lighter weight = that list relaxed');
-  if (e.weights.some((w) => !w.solved)) notes.push('? = weight assumed to be 1');
+  if (e.weights.some((w) => w.relaxed)) notes.push('~ = that list relaxed');
   return notes;
 }
 
@@ -421,7 +421,7 @@ function detailRow(l: HitExplain['lists'][number], t: Theme, width: number): str
   const times = t.g('×', 'x');
   const name = l.list.padEnd(LIST_COL);
   const rank = `r${l.rank}`.padEnd(4);
-  const weight = `${times}${l.weight.toFixed(2)}${l.solved ? '' : '?'}`.padEnd(7);
+  const weight = `${times}${l.weight.toFixed(2)}${l.relaxed ? '~' : ''}`.padEnd(7);
   const contribution = l.contribution.toFixed(4);
   const share = `${Math.round(l.share * 100)}%`.padStart(4);
   const raw = rawColumn(l).padEnd(12);
@@ -441,7 +441,8 @@ const LIST_COL = 17;
  * would be the exact confusion RRF exists to avoid.
  */
 function rawColumn(l: HitExplain['lists'][number]): string {
-  if (l.list === 'vec_exchanges' || l.list === 'vec_cards') return `cos ${l.raw.toFixed(2)}`;
+  if (l.list === 'vec_exchanges' || l.list === 'vec_cards' || l.list === 'vec_ghost_prompts')
+    return `cos ${l.raw.toFixed(2)}`;
   if (l.list === 'titles') return 'title match';
   return `bm25 ${l.raw.toFixed(2)}`;
 }

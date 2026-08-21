@@ -1,4 +1,5 @@
 import { RRF_K, rrfScore } from './similarity.js';
+import { CORROBORATION } from '../recall.js';
 import type { ListName, RecallHit, RecallResult, RecallSession } from '../recall.js';
 
 /**
@@ -23,21 +24,23 @@ import type { ListName, RecallHit, RecallResult, RecallSession } from '../recall
  * share of the hit's total that contribution is. Nothing is summarised away —
  * the numbers on the screen add up to the number beside the title.
  *
- * ## The one thing that is inferred
+ * ## Nothing here is inferred any more
  *
- * `recall` reports `{ list, rank, raw }` per hit but **not** the weight it
- * applied, and the effective weight is not a constant: the `titles` list is
- * scaled by how much of the query the best title covered, and any list that had
- * to relax to any-word matching is penalised. So the weights are *solved for*
- * rather than assumed — a hit found by exactly one list pins that list's weight
- * exactly (`score = w / (k + rank)`), and a hit with one unknown list left over
- * pins that one from the residual. Solving beats hard-coding a copy of
- * `recall.ts`'s table here, which would be a second source of truth that drifts
- * the first time someone tunes a weight.
+ * This module used to *solve* for the weights, because `recall` reported
+ * `{ list, rank, raw }` and not the weight it had applied — and the effective
+ * weight is not a constant, since `titles` is scaled by query coverage and any
+ * relaxed list is penalised. A hit found by one list alone pins that list's
+ * weight (`score = w / (k + rank)`); a hit with one unknown left over pins that
+ * one from the residual; two passes and a median covered the rest.
  *
- * {@link Explain.weights} marks which weights were solved and which fell back
- * to 1, so the output never presents a guess as a measurement. The clean fix is
- * for `recall` to report the weights it used; see `phases/phase-3` T3.3.
+ * It worked, and it was still the wrong shape: the debugger's arithmetic and
+ * the ranker's arithmetic were two implementations of the same formula, and a
+ * debugger that can disagree with the thing it is debugging is worth very
+ * little at the moment you need it. T3.1 made `recall` report `k`, the
+ * effective `weights`, `relaxedLists` and a per-list `contribution`, so the
+ * ledger now *reads* every number it prints. {@link solveWeights} is kept and
+ * exported because it is a genuinely useful cross-check — it recovers the same
+ * weights from the scores alone — but `explain` no longer depends on it.
  */
 
 export interface ListExplain {
@@ -46,9 +49,10 @@ export interface ListExplain {
   rank: number;
   /** bm25 (negative; lower is better) or cosine similarity, as the list gave it. */
   raw: number;
+  /** The effective weight `recall` applied, after coverage and relaxation. */
   weight: number;
-  /** False when the weight could not be solved for and 1 was assumed. */
-  solved: boolean;
+  /** True when the list had relaxed to any-word matching on this query. */
+  relaxed: boolean;
   /** `weight * 1/(k+rank)` — what this list added to the hit. */
   contribution: number;
   /** That contribution as a fraction of the hit's score. */
@@ -83,7 +87,7 @@ export interface SessionExplain {
 export interface Explain {
   query: string;
   k: number;
-  weights: { list: ListName; weight: number; solved: boolean }[];
+  weights: { list: ListName; weight: number; relaxed: boolean }[];
   lists: RecallResult['lists'];
   sessions: SessionExplain[];
   /**
@@ -108,15 +112,25 @@ export interface Explain {
   } | null;
 }
 
-/** Build the full ledger for a finished search. */
-export function explain(result: RecallResult, k = RRF_K): Explain {
-  const weights = solveWeights(result.hits, k);
-  const sessions = result.sessions.map((s, i) => explainSession(s, i + 1, weights, k));
+/**
+ * Build the full ledger for a finished search.
+ *
+ * `k` is only a fallback for a `RecallResult` from before `recall` reported its
+ * own — the result's value wins whenever it has one, because a caller that
+ * passed `{ k: 10 }` to `recall` must not be shown a ledger computed at 60.
+ */
+export function explain(result: RecallResult, k = result.k ?? RRF_K): Explain {
+  const relaxed = new Set(result.relaxedLists ?? []);
+  const sessions = result.sessions.map((s, i) => explainSession(s, i + 1, k, relaxed, result));
   return {
     query: result.query,
     k,
-    weights: [...weights.entries()]
-      .map(([list, w]) => ({ list, weight: w.weight, solved: w.solved }))
+    weights: Object.entries(result.weights ?? {})
+      .map(([list, weight]) => ({
+        list: list as ListName,
+        weight: weight ?? 1,
+        relaxed: relaxed.has(list as ListName),
+      }))
       .sort((a, b) => b.weight - a.weight || a.list.localeCompare(b.list)),
     lists: result.lists,
     sessions,
@@ -127,38 +141,51 @@ export function explain(result: RecallResult, k = RRF_K): Explain {
 function explainSession(
   s: RecallSession,
   place: number,
-  weights: Map<ListName, Weight>,
   k: number,
+  relaxed: ReadonlySet<ListName>,
+  result: RecallResult,
 ): SessionExplain {
-  const hits = [...s.hits].sort((a, b) => b.score - a.score).map((h) => explainHit(h, weights, k));
+  const hits = [...s.hits]
+    .sort((a, b) => b.score - a.score)
+    .map((h) => explainHit(h, k, relaxed, result));
   const best = hits.length > 0 ? hits[0]!.score : 0;
   const rest = hits.slice(1).reduce((n, h) => n + h.score, 0);
+  // `recall`'s `sessionScore`: best + min(rest/2, best * CORROBORATION).
+  // Restated rather than imported because the point of the line on screen is to
+  // show the formula, and a shared helper would hide exactly the part being
+  // explained — but the *cap* is read from the ranker, so tuning it can never
+  // make the ledger disagree with the order it is explaining.
+  const cap = best * CORROBORATION;
   return {
     id: s.id,
     place,
     title: s.displayTitle,
     score: s.score,
     best,
-    // `recall`'s `sessionScore`: best + min(rest/2, best/2). Restated rather
-    // than imported because the point of the line on screen is to show the
-    // formula, and a shared helper would hide exactly the part being explained.
-    corroboration: Math.min(rest / 2, best / 2),
-    capped: rest / 2 > best / 2 + 1e-12,
+    corroboration: Math.min(rest / 2, cap),
+    capped: rest / 2 > cap + 1e-12,
     hits,
   };
 }
 
-function explainHit(hit: RecallHit, weights: Map<ListName, Weight>, k: number): HitExplain {
+function explainHit(
+  hit: RecallHit,
+  k: number,
+  relaxed: ReadonlySet<ListName>,
+  result: RecallResult,
+): HitExplain {
   const lists = hit.from
     .map((f) => {
-      const w = weights.get(f.list) ?? { weight: 1, solved: false };
-      const contribution = w.weight * rrfScore(f.rank, k);
+      // Reported by the ranker. The fallback is for a hand-built RecallHit in a
+      // test, and is the same formula the ranker used.
+      const weight = result.weights?.[f.list] ?? 1;
+      const contribution = f.contribution ?? weight * rrfScore(f.rank, k);
       return {
         list: f.list,
         rank: f.rank,
         raw: f.raw,
-        weight: w.weight,
-        solved: w.solved,
+        weight,
+        relaxed: relaxed.has(f.list),
         contribution,
         share: hit.score > 0 ? contribution / hit.score : 0,
       };
@@ -265,7 +292,7 @@ function median(values: number[]): number {
  * What separates the first result from the second — and, when the obvious
  * answer is the wrong one, saying so.
  *
- * A session's score is `best + min(rest/2, best/2)`, so there are exactly two
+ * A session's score is `best + min(rest/2, best * CORROBORATION)`, so there are exactly two
  * ways to be first: a stronger single hit, or more of them. The second case is
  * the one worth printing, because nothing else on the screen hints at it. On
  * the fixture corpus `find "database migration"` puts a session bm25 ranked

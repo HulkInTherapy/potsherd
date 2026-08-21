@@ -122,6 +122,35 @@ CREATE VIRTUAL TABLE IF NOT EXISTS vec_cards USING vec0(
   }
 }
 
+/**
+ * Migration 7's body: the third vec0 table, for recovered prompts.
+ *
+ * A ghost is a session whose transcript is gone and whose prompts survive in
+ * `history.jsonl`. Until this table existed the ghosts were the one part of
+ * the corpus the semantic half of the hybrid could not see at all — three to
+ * five short prompts, findable only by their exact words, competing in RRF
+ * against sessions that appear in five lists instead of two. Phase 3 measured
+ * the result: every ghost-only eval query missed the top five in every mode
+ * that had vectors switched on, and turning the vector weight *up* pushed them
+ * further out, because a list you are absent from cannot vote for you.
+ *
+ * Separate from {@link createVecTables} because it is a later migration, and
+ * it declines the same way when `sqlite-vec` is not installed.
+ */
+export function createGhostVecTable(db: Db): boolean {
+  if (!loadVec(db).available) return false;
+  try {
+    db.exec(`
+CREATE VIRTUAL TABLE IF NOT EXISTS vec_ghost_prompts USING vec0(
+  id TEXT PRIMARY KEY, embedding FLOAT[384]
+);
+`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** True when the vec tables exist in this database, extension or not. */
 export function vecTablesExist(db: Db): boolean {
   try {

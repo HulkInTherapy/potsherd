@@ -1,0 +1,54 @@
+W={"vec_exchanges":1,"vec_cards":1,"vec_ghost_prompts":1} C=default
+  mode   recall@5  recall@1
+  bm25     11/25      9/25
+  vec      22/25      6/25
+  hyb      20/25     10/25
+  alw      20/25     10/25
+W={"vec_exchanges":1.2,"vec_cards":1.2,"vec_ghost_prompts":1.2} C=default
+  mode   recall@5  recall@1
+  bm25     11/25      9/25
+  vec      22/25      6/25
+  hyb      21/25     11/25
+  alw      21/25     11/25
+W={"vec_exchanges":1.5,"vec_cards":1.5,"vec_ghost_prompts":1.5} C=default
+  mode   recall@5  recall@1
+  bm25     11/25      9/25
+  vec      22/25      6/25
+  hyb      22/25     11/25
+  alw      22/25     11/25
+W={"vec_exchanges":2,"vec_cards":2,"vec_ghost_prompts":2} C=default
+  mode   recall@5  recall@1
+  bm25     11/25      9/25
+  vec      22/25      6/25
+  hyb      23/25     12/25
+  alw      23/25     12/25
+W={"vec_exchanges":3,"vec_cards":3,"vec_ghost_prompts":3} C=default
+  mode   recall@5  recall@1
+  bm25     11/25      9/25
+  vec      22/25      6/25
+  hyb      23/25     14/25
+  alw      23/25     14/25
+W={} C=0.05
+  mode   recall@5  recall@1
+  bm25     11/25      9/25
+  vec      22/25      6/25
+  hyb      22/25     11/25
+  alw      22/25     11/25
+W={} C=0.12
+  mode   recall@5  recall@1
+  bm25     11/25      9/25
+  vec      22/25      6/25
+  hyb      22/25     11/25
+  alw      22/25     11/25
+W={} C=0.25
+  mode   recall@5  recall@1
+  bm25     12/25      9/25
+  vec      22/25      6/25
+  hyb      20/25     11/25
+  alw      20/25     11/25
+W={} C=0.5
+  mode   recall@5  recall@1
+  bm25      9/25      3/25
+  vec      21/25      6/25
+  hyb      19/25     11/25
+  alw      19/25     11/25

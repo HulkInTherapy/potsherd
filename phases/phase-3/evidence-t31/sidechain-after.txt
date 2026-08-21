@@ -1,0 +1,16 @@
+
+Q: which import made the icon set so big
+  any block for 4ae3102b: #3  sidechain-satisfying: #3  of 53 blocks
+    4ae3102b-1ad3-432b-8f01-b0e64eb5d627:agent-s6a  sc=true score=0.02710 hits=exchange/sc=true/vec_exchanges#2 | exchange/sc=false/vec_exchanges#3 | exchange/sc=false/vec_exchanges#9
+  total sidechain-flagged hits anywhere: 1
+
+Q: the thing quietly eating most of the cloud bill
+  any block for d4b1f0a7: #2  sidechain-satisfying: #2  of 53 blocks
+    d4b1f0a7-3c62-4e91-b508-27fa1c6d9e40:agent-p1a  sc=true score=0.02754 hits=exchange/sc=true/vec_exchanges#1 | card/sc=false/vec_cards#16 | exchange/sc=false/vec_exchanges#99
+  total sidechain-flagged hits anywhere: 2
+
+Q: where the pennies went when we changed the file format
+  any block for 2f7c8b31: #1  sidechain-satisfying: #1  of 53 blocks
+    2f7c8b31-6d40-4a75-9e13-c0b5827af4d6  sc=false score=0.02754 hits=card/sc=false/vec_cards#1 | exchange/sc=true/vec_exchanges#1 | exchange/sc=false/vec_exchanges#7
+  total sidechain-flagged hits anywhere: 0
+
