@@ -451,6 +451,89 @@ const HERO = {
 const HERO_SIDECHAIN = 'check whether any driver in the repo still prepares statements server-side under pgbouncer';
 
 /**
+ * ## what phase 4 added: the other side of the thread
+ *
+ * `ask`'s open-thread pass (T4.2) answers *"decided in A, never seen in B"*,
+ * and it can only ever answer it when the corpus actually holds such a pair:
+ * a project that made a decision, and **a sibling project the same decision
+ * applies to that never made it.** Everything the corpus had before this was
+ * one thread and its own history — `data-pipeline` decides, and the three
+ * projects the sweep wiped had already decided the same thing. That is a
+ * *closed* thread, and the rule pass is right to raise nothing from it.
+ *
+ * So: `event-bus` also runs postgres workers behind the same pooler, in the
+ * same transaction pooling mode, and reached it from the other end — it ran
+ * out of connections, moved its consumers behind the pooler, sized the pool
+ * and put a timeout on acquiring one. It never asked what transaction pooling
+ * *breaks*, so nothing in it says anything about prepared statements or
+ * `statement_cache_size`. That is the open thread, and it is the shape
+ * `plans/05` §4 names: *"decided in fulcrum, never applied to meghbrain"*.
+ *
+ * Two deliberate constraints on the text below, both of which the screens
+ * depend on:
+ *
+ *   1. **The word `pgbouncer` never appears in it.** `find pgbouncer` is a
+ *      committed screen (`docs/screens/09-find.txt`) whose whole point is one
+ *      live session, three the sweep deleted and one subagent; a fourth live
+ *      hit would rewrite it. It is also the more honest test: these two
+ *      projects share no *search* vocabulary at all, so nothing a text query
+ *      returns would ever have connected them, and the connection has to come
+ *      from the cards. Which is what the open-thread pass is for.
+ *   2. **Nothing here mentions prepared statements, session state or
+ *      statement caching** — not even as a question. `open-threads.ts` counts
+ *      an open thread in B as B *knowing about* the question and withdraws the
+ *      candidate, correctly. A corpus that hinted at it would be a corpus
+ *      whose catch was staged.
+ *
+ * Planted by overwrite, like the hero and the leaks: {@link SIBLING.index}'s
+ * drawn length is exactly {@link SIBLING.exchanges}'s, so not one count moves.
+ *
+ * Every line below was written for this file. None of it is from a transcript.
+ */
+const SIBLING = {
+  /**
+   * Index into SESSION_AGES_DAYS: the middle of `event-bus`'s three surviving
+   * sessions, 10.3 days old and titled. Titled matters — it is inside `ls`'s
+   * newest fifteen, so the session the open thread points at is one a reader
+   * of these screens has already seen by name.
+   */
+  index: 22,
+  title: 'Move the event-bus consumers behind the pooler',
+  exchanges: [
+    {
+      text: 'the delivery consumers open a postgres connection each and the box is out of them at sixty in flight',
+      assistant: 'Each consumer holds its own connection for the whole delivery, so sixty in flight wants sixty slots and the database is configured for forty.',
+      tool: 'Bash',
+      file: 'consumers/deliver.ts',
+    },
+    {
+      text: 'point the consumers at the pooler instead of straight at postgres',
+      assistant: 'Done: the consumers dial the pooler on 6432 rather than postgres on 5432. It is running in transaction pooling mode, so a connection goes back to the pool at the end of every transaction.',
+      tool: 'Edit',
+      file: 'db/pool.ts',
+    },
+    {
+      text: 'what pool_size does the pooler need to carry sixty consumers?',
+      assistant: 'Twenty-four server connections carried all sixty at peak with no queue wait, so pool_size 24 with a reserve pool of 4.',
+      tool: 'Read',
+      file: 'db/pool.ts',
+    },
+    {
+      text: 'a consumer that cannot get a connection should fail rather than hang',
+      assistant: 'Five-second acquire timeout on the client. A consumer that misses it nacks the delivery and the broker redelivers it.',
+      tool: 'Edit',
+      file: 'consumers/deliver.ts',
+    },
+    {
+      text: 'run the load test and write the numbers into the runbook',
+      assistant: 'Sixty consumers over 4,000 deliveries: p99 acquire 41ms, no timeouts, database connections flat at 24. Written up under "connections".',
+      tool: 'Bash',
+      file: 'docs/runbook.md',
+    },
+  ],
+};
+
+/**
  * The same thread as the sweep left it: prompts only, in three projects whose
  * every transcript is gone. `title` is written into the surviving
  * `sessions-index.json`, which is the only way a ghost gets a name back.
@@ -724,6 +807,19 @@ for (const s of aliveSessions) {
   const hero = aliveSessions[HERO.index];
   hero.title = HERO.title;
   for (const [i, ex] of HERO.exchanges.entries()) Object.assign(hero.prompts[i], ex);
+
+  // The other side of the thread. Unlike the hero, this one does *not* pin its
+  // session's length: it overwrites in place, so the drawn count has to be at
+  // least as long as the thread or a headline count would move underneath it.
+  const sibling = aliveSessions[SIBLING.index];
+  if (sibling.prompts.length < SIBLING.exchanges.length) {
+    throw new Error(
+      `sibling thread: session ${SIBLING.index} drew ${sibling.prompts.length} exchanges, ` +
+        `the thread needs ${SIBLING.exchanges.length}`,
+    );
+  }
+  sibling.title = SIBLING.title;
+  for (const [i, ex] of SIBLING.exchanges.entries()) Object.assign(sibling.prompts[i], ex);
 
   let leaked = 0;
   for (const leak of PLANTED_LEAKS) {
@@ -1209,6 +1305,8 @@ function verify() {
   console.log('');
   console.log(`  planted thread            live ${HERO.id.slice(0, 8)} · ghosts ` +
     GHOST_THREADS.map((t) => `${t.sessionId.slice(0, 8)} (${t.project})`).join(' · '));
+  console.log(`  the open thread           live ${aliveSessions[SIBLING.index].id.slice(0, 8)}` +
+    ` (event-bus) — same pooler, never asked what transaction pooling breaks`);
   console.log(`  planted credentials       ${Object.keys(SECRETS).length}` +
     `   generated, in ${PLANTED_LEAKS.length} tool results and 1 pasted dsn`);
   console.log(`  the leaked .env is in     ${PLANTED_LEAKS[0].id.slice(0, 8)}  exchange 1`);

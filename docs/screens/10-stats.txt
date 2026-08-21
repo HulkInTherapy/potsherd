@@ -1,7 +1,7 @@
 potsherd stats · ~/.potsherd · 22 aug 2026
 
   harness  sessions  subagents  ghosts  exchanges   bytes  span
-  claude         31        197     299        439  545 KB  nov 2025 → aug 2026
+  claude         31        197     299        439  546 KB  nov 2025 → aug 2026
 
   sessions                      31   197 subagents · 21 titled · 0 archived
   exchanges                    439   242 tool calls · 2 redacted

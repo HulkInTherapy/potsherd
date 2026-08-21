@@ -9,7 +9,7 @@ potsherd ls · 15 of 330
   14 aug  claude   docs-site        Pin seed script behind a feature fl…  live
   13 aug  claude   docs-site        Fix checkout flow timeout handling…   live
   12 aug  claude   event-bus        Add a dry-run mode to audit log  ↳3   live
-  11 aug  claude   event-bus        Pin audio transcoder behind a featu…  live
+  11 aug  claude   event-bus        Move the event-bus consumers behind…  live
   10 aug  claude   event-bus        Investigate rss parser regression ↳5  live
    9 aug  claude   infra-terraform  Refactor csv importer into two pass…  live
    8 aug  claude   infra-terraform  infra-terraform-08327c8b              live

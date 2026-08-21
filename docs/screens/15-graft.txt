@@ -1,0 +1,35 @@
+potsherd graft · claude 9c4d2f18 · 2026-08-21
+
+  Add pgbouncer transaction pooling to ingest workers
+  about  pgbouncer
+
+  tokens                       436   of 1200 budget  ·  est. (chars/3.6)
+  citations                    8/8   distinct, and all resolve
+  exchanges                      8   data-pipeline
+  wrote, unsummarised                ~/work/demo-project/.potsherd/graft-9c4d2f…
+  no model call — no model was used
+
+────────────────────────────────────────────────────────────────────────
+
+# Add pgbouncer transaction pooling to ingest workers
+
+Brief from a past session, about **pgbouncer**. Written by potsherd; every claim carries `[9c4d2f18@seq]`, the exchange it came from.
+
+> **unsummarised.** No model call was made — no model was used. What follows is the stored card and transcript verbatim, not a summary.
+
+**decided**
+- Use pgbouncer in transaction pooling mode — Workers hitting postgres max_connections limit [9c4d2f18@1] [9c4d2f18@2]
+- Set statement_cache_size to 0 — Transaction pooling drops server-side prepared statements across transaction boundaries [9c4d2f18@3] [9c4d2f18@4]
+- Make batch writer idempotent keyed on source file digest — pgbouncer restart closes connections mid-batch; idempotent key makes replays no-ops [9c4d2f18@6]
+- Document pooling approach in readme — Prevent relearning the solution a third time [9c4d2f18@7]
+
+**from the transcript**
+- you: put pgbouncer in front of it in transaction pooling mode agent: That will hold, but transaction pooling drops session state: SET, LISTEN/NOTIFY and server-side prepared statements stop surviving a transaction [9c4d2f18@2]
+- you: what happens to an in-flight batch when pgbouncer restarts? agent: The client sees a closed connection rather than a rollback, so a retry replays a partially applied batch unless the writer is idempotent. [9c4d2f18@5]
+- you: run the suite and commit agent: All green: 214 passed. Committed as "ingest: pool through pgbouncer in transaction mode". [9c4d2f18@8]
+
+---
+
+source: claude 9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43 · 8 exchanges · 2026-08-21
+
+  run  potsherd show 9c4d2f18  read the session this came from, end to end

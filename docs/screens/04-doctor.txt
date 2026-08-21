@@ -4,7 +4,7 @@ potsherd doctor · potsherd 0.4.0 · node v24.9.0
   potsherd dir                       ~/.potsherd
   database                           schema v8 of v8
 
-  sessions on disk              31   21 titled · 3 sdk · 545 KB
+  sessions on disk              31   21 titled · 3 sdk · 546 KB
   sidechains on disk           197   subagent transcripts
   ghosts stored                299   2,971 prompts
   files archived               278   1.1 MB of source, byte-exact
