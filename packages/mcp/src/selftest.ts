@@ -4,14 +4,11 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-
 import { VERSION, indexAll, paths } from '@potsherd/core';
 
 import { makeContext } from './context.js';
-import { TOOLS, WRITE_TOOLS, createServer } from './server.js';
+import { TOOLS, WRITE_TOOLS } from './server.js';
+import { call, callRaw, connectInMemory, textOf } from './testing.js';
 
 /**
  * `node packages/mcp/dist/index.js --selftest` — six tools, proved, offline.
@@ -100,11 +97,7 @@ export async function selftest(out: NodeJS.WritableStream = process.stderr): Pro
     const ctx = makeContext({ potsherdDir: root, env, cwd: project });
     check(ctx.graftCwd === project, `graft would write into ${ctx.graftCwd ?? '(nowhere)'}`);
 
-    const server = createServer(ctx);
-    const client = new Client({ name: 'potsherd-selftest', version: VERSION });
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverSide);
-    await client.connect(clientSide);
+    const { client, close } = await connectInMemory(ctx, 'potsherd-selftest');
 
     try {
       say('');
@@ -249,8 +242,7 @@ export async function selftest(out: NodeJS.WritableStream = process.stderr): Pro
       const after = await call(client, 'potsherd_ls', { limit: 1 });
       check(Number(after['total']) > 0, 'the server answered again after three failures');
     } finally {
-      await client.close();
-      await server.close();
+      await close();
     }
 
     const failed = checks.filter((c) => !c.ok).length;
@@ -268,29 +260,6 @@ export async function selftest(out: NodeJS.WritableStream = process.stderr): Pro
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
-}
-
-async function callRaw(
-  client: Client,
-  name: string,
-  args: Record<string, unknown>,
-): Promise<CallToolResult> {
-  return (await client.callTool({ name, arguments: args })) as CallToolResult;
-}
-
-async function call(
-  client: Client,
-  name: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const r = await callRaw(client, name, args);
-  if (r.isError) throw new Error(`${name}: ${textOf(r)}`);
-  return JSON.parse(textOf(r)) as Record<string, unknown>;
-}
-
-function textOf(r: CallToolResult): string {
-  const first = r.content?.[0];
-  return first && first.type === 'text' ? first.text : '';
 }
 
 /** Make the index unreadable for one call, then put it back. */

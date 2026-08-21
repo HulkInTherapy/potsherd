@@ -74,12 +74,27 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     `potsherd-mcp ${VERSION} ready · 6 tools · index ${potsherdDir ?? '~/.potsherd'}\n`,
   );
 
-  // Resolve only when the transport closes, which is when the client exits.
+  /**
+   * Run until the client goes away, then stop — and *actually* stop.
+   *
+   * Registering a `SIGTERM` handler replaces the default action, which is to
+   * die. A stdio server also holds stdin open, so once that handler exists
+   * nothing else will end the process: an editor that shuts the server down
+   * between projects would leave one behind every time, and after a week the
+   * user has twenty of them holding twenty sqlite handles. Caught the first
+   * time this was driven over a real pipe — the child survived `kill` and had
+   * to be killed by pid. So the signal path closes the transport and exits,
+   * rather than merely resolving a promise and hoping the event loop drains.
+   */
   await new Promise<void>((resolve) => {
     server.server.onclose = () => resolve();
-    process.on('SIGINT', () => resolve());
-    process.on('SIGTERM', () => resolve());
+    for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+      process.on(sig, () => {
+        void server.close().finally(() => process.exit(0));
+      });
+    }
   });
+  await server.close().catch(() => {});
   return 0;
 }
 
@@ -98,10 +113,10 @@ const invokedDirectly =
 
 if (invokedDirectly) {
   main().then(
-    (code) => {
-      process.exitCode = code;
-      if (code !== 0 || process.argv.includes('--selftest')) process.exit(code);
-    },
+    // `process.exit`, not `process.exitCode`: stdin is still open on the
+    // server path and would hold the event loop forever. See the shutdown
+    // note in `main`.
+    (code) => process.exit(code),
     (err: unknown) => {
       process.stderr.write(`potsherd-mcp: ${(err as Error)?.message ?? String(err)}\n`);
       process.exit(1);
