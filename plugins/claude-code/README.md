@@ -190,6 +190,7 @@ to your `settings.json`. If you are using this plugin you do not need `guard`.
 | `~/.potsherd/models/` | written once, on first index: a 32.4 MB local embedding model |
 | `~/.potsherd/hook-failures.log` | appended by `SessionEnd` when it could not index; read out and cleared by the next `SessionStart` |
 | `./.potsherd/graft-<id>.md` | written by `graft` only, in the cwd, when you ask for it |
+| `/tmp/potsherd-readers-*.json` | written by `/potsherd ask`, which routes through `ask --readers-out` / `--readers-in`. Holds the shortlisted excerpts, redacted exactly as they would be sent to a model. |
 
 Run `potsherd doctor --privacy` for the authoritative list; it is checked in CI.
 
