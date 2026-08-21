@@ -31,9 +31,10 @@ so the skill and agent can be written against it while the server is being built
 | id | task | branch | deliverables (disjoint) | status |
 |---|---|---|---|---|
 | T5.1 | MCP stdio server, 6 tools, `--selftest` | `task/T5.1-mcp` | `packages/mcp/**` | pending |
-| T5.2 | skills + agent | `task/T5.2-skills` | `plugins/claude-code/skills/**` · `plugins/claude-code/agents/**` | pending |
+| T5.2 | skills + agent | `worktree-agent-a6a0b98…` | `plugins/claude-code/skills/**` · `plugins/claude-code/agents/**` | **merged** |
 | T5.3 | hooks + plugin manifest + marketplace | `task/T5.3-plugin` | `plugins/claude-code/.claude-plugin/**` · `hooks/**` · `.mcp.json` · `marketplace.json` | pending |
-| T5.4 | codex plugin | `task/T5.4-codex` | `plugins/codex/**` | pending |
+| T5.4 | codex plugin | `task/T5.4-codex` | `plugins/codex/**` | **held** until T5.3's manifest exists, so two workers do not guess independently at the same structure |
+| T5.6 | `ask --readers-out` / `--readers-in` | `task/T5.6-readers-io` | `packages/cli/src/commands/ask.ts` · `tests/ask.test.ts` | pending — added mid-wave from T5.2's finding |
 | T5.5 | `potsherd setup` | `task/T5.5-setup` | `packages/cli/src/commands/setup.ts` · `packages/core/src/setup.ts` · `tests/setup.test.ts` | pending |
 
 **RESERVED — no worker edits these.** `packages/core/src/index.ts`, `packages/cli/src/index.ts`,
@@ -72,3 +73,34 @@ interactive session. Four of the DoD boxes can only be closed that way:
 
 Transcripts get pasted into `HANDOFF.md`. A box I cannot demonstrate is recorded OPEN, not passed —
 `plans/08` already carries one such box from phase 3 for exactly this reason.
+
+## worker log
+
+### T5.2 — merged
+
+Answered the question its brief put to it directly, and the answer was no.
+**A SKILL.md cannot supply `readerFn`** — it is a TypeScript closure handed to `ask()` by a
+TypeScript caller, and a skill's only executable surfaces are Bash and Claude Code's tools. So the
+plugin's `ask` reproduces the fan-out's *shape* (binary shortlist → six native Agent readers →
+synthesis, with `READER_SYSTEM` quoted verbatim from `ask.ts`) but **loses `filterAnswer`**, the
+code-enforced citation filter that is this product's central claim. It says so on its own last line
+and routes to `potsherd ask` for the code-checked answer. **It does not claim the guarantee.**
+
+Then it specified the fix rather than leaving the hole: `--readers-out` / `--readers-in`, buildable
+**entirely through the existing public `AskOptions`** with zero edits to `ask.ts`. Added as **T5.6**.
+
+Two things it caught that would have failed silently:
+- **plugin name and `.mcp.json` server key must both be `potsherd`** — tools resolve as
+  `mcp__plugin_<plugin>_<server>__<tool>`, so renaming either leaves the agent **with no tools**
+  rather than failing to load. Relayed to T5.3 mid-flight.
+- **`plugins/claude-code/bin/potsherd` was in nobody's DELIVER list** and `/potsherd` is inert
+  without it. My omission in this table; assigned to T5.3.
+
+It also **verified two plan facts instead of "correcting" them**: `arguments: verb rest` is a real
+skill field, and the space in `Bash(${CLAUDE_PLUGIN_ROOT}/bin/potsherd *)` is correct for a skill
+where the `Bash(git:*)` colon form is settings syntax. Everything checked twice, against live docs
+**and** real installed plugins, pinned to Claude Code **2.1.239**.
+
+Three candidate descriptions for `remembering-sessions` sit commented in its frontmatter; it ships
+the imperative-first one. **The orchestrator tests all three** — see the 11-step script in
+`phases/phase-5/registration-T5.2.txt` §3.
