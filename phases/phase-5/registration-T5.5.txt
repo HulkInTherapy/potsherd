@@ -230,7 +230,7 @@ so this is insurance, not a fix.
   potsherd setup --cursor --dry-run       # the diff, and nothing written
   potsherd setup --all --status
   potsherd doctor --privacy | sed -n '/explicit y/,/leaves this machine/p'
-  pnpm test                               # 1,092 with T5.5, up from 1,041
+  pnpm test                               # 1,093 with T5.5, up from 1,041
 
 Two things T5.5 could not do, both recorded OPEN rather than passed:
 
@@ -241,9 +241,18 @@ Two things T5.5 could not do, both recorded OPEN rather than passed:
     all four, `ClientSpec.verified` carries the same fact in code, and the
     consent screen prints "unverified" above the diff for each of them.
 
-  - `packages/mcp` does not exist yet (T5.1 owns it), so no stanza `setup`
-    writes has been spawned by a real client. `setup` assumes the server is
-    `potsherd-mcp` on PATH, or `<checkout>/packages/mcp/dist/index.js` run by
-    an absolute `node`. If T5.1 ships a different bin name or entry path, the
-    two constants to change are `MCP_BIN` and `MCP_ENTRY_RELATIVE` at the top
-    of `packages/core/src/setup.ts`, and nothing else.
+  - no stanza `setup` writes has been spawned by a real MCP client, because
+    nothing here can run cursor, codex, gemini, opencode, copilot or pi. The
+    write path itself *was* exercised end to end against T5.1's real
+    `potsherd-mcp`, symlinked onto a scratch PATH: `setup --cursor --yes`
+    merged the stanza beside three other servers, took the backup, `--status`
+    then reported it registered and runnable, and `--remove --yes` took it out
+    again leaving the other three untouched.
+
+    The two assumptions `setup` makes about the server were checked against
+    T5.1's `packages/mcp/package.json` after it landed, and both hold: the bin
+    is named `potsherd-mcp`, and `dist/index.js` is a single bundled file a
+    client's config can name directly — T5.1's own bin script says so. If
+    either ever changes, the two constants to change are `MCP_BIN` and
+    `MCP_ENTRY_RELATIVE` at the top of `packages/core/src/setup.ts`, and
+    nothing else.
