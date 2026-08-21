@@ -1283,10 +1283,10 @@ describe('an open thread is checkable in the terminal, not only in --json', () =
     why: 'prepared statements were breaking',
     sessionId: POOLER,
     id8: POOLER.slice(0, 8),
-    project: 'api',
+    project: '/Users/dev/api',
     ts: '2026-08-01T14:30:00Z',
     evidenceSeqs: [12, 19] as readonly number[],
-    otherProject: 'web',
+    otherProject: '/Users/dev/web',
     otherSessionIds: [],
     overlap: { files: [] as readonly string[], topics: ['pooling'] as readonly string[] },
     score: 2.1,
@@ -1312,6 +1312,11 @@ describe('an open thread is checkable in the terminal, not only in --json', () =
       renderAsk(r, new Theme({ color: false, width: 80 }), new Date('2026-08-21T00:00:00Z')),
     );
     expect(text).toContain('@12,19');
+    // Both halves of "decided in A, not seen in B" must survive the width.
+    // Rendering raw absolute project paths tail-truncated B off the end, which
+    // deletes the half of the claim that carries the finding.
+    expect(text).toContain('not seen in web');
+    expect(text).not.toContain('/Users/');
     expect(text).toContain(OPEN_THREAD_LABEL);
     for (const line of text.split('\n')) expect(line.length).toBeLessThanOrEqual(80);
   });

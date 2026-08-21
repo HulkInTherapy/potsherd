@@ -4,6 +4,7 @@ import * as f from '../format.js';
 import { MASK_RE } from '../redact.js';
 import { ELISION_RE } from '../redact-elide.js';
 import { OPEN_THREAD_LABEL, type OpenThread } from '../open-threads.js';
+import { projectName } from '../recall.js';
 import { ANSWER_MAX_WORDS, STRICT_MIN_EVIDENCE, type AskEvidence, type AskResult } from '../ask.js';
 
 /**
@@ -159,7 +160,15 @@ function evidenceLine(e: AskEvidence, t: Theme, now: Date): string[] {
  */
 function threadLines(o: OpenThread, t: Theme, now: Date): string[] {
   const width = t.width - INDENT.length;
-  const head = `${t.warn(OPEN_THREAD_LABEL)} ${t.sep} decided in ${o.project}, not seen in ${o.otherProject}`;
+  // Both halves of the claim are load-bearing — "decided in A, **not seen in
+  // B**" — so B must never be the half that falls off the end. Rendering the
+  // raw absolute project paths overflowed 80 columns and tail-truncated B away
+  // entirely, while the EVIDENCE lines three rows below used the short project
+  // name for the very same projects. Same function, same output, and the line
+  // now fits.
+  const head =
+    `${t.warn(OPEN_THREAD_LABEL)} ${t.sep} ` +
+    `decided in ${projectName(o.project)}, not seen in ${projectName(o.otherProject)}`;
   const out = [INDENT + f.clip(head, t.width, t)];
   for (const line of f.wrap(o.what, width - 4)) out.push(INDENT + '    ' + line);
   // "Cited or dropped" has to survive the render, not just the rule pass. The
@@ -167,7 +176,7 @@ function threadLines(o: OpenThread, t: Theme, now: Date): string[] {
   // this line used to show no seq at all, so the one claim potsherd makes about
   // an *absence* was the one claim a reader could not go and check.
   const seqs = o.evidenceSeqs.length ? `@${o.evidenceSeqs.join(',')}` : '';
-  const src = `${o.project}/${o.id8}${seqs}  ${o.ts ? f.shortDateTime(o.ts, now) : t.dash}`;
+  const src = `${projectName(o.project)}/${o.id8}${seqs}  ${o.ts ? f.shortDateTime(o.ts, now) : t.dash}`;
   out.push(INDENT + '    ' + t.dim(f.clip(src, width - 4, t)));
   if (o.note.trim()) {
     for (const line of f.wrap(o.note.trim(), width - 4)) out.push(INDENT + '    ' + t.dim(line));
