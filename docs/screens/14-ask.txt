@@ -1,0 +1,28 @@
+potsherd ask "what did we decide about prepared statements behind the pooler?"
+
+ANSWER
+  Transaction pooling mode drops session state, so server-side prepared
+  statements don't survive across a transaction boundary. [1] The decision was
+  to have the client stop preparing statements by setting
+  statement_cache_size=0. [2] This was verified: the test failed with the old
+  client config, showing a "prepared statement already exists" error, and passed
+  once the cache was disabled. [3]
+
+EVIDENCE
+  [1] data-pipeline/9c4d2f18  21 aug 09:23  "That will hold, but transaction p…"
+  [2] data-pipeline/9c4d2f18  21 aug 09:31  "The change here is one line eithe…"
+  [3] data-pipeline/9c4d2f18  21 aug 09:42  "Done. The test fails against the…"
+
+OPEN THREADS
+  possible open thread · decided in event-bus, not seen in data-pipeline
+      Route delivery consumers through connection pooler on port 6432 instead of
+      direct postgres on port 5432
+      event-bus/b2181bfe@1,2  11 aug 11:38
+      This is a concrete, reusable postgres infra practice (route many
+      concurrent consumers through a pooler to avoid hitting connection limits)
+      that's worth flagging if data-pipeline also connects directly to postgres.
+
+  6 of 65 sessions read · 1 answered · 32.6s · $0.127 est.
+  searched 6 of 65 matching sessions; raise --k to widen
+
+  next  potsherd graft 9c4d2f18

@@ -8,8 +8,10 @@
 # What it runs against is the demo corpus (scripts/make-demo-corpus.mjs): a
 # synthetic ~/.claude whose audit reproduces the reference machine's measured
 # numbers with none of its project names, prompts or paths. HOME is pointed at
-# a throwaway directory for the whole run, so every path renders as `~/.claude`
-# and `~/.potsherd` and potsherd never sees, reads or writes the real ones.
+# a throwaway directory for the thirteen offline screens, so every path renders
+# as `~/.claude` and `~/.potsherd` and potsherd never sees, reads or writes the
+# real ones. The two model screens are the exception and say why at the point
+# they make it ("the two model screens", below).
 #
 # The file numbers are the order the readme reads them in. The capture order is
 # different, because every screen reports on the state the one before it left:
@@ -19,21 +21,35 @@
 #   03      audit again              the sweep is off
 #   07      index                    parses, redacts and indexes what rescue saved
 #   08..12  ls, find, stats, show    all read the index, so all come after 07
-#   04, 05  doctor                   captured last on purpose, so that it reports
-#                                    a populated index rather than "nothing
+#   04, 05  doctor                   captured after those, so that it reports a
+#                                    populated index rather than "nothing
 #                                    indexed yet — run potsherd index"
+#   14, 15  ask, graft               last: both need cards, and a card would put
+#                                    a model-written title on `ls` and `find`
 #
 # `audit` therefore has to be captured before `rescue` has run and again after,
-# and nothing that reads the index can be captured before `index` has built it.
+# nothing that reads the index can be captured before `index` has built it, and
+# nothing that reads a *card* may be captured before the screens that show what
+# the archive looks like without one.
 #
-# Three things in the output are not fixed by the corpus and cannot be:
+# Four things in the output are not fixed by the corpus and cannot be:
 #   - the date in every heading is today's date, from the system clock;
 #   - `doctor`'s heading carries this machine's node version;
 #   - `index`, `find` and `stats` print how long they took, which is a
-#     measurement of this machine and moves by a few milliseconds a run.
+#     measurement of this machine and moves by a few milliseconds a run;
+#   - the two model screens carry model-written text. 14-ask.txt's ANSWER, its
+#     open-thread notes and how many threads survive differ every capture;
+#     15-graft.txt is `--no-model` but prints the stored *card* verbatim, and a
+#     model wrote that, so re-carding rewords it too. What must not change
+#     about either is asserted at the bottom of this file rather than diffed.
 # Everything else is byte-identical between runs. Regenerating on a different
 # day therefore produces a one-character-per-heading diff, and that is correct:
 # the date is real output, not a caption.
+#
+# Two of the fifteen need a model backend. Without one the script keeps their
+# committed copies, says so, and still asserts them; POTSHERD_SCREENS_NO_MODEL=1
+# forces that path. With one, the run cards 31 transcripts first and takes
+# about seven minutes rather than one.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -50,6 +66,11 @@ fi
 
 rm -rf "$demo"
 node "$repo/scripts/make-demo-corpus.mjs" "$demo/.claude"
+
+# Kept before HOME is moved, for the two screens that make a model call. See
+# `shot_model` below: a harness's login lives under the *developer's* HOME, and
+# the demo HOME has none, so `claude -p` there answers "Not logged in".
+real_home="$HOME"
 
 # The demo HOME is the whole point: `tildify` turns it into `~`, so the screens
 # name no real directory. CLAUDE_CONFIG_DIR / POTSHERD_DIR would both override
@@ -78,8 +99,23 @@ mkdir -p "$screens"
 # Removed up front so a stale screen can never survive a rename and go on being
 # linked from the readme, and so a capture that fails leaves a missing file
 # rather than yesterday's output.
-rm -f "$screens"/*.txt \
-      "$screens/00-audit-before-rescue.txt"
+#
+# Named one by one rather than as `*.txt`, which is what it used to be. Two of
+# the fifteen (`ask`, `graft`) need a model, and a `*.txt` here would delete
+# them on a machine with no backend and then fail the assertions for their
+# absence — turning "this developer cannot regenerate two screens" into "this
+# developer cannot run the script at all". Deleting only what the run is about
+# to write keeps both properties: a screen this run captures can never be
+# yesterday's, and a screen it skips is left exactly as committed and is still
+# asserted below.
+offline_screens=(
+  01-audit.txt 02-rescue.txt 03-audit-after.txt 04-doctor.txt
+  05-doctor-privacy.txt 06-audit-sweep.txt 07-index.txt 08-ls.txt
+  09-find.txt 10-stats.txt 11-show.txt 12-ls-ghosts.txt 13-find-redacted.txt
+)
+model_screens=(14-ask.txt 15-graft.txt)
+for f in "${offline_screens[@]}"; do rm -f "$screens/$f"; done
+rm -f "$screens/00-audit-before-rescue.txt"
 
 # --width 80 --no-color on every capture: the screens are a fixed 80-column
 # artefact, not whatever terminal happened to run this.
@@ -145,9 +181,106 @@ shot 11-show.txt         show 9c4d2f18
 # them. The assertions below fail the build if a raw one ever reaches a screen.
 shot 13-find-redacted.txt find "redacted aws"
 
-# Last, so that both doctor screens report on an index that exists.
+# Last of the offline screens, so that both doctor screens report on an index
+# that exists.
 shot_in_project 04-doctor.txt       doctor
 shot_in_project 05-doctor-privacy.txt doctor --privacy
+
+# ------------------------------------------------------- the two model screens
+#
+# `05`'s moments 4 and 5 — `ask` and `graft` — and the only two screens here
+# that cannot be captured offline. Both need a **card**, and a card is a model
+# call; `ask` additionally makes its reader and synthesizer calls at capture
+# time.
+#
+# ## why these two run with the developer's own HOME
+#
+# Everything above runs with `HOME="$demo"` so that `tildify` renders every
+# path as `~`. A model call cannot: on every subscription path the harness's
+# login lives under the *developer's* HOME, and inside the demo one `claude -p`
+# answers `Not logged in · Please run /login`. Setting CLAUDE_CONFIG_DIR at it
+# does not help — the harness then wants its own `.claude.json` inside that
+# directory, and `~/.claude` is a read-only input to this project.
+#
+# So `shot_model` puts HOME back and points potsherd at the demo corpus with
+# `--potsherd-dir` / `--claude-dir` instead. potsherd still reads and writes
+# nothing but the synthetic tree; only the harness sees the real home. That is
+# safe for `ask` and for `card` because neither prints a path belonging to the
+# machine it ran on: `card` prints its own `--potsherd-dir` and nothing else,
+# and the only paths on an `ask` screen are the corpus's own `/home/dev/<name>`
+# project directories, which is what `open-threads.ts` names a project by. The
+# forbidden-string assertion below fails the build if a `/Users/` path ever
+# reaches one anyway.
+#
+# It is *not* safe for `graft`, whose receipt names the file it wrote in the
+# directory you ran it in. So graft stays under the demo HOME, from
+# `~/work/demo-project` like the doctor screens, and takes `--no-model`: the
+# stored card verbatim, labelled unsummarised, which is the path `graft --help`
+# documents for a machine with no backend. A model-path brief would be the
+# better screen and it cannot be had at the same time as a `~` in that line.
+shot_model() {
+  local out="$1"; shift
+  echo "  $out  <-  potsherd $*  (model call, developer's HOME)"
+  env HOME="$real_home" node "$bin" "$@" \
+    --potsherd-dir "$demo/.potsherd" --claude-dir "$demo/.claude" \
+    --width 80 --no-color >"$screens/$out" 2>/dev/null
+}
+
+# Is there a backend at all? `card --probe` makes one tiny call and stops, which
+# is the cheapest honest answer — cheaper than discovering it inside a 6-minute
+# card run. A machine with no backend keeps its committed copies of the two
+# screens and is told so; it is not failed.
+have_model=0
+if [ "${POTSHERD_SCREENS_NO_MODEL:-}" = "1" ]; then
+  echo "  POTSHERD_SCREENS_NO_MODEL=1 — keeping the committed ask and graft screens"
+elif env HOME="$real_home" node "$bin" card --probe \
+     --potsherd-dir "$demo/.potsherd" --claude-dir "$demo/.claude" >/dev/null 2>&1; then
+  have_model=1
+else
+  echo "  no model backend — keeping the committed ask and graft screens." >&2
+  echo "  set one up (claude, codex or ANTHROPIC_API_KEY) to regenerate them." >&2
+fi
+
+if [ "$have_model" = "1" ]; then
+  for f in "${model_screens[@]}"; do rm -f "$screens/$f"; done
+
+  # Every surviving session gets a card. The ghosts and the 197 subagents do
+  # not: `--all` over the whole corpus is 217 calls and ~35 minutes, which is
+  # not a thing a screenshot script may cost, while the 31 transcripts are 39
+  # calls and about six and a half minutes.
+  #
+  # It is deliberately *not* narrowed to the projects the open thread turns out
+  # to run between. Two reasons, and the second is the one that matters:
+  #
+  #   1. `open-threads.ts` strikes a token that appears in more than 30% of the
+  #      cards as carrying no project-distinguishing information, and switches
+  #      that filter off below twenty cards. A four-card index therefore does
+  #      not behave like an archive; it behaves like a fixture.
+  #   2. Choosing which projects may be project B, *after* seeing which one the
+  #      catch came out of, would make the screen a picture of the script's
+  #      choices rather than of the corpus. Everything carded, and whatever the
+  #      rule pass and the model then agree on is what the screen shows —
+  #      including nothing, which is what the assertions below are for.
+  echo "  cards  <-  potsherd card --all  (31 transcripts, ~6m, ~39 calls)"
+  env HOME="$real_home" node "$bin" card --all \
+    --sidechains exclude --ghosts exclude --yes \
+    --potsherd-dir "$demo/.potsherd" --claude-dir "$demo/.claude" \
+    --width 80 --no-color >/dev/null 2>&1 || {
+      echo "  card --all failed" >&2; exit 1; }
+
+  # `05` moment 4 — ANSWER / EVIDENCE / OPEN THREADS. The question is the one
+  # the corpus's whole planted thread is about, and the answer comes back
+  # entirely out of `data-pipeline`; the open threads come from somewhere else
+  # again. That is the shape `05` §4 describes and it is the reason this screen
+  # is worth a capture: the connection is made from the cards, not from
+  # anything the query matched.
+  shot_model 14-ask.txt ask "what did we decide about prepared statements behind the pooler?" --no-vec
+
+  # `05` moment 5, and it is captured like the doctor screens rather than like
+  # the other model screen, because the receipt names the file graft wrote in
+  # the directory it was run in.
+  shot_in_project 15-graft.txt graft 9c4d2f18 --about pgbouncer --no-model
+fi
 
 # ---------------------------------------------------------------- assertions
 #
@@ -158,16 +291,30 @@ shot_in_project 05-doctor-privacy.txt doctor --privacy
 # The readme is checked here too, and not only the screens. It is the same
 # promise — no real project, no real client, no real path — and the readme is
 # the file most likely to acquire one by hand.
-python3 - "$screens" "$repo/README.md" <<'PY'
+#
+# `doctor`'s heading and its `database` line are the two published *numbers*
+# that describe the build rather than the corpus, and both had gone stale: the
+# committed screen said `potsherd 0.1.0` and `schema v4 of v4` for the whole of
+# phases 2, 3 and 4, against a shipped 0.4.0 and eight migrations. They are
+# passed in here from the binary and the built store so the assertion below can
+# say so out loud rather than leaving it to whoever next reads the screen.
+version="$(node "$bin" --version)"
+schema="$(node -e 'import(process.argv[1]).then((m) => console.log(m.latestSchemaVersion()))' \
+  "$repo/packages/core/dist/db.js")"
+
+python3 - "$screens" "$repo/README.md" "$version" "$schema" <<'PY'
 import re, sys, pathlib
 
 screens = pathlib.Path(sys.argv[1])
 readme = pathlib.Path(sys.argv[2])
+version = sys.argv[3].strip()
+schema = sys.argv[4].strip()
 expected = [
     '01-audit.txt', '02-rescue.txt', '03-audit-after.txt',
     '04-doctor.txt', '05-doctor-privacy.txt', '06-audit-sweep.txt',
     '07-index.txt', '08-ls.txt', '09-find.txt', '10-stats.txt',
     '11-show.txt', '12-ls-ghosts.txt', '13-find-redacted.txt',
+    '14-ask.txt', '15-graft.txt',
 ]
 # Names, paths and client work from the machine the numbers were measured on.
 # None of them may ever reach a published screen or the readme.
@@ -187,6 +334,26 @@ leaked = {
     'password in a url': re.compile(r'://[^\s:@/]*:[^\s:@/‹]{8,}@'),
 }
 
+def columned(name, text):
+    """
+    The lines of a screen that are held to 80 columns.
+
+    Every line of every screen, with one exception. `15-graft.txt` is the only
+    screen with a body that is deliberately *not* an 80-column artefact:
+    `render/graft.ts` prints the brief byte for byte as it wrote it to
+    `./.potsherd/graft-<id8>.md`, because the thing you read and the thing you
+    paste into an agent cannot be two different strings. The brief is markdown
+    for a model to read, not a table for a terminal to draw, and its lines run
+    long. So the rule applies to graft's *receipt* — everything above the `─`,
+    rendered by the same `Card` as every other screen here — and stops there.
+    """
+    lines = text.splitlines()
+    if name != '15-graft.txt':
+        return lines
+    end = next((i for i, l in enumerate(lines) if l.startswith('─')), len(lines))
+    return lines[:end]
+
+
 bad = []
 targets = [(name, screens / name) for name in expected] + [('README.md', readme)]
 for name, p in targets:
@@ -197,9 +364,10 @@ for name, p in targets:
     if not text.strip():
         bad.append(f'{name}: empty')
     # The readme is markdown and wraps at 88; only the screens are an 80-column
-    # artefact, and only their lines are counted.
+    # artefact, and only their lines are counted. See `columned` for the one
+    # screen whose body is exempt, and why.
     if p != readme:
-        for i, line in enumerate(text.splitlines(), 1):
+        for i, line in enumerate(columned(name, text), 1):
             if len(line) > 80:
                 bad.append(f'{name}:{i}: {len(line)} characters (max 80)\n    {line}')
     for word in forbidden:
@@ -217,10 +385,26 @@ if stray:
 # The find screen is the one that carries the whole claim. If it ever stops
 # returning both halves, the readme is quoting a screenshot that no longer
 # proves anything, and that must break the build rather than pass quietly.
+#
+# `· sidechain` used to be one of the four strings required here, and it had
+# stopped appearing — not because the search screen lost its point, but
+# because T3.6 gave it a better one. A subagent hit no longer gets a block of
+# its own headed `claude · sidechain`; it is clustered under the session that
+# spawned it and labelled `↳ subagent <id8>` on its own snippet line, so the
+# reader sees the conversation rather than two disconnected rows. The screen
+# still proves what it is here to prove — the assertion was pinned to the old
+# rendering of the fact rather than to the fact — so it now asks for the
+# marker T3.6 prints and for the footer's own count of them.
 find = screens / '09-find.txt'
 if find.exists():
     text = find.read_text(encoding='utf-8')
-    for needed in ['· live', '· ghost', '· sidechain', 'assistant side not recoverable']:
+    for needed in [
+        '· live',
+        '· ghost',
+        'assistant side not recoverable',
+        '↳ subagent',
+        'from subagents',
+    ]:
         if needed not in text:
             bad.append(f'09-find.txt: no {needed!r} row — the search screen has lost its point')
 
@@ -231,16 +415,95 @@ red = screens / '13-find-redacted.txt'
 if red.exists() and '‹redacted:' not in red.read_text(encoding='utf-8'):
     bad.append('13-find-redacted.txt: no mask on it — nothing was redacted')
 
+# A mask is one atom. Half of one on a published screen says potsherd cut a
+# credential's own marker in two, which reads as corrupt output and invites the
+# reader to think half of something leaked. `render/find.ts` and
+# `search/snippet.ts` both hold the cut back to the mask's edge; this is the
+# assertion that says so on the artefact rather than only in a unit test.
+# `‹` and `›` are reserved for the two markers and cannot occur in base64, in a
+# shell token or in a json key (redact.ts, redact-elide.ts), so an unbalanced
+# one on a line is a cut mask and nothing else. Balance rather than a regex,
+# because the cut can land on either side: `‹redacted…` from the tail and
+# `…auth:201b2d22›` from the head are the same defect.
+for name in expected + ['README.md']:
+    p = readme if name == 'README.md' else screens / name
+    if not p.exists():
+        continue
+    for i, line in enumerate(p.read_text(encoding='utf-8').splitlines(), 1):
+        depth = 0
+        for ch in line:
+            if ch == '‹':
+                depth += 1
+            elif ch == '›':
+                depth -= 1
+                if depth < 0:
+                    break
+        if depth != 0:
+            bad.append(f'{name}:{i}: a mask was cut in half\n    {line.strip()}')
+            break
+
+# The two numbers on `doctor` that describe the *build* and not the corpus.
+# Both had gone stale — a published `potsherd 0.1.0 · schema v4 of v4` against
+# a shipped 0.4.0 and eight migrations — and nothing said so, because every
+# other number on that screen is fixed by the demo corpus and kept being right.
+doctor = screens / '04-doctor.txt'
+if doctor.exists():
+    text = doctor.read_text(encoding='utf-8')
+    head = text.splitlines()[0] if text.splitlines() else ''
+    if f'potsherd {version}' not in head:
+        bad.append(
+            f'04-doctor.txt: heading says {head!r}, but the binary is {version}'
+        )
+    want_schema = f'schema v{schema} of v{schema}'
+    if want_schema not in text:
+        bad.append(
+            f'04-doctor.txt: no {want_schema!r} line — '
+            'the published schema version is not the one the store migrates to'
+        )
+
+# `05` moment 4, and the phase-4 definition of done: *the screenshot: one `ask`
+# with an open-thread catch*. The open-thread line is the one people quote and
+# it is also the one potsherd can most easily get wrong, so what is asserted
+# here is not "there is a section" but the three things that make the section
+# honest: the advisory label, the projects named in both directions, and a
+# citation on the half of the claim that *can* be cited. A run where the model
+# confirms nothing produces a screen with no OPEN THREADS block at all, and
+# that must fail here rather than be committed as a screenshot of the feature.
+ask = screens / '14-ask.txt'
+if ask.exists():
+    text = ask.read_text(encoding='utf-8')
+    for needed in ['ANSWER', 'EVIDENCE', 'OPEN THREADS', 'possible open thread', 'not seen in']:
+        if needed not in text:
+            bad.append(f'14-ask.txt: no {needed!r} — this is not an ask screen with a catch')
+    # `<project>/<id8>@<seq>` under the thread: the positive half of an open
+    # thread is cited even though the negative half cannot be, and a reader who
+    # cannot check the positive half is being asked to take it on faith.
+    if not re.search(r'/[0-9a-f]{8}@\d', text):
+        bad.append('14-ask.txt: the open thread cites no exchange a reader can open')
+
+# `05` moment 5. The brief's last line is the contract — it is what tells the
+# agent, and the person pasting it, where the thing came from.
+graft = screens / '15-graft.txt'
+if graft.exists():
+    text = graft.read_text(encoding='utf-8')
+    if 'source: claude ' not in text:
+        bad.append("15-graft.txt: no `source:` line — a brief with no provenance")
+    if 'graft-' not in text:
+        bad.append('15-graft.txt: does not say where the brief was written')
+
 if bad:
     print('\n'.join('  FAIL  ' + b for b in bad))
     sys.exit(1)
 
+# The same measure the column rule uses, so the number printed on success is
+# the number that would have failed: graft's brief is below the rule and is not
+# an 80-column artefact.
 widest = max(
-    max((len(l) for l in (screens / n).read_text(encoding='utf-8').splitlines()), default=0)
+    max((len(l) for l in columned(n, (screens / n).read_text(encoding='utf-8'))), default=0)
     for n in expected
 )
 print(f'  ok    {len(expected)} screens, widest line {widest} characters, '
-      'no forbidden strings, no unredacted credentials')
+      'no forbidden strings, no unredacted credentials, no cut masks')
 PY
 
 echo "done. screens in docs/screens/"

@@ -160,6 +160,38 @@ jobs:
 
           echo "the published privacy receipt matches the live command"
 
+      # `docs/screens/04-doctor.txt` is the second published artefact that can
+      # go on printing a number after it stopped being true, and it did: it
+      # said `potsherd 0.1.0 · schema v4 of v4` for the whole of phases 2, 3
+      # and 4, against a shipped 0.4.0 and eight migrations. Nothing caught it
+      # because every *other* number on that screen is fixed by the demo corpus
+      # and stayed right, so the screen looked current.
+      #
+      # These two are the only ones on it that describe the build rather than
+      # the corpus, so they are the only ones that need a step of their own —
+      # and this one needs no capture, no HOME and no corpus, which is why it
+      # is a grep and not a rerun of scripts/make-screens.sh.
+      - name: the published doctor screen names the shipped version and schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          screen=docs/screens/04-doctor.txt
+          version="$(node -p "require('./packages/cli/package.json').version")"
+          schema="$(node -e 'import(process.argv[1]).then((m) => console.log(m.latestSchemaVersion()))' \
+            "$PWD/packages/core/dist/db.js")"
+          head -n1 "$screen"
+          if ! head -n1 "$screen" | grep -qF "potsherd $version"; then
+            echo "$screen publishes a version that is not the one this build ships ($version)."
+            echo "Regenerate with:  bash scripts/make-screens.sh"
+            exit 1
+          fi
+          if ! grep -qF "schema v$schema of v$schema" "$screen"; then
+            echo "$screen publishes a schema version that is not v$schema, which is what the store migrates to."
+            echo "Regenerate with:  bash scripts/make-screens.sh"
+            exit 1
+          fi
+          echo "the doctor screen names potsherd $version and schema v$schema"
+
       # audit must agree with the standalone verifier on any corpus, including
       # an empty one and the committed fixture.
       - name: audit agrees with verify-audit.py

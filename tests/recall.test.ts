@@ -20,6 +20,7 @@ import {
   resumeCommand,
   sessionStats,
   showSession,
+  snippetLine,
   Theme,
   type Db,
 } from '@potsherd/core';
@@ -863,4 +864,89 @@ describe.skipIf(!hasModel)('recall: ghost vectors survive a second index — T3.
       vdb2.close();
     }
   }, 600_000);
+});
+
+/**
+ * **T4.8.** The *second* cut, and the one that was actually publishing half a
+ * mask.
+ *
+ * `search/snippet.ts` cuts a 200-character window out of the exchange;
+ * `render/find.ts` then cuts that window again to fit the terminal, around the
+ * highlighted match. Both had to learn that a mask is one atom, and the
+ * renderer had a failure mode the window cutter does not: **the highlight can
+ * land inside the mask.** `find "redacted aws"` matches the literal word
+ * `redacted` — eight characters in the middle of
+ * `‹redacted:basic-auth:201b2d22›` — so the window was centred on a fragment
+ * and `wordEdges` then pulled its end back to exactly the end of that
+ * fragment, which is the middle of the marker. That is how
+ * `docs/screens/13-find-redacted.txt` came to publish
+ * `postgres://ingest:‹redacted…` and fail the screenshot script's own
+ * assertion.
+ */
+describe('the find renderer never prints half a mask', () => {
+  const MASK = '‹redacted:basic-auth:201b2d22›';
+  const TEXT = `the importer cannot reach the pooler — postgres://ingest:${MASK}@db.internal:6432/crm times out but the direct port is fine`;
+
+  const balanced = (s: string): boolean => {
+    let depth = 0;
+    for (const ch of s) {
+      if (ch === '‹') depth++;
+      else if (ch === '›' && --depth < 0) return false;
+    }
+    return depth === 0;
+  };
+
+  /** A hit as `recall` hands one to the renderer, with the mask highlighted. */
+  const hit = (match?: { start: number; end: number }) =>
+    ({
+      kind: 'exchange',
+      sessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      isSidechain: false,
+      id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee:2',
+      seq: 2,
+      ts: '2025-11-22T16:11:48.698Z',
+      score: 0.0098,
+      from: [],
+      snippet: match ? { text: TEXT, match } : { text: TEXT },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any;
+
+  // Where `find "redacted aws"` puts the highlight: the word `redacted`,
+  // inside the marker.
+  const inside = { start: TEXT.indexOf('redacted'), end: TEXT.indexOf('redacted') + 8 };
+
+  it('holds at every width, with the highlight inside the mask', () => {
+    const t = new Theme({ color: false, width: 80 });
+    for (let w = 8; w <= 140; w++) {
+      expect(balanced(snippetLine(hit(inside), t, w)), `width ${w}`).toBe(true);
+    }
+  });
+
+  it('holds at every width with no highlight at all', () => {
+    // The no-match branch is a different cutter (`clipToWords`) and had the
+    // same defect for the same reason.
+    const t = new Theme({ color: false, width: 80 });
+    for (let w = 8; w <= 140; w++) {
+      expect(balanced(snippetLine(hit(), t, w)), `width ${w}`).toBe(true);
+    }
+  });
+
+  it('shows the whole mask at the width the screens are captured at', () => {
+    // 74 is what `renderFind` hands a snippet at `--width 80`, and it is what
+    // docs/screens/13-find-redacted.txt is cut to.
+    const out = snippetLine(hit(inside), new Theme({ color: false, width: 80 }), 74);
+    expect(out).toContain(MASK);
+  });
+
+  it('holds under --ascii, where the marker is folded to <…>', () => {
+    const t = new Theme({ color: false, ascii: true, width: 80 });
+    for (let w = 8; w <= 140; w++) {
+      const out = t.asciiLine(snippetLine(hit(inside), t, w));
+      // The ascii fold turns `‹`/`›` into `<`/`>`, so balance is asserted on
+      // the marker word instead: an opening `<redacted` must be closed.
+      const opens = (out.match(/<(?:redacted|elided)/g) ?? []).length;
+      const closes = (out.match(/>/g) ?? []).length;
+      expect(closes, `width ${w}: ${out}`).toBeGreaterThanOrEqual(opens);
+    }
+  });
 });

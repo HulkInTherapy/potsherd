@@ -1,4 +1,4 @@
-potsherd audit · ~/.claude · 21 aug 2026
+potsherd audit · ~/.claude · 22 aug 2026
 
   sessions ever started        330   nov 2025 → aug 2026
   still on disk                 31
@@ -9,5 +9,5 @@ potsherd audit · ~/.claude · 21 aug 2026
   next sweep will delete         0   nothing in the next 7 days
   cleanupPeriodDays           3650   the sweep is effectively off
 
-  299 ghosts rebuilt · 1.1 MB archived · last rescue 21 aug 2026
+  299 ghosts rebuilt · 1.1 MB archived · last rescue 22 aug 2026
   run  potsherd guard  to take a copy at every startup, automatically.

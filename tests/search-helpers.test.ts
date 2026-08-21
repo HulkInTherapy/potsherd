@@ -200,3 +200,76 @@ describe('snippet selection', () => {
     expect(clipToWords('short', 12)).toBe('short');
   });
 });
+
+/**
+ * **T4.8.** A mask is one atom, and a word edge is not a safe edge.
+ *
+ * Redaction runs at index time, so every string a snippet is cut out of can
+ * carry `‹redacted:basic-auth:201b2d22›` — which is four *words* to
+ * `wordSpans` (`redacted`, `basic`, `auth`, `201b2d22`), so three of its
+ * internal boundaries are legal word edges. Every cutter in the snippet path
+ * happily stopped at one, and `docs/screens/13-find-redacted.txt` had been
+ * failing `scripts/make-screens.sh`'s own "a mask is visible on this screen"
+ * assertion for the whole of phases 2, 3 and 4 as a result: the only mask on
+ * the published screen came out as `postgres://ingest:‹redacted…`.
+ *
+ * Half a mask is worse than no mask. It reads as corrupt output, and it
+ * invites the reader of a screenshot to conclude that potsherd printed half of
+ * a credential — which is the one thing a tool that redacts must never look
+ * like it did.
+ *
+ * The property is asserted by *balance* rather than by matching a shape: `‹`
+ * and `›` cannot occur in base64, in a shell token or in a json key
+ * (`redact.ts`, `redact-elide.ts`), so an unbalanced one in the output is a
+ * cut marker and nothing else — whichever end it was cut at.
+ */
+describe('a snippet never cuts a redaction mask in half', () => {
+  /** The shape `index` leaves behind when a dsn is pasted into a prompt. */
+  const MASK = '‹redacted:basic-auth:201b2d22›';
+  const DSN = `the importer cannot reach the pooler — postgres://ingest:${MASK}@db.internal:6432/crm times out but the direct port is fine`;
+
+  /** True when every `‹` in `s` is closed and no `›` opens one. */
+  const balanced = (s: string): boolean => {
+    let depth = 0;
+    for (const ch of s) {
+      if (ch === '‹') depth++;
+      else if (ch === '›' && --depth < 0) return false;
+    }
+    return depth === 0;
+  };
+
+  it('holds for clipToWords at every width', () => {
+    // Every width, not a chosen one: the cut lands inside the mask for a
+    // contiguous run of them, and picking a width by hand is how the original
+    // defect survived a test suite that already covered this function.
+    for (let w = 1; w <= DSN.length + 2; w++) {
+      expect(balanced(clipToWords(DSN, w)), `width ${w}`).toBe(true);
+    }
+  });
+
+  it('holds for the 200-character window, at every width', () => {
+    const long = `${'lead word '.repeat(20)}${DSN} ${'tail word '.repeat(20)}`;
+    for (let w = 8; w <= 240; w++) {
+      const snip = denseSnippet(long, ['redacted', 'aws'], w);
+      expect(balanced(snip.text), `width ${w}`).toBe(true);
+    }
+  });
+
+  it('keeps the whole mask rather than half of it when there is room', () => {
+    const snip = denseSnippet(DSN, ['redacted'], 90);
+    expect(snip.text).toContain(MASK);
+  });
+
+  /**
+   * The elision marker is the same atom with a different word: a `Read` result
+   * holding a pasted screenshot becomes `‹elided:image/png:109362 bytes›`, and
+   * it contains a space, so it is even easier to cut at a "word edge".
+   */
+  it('holds for an elision marker too', () => {
+    const text = `${'lead word '.repeat(10)}‹elided:image/png:109362 bytes› ${'tail word '.repeat(10)}`;
+    for (let w = 8; w <= 160; w++) {
+      expect(balanced(clipToWords(text, w)), `clip ${w}`).toBe(true);
+      expect(balanced(denseSnippet(text, ['elided'], w).text), `dense ${w}`).toBe(true);
+    }
+  });
+});

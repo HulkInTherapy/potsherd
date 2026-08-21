@@ -29,7 +29,24 @@
  * renderer relies on is: **a snippet never starts or ends mid-word, and when
  * the text contains a query term the snippet contains one too, with offsets
  * saying where to highlight it.**
+ *
+ * ## What T4.8 added, and why
+ *
+ * A word edge is not a safe edge. Redaction runs at index time, so the text a
+ * window is cut out of can contain `‹redacted:basic-auth:201b2d22›` — which is
+ * four words to {@link wordSpans}, so three of its internal boundaries are
+ * legal word edges that cut the marker in half. `docs/screens/13-find-redacted.txt`
+ * had been failing `scripts/make-screens.sh`'s own "a mask is visible on this
+ * screen" assertion for exactly that reason, publishing
+ * `postgres://ingest:‹redacted…`. So the invariant above gains a clause:
+ * **a snippet edge never falls inside a redaction mask or an elision marker**
+ * ({@link maskSpans}, {@link offMask}), and it holds for the 200-character
+ * window here and for the second, narrower cut `render/find.ts` makes to fit
+ * the terminal.
  */
+
+import { MASK_RE } from '../redact.js';
+import { ELISION_RE } from '../redact-elide.js';
 
 export const SNIPPET_CHARS = 200;
 
@@ -41,6 +58,83 @@ const SENTENCE_REACH = 48;
 
 function collapse(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
+}
+
+// --------------------------------------------------------------- mask atoms
+
+/** A `‹redacted:…›` or `‹elided:…›` marker, and where it sits. */
+export interface MaskSpan {
+  start: number;
+  /** Exclusive. */
+  end: number;
+}
+
+/**
+ * Every redaction mask and elision marker in `text`, in order.
+ *
+ * Redaction runs at index time, so every string a snippet is cut out of can
+ * contain `‹redacted:aws:9f2b1c04›` (`redact.ts`) or
+ * `‹elided:image/png:109362 bytes›` (`redact-elide.ts`). Both are **one atom**,
+ * and a window edge that lands inside one is the defect this exists to
+ * prevent: `‹redacted:aws:9f2b…` is not a shorter version of the fact that a
+ * key was there, it is a fragment that reads like corrupt output and invites
+ * the reader to think potsherd printed half a credential.
+ *
+ * `render/ask.ts` has held this property for `ask` and `graft` quotes since
+ * T4.1 ({@link maskSafeCut} there). `find` did not, and its screenshot script
+ * had been failing its own "a mask is visible on this screen" assertion
+ * because of it: the only mask on `docs/screens/13-find-redacted.txt` came out
+ * as `postgres://ingest:‹redacted…`. Both cutters now snap to these spans.
+ *
+ * The patterns are imported from the two modules that own them rather than
+ * rewritten here, so a new marker shape is recognised by every cutter the day
+ * it is added.
+ */
+export function maskSpans(text: string): MaskSpan[] {
+  const out: MaskSpan[] = [];
+  if (!text.includes('‹')) return out;
+  for (const re of [MASK_RE, ELISION_RE]) {
+    const rx = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+    let m: RegExpExecArray | null;
+    while ((m = rx.exec(text)) !== null) out.push({ start: m.index, end: m.index + m[0].length });
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/** The mask `at` falls strictly inside, if any. Edges are not "inside". */
+export function maskAt(spans: readonly MaskSpan[], at: number): MaskSpan | undefined {
+  for (const s of spans) {
+    if (at <= s.start) return undefined; // sorted: nothing later can contain it
+    if (at < s.end) return s;
+  }
+  return undefined;
+}
+
+/**
+ * Move `at` off the inside of a mask, in the direction that keeps `[lo, hi]`
+ * visible.
+ *
+ * `prefer` says which way to go when both ends are available: `'back'` for a
+ * window's *end* (shorten rather than overrun the column) and `'forward'` for
+ * a window's *start*. The preference is given up when honouring it would cut
+ * the match out of the window, because a snippet that no longer shows why the
+ * result matched is a worse outcome than a slightly wider one.
+ */
+export function offMask(
+  spans: readonly MaskSpan[],
+  at: number,
+  prefer: 'back' | 'forward',
+  keep?: { start: number; end: number },
+): number {
+  const span = maskAt(spans, at);
+  if (!span) return at;
+  const back = span.start;
+  const forward = span.end;
+  const dropsMatch = (to: number) =>
+    keep !== undefined && (prefer === 'back' ? to < keep.end : to > keep.start);
+  const first = prefer === 'back' ? back : forward;
+  const second = prefer === 'back' ? forward : back;
+  return dropsMatch(first) ? second : first;
 }
 
 /** Upstream's snippet, verbatim in behaviour. */
@@ -140,29 +234,44 @@ export function isMostlyBoilerplate(text: string): boolean {
 
 // ----------------------------------------------------------------- windows
 
-/** Snap `at` back to a word edge so no snippet ever starts in mid-word. */
-function snapStart(spans: WordSpan[], at: number): number {
+/**
+ * Snap `at` back to a word edge so no snippet ever starts in mid-word — and
+ * never into the middle of a mask.
+ *
+ * A word edge is not enough on its own: `‹redacted:basic-auth:201b2d22›` is
+ * four words to {@link wordSpans} (`redacted`, `basic`, `auth`, `201b2d22`),
+ * so every boundary inside it is a legal word edge and three of them cut the
+ * atom in half.
+ */
+function snapStart(spans: WordSpan[], at: number, masks: readonly MaskSpan[] = []): number {
   if (at <= 0) return 0;
+  let out = at;
   for (const s of spans) {
     if (s.end <= at) continue;
     // `at` fell inside this word (or just before it): begin at the word.
-    return s.start;
+    out = s.start;
+    break;
   }
-  return at;
+  return offMask(masks, out, 'forward');
 }
 
-function snapEnd(text: string, spans: WordSpan[], at: number): number {
+function snapEnd(
+  text: string,
+  spans: WordSpan[],
+  at: number,
+  masks: readonly MaskSpan[] = [],
+): number {
   if (at >= text.length) return text.length;
   let end = at;
   for (const s of spans) {
     if (s.start >= at) break;
     end = s.end <= at ? s.end : s.start;
   }
-  if (end <= 0) return at;
+  if (end <= 0) return offMask(masks, at, 'back');
   // Keep the punctuation the sentence ended on; a snippet stopping at "so" is
   // worse than one stopping at "so." by exactly one character.
   while (end < text.length && end < at + 2 && /[.,;:!?)\]}"']/.test(text[end]!)) end++;
-  return end;
+  return offMask(masks, end, 'back');
 }
 
 /** The nearest sentence edge at or before `at`, or -1 when there is none near. */
@@ -196,6 +305,12 @@ export function clipToWords(text: string, max: number, ellip = '…'): string {
   // `cut === floor` is not the same as "no edge here": the search may have
   // stopped exactly on one. Ask the character, not the counter.
   if (!/\s/.test(text[cut] ?? '')) cut = room;
+  // A mask is one atom and the give-up branch above will happily land in the
+  // middle of one — it is exactly the "300-character token with no word edge"
+  // case. Back the cut up to the mask's own start: a line whose only content
+  // was a mask then renders as `…`, which is the correct outcome, because
+  // there was nothing quotable there.
+  cut = offMask(maskSpans(text), cut, 'back');
   return text.slice(0, cut).trimEnd() + ellip;
 }
 
@@ -218,12 +333,17 @@ export function matchSnippet(text: string, query: string, max = SNIPPET_CHARS): 
   if (at === -1) return { text: leadSnippet(text, max) };
 
   const spans = wordSpans(text);
+  const masks = maskSpans(text);
   const half = Math.max(0, Math.floor((max - needle.length) / 2));
   let rawStart = Math.max(0, at - half);
   rawStart = Math.min(rawStart, at);
-  rawStart = snapStart(spans, rawStart);
-  const rawEnd = snapEnd(text, spans, Math.min(text.length, rawStart + max));
-  const slice = text.slice(rawStart, Math.max(rawEnd, at + needle.length));
+  rawStart = snapStart(spans, rawStart, masks);
+  const rawEnd = snapEnd(text, spans, Math.min(text.length, rawStart + max), masks);
+  // `Math.max` can push the end back inside a mask the snap had just cleared,
+  // when the needle itself sits inside one. See {@link denseSnippet}.
+  const needleSpan = { start: at, end: at + needle.length };
+  const sliceEnd = offMask(masks, Math.max(rawEnd, at + needle.length), 'back', needleSpan);
+  const slice = text.slice(rawStart, sliceEnd);
 
   const lead = rawStart > 0 ? '…' : '';
   const tail = rawStart + slice.length < text.length ? '…' : '';
@@ -266,7 +386,8 @@ export function denseSnippet(
   if (!text) return { text: '' };
   const wanted = [...new Set(tokens.map((t) => t.toLowerCase()).filter(Boolean))];
   const spans = wordSpans(text);
-  if (wanted.length === 0 || spans.length === 0) return cleanLead(text, spans, max);
+  const masks = maskSpans(text);
+  if (wanted.length === 0 || spans.length === 0) return cleanLead(text, spans, max, masks);
 
   const hits: { span: WordSpan; token: string }[] = [];
   for (const span of spans) {
@@ -278,7 +399,7 @@ export function denseSnippet(
     }
     if (best !== null) hits.push({ span, token: best });
   }
-  if (hits.length === 0) return cleanLead(text, spans, max);
+  if (hits.length === 0) return cleanLead(text, spans, max, masks);
 
   // The whole text fits: quote all of it. A window is a compromise, and
   // opening a 54-character prompt with "…rows land in the ledger" when
@@ -299,14 +420,24 @@ export function denseSnippet(
     let start = snapStart(
       spans,
       Math.max(0, Math.min(first.span.start - LEAD_CONTEXT, text.length - max)),
+      masks,
     );
     if (start > first.span.start) start = first.span.start;
     const sentence = sentenceStartNear(text, first.span.start, SENTENCE_REACH);
     if (sentence >= 0 && sentence <= first.span.start && first.span.start - sentence <= max / 2) {
       start = sentence;
     }
-    let end = snapEnd(text, spans, Math.min(text.length, start + max));
+    let end = snapEnd(text, spans, Math.min(text.length, start + max), masks);
     if (end <= first.span.end) end = Math.min(text.length, first.span.end);
+    // The three lines above all override a mask-safe edge with a *word* edge —
+    // `first.span` is a word, and when the matched word is one of the four
+    // inside `‹redacted:basic-auth:201b2d22›` every one of them lands in the
+    // middle of the marker. Re-applied here rather than folded into each
+    // branch, so a fourth branch cannot forget it. `keep` is the match, so an
+    // edge that has to move moves the way that keeps the match in the window,
+    // which for a match *inside* a mask means keeping the whole mask.
+    start = offMask(masks, start, 'forward', first.span);
+    end = offMask(masks, end, 'back', first.span);
     const inside = hits.filter((h) => h.span.start >= start && h.span.end <= end);
     if (inside.length === 0) continue;
     const distinct = new Set(inside.map((h) => h.token)).size;
@@ -323,7 +454,7 @@ export function denseSnippet(
       pick: pick.span,
     });
   }
-  if (candidates.length === 0) return cleanLead(text, spans, max);
+  if (candidates.length === 0) return cleanLead(text, spans, max, masks);
 
   const clean = candidates.filter((c) => !c.boilerplate);
   const pool = clean.length > 0 ? clean : candidates;
@@ -336,19 +467,24 @@ export function denseSnippet(
 }
 
 /** The head of the text, skipping a boilerplate opening when prose follows. */
-function cleanLead(text: string, spans: WordSpan[], max: number): MatchSnippet {
+function cleanLead(
+  text: string,
+  spans: WordSpan[],
+  max: number,
+  masks: readonly MaskSpan[] = [],
+): MatchSnippet {
   let start = 0;
   if (isMostlyBoilerplate(text.slice(0, max))) {
     // Walk forward a window at a time looking for something a person wrote.
     for (let at = max; at < text.length; at += max) {
-      const from = snapStart(spans, at);
+      const from = snapStart(spans, at, masks);
       if (!isMostlyBoilerplate(text.slice(from, from + max))) {
         start = from;
         break;
       }
     }
   }
-  const end = snapEnd(text, spans, Math.min(text.length, start + max));
+  const end = snapEnd(text, spans, Math.min(text.length, start + max), masks);
   const lead = start > 0 ? '…' : '';
   const tail = end < text.length ? '…' : '';
   return { text: lead + collapse(text.slice(start, end)) + tail };
