@@ -1099,6 +1099,7 @@ describe('the run receipt', () => {
     usd: 0,
     inputTokens: 0,
     outputTokens: 0,
+    inputTokensEstimated: false,
     unresolved: 0,
     supplemented: 0,
     degraded: 0,
@@ -1130,6 +1131,32 @@ describe('the run receipt', () => {
     expect(out).toMatch(/unresolved seq\s+2/);
   });
 
+  it('does not let an estimated token count pass for a measured one', () => {
+    const measured = renderCardRun({ ...base, written: 1, inputTokens: 2_100_000 }, t);
+    expect(measured).toMatch(/input tokens\s+2.1M/);
+    expect(measured).toContain('measured');
+    const guessed = renderCardRun(
+      { ...base, written: 1, inputTokens: 2_100_000, inputTokensEstimated: true },
+      t,
+    );
+    expect(guessed).toContain('est.');
+    expect(guessed).toContain('not counted by the sdk');
+  });
+
+  it('grades its own estimate against what the run did', () => {
+    // The failure this exists for: quoted 7m 26s, took 55m 25s.
+    const out = renderCardRun(
+      { ...base, written: 35, calls: 198, ms: 3_325_000, usd: 12.93 },
+      t,
+      { predicted: { seconds: 446, usd: 2.66 } },
+    );
+    expect(out).toContain('the estimate said');
+    expect(out).toContain('7.5x under on time');
+    expect(out).toContain('4.9x under on cost');
+    // Without a quote to compare against, the row is simply absent.
+    expect(renderCardRun({ ...base, written: 1 }, t)).not.toContain('the estimate said');
+  });
+
   it('fits 60 and 80 columns and is ascii-clean under --ascii', () => {
     const report = {
       ...base,
@@ -1140,12 +1167,13 @@ describe('the run receipt', () => {
         { id: 's1', kind: 'session' as const, title: 'switched the pooler', outcome: 'shipped', decisions: 2, openThreads: 1, kept: 4, dropped: 2, coverage: 0.9, supplemented: true, degraded: false, calls: 2, usd: 0.02, ms: 1_000, path: '/tmp/x.md' },
       ],
     };
+    const opts = { predicted: { seconds: 446, usd: 2.66 } };
     for (const width of [60, 80]) {
-      for (const line of renderCardRun(report, new Theme({ color: false, width })).split('\n')) {
+      for (const line of renderCardRun(report, new Theme({ color: false, width }), opts).split('\n')) {
         expect(line.length, `"${line}" at ${width}`).toBeLessThanOrEqual(width);
       }
     }
-    const ascii = renderCardRun(report, new Theme({ color: false, ascii: true, width: 80 }));
+    const ascii = renderCardRun(report, new Theme({ color: false, ascii: true, width: 80 }), opts);
     // eslint-disable-next-line no-control-regex
     expect(/[^\x00-\x7F]/.test(ascii)).toBe(false);
   });

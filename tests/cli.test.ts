@@ -484,7 +484,12 @@ describe('potsherd card', () => {
     expect(r.stdout).toContain('input tokens');
     expect(r.stdout).toContain('output tokens');
     expect(r.stdout).toMatch(/\$\d/);
-    expect(r.stdout).toMatch(/estimated time\s+\d/);
+    // `~55m`, not `7m 26s`: the tilde and the range are the honesty contract
+    // (T2.6). A point estimate rendered to the second claims a precision the
+    // one measured run showed it does not have.
+    expect(r.stdout).toMatch(/estimated time\s+~\d/);
+    expect(r.stdout).toContain('est. ');
+    expect(r.stdout).toContain('time and cost are estimates');
     expect(r.stdout).toContain('nothing was called');
   });
 

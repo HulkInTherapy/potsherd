@@ -186,37 +186,165 @@ export function tokensForText(text: string): number {
 }
 
 /**
- * **These constants will age.** `seconds = calls × overhead + outputTokens / throughput`.
+ * ## What a model call actually costs, measured
  *
- * `CALL_OVERHEAD_MS` is **measured**, not guessed: `potsherd card --probe`
- * against haiku-class through the agent sdk on the reference machine, 21 aug
- * 2026, took 11.2 s cold and 5.4 s warm for a 10-token prompt. The warm number
- * is the one used, because a run of 300 cards pays the cold start once. Almost
- * all of it is spawning the harness, which is why the api path — which spawns
- * nothing — is faster per call despite being the fallback.
+ * The previous version of this block said `seconds = calls × 5.4 s`. That
+ * 5.4 s came from a **10-token probe prompt**, and the card pipeline sends
+ * 40,000-character chunks. Extrapolating one to the other told a user
+ * "estimated time 7m 26s" immediately before a run that took **55m 25s** and
+ * reported **$12.93**. `03` §12 and `04`'s log record it; this table is the
+ * fix, and it exists so nobody has to guess again.
  *
- * `OUTPUT_TOKENS_PER_SECOND` is an **assumption**, deliberately conservative:
- * a 50-token reply inside a 5.4 s spawn tells you nothing about throughput, so
- * this cannot be measured until T2.2 runs real extractions. Re-measure there.
+ * ### The calls it is fitted to
+ *
+ * `pnpm tsx scripts/measure-llm-calls.ts serial` and `… fanout`, 21 aug 2026,
+ * apple silicon, Claude Code 2.1.238, agent sdk on the subscription,
+ * `haiku` → `claude-haiku-4-5-20251001`, the real card system prompt and the
+ * real JSON rule, `maxOutputTokens: 2048`:
+ *
+ * | # | mode | prompt chars | wall | sdk `total_cost_usd` | output tokens |
+ * |---|---|---:|---:|---:|---:|
+ * | 1 | serial      |  3,097 |  45.4 s | $0.0232 | 2,391 |
+ * | 2 | serial      | 10,658 |  60.9 s | $0.0243 | 1,120 |
+ * | 3 | serial      | 12,999 |  62.2 s | $0.0279 | 1,429 |
+ * | 4 | serial      | 21,136 |  58.9 s | $0.0380 | 1,827 |
+ * | 5 | serial      | 40,933 |  94.9 s | $0.0721 | 4,852 |
+ * | 6 | serial      | 41,408 |  74.1 s | $0.0583 | 1,272 |
+ * | 7–12 | 6 at once | ~41,700 | 191–204 s | $0.0545–$0.0656 | 1,301–3,436 |
+ *
+ * Least squares over the six serial calls: **`ms ≈ 46,200 + 915 per 1k chars`**.
+ * Least squares over all twelve for money: **`usd ≈ $0.0160 + $1.057 per 1M chars`**.
+ * Mean output was **2,107 tokens per call** — five times the ~390 the old
+ * `OUTPUT_CHARS_PER_CALL` arithmetic implied, because a haiku-class model
+ * through the harness bills its reasoning as output.
+ *
+ * ### Three things the old model got structurally wrong
+ *
+ *   1. **A flat per-call constant.** A call is ~46 s of fixed latency *plus*
+ *      ~0.9 ms per character. At 40k chars that is 83 s, not 5.4.
+ *   2. **Concurrency is not free.** `wall = serial ÷ concurrency` assumes
+ *      perfect parallelism. Six 40k calls launched together took 191–204 s
+ *      each where one alone takes ~84 s. Against the one full run we have —
+ *      209 calls, 55m 25s at concurrency 6 — the realised speed-up was
+ *      **4.9× of a requested 6**, so {@link CallProfile.parallelEfficiency}
+ *      is 0.8 and the *upper* bound of the range assumes much worse.
+ *   3. **Token arithmetic does not price the agent sdk.** Our chars ÷ 3.6
+ *      prices those 209 calls at $4.25; the SDK reported $12.93. Cache writes,
+ *      the harness's own system prompt and reasoning output are all invisible
+ *      to a character count. So on the agent-sdk path the money comes from the
+ *      **measured fit above**, not from {@link PRICES}; on the api path — where
+ *      the user is really billed and there is no harness — it still comes from
+ *      {@link PRICES}, because that is what the invoice will say.
+ *
+ * Re-fit with `scripts/measure-llm-calls.ts` when the harness, the model or
+ * the machine changes, and paste the new table here.
  */
-export const CALL_OVERHEAD_MS = 5_400;
-export const OUTPUT_TOKENS_PER_SECOND = 60;
+export interface CallProfile {
+  /** Fixed milliseconds per call, whatever the prompt size. */
+  baseMs: number;
+  /** Milliseconds per 1,000 input characters. */
+  msPerKChar: number;
+  /**
+   * Fixed api-equivalent dollars per call: the harness's own system prompt.
+   * Zero on the api path, where there is no harness to pay for.
+   */
+  baseUsd: number;
+  /**
+   * Api-equivalent dollars per million input characters, measured end to end
+   * from the SDK's `total_cost_usd`. `null` means "price this path from
+   * {@link PRICES} and the token counts" — the api path, where the token
+   * arithmetic *is* the bill.
+   */
+  usdPerMChar: number | null;
+  /**
+   * Measured mean output tokens per call, reasoning included. `null` falls
+   * back to {@link OUTPUT_CHARS_PER_CALL} ÷ {@link CHARS_PER_TOKEN}.
+   */
+  outputTokensPerCall: number | null;
+  /** Realised fraction of each extra concurrent slot. 1 would be perfect. */
+  parallelEfficiency: number;
+  /** Multipliers on the point estimate that bound the honest range. */
+  spread: { timeLow: number; timeHigh: number; usdLow: number; usdHigh: number };
+  /** False when the numbers are an assumption rather than a measurement. */
+  measured: boolean;
+  /** One line for the card, so the screen can say what it is fitted to. */
+  basis: string;
+}
+
+export const CALL_PROFILES: Record<Backend, CallProfile> = {
+  'agent-sdk': {
+    baseMs: 46_200,
+    msPerKChar: 915,
+    baseUsd: 0.016,
+    usdPerMChar: 1.057,
+    outputTokensPerCall: 2_100,
+    parallelEfficiency: 0.8,
+    spread: { timeLow: 0.8, timeHigh: 2.0, usdLow: 0.8, usdHigh: 1.4 },
+    measured: true,
+    basis: '12 real calls, 3k–42k chars',
+  },
+  // Never measured on the reference machine: there is no key there and `04`
+  // Q4 made this the fallback. The shape is the agent-sdk fit with the
+  // harness taken out — no spawn, no reasoning-heavy harness loop — and the
+  // range is deliberately three times as wide, because a wide range that
+  // contains the truth beats a narrow one that does not.
+  api: {
+    baseMs: 8_000,
+    msPerKChar: 250,
+    baseUsd: 0,
+    usdPerMChar: null,
+    outputTokensPerCall: null,
+    parallelEfficiency: 0.9,
+    spread: { timeLow: 0.4, timeHigh: 3.0, usdLow: 0.7, usdHigh: 1.6 },
+    measured: false,
+    basis: 'not measured — api list price and an assumed latency',
+  },
+  // Likewise unverified: codex is not installed on the reference machine
+  // (`CodexTransport`'s note says the same). It spawns a CLI like the agent
+  // sdk does, so it inherits those timings and is priced from tokens.
+  codex: {
+    baseMs: 46_200,
+    msPerKChar: 915,
+    baseUsd: 0,
+    usdPerMChar: null,
+    outputTokensPerCall: null,
+    parallelEfficiency: 0.8,
+    spread: { timeLow: 0.4, timeHigh: 3.0, usdLow: 0.7, usdHigh: 1.6 },
+    measured: false,
+    basis: 'not measured — assumed to behave like the agent sdk',
+  },
+};
+
+/** The profile a run is quoted against. Unknown backends quote the default. */
+export function callProfile(backend?: Backend): CallProfile {
+  return CALL_PROFILES[backend ?? 'agent-sdk'] ?? CALL_PROFILES['agent-sdk'];
+}
 
 /**
  * What the agent sdk's own system prompt costs per call, in api-equivalent
- * dollars, once it is cached. **Measured** the same way: the SDK reported
- * `total_cost_usd` $0.0027 for a call whose main-loop usage was 10 in / 50
- * out, which our token arithmetic prices at $0.0003.
+ * dollars: the intercept of the cost fit above, **$0.016**.
  *
- * It is recorded here and deliberately **not** added to {@link estimate}: it
- * exists only on the agent-sdk path, where the marginal cost is zero, and
- * adding it would inflate the one number — the api-path quote — that a user
- * actually pays. `03` §12's $2 target is an api-path target and the estimator
- * answers that question. The agent-sdk equivalent is roughly
- * `usd + calls × HARNESS_OVERHEAD_USD` and the wall-time row is the honest
- * budget on that path anyway.
+ * The old value, $0.0027, was read off the same 10-token probe that produced
+ * the 5.4 s and was as wrong for the same reason. Unlike the old value this
+ * one *is* used: {@link estimate} adds it on the agent-sdk path, because the
+ * `$12.93` a user sees at the end of a run is the SDK's own number and it
+ * includes the harness. The api-path quote still excludes it — an api-path
+ * user does not pay for a harness they do not run.
  */
-export const HARNESS_OVERHEAD_USD = 0.0027;
+export const HARNESS_OVERHEAD_USD = CALL_PROFILES['agent-sdk'].baseUsd;
+
+/**
+ * Effective concurrency for `n` requested slots.
+ *
+ * The first call is free of contention; every slot after it delivers
+ * {@link CallProfile.parallelEfficiency} of a full one. At the measured 0.8,
+ * asking for 6 gets 5.0 — which is what the one recorded 209-call run did
+ * (4.9), and nothing like the 6.0 the old estimator assumed.
+ */
+export function effectiveConcurrency(n: number, profile: CallProfile): number {
+  const c = Math.max(1, Math.floor(n));
+  return 1 + (c - 1) * profile.parallelEfficiency;
+}
 
 /** Default chunk size for map-reduce over a long session (`phase-2` T2.2 §1). */
 export const CHUNK_CHARS = 40_000;
@@ -250,6 +378,28 @@ export interface EstimateInput {
   promptOverheadChars?: number;
   /** Calls run in parallel; wall time divides by this. Default 1. */
   concurrency?: number;
+  /**
+   * What this machine's own finished runs say the quote is out by
+   * (`calibration.ts`). Applied last, so the correction is visible as a
+   * multiplier rather than baked into the constants.
+   */
+  calibration?: Calibration;
+}
+
+/**
+ * The correction a machine learns from its own runs.
+ *
+ * `ratio > 1` means the last runs took longer / cost more than quoted.
+ * `samples` is how many finished runs it is averaged over, and it is carried
+ * onto the screen: "corrected ×1.2 from 3 runs here" is a number a user can
+ * argue with, and a silently-corrected one is not.
+ */
+export interface Calibration {
+  timeRatio: number;
+  usdRatio: number;
+  samples: number;
+  /** ISO timestamp of the most recent run it is drawn from. */
+  lastRanAt?: string;
 }
 
 export interface EstimatePerSession {
@@ -263,15 +413,30 @@ export interface EstimatePerSession {
 export interface Estimate {
   sessions: number;
   calls: number;
+  /** Estimated, always: chars ÷ {@link CHARS_PER_TOKEN}. Never measured here. */
   inputTokens: number;
   outputTokens: number;
+  /** The middle of {@link usdLow}…{@link usdHigh}, not a promise. */
   usd: number;
+  usdLow: number;
+  usdHigh: number;
+  /** The middle of {@link secondsLow}…{@link secondsHigh}, not a promise. */
   seconds: number;
+  secondsLow: number;
+  secondsHigh: number;
   model: string;
   modelClass: ModelClass;
   backend?: Backend;
   /** False on the subscription paths: `usd` is an api-equivalent, not a charge. */
   chargeable: boolean;
+  /** What the per-call model is fitted to, for the card to print. */
+  basis: string;
+  /** False when the profile is an assumption rather than a measurement. */
+  measured: boolean;
+  /** How many concurrent slots the profile expects to actually get. */
+  effectiveConcurrency: number;
+  /** Set when this machine's own runs moved the number. */
+  calibration?: Calibration;
   perSession: EstimatePerSession[];
 }
 
@@ -281,21 +446,33 @@ export interface Estimate {
  * No network, no credentials, no model. `potsherd card --dry-run --all` is
  * exactly this function plus a renderer, which is what makes the dry run
  * trustworthy: there is no code path from here to a backend.
+ *
+ * Everything it returns is an **estimate** and the caller is expected to say
+ * so. It returns a range as well as a point for that reason: the point
+ * estimate this replaced was 7× under on the one run that checked it, and a
+ * single number rendered without a range reads as a promise.
  */
 export function estimate(input: EstimateInput): Estimate {
   const model = input.model ?? CARD_MODEL;
   const cls = modelClass(model);
   const price = PRICES[cls];
+  const profile = callProfile(input.backend);
   const chunk = Math.max(1_000, input.chunkChars ?? CHUNK_CHARS);
   const outChars = input.outputCharsPerCall ?? OUTPUT_CHARS_PER_CALL;
   const overhead = input.promptOverheadChars ?? PROMPT_OVERHEAD_CHARS;
   const concurrency = Math.max(1, Math.floor(input.concurrency ?? 1));
   const chargeable = input.chargeable ?? (input.backend ? input.backend === 'api' : true);
+  // The measured fit is a haiku fit. A `--model sonnet` run buys the same
+  // seconds and three times the tokens, so the money scales with the class
+  // and the clock does not.
+  const priceScale = price.inputPerMTok / PRICES[CARD_MODEL].inputPerMTok;
 
   const perSession: EstimatePerSession[] = [];
   let calls = 0;
   let inputTokens = 0;
   let outputTokens = 0;
+  // Input characters actually sent, which is what the per-call fits take.
+  let promptChars = 0;
 
   for (const s of input.sessions) {
     // Map-reduce: a session longer than one chunk is extracted per chunk and
@@ -305,18 +482,38 @@ export function estimate(input: EstimateInput): Estimate {
     const n = s.calls ?? (chunks === 1 ? 1 : chunks + 1);
     // The reduce call re-reads the per-chunk output, not the transcript.
     const reduceChars = chunks === 1 ? 0 : chunks * outChars;
-    const inTok = tokensForChars(Math.max(0, s.chars) + n * overhead + reduceChars);
-    const outTok = tokensForChars(n * outChars);
-    const usd = (inTok / 1e6) * price.inputPerMTok + (outTok / 1e6) * price.outputPerMTok;
+    const chars = Math.max(0, s.chars) + n * overhead + reduceChars;
+    const inTok = tokensForChars(chars);
+    const outTok =
+      profile.outputTokensPerCall !== null
+        ? n * profile.outputTokensPerCall
+        : tokensForChars(n * outChars);
 
-    perSession.push({ id: s.id, calls: n, inputTokens: inTok, outputTokens: outTok, usd });
+    perSession.push({
+      id: s.id,
+      calls: n,
+      inputTokens: inTok,
+      outputTokens: outTok,
+      usd: callUsd(n, chars, inTok, outTok, profile, price, priceScale),
+    });
     calls += n;
     inputTokens += inTok;
     outputTokens += outTok;
+    promptChars += chars;
   }
 
-  const usd = (inputTokens / 1e6) * price.inputPerMTok + (outputTokens / 1e6) * price.outputPerMTok;
-  const ms = calls * CALL_OVERHEAD_MS + (outputTokens / OUTPUT_TOKENS_PER_SECOND) * 1000;
+  const cal = input.calibration;
+  const usdRatio = cal && cal.samples > 0 ? cal.usdRatio : 1;
+  const timeRatio = cal && cal.samples > 0 ? cal.timeRatio : 1;
+
+  const rawUsd =
+    calls === 0 ? 0 : callUsd(calls, promptChars, inputTokens, outputTokens, profile, price, priceScale);
+  const usd = rawUsd * usdRatio;
+
+  // Serial work first, then the concurrency the machine actually delivers.
+  const serialMs = calls * profile.baseMs + (promptChars / 1_000) * profile.msPerKChar;
+  const eff = effectiveConcurrency(concurrency, profile);
+  const seconds = calls === 0 ? 0 : (serialMs / 1_000 / eff) * timeRatio;
 
   return {
     sessions: input.sessions.length,
@@ -324,13 +521,53 @@ export function estimate(input: EstimateInput): Estimate {
     inputTokens,
     outputTokens,
     usd,
-    seconds: ms / 1000 / concurrency,
+    usdLow: usd * profile.spread.usdLow,
+    usdHigh: usd * profile.spread.usdHigh,
+    seconds,
+    secondsLow: seconds * profile.spread.timeLow,
+    secondsHigh: seconds * profile.spread.timeHigh,
     model,
     modelClass: cls,
     ...(input.backend ? { backend: input.backend } : {}),
     chargeable,
+    basis: profile.basis,
+    measured: profile.measured,
+    effectiveConcurrency: eff,
+    ...(cal && cal.samples > 0 ? { calibration: cal } : {}),
     perSession,
   };
+}
+
+/**
+ * Api-equivalent dollars for `calls` calls carrying `chars` characters.
+ *
+ * Two ways to answer, and which one is right depends on who is paying:
+ *
+ *   - **agent-sdk**: the measured end-to-end fit. The SDK's own
+ *     `total_cost_usd` is the ground truth on that path, and it prices cache
+ *     writes and reasoning output that a character count cannot see. Our
+ *     token arithmetic priced the one recorded run at $4.25 against a real
+ *     $12.93; the fit prices it at $11.18.
+ *   - **api**: {@link PRICES} on the token counts, with no harness overhead.
+ *     That path is really billed, and the invoice is token arithmetic.
+ */
+function callUsd(
+  calls: number,
+  chars: number,
+  inputTokens: number,
+  outputTokens: number,
+  profile: CallProfile,
+  price: Price,
+  priceScale: number,
+): number {
+  if (profile.usdPerMChar === null) {
+    return (
+      (inputTokens / 1e6) * price.inputPerMTok +
+      (outputTokens / 1e6) * price.outputPerMTok +
+      calls * profile.baseUsd * priceScale
+    );
+  }
+  return (calls * profile.baseUsd + (chars / 1e6) * profile.usdPerMChar) * priceScale;
 }
 
 // ------------------------------------------------------------------ budget
@@ -341,10 +578,18 @@ export interface Spend {
   outputTokens: number;
   usd: number;
   ms: number;
+  /**
+   * How many of those calls had their input tokens **estimated** rather than
+   * reported, because the backend's own number was not believable
+   * ({@link Llm.text}). On the agent-sdk path this is every call, and a
+   * receipt that prints `inputTokens` without printing this is claiming a
+   * measurement it does not have.
+   */
+  estimatedInputCalls: number;
 }
 
 export function emptySpend(): Spend {
-  return { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0, ms: 0 };
+  return { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0, ms: 0, estimatedInputCalls: 0 };
 }
 
 export interface BudgetOptions {
@@ -448,12 +693,19 @@ export class Budget {
     }
   }
 
-  record(r: { inputTokens: number; outputTokens: number; usd: number; ms: number }): void {
+  record(r: {
+    inputTokens: number;
+    outputTokens: number;
+    usd: number;
+    ms: number;
+    inputTokensEstimated?: boolean;
+  }): void {
     this.spent.calls += 1;
     this.spent.inputTokens += r.inputTokens;
     this.spent.outputTokens += r.outputTokens;
     this.spent.usd += r.usd;
     this.spent.ms += r.ms;
+    if (r.inputTokensEstimated) this.spent.estimatedInputCalls += 1;
   }
 }
 
@@ -1062,6 +1314,14 @@ export interface LlmResult {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * True when {@link inputTokens} is potsherd's own chars ÷
+   * {@link CHARS_PER_TOKEN} estimate because the backend's number was not
+   * believable. See {@link IMPLAUSIBLE_TOKEN_FACTOR}.
+   */
+  inputTokensEstimated: boolean;
+  /** Likewise: no backend number at all, so the reply's length was counted. */
+  outputTokensEstimated: boolean;
   usd: number;
   ms: number;
   /** How many secrets were masked on the way out. */
@@ -1069,6 +1329,26 @@ export interface LlmResult {
   /** False on the subscription paths: `usd` is an api-equivalent. */
   chargeable: boolean;
 }
+
+/**
+ * How far below our own estimate a backend's input-token count may fall
+ * before we stop believing it.
+ *
+ * The agent SDK's `usage.input_tokens` counts the **uncached** tokens of the
+ * final turn only. Everything potsherd sends is a cache write, so the number
+ * it reports is a constant 10 whatever the prompt: a 198-call run over 2M
+ * characters reported **1,980 input tokens** in total (`04`, 21 aug 2026).
+ * That is not a small error, it is a different quantity wearing the same
+ * name, and printing it in a column headed "input tokens" is exactly the
+ * confidently-wrong number this project exists not to print.
+ *
+ * So: below one tenth of what the characters say, the backend's number is
+ * discarded for our estimate and the result says which one it is. An order of
+ * magnitude is deliberately loose — real tokenisation differs from chars ÷ 3.6
+ * by tens of percent, never by 1,000× — so a backend that counts honestly is
+ * always believed.
+ */
+export const IMPLAUSIBLE_TOKEN_FACTOR = 10;
 
 export interface JsonRequest<T> extends LlmRequest {
   /**
@@ -1222,8 +1502,20 @@ export class Llm {
     });
     const ms = Date.now() - started;
 
-    const outputTokens = sent.outputTokens ?? tokensForText(sent.text);
-    const inputTokens = sent.inputTokens ?? inTokens;
+    const outputTokensEstimated = typeof sent.outputTokens !== 'number' || sent.outputTokens <= 0;
+    const outputTokens = outputTokensEstimated
+      ? tokensForText(sent.text)
+      : (sent.outputTokens as number);
+
+    // Prefer the backend's own count — except when it is not a count of the
+    // thing it is named after. See IMPLAUSIBLE_TOKEN_FACTOR.
+    const reportedIn = sent.inputTokens;
+    const inputTokensEstimated =
+      typeof reportedIn !== 'number' ||
+      reportedIn <= 0 ||
+      reportedIn * IMPLAUSIBLE_TOKEN_FACTOR < inTokens;
+    const inputTokens = inputTokensEstimated ? inTokens : (reportedIn as number);
+
     const usd =
       sent.usd ??
       (inputTokens / 1e6) * price.inputPerMTok + (outputTokens / 1e6) * price.outputPerMTok;
@@ -1234,6 +1526,8 @@ export class Llm {
       model: sent.model ?? this.model,
       inputTokens,
       outputTokens,
+      inputTokensEstimated,
+      outputTokensEstimated,
       usd,
       ms,
       redactions,

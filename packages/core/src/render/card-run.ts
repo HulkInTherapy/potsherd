@@ -3,7 +3,8 @@ import { Theme } from '../theme.js';
 import * as f from '../format.js';
 import { tildify } from '../paths.js';
 import type { CardRunReport } from '../cards/run.js';
-import { TARGET_SECONDS, TARGET_USD } from './estimate.js';
+import { compact, TARGET_SECONDS, TARGET_USD } from './estimate.js';
+import { accuracyShort } from '../calibration.js';
 
 /**
  * The receipt for a card run: what ran, what it cost, and how much of it the
@@ -33,6 +34,13 @@ export interface CardRunOptions {
   /** How many cards to list under the totals. */
   show?: number;
   maxUsd?: number;
+  /**
+   * What the pre-run quote said, so the receipt can grade it (T2.6).
+   *
+   * An estimator that never publishes its own error is just a confident one.
+   * The same comparison is written to `card_runs` and corrects the next quote.
+   */
+  predicted?: { seconds: number; usd: number };
 }
 
 export function renderCardRun(
@@ -146,6 +154,33 @@ export function renderCardRun(
           : `target ${f.money(TARGET_USD)}`
         : `$0 charged ${t.sep} what this would have cost on an api key`,
     },
+    {
+      label: 'input tokens',
+      value: compact(report.inputTokens),
+      tone: 'dim',
+      // The agent sdk's `usage.input_tokens` excludes cache tokens, so it
+      // reported 1,980 for a 198-call run. When it is not believable the
+      // number here is ours, and the note says so rather than letting an
+      // estimate pass for a measurement (T2.6).
+      note: report.inputTokensEstimated
+        ? `est. ${t.sep} chars ${t.g('÷', '/')} 3.6, not counted by the sdk`
+        : `measured ${t.sep} reported by the backend`,
+    },
+    ...(o.predicted
+      ? [
+          {
+            label: 'the estimate said',
+            value: f.duration(o.predicted.seconds * 1000),
+            tone: 'dim' as const,
+            note: accuracyShort({
+              predictedSeconds: o.predicted.seconds,
+              actualSeconds: report.ms / 1000,
+              predictedUsd: o.predicted.usd,
+              actualUsd: report.usd,
+            }),
+          },
+        ]
+      : []),
   ]);
 
   const show = o.show ?? 6;

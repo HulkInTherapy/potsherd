@@ -6,18 +6,19 @@ import {
   API_MODEL_IDS,
   Budget,
   BudgetError,
-  CALL_OVERHEAD_MS,
+  CALL_PROFILES,
   CARD_MODEL,
   CHARS_PER_TOKEN,
   Llm,
   LlmError,
+  IMPLAUSIBLE_TOKEN_FACTOR,
   NoBackendError,
-  OUTPUT_TOKENS_PER_SECOND,
   PRICES,
   REENTRANCY_ENV,
   ReentrancyError,
   availability,
   detectBackend,
+  effectiveConcurrency,
   estimate,
   lastAgentMessage,
   modelClass,
@@ -37,6 +38,13 @@ import {
   planCards,
 } from '../packages/core/src/cards/plan.js';
 import { renderEstimate } from '../packages/core/src/render/estimate.js';
+import {
+  accuracyNote,
+  cardRuns,
+  readCalibration,
+  recordCardRun,
+  MIN_CALLS as MIN_CALIBRATION_CALLS,
+} from '../packages/core/src/calibration.js';
 import { rmrf, tempDir } from './helpers.js';
 
 /**
@@ -258,10 +266,13 @@ describe('estimate', () => {
     expect(CHARS_PER_TOKEN).toBe(3.6);
   });
 
-  it('prices at the model class list price', () => {
+  it('prices the api path at the model class list price', () => {
+    // The api path is the one a user is really billed for, and there the
+    // token arithmetic *is* the invoice.
     const e = estimate({
       sessions: [{ id: 'a', chars: 3_600_000 }],
       model: 'haiku',
+      backend: 'api',
       promptOverheadChars: 0,
       outputCharsPerCall: 0,
       chunkChars: 3_600_000,
@@ -285,15 +296,68 @@ describe('estimate', () => {
     expect(e.seconds).toBe(0);
   });
 
-  it('time is call overhead plus output throughput, divided by concurrency', () => {
-    const serial = estimate({ sessions: [{ id: 'a', chars: 1_000 }] });
-    expect(serial.calls).toBe(1);
-    expect(serial.seconds).toBeCloseTo(
-      CALL_OVERHEAD_MS / 1000 + serial.outputTokens / OUTPUT_TOKENS_PER_SECOND,
-      5,
-    );
-    const parallel = estimate({ sessions: [{ id: 'a', chars: 1_000 }], concurrency: 4 });
-    expect(parallel.seconds).toBeCloseTo(serial.seconds / 4, 5);
+  it('time is a fixed cost per call plus a cost per character', () => {
+    const p = CALL_PROFILES['agent-sdk'];
+    const small = estimate({ sessions: [{ id: 'a', chars: 1_000 }], promptOverheadChars: 0 });
+    const big = estimate({ sessions: [{ id: 'a', chars: 39_000 }], promptOverheadChars: 0 });
+    expect(small.calls).toBe(1);
+    expect(big.calls).toBe(1);
+    expect(small.seconds).toBeCloseTo((p.baseMs + p.msPerKChar * 1) / 1_000, 5);
+    // The bug this replaced: one flat constant per call, so a 40k chunk was
+    // quoted at the same 5.4 s as a ten-token probe. It is not.
+    expect(big.seconds).toBeGreaterThan(small.seconds * 1.5);
+  });
+
+  it('does not pretend concurrency is free', () => {
+    const p = CALL_PROFILES['agent-sdk'];
+    const serial = estimate({
+      sessions: Array.from({ length: 12 }, (_, i) => ({ id: `s${i}`, chars: 20_000 })),
+    });
+    const parallel = estimate({
+      sessions: Array.from({ length: 12 }, (_, i) => ({ id: `s${i}`, chars: 20_000 })),
+      concurrency: 6,
+    });
+    expect(effectiveConcurrency(6, p)).toBeCloseTo(5, 5);
+    expect(parallel.seconds).toBeCloseTo(serial.seconds / 5, 5);
+    // Never the naive divide-by-six that produced "7m 26s" for a 55-minute run.
+    expect(parallel.seconds).toBeGreaterThan(serial.seconds / 6);
+    expect(parallel.effectiveConcurrency).toBeCloseTo(5, 5);
+  });
+
+  it('gives a range, because a point estimate was 7x wrong once', () => {
+    const e = estimate({ sessions: [{ id: 'a', chars: 40_000 }], concurrency: 6 });
+    expect(e.secondsLow).toBeLessThan(e.seconds);
+    expect(e.secondsHigh).toBeGreaterThan(e.seconds);
+    expect(e.usdLow).toBeLessThan(e.usd);
+    expect(e.usdHigh).toBeGreaterThan(e.usd);
+    expect(e.basis).toMatch(/real calls/);
+    expect(e.measured).toBe(true);
+    expect(estimate({ sessions: [{ id: 'a', chars: 1 }], backend: 'api' }).measured).toBe(false);
+  });
+
+  it('reproduces the one real run it is fitted to, within 2x', () => {
+    // 21 aug 2026: 33 eligible sessions of the frozen corpus, 209 calls,
+    // 55m 25s at concurrency 6, $12.93 api-equivalent. The old estimator said
+    // 7m 26s and $2.66. Sizes below are the real per-session character counts
+    // reduced to their mean; what is asserted is the order of magnitude.
+    const perCall = 35_454;
+    const e = estimate({
+      sessions: Array.from({ length: 209 }, (_, i) => ({
+        id: `s${i}`,
+        chars: perCall,
+        calls: 1,
+      })),
+      promptOverheadChars: 0,
+      concurrency: 6,
+    });
+    expect(e.calls).toBe(209);
+    for (const [actual, got] of [
+      [3_325, e.seconds],
+      [12.93, e.usd],
+    ] as const) {
+      expect(got).toBeGreaterThan(actual / 2);
+      expect(got).toBeLessThan(actual * 2);
+    }
   });
 
   it('knows the subscription path spends no money', () => {
@@ -303,14 +367,200 @@ describe('estimate', () => {
     expect(api.chargeable).toBe(true);
     // The equivalent is still computed on both: 03 §12's $2 target is real for
     // anyone on a key, and it is the number that lets someone choose.
-    expect(sub.usd).toBeCloseTo(api.usd, 10);
     expect(sub.usd).toBeGreaterThan(0);
+    expect(api.usd).toBeGreaterThan(0);
+    // They are no longer the same number, and that is the point: the agent
+    // sdk's own `total_cost_usd` includes its system prompt, its cache writes
+    // and its reasoning output. Pricing that path from tokens alone quoted the
+    // one recorded run at $4.25 against a real $12.93.
+    expect(sub.usd).toBeGreaterThan(api.usd);
   });
 
   it('scales linearly in sessions', () => {
     const s = (n: number) =>
       estimate({ sessions: Array.from({ length: n }, (_, i) => ({ id: `s${i}`, chars: 5_000 })) });
     expect(s(10).usd).toBeCloseTo(s(1).usd * 10, 8);
+  });
+});
+
+// ------------------------------------------------------- token accounting
+
+/**
+ * The agent SDK counts only the uncached tokens of its final turn, so it
+ * reported **10** for every one of the twelve real calls measured for T2.6 —
+ * and **1,980 in total** for a 198-call run over two million characters. A
+ * column headed "input tokens" that prints that number is not slightly wrong;
+ * it is measuring something else.
+ */
+describe('token accounting on the agent-sdk path', () => {
+  class Reporting implements Transport {
+    readonly backend = 'agent-sdk' as const;
+    constructor(private readonly usage: Partial<SendResult>) {}
+    async send(): Promise<SendResult> {
+      return { text: 'ok', ...this.usage };
+    }
+    async close(): Promise<void> {}
+  }
+
+  const bigPrompt = 'x'.repeat(40_000);
+
+  it('prefers its own estimate when the backend under-reports by an order of magnitude', async () => {
+    const llm = Llm.open({ transport: new Reporting({ inputTokens: 10, outputTokens: 900 }) });
+    const r = await llm.text({ prompt: bigPrompt });
+    expect(r.inputTokensEstimated).toBe(true);
+    // chars / 3.6, not 10.
+    expect(r.inputTokens).toBeGreaterThan(10_000);
+    expect(r.outputTokensEstimated).toBe(false);
+    expect(r.outputTokens).toBe(900);
+  });
+
+  it('believes a backend that counts honestly, and says it was measured', async () => {
+    const honest = Math.round(40_000 / CHARS_PER_TOKEN);
+    const llm = Llm.open({ transport: new Reporting({ inputTokens: honest, outputTokens: 40 }) });
+    const r = await llm.text({ prompt: bigPrompt });
+    expect(r.inputTokensEstimated).toBe(false);
+    expect(r.inputTokens).toBe(honest);
+  });
+
+  it('draws the line at one order of magnitude, not at taste', async () => {
+    const estimated = Math.ceil(40_000 / CHARS_PER_TOKEN);
+    // Just inside: a real tokenizer differs from chars / 3.6 by tens of
+    // percent, never by 1,000x, so anything this close is believed.
+    const near = Math.ceil(estimated / (IMPLAUSIBLE_TOKEN_FACTOR - 1));
+    const llmNear = Llm.open({ transport: new Reporting({ inputTokens: near }) });
+    expect((await llmNear.text({ prompt: bigPrompt })).inputTokensEstimated).toBe(false);
+
+    const far = Math.floor(estimated / (IMPLAUSIBLE_TOKEN_FACTOR + 1));
+    const llmFar = Llm.open({ transport: new Reporting({ inputTokens: far }) });
+    expect((await llmFar.text({ prompt: bigPrompt })).inputTokensEstimated).toBe(true);
+  });
+
+  it('counts how many calls of a run had to be estimated', async () => {
+    const llm = Llm.open({ transport: new Reporting({ inputTokens: 10 }) });
+    await llm.text({ prompt: bigPrompt });
+    await llm.text({ prompt: bigPrompt });
+    expect(llm.spend.calls).toBe(2);
+    expect(llm.spend.estimatedInputCalls).toBe(2);
+    expect(llm.spend.inputTokens).toBeGreaterThan(20_000);
+  });
+});
+
+// ------------------------------------------------------------ calibration
+
+/**
+ * The estimator's self-check. Constants fitted on one machine are still a
+ * guess about every other one; the only measurement that settles it is the
+ * user's own finished run.
+ */
+describe('calibration from the machine own runs', () => {
+  const finished = {
+    backend: 'agent-sdk' as const,
+    model: 'haiku',
+    concurrency: 6,
+    targets: 33,
+    predictedCalls: 209,
+    predictedSeconds: 3_287,
+    predictedUsd: 11.18,
+    actualCalls: 209,
+    actualSeconds: 3_325,
+    actualUsd: 12.93,
+    complete: true,
+  };
+
+  it('has a card_runs table from migration 6', () => {
+    const db = store.open({ file: ':memory:' });
+    expect(store.schemaVersion(db)).toBeGreaterThanOrEqual(6);
+    expect(cardRuns(db)).toEqual([]);
+    db.close();
+  });
+
+  it('records what a run was quoted and what it did', () => {
+    const db = store.open({ file: ':memory:' });
+    const row = recordCardRun(db, finished);
+    expect(row.timeRatio).toBeCloseTo(3_325 / 3_287, 4);
+    expect(row.usdRatio).toBeCloseTo(12.93 / 11.18, 4);
+    expect(cardRuns(db)).toHaveLength(1);
+    db.close();
+  });
+
+  it('corrects the next estimate by what the last run did', () => {
+    const db = store.open({ file: ':memory:' });
+    expect(readCalibration(db)).toBeNull();
+    // A run that came in 3x over.
+    recordCardRun(db, { ...finished, actualSeconds: 9_861, actualUsd: 33.54 });
+    const cal = readCalibration(db, { backend: 'agent-sdk' })!;
+    expect(cal.samples).toBe(1);
+    expect(cal.timeRatio).toBeCloseTo(3, 2);
+    expect(cal.usdRatio).toBeCloseTo(3, 2);
+
+    const plain = estimate({ sessions: [{ id: 'a', chars: 40_000 }] });
+    const corrected = estimate({ sessions: [{ id: 'a', chars: 40_000 }], calibration: cal });
+    expect(corrected.seconds / plain.seconds).toBeCloseTo(3, 1);
+    expect(corrected.usd / plain.usd).toBeCloseTo(3, 1);
+    expect(corrected.calibration?.samples).toBe(1);
+    db.close();
+  });
+
+  it('ignores a run that a ceiling stopped, and one too small to mean anything', () => {
+    const db = store.open({ file: ':memory:' });
+    recordCardRun(db, { ...finished, actualSeconds: 9_861, complete: false });
+    expect(readCalibration(db)).toBeNull();
+    recordCardRun(db, {
+      ...finished,
+      actualCalls: MIN_CALIBRATION_CALLS - 1,
+      actualSeconds: 9_861,
+    });
+    expect(readCalibration(db)).toBeNull();
+    db.close();
+  });
+
+  it('clamps a wild ratio rather than quoting nonsense forever', () => {
+    const db = store.open({ file: ':memory:' });
+    recordCardRun(db, { ...finished, actualSeconds: 3_287_000, actualUsd: 11_180 });
+    expect(readCalibration(db)!.timeRatio).toBe(5);
+    expect(readCalibration(db)!.usdRatio).toBe(5);
+    db.close();
+  });
+
+  it('the plan reads the correction from the store without being asked', () => {
+    const { db, addSession } = seededDb(scratch());
+    addSession('s', 5, 20_000);
+    const before = planCards(db, { backend: 'agent-sdk' });
+    expect(before.estimate.calibration).toBeUndefined();
+
+    recordCardRun(db, { ...finished, actualSeconds: 6_574, actualUsd: 22.36 });
+    const after = planCards(db, { backend: 'agent-sdk' });
+    expect(after.estimate.calibration?.samples).toBe(1);
+    expect(after.estimate.seconds).toBeGreaterThan(before.estimate.seconds * 1.8);
+
+    // A caller that wants the fitted constants alone can still have them.
+    const pinned = planCards(db, { backend: 'agent-sdk', calibration: null });
+    expect(pinned.estimate.seconds).toBeCloseTo(before.estimate.seconds, 5);
+
+    // The correction is on the screen, not only in the arithmetic.
+    const out = renderEstimate(after, new Theme({ color: false, width: 80 }));
+    expect(out).toContain('corrected');
+    expect(out).toContain('1 finished run here');
+    db.close();
+  });
+
+  it('says how wrong the estimate was, in words a user can read', () => {
+    expect(
+      accuracyNote({
+        predictedSeconds: 446,
+        actualSeconds: 3_325,
+        predictedUsd: 2.66,
+        actualUsd: 12.93,
+      }),
+    ).toBe('the estimate was 7.5x under on time and 4.9x under on cost');
+    expect(
+      accuracyNote({
+        predictedSeconds: 3_287,
+        actualSeconds: 3_325,
+        predictedUsd: 11.18,
+        actualUsd: 12.93,
+      }),
+    ).toContain('right on time');
   });
 });
 
