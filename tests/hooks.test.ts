@@ -218,6 +218,60 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
     if (r.stdout.trim()) expect(() => JSON.parse(r.stdout.trim())).not.toThrow();
   });
 
+  it('never prints an install command for a package that is not published', () => {
+    // D4. `npm i -g potsherd` was the single documented repair, printed in
+    // both plugin READMEs, in the shim's exit-127 message and in the
+    // SessionStart hook's systemMessage. `npm view potsherd version` is a 404:
+    // the package is unpublished. A user following it got nothing and was told
+    // nothing. Every remaining mention has to be flagged as a 404, not offered
+    // as a fix — so a line that says the words must also say "not published"
+    // or "404" within it.
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const f = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(f);
+          continue;
+        }
+        const lines = fs.readFileSync(f, 'utf8').split('\n');
+        lines.forEach((line, i) => {
+          if (!/npm i(nstall)? -g potsherd/.test(line)) return;
+          if (/404|not published|NOT published|unpublished/.test(line)) return;
+          offenders.push(`${path.relative(repo, f)}:${String(i + 1)}`);
+        });
+      }
+    };
+    walk(pluginDir);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ships an MCP launcher that says why there are no tools', () => {
+    // D4's other half: `.mcp.json` named packages/mcp/dist/index.js directly,
+    // which a marketplace clone does not have, so node died before the server
+    // spoke MCP and all six tools were simply absent with no explanation.
+    const mcp = JSON.parse(
+      fs.readFileSync(path.join(pluginDir, '.mcp.json'), 'utf8'),
+    ) as { mcpServers: { potsherd: { args: string[] } } };
+    expect(mcp.mcpServers.potsherd.args.join(' ')).toMatch(/bin\/potsherd-mcp/);
+
+    const shim = path.join(pluginDir, 'bin', 'potsherd-mcp');
+    expect(fs.existsSync(shim)).toBe(true);
+
+    // With nothing to launch it must exit non-zero and name what is missing.
+    const sb = tempDir('potsherd-mcpshim-');
+    sandboxes.push(sb);
+    fs.cpSync(pluginDir, path.join(sb, 'plugin'), { recursive: true });
+    const r = spawnSync('sh', [path.join(sb, 'plugin', 'bin', 'potsherd-mcp')], {
+      encoding: 'utf8',
+      env: { PATH: '/usr/bin:/bin' },
+    });
+    expect(r.status).toBe(127);
+    expect(r.stderr).toMatch(/NO potsherd tools/);
+    expect(r.stderr).toMatch(/pnpm install && pnpm build/);
+    expect(r.stderr).not.toMatch(/npm i -g potsherd\b/);
+  });
+
   it('quotes the model download at the size the CLI prints', () => {
     // D13: the hooks said "33 MB" and `potsherd index` said "32.4 MB". One
     // number cannot have two values, and neither copy may drift again.

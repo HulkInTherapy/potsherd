@@ -35,21 +35,35 @@ Component cost, from `claude plugin details potsherd@potsherd`:
 
 ## Install
 
-### 1. You need a `potsherd` binary
+### 1. You need a `potsherd` binary — build it from a checkout
 
-**Install this first.** The plugin ships configuration, not a program. A
-marketplace install is a git clone, and this repository gitignores `dist/`, so
-a clone contains no built binary and no `node_modules`:
+**Do this first.** The plugin ships configuration, not a program. A marketplace
+install is a git clone, and this repository gitignores `dist/`, so a clone
+contains no built binary and no `node_modules`.
+
+> **`potsherd` is not published to npm.** `npm i -g potsherd` is a 404 today,
+> and every earlier version of this file, of the shim's error message and of
+> the `SessionStart` hook printed it anyway. Publishing is phase 7's. Until
+> then the only instruction that works is the one below.
 
 ```sh
-npm i -g potsherd
+git clone https://github.com/HulkInTherapy/potsherd
+cd potsherd
+pnpm install && pnpm build
 ```
 
-From a checkout, `pnpm install && pnpm build` does the same job.
+Then install the plugin **from that checkout** (`/plugin marketplace add
+<the path you just cloned into>`), so that `bin/potsherd` finds the bundle two
+directories up from itself. Installing from `HulkInTherapy/potsherd` on GitHub
+clones a *second* copy with no `dist/` in it, and that copy is what the plugin
+will look beside.
 
-Without one of those the hooks take no copy and `/potsherd` runs nothing. Both
-say so rather than failing quietly — the hook prints a `systemMessage` naming
-the problem, and the shim exits `127` listing the three places it looked.
+Without a built potsherd the hooks take no copy, `/potsherd` runs nothing, and
+**all six MCP tools are absent** — which also leaves `session-archaeologist`
+holding nothing but `Read`, so it answers "not found" to everything. None of
+that is silent: the hook prints a `systemMessage` naming the problem, the shim
+exits `127` listing the three places it looked, and `bin/potsherd-mcp` writes
+the same list to the MCP server log.
 
 ### 2. Add the marketplace and install the plugin
 

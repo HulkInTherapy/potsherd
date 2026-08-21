@@ -99,7 +99,7 @@ export async function runSetup(o: SetupOptions): Promise<number> {
     print(t.dim('  and silently gives the model nothing, which is worse than no'));
     print(t.dim(`  stanza at all. so potsherd ${o.dryRun ? 'would refuse' : 'refuses'} to write it.`));
     print('');
-    print('  build it first:  pnpm build      (or:  npm i -g potsherd)');
+    print('  build it first:  pnpm install && pnpm build');
   }
 
   for (const plan of todo) {

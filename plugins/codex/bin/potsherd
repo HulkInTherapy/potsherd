@@ -33,8 +33,10 @@
 # beside it with those two built for the host platform. A git clone of this
 # repository has neither `dist/` (gitignored) nor `node_modules/`, which is why
 # a marketplace install falls through to step 3, and why the README tells you
-# to build from the checkout -- potsherd is NOT published to npm yet, so
-# `npm i -g potsherd` is not an instruction this file will ever print.
+# to build from the checkout. And step 3 is empty too: potsherd is NOT
+# published to npm, so a global install is something only somebody who already
+# built a checkout can have, and there is no install command for this file to
+# print.
 set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

@@ -3,7 +3,7 @@
 Claude Code deletes your session transcripts after 30 days. It does not tell you.
 
 ```
-npx potsherd audit
+npx potsherd audit          # at release. today: see Install — the package is not published yet
 ```
 
 ```
@@ -653,20 +653,25 @@ Being clear about this before you find out yourself:
 
 ## Install
 
-Nothing is required for `audit`:
+> **potsherd is not on npm yet.** `npx potsherd` and `npm i -g potsherd` are
+> both 404 today — publishing is phase 7's job. The `npx` line at the top of
+> this readme is what `audit` will be at release; the commands below are what
+> works now. Nothing else in this readme depends on the registry: every screen
+> in it was captured from a checkout.
 
 ```bash
-npx potsherd audit
+git clone https://github.com/HulkInTherapy/potsherd
+cd potsherd
+pnpm install && pnpm build
+
+node packages/cli/bin/potsherd.js audit
+node packages/cli/bin/potsherd.js rescue
+node packages/cli/bin/potsherd.js index --no-embed
+node packages/cli/bin/potsherd.js find "something you argued about in june"
 ```
 
-For the verbs that write, install it:
-
-```bash
-npm install -g potsherd
-potsherd rescue
-potsherd index --no-embed
-potsherd find "something you argued about in june"
-```
+`potsherd setup --claude` (and the plugin) write the absolute path to that
+`bin/potsherd.js` into their config, so nothing depends on a global install.
 
 Requires Node 22 or newer. `CLAUDE_CONFIG_DIR` is honoured; `--claude-dir`
 overrides it. Every verb takes `--json`, `--no-color`, `--ascii` and `--width`.

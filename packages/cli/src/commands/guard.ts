@@ -53,7 +53,7 @@ export async function runGuard(o: GuardOptions): Promise<number> {
       if (resolution.via === 'absolute') {
         print('');
         print(t.dim('  potsherd is not on your PATH, so the hook pins this install by path.'));
-        print(t.dim('  after  npm i -g potsherd,  re-run  potsherd guard  for the portable form.'));
+        print(t.dim('  once a  potsherd  is on your PATH, re-run  potsherd guard  for the portable form.'));
       }
     }
     print('');

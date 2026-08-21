@@ -74,6 +74,8 @@ Two forms work, and `setup` picks between them the way `guard` does:
 | `potsherd-mcp` | it is on your `PATH` | survives an upgrade, reads best in a diff |
 | `/abs/path/to/node /abs/path/to/packages/mcp/dist/index.js` | it is not | pinned to this install |
 
+(Inside the two plugins the same server is launched through `bin/potsherd-mcp`, which resolves the bundle and, when there is none, writes the three paths it tried to the server log rather than dying with a module-not-found trace and taking all six tools with it silently.)
+
 The absolute `node` in the second form is deliberate. Several of these clients
 are GUI applications launched from Finder or a desktop entry, and those inherit
 no shell `PATH` at all — a version-managed `node` would simply not be found.

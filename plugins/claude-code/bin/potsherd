@@ -35,9 +35,12 @@
 # `sqlite-vec` at runtime through `createRequire`, so it needs a `node_modules`
 # beside it with those two built for the host platform. A git clone of this
 # repository has neither `dist/` (gitignored) nor `node_modules/`, which is why
-# a marketplace install falls through to step 3 and why the README tells you to
-# `npm i -g potsherd`. Making step 1 work for a marketplace install requires a
-# packaging change to `packages/cli` -- reserved ground, and T5.6's call.
+# a marketplace install falls through to step 3. And step 3 is empty too:
+# potsherd is NOT published to npm, so a global install is something only
+# somebody who already built a checkout can have. Every version of this file
+# before T5.9 printed `npm i -g potsherd` as the fix; it is a 404. Making step 1
+# work for a marketplace install requires a packaging change to `packages/cli`
+# -- reserved ground, and reported rather than taken.
 set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

@@ -43,20 +43,28 @@ finds nothing. **[docs]**
 
 ## Install
 
-### 1. You need a `potsherd` binary — install this first
+### 1. You need a `potsherd` binary — build it from a checkout
 
 The plugin ships configuration, not a program.
 
+> **`potsherd` is not published to npm.** `npm i -g potsherd` is a 404 today,
+> and this file used to print it as the install command. Publishing is
+> phase 7's. Until then the only instruction that works is the one below.
+
 ```sh
-npm i -g potsherd
+git clone https://github.com/HulkInTherapy/potsherd
+cd potsherd
+pnpm install && pnpm build
 ```
 
-From a checkout, `pnpm install && pnpm build` does the same job.
+Then add the plugin **from that checkout**, so that `bin/potsherd` finds the
+bundle two directories up from itself. Adding it from GitHub clones a *second*
+copy with no `dist/` in it, and that copy is the one the plugin looks beside.
 
-Without one, the `SessionEnd` hook indexes nothing. It does not fail quietly:
-the `SessionStart` hook prints a `systemMessage` naming the problem. **[disk]** —
-that message was produced by running the real hook command with no `potsherd`
-reachable.
+Without a built potsherd the `SessionEnd` hook indexes nothing and the MCP
+server exposes no tools. It does not fail quietly: the `SessionStart` hook
+prints a `systemMessage` naming the problem. **[disk]** — that message was
+produced by running the real hook command with no `potsherd` reachable.
 
 ### 2. Add the plugin
 
@@ -153,9 +161,18 @@ the plugin root and let the child process resolve a relative argument against
 it:
 
 ```json
-{ "type": "stdio", "command": "node",
-  "args": ["../../packages/mcp/dist/index.js"], "cwd": "." }
+{ "type": "stdio", "command": "sh",
+  "args": ["bin/potsherd-mcp"], "cwd": "." }
 ```
+
+`bin/potsherd-mcp` is the same three-place resolution `bin/potsherd` does, and
+it exists for the same reason. Naming
+`../../packages/mcp/dist/index.js` here directly — which this file used to —
+means that in a marketplace install, where `dist/` is gitignored and absent,
+`node` dies with a module-not-found stack trace before the server speaks MCP
+and all six tools are simply missing from the client with no explanation. The
+shim writes the three paths it tried, and the build command, to the server log
+instead.
 
 **Two warnings about this file, both honest:**
 
