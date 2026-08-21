@@ -121,13 +121,31 @@ jobs:
                  doctor --privacy --width 80 --no-color ) > "$home/live.txt"
 
           # Everything in the receipt is fixed by the corpus except the date in
-          # the heading, which is today's from the system clock. That is real
-          # output rather than a caption, so it is normalised rather than
-          # pinned — a screen regenerated on a different day must still pass.
-          undate() { sed -E '1s/·[^·]*$/· <date>/' "$1"; }
+          # Two things in this receipt are real output that legitimately differ
+          # between one capture and the next, so both are normalised rather than
+          # pinned — the same reasoning, applied twice.
+          #
+          #   the heading date: today's, from the system clock.
+          #
+          #   the managed-settings path: **platform-dependent**. Claude Code
+          #   reads it from /Library/Application Support/ClaudeCode on macOS and
+          #   /etc/claude-code on Linux, so a screen captured on one OS could
+          #   never match the live command on the other. This guard ran on both
+          #   and failed on ubuntu for exactly that reason on its first outing.
+          #   The line's *presence* is still asserted below; only the platform's
+          #   own spelling of the path is normalised away.
+          norm() {
+            sed -E -e '1s/·[^·]*$/· <date>/' \
+                   -e 's#^( *)[^ ].*managed-settings\.json#\1<managed-settings>#' "$1"
+          }
+
+          # ...and the line must still be there. A normaliser that silently
+          # accepted its disappearance would be a guard that stopped guarding.
+          grep -q 'managed-settings' docs/screens/05-doctor-privacy.txt || {
+            echo "the privacy receipt no longer mentions managed-settings at all"; exit 1; }
 
           screen=docs/screens/05-doctor-privacy.txt
-          if ! diff -u <(undate "$screen") <(undate "$home/live.txt"); then
+          if ! diff -u <(norm "$screen") <(norm "$home/live.txt"); then
             echo
             echo "The published privacy receipt no longer matches what the product does."
             echo "Above, '-' is what $screen claims and '+' is what the live"
@@ -149,7 +167,13 @@ jobs:
           end = next(i for i in range(start, len(lines)) if lines[i].startswith('```'))
           quoted = lines[start:end]
           # The heading date is normalised here too, for the same reason.
-          norm = lambda b: ['potsherd doctor --privacy · <date>'] + b[1:]
+          import re
+          def norm(b):
+              out = ['potsherd doctor --privacy · <date>']
+              for line in b[1:]:
+                  out.append(re.sub(r'^( *)\S.*managed-settings\.json',
+                                    r'\1<managed-settings>', line))
+              return out
           if norm(quoted) != norm(screen):
               import difflib
               print('\n'.join(difflib.unified_diff(
