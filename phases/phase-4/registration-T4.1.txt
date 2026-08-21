@@ -344,3 +344,53 @@ has `decision: string; what: string` and no `why` / `evidenceSeq`, the file has
 against **the file**, since that is what compiles. If T4.2 lands WAVE's shape
 instead, `threadLines()` in `packages/core/src/render/ask.ts` needs one line
 changed (`o.what` → `o.decision`).
+
+
+================================================================================
+6. two numbers the orchestrator has to decide about
+================================================================================
+
+Both are measured, both are in `phases/phase-4/evidence-T4.1/real-runs.txt`
+with the runs behind them, and neither is changed here because both are set by
+the plan.
+
+**`03` §12: "ask p50 < 20 s and < $0.05 per question at k=6" is MISSED on the
+subscription path.** Five real runs: 57 s, 92 s, 93 s, 100 s, 183 s. The
+readers alone cost $0.061–$0.123 est. The cause is the one `03` §12 already
+records for `card`: a real haiku-class call through the agent SDK is 60–160 s,
+and six in parallel realise ~4.9x. The target predates any agent-SDK
+measurement. **Reported as a miss rather than met by narrowing k.**
+
+**`--max-usd`'s default of 0.10 aborts a normal k=6 run before the
+synthesizer.** That is the phase-4 ruling working exactly as written — an abort
+that still printed an ungrounded answer would be worse — and it fired on a real
+run at $0.123 est. after six readers. `ASK_MAX_USD` is left at 0.10 because
+the phase plan sets it there. The measurement says ~0.30 for k=6 on the api
+path; and on the subscription path, which `04` Q4 chose, the figure being
+compared against is an api-equivalent rather than money spent, exactly as `03`
+§12 already says of `card`'s $2.
+
+There is also **a race in `llm.ts` this exposed and did not fix.** `Budget.admit`
+runs before a call and `Budget.record` after it, so at concurrency 6 all six
+readers clear `admit` against a spend of $0 before any of them records
+anything. The ceiling is enforced between batches, not within one. `ask`
+catches the overshoot after the fan-out and aborts before the synthesizer, so
+no run here spent past the ceiling by more than the readers' own cost — but the
+race is in `llm.ts`, is not T4.1's file, and affects `card --all` the same way.
+
+
+================================================================================
+7. running `ask` before the blocks are pasted
+================================================================================
+
+`phases/phase-4/evidence-T4.1/wire-up.py` applies the blocks in sections 1 and
+2 by reading them **out of this file**, so there is no second copy to drift,
+and `--revert` takes them out again:
+
+    python3 phases/phase-4/evidence-T4.1/wire-up.py && pnpm build
+    sh phases/phase-4/evidence-T4.1/run-synthetic.sh …
+    python3 phases/phase-4/evidence-T4.1/wire-up.py --revert && pnpm build
+
+Every measurement in `evidence-T4.1/` was taken with them applied. The script
+is for reproducing those; at integration the blocks are pasted for good and it
+becomes dead weight the orchestrator can delete.

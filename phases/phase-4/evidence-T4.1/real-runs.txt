@@ -26,7 +26,7 @@ subscription path, measured here, neither holds and the shortfall is not close:
 
     k=6, readers haiku-class at concurrency 6, synthesizer sonnet-class
 
-    wall           57 s  ·  92 s  ·  93 s  ·  100 s  ·  183 s      (5 runs)
+    wall           57 s · 92 s · 100 s · 110 s · 183 s        (5 runs)
     of which recall  1.1 s – 12.2 s   (the vector arm; ~350 ms is the forward
                                        pass, the rest is the six-list fan-out
                                        over 236 sessions)
@@ -60,15 +60,21 @@ For the orchestrator to decide.
 the runs
 --------
 
-  q1-ratelimit  (a question one surviving session answers)
-    shortlist   6 of 50 candidate sessions · 5 ghosts, 1 session
-    readers     6 · 1 found · 5 not-found · 0 failed
-    filter      2 evidence lines proposed, 2 kept, 0 dropped
-                2 sentences proposed, 2 kept, 0 dropped
-    answer      2 sentences, both cited; it corrected the question's premise
-                rather than accepting it
-    wall        93 s (measured)  ·  $0.073 est.  ·  7 calls  ·  exit 0
-    file        runs/diag-vec.txt  (--json)
+  q1-ratelimit-answered   (a question two surviving sessions answer)
+    shortlist   6 of 56 candidate sessions
+    readers     6 · 2 found · 4 not-found · **0 failed**
+    filter      4 evidence lines proposed, 3 kept, **1 dropped** (`not-a-quote`
+                — the synthesizer stitched `MEGHBRAIN_INGEST_CONCURRENCY=4`
+                onto a shell command that follows it in a different exchange;
+                the seq resolved, the string did not occur, the line went)
+                3 sentences proposed, 3 kept, 0 dropped
+    answer      3 sentences, every one cited; it corrected the question's false
+                premise rather than accepting it
+    invariants  answer === sentences.join(' ')          true
+                every kept sentence cites something     true
+                every cite resolves to an evidence line true
+    wall        110 s (measured)  ·  $0.114 est.  ·  7 calls  ·  exit 0
+    file        runs/q1-ratelimit-answered.txt  (--json, the AskResult verbatim)
 
   q1-ratelimit  (the same question, at the 0.10 default)
     readers     6 · 2 found · 4 not-found · 0 failed
