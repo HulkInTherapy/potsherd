@@ -133,12 +133,16 @@ export function findMcpEntry(entry: string | undefined): { file: string | null; 
     // The *nearest* such directory wins, so a worktree checked out inside
     // another checkout resolves to itself rather than to its parent.
     if (
-      workspace === null &&
       !dir.split(path.sep).includes('node_modules') &&
       fs.existsSync(path.join(dir, 'package.json')) &&
       fs.existsSync(path.join(dir, 'packages'))
     ) {
       workspace = dir;
+      // And stop. Above the checkout is somebody else's tree: a git worktree
+      // living inside its own repository would otherwise walk out of itself and
+      // register the *parent* checkout's build, which is a different potsherd
+      // than the one being run.
+      break;
     }
     const up = path.dirname(dir);
     if (up === dir) break;

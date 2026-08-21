@@ -163,15 +163,26 @@ describe('where the MCP server is', () => {
     expect(res.file).toBe(path.join(root, 'packages', 'mcp', 'dist', 'index.js'));
   });
 
-  it('resolves the nearest checkout, not an outer one it happens to sit inside', () => {
+  /**
+   * A git worktree lives inside its own repository, so the walk up from
+   * `packages/cli/bin` passes straight through the worktree root and into the
+   * parent checkout. Left unbounded it found the *parent's* built server and
+   * registered that — a different potsherd than the one being run, and no
+   * message anywhere would have said so.
+   */
+  it('stops at its own checkout, and does not adopt the parent one’s build', () => {
     const outer = path.join(home, 'outer');
     write(path.join(outer, 'package.json'), '{}\n');
-    fs.mkdirSync(path.join(outer, 'packages'), { recursive: true });
+    const outerBuild = write(path.join(outer, 'packages', 'mcp', 'dist', 'index.js'), '// stub\n');
+
     const inner = path.join(outer, '.worktrees', 'wt');
     write(path.join(inner, 'package.json'), '{}\n');
     const cliBin = write(path.join(inner, 'packages', 'cli', 'bin', 'potsherd.js'), '// stub\n');
 
-    expect(findMcpEntry(cliBin).file).toBe(path.join(inner, 'packages', 'mcp', 'dist', 'index.js'));
+    const found = findMcpEntry(cliBin);
+    expect(found.file).toBe(path.join(inner, 'packages', 'mcp', 'dist', 'index.js'));
+    expect(found.file).not.toBe(outerBuild);
+    expect(found.exists).toBe(false);
   });
 
   /**
