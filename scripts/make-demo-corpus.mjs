@@ -467,7 +467,7 @@ const HERO_SIDECHAIN = 'check whether any driver in the repo still prepares stat
  * and put a timeout on acquiring one. It never asked what transaction pooling
  * *breaks*, so nothing in it says anything about prepared statements or
  * `statement_cache_size`. That is the open thread, and it is the shape
- * `plans/05` §4 names: *"decided in fulcrum, never applied to meghbrain"*.
+ * `plans/05` §4 names: *"decided in one project, never applied to the next"*.
  *
  * Two deliberate constraints on the text below, both of which the screens
  * depend on:

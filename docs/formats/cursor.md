@@ -175,7 +175,7 @@ records of 1, 285 of 2, 44 of 3, 1 of 10); the common shapes across the corpus a
 | `id` | ✅ | directory / file basename (the `composerId`) |
 | `harness` | ✅ | `cursor` |
 | `sourcePath` | ✅ | |
-| `project` | ⚠️ **recovered** | an absolute directory found in this session's own tool inputs whose `cursorSlug()` equals the project directory name. Both real projects resolve, including the underscore case (`Users-zebra-maths-practice` → `/Users/zebra/maths_practice`) that slug inversion can never reach. Corroboration, not proof: `/a/b_c` and `/a/b-c` slug alike. `''` when nothing agrees — window-id and `empty-window` projects never have a cwd |
+| `project` | ⚠️ **recovered** | an absolute directory found in this session's own tool inputs whose `cursorSlug()` equals the project directory name. Both projects in the survey corpus resolve, including the underscore case (`Users-example-my-project` → `/Users/example/my_project`) that slug inversion can never reach. Corroboration, not proof: `/a/b_c` and `/a/b-c` slug alike. `''` when nothing agrees — window-id and `empty-window` projects never have a cwd |
 | `projectSlug` | ✅ | the directory name, verbatim |
 | `startedAt` | ⚠️ | first prompt stamp, else **mtime** |
 | `endedAt` | ⚠️ | **mtime** |
