@@ -705,12 +705,6 @@ export async function indexAll(options: IndexOptions = {}): Promise<IndexReport>
 
     const embeddings = await embedExchanges(db, { ...options, embed }, vec);
 
-    // `doctor` prints exact per-(harness, version, type) counts long after the
-    // run that computed them, so they are kept in `sync_state`. Only harnesses
-    // this run actually re-read are replaced; the rest keep the numbers their
-    // own last full read produced.
-    persistRecordTypes(db, harnesses, [...recordTypes.values()]);
-
     const totals = {
       sessions: sum(harnesses, (h) => h.sessions),
       exchanges: sum(harnesses, (h) => h.exchanges),
@@ -857,8 +851,12 @@ async function indexHarness(
     redaction = addCounts(redaction, result.counts);
 
     const version = spec.version(parsed);
+    // Two ledgers, deliberately: the map is what *this run* saw and goes on the
+    // receipt; the table is what the *index* holds and is what `doctor` reads
+    // back, months later, after an incremental pass that opened one file.
+    writeSessionRecordTypes(db, parsed.session.id, spec, version, parsed.unknownTypes);
     for (const [type, count] of Object.entries(parsed.unknownTypes)) {
-      const key = `${spec.harness} ${version} ${type}`;
+      const key = `${spec.harness}\0${version}\0${type}`;
       const row = recordTypes.get(key);
       if (row) {
         row.count += count;
@@ -1035,27 +1033,68 @@ async function embedExchanges(
   return report;
 }
 
-const RECORD_TYPES_KEY = 'index:recordTypes';
-
-function persistRecordTypes(
+/**
+ * Record the types one session's parser did not consume.
+ *
+ * Written per session, replacing that session's rows, so re-reading a grown
+ * transcript updates its own numbers and touches nobody else's. The previous
+ * design kept one JSON blob per *run* in `sync_state`, and an incremental pass
+ * that re-read a single file rewrote the whole harness's counts to whatever
+ * that one file happened to contain: `queue-operation 10` became
+ * `queue-operation 1`, and types absent from that file disappeared from
+ * `doctor` altogether. Counts are a property of the corpus, so they are stored
+ * against the corpus.
+ */
+function writeSessionRecordTypes(
   db: Db,
-  harnesses: readonly HarnessReport[],
-  fresh: readonly RecordTypeRow[],
+  sessionId: string,
+  spec: AdapterSpec,
+  version: string,
+  unknownTypes: Readonly<Record<string, number>>,
 ): void {
-  const refreshed = new Set(harnesses.filter((h) => h.parsed > 0).map((h) => h.harness));
-  if (refreshed.size === 0) return;
-  const kept = storedRecordTypes(db).filter((r) => !refreshed.has(r.harness));
-  writeIndexState(db, RECORD_TYPES_KEY, JSON.stringify([...kept, ...fresh]));
+  const write = db.transaction(() => {
+    db.prepare('DELETE FROM session_record_types WHERE session_id = ?').run(sessionId);
+    const insert = db.prepare(
+      `INSERT INTO session_record_types (session_id, harness, version, type, count, novel)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, version, type) DO UPDATE SET count = excluded.count`,
+    );
+    for (const [type, count] of Object.entries(unknownTypes)) {
+      insert.run(sessionId, spec.harness, version, type, count, spec.novel(type) ? 1 : 0);
+    }
+  });
+  write();
 }
 
-/** What the last read of each harness saw. `[]` before the first `index`. */
+/**
+ * Every record type in the index right now, summed over every session that is
+ * in it — not over whatever the last run happened to open.
+ *
+ * `files` is the number of transcripts the type appears in, which is why the
+ * rows are grouped rather than summed in the caller.
+ */
 export function storedRecordTypes(db: Db): RecordTypeRow[] {
-  const raw = readIndexState(db, RECORD_TYPES_KEY);
-  if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw) as RecordTypeRow[];
-    return Array.isArray(parsed) ? parsed : [];
+    const rows = db
+      .prepare(
+        `SELECT harness, version, type,
+                SUM(count) AS count, COUNT(*) AS files, MAX(novel) AS novel
+           FROM session_record_types
+          GROUP BY harness, version, type
+          ORDER BY count DESC`,
+      )
+      .all() as { harness: Harness; version: string; type: string; count: number; files: number; novel: number }[];
+    return rows.map((r) => ({
+      harness: r.harness,
+      version: r.version,
+      type: r.type,
+      count: r.count,
+      files: r.files,
+      novel: r.novel === 1,
+    }));
   } catch {
+    // A database from a potsherd older than migration 5. Say nothing rather
+    // than say something wrong; the next `index` fills the table.
     return [];
   }
 }

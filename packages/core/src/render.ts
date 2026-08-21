@@ -43,6 +43,15 @@ export class Card {
   constructor(private readonly t: Theme) {}
 
   /**
+   * The one place a line enters a card, so `--ascii` cannot be forgotten by a
+   * caller. The fold is width-preserving (see {@link Theme.asciiLine}), so it
+   * runs after the line has already been fitted.
+   */
+  private push(line: string): void {
+    this.lines.push(this.t.asciiLine(line));
+  }
+
+  /**
    * `potsherd audit · ~/.claude · 21 aug 2026`. Middle parts are paths, so
    * they elide in the middle when the terminal is narrow: the last segment of
    * a path identifies it, the middle rarely does.
@@ -58,7 +67,7 @@ export class Card {
       budget -= out.length;
       return out;
     });
-    this.lines.push(this.t.dim([head, ...shown].join(sep)));
+    this.push(this.t.dim([head, ...shown].join(sep)));
     return this;
   }
 
@@ -68,14 +77,14 @@ export class Card {
   }
 
   raw(line = ''): this {
-    this.lines.push(line);
+    this.push(line);
     return this;
   }
 
   /** An indented prose line, clipped (never wrapped) to the terminal width. */
   text(s: string, tone: Row['tone'] = 'none'): this {
     const max = Math.max(20, this.t.width - INDENT.length);
-    this.lines.push(INDENT + this.tone(clip(s, max), tone));
+    this.push(INDENT + this.tone(clip(s, max, this.t), tone));
     return this;
   }
 
@@ -84,13 +93,13 @@ export class Card {
     const noteW = Math.max(0, this.t.width - INDENT.length - labelW - VALUE_W - GAP);
     // elide() may come back shorter than labelW (it trims before the ellipsis),
     // so pad afterwards or the value column stops being a column.
-    const label = (r.label.length > labelW ? elide(r.label, labelW) : r.label).padEnd(labelW);
+    const label = (r.label.length > labelW ? elide(r.label, labelW, this.t) : r.label).padEnd(labelW);
     const rawValue = r.value ?? '';
     const value = rawValue.length > VALUE_W ? rawValue : rawValue.padStart(VALUE_W);
-    const note = r.note ? clip(r.note, noteW) : '';
+    const note = r.note ? clip(r.note, noteW, this.t) : '';
     const coloured = this.tone(value, r.tone);
     const line = `${INDENT}${label}${coloured}${note ? '   ' + this.noteTone(note, r.tone) : ''}`;
-    this.lines.push(line.trimEnd());
+    this.push(line.trimEnd());
     return this;
   }
 
@@ -101,7 +110,7 @@ export class Card {
 
   /** Every verb's last line is the next verb. */
   next(command: string, why: string): this {
-    this.lines.push(`${INDENT}${this.t.dim('run')}  ${command}  ${this.t.dim(why)}`);
+    this.push(`${INDENT}${this.t.dim('run')}  ${command}  ${this.t.dim(why)}`);
     return this;
   }
 
@@ -114,11 +123,11 @@ export class Card {
     const max = Math.max(20, this.t.width - INDENT.length);
     for (const v of variants) {
       if (v.length <= max) {
-        this.lines.push(INDENT + v);
+        this.push(INDENT + v);
         return this;
       }
     }
-    this.lines.push(INDENT + clip(variants[variants.length - 1] ?? '', max));
+    this.push(INDENT + clip(variants[variants.length - 1] ?? '', max, this.t));
     return this;
   }
 
@@ -180,9 +189,9 @@ export class Card {
 export function fitLine(t: Theme, ...variants: string[]): string {
   const max = Math.max(20, t.width - INDENT.length);
   for (const v of variants) {
-    if (Theme.len(v) <= max) return INDENT + v;
+    if (Theme.len(v) <= max) return t.asciiLine(INDENT + v);
   }
-  return INDENT + clip(variants[variants.length - 1] ?? '', max);
+  return t.asciiLine(INDENT + clip(variants[variants.length - 1] ?? '', max, t));
 }
 
 /**
@@ -240,16 +249,16 @@ export function table(
   }
 
   return rows.map((r) =>
-    (indent +
+    t.asciiLine((indent +
       r
         .map((cell, c) => {
           const w = widths[c] ?? 0;
           const len = Theme.len(cell);
-          const clipped = len > w ? elide(cell, w) : cell;
+          const clipped = len > w ? elide(cell, w, t) : cell;
           const pad = ' '.repeat(Math.max(0, w - Theme.len(clipped)));
           return opts.align?.[c] === 'right' ? pad + clipped : clipped + pad;
         })
         .join(' '.repeat(gap))
-    ).trimEnd(),
+    ).trimEnd()),
   );
 }

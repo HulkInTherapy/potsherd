@@ -242,6 +242,41 @@ CREATE TABLE IF NOT EXISTS sync_state (
     // because a native extension did not load.
     run: createVecTables,
   },
+  {
+    version: 5,
+    name: 'session-record-types',
+    // `doctor` promises that every record type a parser did not consume is
+    // listed with a count (plans/06). Until now those counts lived in one
+    // `sync_state` blob that each `index` run overwrote with whatever *that
+    // run* had re-read, so one incremental pass could take a type that exists
+    // in three hundred transcripts down to one — or make it vanish. Counts
+    // belong to the sessions they were counted in, so they live here, one row
+    // per (session, version, type), and `ON DELETE CASCADE` retires them with
+    // the session. `doctor` sums; nothing overwrites.
+    //
+    // The last two statements throw the old, per-run numbers away and clear
+    // the incremental fingerprints, so the next `index` re-reads every
+    // transcript once and refills the table honestly. A migration that left
+    // the stale blob in place would keep reporting the wrong numbers, and a
+    // wrong number that looks precise is worse than no number.
+    up: `
+CREATE TABLE IF NOT EXISTS session_record_types (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  harness    TEXT NOT NULL,
+  version    TEXT NOT NULL DEFAULT 'unknown',
+  type       TEXT NOT NULL,
+  count      INTEGER NOT NULL DEFAULT 0,
+  novel      INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, version, type)
+);
+CREATE INDEX IF NOT EXISTS session_record_types_type
+  ON session_record_types(harness, version, type);
+
+DELETE FROM sync_state WHERE key = 'index:recordTypes';
+DELETE FROM sync_state WHERE key LIKE 'index:%' AND key <> 'index:ghosts';
+UPDATE sessions SET source_mtime = NULL;
+`,
+  },
 ];
 
 export function open(opts: OpenOptions = {}): Db {
@@ -301,10 +336,28 @@ export function migrate(db: Db): number {
   return ran;
 }
 
+/**
+ * The highest version every migration up to which has been applied.
+ *
+ * Not `MAX(version)`: migration 4 may legitimately decline on a machine with no
+ * `sqlite-vec`, and later migrations still run. `MAX` would then report the
+ * schema as complete while the vector tables were absent, which is the kind of
+ * quietly-wrong number this codebase exists to avoid. Counting contiguously
+ * makes `doctor`'s `schema v3 of v5` say exactly what is true.
+ */
 export function schemaVersion(db: Db): number {
   try {
-    const row = db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as { v: number | null };
-    return row?.v ?? 0;
+    const applied = new Set<number>(
+      (db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]).map(
+        (r) => r.version,
+      ),
+    );
+    let v = 0;
+    for (const m of MIGRATIONS) {
+      if (!applied.has(m.version)) break;
+      v = m.version;
+    }
+    return v;
   } catch {
     return 0;
   }

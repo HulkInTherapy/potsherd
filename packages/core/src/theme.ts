@@ -8,7 +8,12 @@ import process from 'node:process';
  *     else is `dim` or default.
  *   - NO_COLOR and --no-color are honoured; a non-TTY stdout is never coloured.
  *   - --ascii replaces every non-ASCII glyph, so the output survives a terminal
- *     with no unicode font and a screenshot taken on Windows.
+ *     with no unicode font and a screenshot taken on Windows. Two mechanisms,
+ *     because one was demonstrably forgettable: {@link Theme.g} picks the
+ *     fallback where the glyph is chosen, and {@link Theme.asciiLine} folds
+ *     whatever still got through — an em dash typed into a note, a `·` an
+ *     adapter wrote, an emoji in someone's own prompt. `render.ts` runs every
+ *     line it emits through the fold, so no verb can opt out by forgetting.
  */
 
 export interface ThemeOptions {
@@ -56,11 +61,67 @@ export class Theme {
   get star(): string { return this.g('★', '*'); }
   get le(): string { return this.g('≤', '<='); }
   get bullet(): string { return this.g('•', '-'); }
+  /** The em dash that stands in for "no number here". */
+  get dash(): string { return this.g('—', '-'); }
+
+  /**
+   * Fold one rendered line to pure ASCII, when `--ascii` is on.
+   *
+   * Applied at the very end, after the line has been fitted to the terminal
+   * width, so **every substitution is exactly one character wide or narrower**.
+   * That is the whole design constraint: `…` → `...` here would push a line
+   * that just fitted 80 columns to 82. The three-character ellipsis comes from
+   * {@link ellip}, which the width arithmetic sees; this is only the net.
+   */
+  asciiLine(s: string): string {
+    return this.ascii ? toAscii(s) : s;
+  }
 
   /** Visible width, ignoring ANSI escapes. */
   static len(s: string): number {
     return stripAnsi(s).length;
   }
+}
+
+/**
+ * The glyphs the design system uses, and their one-character ASCII stand-ins.
+ * Anything not listed is decomposed (`é` → `e`) and, failing that, becomes a
+ * single `?` — never silently dropped, because a vanished character is a
+ * vanished fact.
+ */
+const ASCII_FOLD: Record<string, string> = {
+  '…': '.', '·': '.', '•': '*', '‧': '.', '∙': '.',
+  '—': '-', '–': '-', '‒': '-', '−': '-', '―': '-',
+  '→': '>', '⇒': '>', '←': '<', '⇐': '<', '↑': '^', '↓': 'v',
+  '≤': '<', '≥': '>', '≠': '!', '±': '~', '×': 'x', '÷': '/',
+  '★': '*', '☆': '*', '✓': 'v', '✔': 'v', '✗': 'x', '✘': 'x',
+  '‹': '<', '›': '>', '«': '<', '»': '>',
+  '“': '"', '”': '"', '„': '"', '‘': "'", '’': "'", '‚': "'",
+  '█': '#', '▇': '#', '▓': '#', '▒': '+', '░': '.', '■': '#', '□': '.',
+  '│': '|', '─': '-', '┌': '+', '┐': '+', '└': '+', '┘': '+', '├': '+',
+  '┤': '+', '┬': '+', '┴': '+', '┼': '+', '°': 'o', '§': 'S', '¶': 'P',
+  '\u00a0': ' ', '\u2007': ' ', '\u2009': ' ', '\u202f': ' ', '\ufeff': '',
+};
+
+/**
+ * Every non-ASCII code point replaced by one that is, without ever making the
+ * string longer (measured in characters, which is what a terminal column is).
+ * Surrogate pairs count as the one character they display as.
+ */
+export function toAscii(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  if (!/[^\x00-\x7F]/.test(s)) return s;
+  let out = '';
+  for (const ch of s) {
+    if (ch.charCodeAt(0) < 128 && ch.length === 1) { out += ch; continue; }
+    const mapped = ASCII_FOLD[ch];
+    if (mapped !== undefined) { out += mapped; continue; }
+    // `é` is `e` plus a combining acute; drop the accent and keep the letter.
+    const bare = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // eslint-disable-next-line no-control-regex
+    out += bare.length === 1 && !/[^\x00-\x7F]/.test(bare) ? bare : '?';
+  }
+  return out;
 }
 
 const ANSI_RE = new RegExp('\\u001b\\[[0-9;]*m', 'g');

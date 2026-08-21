@@ -6,10 +6,11 @@ import {
   indexAll,
   lock,
   paths,
-  redactionRow,
   type Harness,
   type HarnessReport,
   type IndexReport,
+  type RedactionCounts,
+  type Row,
 } from '@potsherd/core';
 import { print, printJson, Progress, themeFrom, UserError, type GlobalOptions } from '../output.js';
 
@@ -97,7 +98,11 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
   if (o.json) {
     printJson({
       ...report,
+      // Named for what it is: what *this pass* masked. The index-wide totals
+      // are `potsherd doctor --json`'s `redaction`, counted back out of the
+      // stored text rather than remembered from a run.
       redaction: countsJson(report.redaction),
+      redactionScope: 'run',
       db: paths.dbPath(root),
     });
     return report.totals.failed ? 1 : 0;
@@ -150,7 +155,7 @@ export function renderIndexReceipt(
     card.row({
       label: h.harness,
       value: fmt.num(h.sessions),
-      note: harnessNote(h),
+      note: harnessNote(h, ` ${t.mid} `),
       tone: h.failed > 0 ? 'warn' : h.sessions > 0 ? 'none' : 'dim',
     });
   }
@@ -161,22 +166,16 @@ export function renderIndexReceipt(
     {
       label: 'exchanges indexed',
       value: fmt.num(totals.exchanges),
-      note: `${fmt.num(totals.toolCalls)} tool ${fmt.plural(totals.toolCalls, 'call')} · ${fmt.num(totals.redactedExchanges)} redacted`,
+      note:
+        `${fmt.num(totals.toolCalls)} tool ${fmt.plural(totals.toolCalls, 'call')} ` +
+        `${t.mid} ${fmt.num(totals.redactedExchanges)} redacted`,
     },
-    {
-      label: 'ghosts indexed',
-      value: fmt.num(report.ghosts.ghosts),
-      note: report.ghosts.unchanged
-        ? `${fmt.num(report.ghosts.prompts)} prompts · unchanged`
-        : `${fmt.num(report.ghosts.prompts)} ${fmt.plural(report.ghosts.prompts, 'prompt')}, searchable`,
-    },
-    // The redaction row describes *this run*, like `parsed` does — an
-    // incremental run that re-read nothing masked nothing, and saying "nothing
-    // matched" there would be a lie about the index. `potsherd doctor` reports
-    // the index-wide counts, read back out of the stored text.
-    totals.parsed === 0
-      ? { label: 'secrets masked', value: '—', note: 'nothing re-read — see potsherd doctor', tone: 'dim' as const }
-      : redactionRow(report.redaction, t, card.noteWidth()),
+    ghostRow(report, t),
+    // What *this pass* masked, and labelled as such. `index` cannot see the
+    // index-wide total — it only knows what it re-read — and the old row said
+    // "nothing matched — index holds no secrets" after an incremental run that
+    // opened one file, on an index holding three masks. A run reports the run.
+    maskedThisRunRow(report, t, card.noteWidth()),
     embeddingRow(report, t),
   ]);
 
@@ -185,7 +184,9 @@ export function renderIndexReceipt(
     {
       label: report.full ? 'full index' : 'incremental index',
       value: fmt.duration(report.ms),
-      note: `${fmt.num(totals.parsed)} parsed · ${fmt.num(totals.skipped)} unchanged · ${fmt.bytes(totals.bytes)}`,
+      note:
+        `${fmt.num(totals.parsed)} parsed ${t.mid} ${fmt.num(totals.skipped)} unchanged ` +
+        `${t.mid} ${fmt.bytes(totals.bytes)}`,
       tone: 'accent',
     },
   ]);
@@ -199,9 +200,16 @@ export function renderIndexReceipt(
 
   const novel = report.recordTypes.filter((r) => r.novel);
   if (novel.length > 0) {
-    card.blank().text('record types no format note describes yet:');
+    card.blank().text('record types no format note describes yet, in what this run read:');
     for (const row of novel.slice(0, 5)) {
-      card.raw(`    ${(`${row.harness} ${row.type}`).padEnd(30)}${fmt.num(row.count).padStart(7)}   ${t.dim(row.version)}`);
+      // The name is what the reader needs, so it gets the width and the
+      // version gives ground — the same rule `doctor` follows.
+      const nameW = Math.max(20, t.width - 4 - 7 - 3 - 8);
+      const name = `${row.harness} ${row.type}`;
+      card.raw(
+        `    ${fmt.elide(name, nameW, t).padEnd(Math.min(nameW, 30))}` +
+          `${fmt.num(row.count).padStart(7)}   ${t.dim(fmt.elide(row.version, 8, t))}`,
+      );
     }
   }
 
@@ -213,7 +221,7 @@ export function renderIndexReceipt(
   return card.toString();
 }
 
-function harnessNote(h: HarnessReport): string {
+function harnessNote(h: HarnessReport, sep = ' · '): string {
   if (!h.present && h.discovered === 0) return `not installed — ${paths.tildify(h.sourceDir)}`;
   if (h.discovered === 0) return `no transcripts in ${paths.tildify(h.sourceDir)}`;
   const parts: string[] = [];
@@ -224,27 +232,103 @@ function harnessNote(h: HarnessReport): string {
   if (h.unchanged) parts.push('unchanged');
   else if (h.parsed > 0) parts.push(`${fmt.num(h.parsed)} re-read`);
   if (h.failed > 0) parts.push(`${fmt.num(h.failed)} failed`);
-  return parts.join(' · ');
+  return parts.join(sep);
 }
 
 function embeddingRow(report: IndexReport, t: ReturnType<typeof themeFrom>) {
   const e = report.embeddings;
   const total = e.embedded + e.upToDate;
   if (!e.enabled) {
-    return { label: 'vectors', value: '—', note: 'skipped (--no-embed) · text search only', tone: 'dim' as const };
+    return {
+      label: 'vectors',
+      value: t.dash,
+      note: `skipped (--no-embed) ${t.mid} text search only`,
+      tone: 'dim' as const,
+    };
   }
   if (!e.available) {
     return {
       label: 'vectors',
-      value: '—',
-      note: fmt.clip(`no vector index: ${e.reason ?? 'unavailable'}`, Math.max(20, t.width - 40)),
+      value: t.dash,
+      note: fmt.clip(`no vector index: ${e.reason ?? 'unavailable'}`, Math.max(20, t.width - 40), t),
       tone: 'dim' as const,
     };
   }
   return {
     label: 'vectors',
     value: fmt.num(total),
-    note: `${fmt.num(e.embedded)} new · bge-small${report.vec.version ? ` · sqlite-vec ${report.vec.version}` : ''}`,
+    note:
+      `${fmt.num(e.embedded)} new ${t.mid} bge-small` +
+      `${report.vec.version ? ` ${t.mid} sqlite-vec ${report.vec.version}` : ''}`,
     tone: 'ok' as const,
+  };
+}
+
+/**
+ * `ghosts indexed`.
+ *
+ * Zero is a fact worth explaining rather than a blank: ghosts are recovered
+ * from `history.jsonl` by `potsherd rescue`, so a fresh `index` alone finds
+ * none — and `potsherd find --ghosts only` would then answer "no match", which
+ * reads as "you have no deleted sessions" when the truth is "nobody has looked
+ * for them yet".
+ */
+function ghostRow(report: IndexReport, t: ReturnType<typeof themeFrom>): Row {
+  const g = report.ghosts;
+  if (g.ghosts === 0) {
+    return {
+      label: 'ghosts indexed',
+      value: '0',
+      note: 'none recovered yet — run potsherd rescue',
+      tone: 'dim',
+    };
+  }
+  return {
+    label: 'ghosts indexed',
+    value: fmt.num(g.ghosts),
+    note: g.unchanged
+      ? `${fmt.num(g.prompts)} prompts ${t.mid} unchanged`
+      : `${fmt.num(g.prompts)} ${fmt.plural(g.prompts, 'prompt')}, searchable`,
+  };
+}
+
+/**
+ * `masked this run`.
+ *
+ * Every word of this row is scoped to the pass that just ran, because that is
+ * all a run can honestly know. `potsherd doctor` counts the masks that are
+ * actually in the stored text and is the only place that speaks for the index.
+ */
+function maskedThisRunRow(
+  report: IndexReport,
+  t: ReturnType<typeof themeFrom>,
+  noteWidth: number,
+): Row {
+  const c: RedactionCounts = report.redaction;
+  if (report.totals.parsed === 0) {
+    return {
+      label: 'masked this run',
+      value: t.dash,
+      note: 'nothing re-read — see potsherd doctor',
+      tone: 'dim',
+    };
+  }
+  const parts = Object.entries(c.byType)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `${k} ${fmt.num(n)}`);
+  if (parts.length === 0) {
+    return {
+      label: 'masked this run',
+      value: '0',
+      note: 'nothing matched in what was re-read',
+      tone: 'dim',
+    };
+  }
+  return {
+    label: 'masked this run',
+    value: fmt.num(c.total),
+    note: fmt.joinFit(parts, noteWidth, ` ${t.mid} `, t),
+    tone: 'ok',
   };
 }

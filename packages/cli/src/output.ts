@@ -24,13 +24,24 @@ export interface GlobalOptions {
   yes?: boolean;
 }
 
+/**
+ * The theme the verb running in this process chose.
+ *
+ * One process runs one verb, so there is exactly one, and {@link print} uses it
+ * to fold `--ascii` output as it leaves — the last gate before the terminal.
+ * `render.ts` already folds every card and table it builds; this catches the
+ * lines a verb writes by hand, which is where `--ascii` leaked eleven glyphs.
+ */
+let active: Theme | null = null;
+
 export function themeFrom(o: GlobalOptions): Theme {
   const opts: { color?: boolean; ascii?: boolean; width?: number } = {};
   if (o.json) opts.color = false;
   else if (o.color === false) opts.color = false;
   if (o.ascii) opts.ascii = true;
   if (o.width) opts.width = o.width;
-  return new Theme(opts);
+  active = new Theme(opts);
+  return active;
 }
 
 export function printJson(value: unknown): void {
@@ -38,7 +49,10 @@ export function printJson(value: unknown): void {
 }
 
 export function print(s: string): void {
-  process.stdout.write(s.endsWith('\n') ? s : s + '\n');
+  // The fold is width-preserving (Theme.asciiLine), so it can never turn a
+  // line that fitted the terminal into one that does not.
+  const out = active ? active.asciiLine(s) : s;
+  process.stdout.write(out.endsWith('\n') ? out : out + '\n');
 }
 
 /**
