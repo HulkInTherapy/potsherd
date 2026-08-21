@@ -78,13 +78,33 @@ citation survived the hop from brief to agent to user, which is the whole point 
 
 ## the control — the same question, no graft
 
-Same prompt, no plugin, no brief. It did **not** answer from knowledge and it did not say it did not
-know: it went looking, making **15 `Bash` calls** across the filesystem, and had still not produced
-an answer when this was written.
+Same prompt, no plugin, no brief. **16 turns · 88 s · 15 `Bash` calls** — and the result is worse
+than not knowing. It went looking, found something in the repo that matched the words "four points"
+and "split", and answered confidently about **an entirely different event**: phase 3's change to
+which retrieval lists each eval arm is given.
 
-That is the comparison the box asks for. With the brief: one turn, six seconds, no tools, correct
-and cited. Without it: fifteen tool calls and still searching for something that is not on this
-machine's disk at all.
+```
+Two things in the repo match "four points," and they're different events — here's what the record
+actually says.
+
+## The one that involves a split change
+
+`evals/run.ts:173`, commit `ef82130` ("evals: give vec-only every vector list, so the gate is a
+fair comparison"). The split that changed is **which retrieval lists each eval arm is given**:
+…
+```
+
+It is well-sourced, it cites a real commit, and it is not the answer to the question. That is the
+comparison the box asks for, and it is sharper than "it did not know":
+
+| | turns | wall | tool calls | outcome |
+|---|---|---|---|---|
+| with the brief | **1** | **5.9 s** | **0** | correct, and carried its source line through |
+| without it | 16 | 88 s | 15 | confidently wrong, about a different event |
+
+The failure mode without potsherd is not silence. It is a plausible answer assembled from whatever
+is nearest to hand — which is exactly the problem `01`'s "archive amnesia" describes, reproduced
+here by accident.
 
 ## what this does NOT close
 
