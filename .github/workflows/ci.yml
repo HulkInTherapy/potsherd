@@ -32,7 +32,14 @@ jobs:
       # is where the rule for "real content" is written down, and its failure
       # output repeats it, so a red run teaches rather than just blocks.
       - name: no committed file carries real-corpus content
-        run: python3 scripts/check-privacy.py
+        # `--selftest` first, and not as a formality: T5.9 found that the guard
+        # had never caught family (2) at all, and that a `/home/<user>/` path
+        # walked straight past it. A guard nobody has watched fail is a guard
+        # nobody has watched, so it proves it can fail before it is believed
+        # when it passes.
+        run: |
+          python3 scripts/check-privacy.py --selftest
+          python3 scripts/check-privacy.py
 
       - uses: pnpm/action-setup@v4
         with:

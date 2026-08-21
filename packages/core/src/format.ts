@@ -97,7 +97,7 @@ function ellipsisOf(e: EllipsisSource): string {
   return typeof e === 'string' ? e : e.ellip;
 }
 
-/** Elide in the middle, never at the end: `.../Second-Brain/85ef9531`. */
+/** Elide in the middle, never at the end: `.../data-pipeline/9c4d2f18`. */
 export function elideMiddle(s: string, max: number, ellipsis: EllipsisSource = ELLIPSIS): string {
   const ellip = ellipsisOf(ellipsis);
   if (s.length <= max) return s;

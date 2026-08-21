@@ -20,7 +20,7 @@ import type { RecallHit, RecallResult, RecallSession } from '../recall.js';
  * resume command for that harness**.
  *
  * The resume command is the point of the whole verb. Every other search tool
- * ends at "here is a match"; this one ends at `claude --resume 85ef9531-…`,
+ * ends at "here is a match"; this one ends at `claude --resume 9c4d2f18-…`,
  * which is the difference between finding a conversation and re-entering it.
  * Where a session cannot be resumed — archived, ghost, or a harness with no
  * command-line resume — the block says so and offers `potsherd show` instead,
