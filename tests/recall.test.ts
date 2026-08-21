@@ -28,17 +28,21 @@ import { rmrf, tempDir } from './helpers.js';
  * can drift from the other's idea of what is in the corpus.
  *
  * What the corpus holds, and why each piece is there:
- *   24 sessions     two of them untitled, so the `<slug>-<id8>` fallback is exercised
- *   2 sidechains    a subagent transcript whose text exists nowhere else
- *   5 ghosts        prompts only, from history.jsonl — no assistant side at all
- *   6 projects      so `--project` has something to be wrong about
+ *   46 sessions     two of them untitled, so the `<slug>-<id8>` fallback is exercised
+ *   6 sidechains    subagent transcripts whose text exists nowhere else
+ *   12 ghosts       prompts only, from history.jsonl — no assistant side at all
+ *   8 projects      so `--project` has something to be wrong about
  *
- * T1.7b grew it from eight sessions to twenty-four. Eleven candidates is not a
- * corpus a recall@5 metric can fail against — with that few, bm25 cannot lose
- * — so most of the new sessions are *distractors*: adjacent topics that share
- * the query's words and must rank below the answer. One of them
- * (`ID.pasted`) has pasted-screenshot placeholders where its prompts should
- * be, which is what the snippet chooser is there to survive.
+ * T1.7b grew it from eight sessions to twenty-four; T3.4 grew it again to
+ * forty-six and generated the whole thing from `scripts/make-eval-corpus.mjs`.
+ * Eleven candidates is not a corpus a recall@5 metric can fail against — with
+ * that few, bm25 cannot lose — so most of the sessions are *distractors*:
+ * adjacent topics that share the query's words and must rank below the answer.
+ * One of them (`ID.pasted`) has pasted-screenshot placeholders where its
+ * prompts should be, which is what the snippet chooser is there to survive.
+ *
+ * The counts below are the generator's; `node scripts/make-eval-corpus.mjs`
+ * prints them, and they change together or not at all.
  */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -189,8 +193,8 @@ describe('recall: the tri-state filters', () => {
   });
 
   it('--since and --until bound the window', async () => {
-    const all = await recall(db, 'the', {}, { vectors: false, limit: 50 });
-    const june = await recall(db, 'the', { since: '2026-06-01' }, { vectors: false, limit: 50 });
+    const all = await recall(db, 'the', {}, { vectors: false, limit: 100 });
+    const june = await recall(db, 'the', { since: '2026-06-01' }, { vectors: false, limit: 100 });
     // The ghosts are from April; the sessions from June.
     expect(june.sessions.every((s) => s.status !== 'ghost')).toBe(true);
     expect(all.sessions.length).toBeGreaterThan(june.sessions.length);
@@ -388,18 +392,18 @@ describe('ls', () => {
     expect(r.sessions.length).toBeGreaterThan(0);
     const when = r.sessions.map((s) => s.endedAt ?? s.startedAt ?? '');
     expect([...when].sort().reverse()).toEqual(when);
-    expect(r.ghosts).toBe(5);
+    expect(r.ghosts).toBe(12);
   });
 
   it('rolls subagents up under their parent instead of listing them flat', () => {
     const rolled = listSessions(db, {}, { limit: 50 });
     expect(rolled.sessions.every((s) => !s.isSidechain)).toBe(true);
-    expect(rolled.rolledUp).toBe(2);
+    expect(rolled.rolledUp).toBe(6);
     const parent = rolled.sessions.find((s) => s.id.startsWith(ID.bundle))!;
     expect(parent.subagents).toBe(1);
 
     const only = listSessions(db, { sidechains: 'only' }, { limit: 50 });
-    expect(only.sessions.length).toBe(2);
+    expect(only.sessions.length).toBe(6);
     expect(only.sessions.every((s) => s.isSidechain)).toBe(true);
   });
 
@@ -424,7 +428,7 @@ describe('ls', () => {
 
   it('--project filters both tables', () => {
     const r = listSessions(db, { project: '/tmp/potsherd-eval-devices' }, { limit: 50 });
-    expect(r.sessions.length).toBe(2);
+    expect(r.sessions.length).toBe(4);
     expect(r.sessions.every((s) => s.status === 'ghost')).toBe(true);
   });
 });
@@ -497,9 +501,9 @@ describe('stats', () => {
   it('counts sessions, subagents and ghosts per harness', () => {
     const r = sessionStats(db, { root });
     const claude = r.harnesses.find((h) => h.harness === 'claude')!;
-    expect(claude.sessions).toBe(24);
-    expect(claude.sidechains).toBe(2);
-    expect(claude.ghosts).toBe(5);
+    expect(claude.sessions).toBe(46);
+    expect(claude.sidechains).toBe(6);
+    expect(claude.ghosts).toBe(12);
     expect(claude.exchanges).toBeGreaterThan(0);
   });
 
@@ -513,7 +517,7 @@ describe('stats', () => {
 
   it('reports freshness against the files it actually read', () => {
     const r = sessionStats(db, { root });
-    expect(r.freshness.indexed).toBe(26);
+    expect(r.freshness.indexed).toBe(52);
     expect(r.freshness.missing).toBe(0);
     expect(r.freshness.stale).toBe(0);
     expect(r.freshness.lastIndexedAt).toBeTruthy();

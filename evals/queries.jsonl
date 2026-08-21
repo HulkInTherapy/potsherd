@@ -1,12 +1,17 @@
-// The committed set. Fixture corpus only — no real prompt text, no real
-// project, client or path appears in this file or in evals/fixture/.
+// The committed set — 25 queries, `plans/06` phase 3. Fixture corpus only: no
+// real prompt text, no real project, client or path appears in this file or in
+// evals/fixture/. The private reference set lives in ~/.potsherd/evals/.
 //
 // Every query is written the way somebody remembers a conversation weeks
 // later: the thing it was *about*, not the words they typed at the time. The
-// previous set failed that test — "webhook rate limited by the gateway"
-// against a prompt saying "the outbound webhook is getting rate limited by
-// their gateway" measures substring overlap, not retrieval, and scored 10/10
-// with every answer at rank 1. `class` records what each query is for.
+// first version of this set failed that test — "webhook rate limited by the
+// gateway" against a prompt saying "the outbound webhook is getting rate
+// limited by their gateway" measures substring overlap, not retrieval, and
+// scored 10/10 with every answer at rank 1 over eleven candidates. The runner
+// now prints the word overlap between each query and its answer so that
+// failure cannot come back quietly; see `--overlap` in evals/run.ts.
+//
+// `class` records what each query is for:
 //
 //   concept   the answer shares almost no content words with the query. bm25
 //             can genuinely fail here; this is where the vector half earns its
@@ -16,17 +21,45 @@
 //   recall    the ordinary case: a couple of distinctive words remembered
 //             correctly, competing against a corpus that shares them.
 //
+// `needs` records *where in the index the answer physically is*, which is what
+// `plans/06` phase 3 asks the set to cover: 5 answerable only from a sidechain,
+// 5 answerable only from a ghost, 5 answerable only from a card.
+//
+//   sidechain  the words exist only in a subagent transcript; the parent
+//              session never says what came back
+//   ghost      the session was deleted. history.jsonl kept the prompts and
+//              nothing else — there is no assistant text to match
+//   card       the exchange text does not answer the question and the title
+//              does not either. Only the card's summary does, which is the
+//              "what was that session about" case
+//   text       the ordinary exchange body
+//
 // `expected_sidechain` asserts the answer came back as the subagent
 // transcript, not merely as some session whose id starts the same way — a
 // claude sidechain id is `<parent>:agent-<hash>`, so a prefix test alone
 // cannot tell the two apart.
-{"query": "charged the customer twice because the client retried", "expected_session_prefix": "7c1d0e44", "expected_harness": "claude", "class": "concept", "note": "concept — the session never says charged, customer or twice"}
-{"query": "combining keyword and vector search into one ranked list", "expected_session_prefix": "cbcfda7e", "expected_harness": "claude", "class": "recall", "note": "remembered by topic, not by phrase"}
-{"query": "which import made the icon set so big", "expected_session_prefix": "4ae3102b", "expected_harness": "claude", "expected_sidechain": true, "class": "ranking", "note": "SIDECHAIN — the parent session never mentions icons; the subagent does"}
-{"query": "the batch job that overran the backup window", "expected_session_prefix": "4ddd4b1f", "expected_harness": "claude", "class": "ranking", "note": "GHOST — prompts only; three other sessions are about nightly jobs"}
-{"query": "the ci runner filled up its disk with docker layers", "expected_session_prefix": "e83f5c17", "expected_harness": "claude", "class": "recall", "note": "GHOST — the whole session was deleted by the sweep"}
-{"query": "we were sending events faster than they would accept", "expected_session_prefix": "a0c57a31", "expected_harness": "claude", "class": "concept", "note": "concept, and the session is untitled — rate limiting said without the words"}
-{"query": "the pod kept getting killed even though the app was fine", "expected_session_prefix": "94f91303", "expected_harness": "claude", "class": "ranking", "note": "one shared word, against another session about pods"}
-{"query": "eu region reporting a day late", "expected_session_prefix": "9a4e7c26", "expected_harness": "claude", "class": "ranking", "note": "competes with the backfill session over the same table"}
-{"query": "changes the user had already undone came back", "expected_session_prefix": "c2f68b40", "expected_harness": "claude", "class": "concept", "note": "concept — the session says undid, mutation and superseded"}
-{"query": "stop counting the same event twice in the rollup", "expected_session_prefix": "47d9e281", "expected_harness": "claude", "class": "ranking", "note": "untitled session, and four other sessions contain twice"}
+{"query": "charged the customer twice because the client retried", "expected_session_prefix": "7c1d0e44", "expected_harness": "claude", "class": "concept", "needs": "text", "note": "concept — the answer session never says charged, customer or twice, while the distractor 0c68f4a1 says all three about a card terminal that replays its capture. Getting this right means reading 'because the client retried' as the discriminator."}
+{"query": "combining keyword and vector search into one ranked list", "expected_session_prefix": "cbcfda7e", "expected_harness": "claude", "class": "recall", "needs": "text", "note": "remembered by topic, not by phrase; bd1a4082 and a17c5e93 are both about search ranking and are not the answer. FLAGGED by the overlap check at 67% (keyword, vector, search, list) — kept as the easy end of the set, and the reason the set is not judged by this query alone"}
+{"query": "which import made the icon set so big", "expected_session_prefix": "4ae3102b", "expected_harness": "claude", "expected_sidechain": true, "class": "ranking", "needs": "sidechain", "note": "SIDECHAIN — the parent session never mentions icons; the subagent does. 1b6f0d95 is about icons rendering at the wrong size and ea4d7c60 is about the other half of the same bundle"}
+{"query": "the batch job that overran the backup window", "expected_session_prefix": "4ddd4b1f", "expected_harness": "claude", "class": "ranking", "needs": "ghost", "note": "GHOST — prompts only. 4c07b9e3 is a live session about a snapshot that outgrew its window and says both 'backup' and 'window'; the answer says neither"}
+{"query": "the ci runner filled up its disk with docker layers", "expected_session_prefix": "e83f5c17", "expected_harness": "claude", "class": "recall", "needs": "ghost", "note": "GHOST — the whole session was deleted by the sweep. c4a95e18 is a second ghost about a build agent out of inodes, which shares everything but the word docker. FLAGGED by the overlap check at 67% (ci, runner, disk, docker) — inherited from the phase-1 set and kept, because the discriminator against c4a95e18 is one word and that is the test"}
+{"query": "we were sending events faster than they would accept", "expected_session_prefix": "a0c57a31", "expected_harness": "claude", "class": "concept", "needs": "text", "note": "concept, and the session is untitled — rate limiting said without the words. b3e7a205 is about a retry budget against the same gateway"}
+{"query": "the pod kept getting killed even though the app was fine", "expected_session_prefix": "94f91303", "expected_harness": "claude", "class": "ranking", "needs": "text", "note": "b52e8c07 is a pod being killed for exceeding its memory limit, which is the same words and the wrong answer; 6f0b24d9 is a third session about pods"}
+{"query": "eu region reporting a day late", "expected_session_prefix": "9a4e7c26", "expected_harness": "claude", "class": "ranking", "needs": "text", "note": "competes with the backfill session over the same table and with 7f3b2d48, where the eu export lands an hour late rather than a day"}
+{"query": "changes the user had already undone came back", "expected_session_prefix": "c2f68b40", "expected_harness": "claude", "class": "concept", "needs": "text", "note": "concept — the session says undid, mutation and superseded. c93f1e07 is a queue replaying after a crash and is not it"}
+{"query": "stop counting the same event twice in the rollup", "expected_session_prefix": "47d9e281", "expected_harness": "claude", "class": "ranking", "needs": "text", "note": "untitled session, and d80a3f16 (funnel double counting), 1c58f0b3 (doubled totals) and 8d31f7c5 (push twice) all contain the same words"}
+{"query": "the thing quietly eating most of the cloud bill", "expected_session_prefix": "d4b1f0a7", "expected_harness": "claude", "expected_sidechain": true, "class": "concept", "needs": "sidechain", "note": "SIDECHAIN — only the cost-modeller subagent names the nat gateway line. The parent session is a terraform plan review and never mentions money at all, so a ranker that reads parents and not subagents scores zero here"}
+{"query": "where the pennies went when we changed the file format", "expected_session_prefix": "2f7c8b31", "expected_harness": "claude", "expected_sidechain": true, "class": "concept", "needs": "sidechain", "note": "SIDECHAIN — the subagent found a numeric column written as a double. The parent is about parquet being faster and says nothing about precision; b8f43d05 is a different session about wrong amounts in a file"}
+{"query": "the thing on the new page a screen reader could not escape", "expected_session_prefix": "9c1e5d80", "expected_harness": "claude", "expected_sidechain": true, "class": "ranking", "needs": "sidechain", "note": "SIDECHAIN — f4a8c317 is about trapping focus in a dialog and mentions screen readers, and e2749f91 is about contrast. Both are the adjacent topic; the audit that found the carousel is a subagent transcript. The first drafting of this query named the carousel outright and the overlap check flagged it at 100% — three content words, all three in the answer — so it was rewritten to the thing a person would actually remember."}
+{"query": "how many a second before the latency went off a cliff", "expected_session_prefix": "6b3a9e24", "expected_harness": "claude", "expected_sidechain": true, "class": "concept", "needs": "sidechain", "note": "SIDECHAIN — the number is only in the load-runner's reply. The parent session designs the test and never runs it, and 0a2fbf9b talks about latency at 800 clients"}
+{"query": "the submission that came back over a missing label", "expected_session_prefix": "f1c48b07", "expected_harness": "claude", "class": "ranking", "needs": "ghost", "note": "GHOST — prompts only, and the only anchors are missing and label. A ghost competes here against 46 live sessions and 33 cards for two ordinary words; the vector modes cannot help at all, because a ghost has no exchanges and this one has no card"}
+{"query": "the second screen that cut out when the dock got hot", "expected_session_prefix": "3b7d94e1", "expected_harness": "claude", "class": "ranking", "needs": "ghost", "note": "GHOST — b60ae934 is a second devices ghost about a bluetooth peripheral that drops on sleep, and 71ea08b3 is carded as a feed screen. Two words (second, dock) separate the answer from both"}
+{"query": "customer names sitting in a database nobody scrubbed", "expected_session_prefix": "a6e02f53", "expected_harness": "claude", "class": "ranking", "needs": "ghost", "note": "GHOST — the prompts say staging database, real customer names and scrub. The words are there, but so is a corpus full of databases, and the answer has no assistant text and no card to add weight"}
+{"query": "what was the session about people not being able to sign in", "expected_session_prefix": "e5a70c14", "expected_harness": "claude", "class": "concept", "needs": "card", "note": "CARD-ONLY — the transcript is cookie attributes and safari; the words sign in, login and authentication appear only in the card summary, and the title says SameSite. cards_fts or vec_cards or nothing"}
+{"query": "the one about the broken monthly finance report", "expected_session_prefix": "b8f43d05", "expected_harness": "claude", "class": "ranking", "needs": "card", "note": "CARD-ONLY — the transcript says blanks, march and cast, never monthly, finance or report. d80a3f16 and 9a4e7c26 are carded sessions that do say report, so the card list has to rank as well as match"}
+{"query": "what was the deployment pipeline that broke every night", "expected_session_prefix": "3d92c7fe", "expected_harness": "claude", "class": "ranking", "needs": "card", "note": "CARD-ONLY — the transcript is a timestamp and a token expiry; deployment and pipeline exist only on the card. a5c2d803 and the e83f5c17 ghost both say nightly, which is the word the query does not need"}
+{"query": "what did we do about the janky scrolling", "expected_session_prefix": "71ea08b3", "expected_harness": "claude", "class": "concept", "needs": "card", "note": "CARD-ONLY — the person typed stutters and flick; janky and scrolling are the card's words. Nothing in any transcript in the corpus contains either"}
+{"query": "the design discussion about incremental sync", "expected_session_prefix": "c47b1a09", "expected_harness": "claude", "class": "concept", "needs": "card", "note": "CARD-ONLY — the transcript says changed fields, version and tombstone. Incremental, synchronisation and design are the card's abstraction of it, and c2f68b40 is the other session about versioned client writes"}
+{"query": "it scored well in testing and badly for real users", "expected_session_prefix": "f60c9d13", "expected_harness": "claude", "class": "concept", "needs": "text", "note": "concept — training/serving skew described without one word of its vocabulary. 3a72e9c5 is the other machine-learning session and is about a score that moved for the opposite reason"}
+{"query": "why names sometimes took forever to turn into addresses", "expected_session_prefix": "5e91d7b2", "expected_harness": "claude", "class": "concept", "needs": "text", "note": "concept — the session is conntrack, ndots and resolv.conf and never says name resolution, lookup delay or dns in the words the query uses"}
+{"query": "the search box that only worked if you got the word exactly right", "expected_session_prefix": "a17c5e93", "expected_harness": "claude", "class": "ranking", "needs": "text", "note": "concept phrasing over a crowded neighbourhood: bd1a4082 is the other docs-search session, cbcfda7e is about fusing search lists, and only one of the three is about stemming"}

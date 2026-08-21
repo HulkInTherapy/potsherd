@@ -125,8 +125,8 @@ describe('ls', () => {
       rolledUp: number;
       sessions: Record<string, unknown>[];
     };
-    expect(j.ghosts).toBe(5);
-    expect(j.rolledUp).toBe(2);
+    expect(j.ghosts).toBe(12);
+    expect(j.rolledUp).toBe(6);
     const first = j.sessions[0]!;
     for (const key of ['id', 'harness', 'project', 'displayTitle', 'status', 'isSidechain', 'resume']) {
       expect(Object.keys(first)).toContain(key);
@@ -329,9 +329,9 @@ describe('stats', () => {
       redaction: unknown;
     };
     const claude = j.harnesses.find((h) => h.harness === 'claude')!;
-    expect(claude.sessions).toBe(24);
-    expect(claude.sidechains).toBe(2);
-    expect(claude.ghosts).toBe(5);
+    expect(claude.sessions).toBe(46);
+    expect(claude.sidechains).toBe(6);
+    expect(claude.ghosts).toBe(12);
     expect(j.freshness.stale).toBe(0);
     expect(j.freshness.missing).toBe(0);
     expect(j.redaction).toBeTruthy();

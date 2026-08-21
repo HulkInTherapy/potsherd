@@ -1,3 +1,9 @@
+{"display":"the webcam is not detected after the kernel update","pastedContents":{},"timestamp":1776240000000,"project":"/tmp/potsherd-eval-devices","sessionId":"5d3c8a72-1e64-4b09-a537-8c2f60d91eb4"}
+{"display":"modprobe says the module is missing entirely","pastedContents":{},"timestamp":1776240660000,"project":"/tmp/potsherd-eval-devices","sessionId":"5d3c8a72-1e64-4b09-a537-8c2f60d91eb4"}
+{"display":"rolling back to the previous kernel until there is a build","pastedContents":{},"timestamp":1776241320000,"project":"/tmp/potsherd-eval-devices","sessionId":"5d3c8a72-1e64-4b09-a537-8c2f60d91eb4"}
+{"display":"the build agent ran out of inodes with plenty of space left","pastedContents":{},"timestamp":1776502800000,"project":"/tmp/potsherd-eval-infra","sessionId":"c4a95e18-7d20-4f63-b849-1e05a3c76d92"}
+{"display":"it is millions of tiny files under the package cache","pastedContents":{},"timestamp":1776503460000,"project":"/tmp/potsherd-eval-infra","sessionId":"c4a95e18-7d20-4f63-b849-1e05a3c76d92"}
+{"display":"clear the cache weekly and leave the images alone","pastedContents":{},"timestamp":1776504120000,"project":"/tmp/potsherd-eval-infra","sessionId":"c4a95e18-7d20-4f63-b849-1e05a3c76d92"}
 {"display":"the brother laser printer driver will not install on this linux box","pastedContents":{},"timestamp":1776661200000,"project":"/tmp/potsherd-eval-devices","sessionId":"e6aa5ba7-6fce-4542-88d9-12c82cf03edd"}
 {"display":"it says the ppd file is missing after the deb unpacks","pastedContents":{},"timestamp":1776661860000,"project":"/tmp/potsherd-eval-devices","sessionId":"e6aa5ba7-6fce-4542-88d9-12c82cf03edd"}
 {"display":"can we build the driver from source instead","pastedContents":{},"timestamp":1776662520000,"project":"/tmp/potsherd-eval-devices","sessionId":"e6aa5ba7-6fce-4542-88d9-12c82cf03edd"}
@@ -13,53 +19,137 @@
 {"display":"the bluetooth keyboard drops every time the laptop sleeps","pastedContents":{},"timestamp":1777402800000,"project":"/tmp/potsherd-eval-devices","sessionId":"b60ae934-1c72-4d85-93a0-58f6e2b41d07"}
 {"display":"it comes back if i toggle bluetooth off and on","pastedContents":{},"timestamp":1777403460000,"project":"/tmp/potsherd-eval-devices","sessionId":"b60ae934-1c72-4d85-93a0-58f6e2b41d07"}
 {"display":"is there a way to stop the dongle powering down","pastedContents":{},"timestamp":1777404120000,"project":"/tmp/potsherd-eval-devices","sessionId":"b60ae934-1c72-4d85-93a0-58f6e2b41d07"}
+{"display":"the app store rejected the build for a missing privacy label","pastedContents":{},"timestamp":1777701600000,"project":"/tmp/potsherd-eval-mobile","sessionId":"f1c48b07-6d92-4a35-8e07-2b91c5d4703a"}
+{"display":"which of the sdks is collecting the advertising id","pastedContents":{},"timestamp":1777702260000,"project":"/tmp/potsherd-eval-mobile","sessionId":"f1c48b07-6d92-4a35-8e07-2b91c5d4703a"}
+{"display":"can we ship without that sdk at all","pastedContents":{},"timestamp":1777702920000,"project":"/tmp/potsherd-eval-mobile","sessionId":"f1c48b07-6d92-4a35-8e07-2b91c5d4703a"}
+{"display":"resubmitted with the label filled in and it went through","pastedContents":{},"timestamp":1777703580000,"project":"/tmp/potsherd-eval-mobile","sessionId":"f1c48b07-6d92-4a35-8e07-2b91c5d4703a"}
+{"display":"the second monitor goes black whenever the dock gets warm","pastedContents":{},"timestamp":1778004000000,"project":"/tmp/potsherd-eval-devices","sessionId":"3b7d94e1-0c58-4f26-9a83-71e6d0b5c247"}
+{"display":"it comes back if i unplug the usb-c and put it back in","pastedContents":{},"timestamp":1778004660000,"project":"/tmp/potsherd-eval-devices","sessionId":"3b7d94e1-0c58-4f26-9a83-71e6d0b5c247"}
+{"display":"is there a firmware update for the dock","pastedContents":{},"timestamp":1778005320000,"project":"/tmp/potsherd-eval-devices","sessionId":"3b7d94e1-0c58-4f26-9a83-71e6d0b5c247"}
+{"display":"the firmware fixed it, three days without a drop","pastedContents":{},"timestamp":1778005980000,"project":"/tmp/potsherd-eval-devices","sessionId":"3b7d94e1-0c58-4f26-9a83-71e6d0b5c247"}
+{"display":"the invoice pdf job stalls on the biggest account","pastedContents":{},"timestamp":1778223600000,"project":"/tmp/potsherd-eval-api","sessionId":"9f2b60d4-3a17-4e58-bc09-27d6154fae83"}
+{"display":"it renders every line item in one pass and runs out of heap","pastedContents":{},"timestamp":1778224260000,"project":"/tmp/potsherd-eval-api","sessionId":"9f2b60d4-3a17-4e58-bc09-27d6154fae83"}
+{"display":"page it and stream each page straight to storage","pastedContents":{},"timestamp":1778224920000,"project":"/tmp/potsherd-eval-api","sessionId":"9f2b60d4-3a17-4e58-bc09-27d6154fae83"}
 {"display":"the ci runner is out of disk again","pastedContents":{},"timestamp":1778569200000,"project":"/tmp/potsherd-eval-infra","sessionId":"e83f5c17-9d41-4b72-a068-3c25e7f1b904"}
 {"display":"docker keeps every layer from every build on that box","pastedContents":{},"timestamp":1778569860000,"project":"/tmp/potsherd-eval-infra","sessionId":"e83f5c17-9d41-4b72-a068-3c25e7f1b904"}
 {"display":"add a nightly prune for images older than a week","pastedContents":{},"timestamp":1778570520000,"project":"/tmp/potsherd-eval-infra","sessionId":"e83f5c17-9d41-4b72-a068-3c25e7f1b904"}
 {"display":"how much does that free","pastedContents":{},"timestamp":1778571180000,"project":"/tmp/potsherd-eval-infra","sessionId":"e83f5c17-9d41-4b72-a068-3c25e7f1b904"}
+{"display":"the staging database has real customer names in it","pastedContents":{},"timestamp":1779094800000,"project":"/tmp/potsherd-eval-api","sessionId":"a6e02f53-4b71-4c98-8d26-59fa0e73c481"}
+{"display":"who can reach staging right now","pastedContents":{},"timestamp":1779095460000,"project":"/tmp/potsherd-eval-api","sessionId":"a6e02f53-4b71-4c98-8d26-59fa0e73c481"}
+{"display":"we need a scrub step inside the restore, not after it","pastedContents":{},"timestamp":1779096120000,"project":"/tmp/potsherd-eval-api","sessionId":"a6e02f53-4b71-4c98-8d26-59fa0e73c481"}
+{"display":"the scrub runs before anything can connect, verified on today copy","pastedContents":{},"timestamp":1779096780000,"project":"/tmp/potsherd-eval-api","sessionId":"a6e02f53-4b71-4c98-8d26-59fa0e73c481"}
+{"display":"the newsletter signup posts twice if you double click it","pastedContents":{},"timestamp":1779375600000,"project":"/tmp/potsherd-eval-web","sessionId":"e70d51c6-8f43-4b27-9051-6ac3d792be40"}
+{"display":"disable the button on submit and key the request","pastedContents":{},"timestamp":1779376260000,"project":"/tmp/potsherd-eval-web","sessionId":"e70d51c6-8f43-4b27-9051-6ac3d792be40"}
+{"display":"the second post is gone, and the duplicate rows are cleaned up","pastedContents":{},"timestamp":1779376920000,"project":"/tmp/potsherd-eval-web","sessionId":"e70d51c6-8f43-4b27-9051-6ac3d792be40"}
+{"display":"the plan wants to replace the subnet and i cannot see why","pastedContents":{},"timestamp":1780304400000,"project":"/tmp/potsherd-eval-infra","sessionId":"d4b1f0a7-3c62-4e91-b508-27fa1c6d9e40"}
+{"display":"can we make a plan reviewable in a pull request","pastedContents":{},"timestamp":1780304820000,"project":"/tmp/potsherd-eval-infra","sessionId":"d4b1f0a7-3c62-4e91-b508-27fa1c6d9e40"}
+{"display":"who approves an apply","pastedContents":{},"timestamp":1780305240000,"project":"/tmp/potsherd-eval-infra","sessionId":"d4b1f0a7-3c62-4e91-b508-27fa1c6d9e40"}
 {"display":"the connection pool falls over under load. can we put pgbouncer in front of postgres?","pastedContents":{},"timestamp":1780394400000,"project":"/tmp/potsherd-eval-api","sessionId":"0a2fbf9b-c6fd-4486-86ee-d17cde32e587"}
 {"display":"prepared statements break in transaction mode though","pastedContents":{},"timestamp":1780394820000,"project":"/tmp/potsherd-eval-api","sessionId":"0a2fbf9b-c6fd-4486-86ee-d17cde32e587"}
 {"display":"what does that cost us on latency","pastedContents":{},"timestamp":1780395240000,"project":"/tmp/potsherd-eval-api","sessionId":"0a2fbf9b-c6fd-4486-86ee-d17cde32e587"}
+{"display":"the csv loads take an hour and the files are enormous","pastedContents":{},"timestamp":1780480800000,"project":"/tmp/potsherd-eval-data","sessionId":"2f7c8b31-6d40-4a75-9e13-c0b5827af4d6"}
+{"display":"do we keep the csv around","pastedContents":{},"timestamp":1780481220000,"project":"/tmp/potsherd-eval-data","sessionId":"2f7c8b31-6d40-4a75-9e13-c0b5827af4d6"}
+{"display":"how does a reader know a load finished","pastedContents":{},"timestamp":1780481640000,"project":"/tmp/potsherd-eval-data","sessionId":"2f7c8b31-6d40-4a75-9e13-c0b5827af4d6"}
 {"display":"the csv importer eats 3 GB of memory on the big files. rewrite it","pastedContents":{},"timestamp":1780567200000,"project":"/tmp/potsherd-eval-api","sessionId":"a82ceb72-455b-4fc8-88b8-993effefe3c7"}
 {"display":"how do we handle backpressure when the database is slow","pastedContents":{},"timestamp":1780567620000,"project":"/tmp/potsherd-eval-api","sessionId":"a82ceb72-455b-4fc8-88b8-993effefe3c7"}
 {"display":"add a progress line","pastedContents":{},"timestamp":1780568040000,"project":"/tmp/potsherd-eval-api","sessionId":"a82ceb72-455b-4fc8-88b8-993effefe3c7"}
 {"display":"the outbound webhook is getting rate limited by their gateway. what do we do","pastedContents":{},"timestamp":1780653600000,"project":"/tmp/potsherd-eval-api","sessionId":"a0c57a31-0b9d-4442-83dc-fd426b0c37af"}
 {"display":"does the bucket survive a restart","pastedContents":{},"timestamp":1780654020000,"project":"/tmp/potsherd-eval-api","sessionId":"a0c57a31-0b9d-4442-83dc-fd426b0c37af"}
+{"display":"the new landing page has to go out on friday, what is left","pastedContents":{},"timestamp":1780743600000,"project":"/tmp/potsherd-eval-web","sessionId":"9c1e5d80-4b27-4f63-8a91-de50c73b2f18"}
+{"display":"who edits the copy after launch","pastedContents":{},"timestamp":1780744020000,"project":"/tmp/potsherd-eval-web","sessionId":"9c1e5d80-4b27-4f63-8a91-de50c73b2f18"}
+{"display":"do we need a redirect from the old url","pastedContents":{},"timestamp":1780744440000,"project":"/tmp/potsherd-eval-web","sessionId":"9c1e5d80-4b27-4f63-8a91-de50c73b2f18"}
 {"display":"we need dark mode. how should the design tokens be organised","pastedContents":{},"timestamp":1780826400000,"project":"/tmp/potsherd-eval-web","sessionId":"e2749f91-a8e0-4f9f-8a3f-47590019effb"}
 {"display":"what about the charts, they have their own palette","pastedContents":{},"timestamp":1780826820000,"project":"/tmp/potsherd-eval-web","sessionId":"e2749f91-a8e0-4f9f-8a3f-47590019effb"}
+{"display":"we need numbers for the endpoint before the sale","pastedContents":{},"timestamp":1780927200000,"project":"/tmp/potsherd-eval-api","sessionId":"6b3a9e24-8f05-4c31-b7d2-1a94e6035cb7"}
+{"display":"what do we watch while it runs","pastedContents":{},"timestamp":1780927620000,"project":"/tmp/potsherd-eval-api","sessionId":"6b3a9e24-8f05-4c31-b7d2-1a94e6035cb7"}
+{"display":"where do we run it from","pastedContents":{},"timestamp":1780928040000,"project":"/tmp/potsherd-eval-api","sessionId":"6b3a9e24-8f05-4c31-b7d2-1a94e6035cb7"}
 {"display":"the checkout end-to-end test fails about one run in six and passes on a retry","pastedContents":{},"timestamp":1780999200000,"project":"/tmp/potsherd-eval-web","sessionId":"a86656f1-5e43-49c2-8577-6213aec94c61"}
 {"display":"how do we wait for it properly","pastedContents":{},"timestamp":1780999620000,"project":"/tmp/potsherd-eval-web","sessionId":"a86656f1-5e43-49c2-8577-6213aec94c61"}
+{"display":"after the redirect back from the provider the browser is not sending it","pastedContents":{},"timestamp":1781082000000,"project":"/tmp/potsherd-eval-web","sessionId":"e5a70c14-9b38-4d52-a670-5c39f28b1e64"}
+{"display":"safari still refuses","pastedContents":{},"timestamp":1781082420000,"project":"/tmp/potsherd-eval-web","sessionId":"e5a70c14-9b38-4d52-a670-5c39f28b1e64"}
+{"display":"does that break the old webview","pastedContents":{},"timestamp":1781082840000,"project":"/tmp/potsherd-eval-web","sessionId":"e5a70c14-9b38-4d52-a670-5c39f28b1e64"}
 {"display":"the js bundle is 1.4 MB. find out what is in it","pastedContents":{},"timestamp":1781172000000,"project":"/tmp/potsherd-eval-web","sessionId":"4ae3102b-1ad3-432b-8f01-b0e64eb5d627"}
 {"display":"summarise what you found","pastedContents":{},"timestamp":1781172420000,"project":"/tmp/potsherd-eval-web","sessionId":"4ae3102b-1ad3-432b-8f01-b0e64eb5d627"}
+{"display":"the march file has blanks where the amounts should be","pastedContents":{},"timestamp":1781258400000,"project":"/tmp/potsherd-eval-data","sessionId":"b8f43d05-1e79-4a26-8c40-6b271fa9d3e5"}
+{"display":"why did it work last quarter","pastedContents":{},"timestamp":1781258820000,"project":"/tmp/potsherd-eval-data","sessionId":"b8f43d05-1e79-4a26-8c40-6b271fa9d3e5"}
+{"display":"run it again for march","pastedContents":{},"timestamp":1781259240000,"project":"/tmp/potsherd-eval-data","sessionId":"b8f43d05-1e79-4a26-8c40-6b271fa9d3e5"}
 {"display":"kubernetes keeps restarting the pod every few minutes and the logs show nothing","pastedContents":{},"timestamp":1781344800000,"project":"/tmp/potsherd-eval-infra","sessionId":"94f91303-5710-4986-8bbb-cd54ebacccfb"}
 {"display":"what values","pastedContents":{},"timestamp":1781345220000,"project":"/tmp/potsherd-eval-infra","sessionId":"94f91303-5710-4986-8bbb-cd54ebacccfb"}
+{"display":"it stops at 04:12 again and the log just ends","pastedContents":{},"timestamp":1781424000000,"project":"/tmp/potsherd-eval-infra","sessionId":"3d92c7fe-5a14-4b98-9207-8ef6c1d54b3a"}
+{"display":"can we make the token last longer","pastedContents":{},"timestamp":1781424420000,"project":"/tmp/potsherd-eval-infra","sessionId":"3d92c7fe-5a14-4b98-9207-8ef6c1d54b3a"}
+{"display":"what if the refresh fails","pastedContents":{},"timestamp":1781424840000,"project":"/tmp/potsherd-eval-infra","sessionId":"3d92c7fe-5a14-4b98-9207-8ef6c1d54b3a"}
 {"display":"two rows land in the ledger when a request is replayed","pastedContents":{},"timestamp":1781514000000,"project":"/tmp/potsherd-eval-api","sessionId":"7c1d0e44-2b96-4f31-a0d7-5e1c9b2a4f83"}
 {"display":"what happens if two replays race","pastedContents":{},"timestamp":1781514420000,"project":"/tmp/potsherd-eval-api","sessionId":"7c1d0e44-2b96-4f31-a0d7-5e1c9b2a4f83"}
 {"display":"how long do we hold the keys","pastedContents":{},"timestamp":1781514840000,"project":"/tmp/potsherd-eval-api","sessionId":"7c1d0e44-2b96-4f31-a0d7-5e1c9b2a4f83"}
 {"display":"we have keyword scores and vector scores. how do we combine them","pastedContents":{},"timestamp":1781517600000,"project":"/tmp/potsherd-eval-infra","sessionId":"cbcfda7e-ac7c-4077-8712-6b71ff14f145"}
 {"display":"what k","pastedContents":{},"timestamp":1781518020000,"project":"/tmp/potsherd-eval-infra","sessionId":"cbcfda7e-ac7c-4077-8712-6b71ff14f145"}
 {"display":"is a linear blend ever better","pastedContents":{},"timestamp":1781518440000,"project":"/tmp/potsherd-eval-infra","sessionId":"cbcfda7e-ac7c-4077-8712-6b71ff14f145"}
+{"display":"the list stutters when you flick it fast","pastedContents":{},"timestamp":1781600400000,"project":"/tmp/potsherd-eval-mobile","sessionId":"71ea08b3-2c56-4f19-b843-905ed7c26f41"}
+{"display":"it still hitches on the first screenful","pastedContents":{},"timestamp":1781600820000,"project":"/tmp/potsherd-eval-mobile","sessionId":"71ea08b3-2c56-4f19-b843-905ed7c26f41"}
+{"display":"how do we stop it coming back","pastedContents":{},"timestamp":1781601240000,"project":"/tmp/potsherd-eval-mobile","sessionId":"71ea08b3-2c56-4f19-b843-905ed7c26f41"}
 {"display":"we retry every failed payment three times and the gateway complains","pastedContents":{},"timestamp":1781618400000,"project":"/tmp/potsherd-eval-api","sessionId":"b3e7a205-9c47-4d18-8e26-31f7a0c5d92b"}
 {"display":"what about the ones we drop","pastedContents":{},"timestamp":1781618820000,"project":"/tmp/potsherd-eval-api","sessionId":"b3e7a205-9c47-4d18-8e26-31f7a0c5d92b"}
+{"display":"we push the whole object on every save and the phone burns data","pastedContents":{},"timestamp":1781686800000,"project":"/tmp/potsherd-eval-api","sessionId":"c47b1a09-7d63-42f8-a915-3b820c6ed57f"}
+{"display":"what about deletes, the client never hears about them","pastedContents":{},"timestamp":1781687220000,"project":"/tmp/potsherd-eval-api","sessionId":"c47b1a09-7d63-42f8-a915-3b820c6ed57f"}
+{"display":"how does a client that was away for a month catch up","pastedContents":{},"timestamp":1781687640000,"project":"/tmp/potsherd-eval-api","sessionId":"c47b1a09-7d63-42f8-a915-3b820c6ed57f"}
 {"display":"a refund shows up twice in the customer ledger","pastedContents":{},"timestamp":1781695800000,"project":"/tmp/potsherd-eval-api","sessionId":"2d6b91ae-6f83-4c05-b7d9-0a48e2f31c67"}
 {"display":"do we clean up the duplicates","pastedContents":{},"timestamp":1781696220000,"project":"/tmp/potsherd-eval-api","sessionId":"2d6b91ae-6f83-4c05-b7d9-0a48e2f31c67"}
 {"display":"page 400 of the orders list takes nine seconds","pastedContents":{},"timestamp":1781776800000,"project":"/tmp/potsherd-eval-api","sessionId":"19f2c8d1-4a70-4b93-9c58-2e6d0f8a17b4"}
 {"display":"what breaks for existing clients","pastedContents":{},"timestamp":1781777220000,"project":"/tmp/potsherd-eval-api","sessionId":"19f2c8d1-4a70-4b93-9c58-2e6d0f8a17b4"}
+{"display":"the new checkpoint beats the old one on the held-out set and is worse once it is live","pastedContents":{},"timestamp":1781794800000,"project":"/tmp/potsherd-eval-ml","sessionId":"f60c9d13-8b45-4e27-a06c-51d9273fe8b4"}
+{"display":"how do we prove that","pastedContents":{},"timestamp":1781795220000,"project":"/tmp/potsherd-eval-ml","sessionId":"f60c9d13-8b45-4e27-a06c-51d9273fe8b4"}
+{"display":"what stops it recurring","pastedContents":{},"timestamp":1781795640000,"project":"/tmp/potsherd-eval-ml","sessionId":"f60c9d13-8b45-4e27-a06c-51d9273fe8b4"}
+{"display":"about one call in twenty hangs for exactly five seconds and then succeeds","pastedContents":{},"timestamp":1781856000000,"project":"/tmp/potsherd-eval-infra","sessionId":"5e91d7b2-3a68-4c04-9f57-b81d0e63a29c"}
+{"display":"can we avoid the second query","pastedContents":{},"timestamp":1781856420000,"project":"/tmp/potsherd-eval-infra","sessionId":"5e91d7b2-3a68-4c04-9f57-b81d0e63a29c"}
+{"display":"is there a fix below us","pastedContents":{},"timestamp":1781856840000,"project":"/tmp/potsherd-eval-infra","sessionId":"5e91d7b2-3a68-4c04-9f57-b81d0e63a29c"}
 {"display":"tabbing out of the modal lands on the page behind it","pastedContents":{},"timestamp":1781874000000,"project":"/tmp/potsherd-eval-web","sessionId":"f4a8c317-5d29-4e60-b184-7c93a2f5e018"}
 {"display":"does a screen reader announce it","pastedContents":{},"timestamp":1781874420000,"project":"/tmp/potsherd-eval-web","sessionId":"f4a8c317-5d29-4e60-b184-7c93a2f5e018"}
+{"display":"searching for buttons finds nothing and button finds everything","pastedContents":{},"timestamp":1781946000000,"project":"/tmp/potsherd-eval-docs","sessionId":"a17c5e93-4f28-4b06-8d71-e2609ba4c318"}
+{"display":"what does that cost","pastedContents":{},"timestamp":1781946420000,"project":"/tmp/potsherd-eval-docs","sessionId":"a17c5e93-4f28-4b06-8d71-e2609ba4c318"}
+{"display":"how long is a reindex","pastedContents":{},"timestamp":1781946840000,"project":"/tmp/potsherd-eval-docs","sessionId":"a17c5e93-4f28-4b06-8d71-e2609ba4c318"}
 {"display":"[Image: source: /tmp/potsherd-eval-web/.cache/clipboard-2026-06-20.png]\nwhy is the pay button grey here","pastedContents":{},"timestamp":1781967600000,"project":"/tmp/potsherd-eval-web","sessionId":"5b0d7e92-8c31-4a76-9f20-6b48d1e07a53"}
 {"display":"[Image: source: /tmp/potsherd-eval-web/.cache/clipboard-2026-06-20b.png]","pastedContents":{},"timestamp":1781968020000,"project":"/tmp/potsherd-eval-web","sessionId":"5b0d7e92-8c31-4a76-9f20-6b48d1e07a53"}
+{"display":"the customer is charged twice when the card terminal drops and reconnects","pastedContents":{},"timestamp":1782054000000,"project":"/tmp/potsherd-eval-api","sessionId":"0c68f4a1-9d27-4b53-8e10-7a4f2c95db06"}
+{"display":"how do we give back the ones that already went through","pastedContents":{},"timestamp":1782054420000,"project":"/tmp/potsherd-eval-api","sessionId":"0c68f4a1-9d27-4b53-8e10-7a4f2c95db06"}
+{"display":"does the receipt printer know","pastedContents":{},"timestamp":1782054840000,"project":"/tmp/potsherd-eval-api","sessionId":"0c68f4a1-9d27-4b53-8e10-7a4f2c95db06"}
+{"display":"the pod is killed with exit code 137 a few times a day and comes straight back","pastedContents":{},"timestamp":1782115200000,"project":"/tmp/potsherd-eval-infra","sessionId":"b52e8c07-6a31-4d94-8f26-c30719ad5e48"}
+{"display":"why only in the afternoon","pastedContents":{},"timestamp":1782115620000,"project":"/tmp/potsherd-eval-infra","sessionId":"b52e8c07-6a31-4d94-8f26-c30719ad5e48"}
+{"display":"should we just move the job","pastedContents":{},"timestamp":1782116040000,"project":"/tmp/potsherd-eval-infra","sessionId":"b52e8c07-6a31-4d94-8f26-c30719ad5e48"}
 {"display":"the hero image is 800 kB and blocks the first paint","pastedContents":{},"timestamp":1782120600000,"project":"/tmp/potsherd-eval-web","sessionId":"c8e14f60-7b18-42d9-a350-9e64f1b28d07"}
 {"display":"is the bundle the problem too","pastedContents":{},"timestamp":1782121020000,"project":"/tmp/potsherd-eval-web","sessionId":"c8e14f60-7b18-42d9-a350-9e64f1b28d07"}
+{"display":"the snapshot on the replica takes six hours now and the window is four","pastedContents":{},"timestamp":1782198000000,"project":"/tmp/potsherd-eval-infra","sessionId":"4c07b9e3-2d58-41af-9067-8b1e5c3fd274"}
+{"display":"does a restore still work off an incremental chain","pastedContents":{},"timestamp":1782198420000,"project":"/tmp/potsherd-eval-infra","sessionId":"4c07b9e3-2d58-41af-9067-8b1e5c3fd274"}
+{"display":"who gets paged when it overruns","pastedContents":{},"timestamp":1782198840000,"project":"/tmp/potsherd-eval-infra","sessionId":"4c07b9e3-2d58-41af-9067-8b1e5c3fd274"}
 {"display":"on ios safari the checkout button loses focus after the keyboard closes","pastedContents":{},"timestamp":1782230400000,"project":"/tmp/potsherd-eval-web","sessionId":"f09b6c73-1e54-4a82-b096-3d7c518ae294"}
 {"display":"every internal call started failing tls this morning","pastedContents":{},"timestamp":1782288000000,"project":"/tmp/potsherd-eval-infra","sessionId":"3e9a7b15-6c82-4f37-a5e1-0d29b4c86f13"}
+{"display":"the funnel says more people reached checkout than looked at the page","pastedContents":{},"timestamp":1782309600000,"project":"/tmp/potsherd-eval-data","sessionId":"d80a3f16-5c92-4e78-b134-6207ea9c58fd"}
+{"display":"which of the two is right","pastedContents":{},"timestamp":1782310020000,"project":"/tmp/potsherd-eval-data","sessionId":"d80a3f16-5c92-4e78-b134-6207ea9c58fd"}
+{"display":"do we restate what we published","pastedContents":{},"timestamp":1782310440000,"project":"/tmp/potsherd-eval-data","sessionId":"d80a3f16-5c92-4e78-b134-6207ea9c58fd"}
+{"display":"the eu bucket gets its file an hour after everybody else","pastedContents":{},"timestamp":1782378000000,"project":"/tmp/potsherd-eval-data","sessionId":"7f3b2d48-9e01-4c65-a872-13b5c0e94f27"}
+{"display":"can they run at the same time","pastedContents":{},"timestamp":1782378420000,"project":"/tmp/potsherd-eval-data","sessionId":"7f3b2d48-9e01-4c65-a872-13b5c0e94f27"}
+{"display":"what does that buy","pastedContents":{},"timestamp":1782378840000,"project":"/tmp/potsherd-eval-data","sessionId":"7f3b2d48-9e01-4c65-a872-13b5c0e94f27"}
 {"display":"the nightly job fires once in each region and we get two of everything","pastedContents":{},"timestamp":1782417600000,"project":"/tmp/potsherd-eval-infra","sessionId":"a5c2d803-4b71-49e6-8f25-1c07d6e93a48"}
 {"display":"which is less to operate","pastedContents":{},"timestamp":1782418020000,"project":"/tmp/potsherd-eval-infra","sessionId":"a5c2d803-4b71-49e6-8f25-1c07d6e93a48"}
+{"display":"every icon is twice the size it should be since the sprite change","pastedContents":{},"timestamp":1782460800000,"project":"/tmp/potsherd-eval-web","sessionId":"1b6f0d95-4a73-42e8-b501-9c8de27a64f3"}
+{"display":"why did it look right in storybook","pastedContents":{},"timestamp":1782461220000,"project":"/tmp/potsherd-eval-web","sessionId":"1b6f0d95-4a73-42e8-b501-9c8de27a64f3"}
+{"display":"how do we catch it next time","pastedContents":{},"timestamp":1782461640000,"project":"/tmp/potsherd-eval-web","sessionId":"1b6f0d95-4a73-42e8-b501-9c8de27a64f3"}
 {"display":"after the cutover some requests still hit the old version","pastedContents":{},"timestamp":1782475200000,"project":"/tmp/potsherd-eval-infra","sessionId":"6f0b24d9-3e57-4c81-b0a6-92f14e5d7c30"}
+{"display":"the date library is 400 kB on its own","pastedContents":{},"timestamp":1782558000000,"project":"/tmp/potsherd-eval-web","sessionId":"ea4d7c60-8b19-4f37-9a25-06c3f1b8d472"}
+{"display":"what does the shim cost","pastedContents":{},"timestamp":1782558420000,"project":"/tmp/potsherd-eval-web","sessionId":"ea4d7c60-8b19-4f37-9a25-06c3f1b8d472"}
+{"display":"does anything else pull it in","pastedContents":{},"timestamp":1782558840000,"project":"/tmp/potsherd-eval-web","sessionId":"ea4d7c60-8b19-4f37-9a25-06c3f1b8d472"}
+{"display":"after a crash the app sends the same analytics batch a second time","pastedContents":{},"timestamp":1782637200000,"project":"/tmp/potsherd-eval-mobile","sessionId":"c93f1e07-6d24-4b85-a710-5f28be03c9d1"}
+{"display":"how long does the server remember an id","pastedContents":{},"timestamp":1782637620000,"project":"/tmp/potsherd-eval-mobile","sessionId":"c93f1e07-6d24-4b85-a710-5f28be03c9d1"}
+{"display":"does the duplicate actually matter","pastedContents":{},"timestamp":1782638040000,"project":"/tmp/potsherd-eval-mobile","sessionId":"c93f1e07-6d24-4b85-a710-5f28be03c9d1"}
 {"display":"the eu region is always one day behind everyone else in the dashboard","pastedContents":{},"timestamp":1782723600000,"project":"/tmp/potsherd-eval-data","sessionId":"9a4e7c26-5f03-4b18-92d7-6ae481c530f9"}
 {"display":"what about the rows we already wrote","pastedContents":{},"timestamp":1782724020000,"project":"/tmp/potsherd-eval-data","sessionId":"9a4e7c26-5f03-4b18-92d7-6ae481c530f9"}
+{"display":"the score jumped four points overnight and nobody touched the model","pastedContents":{},"timestamp":1782741600000,"project":"/tmp/potsherd-eval-ml","sessionId":"3a72e9c5-1b48-4d60-9e37-8c04f5a1b6d2"}
+{"display":"how far does the honest number fall","pastedContents":{},"timestamp":1782742020000,"project":"/tmp/potsherd-eval-ml","sessionId":"3a72e9c5-1b48-4d60-9e37-8c04f5a1b6d2"}
+{"display":"do we keep the old number anywhere","pastedContents":{},"timestamp":1782742440000,"project":"/tmp/potsherd-eval-ml","sessionId":"3a72e9c5-1b48-4d60-9e37-8c04f5a1b6d2"}
 {"display":"someone ran the backfill twice and every total is double what it should be","pastedContents":{},"timestamp":1782817200000,"project":"/tmp/potsherd-eval-data","sessionId":"1c58f0b3-7d92-4a15-8e63-40b7c2f9d18e"}
 {"display":"can we detect it next time","pastedContents":{},"timestamp":1782817620000,"project":"/tmp/potsherd-eval-data","sessionId":"1c58f0b3-7d92-4a15-8e63-40b7c2f9d18e"}
+{"display":"the deprecated page comes above the current one for the same query","pastedContents":{},"timestamp":1782831600000,"project":"/tmp/potsherd-eval-docs","sessionId":"bd1a4082-7c56-4e93-8b20-9f3d7a56c018"}
+{"display":"how big a boost","pastedContents":{},"timestamp":1782832020000,"project":"/tmp/potsherd-eval-docs","sessionId":"bd1a4082-7c56-4e93-8b20-9f3d7a56c018"}
+{"display":"can an editor see what it did","pastedContents":{},"timestamp":1782832440000,"project":"/tmp/potsherd-eval-docs","sessionId":"bd1a4082-7c56-4e93-8b20-9f3d7a56c018"}
 {"display":"the analytics rollup counts an event twice whenever the producer redelivers","pastedContents":{},"timestamp":1782900000000,"project":"/tmp/potsherd-eval-data","sessionId":"47d9e281-3b64-4c07-a9f8-25e1d0b73c6a"}
 {"display":"what if the id is missing","pastedContents":{},"timestamp":1782900420000,"project":"/tmp/potsherd-eval-data","sessionId":"47d9e281-3b64-4c07-a9f8-25e1d0b73c6a"}
 {"display":"android users get every push notification twice","pastedContents":{},"timestamp":1783015200000,"project":"/tmp/potsherd-eval-mobile","sessionId":"8d31f7c5-2a49-4e83-b571-6c0d8f21943b"}
