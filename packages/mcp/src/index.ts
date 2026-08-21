@@ -12,6 +12,7 @@ const USAGE = `potsherd-mcp — potsherd as an MCP stdio server (six tools)
   potsherd-mcp                     speak MCP on stdin/stdout
   potsherd-mcp --selftest          build a throwaway index and prove each tool answers
   potsherd-mcp --potsherd-dir DIR  read the index in DIR instead of ~/.potsherd
+  potsherd-mcp --width N           column budget for --selftest. Default 80.
 
 environment
   POTSHERD_DIR                     same as --potsherd-dir
@@ -34,7 +35,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     process.stdout.write(`${VERSION}\n`);
     return 0;
   }
-  if (argv.includes('--selftest')) return selftest(process.stdout);
+  if (argv.includes('--selftest')) {
+    // `05` governs this screen: 80 columns, elide with an ellipsis, never
+    // hard-cut mid-word. `--width` is the same flag every potsherd verb takes.
+    const w = Number(flagValue(argv, '--width'));
+    return selftest(process.stdout, Number.isFinite(w) && w > 0 ? Math.floor(w) : undefined);
+  }
 
   const potsherdDir = flagValue(argv, '--potsherd-dir') ?? process.env['POTSHERD_DIR'];
   const ctx = makeContext(potsherdDir ? { potsherdDir } : {});

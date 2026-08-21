@@ -4,7 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { VERSION, allTags, db as dbNs, indexAll, paths } from '@potsherd/core';
+import { VERSION, allTags, db as dbNs, format as fmt, indexAll, paths } from '@potsherd/core';
 
 import { makeContext } from './context.js';
 import { TOOLS, WRITE_TOOLS } from './server.js';
@@ -64,7 +64,13 @@ import {
  * tool may run without asking the user first; it is not a place to be
  * aspirational.
  */
-export async function selftest(out: NodeJS.WritableStream = process.stderr): Promise<number> {
+/** `05`'s column budget. `--width` overrides it; nothing else is 80 here. */
+export const DEFAULT_WIDTH = 80;
+
+export async function selftest(
+  out: NodeJS.WritableStream = process.stderr,
+  width = DEFAULT_WIDTH,
+): Promise<number> {
   const started = Date.now();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'potsherd-mcp-selftest-'));
   const root = path.join(tmp, 'potsherd');
@@ -77,7 +83,13 @@ export async function selftest(out: NodeJS.WritableStream = process.stderr): Pro
   const checks: { ok: boolean; line: string }[] = [];
   const check = (ok: boolean, line: string): void => {
     checks.push({ ok, line });
-    say(`  ${ok ? 'ok  ' : 'FAIL'}  ${line}`);
+    // D11. `05` gives every potsherd line 80 columns, and this is a
+    // verification command named in the phase file. It ran to 130 characters,
+    // hard-cut mid-word by ad-hoc `.slice(0, 56)` calls inside the messages
+    // with no ellipsis, so a reader could not tell a truncated path from a
+    // wrong one. One clip, here, at the only place that knows the width, and
+    // it puts the ellipsis in.
+    say(fmt.clip(`  ${ok ? 'ok  ' : 'FAIL'}  ${line}`, width));
   };
 
   try {
@@ -85,8 +97,12 @@ export async function selftest(out: NodeJS.WritableStream = process.stderr): Pro
     say('');
 
     const fixture = fixtureClaudeDir();
-    say(`  corpus  ${fixture}`);
-    say(`  index   ${root}`);
+    // Paths elide in the MIDDLE — the last segment is what identifies a file,
+    // so these two are the one place on this screen where a tail cut would
+    // throw away the informative half.
+    const shortPath = (p: string): string => fmt.elideMiddle(paths.tildify(p), width - 10);
+    say(`  corpus  ${shortPath(fixture)}`);
+    say(`  index   ${shortPath(root)}`);
     say('');
 
     const report = await indexAll({
@@ -288,7 +304,7 @@ export async function selftest(out: NodeJS.WritableStream = process.stderr): Pro
       check(
         askErr.isError === true && /claude|codex|ANTHROPIC_API_KEY/i.test(askText),
         `potsherd_ask   no backend → tool error in ${Date.now() - askAt}ms, not after ~100s: ` +
-          askText.split('\n')[0]!.slice(0, 56),
+          askText.split('\n')[0]!,
       );
 
       // ------------------------------------- who actually wrote anything
@@ -332,7 +348,7 @@ export async function selftest(out: NodeJS.WritableStream = process.stderr): Pro
         if (ctxBefore) fixIndex(root, ctxBefore);
         check(
           r.isError === true && textOf(r).length > 0,
-          `${what} → tool error, server still up: ${textOf(r).split('\n')[0]!.slice(0, 60)}`,
+          `${what} → tool error, server still up: ${textOf(r).split('\n')[0]!}`,
         );
       }
 

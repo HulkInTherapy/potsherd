@@ -622,9 +622,23 @@ describe('the verb', () => {
    */
   it('keeps to 80 columns, whatever the path lengths', async () => {
     fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
+    // D11: the `note` line of a docs-only client's consent screen ran to 179
+    // characters, unwrapped and unelided, while `runs` on the same screen
+    // elided to exactly 80 and `tools` wrapped. The list below did not reach
+    // it, because in a throwaway home none of the four docs-only clients has
+    // a directory and so none of their plans is ever printed. Making them
+    // exist is what makes this test see the screen the user sees.
+    for (const dir of [['.gemini'], ['.copilot'], ['.pi', 'agent'], ['.config', 'opencode']]) {
+      fs.mkdirSync(path.join(home, ...dir), { recursive: true });
+    }
     const runs = [
       () => runSetup({ ...base, all: true, status: true, width: 80 }),
       () => runSetup({ ...base, all: true, dryRun: true, width: 80 }),
+      // Each docs-only client on its own, which is the form the verifier ran.
+      () => runSetup({ ...base, clients: ['pi'], dryRun: true, width: 80 }),
+      () => runSetup({ ...base, clients: ['gemini'], dryRun: true, width: 80 }),
+      () => runSetup({ ...base, clients: ['opencode'], dryRun: true, width: 80 }),
+      () => runSetup({ ...base, clients: ['copilot'], dryRun: true, width: 80 }),
     ];
     for (const r of runs) {
       const { out } = await capture(r);

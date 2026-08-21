@@ -205,7 +205,14 @@ function printPlan(
     );
   }
   if (plan.detection.verified === 'docs') {
-    print(`  ${t.warn('note')}   ${plan.label}'s schema is unverified: ${plan.detection.evidenceNote}`);
+    // D11: this printed on one line and ran to 179 characters at --width 80,
+    // unwrapped and unelided, on the same screen where `runs` elides to
+    // exactly 80 and `tools` wraps. It is a sentence, so it wraps: eliding a
+    // reason to fit leaves half a reason, and `05` gives every line 80 columns.
+    const note = `${plan.label}'s schema is unverified: ${plan.detection.evidenceNote}`;
+    const lines = fmt.wrap(note, Math.max(24, t.width - 9));
+    print(`  ${t.warn('note')}   ${lines[0] ?? ''}`);
+    for (const l of lines.slice(1)) print(`         ${l}`);
   }
   print('');
   for (const raw of plan.diff.split('\n')) {

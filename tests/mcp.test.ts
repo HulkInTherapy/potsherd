@@ -137,6 +137,49 @@ describe('the tool list', () => {
     }
   });
 
+  it('--selftest keeps to 80 columns and elides with an ellipsis', () => {
+    // D11. `--selftest` is a verification command named in the phase file, and
+    // `05` governs the screens it prints. It ran to 130 characters, hard-cut
+    // mid-word by ad-hoc `.slice(0, 56)` calls with no ellipsis — a reader
+    // could not tell a truncated path from a wrong one — and it took no
+    // --width.
+    const mcpBin = path.join(repo, 'packages', 'mcp', 'dist', 'index.js');
+    const at = (width?: number): string[] =>
+      execFileSync(
+        process.execPath,
+        [mcpBin, '--selftest', ...(width === undefined ? [] : ['--width', String(width)])],
+        { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] },
+      ).split('\n');
+
+    // The default is 80, with no flag — the form the phase file names.
+    for (const line of at()) expect([...line].length, line).toBeLessThanOrEqual(80);
+
+    // Whatever `--width` says, and whatever the paths are.
+    for (const width of [60, 100]) {
+      const lines = at(width).filter((l) => l.length > 0);
+      expect(lines.length).toBeGreaterThan(10);
+      for (const line of lines) {
+        expect([...line].length, `width ${String(width)}: ${line}`).toBeLessThanOrEqual(width);
+      }
+    }
+
+    // And nothing is cut without saying so: every line that a narrow run
+    // shortened carries an ellipsis. A hard cut mid-word reads as a wrong
+    // value, not a clipped one.
+    const wide = at(400);
+    const narrow = at(60);
+    expect(narrow).toHaveLength(wide.length);
+    let shortened = 0;
+    narrow.forEach((line, i) => {
+      const full = wide[i]!;
+      // Timings and temp paths differ between runs; only length is compared.
+      if ([...line].length >= [...full].length) return;
+      shortened++;
+      expect(line, `cut without an ellipsis: ${line}`).toContain('…');
+    });
+    expect(shortened, 'nothing was shortened at --width 60').toBeGreaterThan(5);
+  });
+
   it('advertises a json schema for every tool, with the contract fields in it', async () => {
     const { client, close } = await connect();
     try {
