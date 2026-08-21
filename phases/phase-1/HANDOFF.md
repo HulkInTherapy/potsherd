@@ -92,7 +92,13 @@ recall@5   bm25 8/10                 the phase-1 gate is >= 8/10 — met
 6. **`ls` is a shareable moment and now looks like one.** Build every new verb's output with
    `Card`/`table` and `Theme`. Since T1.7a, `format.ts`'s `elide`/`clip`/`joinFit`/`elideMiddle`
    take the `Theme` so ASCII width arithmetic is correct — pass it.
-7. **A run reports what the run did; the index reports what the index holds.** Never label one as
+7. **`recall.ts`'s title list is weight-scaled by query coverage.** The honest query set exposed a
+   real ranking defect: `titleMatches` keeps whichever titles matched *best*, and when nothing
+   matches well "best" is one common word out of six — a query for "stop counting the same event
+   twice in the rollup" filled the page with sessions titled "…twice…" and pushed the real answer
+   to rank 6. The list's weight is now scaled by the fraction of the query the best title covered.
+   That one change is what took bm25 from 7/10 to 8/10; no query was touched to get there.
+8. **A run reports what the run did; the index reports what the index holds.** Never label one as
    the other. This was a real defect (`index` printed "index holds no secrets" while the index
    held masks) and the rule now has tests behind it.
 
@@ -125,7 +131,7 @@ this phase. It found 8 defects; 7 were fixed and re-verified, 1 is carried below
 
 | item | state | picked up by |
 |---|---|---|
-| **hybrid recall scores *below* bm25 alone: 8/10 bm25, 6/10 vectors, 6/10 hybrid** on the honest query set. `pnpm evals` prints "plans/06 phase 3 would not merge this fusion" itself. The phase-1 gate (bm25 ≥ 8/10) is met; the fusion is not good enough | **open, measured** | phase 3, whose gate is exactly this |
+| **hybrid recall scores *below* bm25 alone: 8/10 bm25, 6/10 vectors, 6/10 hybrid** on the honest query set. `pnpm evals` prints "plans/06 phase 3 would not merge this fusion" itself. The phase-1 gate (bm25 ≥ 8/10) is met; the fusion is not good enough. **Diagnosis for phase 3, already measured:** vectors genuinely help where bm25 fails — vectors-only finds one of the two concept queries at rank 3 and lifts the other to 6 — but **ghosts carry no embeddings and get drowned whenever the vec list is on**. Fixing the fusion probably means embedding ghost prompts, or scoring lists a session is absent from rather than letting absence read as a low rank | **open, measured** | phase 3, whose gate is exactly this |
 | full index 4m 11s against `03 §12`'s 3 minutes | open, recorded | phase 3 or 7; `--no-embed` at 8.7s is the shippable path |
 | the eval set is 10 queries over a small fixture corpus | by design | phase 3 grows it to 25 with 5 sidechain-only and 5 ghost-only |
 | `show --html` | unimplemented (`--md` works) | phase 7 |
