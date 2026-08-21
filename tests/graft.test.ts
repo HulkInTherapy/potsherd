@@ -1072,6 +1072,52 @@ describe('the pinned GraftResult', () => {
     expect(renderGraft(r, new Theme({ color: false }))).toContain('est. (chars/3.6)');
   });
 
+  it('labels the dollar figure est. too, not just the token count', async () => {
+    // **T4.7a G2.** `render/ask.ts:109`, `render/ask.ts:212` and
+    // `cli/commands/ask.ts:101` all guard money with `r.estimated`;
+    // `render/graft.ts:80` was the one site in the product that did not, and
+    // the unlabelled figure sat two rows under a `tokens` row that labels
+    // *itself* `est. (chars/3.6)`. On the subscription path it is an
+    // api-equivalent estimate, not money anyone was charged. Seen unlabelled
+    // on three real runs; `05`'s honesty contract is explicit.
+    const llm = stub(`- a fact [${ID.pgbouncer}@${seqOf(pgbouncerId)}]`, 'agent-sdk');
+    const r = await graft(db, pgbouncerId, { llm, cwd: workdir() });
+    await llm.close();
+    expect(r.estimated).toBe(true);
+    expect(r.spend.usd).toBeGreaterThan(0);
+    const out = renderGraft(r, new Theme({ color: false }));
+    const money = out.split('\n').find((l) => l.includes('$'))!;
+    expect(money).toBeDefined();
+    expect(money).toMatch(/\$[\d.]+ est\./);
+  });
+
+  it('a zero-citation brief never reads as clean', async () => {
+    // **T4.7a G4.** `citations 0/0 · "distinct, and all resolve"` read green
+    // on a brief with no citations at all — the receipt's most reassuring line
+    // above a brief with no evidence in it. "All of them resolve" is vacuously
+    // true of an empty set; the row exists to answer *is this backed by
+    // anything*, and on zero the answer is no.
+    const llm = stub('This session was about a thing.');
+    const r = await graft(db, pgbouncerId, { llm, cwd: workdir() });
+    await llm.close();
+    expect(r.citations).toHaveLength(0);
+    const out = renderGraft(r, new Theme({ color: false }));
+    const row = out.split('\n').find((l) => l.includes('citations'))!;
+    expect(row).toContain('0/0');
+    expect(row).not.toContain('distinct, and all resolve');
+    expect(row).toContain('nothing in this brief is cited');
+  });
+
+  it('still says all resolve when some actually did', async () => {
+    const llm = stub(`- a fact [${ID.pgbouncer}@${seqOf(pgbouncerId)}]`);
+    const r = await graft(db, pgbouncerId, { llm, cwd: workdir() });
+    await llm.close();
+    const row = renderGraft(r, new Theme({ color: false }))
+      .split('\n')
+      .find((l) => l.includes('citations'))!;
+    expect(row).toContain('distinct, and all resolve');
+  });
+
   it('degrades to 60 columns without losing the next verb', async () => {
     // `plans/05`: designed for 80, degrades to 60, and the last line of every
     // verb is the next verb — printed whole, because half a command cannot be
