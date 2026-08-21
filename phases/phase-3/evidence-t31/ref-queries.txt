@@ -1,0 +1,20 @@
+pgbouncer prepared statements
+what was the astrology session about
+handoff
+supabase migration
+canon printer driver
+the thing that kept timing out in ci
+why the build got so slow
+instagram chat only client
+rate limited by the gateway
+session diversification in the ranker
+embedding model download
+sqlite vec extension load failure
+redacting secrets from transcripts
+what did we decide about the archive sweep
+recall eval query set
+the deleted session with the client name
+tree shaking the icon set
+hybrid retrieval reciprocal rank fusion
+how the resume command is built
+the migration that added the cards table

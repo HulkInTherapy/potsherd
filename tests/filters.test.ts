@@ -407,20 +407,27 @@ describe('find --explain', () => {
     }
   });
 
-  it('solves each list weight from the scores rather than assuming one', async () => {
+  it('reads each list weight from recall rather than solving for it', async () => {
     const r = await recall(db, 'widget pool', {}, { vectors: false, limit: 5 });
     const e = search.explain(r);
     expect(e.weights.length).toBeGreaterThan(0);
-    expect(e.weights.every((w) => w.solved)).toBe(true);
-    expect(e.weights.every((w) => w.weight > 0)).toBe(true);
-    // The solve has to recover the *effective* weight, not the table's: the
-    // `titles` list is scaled by how much of the query the best title covered,
-    // so a copy of `recall.ts`'s constants would print 1.5 where the fusion
-    // used 0.75. Whatever it is, `contribution = weight / (k + rank)` must hold
-    // against the score `recall` actually produced — which the ledger test
-    // above checks to twelve places.
+    // The ledger prints the weight the fusion *used*, so it must be the same
+    // object `recall` reported — not a re-derivation that can drift from it.
+    expect(e.k).toBe(r.k);
+    for (const w of e.weights) expect(w.weight).toBe(r.weights[w.list]);
+    // Those are effective weights, not the static table: `titles` is scaled by
+    // how much of the query the best title covered, so a copy of `recall.ts`'s
+    // constants would print 1.5 where the fusion used 0.75.
     const titles = e.weights.find((w) => w.list === 'titles');
     if (titles) expect(titles.weight).not.toBe(1.5);
+    // And the old solver — kept as a cross-check — still recovers the same
+    // numbers from the scores alone. If these two ever disagree, one of them is
+    // lying about how the page was ordered.
+    const solved = search.solveWeights(r.hits, r.k);
+    for (const [list, w] of solved) {
+      if (!w.solved) continue;
+      expect(w.weight).toBeCloseTo(r.weights[list] ?? 1, 9);
+    }
   });
 
   it('names which list ranked the top two, and when corroboration decided it',

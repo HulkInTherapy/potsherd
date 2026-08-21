@@ -70,6 +70,7 @@ export type ListName =
   | 'ghosts_fts'
   | 'ghost_prompts_fts'
   | 'vec_exchanges'
+  | 'vec_ghost_prompts'
   | 'cards_fts'
   | 'vec_cards';
 
@@ -89,6 +90,7 @@ export const LISTS: readonly ListName[] = [
   'ghosts_fts',
   'ghost_prompts_fts',
   'vec_exchanges',
+  'vec_ghost_prompts',
   'vec_cards',
 ];
 
@@ -112,8 +114,17 @@ export interface RecallHit {
   isSidechain: boolean;
   /** Fused score. Bigger is better; RRF scores are small (~0.016 at rank 1). */
   score: number;
-  /** Which lists put this row where, for `--json` and for debugging recall. */
-  from: { list: ListName; rank: number; raw: number }[];
+  /**
+   * Which lists put this row where, for `--json` and for debugging recall.
+   *
+   * `contribution` is what that list actually added to {@link score}:
+   * `effectiveWeight(list) * 1/(k + rank)`. It is recorded rather than
+   * recomputed because `--explain` used to *solve* for it from the totals,
+   * which meant the debugger's arithmetic and the ranker's arithmetic were two
+   * separate implementations that could disagree — and did, whenever a list
+   * relaxed.
+   */
+  from: { list: ListName; rank: number; raw: number; contribution: number }[];
 }
 
 export interface RecallSession {
@@ -162,6 +173,18 @@ export interface RecallResult {
   hits: RecallHit[];
   vectors: VectorState;
   lists: { list: ListName; candidates: number; ms: number }[];
+  /**
+   * The fusion's own parameters, reported rather than reconstructed, because
+   * `find --explain` has to be able to say *why* a hit scored what it scored.
+   *
+   * `k` is RRF's constant; `weights` is what each list was **actually** worth
+   * on this query, after title-coverage scaling and {@link RELAXED_PENALTY} —
+   * not the static table; `relaxedLists` names the lists that had to fall back
+   * to any-word matching and therefore took that penalty.
+   */
+  k: number;
+  weights: Partial<Record<ListName, number>>;
+  relaxedLists: ListName[];
   /** True when the exact-AND pass found too little and the OR pass was run. */
   relaxed: boolean;
   /** True when the search was restricted to ghosts (`--ghosts only`). */
@@ -192,6 +215,16 @@ export interface RecallOptions {
   /** Candidate depth per list. Default `max(limit * 10, 60)`. */
   candidates?: number;
   /**
+   * Per-list weight overrides, merged over {@link WEIGHTS}. `03` §7 asks for
+   * configurable weights; this is the knob, and it is what the eval sweeps.
+   */
+  weights?: Partial<Record<ListName, number>>;
+  /**
+   * How much a session's *second and later* hits can add, as a fraction of its
+   * best hit. Default {@link CORROBORATION}.
+   */
+  corroboration?: number;
+  /**
    * The vector half of the hybrid.
    *
    *   `true`   — always run it.
@@ -221,6 +254,28 @@ export interface RecallOptions {
 
 /** Max exchange hits from one session in the top list (`03` §7). */
 export const PER_SESSION = 3;
+
+/**
+ * How much corroboration is worth, as a fraction of a session's best hit.
+ *
+ * **This number was the sidechain bug.** A subagent transcript is indexed as
+ * its own session holding exactly *one* exchange, so it can never have a
+ * second hit to corroborate the first — while a 120-exchange distractor
+ * collects three automatically. At the old value (0.5) that handed every
+ * multi-hit session a standing +50%, which is more than the whole gap between
+ * rank 1 and rank 30 in an RRF list: on the eval corpus the subagent that was
+ * the **nearest vector in the index** to "the thing quietly eating most of the
+ * cloud bill" came back as session block #29, behind twenty-eight sessions
+ * whose best evidence was worse than its own and whose only advantage was
+ * having said something three times.
+ *
+ * At 0.12 the rule reads the way the docstring above always claimed it did:
+ * the strongest single piece of evidence decides, and repetition breaks ties
+ * *within* that — it can no longer overturn a strictly better match. The
+ * "Build Instagram chat-only client" case that motivated the cap is unaffected,
+ * because that one is fixed by the `titles` weight, not by this.
+ */
+export const CORROBORATION = 0.12;
 
 /**
  * Per-list weight in the fusion. RRF's own formula has none — every list is
@@ -274,7 +329,7 @@ interface TitleList {
   coverage: number;
 }
 
-const WEIGHTS: Record<string, number> = {
+export const WEIGHTS: Record<ListName, number> = {
   // A title is a statement about the *whole* session — Claude Code's own
   // `ai-title`, or codex's thread name. One paragraph out of four hundred
   // mentioning "instagram" and a session called "Build Instagram chat-only
@@ -290,12 +345,18 @@ const WEIGHTS: Record<string, number> = {
   exchanges_fts: 1,
   ghosts_fts: 1,
   ghost_prompts_fts: 1,
-  vec_exchanges: 0.5,
+  vec_exchanges: 1.5,
+  // The ghosts' half of the semantic list (schema 8). Same weight as the
+  // exchange vectors, because it is the same model over the same kind of text
+  // — a prompt someone typed — and the only difference is that the answer to
+  // this one no longer exists. Weighting it lower would re-create by hand the
+  // exact disadvantage the table was added to remove.
+  vec_ghost_prompts: 1.5,
   // Card vectors are the semantic half of the same statement. Same weight as
   // the exchange vectors: rank-based fusion needs no common scale, but a list
   // that answers "about the same thing" still should not outvote one that
   // answers "says these words".
-  vec_cards: 0.5,
+  vec_cards: 1.5,
 };
 
 // -------------------------------------------------------------- fts5 syntax
@@ -815,6 +876,12 @@ function vecCards(db: Db, embedding: number[], filters: SearchFilters, depth: nu
   if (near.length === 0) return [];
 
   const order = new Map(near.map((n, i) => [n.session_id, i]));
+  // Carried through so `--explain` can print the cosine it ranked on. It used
+  // to hard-code 0, and a ledger row reading `cos 0.00` beside the hit that
+  // *won* the query is worse than no column at all.
+  const similarity = new Map(
+    near.map((n) => [n.session_id, l2DistanceToCosineSimilarity(n.distance)]),
+  );
   const placeholders = near.map(() => '?').join(',');
   const ids = near.map((n) => n.session_id);
   // Same two-query rule as `bm25Cards`, for the same reason: half the cards on
@@ -855,7 +922,7 @@ function vecCards(db: Db, embedding: number[], filters: SearchFilters, depth: nu
   return rows
     .sort((a, b) => (order.get(a.session_id) ?? 0) - (order.get(b.session_id) ?? 0))
     .slice(0, depth)
-    .map((r) => ({ ...cardHit(r), raw: 0 }));
+    .map((r) => ({ ...cardHit(r), raw: similarity.get(r.session_id) ?? 0 }));
 }
 
 function bm25Ghosts(db: Db, match: string, filters: SearchFilters, depth: number): RawHit[] {
@@ -983,6 +1050,65 @@ function vecExchanges(
     }));
 }
 
+/**
+ * The ghosts' vector list (schema 8).
+ *
+ * Shaped to produce the same `key` as {@link bm25GhostPrompts} — `gp:<id>` —
+ * so that a prompt found by both halves fuses into one hit with two votes
+ * rather than appearing twice, which is the whole point of doing this at the
+ * row level instead of the session level.
+ */
+function vecGhostPrompts(
+  db: Db,
+  embedding: number[],
+  filters: SearchFilters,
+  depth: number,
+): RawHit[] {
+  const wanted = knnCandidates(depth, filters);
+  const near = db
+    .prepare(
+      `SELECT id, distance FROM vec_ghost_prompts
+        WHERE embedding MATCH ? ORDER BY distance LIMIT ?`,
+    )
+    .all(embeddingToBlob(embedding), wanted) as { id: string; distance: number }[];
+  if (near.length === 0) return [];
+
+  const order = new Map(near.map((n, i) => [n.id, i]));
+  const similarity = new Map(near.map((n) => [n.id, l2DistanceToCosineSimilarity(n.distance)]));
+  const f = buildGhostFilters(filters);
+  const placeholders = near.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT p.id AS id, p.session_id AS session_id, p.seq AS seq, p.ts AS ts, p.text AS text
+         FROM ghost_prompts p
+         JOIN ghosts g ON g.session_id = p.session_id
+        WHERE p.id IN (${placeholders})
+          ${f.sql}`,
+    )
+    .all(...near.map((n) => n.id), ...f.params) as {
+    id: string;
+    session_id: string;
+    seq: number;
+    ts: string | null;
+    text: string;
+  }[];
+
+  return rows
+    .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+    .slice(0, depth)
+    .map((r) => ({
+      key: `gp:${r.id}`,
+      kind: 'ghost' as const,
+      sessionId: r.session_id,
+      id: r.id,
+      seq: r.seq,
+      ts: r.ts,
+      userText: r.text,
+      isSidechain: false,
+      raw: similarity.get(r.id) ?? 0,
+    }));
+}
+
 // ------------------------------------------------------------------ vectors
 
 /** Can this database answer a vector query at all, and if not, why not. */
@@ -1042,6 +1168,8 @@ export async function recall(
   const limit = Math.max(1, options.limit ?? 10);
   const k = options.k ?? RRF_K;
   const perSession = Math.max(1, options.perSession ?? PER_SESSION);
+  const baseWeights: Partial<Record<ListName, number>> = { ...WEIGHTS, ...options.weights };
+  const corroboration = options.corroboration ?? CORROBORATION;
   const depth = Math.max(options.candidates ?? Math.max(limit * 10, 60), limit);
   // `--status ghost` is `--ghosts only` said the other way round; a ghost has
   // no row in `sessions`, so there is nothing else it could mean.
@@ -1063,6 +1191,9 @@ export async function recall(
     hits: [],
     vectors,
     lists: listReports,
+    k,
+    weights: {},
+    relaxedLists: [],
     relaxed: false,
     ghostsOnly: ghosts === 'only',
     indexedGhosts: countGhosts(db),
@@ -1100,8 +1231,18 @@ export async function recall(
   ) {
     wanted.delete('ghosts_fts');
     wanted.delete('ghost_prompts_fts');
+    wanted.delete('vec_ghost_prompts');
   }
-  if (!vectors.available) wanted.delete('vec_exchanges');
+  if (!vectors.available) {
+    wanted.delete('vec_exchanges');
+    wanted.delete('vec_ghost_prompts');
+  }
+  // Schema 8, and it declines on a machine without `sqlite-vec`. An index
+  // rescued before this release has the table and no rows in it; running a KNN
+  // against an empty vec0 table per search is a cost with no answer attached.
+  if (!tableExists(db, 'vec_ghost_prompts') || countRows(db, 'vec_ghost_prompts') === 0) {
+    wanted.delete('vec_ghost_prompts');
+  }
   // The card lists are real from T2.2 on, and still leave the set the moment
   // there is nothing behind them: an index that has never run `potsherd card`
   // has an empty `cards` table, and running two extra queries per search to
@@ -1177,13 +1318,14 @@ export async function recall(
   if (vecMode === 'auto' && settled) {
     wanted.delete('vec_exchanges');
     wanted.delete('vec_cards');
+    wanted.delete('vec_ghost_prompts');
     vectors.reason = 'the words matched; --vectors on adds semantic search';
   }
 
   // One forward pass, two lists. The query embedding is the expensive part
   // (~350 ms); `vec_exchanges` and `vec_cards` are two KNN seeks against it,
   // so a search that pays for the vector half should get both halves of it.
-  if (wanted.has('vec_exchanges') || wanted.has('vec_cards')) {
+  if (wanted.has('vec_exchanges') || wanted.has('vec_cards') || wanted.has('vec_ghost_prompts')) {
     try {
       const embedding = await generateQueryEmbedding(query, {
         cacheDir: modelsDir(potsherdDir(options.root)),
@@ -1194,6 +1336,17 @@ export async function recall(
         const hits = vecExchanges(db, embedding, filters, depth);
         listReports.push({ list: 'vec_exchanges', candidates: hits.length, ms: Date.now() - t0 });
         lists['vec_exchanges'] = hits;
+        used ||= hits.length > 0;
+      }
+      if (wanted.has('vec_ghost_prompts')) {
+        const t0 = Date.now();
+        const hits = vecGhostPrompts(db, embedding, filters, depth);
+        listReports.push({
+          list: 'vec_ghost_prompts',
+          candidates: hits.length,
+          ms: Date.now() - t0,
+        });
+        lists['vec_ghost_prompts'] = hits;
         used ||= hits.length > 0;
       }
       if (wanted.has('vec_cards')) {
@@ -1224,18 +1377,22 @@ export async function recall(
 
   // ---- reciprocal rank fusion
   const fused = new Map<string, RawHit & { score: number; from: RecallHit['from'] }>();
+  const effectiveWeights: Partial<Record<ListName, number>> = {};
   for (const [name, hits] of Object.entries(lists)) {
     const weight =
-      (WEIGHTS[name] ?? 1) *
+      (baseWeights[name as ListName] ?? 1) *
       (name === 'titles' ? titles.coverage : 1) *
       (relaxedLists.has(name as ListName) ? RELAXED_PENALTY : 1);
+    // Recorded for every list that ran, empty one included: `--explain` has to
+    // be able to say "cards_fts was worth 1.2 and still found nothing".
+    if (wanted.has(name as ListName)) effectiveWeights[name as ListName] = weight;
     hits.forEach((hit, i) => {
       const rank = i + 1;
       const contribution = weight * rrfScore(rank, k);
       const seen = fused.get(hit.key);
       if (seen) {
         seen.score += contribution;
-        seen.from.push({ list: name as ListName, rank, raw: hit.raw });
+        seen.from.push({ list: name as ListName, rank, raw: hit.raw, contribution });
         // A vec hit carries no better text than an fts hit of the same row, but
         // it may be the only one that has it.
         if (!seen.assistantText && hit.assistantText) seen.assistantText = hit.assistantText;
@@ -1243,7 +1400,7 @@ export async function recall(
         fused.set(hit.key, {
           ...hit,
           score: contribution,
-          from: [{ list: name as ListName, rank, raw: hit.raw }],
+          from: [{ list: name as ListName, rank, raw: hit.raw, contribution }],
         });
       }
     });
@@ -1253,13 +1410,39 @@ export async function recall(
     (a, b) => b.score - a.score || (a.seq ?? 0) - (b.seq ?? 0),
   );
 
-  // ---- session diversification (`03` §7: at most 3 from one session)
+  // ---- one conversation, one block
+  //
+  // A subagent transcript is not a separate conversation. potsherd already
+  // says so everywhere else — `resumeCommand` resumes the *parent* because
+  // `<parent>:agent-<hash>` is an id for a file rather than something claude
+  // will reopen, and `RecallSession.subagents` counts them on the parent — but
+  // the ranker used to treat the two as rivals, and they are rivals about the
+  // same topic, which is the worst possible pairing.
+  //
+  // Concretely: a subagent holds *one* exchange. It can never be corroborated,
+  // it can never fill the three-hit diversification budget, and its parent —
+  // which is about the same thing, and has a card and a hundred exchanges —
+  // outranks it every time. On phase 3's eval set the subagent that was the
+  // single nearest vector in the whole index to "the thing quietly eating most
+  // of the cloud bill" came back below its own parent, so the answer on the
+  // screen was the session that *spawned* the work rather than the transcript
+  // that did it. Both spellings point at the same conversation; showing them as
+  // two results is also just a duplicate on the page.
+  //
+  // So: cluster by conversation, diversify per conversation (which is what
+  // `03` §7's "max 3 exchanges per session" meant when sessions had no
+  // children), and let the cluster be *represented* by whichever member
+  // actually earned the top hit — so a query whose only answer is in the
+  // subagent still shows the subagent, and a query the parent answers better
+  // shows the parent with the subagent's line underneath it.
+  const conversationOf = conversationKeys(db, ranked.map((h) => h.sessionId));
   const perSessionCount = new Map<string, number>();
   const kept: RecallHit[] = [];
   for (const hit of ranked) {
-    const n = perSessionCount.get(hit.sessionId) ?? 0;
+    const conversation = conversationOf(hit.sessionId);
+    const n = perSessionCount.get(conversation) ?? 0;
     if (n >= perSession) continue;
-    perSessionCount.set(hit.sessionId, n + 1);
+    perSessionCount.set(conversation, n + 1);
     kept.push({
       kind: hit.kind,
       sessionId: hit.sessionId,
@@ -1279,30 +1462,40 @@ export async function recall(
   const order: string[] = [];
   const grouped = new Map<string, RecallHit[]>();
   for (const hit of kept) {
-    if (!grouped.has(hit.sessionId)) {
-      grouped.set(hit.sessionId, []);
-      order.push(hit.sessionId);
+    const conversation = conversationOf(hit.sessionId);
+    if (!grouped.has(conversation)) {
+      grouped.set(conversation, []);
+      order.push(conversation);
     }
-    grouped.get(hit.sessionId)!.push(hit);
+    grouped.get(conversation)!.push(hit);
   }
 
-  const meta = sessionMeta(db, order);
+  // The block is headed by the member that earned the best hit, not by the
+  // parent on principle: `find "tree shaking icon set"` where only the subagent
+  // ever said the words must show the subagent.
+  const represents = new Map<string, string>();
+  for (const [conversation, hits] of grouped) {
+    const best = hits.reduce((a, b) => (b.score > a.score ? b : a));
+    represents.set(conversation, best.sessionId);
+  }
+  const meta = sessionMeta(db, [...represents.values()]);
   const sessions: RecallSession[] = [];
-  for (const id of order) {
+  for (const conversation of order) {
+    const id = represents.get(conversation) ?? conversation;
     const m = meta.get(id);
     if (!m) continue;
     // A session can hold the same text twice — a re-sent prompt, a `/model`
     // typed at both ends of a session — and two identical snippet lines under
     // one heading read as a rendering bug rather than as data.
     const seenText = new Set<string>();
-    const hits = grouped.get(id)!.filter((h) => {
+    const hits = grouped.get(conversation)!.filter((h) => {
       const key = h.snippet.text.trim();
       if (!key) return true;
       if (seenText.has(key)) return false;
       seenText.add(key);
       return true;
     });
-    sessions.push({ ...m, score: sessionScore(hits), hits });
+    sessions.push({ ...m, score: sessionScore(hits, corroboration), hits });
     // Three times the page, then sort by the *session's* total and cut. A
     // session whose best single hit ranks eleventh but which matched five
     // times is a better answer than one that matched once at rank ten, and
@@ -1319,6 +1512,9 @@ export async function recall(
     hits: kept.filter((h) => shown.has(h.sessionId)),
     vectors,
     lists: listReports,
+    k,
+    weights: effectiveWeights,
+    relaxedLists: [...relaxedLists],
     relaxed,
     ghostsOnly: ghosts === 'only',
     indexedGhosts: sessions.length === 0 ? countGhosts(db) : null,
@@ -1329,6 +1525,38 @@ export async function recall(
 // -------------------------------------------------------------- session meta
 
 type SessionMeta = Omit<RecallSession, 'score' | 'hits'>;
+
+/**
+ * `sessionId -> conversationId`, where a subagent transcript's conversation is
+ * the session that spawned it.
+ *
+ * One query for the whole candidate set rather than one per hit, and it
+ * degrades to identity when `sessions` cannot answer — an id that is a ghost's,
+ * or a subagent whose parent transcript was never indexed, is its own
+ * conversation, which is the truthful answer in both cases.
+ */
+function conversationKeys(db: Db, ids: readonly string[]): (id: string) => string {
+  const distinct = [...new Set(ids)];
+  const parents = new Map<string, string>();
+  if (distinct.length > 0) {
+    try {
+      const rows = db
+        .prepare(
+          `SELECT c.id AS id, c.parent_session_id AS parent
+             FROM sessions c
+             JOIN sessions p ON p.id = c.parent_session_id
+            WHERE c.id IN (${distinct.map(() => '?').join(',')})
+              AND c.parent_session_id IS NOT NULL`,
+        )
+        .all(...distinct) as { id: string; parent: string }[];
+      for (const r of rows) parents.set(r.id, r.parent);
+    } catch {
+      // A conversation is a grouping, not an answer. If the lookup fails the
+      // search still returns every hit it found, one block per session.
+    }
+  }
+  return (id: string): string => parents.get(id) ?? id;
+}
 
 /**
  * Metadata for a mixed set of ids, some of which are sessions and some ghosts.
@@ -1511,18 +1739,12 @@ function firstPromptTitle(text: string | null | undefined): string | null {
  * repetition breaks ties within that. A session can never score more than 1.5x
  * its own best hit.
  */
-function sessionScore(hits: RecallHit[]): number {
+function sessionScore(hits: RecallHit[], cap: number = CORROBORATION): number {
   if (hits.length === 0) return 0;
   const sorted = [...hits].sort((a, b) => b.score - a.score);
   const best = sorted[0]!.score;
   const rest = sorted.slice(1).reduce((n, h) => n + h.score, 0);
-  // Corroboration is capped at half the best hit, so no amount of repetition
-  // can beat strictly better evidence. Uncapped, three mid-ranked mentions
-  // inside one long session outscore any single top hit, and the long session
-  // wins every query — which is how the reference corpus ranked the session
-  // literally titled "Build Instagram chat-only client" eighth for
-  // "instagram chat only client".
-  return best + Math.min(rest / 2, best / 2);
+  return best + Math.min(rest / 2, best * cap);
 }
 
 function titled(

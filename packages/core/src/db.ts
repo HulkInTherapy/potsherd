@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { dbPath, potsherdDir } from './paths.js';
-import { createVecTables } from './vec.js';
+import { createGhostVecTable, createVecTables } from './vec.js';
 
 /**
  * One SQLite file, `~/.potsherd/potsherd.db`, WAL mode.
@@ -313,6 +313,34 @@ CREATE TABLE IF NOT EXISTS card_runs (
 );
 CREATE INDEX IF NOT EXISTS card_runs_backend ON card_runs(backend, ran_at);
 `,
+  },
+  {
+    version: 7,
+    name: 'ghost-vectors',
+    // Ghosts join the semantic half of the hybrid.
+    //
+    // `03 §7` fuses five lists and a ghost could only ever appear in two of
+    // them, because nothing had ever embedded a recovered prompt. RRF has no
+    // opinion about a list you are missing from — it simply adds nothing — so
+    // a session that can appear in five lists collects five contributions and
+    // a ghost collects two, and on phase 3's eval set every ghost-only query
+    // fell out of the top five the moment the vector lists were switched on.
+    //
+    // The column is stamped exactly like `exchanges.embedding_version`, so
+    // `index --embed` re-embeds a prompt whose model changed and skips one
+    // whose did not. `vec_ghost_prompts` needs `sqlite-vec`, so this migration
+    // is its own migration (8) that may decline, like migration 4 — the column
+    // is unconditional so that every code path can read it whether or not the
+    // extension ever loads.
+    up: `ALTER TABLE ghost_prompts ADD COLUMN embedding_version INTEGER;`,
+  },
+  {
+    version: 8,
+    name: 'ghost-vectors-table',
+    // See migration 7. Split off because `sqlite-vec` may not be installed and
+    // a declining migration rolls its whole transaction back, which would take
+    // the column with it.
+    run: createGhostVecTable,
   },
 ];
 

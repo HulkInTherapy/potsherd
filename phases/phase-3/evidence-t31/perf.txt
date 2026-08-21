@@ -1,0 +1,8 @@
+npm warn Unknown project config "enable-pre-post-scripts". This will stop working in the next major version of npm.
+20 warm runs x 25 queries per mode
+
+  mode              p50      p95      max      n
+  bm25 only            2.3ms    3.4ms    4.1ms  500
+  vectors only         8.2ms   10.6ms   16.0ms  500
+  hybrid (auto)       10.9ms   18.3ms   27.9ms  500
+  hybrid (always)     15.9ms   20.3ms   29.2ms  500
