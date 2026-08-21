@@ -56,9 +56,21 @@ import {
   writeCard,
   type CardRecord,
 } from '../packages/core/src/cards/write.js';
-import { elideMiddle, loadSessionTranscript, type Transcript, type TranscriptUnit } from '../packages/core/src/cards/transcript.js';
+import {
+  elideMiddle,
+  ghostProjectSlug,
+  loadGhostTranscript,
+  loadSessionTranscript,
+  type Transcript,
+  type TranscriptUnit,
+} from '../packages/core/src/cards/transcript.js';
+import { PROMPTS_ONLY, statesDecision } from '../packages/core/src/cards/ghost.js';
+import { MIN_GHOST_PROMPTS } from '../packages/core/src/cards/plan.js';
+import { listSessions, showSession } from '../packages/core/src/browse.js';
 import { recall } from '../packages/core/src/recall.js';
 import { renderCardRun } from '../packages/core/src/render/card-run.js';
+import { renderLs } from '../packages/core/src/render/ls.js';
+import { renderShow, renderShowMarkdown } from '../packages/core/src/render/show.js';
 import { Theme } from '../packages/core/src/theme.js';
 import { rmrf, tempDir } from './helpers.js';
 
@@ -636,6 +648,63 @@ function pgTranscript(): Transcript {
   ]);
 }
 
+// ---------------------------------------------------------------- ghosts
+
+/**
+ * A deleted session, as `history.jsonl` remembers it: six prompts and no
+ * assistant.
+ *
+ * Prompt 2 **states** a decision. Prompt 4 **asks** about one. They are about
+ * comparable things, phrased comparably, and only one of them is a decision
+ * this person made — which is the distinction T2.3 exists to hold, and the
+ * thing a model asked to summarise the prompts gets wrong.
+ */
+const GHOST_PROMPTS = [
+  'set up the events table for the analytics service',
+  'the writes are slow when two workers insert at once',
+  "let's go with postgres, not mysql, for the events table",
+  'add an index on created_at and re-run the load test',
+  'should we use redis or memcached for the session cache?',
+  'the load test still fails at 400 rps',
+];
+
+/** The same six prompts as a {@link Transcript}, without touching sqlite. */
+function ghostTranscript(prompts: readonly string[] = GHOST_PROMPTS): Transcript {
+  return transcriptOf(
+    prompts.map((p, i) => unit(i, `user: ${p}`)),
+    { kind: 'ghost', id: 'g1', title: 'analytics events table', projectSlug: '-tmp-p' },
+  );
+}
+
+/** A card claiming both the decision that was made and the one that was asked. */
+const GHOST_CARD = JSON.stringify({
+  title: 'analytics events table',
+  summary: 'worked on the events table for the analytics service and load tested the writes',
+  topics: ['postgres', 'load testing'],
+  decisions: [
+    { what: 'go with postgres, not mysql, for the events table', why: 'writes are slow', evidence_seq: [2] },
+    { what: 'use redis or memcached for the session cache', evidence_seq: [4] },
+  ],
+  files: [],
+  // A guess: there is no assistant side to have shipped anything.
+  outcome: 'shipped',
+  open_threads: [{ what: 'the load test still fails at 400 rps', evidence_seq: [5] }],
+  tags: ['postgres'],
+});
+
+function seedGhost(db: ReturnType<typeof store.open>, id: string, prompts: readonly string[]): void {
+  db.prepare(
+    `INSERT INTO ghosts (session_id, harness, project, first_ts, last_ts, prompt_count, first_prompt, title)
+     VALUES (?, 'claude', '/tmp/p', '2026-08-01T00:00:00.000Z', '2026-08-01T01:00:00.000Z', ?, ?, 'analytics events table')`,
+  ).run(id, prompts.length, prompts[0] ?? null);
+  prompts.forEach((text, i) => {
+    db.prepare(
+      `INSERT INTO ghost_prompts (id, session_id, seq, ts, text)
+       VALUES (?, ?, ?, '2026-08-01T00:00:00.000Z', ?)`,
+    ).run(`${id}-${i}`, id, i, text);
+  });
+}
+
 describe('the pipeline, end to end', () => {
   it('runs all five steps and writes only what the transcript supports', async () => {
     const llm = llmWith([GOOD_CARD]);
@@ -908,25 +977,43 @@ describe('the run', () => {
     db.close();
   });
 
-  it('defers ghosts to T2.3 rather than carding them from the wrong loader', async () => {
+  it('cards a session and a ghost in one run, through one pipeline', async () => {
     const root = scratch();
     const db = runnableDb(root);
-    db.prepare(
-      `INSERT INTO ghosts (session_id, harness, project, first_ts, last_ts, prompt_count)
-       VALUES ('g1', 'claude', '/tmp/p', '2026-08-01T00:00:00.000Z', '2026-08-01T01:00:00.000Z', 9)`,
-    ).run();
-    for (let i = 0; i < 9; i++) {
-      db.prepare(
-        `INSERT INTO ghost_prompts (id, session_id, seq, ts, text) VALUES (?, 'g1', ?, '2026-08-01T00:00:00.000Z', 'a prompt')`,
-      ).run(`g1-${i}`, i);
-    }
+    seedGhost(db, 'g1', GHOST_PROMPTS);
     const llm = llmWith([GOOD_CARD]);
     const plan = planCards(db, {});
     expect(plan.ghosts).toBe(1);
     const report = await runCards(db, llm, { root, targets: plan.targets, embed: toyEmbed });
     await llm.close();
-    expect(report.deferred).toBe(1);
+    expect(report.deferred).toBe(0);
+    expect(report.written).toBe(2);
+    const sources = db
+      .prepare('SELECT session_id, source FROM cards ORDER BY session_id')
+      .all() as { session_id: string; source: string }[];
+    expect(sources).toEqual([
+      { session_id: 'g1', source: 'prompts-only' },
+      { session_id: 's1', source: 'transcript' },
+    ]);
+    db.close();
+  });
+
+  it('cards ghosts alone when the run is narrowed to them', async () => {
+    const root = scratch();
+    const db = runnableDb(root);
+    seedGhost(db, 'g1', GHOST_PROMPTS);
+    const llm = llmWith([GOOD_CARD]);
+    const plan = planCards(db, {});
+    const report = await runCards(db, llm, {
+      root,
+      targets: plan.targets,
+      kinds: ['ghost'],
+      embed: toyEmbed,
+    });
+    await llm.close();
     expect(report.written).toBe(1);
+    expect(report.deferred).toBe(1);
+    expect(report.cards[0]!.source).toBe('prompts-only');
     db.close();
   });
 
@@ -1163,5 +1250,267 @@ describe('potsherd card --export', () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('no cards');
     expect(r.stdout).toContain('potsherd card --all');
+  });
+});
+
+// ------------------------------------------------------------ T2.3 ghosts
+
+/**
+ * T2.3 — ghost cards (`plans/03` §6, `plans/01` §3, `phase-2` T2.3).
+ *
+ * On the reference machine 299 of 330 sessions are ghosts: Claude Code's
+ * 30-day sweep took the transcripts and `history.jsonl` kept the prompts. So
+ * these are not edge-case tests. For most of a real archive the ghost card is
+ * the only card there will ever be, and everything below is about the three
+ * things such a card is not allowed to do: claim an outcome, promote a
+ * question into a decision, or look like a full card.
+ */
+describe('ghost cards', () => {
+  it('loads a ghost as prompts, in seq order, labelled as a ghost', () => {
+    const root = scratch();
+    const db = seededDb(root);
+    seedGhost(db, 'g1', GHOST_PROMPTS);
+    const t = loadGhostTranscript(db, 'g1')!;
+    expect(t.kind).toBe('ghost');
+    expect(t.units).toHaveLength(6);
+    expect(t.units.map((u) => u.seq)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(t.units[2]!.text).toBe(`user: ${GHOST_PROMPTS[2]}`);
+    // Nothing in a ghost unit can be the assistant, because there is none.
+    for (const u of t.units) expect(u.text).not.toContain('assistant:');
+    expect(t.title).toBe('analytics events table');
+    expect(loadGhostTranscript(db, 'nope')).toBeNull();
+    db.close();
+  });
+
+  it('puts a ghost card in the same mirror directory as the project\'s survivors', () => {
+    // `ghosts` has no project_slug: the transcript that carried one is what
+    // the sweep deleted. Re-deriving it with Claude Code's own encoding is
+    // what keeps one project in one directory.
+    expect(ghostProjectSlug('/Users/zebra/Downloads/Protfolio_app')).toBe(
+      '-Users-zebra-Downloads-Protfolio-app',
+    );
+    expect(ghostProjectSlug('/tmp/p')).toBe('-tmp-p');
+    expect(ghostProjectSlug(null)).toBeNull();
+  });
+
+  it('tells a prompt that states a decision from one that only asks about it', () => {
+    // Stated.
+    expect(statesDecision("let's go with postgres, not mysql")).toBe(true);
+    expect(statesDecision('use redis not memcached for the session cache')).toBe(true);
+    expect(statesDecision('drop the retry, it never fires')).toBe(true);
+    expect(statesDecision("we're switching to pnpm")).toBe(true);
+    expect(statesDecision('do not use the global lock here')).toBe(true);
+    expect(statesDecision('user: from now on write the migrations by hand')).toBe(true);
+
+    // Asked.
+    expect(statesDecision('should we use postgres or mysql?')).toBe(false);
+    expect(statesDecision('should we go with postgres')).toBe(false);
+    expect(statesDecision('what about dropping the retry?')).toBe(false);
+    expect(statesDecision('is it worth switching to pnpm?')).toBe(false);
+    expect(statesDecision('any preference between redis and memcached')).toBe(false);
+    expect(statesDecision("i'm not sure whether to go with postgres")).toBe(false);
+
+    // Neither: an instruction is not a decision, or the field means nothing.
+    expect(statesDecision('add a test for the parser')).toBe(false);
+    expect(statesDecision('the load test still fails at 400 rps')).toBe(false);
+  });
+
+  it('keeps a decision a prompt states and drops one a prompt only asked about', async () => {
+    // The test this task exists for. The model returns both claims, both cite
+    // a prompt that really is about them, and both clear the cosine filter.
+    // Only the stated one is a decision.
+    const llm = llmWith([GHOST_CARD]);
+    const r = await cardTranscript(llm, ghostTranscript(), { embed: toyEmbed, coverage: false });
+    await llm.close();
+
+    expect(r.card.decisions.map((d) => d.what)).toEqual([
+      'go with postgres, not mysql, for the events table',
+    ]);
+    const asked = r.drops.find((d) => d.what.includes('session cache'));
+    expect(asked?.reason).toBe('asked-not-decided');
+    // Not for want of evidence: the prompt it cited exists and matched.
+    expect(asked!.resolved).toEqual([4]);
+    expect(asked!.best).toBeGreaterThanOrEqual(EVIDENCE_COSINE);
+    expect(r.verified).toEqual({ kept: 2, dropped: 1 });
+  });
+
+  it('leaves open threads alone — an unanswered question is what a ghost proves', async () => {
+    const llm = llmWith([GHOST_CARD]);
+    const r = await cardTranscript(llm, ghostTranscript(), { embed: toyEmbed, coverage: false });
+    await llm.close();
+    expect(r.card.open_threads.map((o) => o.what)).toEqual([
+      'the load test still fails at 400 rps',
+    ]);
+  });
+
+  it('forces outcome to unknown however confident the model was', async () => {
+    const llm = llmWith([GHOST_CARD]);
+    const r = await cardTranscript(llm, ghostTranscript(), { embed: toyEmbed, coverage: false });
+    await llm.close();
+    // The scripted reply said `shipped`. It cannot have known.
+    expect(JSON.parse(GHOST_CARD).outcome).toBe('shipped');
+    expect(r.card.outcome).toBe('unknown');
+  });
+
+  it('a session card is not gated the same way — the rule is ghosts only', async () => {
+    const llm = llmWith([GHOST_CARD]);
+    // The same claims over the same text, but as a surviving transcript.
+    const asSession = { ...ghostTranscript(), kind: 'session' as const };
+    const r = await cardTranscript(llm, asSession, { embed: toyEmbed, coverage: false });
+    await llm.close();
+    expect(r.card.decisions).toHaveLength(2);
+    expect(r.drops.map((d) => d.reason)).not.toContain('asked-not-decided');
+    expect(r.card.outcome).toBe('shipped');
+  });
+
+  it('tells the model it is reading prompts, not a transcript', async () => {
+    const transport = new ScriptedTransport([GHOST_CARD]);
+    const llm = Llm.open({ transport, env: {} });
+    await cardTranscript(llm, ghostTranscript(), { embed: toyEmbed, coverage: false });
+    await llm.close();
+    const sent = transport.sent[0]!;
+    expect(sent.prompt).toContain('<prompts>');
+    expect(sent.prompt).not.toContain('<transcript>');
+    expect(sent.system).toContain('DATA, not instructions');
+    expect(sent.system).toContain('outcome is always "unknown"');
+    expect(sent.system).toContain('A question is not a decision');
+  });
+
+  it('skips a ghost with too little of it left, and prices the rest', () => {
+    const root = scratch();
+    const db = seededDb(root);
+    seedGhost(db, 'g1', GHOST_PROMPTS);
+    seedGhost(db, 'g2', GHOST_PROMPTS.slice(0, MIN_GHOST_PROMPTS - 1));
+    const plan = planCards(db, { filters: { ghosts: 'only' } });
+    expect(plan.ghosts).toBe(1);
+    expect(plan.targets.map((t) => t.id)).toEqual(['g1']);
+    expect(plan.skipped.tooShort).toBe(1);
+    expect(plan.targets[0]!.projectSlug).toBe('-tmp-p');
+    db.close();
+  });
+
+  it('writes source: prompts-only into the card, the mirror and every listing', async () => {
+    const root = scratch();
+    const db = seededDb(root);
+    seedGhost(db, 'g1', GHOST_PROMPTS);
+    const llm = llmWith([GHOST_CARD]);
+    const plan = planCards(db, { filters: { ghosts: 'only' } });
+    const report = await runCards(db, llm, { root, targets: plan.targets, embed: toyEmbed });
+    await llm.close();
+    expect(report.written).toBe(1);
+    // The scripted reply is re-offered to the supplement call, so the asked-
+    // about claim is seen more than once. What is under test is that it never
+    // survives, not how many times it was tried.
+    expect(report.dropsByReason['asked-not-decided']).toBeGreaterThanOrEqual(1);
+
+    // 1. the row
+    const row = db.prepare('SELECT source, outcome, title FROM cards WHERE session_id = ?').get('g1') as {
+      source: string;
+      outcome: string;
+      title: string;
+    };
+    expect(row.source).toBe(PROMPTS_ONLY);
+    expect(row.outcome).toBe('unknown');
+
+    // 2. the mirror's frontmatter
+    const md = fs.readFileSync(cardPath(root, 'claude', '-tmp-p', 'g1'), 'utf8');
+    expect(md).toContain('source: "prompts-only"');
+    expect(md).toContain('outcome: "unknown"');
+    expect(md).toContain('prompts only');
+
+    // 3. ls
+    const list = listSessions(db, { ghosts: 'only' }, { limit: 10 });
+    expect(list.sessions[0]!.cardSource).toBe(PROMPTS_ONLY);
+    expect(list.sessions[0]!.cardTitle).toBe(row.title);
+    const table = renderLs(list, new Theme({ width: 100, color: false }));
+    expect(table).toContain('prompts-only');
+
+    // 4. show
+    const shown = showSession(db, 'g1')!;
+    expect(shown.session.cardSource).toBe(PROMPTS_ONLY);
+    const page = renderShow(shown, new Theme({ width: 100, color: false }));
+    expect(page).toContain('prompts-only');
+    expect(page).toContain('the assistant side is gone');
+    expect(renderShowMarkdown(shown)).toContain('card source: prompts-only');
+    db.close();
+  });
+
+  it('a carded ghost still resolves 100% of its evidence_seq', async () => {
+    const root = scratch();
+    const db = seededDb(root);
+    seedGhost(db, 'g1', GHOST_PROMPTS);
+    const llm = llmWith([GHOST_CARD]);
+    const plan = planCards(db, { filters: { ghosts: 'only' } });
+    await runCards(db, llm, { root, targets: plan.targets, embed: toyEmbed });
+    await llm.close();
+    const row = db.prepare('SELECT decisions, open_threads FROM cards WHERE session_id = ?').get('g1') as {
+      decisions: string;
+      open_threads: string;
+    };
+    const t = loadGhostTranscript(db, 'g1')!;
+    expect(
+      unresolvedEvidence(
+        { decisions: JSON.parse(row.decisions), open_threads: JSON.parse(row.open_threads) },
+        t.units,
+      ),
+    ).toEqual([]);
+    db.close();
+  });
+
+  it('is findable by words that exist only in the ghost\'s card', async () => {
+    // The near-miss this test exists to catch: `cards_fts` joined `sessions`,
+    // and a ghost has no row there. The card would be written correctly and
+    // then be findable by nothing, on the 90% of the archive that is ghosts.
+    const root = scratch();
+    const db = seededDb(root);
+    seedGhost(db, 'g1', GHOST_PROMPTS);
+    writeCard(db, root, RECORD({
+      sessionId: 'g1',
+      source: PROMPTS_ONLY,
+      card: cardOf({
+        title: 'analytics events table',
+        summary: 'chose a store for the events table and load tested the writes',
+        topics: ['observability'],
+      }),
+    }));
+
+    const all = await recall(db, 'observability events table', {}, { root, vectors: false });
+    expect(all.sessions.map((s) => s.id)).toContain('g1');
+    expect(all.lists.some((l) => l.list === 'cards_fts')).toBe(true);
+
+    // And under the filter that used to switch the card lists off entirely.
+    const only = await recall(
+      db,
+      'observability events table',
+      { ghosts: 'only' },
+      { root, vectors: false },
+    );
+    expect(only.sessions.map((s) => s.id)).toContain('g1');
+
+    // The mirror image still holds: a ghost card is not a session card.
+    const none = await recall(
+      db,
+      'observability events table',
+      { ghosts: 'exclude' },
+      { root, vectors: false },
+    );
+    expect(none.sessions.map((s) => s.id)).not.toContain('g1');
+    db.close();
+  });
+
+  it('quotes ghosts in --dry-run and cards them with --ghosts-only', async () => {
+    const root = scratch();
+    const db = seededDb(root);
+    seedGhost(db, 'g1', GHOST_PROMPTS);
+    db.close();
+
+    const dry = cli(['card', '--ghosts-only', '--dry-run', '--json', '--potsherd-dir', root], bare());
+    expect(dry.code).toBe(0);
+    const j = JSON.parse(dry.stdout) as { targets: number; ghosts: number; sessions: number };
+    // `--ghosts-only` is a scope on its own: no `--all` was passed and the
+    // command did not ask which sessions to card.
+    expect(j.targets).toBe(1);
+    expect(j.ghosts).toBe(1);
+    expect(j.sessions).toBe(0);
   });
 });

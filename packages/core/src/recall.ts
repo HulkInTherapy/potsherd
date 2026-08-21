@@ -693,30 +693,17 @@ function bm25Exchanges(db: Db, match: string, filters: SearchFilters, depth: num
  * `ghosts`, fused as the same list — not a LEFT JOIN, which would defeat the
  * filter builder's bound-parameter guarantee).
  */
-function bm25Cards(db: Db, match: string, filters: SearchFilters, depth: number): RawHit[] {
-  const f = buildSessionFilters(filters);
-  const rows = db
-    .prepare(
-      `SELECT c.session_id AS session_id, c.title AS title, c.summary AS summary,
-              s.started_at AS ts, s.is_sidechain AS is_sidechain,
-              bm25(cards_fts, 2.0, 1.5, 1.0, 1.0, 1.0) AS rank
-         FROM cards_fts
-         JOIN cards c    ON c.rowid = cards_fts.rowid
-         JOIN sessions s ON s.id = c.session_id
-        WHERE cards_fts MATCH ?
-          ${f.sql}
-        ORDER BY rank
-        LIMIT ?`,
-    )
-    .all(match, ...f.params, depth) as {
-    session_id: string;
-    title: string | null;
-    summary: string | null;
-    ts: string | null;
-    is_sidechain: number;
-    rank: number;
-  }[];
-  return rows.map((r) => ({
+interface CardHitRow {
+  session_id: string;
+  title: string | null;
+  summary: string | null;
+  ts: string | null;
+  is_sidechain: number;
+  rank: number;
+}
+
+function cardHit(r: CardHitRow): RawHit {
+  return {
     key: `c:${r.session_id}`,
     kind: 'card' as const,
     sessionId: r.session_id,
@@ -725,7 +712,95 @@ function bm25Cards(db: Db, match: string, filters: SearchFilters, depth: number)
     assistantText: r.summary ?? '',
     isSidechain: r.is_sidechain === 1,
     raw: r.rank,
-  }));
+  };
+}
+
+/**
+ * `cards_fts`, over both kinds of card.
+ *
+ * **Two queries, not a `LEFT JOIN`.** A card's session lives in `sessions` if
+ * it survived and in `ghosts` if the sweep took it, and the two are filtered by
+ * different column names (`s.started_at` against `g.last_ts`, and so on) by two
+ * different bound-parameter builders. A single query over an outer join would
+ * have to hand-roll that clause and would lose the parameter binding with it —
+ * which is the whole safety property of `search/filters.ts`.
+ *
+ * Skipping the second query is not an option and was the near-miss of T2.3: on
+ * the reference machine 299 of 330 sessions are ghosts, so a `cards_fts` that
+ * only joins `sessions` writes 200 ghost cards correctly and then finds none
+ * of them.
+ */
+function bm25Cards(db: Db, match: string, filters: SearchFilters, depth: number): RawHit[] {
+  const hits: RawHit[] = [];
+
+  if (sessionCardsInScope(filters)) {
+    const f = buildSessionFilters(filters);
+    hits.push(
+      ...(db
+        .prepare(
+          `SELECT c.session_id AS session_id, c.title AS title, c.summary AS summary,
+                  s.started_at AS ts, s.is_sidechain AS is_sidechain,
+                  bm25(cards_fts, 2.0, 1.5, 1.0, 1.0, 1.0) AS rank
+             FROM cards_fts
+             JOIN cards c    ON c.rowid = cards_fts.rowid
+             JOIN sessions s ON s.id = c.session_id
+            WHERE cards_fts MATCH ?
+              ${f.sql}
+            ORDER BY rank
+            LIMIT ?`,
+        )
+        .all(match, ...f.params, depth) as CardHitRow[]
+      ).map(cardHit),
+    );
+  }
+
+  if (ghostCardsInScope(filters)) {
+    const f = buildGhostFilters(filters);
+    hits.push(
+      ...(db
+        .prepare(
+          `SELECT c.session_id AS session_id, c.title AS title, c.summary AS summary,
+                  g.last_ts AS ts, 0 AS is_sidechain,
+                  bm25(cards_fts, 2.0, 1.5, 1.0, 1.0, 1.0) AS rank
+             FROM cards_fts
+             JOIN cards c  ON c.rowid = cards_fts.rowid
+             JOIN ghosts g ON g.session_id = c.session_id
+            WHERE cards_fts MATCH ?
+              ${f.sql}
+            ORDER BY rank
+            LIMIT ?`,
+        )
+        .all(match, ...f.params, depth) as CardHitRow[]
+      ).map(cardHit),
+    );
+  }
+
+  // Both halves came back ranked; the fusion downstream reads position, so the
+  // merged list has to be one ranking rather than two concatenated ones.
+  return hits.sort((a, b) => a.raw - b.raw).slice(0, depth);
+}
+
+/**
+ * Whether a surviving session's card can satisfy these filters.
+ *
+ * The same tri-state reasoning `recall()` applies to whole lists, asked one
+ * level down: `cards` holds both kinds now, so the *list* stays in play under
+ * `--ghosts only` and each half decides for itself.
+ */
+function sessionCardsInScope(filters: SearchFilters): boolean {
+  if (filters.status === 'ghost') return false;
+  return (filters.ghosts ?? 'include') !== 'only';
+}
+
+/** And the mirror image, for a card written from a deleted session's prompts. */
+function ghostCardsInScope(filters: SearchFilters): boolean {
+  if (filters.status === 'ghost') return true;
+  if ((filters.ghosts ?? 'include') === 'exclude') return false;
+  // A ghost has no assistant side, no subagents and no recorded file edits.
+  if ((filters.sidechains ?? 'include') === 'only') return false;
+  if (filters.file) return false;
+  if (filters.status) return false;
+  return true;
 }
 
 /** KNN over `vec_cards` — `title + summary + topics`, one vector per session. */
@@ -740,38 +815,47 @@ function vecCards(db: Db, embedding: number[], filters: SearchFilters, depth: nu
   if (near.length === 0) return [];
 
   const order = new Map(near.map((n, i) => [n.session_id, i]));
-  const f = buildSessionFilters(filters);
   const placeholders = near.map(() => '?').join(',');
-  const rows = db
-    .prepare(
-      `SELECT c.session_id AS session_id, c.title AS title, c.summary AS summary,
-              s.started_at AS ts, s.is_sidechain AS is_sidechain
-         FROM cards c
-         JOIN sessions s ON s.id = c.session_id
-        WHERE c.session_id IN (${placeholders})
-          ${f.sql}`,
-    )
-    .all(...near.map((n) => n.session_id), ...f.params) as {
-    session_id: string;
-    title: string | null;
-    summary: string | null;
-    ts: string | null;
-    is_sidechain: number;
-  }[];
+  const ids = near.map((n) => n.session_id);
+  // Same two-query rule as `bm25Cards`, for the same reason: half the cards on
+  // a real machine belong to sessions that no longer have a `sessions` row.
+  const rows: CardHitRow[] = [];
+
+  if (sessionCardsInScope(filters)) {
+    const f = buildSessionFilters(filters);
+    rows.push(
+      ...(db
+        .prepare(
+          `SELECT c.session_id AS session_id, c.title AS title, c.summary AS summary,
+                  s.started_at AS ts, s.is_sidechain AS is_sidechain, 0 AS rank
+             FROM cards c
+             JOIN sessions s ON s.id = c.session_id
+            WHERE c.session_id IN (${placeholders})
+              ${f.sql}`,
+        )
+        .all(...ids, ...f.params) as CardHitRow[]),
+    );
+  }
+  if (ghostCardsInScope(filters)) {
+    const f = buildGhostFilters(filters);
+    rows.push(
+      ...(db
+        .prepare(
+          `SELECT c.session_id AS session_id, c.title AS title, c.summary AS summary,
+                  g.last_ts AS ts, 0 AS is_sidechain, 0 AS rank
+             FROM cards c
+             JOIN ghosts g ON g.session_id = c.session_id
+            WHERE c.session_id IN (${placeholders})
+              ${f.sql}`,
+        )
+        .all(...ids, ...f.params) as CardHitRow[]),
+    );
+  }
 
   return rows
     .sort((a, b) => (order.get(a.session_id) ?? 0) - (order.get(b.session_id) ?? 0))
     .slice(0, depth)
-    .map((r) => ({
-      key: `c:${r.session_id}`,
-      kind: 'card' as const,
-      sessionId: r.session_id,
-      ts: r.ts,
-      userText: r.title ?? '',
-      assistantText: r.summary ?? '',
-      isSidechain: r.is_sidechain === 1,
-      raw: 0,
-    }));
+    .map((r) => ({ ...cardHit(r), raw: 0 }));
 }
 
 function bm25Ghosts(db: Db, match: string, filters: SearchFilters, depth: number): RawHit[] {
@@ -1001,8 +1085,10 @@ export async function recall(
     wanted.delete('titles');
     wanted.delete('exchanges_fts');
     wanted.delete('vec_exchanges');
-    wanted.delete('cards_fts');
-    wanted.delete('vec_cards');
+    // The card lists stay. From T2.3 on `cards` holds ghost cards too — on the
+    // reference machine most of them are — and `bm25Cards`/`vecCards` narrow
+    // to the ghost half themselves. Dropping the lists here would make
+    // `--ghosts only` the one search that cannot see a ghost's card.
   }
   // A ghost is a row from history.jsonl: prompts only, never a subagent. So
   // `--ghosts exclude` and `--sidechains only` both mean the same thing here.

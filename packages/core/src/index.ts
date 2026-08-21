@@ -297,6 +297,8 @@ export {
 } from './cards/run.js';
 export {
   loadSessionTranscript,
+  loadGhostTranscript,
+  ghostProjectSlug,
   unitHeader,
   unitText,
   renderUnit,
@@ -338,9 +340,17 @@ export {
   EVIDENCE_WINDOW_CHARS,
   type DropReason,
   type DroppedClaim,
+  type ClaimGate,
   type VerifyResult,
   type VerifyTotals,
 } from './cards/verify.js';
+export {
+  ghostClaimGate,
+  statesDecision,
+  decisionEvidence,
+  GHOST_SYSTEM,
+  PROMPTS_ONLY,
+} from './cards/ghost.js';
 export { dedupeCard, DEDUPE_COSINE, type DedupeReport, type DedupeResult } from './cards/dedupe.js';
 export { makeGate, openGate, type Gate } from './cards/gate.js';
 export {

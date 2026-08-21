@@ -45,10 +45,12 @@ import { openIndex, parseFilters, type FilterFlags } from '../filters.js';
  * receipt. The estimate is still rendered first on every path, so the quote
  * and the bill are shown by the same command in the same run.
  *
- * **Ghosts are planned but not carded here.** `planCards` selects them and
- * prices them — they are 90 of the reference machine's 126 targets and a quote
- * that hid them would be a lie — and `runCards({ kinds: ['session'] })` steps
- * over them until T2.3 supplies a ghost transcript loader.
+ * **Ghosts are carded here too** (T2.3). `planCards` selects and prices them
+ * beside the surviving sessions — on the reference machine they are 299 of the
+ * 329 targets, and a quote that hid them would be a lie — and `runCards` sends
+ * them through the same pipeline with a different loader. The card they get
+ * says `source: prompts-only` and its outcome is always `unknown`.
+ * `--ghosts only` (or `--ghosts-only`) cards nothing else.
  */
 
 export interface CardCommandOptions extends GlobalOptions, FilterFlags {
@@ -64,6 +66,16 @@ export interface CardCommandOptions extends GlobalOptions, FilterFlags {
   concurrency?: number;
   /** `--export <dir>`: copy the markdown mirror out. No model, no index. */
   export?: string;
+  /**
+   * `--ghosts-only`: card the sessions Claude Code deleted and nothing else.
+   *
+   * Spelled as its own boolean rather than as the bare `--ghosts` the phase
+   * plan sketches, because `--ghosts <mode>` is a shared filter flag that
+   * takes a value on `find` and `ls` too. Making it optional-valued would let
+   * `potsherd card --ghosts 4c9339e0` swallow the session argument. `rescue`
+   * already spells the same idea `--ghosts-only`.
+   */
+  ghostsOnly?: boolean;
 }
 
 export async function runCard(o: CardCommandOptions): Promise<number> {
@@ -73,6 +85,7 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
   const { db, root } = openIndex(o);
   try {
     const filters = parseFilters(db, o);
+    if (o.ghostsOnly) filters.ghosts = 'only';
 
     if (o.session) {
       const found = resolveSession(db, o.session);
@@ -80,7 +93,18 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
         throw new UserError(`no session matches "${o.session}"`, 'potsherd ls');
       }
       filters.sessionId = found.id;
-    } else if (!o.all && !filters.pinned && !filters.project && !filters.tag && !filters.since) {
+    } else if (
+      !o.all &&
+      !filters.pinned &&
+      !filters.project &&
+      !filters.tag &&
+      !filters.since &&
+      // `--ghosts only` and `--status ghost` each name a scope on their own:
+      // "card everything the sweep took" is a whole request, and on the
+      // reference machine it is 299 of the 329 targets.
+      filters.ghosts !== 'only' &&
+      filters.status !== 'ghost'
+    ) {
       throw new UserError(
         'say which sessions to card',
         'potsherd card --dry-run --all      # what the whole archive would cost',

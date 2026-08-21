@@ -45,9 +45,13 @@ export function renderLs(result: ListResult, t: Theme = new Theme(), now = new D
   lines.push(
     ...table(t, rows, {
       gap: 2,
-      // The title is the column worth every spare character; `status` is five.
+      // The title is the column worth every spare character; `status` is five
+      // — or twelve, on a listing that contains a carded ghost. `table()`
+      // sizes a column to its content, so the extra four characters are taken
+      // from the title only on the listings that have something to say with
+      // them.
       grow: 3,
-      max: [11, 7, 15, undefined, 8],
+      max: [11, 7, 15, undefined, 12],
       // Dates are values, and values right-align (plans/05): `7 aug` under
       // `20 aug` reads as a column of days, not as ragged text.
       align: ['right'],
@@ -140,9 +144,21 @@ function row(s: BrowseSession, t: Theme, now: Date): TableCellInput[] {
   ];
 }
 
+/**
+ * The status column, and the one place `ls` says a title is only half sourced.
+ *
+ * A carded ghost is the row that needs it. Its title is no longer the first
+ * prompt truncated — it is a card title, written by a model, indistinguishable
+ * on the page from the title of a session whose whole transcript survived. So
+ * the row says `prompts-only` where an uncarded ghost says `ghost`: the same
+ * accent, the same column, four more characters, and no reader has to know
+ * that "ghost" implies the assistant's side is missing.
+ */
 function statusCell(s: BrowseSession, t: Theme): string {
   // Exactly one accent on the screen, and it is the thing that is gone.
-  if (s.status === 'ghost') return t.accent('ghost');
+  if (s.status === 'ghost') {
+    return t.accent(s.cardSource === 'prompts-only' ? 'prompts-only' : 'ghost');
+  }
   if (s.status === 'archived') return 'archived';
   return t.dim('live');
 }
@@ -154,6 +170,8 @@ function summary(r: ListResult, t: Theme): string {
   if (r.sidechains > 0) parts.push(`${f.num(r.sidechains)} sidechains`);
   if (r.rolledUp > 0) parts.push(`${f.num(r.rolledUp)} subagents inside them`);
   if (r.ghosts > 0) parts.push(`${f.num(r.ghosts)} ${f.plural(r.ghosts, 'ghost')}, prompts only`);
+  const carded = r.sessions.filter((s) => s.cardSource === 'prompts-only').length;
+  if (carded > 0) parts.push(`${f.num(carded)} carded from prompts alone`);
   return f.joinFit(parts, t.width - INDENT.length, ` ${t.sep} `, t.ellip);
 }
 

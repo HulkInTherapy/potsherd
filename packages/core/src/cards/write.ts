@@ -6,6 +6,7 @@ import type { Harness } from '../adapters/types.js';
 import { EMBEDDING_DIMENSIONS, embeddingToBlob } from '../embeddings.js';
 import { cardsDir } from '../paths.js';
 import { vecAvailable } from '../vec.js';
+import { PROMPTS_ONLY } from './ghost.js';
 import type { CardClaim, ExtractedCard } from './schema.js';
 import type { VerifyTotals } from './verify.js';
 
@@ -144,6 +145,16 @@ export function cardMarkdown(record: CardRecord): string {
   ].join('\n');
 
   const body: string[] = ['', `# ${c.title || record.sessionId.slice(0, 8)}`, ''];
+  // Above the summary, not below it: a reader who takes one line off this file
+  // must take the line that says half the conversation is missing.
+  if (record.source === PROMPTS_ONLY) {
+    body.push(
+      '> **prompts only.** Claude Code deleted this transcript; the card was written from the',
+      "> prompts `history.jsonl` kept. Nothing here describes what the assistant said or did,",
+      '> and the outcome is unknowable.',
+      '',
+    );
+  }
   if (c.summary) body.push(c.summary, '');
   if (c.decisions.length > 0) {
     body.push('## decisions', '');
@@ -166,7 +177,8 @@ export function cardMarkdown(record: CardRecord): string {
     '---',
     '',
     `${record.verified.kept} claim${record.verified.kept === 1 ? '' : 's'} kept, ` +
-      `${record.verified.dropped} dropped for want of evidence in the transcript.` +
+      `${record.verified.dropped} dropped for want of evidence in the ` +
+      `${record.source === PROMPTS_ONLY ? 'prompts' : 'transcript'}.` +
       (record.degraded ? '  The model never returned valid JSON; this card is title and summary only.' : ''),
     '',
     `\`potsherd show ${record.sessionId.slice(0, 8)}\``,

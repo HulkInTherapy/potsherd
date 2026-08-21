@@ -217,3 +217,97 @@ export function loadVectors(db: Db, ids: readonly string[]): Map<string, number[
   }
   return out;
 }
+
+// -------------------------------------------------------------------- ghosts
+
+interface GhostRow {
+  session_id: string;
+  harness: Harness;
+  title: string | null;
+  project: string | null;
+  first_prompt: string | null;
+}
+
+interface GhostPromptRow {
+  id: string;
+  seq: number;
+  ts: string | null;
+  text: string;
+}
+
+/**
+ * One ghost, as units — T2.3's half of the seam described at the top of this
+ * file.
+ *
+ * A ghost is a session Claude Code's 30-day sweep deleted, rebuilt from
+ * `~/.claude/history.jsonl`. On the reference machine there are 30 surviving
+ * sessions and 299 ghosts, so this loader — not {@link loadSessionTranscript}
+ * — is what most of a real archive goes through. The ghost card is, for most
+ * of the archive, the only card there will ever be.
+ *
+ * What survives is the prompt side: `ghost_prompts.text` in `seq` order, plus
+ * `ghosts.title` (from a `sessions-index.json` that outlived the transcript)
+ * and `ghosts.first_prompt`. The assistant's side is gone and cannot be
+ * inferred, which is why the units say `user:` and nothing else, why the
+ * pipeline forces `outcome: unknown` on anything that comes out of here, and
+ * why the card is written `source: prompts-only`.
+ *
+ * `seq` is `ghost_prompts.seq` — the prompt's position in the session, counted
+ * from 0 — and it is the number the model cites and `verify.ts` looks up, the
+ * same contract an exchange's seq has.
+ */
+export function loadGhostTranscript(db: Db, sessionId: string): Transcript | null {
+  const g = db
+    .prepare(
+      `SELECT session_id, harness, title, project, first_prompt
+         FROM ghosts WHERE session_id = ?`,
+    )
+    .get(sessionId) as GhostRow | undefined;
+  if (!g) return null;
+
+  const rows = db
+    .prepare(`SELECT id, seq, ts, text FROM ghost_prompts WHERE session_id = ? ORDER BY seq`)
+    .all(sessionId) as GhostPromptRow[];
+
+  let chars = 0;
+  const units: TranscriptUnit[] = rows.map((r) => {
+    // `unitText` with an empty assistant side, deliberately: the prompt is
+    // labelled `user:` exactly as it would be in a session, so the model reads
+    // one shape and a person opening the mirror reads one shape.
+    const text = unitText(r.text, '');
+    chars += text.length;
+    return { seq: r.seq, id: r.id, ts: r.ts, text };
+  });
+
+  // The harness's own title when a `sessions-index.json` survived the sweep;
+  // otherwise the opening prompt, which is what `ls` already falls back to.
+  const title = g.title?.trim() || g.first_prompt?.trim() || null;
+
+  return {
+    id: g.session_id,
+    kind: 'ghost',
+    harness: g.harness,
+    title,
+    project: g.project,
+    projectSlug: ghostProjectSlug(g.project),
+    units,
+    chars,
+    isSidechain: false,
+  };
+}
+
+/**
+ * `/Users/zebra/Downloads/Protfolio_app` -> `-Users-zebra-Downloads-Protfolio-app`.
+ *
+ * `ghosts` has no `project_slug` column — the transcript that would have
+ * carried one is what the sweep deleted — so the slug is re-derived here with
+ * Claude Code's own encoding: every character that is not a letter or a digit
+ * becomes `-`. Deriving it rather than handing the raw path to `safeSlug` is
+ * what puts a ghost's card in the *same* mirror directory as the surviving
+ * sessions of the same project instead of one directory beside it.
+ */
+export function ghostProjectSlug(project: string | null | undefined): string | null {
+  const p = project?.trim();
+  if (!p) return null;
+  return p.replace(/[^A-Za-z0-9]/g, '-');
+}
