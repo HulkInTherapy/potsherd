@@ -48,7 +48,8 @@ let confirmed = [];
 let modelMs = 0;
 if (!noModel && candidates.length) {
   const t1 = Date.now();
-  confirmed = await confirmOpenThreads(candidates);
+  const mi = args.indexOf("--model");
+  confirmed = await confirmOpenThreads(candidates, mi >= 0 ? { model: args[mi + 1] } : {});
   modelMs = Date.now() - t1;
 }
 

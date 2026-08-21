@@ -2,6 +2,27 @@
 
 Written before the numbers, so the method cannot be fitted to the result.
 
+## where the real outputs are, and why they are not here
+
+`plans/00-README.md`'s privacy rule: committed artefacts use the synthetic corpus, never the
+live one. The reference corpus contains a named third party's business plans and a personal
+tweet, and this repo is public.
+
+So this folder holds **the instruments, the method and the numbers**. Every file that contains
+transcript prose or verbatim card text from the real archive lives beside the repo, in:
+
+```
+/Users/zebra/randomness/potsherd-p4-evidence/T4.2/
+```
+
+and the kept `--potsherd-dir` those were produced from is:
+
+```
+/private/tmp/potsherd-T4.2
+```
+
+Both are re-examinable. Neither is committed.
+
 ## the corpus
 
 The frozen snapshot, `~/.potsherd/archive-manual-2026-08-21`, indexed and carded into a
@@ -17,12 +38,22 @@ node packages/cli/bin/potsherd.js card --all --yes --concurrency 4 \
                                          --potsherd-dir /private/tmp/potsherd-T4.2
 ```
 
-`card --all --dry-run` on this index reports **35 sessions and 90 ghosts**, which is the
-reference corpus phase 2 measured against, recreated rather than borrowed — the phase-2 run's
-own `--potsherd-dir` was a `mktemp -d` and is gone (`docs/09-RUNNING-WORKERS.md` §2.4). This
-one is kept.
+`card --all --dry-run` on this index reports **35 sessions and 90 ghosts** — the reference
+corpus phase 2 measured against, recreated rather than borrowed, because the phase-2 run's own
+`--potsherd-dir` was a `mktemp -d` and is gone (`docs/09-RUNNING-WORKERS.md` §2.4).
 
-`--potsherd-dir` used for every number below: **`/private/tmp/potsherd-T4.2`**
+**Not all of it was carded, deliberately.** `card --all` is a ~70-minute run and the
+orchestrator's ruling mid-task was to card *a deliberate subset — 8–12 sessions spanning at
+least two projects, chosen because they plausibly share topics/files — and report the candidate
+count and precision against that subset, saying plainly how many cards the corpus had*. The
+subset carded is in `RESULTS.md`, along with the exact session count. A measured precision on a
+small corpus, labelled as such, is worth more than an unmeasured claim about a large one.
+
+Cards were written one session at a time rather than with `--all`. This is not cosmetic: under
+`--all`, concurrency is spent across *sessions*, so a 25 MB session's ~38 chunk calls run
+**serially** and one card takes half an hour; carding a session on its own spends the same
+concurrency across that session's chunks and it takes three minutes. Worth knowing for T4.1's
+latency budget and for anyone re-running this.
 
 ## the three instruments
 

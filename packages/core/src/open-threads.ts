@@ -87,24 +87,45 @@ export interface ConfirmOptions {
  * The bar for *"project B already mentions this decision"*, as a cosine over
  * content-token sets.
  *
- * **This constant decides whether a candidate is raised at all**, so it is
- * picked the way `cards/verify.ts`'s {@link EVIDENCE_COSINE} was picked — by
- * measuring a labelled control — and not by taste. The measurement is in
- * `phases/phase-4/evidence-T4.2/mention-control.md`; the short version:
+ * **This constant decides whether a candidate is raised at all**, so it was
+ * picked the way `cards/verify.ts`'s `EVIDENCE_COSINE` was picked — by
+ * measuring a control — and not by taste. The measurement is
+ * `evidence-T4.2/RESULTS.md`, and it did not come out the way the first draft
+ * of this comment assumed.
+ *
+ * **194 (decision in A, project B) pairs** were generated from the reference
+ * corpus with the bar switched off, and the top of the distribution was read
+ * by hand against project B's cards *and* B's raw exchanges. **Not one pair
+ * was a genuine restatement.** Every high-scoring pair was two different
+ * decisions sharing process vocabulary — "launch four-agent wall audit"
+ * against "design 8-phase implementation plan with audit as phase 0", which
+ * scores 0.3223 and is the corpus maximum. So the measured distribution is
+ * *entirely* negative:
  *
  * ```
- *   pairs where project B really had decided the same thing   median 0.41
- *   pairs where project B genuinely never mentioned it        median 0.10
- *   the bar that separates them with no positive below it     0.30
+ *   n = 194 pairs, every one a non-match
+ *   median 0.089   p90 0.178   p95 0.202   p99 0.298   max 0.3223
  * ```
  *
- * The direction of the errors is not symmetric and the bar is set for the
- * expensive one. A bar set too **high** lets a decision B plainly made be
- * announced as an open thread — the false positive that reads as insight and
- * is the whole risk of this feature. A bar set too **low** silently suppresses
- * a real catch, which costs a screenshot and nothing else. So the bar sits at
- * the bottom of the positive distribution rather than midway between the two:
- * anything that *looks* like B mentioned it is treated as though B did.
+ * The bar is therefore set **above the strongest coincidence the corpus
+ * produced**, at 0.35. At the previous 0.30 it suppressed exactly one
+ * candidate in 194, and that suppression was read and found wrong: a real
+ * catch lost to two decisions that happened to share the word "audit".
+ *
+ * **This bar is a weak guard and the code must not pretend otherwise.** The
+ * honest limit of the measurement is that the positive side is *n = 0* — the
+ * corpus contains no case of project B genuinely restating A's decision — so
+ * nothing here shows the bar catches one when it appears. Worse, synthetic
+ * paraphrase pairs (`tests/open-threads.test.ts`) score from 0.20 to 0.57,
+ * which **overlaps the measured negative distribution outright**. There is no
+ * threshold on this statistic that separates "B said this" from "B used these
+ * words", and choosing one differently would not fix that.
+ *
+ * What follows for the design: the mention check is not what makes this
+ * feature safe. {@link MIN_ANCHOR_TOKENS} and the model pass are, and the
+ * measured effect of each is in `RESULTS.md`. The bar's job is only to
+ * withdraw a candidate when B's own card says something *unmistakably* the
+ * same, and 0.35 is where the corpus says "unmistakable" starts.
  *
  * `tests/open-threads.test.ts` asserts this value directly and fails when it
  * moves, because a constant that sat at the wrong value for a day while every
@@ -113,9 +134,19 @@ export interface ConfirmOptions {
  *
  * It is a **token** cosine, not an embedding cosine, and that is forced rather
  * than chosen: {@link openThreadCandidates} is pinned synchronous and
- * `cards/vectors.ts`'s `Embedder` is async. See the note in the T4.2 report.
+ * `cards/vectors.ts`'s `Embedder` is async. An embedding cosine might well
+ * separate these distributions where tokens cannot; that is the first thing to
+ * try if this ever needs to be better, and it needs the signature to change.
  */
-export const MENTION_COSINE = 0.3;
+export const MENTION_COSINE = 0.35;
+
+/**
+ * The largest token cosine any of the 194 measured pairs reached — and it was
+ * a non-match. {@link MENTION_COSINE} sits above it by construction; the test
+ * asserts the relationship rather than just the number, so that moving one
+ * without the other fails.
+ */
+export const MEASURED_NONMATCH_MAX = 0.3223;
 
 /**
  * How many distinct content tokens of the decision must appear in project B's

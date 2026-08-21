@@ -10,6 +10,7 @@ import {
 import {
   CONFIRM_BATCH,
   GENERIC_DF,
+  MEASURED_NONMATCH_MAX,
   MENTION_COSINE,
   MIN_ANCHOR_TOKENS,
   MIN_PROJECT_OVERLAP,
@@ -457,14 +458,47 @@ describe('T4.2 constants are measured, and this test fails when one moves', () =
    *
    * The control is in `phases/phase-4/evidence-T4.2/mention-control.md`.
    */
-  it('MENTION_COSINE is 0.30', () => {
-    expect(MENTION_COSINE).toBe(0.3);
+  it('MENTION_COSINE is 0.35', () => {
+    expect(MENTION_COSINE).toBe(0.35);
   });
 
-  it('separates the labelled control pairs at 0.30 and at no higher value', () => {
-    // POSITIVE: B really had decided the same thing. Must score at or above
-    // the bar, so the candidate is withdrawn.
-    const positives: [string, string][] = [
+  it('sits above the largest non-match the corpus produced', () => {
+    // 194 (decision in A, project B) pairs were generated from the reference
+    // corpus with the bar off and read by hand at the top of the distribution.
+    // Every one was a non-match; the largest reached 0.3223. The bar is above
+    // it by construction, and this asserts the relationship rather than the
+    // bare number so that moving one without the other fails.
+    expect(MEASURED_NONMATCH_MAX).toBe(0.3223);
+    expect(MENTION_COSINE).toBeGreaterThan(MEASURED_NONMATCH_MAX);
+
+    // The corpus's own maximum, replayed through the same arithmetic the rule
+    // pass uses: two different decisions that share the word "audit".
+    const worstCoincidence = tokenCosine(
+      new Set(
+        contentTokens(
+          'Launch four-agent comprehensive wall audit (pentest, plan-vs-code, architecture, code-quality) ' +
+            'Find missing loopholes and problems; verify phase plans implemented; ensure interconnection and testing coverage',
+        ),
+      ),
+      new Set(
+        contentTokens(
+          'Design 8-phase implementation plan with rescue/audit as phase 0, launch as phase 7',
+        ),
+      ),
+    );
+    // It must not be withdrawn: it is not the same decision.
+    expect(worstCoincidence).toBeLessThan(MENTION_COSINE);
+  });
+
+  it('is a weak guard, and the overlap that makes it weak is real', () => {
+    // The honest limit of the measurement: the positive side is n = 0. The
+    // corpus contains no case of B genuinely restating A's decision, so
+    // nothing measured shows this bar catches one. These synthetic paraphrase
+    // pairs are what a positive would look like, and they straddle the bar —
+    // which is the point of this test. If this ever starts passing as a clean
+    // separation, the statistic changed and the comment on MENTION_COSINE is
+    // out of date.
+    const paraphrases: [string, string][] = [
       [
         'disable prepared statements when pgbouncer runs in transaction pooling mode',
         'turn off prepared statements for pgbouncer transaction pooling',
@@ -482,8 +516,8 @@ describe('T4.2 constants are measured, and this test fails when one moves', () =
         'ask fans out to at most six reader sessions',
       ],
     ];
-    // NEGATIVE: B genuinely never mentioned it. Must score below the bar.
-    const negatives: [string, string][] = [
+    // Plainly unrelated pairs, for the floor of the distribution.
+    const unrelated: [string, string][] = [
       [
         'disable prepared statements when pgbouncer runs in transaction pooling mode',
         'move the nightly ingest onto a cron schedule',
@@ -505,17 +539,20 @@ describe('T4.2 constants are measured, and this test fails when one moves', () =
     const score = ([x, y]: [string, string]) =>
       tokenCosine(new Set(contentTokens(x)), new Set(contentTokens(y)));
 
-    const lowestPositive = Math.min(...positives.map(score));
-    const highestNegative = Math.max(...negatives.map(score));
+    const paraphraseScores = paraphrases.map(score);
+    const lowestParaphrase = Math.min(...paraphraseScores);
+    const highestParaphrase = Math.max(...paraphraseScores);
 
-    // The bar is set at the bottom of the positive distribution rather than
-    // midway: a bar too high announces a decision B plainly made, which is the
-    // expensive error; a bar too low costs a screenshot.
-    expect(highestNegative).toBeLessThan(MENTION_COSINE);
-    expect(lowestPositive).toBeGreaterThanOrEqual(MENTION_COSINE);
-    // And it is the *tightest* bar that still separates them: raising it past
-    // the lowest positive would let that pair through as a candidate.
-    expect(MENTION_COSINE).toBeLessThanOrEqual(lowestPositive);
+    // Unrelated text stays far below the bar. That much the statistic does do.
+    expect(Math.max(...unrelated.map(score))).toBeLessThan(MENTION_COSINE);
+
+    // But a real paraphrase can land on either side of it: some restatements
+    // are withdrawn and some are not. This is the overlap with the measured
+    // non-match distribution (max 0.3223) and it is why the module says the
+    // mention check is not the guard.
+    expect(lowestParaphrase).toBeLessThan(MENTION_COSINE);
+    expect(highestParaphrase).toBeGreaterThan(MENTION_COSINE);
+    expect(lowestParaphrase).toBeLessThan(MEASURED_NONMATCH_MAX);
   });
 
   it('pins the structural minimums and the label', () => {
