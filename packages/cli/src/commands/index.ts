@@ -21,7 +21,9 @@ export interface IndexCommandOptions extends GlobalOptions {
   session?: string;
 }
 
-const HARNESS_NAMES: readonly string[] = ['claude', 'codex', 'cursor', 'pi', 'gemini', 'opencode', 'copilot'];
+/** The harnesses an adapter exists for. `03` §2 names three more; phase 6. */
+const INDEXABLE: readonly string[] = ['claude', 'codex', 'cursor', 'pi'];
+const NOT_YET: readonly string[] = ['gemini', 'opencode', 'copilot'];
 
 /**
  * `potsherd index` — every transcript on this machine, parsed, redacted and
@@ -112,11 +114,21 @@ function parseHarnesses(raw?: string): Harness[] | undefined {
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  const bad = wanted.filter((h) => !HARNESS_NAMES.includes(h));
+  // A harness potsherd cannot parse yet is named as such rather than accepted
+  // and silently ignored — `--harness gemini` returning "0 sessions" would read
+  // as "you have no gemini sessions", which is a different and wrong claim.
+  const pending = wanted.filter((h) => NOT_YET.includes(h));
+  if (pending.length) {
+    throw new UserError(
+      `${pending.join(', ')} ${pending.length === 1 ? 'is' : 'are'} not parsed yet — phase 6. doctor names the directory potsherd would read`,
+      'potsherd doctor',
+    );
+  }
+  const bad = wanted.filter((h) => !INDEXABLE.includes(h));
   if (bad.length) {
     throw new UserError(
       `unknown harness: ${bad.join(', ')}`,
-      `potsherd index --harness ${HARNESS_NAMES.slice(0, 4).join('|')}`,
+      `potsherd index --harness ${INDEXABLE.join('|')}`,
     );
   }
   return wanted as Harness[];
@@ -158,7 +170,13 @@ export function renderIndexReceipt(
         ? `${fmt.num(report.ghosts.prompts)} prompts · unchanged`
         : `${fmt.num(report.ghosts.prompts)} ${fmt.plural(report.ghosts.prompts, 'prompt')}, searchable`,
     },
-    redactionRow(report.redaction, t, card.noteWidth()),
+    // The redaction row describes *this run*, like `parsed` does — an
+    // incremental run that re-read nothing masked nothing, and saying "nothing
+    // matched" there would be a lie about the index. `potsherd doctor` reports
+    // the index-wide counts, read back out of the stored text.
+    totals.parsed === 0
+      ? { label: 'secrets masked', value: '—', note: 'nothing re-read — see potsherd doctor', tone: 'dim' as const }
+      : redactionRow(report.redaction, t, card.noteWidth()),
     embeddingRow(report, t),
   ]);
 

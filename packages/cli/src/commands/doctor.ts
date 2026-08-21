@@ -56,12 +56,16 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     const db = store.open({ root, readonly: true });
     try {
       schema = store.schemaVersion(db);
+      // Before the counts: `vec_exchanges` is a virtual table and does not
+      // exist for a connection that has not loaded the extension, so counting
+      // it first would silently report zero vectors on a fully vectorised
+      // index. A read-only connection can still load an extension.
+      vec = vecStatus(db);
       for (const table of ['sessions', 'exchanges', 'tool_calls', 'ghosts', 'ghost_prompts', 'cards', 'tags', 'pins', 'links', 'archive_files', 'rescue_log', 'vec_exchanges']) {
         counts[table] = store.count(db, table);
       }
       redaction = storedRedactionCounts(db);
       indexedTypes = storedRecordTypes(db);
-      vec = vecStatus(db);
       const row = db.prepare('SELECT MAX(indexed_at) AS at FROM sessions').get() as { at: string | null };
       indexedAt = row?.at ?? null;
     } catch {
@@ -74,12 +78,20 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
 
   const unknownTypes = collectRecordTypes(report);
   const adapters = await adapterStatus(o);
-  const written = [root, paths.archiveDir(root), dbFile];
+  // `audit` only ever reads claude's tree. `index` reads all seven harnesses,
+  // so `--privacy` must list all seven — from `paths.harnessSourceDirs()`, the
+  // one module every adapter now resolves its directory through (finding F9),
+  // so this list cannot drift from what the code actually opens.
+  const harnessReads = paths
+    .harnessSourceDirs(o.claudeDir ? { claudeDir: o.claudeDir } : {})
+    .map((h) => h.dir);
+  const reads = dedupe([...report.pathsRead, ...harnessReads]);
+  const written = [root, paths.archiveDir(root), dbFile, paths.modelsDir(root)];
   const consented = [paths.claudePaths(report.claudeDir).settings];
 
   if (o.privacy) {
     if (o.json) {
-      printJson({ reads: report.pathsRead, writes: written, writesWithConsent: consented });
+      printJson({ reads, writes: written, writesWithConsent: consented });
       return 0;
     }
     const t = themeFrom(o);
@@ -91,7 +103,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     const show = (p: string) => fmt.elideMiddle(paths.tildify(p), pathW, t.ellip);
 
     card.text('reads (never modified):');
-    for (const p of dedupe(report.pathsRead)) {
+    for (const p of reads) {
       card.raw(`    ${show(p)}${fs.existsSync(p) ? '' : t.dim('  (absent)')}`);
     }
     card.blank().text('writes:');
@@ -99,7 +111,11 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     card.blank().text('writes only after an explicit y at a diff:');
     for (const p of consented) card.raw(`    ${show(p)}`);
     card.raw(`      ${t.dim('cleanupPeriodDays, and one SessionStart hook entry')}`);
-    card.blank().text('no network. no telemetry. no account.');
+    card
+      .blank()
+      .text('no network, except the one-off embedding-model download that')
+      .text('`potsherd index` announces before it starts and `--no-embed` skips.')
+      .text('no telemetry. no account.');
     print(card.toString());
     return 0;
   }
@@ -216,13 +232,18 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   // (harness, version, type); before that they are the audit's head/tail
   // estimate over claude alone.
   if (indexedTypes.length > 0) {
-    card.blank().text('record types not consumed, per harness and version:');
-    for (const row of indexedTypes) {
+    // Summed across harness versions — the full (harness, version, type) table
+    // is in `--json`, and on this corpus it is a hundred rows. What a person
+    // needs on screen is which types exist, how many, in how many builds, and
+    // whether any of them is one no format note has described yet.
+    card.blank().text('record types the parsers did not consume:');
+    for (const row of foldRecordTypes(indexedTypes)) {
       const left = `${row.harness} ${row.type}`;
       const mark = row.novel ? t.warn('new') : t.dim('known');
+      const versions = row.versions === 1 ? '1 version' : `${row.versions} versions`;
       card.raw(
-        `    ${fmt.elide(left, 28).padEnd(28)}${fmt.num(row.count).padStart(7)}   ` +
-          `${t.dim(fmt.elide(row.version, 10).padEnd(10))} ${mark}`,
+        `    ${fmt.elide(left, 30).padEnd(30)}${fmt.num(row.count).padStart(7)}   ` +
+          `${t.dim(versions.padEnd(11))} ${mark}`,
       );
     }
     card.text(t.dim('"new" means no note in research/formats.md describes it yet.'));
@@ -339,6 +360,39 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     });
   }
   return out;
+}
+
+interface FoldedRecordType {
+  harness: string;
+  type: string;
+  count: number;
+  versions: number;
+  novel: boolean;
+}
+
+/** `(harness, version, type)` rows summed to `(harness, type)`, novel first. */
+function foldRecordTypes(rows: readonly RecordTypeRow[]): FoldedRecordType[] {
+  const out = new Map<string, FoldedRecordType>();
+  for (const row of rows) {
+    const key = `${row.harness} ${row.type}`;
+    const at = out.get(key);
+    if (at) {
+      at.count += row.count;
+      at.versions += 1;
+      at.novel = at.novel || row.novel;
+    } else {
+      out.set(key, {
+        harness: row.harness,
+        type: row.type,
+        count: row.count,
+        versions: 1,
+        novel: row.novel,
+      });
+    }
+  }
+  return [...out.values()].sort(
+    (a, b) => Number(b.novel) - Number(a.novel) || b.count - a.count || (a.type < b.type ? -1 : 1),
+  );
 }
 
 function dedupe(xs: string[]): string[] {

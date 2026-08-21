@@ -71,6 +71,42 @@ describe('embeddings', () => {
     expect(embeddings.isModelCached(MODEL_CACHE)).toBe(true);
   }, 300_000);
 
+  it('picks a thread count rather than taking onnxruntime\'s default', () => {
+    // Measured on the reference machine: the runtime default (all logical
+    // cores) is 161 ms per 2,000-character exchange, four threads is 94 ms and
+    // eight is 251 ms. On a 1,400-exchange corpus that difference is minutes.
+    const n = embeddings.embedThreads();
+    expect(n).toBeGreaterThanOrEqual(1);
+    expect(n).toBeLessThanOrEqual(4);
+  });
+
+  it.runIf(hasModel)('embeds a batch equivalently, but not identically, to one at a time', async () => {
+    // transformers.js mean-pools under the attention mask, so the padding a
+    // ragged batch introduces does not reach the vector — if it ever did, the
+    // dot products below would collapse and `find` would rank on noise.
+    //
+    // But "does not leak" is not "identical": q8 picks activation scales per
+    // forward pass, so a batched vector lands a few thousandths of cosine away
+    // from the same input embedded alone. That is the measurement behind
+    // `ingest.ts` embedding one exchange per call — batching was no faster on
+    // this machine, so there was nothing to trade the reproducibility for.
+    const items = [
+      { userText: 'how do we pin the pgbouncer prepared-statement setting?', assistantText: 'Set statement_cache_size to 0.' },
+      { userText: 'short one', assistantText: 'ok' },
+      { userText: 'a much longer exchange about connection pooling, transaction mode, and why prepared statements break under it, repeated to make the batch ragged. '.repeat(6), assistantText: 'Right.' },
+    ];
+    const batched = await embeddings.generateExchangeEmbeddings(items, { cacheDir: MODEL_CACHE });
+    expect(batched).toHaveLength(3);
+    for (const [i, item] of items.entries()) {
+      const single = await embeddings.generateExchangeEmbedding(item.userText, item.assistantText, undefined, {
+        cacheDir: MODEL_CACHE,
+      });
+      const dot = single.reduce((s, v, n) => s + v * (batched[i]![n] ?? 0), 0);
+      expect(dot, `item ${i}`).toBeGreaterThan(0.99);
+      expect(dot, `item ${i}`).toBeLessThanOrEqual(1.0001);
+    }
+  }, 300_000);
+
   it.runIf(hasModel)('puts a related query nearer than an unrelated one', async () => {
     const doc = await embeddings.generateExchangeEmbedding(
       'how do we pin the pgbouncer prepared-statement setting?',

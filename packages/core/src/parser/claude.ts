@@ -42,8 +42,13 @@ import {
  *   3. **Sidechains are first-class.** Upstream's discovery excludes
  *      `subagents/`; here a sidechain file parses into its own SessionRecord
  *      whose `parentSessionId` is the `sessionId` its records carry (that
- *      field holds the *parent's* id in a subagent transcript), with
- *      `agentName` from the `agent-name` record.
+ *      field holds the *parent's* id in a subagent transcript), and with
+ *      `agentName` from an `agent-name` record wherever one appears. Note
+ *      finding F3: `formats.md` claimed those records name the *subagent*, and
+ *      they do not — all 24 in the reference corpus sit in two **top-level**
+ *      transcripts and hold that session's own name, and no subagent file has
+ *      one. The code was always version-agnostic about where it read them, so
+ *      only this comment was wrong.
  *   4. **A session, not just exchanges.** Upstream emits exchanges with
  *      session metadata denormalised onto each one. potsherd emits one
  *      `SessionRecord` plus `Exchange[]`, with byte offsets so the next index

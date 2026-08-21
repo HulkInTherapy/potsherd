@@ -196,17 +196,26 @@ potsherd doctor --privacy · 21 aug 2026
     ~/.claude/settings.json
     ~/.claude/settings.local.json  (absent)
     /Library/Application Support/ClaudeCode/managed-settings.json  (absent)
+    ~/.codex/sessions  (absent)
+    ~/.cursor/projects  (absent)
+    ~/.pi/agent/sessions  (absent)
+    ~/.gemini/tmp  (absent)
+    ~/.local/share/opencode  (absent)
+    ~/.copilot/session-state  (absent)
 
   writes:
     ~/.potsherd
     ~/.potsherd/archive
     ~/.potsherd/potsherd.db
+    ~/.potsherd/models
 
   writes only after an explicit y at a diff:
     ~/.claude/settings.json
       cleanupPeriodDays, and one SessionStart hook entry
 
-  no network. no telemetry. no account.
+  no network, except the one-off embedding-model download that
+  `potsherd index` announces before it starts and `--no-embed` skips.
+  no telemetry. no account.
 ```
 
 `~/.claude`, `~/.codex`, `~/.cursor`, `~/.pi` and `~/.gemini` are read-only

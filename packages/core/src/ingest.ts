@@ -29,7 +29,7 @@ import {
   MODEL_DOWNLOAD_BYTES,
   MODEL_ID,
   embeddingToBlob,
-  generateExchangeEmbeddings,
+  generateExchangeEmbedding,
   isModelCached,
 } from './embeddings.js';
 import { loadVec, vecStatus, vecTablesExist, type VecStatus } from './vec.js';
@@ -893,8 +893,11 @@ function fillStoredCounts(db: Db, report: HarnessReport): void {
 
 // ------------------------------------------------------------ embeddings
 
-/** How many exchanges go through the model in one call. */
-const EMBED_BATCH = 32;
+/**
+ * How many exchanges are written per transaction, and how often the progress
+ * bar moves. Not a model batch size: see {@link embedExchanges}.
+ */
+const EMBED_CHUNK = 32;
 
 /**
  * bge-small over every exchange that does not already have a current vector.
@@ -964,22 +967,28 @@ async function embedExchanges(
   const insertVec = db.prepare('INSERT INTO vec_exchanges (id, embedding) VALUES (?, ?)');
   const stamp = db.prepare('UPDATE exchanges SET embedding_version = ? WHERE id = ?');
 
-  for (let i = 0; i < pending.length; i += EMBED_BATCH) {
-    const batch = pending.slice(i, i + EMBED_BATCH);
+  const embedOptions = {
+    cacheDir,
+    ...(options.onProgress
+      ? { onProgress: (fraction: number) => options.onProgress?.({ phase: 'model-download', fraction }) }
+      : {}),
+  };
+
+  for (let i = 0; i < pending.length; i += EMBED_CHUNK) {
+    const chunk = pending.slice(i, i + EMBED_CHUNK);
     let vectors: number[][];
     try {
-      vectors = await generateExchangeEmbeddings(
-        batch.map((row) => ({ userText: row.user_text, assistantText: row.assistant_text })),
-        {
-          cacheDir,
-          ...(options.onProgress
-            ? {
-                onProgress: (fraction: number) =>
-                  options.onProgress?.({ phase: 'model-download', fraction }),
-              }
-            : {}),
-        },
-      );
+      // One exchange per forward pass. Batching was measured on the reference
+      // machine and buys nothing (the model dominates, not the call overhead)
+      // while q8's per-pass activation scales make a batched vector differ from
+      // a single-call one by ~3e-3 of cosine. No speed to gain, so take the
+      // reproducible vector. See `embeddings.generateExchangeEmbeddings`.
+      vectors = [];
+      for (const row of chunk) {
+        vectors.push(
+          await generateExchangeEmbedding(row.user_text, row.assistant_text, undefined, embedOptions),
+        );
+      }
     } catch (err) {
       // The model, or the runtime that loads it, is not on this machine.
       // `--no-embed` is what the user gets, and they are told which of the two
@@ -990,7 +999,7 @@ async function embedExchanges(
       return report;
     }
     const write = db.transaction(() => {
-      batch.forEach((row, n) => {
+      chunk.forEach((row, n) => {
         const vector = vectors[n];
         if (!vector) return;
         dropVec.run(row.id);
@@ -1000,7 +1009,7 @@ async function embedExchanges(
       });
     });
     write();
-    options.onProgress?.({ phase: 'embed', done: Math.min(i + EMBED_BATCH, pending.length), total: pending.length });
+    options.onProgress?.({ phase: 'embed', done: Math.min(i + EMBED_CHUNK, pending.length), total: pending.length });
   }
 
   report.ms = Date.now() - started;

@@ -302,7 +302,7 @@ describe('potsherd cli', () => {
   });
 
   it('every verb has --help with at least one example', () => {
-    for (const verb of ['audit', 'rescue', 'guard', 'doctor']) {
+    for (const verb of ['audit', 'rescue', 'guard', 'index', 'doctor']) {
       const r = run([verb, '--help']);
       expect(r.code, verb).toBe(0);
       expect(r.stdout, verb).toContain('example:');
@@ -327,5 +327,74 @@ describe('potsherd cli', () => {
   it('honours CLAUDE_CONFIG_DIR when no --claude-dir is given', () => {
     const r = run(['audit', '--json'], { CLAUDE_CONFIG_DIR: FIXTURE_CLAUDE });
     expect(JSON.parse(r.stdout)['deleted']).toBe(3);
+  });
+
+  /**
+   * `index` reads every harness by default, and on this machine three of the
+   * four are the developer's real directories. `--harness claude` keeps the
+   * numbers below a function of the committed fixture and nothing else.
+   */
+  it('index builds a searchable index from the fixture and is incremental after', () => {
+    const root = scratchRoot();
+    const args = ['index', '--harness', 'claude', '--no-embed', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root];
+
+    const first = run([...args, '--full', '--json']);
+    expect(first.code).toBe(0);
+    const a = JSON.parse(first.stdout) as {
+      totals: { parsed: number; sessions: number; exchanges: number; failed: number };
+      embeddings: { enabled: boolean };
+    };
+    // Two sessions and two sidechains: a subagent transcript is a session in
+    // its own right and never a session of its parent.
+    expect(a.totals.sessions).toBe(4);
+    expect(a.totals.parsed).toBe(4);
+    expect(a.totals.failed).toBe(0);
+    expect(a.totals.exchanges).toBeGreaterThan(0);
+    expect(a.embeddings.enabled).toBe(false);
+
+    const second = run([...args, '--json']);
+    const b = JSON.parse(second.stdout) as { totals: { parsed: number; skipped: number; sessions: number } };
+    expect(b.totals.parsed).toBe(0);
+    expect(b.totals.skipped).toBe(4);
+    expect(b.totals.sessions).toBe(4);
+  });
+
+  it('index refuses two flags that ask for opposite things', () => {
+    const root = scratchRoot();
+    const r = run(['index', '--full', '--incremental', '--potsherd-dir', root]);
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain('opposite');
+    expect(r.stderr).not.toContain('at Object.');
+  });
+
+  it('index names an unknown harness instead of silently indexing nothing', () => {
+    const root = scratchRoot();
+    const r = run(['index', '--harness', 'emacs', '--potsherd-dir', root]);
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain('emacs');
+  });
+
+  it('doctor reports redaction counts and the vector index after an index run', () => {
+    const root = scratchRoot();
+    run(['index', '--harness', 'claude', '--no-embed', '--full', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    const r = run(['doctor', '--json', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    expect(r.code).toBe(0);
+    const d = JSON.parse(r.stdout) as {
+      redaction: Record<string, number>;
+      index: { sessions: number; exchanges: number; vec: { available: boolean; reason?: string } };
+      indexedRecordTypes: { harness: string; type: string; novel: boolean }[];
+      adapters: { harness: string; supported: boolean }[];
+    };
+    expect(d.redaction).toHaveProperty('total');
+    expect(d.index.sessions).toBe(4);
+    expect(d.index.exchanges).toBeGreaterThan(0);
+    // Either it loaded or it said why. Never neither.
+    expect(d.index.vec.available || Boolean(d.index.vec.reason)).toBe(true);
+    // Every claude record type the parser did not consume, with its version.
+    expect(d.indexedRecordTypes.some((r) => r.harness === 'claude')).toBe(true);
+    // T1.3a/T1.3c: the four adapters are supported now, not "phase 1".
+    for (const harness of ['claude', 'codex', 'cursor', 'pi']) {
+      expect(d.adapters.find((a) => a.harness === harness)?.supported, harness).toBe(true);
+    }
   });
 });

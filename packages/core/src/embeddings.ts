@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
 import { modelsDir } from './paths.js';
 
 /**
@@ -55,6 +57,31 @@ export const BGE_QUERY_PREFIX = 'Represent this sentence for searching relevant 
 /** Longer inputs degrade mean-pooled embeddings; upstream measured this too. */
 const MAX_INPUT_CHARS = 2000;
 
+/**
+ * How many threads onnxruntime may use for one forward pass.
+ *
+ * Measured on the reference machine (Apple M-series, 4 performance + 4
+ * efficiency cores), embedding a 2,000-character exchange with the q8 model:
+ *
+ *     onnxruntime default (all logical cores)   161 ms
+ *     intraOpNumThreads = 4                      94 ms
+ *     intraOpNumThreads = 8                     251 ms
+ *
+ * The default is not a good default here: spilling a 33M-parameter model onto
+ * the efficiency cores costs more in synchronisation than the extra cores
+ * return, and on this corpus that difference is the whole of `index`'s time
+ * budget (`03` §12). Half the logical cores, capped at four, is the shape of
+ * that curve. `POTSHERD_EMBED_THREADS` overrides it for a machine where it is
+ * wrong. Thread count changes no vector — it is the same arithmetic in a
+ * different order — so {@link EMBEDDING_VERSION} does not move with it.
+ */
+export function embedThreads(): number {
+  const override = Number(process.env['POTSHERD_EMBED_THREADS']);
+  if (Number.isFinite(override) && override >= 1) return Math.floor(override);
+  const logical = os.availableParallelism?.() ?? os.cpus().length ?? 2;
+  return Math.max(1, Math.min(4, Math.floor(logical / 2)));
+}
+
 export interface EmbeddingsOptions {
   /** Where the ONNX weights live. Defaults to `~/.potsherd/models`. */
   cacheDir?: string;
@@ -107,6 +134,7 @@ async function getPipeline(options: EmbeddingsOptions = {}): Promise<Pipeline> {
     const onProgress = options.onProgress;
     const built = await transformers.pipeline('feature-extraction', MODEL_ID, {
       dtype: MODEL_DTYPE,
+      session_options: { intraOpNumThreads: embedThreads(), interOpNumThreads: 1 },
       progress_callback: onProgress
         ? (p: unknown) => {
             if (typeof p !== 'object' || p === null) return;
@@ -199,14 +227,22 @@ export interface ExchangeInput {
 }
 
 /**
- * Embed a batch in one forward pass.
+ * Embed several inputs in one forward pass.
  *
- * `index` has thousands of exchanges to embed and one call per exchange spends
- * most of its time in per-call overhead rather than in the model. Batching is
- * safe here for one specific reason: transformers.js's `pooling: 'mean'`
- * averages **under the attention mask**, so the padding a batch introduces does
- * not reach the vector — a batched embedding is identical to the single-input
- * one, which `tests/embeddings.test.ts` asserts rather than assumes.
+ * Measured on the reference machine before `index` was allowed to use this:
+ * batch sizes 1, 2, 4, 8 and 16 are within noise of each other (~215 ms per
+ * 2,000-character exchange) and 32 is nearly twice as slow. There is no
+ * throughput to win here — the model, not the per-call overhead, is the cost.
+ *
+ * And a batch is not bit-identical to single calls. `pooling: 'mean'` does
+ * average under the attention mask, so padding does not leak, but q8 dynamic
+ * quantisation picks activation scales per forward pass and a ragged batch
+ * therefore lands about 3e-3 of cosine away from the same input embedded alone
+ * (`tests/embeddings.test.ts` measures it). Both vectors are equally valid and
+ * either would retrieve the same neighbours — but given no speed to gain,
+ * `ingest.ts` embeds one exchange per call and keeps the exactly-reproducible
+ * vector. This function stays because it is the right shape for a caller that
+ * does have a throughput problem, on a machine where batching pays.
  *
  * Falls back to one call per input if the runtime ever returns a shape other
  * than `[n, 384]`; a slower index is always better than a wrong vector.

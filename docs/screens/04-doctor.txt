@@ -2,7 +2,7 @@ potsherd doctor · potsherd 0.1.0 · node v24.9.0
 
   claude dir                         ~/.claude
   potsherd dir                       ~/.potsherd
-  database                           schema v3 of v3
+  database                           schema v4 of v4
 
   sessions on disk              31   21 titled · 3 sdk · 539 KB
   sidechains on disk           197   subagent transcripts
@@ -10,7 +10,12 @@ potsherd doctor · potsherd 0.1.0 · node v24.9.0
   files archived               278   1.1 MB of source, byte-exact
   rescue runs                    1
 
-  record types seen (head/tail scan):
+  sessions indexed               0   nothing indexed yet — run potsherd index
+  ghost prompts indexed      2,971   searchable in ghost_prompts_fts
+  secrets masked                 0   nothing matched — index holds no secrets
+  vectors                        0   sqlite-vec v0.1.9 · bge-small, 384-d
+
+  record types seen (head/tail scan — run potsherd index for exact counts):
     user                        675
     assistant                   436
     agent-name                  197
@@ -28,13 +33,14 @@ potsherd doctor · potsherd 0.1.0 · node v24.9.0
     file-history-delta           25
 
   adapters:
-    claude      ready     ~/.claude/projects
-    codex       phase 1   ~/.codex/sessions
-    cursor      phase 1   ~/.cursor/projects
-    pi          phase 1   ~/.pi/agent/sessions
-    gemini      phase 6   ~/.gemini/tmp
-    opencode    phase 6   ~/.local/share/opencode
-    copilot     phase 6   ~/.copilot/session-state
+    claude      ready     ~/.claude/projects            31 sessions · 197 sidec…
+    codex       absent    ~/.codex/sessions             Codex CLI not installed
+    cursor      absent    ~/.cursor/projects            Cursor not installed
+    pi          absent    ~/.pi/agent/sessions          pi not installed
+    gemini      phase 6   ~/.gemini/tmp                 not yet parsed
+    opencode    phase 6   ~/.local/share/opencode       not yet parsed
+    copilot     phase 6   ~/.copilot/session-state      not yet parsed
+  cursor: no timestamps on assistant turns (session times come from file mtim…
 
   fatal parse errors             0   none
 
