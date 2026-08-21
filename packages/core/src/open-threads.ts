@@ -500,8 +500,7 @@ export function openThreadCandidates(
     'SELECT ts FROM exchanges WHERE session_id = ? AND seq = ? LIMIT 1',
   );
 
-  const out: OpenThreadCandidate[] = [];
-  const seen = new Set<string>();
+  const raised: OpenThreadCandidate[] = [];
 
   for (const sessionId of sessionIds) {
     const a = byId.get(sessionId);
@@ -566,11 +565,7 @@ export function openThreadCandidates(
         }
         if (best >= MENTION_COSINE) continue;
 
-        const key = `${sessionId} ${d.what} ${project}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        out.push({
+        raised.push({
           what: d.what,
           why: d.why,
           sessionId,
@@ -593,8 +588,24 @@ export function openThreadCandidates(
     }
   }
 
-  out.sort((x, y) => y.score - x.score || x.what.localeCompare(y.what));
-  return out.slice(0, limit);
+  // One line per decision, not one per sibling project.
+  //
+  // A decision absent from three related projects is still *one* claim, and
+  // {@link OpenThreadCandidate} can name only one `otherProject`, so raising it
+  // three times would print the same sentence three times with the tail
+  // changed. `05`'s rule is that the whole of `ask` has to be screenshot-able,
+  // and the best-scoring pairing is the one worth the line. The same decision
+  // text reached from two different sessions of A collapses the same way.
+  const best = new Map<string, OpenThreadCandidate>();
+  for (const c of raised) {
+    const key = c.what.toLowerCase();
+    const prior = best.get(key);
+    if (!prior || c.score > prior.score) best.set(key, c);
+  }
+
+  return [...best.values()]
+    .sort((x, y) => y.score - x.score || x.what.localeCompare(y.what))
+    .slice(0, limit);
 }
 
 // ------------------------------------------------------------------ model pass

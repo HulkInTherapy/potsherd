@@ -321,6 +321,54 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
     expect(openThreadCandidates(db, [a], { limit: 0 })).toEqual([]);
   });
 
+  it('raises one line per decision, not one per sibling project', () => {
+    const db = memDb();
+    const a = addCard(db, {
+      project: FULCRUM,
+      topics: SIBLING_TOPICS,
+      files: SIBLING_FILES,
+      decisions: [DECIDED],
+    });
+    // Two related projects, neither of which ever mentions it. That is still
+    // one claim, and `OpenThreadCandidate` can name only one `otherProject`.
+    for (const p of [MEGHBRAIN, '/Users/zebra/proteus']) {
+      addCard(db, {
+        project: p,
+        topics: SIBLING_TOPICS,
+        files: SIBLING_FILES,
+        decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
+      });
+    }
+
+    const found = openThreadCandidates(db, [a]);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.what).toBe(DECIDED.what);
+  });
+
+  it('collapses the same decision reached from two sessions of A', () => {
+    const db = memDb();
+    const a1 = addCard(db, {
+      project: FULCRUM,
+      topics: SIBLING_TOPICS,
+      files: SIBLING_FILES,
+      decisions: [DECIDED],
+    });
+    const a2 = addCard(db, {
+      project: FULCRUM,
+      topics: SIBLING_TOPICS,
+      files: SIBLING_FILES,
+      decisions: [DECIDED],
+    });
+    addCard(db, {
+      project: MEGHBRAIN,
+      topics: SIBLING_TOPICS,
+      files: SIBLING_FILES,
+      decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
+    });
+
+    expect(openThreadCandidates(db, [a1, a2])).toHaveLength(1);
+  });
+
   it('returns nothing rather than throwing on an empty index', () => {
     const db = memDb();
     expect(openThreadCandidates(db, [])).toEqual([]);
