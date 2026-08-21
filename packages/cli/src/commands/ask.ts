@@ -275,7 +275,20 @@ async function recordReaders(
       question: file.question,
       k: file.k,
       sessionIds: file.sessionIds,
-      targets: file.targets.length,
+      // The same per-session facts the receipt prints, so `--json` is the
+      // human view and not a summary of it (`06`: every verb's `--json`
+      // carries the same data). The excerpts themselves stay in the file —
+      // `--json` names the path rather than printing a second copy of the
+      // transcript to a terminal.
+      targets: file.targets.map((x) => ({
+        sessionId: x.sessionId,
+        id8: x.id8,
+        project: x.project,
+        harness: x.harness,
+        isGhost: x.isGhost,
+        isSidechain: x.isSidechain,
+        seqs: x.seqs,
+      })),
       matching: probe.matching,
       modelCalls: probe.spend.calls,
     });

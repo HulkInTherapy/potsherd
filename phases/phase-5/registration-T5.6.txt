@@ -1,0 +1,352 @@
+================================================================================
+T5.6 — `ask --readers-out <path>` and `ask --readers-in <path>`
+branch: task/T5.6-readers-io   ·   cut from 6a58271
+================================================================================
+
+WHAT LANDED
+
+  packages/cli/src/commands/ask.ts    the two flags, the envelope, the checks
+  tests/ask.test.ts                   two new describes, 18 tests
+  phases/phase-5/registration-T5.6.txt   this file
+
+  Zero edits to `packages/core/src/ask.ts`. T5.2's central claim — that both
+  flags are implementable entirely through the existing public `AskOptions` —
+  is correct and is now shipped. Nothing about the T4.4 interface needed
+  widening.
+
+  Baseline 1,041 tests → 1,059. `pnpm typecheck` and `pnpm build` clean.
+
+
+================================================================================
+1. TWO THINGS THE ORCHESTRATOR HAS TO APPLY
+================================================================================
+
+Both are in RESERVED files. `09` §339's rule is followed: the worker reports
+the lines, the orchestrator applies them.
+
+1a. THE FLAG REGISTRATION            → `packages/cli/src/index.ts` (barrel)
+--------------------------------------------------------------------------------
+Without this hunk the two flags exist and are unreachable from the binary:
+commander rejects an unregistered option before `runAsk` is called. Everything
+else in this task is done and tested; this is the wire.
+
+The hunk was applied locally, the binary was driven end to end with it (every
+number in section 4 comes from that build), and it was then reverted so the
+branch does not carry a barrel edit. Apply verbatim:
+
+  --- a/packages/cli/src/index.ts
+  @@ in the `ask` command's option chain, after `--no-vec`
+  -      .option('--no-vec', 'text search only — the same as --vectors off'),
+  +      .option('--no-vec', 'text search only — the same as --vectors off')
+  +      // T5.6. The two halves of one round trip: `--readers-out` records what
+  +      // the readers would have been given and makes no model call at all;
+  +      // `--readers-in` takes the outputs back and runs the rest of `ask`
+  +      // unchanged, citation filter included. `--help` for the pair is one
+  +      // example, because they are one thing.
+  +      .option('--readers-out <path>', 'write what the readers would be given to this file; makes no model call')
+  +      .option('--readers-in <path>', 'answer from reader outputs recorded in this file, filter and all'),
+
+  @@ in the same command's `addHelpText('after', …)` example block, appended
+     after the `--k 10 --max-usd 0.25` line
+  +  potsherd ask "the pooler decision" --readers-out r.json   # no model call; run
+  +    your own readers over r.json's targets, add an "outputs" array, then
+  +  potsherd ask "the pooler decision" --readers-in r.json    # one call, same filter
+
+  @@ in `ask.action(...)`, in the object passed to `runAsk`, after the
+     `vectors` line
+  +          ...(opts['readersOut'] ? { readersOut: String(opts['readersOut']) } : {}),
+  +          ...(opts['readersIn'] ? { readersIn: String(opts['readersIn']) } : {}),
+
+`tests/cli.test.ts`'s "every verb has --help with at least one example" still
+passes with it; `ask --help` was read back and the example renders correctly.
+
+1b. THE PRIVACY RECEIPT              → `packages/cli/src/commands/doctor.ts`
+                                       + `docs/screens/05-doctor-privacy.txt`
+--------------------------------------------------------------------------------
+`--readers-out` writes a file **outside `~/.potsherd`, at a path the user
+chose**. That makes it the second such path after `graft`, and `03` §11 says
+the receipt lists *every* path written. CI fails if the published receipt
+drifts from the live one, so both sides move together.
+
+In `doctor.ts`, the `written` array currently ends:
+
+      // `graft` is the one verb that writes outside ~/.potsherd: …
+      nodePath.join(process.cwd(), '.potsherd', 'graft-<id8>.md'),
+    ];
+
+`graft` is no longer "the one verb". Suggested replacement, keeping the
+existing comment's argument and extending it:
+
+      // `graft` was the one verb that wrote outside ~/.potsherd: the brief
+      // lands in the project you run it in, which is the entire point of the
+      // verb. `ask --readers-out` is the second, and it is looser still — the
+      // file goes exactly where the user named it, so the receipt can only
+      // name the flag. `03` §11 says this receipt lists *every* path written,
+      // and it has under-reported once already, when it still said "no
+      // network" after the product had started calling a model.
+      nodePath.join(process.cwd(), '.potsherd', 'graft-<id8>.md'),
+      '<the path you give to  ask --readers-out>',
+    ];
+
+The dim note under the list is currently a single unconditional `card.raw`
+after the loop. It needs to become per-path, e.g. a
+`Record<string, string>` keyed by the path, or simply a second `card.raw`
+after the second entry. The rendered block then reads:
+
+    writes:
+      ~/.potsherd
+      ~/.potsherd/archive
+      ~/.potsherd/potsherd.db
+      ~/.potsherd/models
+      ~/work/demo-project/.potsherd/graft-<id8>.md
+        the graft path only when you run graft, in the directory you run it in
+      <the path you give to  ask --readers-out>
+        only when you pass the flag. it holds the same redacted excerpts a
+        model would have been sent, and no model was called to write it
+
+`docs/screens/05-doctor-privacy.txt` must be regenerated in the same commit.
+
+**No change to `MODEL_CALL_VERBS`.** `ask` is already on it, and the list is
+"the verbs that may make a model call". `--readers-out` makes none, but the
+verb still can, and `tests/llm.test.ts` asserts that list against the command
+files that reach `Llm.open`.
+
+
+================================================================================
+2. THE DESIGN, VERIFIED RATHER THAN FOLLOWED
+================================================================================
+
+2a. `--readers-out` MAKES ZERO MODEL CALLS **BY CONSTRUCTION** — CONFIRMED
+--------------------------------------------------------------------------------
+T5.2 asked for this to be checked against the current `ask.ts` and stated with
+line references. It is true, and here they are:
+
+  packages/core/src/ask.ts:1047
+      const ownReader = o.readerFn ? null : o.readerLlm ?? openLlm(…);
+    → supplying a `readerFn` means **no reader backend is constructed at all**.
+
+  packages/core/src/ask.ts:1104
+      if (answered.length === 0) {
+        return base({ refused: strict, refusal: strict ? 'no-answer' : null });
+      }
+    → every recorded reader reports `found: false`, so this returns …
+
+  packages/core/src/ask.ts:1116
+      const ownSynth = o.llm ?? openLlm(o.model ?? ASK_MODEL, budget, o);
+    → … before the only line in the function that opens the synthesizer's
+      backend. `filterAnswer` (1134) and `tryOpenThreads` are both below it.
+
+There is no branch to get wrong and no flag to forget: on this path the
+function never evaluates an expression that could construct a backend. Proved
+in the tests with a `Throwing` transport passed as *both* `llm` and
+`readerLlm`, asserting `transport.sent` is empty and `spend.calls` is 0.
+
+A consequence worth naming: `--readers-out` therefore does **not** require a
+backend to exist. `detectBackend` is skipped for it in the CLI. Demanding a
+`claude` binary for a run that structurally cannot call a model would be the
+CLI saying something untrue about it, and it would put a binary between a
+skill and the one path that needs no model. Verified on the live binary with
+`POTSHERD_LLM_BACKEND=none`: a normal `ask` exits 1 with "no way to reach a
+model", `--readers-out` writes its file and exits 0.
+
+2b. `--readers-in` CANNOT SKIP THE SHORTLIST, AND MUST NOT
+--------------------------------------------------------------------------------
+T5.2 §2 says `--readers-in` "skips shortlist and readers". It skips the
+readers. The shortlist has to run, and that is not a limitation:
+
+  - `filterAnswer(proposed.answer, proposed.evidence, targets)` checks every
+    quote against the **live transcript bytes** at the `(sessionId, seq)` it
+    names. `targets` is the shortlist. Without it there is nothing to check
+    against, and the guarantee becomes something the file asserts about
+    itself — which is exactly the property the flags exist to restore.
+  - `AskResult.matching` and the render's "n of m sessions read" come from the
+    shortlist too.
+
+So a replay runs `recall` once more. On the fixture that is ~100 ms; no model,
+no network beyond the local embedding pass, which `--vectors off` skips
+entirely.
+
+2c. THE REPLAY VALIDATES **BEFORE** IT SPENDS — TWO PASSES
+--------------------------------------------------------------------------------
+Since the shortlist re-runs, the recorded ids and the live shortlist can
+disagree. Learning that from inside `readerFn` is too late: `ask()` treats a
+thrown reader as "this session contributed nothing" (a deliberate phase-4
+ruling) and carries on to pay for the synthesizer. So `--readers-in` runs the
+`--readers-out` recorder first — zero model calls by the same construction as
+2a — takes the live shortlist from it, checks the file, and only then replays.
+
+Reusing the recorder rather than re-deriving the shortlist in the CLI is
+deliberate. `ask()`'s `recall` call is tuned with measured reasons in its own
+comments (candidate depth pinned to `find --limit k`, vectors defaulted on). A
+second copy of that call in `commands/ask.ts` would drift, and the drift would
+present as a stale file.
+
+2d. THE RULING ON A PARTIAL MATCH: **ANY DIFFERENCE IS AN ERROR**
+--------------------------------------------------------------------------------
+The tempting alternative is to answer from the overlap. It is wrong in a way
+the user cannot see. `searched` and `matching` are printed as "n of m sessions
+read", and on a partial replay those would be the *live* shortlist's numbers
+over a file that covers less than it. The answer would read as a full sweep
+while a session the shortlist ranked into the top k contributed nothing — and
+`filterAnswer` cannot see that, because it checks the quotes it is given and
+has no view of the ones nobody produced. That is "silently answer from a stale
+file", arrived at one session at a time.
+
+The error names both directions, because they fail differently and only one is
+dangerous:
+
+  - in the shortlist, not in the file  → a hole in coverage. The real failure.
+  - in the file, not in the shortlist  → merely unused, but it means the index
+                                          moved, so the first case is likely too.
+
+The cause is always the same (the index changed between record and replay) and
+the fix is always one command, which the error prints.
+
+
+================================================================================
+3. THE FILE FORMAT
+================================================================================
+
+One envelope for both directions, on purpose: a skill reads the file, fans its
+own Agent readers out over `targets`, adds `outputs`, and hands **the same
+file** back. Transcribing six session ids from one shape into another is a
+step that can go wrong silently.
+
+  {
+    "kind": "potsherd.ask.readers",     // discriminator; wrong kind → refuse
+    "version": 1,                        // envelope version; wrong → refuse
+    "potsherd": "0.4.0",                 // the binary that wrote it (informational)
+    "question": "…",                     // redacted as llm.ts would redact it
+    "k": 6,
+    "sessionIds": ["…"],                 // the shortlist, in shortlist order
+    "targets": [ AskReaderInput, … ],    // T4.4's object, verbatim
+    "outputs": [ { "sessionId": "…", ...AskReaderOutput }, … ]   // added by the reader
+  }
+
+Mismatch detection, in the order it runs, all of it before any model call:
+
+  kind ≠ potsherd.ask.readers   → refuse   ("is not a reader file")
+  version ≠ 1                   → refuse   ("a v99 reader file and this potsherd reads v1")
+  no/blank question             → refuse
+  question ≠ this question      → refuse   ← "a file recorded against a different
+                                             question must not be replayable"
+  k ≠ this run's k              → refuse   (a different k is a different shortlist)
+  no "outputs"                  → refuse   ("a recording nobody has read yet")
+  malformed output entry        → refuse   (missing sessionId / non-boolean found /
+                                            non-integer seq / non-string text)
+  sessionIds ≠ live shortlist   → refuse   (§2d)
+  outputs' ids ≠ live shortlist → refuse   (§2d)
+
+**Filters are not recorded, and do not need to be.** `--project`, `--since`,
+`--tag` and the rest change *which sessions are shortlisted*, so any filter
+difference between the recording and the replay shows up as a session-id set
+difference and is caught by the last two checks. Recording the filter objects
+would add a second, weaker copy of a check that already exists.
+
+`--readers-out` records at `concurrency: 1`, so the recording order is the
+shortlist order and two recordings over an unchanged index are byte-identical.
+A test asserts it. The file ends with a newline.
+
+
+================================================================================
+4. THE NUMBERS
+================================================================================
+
+Tests            1,041 before  →  1,059 after   (25 files, all green)
+                 +7 in `T5.6 --readers-out`, +11 in `T5.6 --readers-in`
+
+Model calls under `--readers-out`
+                 0.  Asserted against a transport that throws if it is ever
+                 sent anything, and printed by the receipt and by `--json`
+                 (`"modelCalls": 0`) on the live binary.
+
+Wall time, live binary, `tests/fixtures/claude` indexed to a scratch dir,
+one shortlisted session, `--vectors off`:
+
+                 normal ask        21.8 s   2 calls   $0.134 est.
+                 --readers-in       8.2 s   1 call    $0.031 est.
+                 --readers-out      0.14 s  0 calls   $0
+
+  A 2.6× speed-up on a **one-session** corpus, where the readers are a single
+  call. `ask`'s real shape is six readers in parallel plus one synthesizer; the
+  readers are the long pole (T5.2 measures the binary path at 40–183 s, p50
+  ~100 s), and a replay drops all of them. The fixture number is a floor, not
+  the figure to quote.
+
+
+================================================================================
+5. REDACTION — THE RULING, ANSWERED
+================================================================================
+
+**The reader inputs `readerFn` receives are already redacted, in exactly the
+state a model would have been sent them.** This is not an assumption:
+
+  - Redaction is L2. `packages/core/src/index.ts:74` — *"redaction. Runs
+    before anything is written to the index (`03` §5)"*. `ingest.ts` elides
+    binary payloads and then runs `redactExchange` on every exchange before a
+    row is inserted. The store is masked at rest.
+  - `AskReaderInput.excerpts` is built by `excerptText(t.units)` from those
+    rows. `ask.ts:255` says so: *"already capped and redacted at rest"*.
+  - `llm.ts`'s outgoing pass is `redactOutgoing = redact(elideBinary(text))`,
+    and its own comment (llm.ts:1879-1882) says it is *"identical to the
+    ingest path, deliberately: what a model sees and what the index holds are
+    the same text"*.
+
+So there was no finding to escalate. It is still belt-and-braces'd, because
+this flag writes to a path the user names rather than to a model:
+`--readers-out` re-runs `redactOutgoing` over each `excerpts` and over the
+`question` before writing. Two tests hold it:
+
+  - on the ordinary fixture, `redactOutgoing(excerpts).hits === 0` and the
+    text is unchanged — i.e. the second pass is a **no-op today**, asserted
+    rather than assumed, so a future divergence between the two rule sets
+    fails a test instead of leaking.
+  - a credential seeded straight into the index (past ingest, the only way it
+    could be there) does not appear in the written file; a `‹redacted:aws:…›`
+    mask does.
+
+Running it also keeps the two paths *identical*: a native Agent reader quoting
+this text quotes what an SDK reader would have been shown, so `filterAnswer`
+behaves the same on both.
+
+There is still no `--no-redact` and these flags do not become one.
+
+
+================================================================================
+6. WHAT THIS UNBLOCKS, AND WHAT IS NOT DONE
+================================================================================
+
+T5.2 §2's closing instruction now applies:
+
+  > When they land, replace steps 1–3 and 5 of the `ask` route in
+  > `skills/potsherd/SKILL.md` with them and delete the "checked by reading"
+  > caveat — the guarantee becomes the shipped one.
+
+`plugins/**` is RESERVED here and belongs to T5.3, so that edit is **not**
+made. The route the skill should become:
+
+    BIN ask "<q>" [filters] --readers-out $TMP/readers.json --json
+        → zero model calls. `targets[]` carries each session's excerpts,
+          seqs, isGhost, isSidechain — everything READER_SYSTEM needs.
+    one message, N native Agent calls, one per entry in "targets"
+        → parallel, free, no subprocess. Same READER_SYSTEM.
+    write the results back into the file as "outputs"
+    BIN ask "<q>" [filters] --readers-in $TMP/readers.json
+        → one model call, and `filterAnswer` runs. Print what it prints.
+
+The last line of `SKILL.md` — the one that names the weaker guarantee and
+routes to `potsherd ask` — can go. The fast path is no longer weaker.
+
+Two notes for whoever writes that:
+  - the filters on the two calls **must match**, or the replay refuses (§2d).
+    Simplest is to build the flag string once.
+  - `--strict` needs no special case any more: it is passed to the
+    `--readers-in` call and refuses exactly as it does on the binary path. A
+    test covers it.
+
+NOT DONE, deliberately:
+  - `packages/cli/src/index.ts` (§1a) and the privacy receipt (§1b) — RESERVED.
+  - `plugins/claude-code/skills/potsherd/SKILL.md` — T5.3's, and RESERVED.
+  - No real project name, session title or transcript prose appears anywhere in
+    this branch. Every live number above comes from `tests/fixtures/claude`,
+    the repo's own synthetic corpus.
