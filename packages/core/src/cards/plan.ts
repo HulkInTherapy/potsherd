@@ -5,7 +5,6 @@ import {
   buildSessionFilters,
   type SearchFilters,
 } from '../search/filters.js';
-import { slugify } from '../paths.js';
 import { ghostProjectSlug } from './transcript.js';
 import {
   CARD_MODEL,
@@ -218,19 +217,11 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
         harness: r.harness,
         title: r.title,
         project: r.project,
-<<<<<<< HEAD
-        // Ghosts have no `project_slug` column — `rescue` recovers a cwd, not
-        // a slug — so it is derived the same way Claude Code derives its own,
-        // and a ghost's card lands beside the sessions from the same project
-        // rather than in a directory of its own spelling.
-        projectSlug: r.project ? slugify(r.project) : null,
-=======
         // Ghosts have no `project_slug` column — the transcript that carried
         // one is what the sweep deleted — so it is re-derived from the path
         // `rescue` recovered, with Claude Code's own encoding, and lands in
         // the same mirror directory as that project's surviving sessions.
         projectSlug: ghostProjectSlug(r.project),
->>>>>>> worktree-agent-ae47177303e600daf
         units: r.prompts,
         chars: r.chars + r.prompts * SEQ_HEADER_CHARS,
         carded: r.carded > 0,
