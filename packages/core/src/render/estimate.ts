@@ -2,7 +2,7 @@ import { Card } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
 import { tildify } from '../paths.js';
-import { CHARS_PER_TOKEN } from '../llm.js';
+import { CHARS_PER_TOKEN, type Calibration } from '../llm.js';
 import type { CardPlan } from '../cards/plan.js';
 
 /**
@@ -21,6 +21,16 @@ import type { CardPlan } from '../cards/plan.js';
  *   **Every number says where it came from.** `chars ÷ 3.6` is an estimate and
  *   is labelled as one; `03` §12's targets are printed beside the estimate so
  *   a miss is visible on the same screen rather than in a plan file.
+ *
+ *   **A number that was 7× wrong is not rendered as though it were precise.**
+ *   This card once said "estimated time 7m 26s, equivalent cost $2.66"
+ *   immediately before a run that took 55m 25s and reported $12.93. The
+ *   constants behind it have been re-fitted from real calls (`llm.ts`), but
+ *   the deeper mistake was typographic: `7m 26s` claims a precision nothing
+ *   here has. So the time and the money are printed as `~55m` with the range
+ *   and the basis beside them, every estimated figure carries `est.`, and when
+ *   this machine's own finished runs have moved the number the card says so
+ *   and by how much.
  */
 
 /** `03` §12: `card` over the whole archive. */
@@ -101,41 +111,37 @@ export function renderEstimate(
 
   card.blank();
 
-  const money = f.money(e.usd);
-  const time = f.duration(e.seconds * 1000);
-  const overTime = e.seconds > TARGET_SECONDS;
-  const overMoney = e.usd > TARGET_USD;
+  const money = `~${approxMoney(e.usd)}`;
+  const time = `~${approxDuration(e.seconds)}`;
+  const overTime = e.secondsLow > TARGET_SECONDS;
+  const overMoney = e.usdLow > TARGET_USD;
+  const timeRange = `${approxDuration(e.secondsLow)}${t.g('–', '-')}${approxDuration(e.secondsHigh)}`;
+  const moneyRange = `${approxMoney(e.usdLow)}${t.g('–', '-')}${approxMoney(e.usdHigh)}`;
 
   card.rows([
     {
       label: 'input tokens',
       value: compact(e.inputTokens),
-      note: `chars ${t.g('÷', '/')} ${CHARS_PER_TOKEN} of the redacted text`,
+      note: `est. ${t.sep} chars ${t.g('÷', '/')} ${CHARS_PER_TOKEN} of the redacted text`,
     },
     {
       label: 'output tokens',
       value: compact(e.outputTokens),
-      note: 'estimated, not measured',
+      note: `est. ${t.sep} ${f.num(perCallOutput(e))} a call, measured`,
     },
     {
       label: 'estimated time',
       value: time,
       tone: e.chargeable ? (overTime ? 'warn' : 'none') : overTime ? 'warn' : 'accent',
-      note: e.chargeable
-        ? overTime
-          ? `over the ${f.duration(TARGET_SECONDS * 1000)} target`
-          : `target ${f.duration(TARGET_SECONDS * 1000)}`
-        : 'the real budget on your subscription',
+      note: `est. ${timeRange} ${t.sep} target ${f.duration(TARGET_SECONDS * 1000)}`,
     },
     {
       label: e.chargeable ? 'estimated cost' : 'equivalent cost',
       value: money,
       tone: e.chargeable ? (overMoney ? 'warn' : 'accent') : 'dim',
       note: e.chargeable
-        ? overMoney
-          ? `over the ${f.money(TARGET_USD)} target`
-          : `target ${f.money(TARGET_USD)}`
-        : `$0 charged ${t.sep} what this would cost on an api key`,
+        ? `est. ${moneyRange} ${t.sep} target ${f.money(TARGET_USD)}`
+        : `$0 charged ${t.sep} ${moneyRange} on an api key`,
     },
     ...(o.maxUsd !== undefined
       ? [
@@ -153,6 +159,8 @@ export function renderEstimate(
   ]);
 
   card.blank();
+  for (const line of basisLines(e, t)) card.text(line, 'dim');
+  card.blank();
   if (o.dryRun === false) {
     card.text('this is what the run will do.');
   } else {
@@ -165,6 +173,58 @@ export function renderEstimate(
     );
   }
   return card.toString();
+}
+
+/**
+ * An estimate rounded to the precision it actually has.
+ *
+ * `f.duration` gives `55m 25s`, which is the right answer for a stopwatch and
+ * the wrong one for a projection: the seconds are noise dressed as knowledge.
+ * Above two minutes this rounds to the minute; below it, to five seconds.
+ */
+export function approxDuration(seconds: number): string {
+  if (seconds >= 120) return f.duration(Math.round(seconds / 60) * 60_000);
+  return f.duration(Math.round(seconds / 5) * 5_000);
+}
+
+/** Output tokens the profile expects per call — the measured figure, shown. */
+function perCallOutput(e: { calls: number; outputTokens: number }): number {
+  return e.calls > 0 ? Math.round(e.outputTokens / e.calls) : 0;
+}
+
+/**
+ * A dollar figure at the precision an estimate has. `$11.18` claims cents it
+ * cannot know; `$11` is the same number without the false promise.
+ */
+export function approxMoney(usd: number): string {
+  if (usd >= 10) return `$${Math.round(usd)}`;
+  if (usd >= 1) return `$${(Math.round(usd * 10) / 10).toFixed(1)}`;
+  return f.money(usd);
+}
+
+/**
+ * Where the two headline numbers come from.
+ *
+ * The first line says what the constants are fitted to, and whether they were
+ * fitted at all — the api and codex paths have never been measured and must
+ * say so. The second says what *this* machine's own finished runs did to them,
+ * because a correction the user cannot see is a number they cannot argue with.
+ */
+export function basisLines(
+  e: { basis: string; measured: boolean; calibration?: Calibration },
+  t: Theme,
+): string[] {
+  const first = e.measured
+    ? `time and cost are estimates, fitted to ${e.basis}.`
+    : `time and cost are estimates: ${e.basis}.`;
+  const cal = e.calibration;
+  const second =
+    cal && cal.samples > 0
+      ? `corrected ${t.g('×', 'x')}${cal.timeRatio.toFixed(1)} on time and ` +
+        `${t.g('×', 'x')}${cal.usdRatio.toFixed(1)} on cost from ` +
+        `${cal.samples} finished ${f.plural(cal.samples, 'run')} here.`
+      : 'no finished run on this machine yet has corrected them.';
+  return [first, second];
 }
 
 /** `1.2M`, `418k`, `900`. Token counts are magnitudes, not exact figures. */

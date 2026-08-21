@@ -7,6 +7,7 @@ import {
   exportCards,
   paths,
   planCards,
+  recordCardRun,
   renderCardRun,
   renderEstimate,
   resolveSession,
@@ -193,6 +194,23 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
       await llm.close();
     }
 
+    // T2.6: the estimator's self-check. One row saying what this run was
+    // quoted and what it did, so the *next* quote on this machine corrects
+    // itself by the difference (`core/src/calibration.ts`).
+    recordCardRun(db, {
+      backend: choice?.backend ?? 'agent-sdk',
+      model: plan.model,
+      concurrency,
+      targets: plan.targets.length,
+      predictedCalls: plan.estimate.calls,
+      predictedSeconds: plan.estimate.seconds,
+      predictedUsd: plan.estimate.usd,
+      actualCalls: report.calls,
+      actualSeconds: report.ms / 1000,
+      actualUsd: report.usd,
+      complete: !report.aborted && report.failed === 0,
+    });
+
     if (o.json) {
       printJson(runJson(report, choice, concurrency));
       return report.aborted || report.failed > 0 ? 1 : 0;
@@ -205,6 +223,7 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
           concurrency,
           backendNote: backendNote(choice, missing),
           chargeable: choice?.chargeable ?? true,
+          predicted: { seconds: plan.estimate.seconds, usd: plan.estimate.usd },
           ...(o.maxUsd !== undefined ? { maxUsd: o.maxUsd } : {}),
         }),
       );
@@ -320,6 +339,9 @@ function runJson(
     unresolved: report.unresolved,
     calls: report.calls,
     inputTokens: report.inputTokens,
+    // The agent sdk does not count what it sends, so this is our own estimate
+    // and the receipt says which it is (T2.6).
+    inputTokensEstimated: report.inputTokensEstimated,
     outputTokens: report.outputTokens,
     usd: Number(report.usd.toFixed(4)),
     seconds: Math.round(report.ms / 1000),
@@ -363,9 +385,20 @@ function cardJson(
       calls: plan.estimate.calls,
       inputTokens: plan.estimate.inputTokens,
       outputTokens: plan.estimate.outputTokens,
+      // Every figure here is an estimate; the range and the basis travel with
+      // them so a machine consumer cannot mistake one for a measurement (T2.6).
+      estimated: true,
       usd: Number(plan.estimate.usd.toFixed(4)),
+      usdLow: Number(plan.estimate.usdLow.toFixed(4)),
+      usdHigh: Number(plan.estimate.usdHigh.toFixed(4)),
       seconds: Math.round(plan.estimate.seconds),
+      secondsLow: Math.round(plan.estimate.secondsLow),
+      secondsHigh: Math.round(plan.estimate.secondsHigh),
       minutes: Number((plan.estimate.seconds / 60).toFixed(1)),
+      basis: plan.estimate.basis,
+      measured: plan.estimate.measured,
+      effectiveConcurrency: Number(plan.estimate.effectiveConcurrency.toFixed(2)),
+      calibration: plan.estimate.calibration ?? null,
       model: plan.estimate.model,
       chargeable: plan.estimate.chargeable,
     },

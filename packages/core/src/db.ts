@@ -277,6 +277,43 @@ DELETE FROM sync_state WHERE key LIKE 'index:%' AND key <> 'index:ghosts';
 UPDATE sessions SET source_mtime = NULL;
 `,
   },
+  {
+    version: 6,
+    name: 'card-runs',
+    // What a card run was quoted at, and what it actually cost.
+    //
+    // `card --dry-run --all` once said "7m 26s, $2.66" before a run that took
+    // 55m 25s and reported $12.93. The constants behind that quote have been
+    // re-fitted (`llm.ts`), but a constant fitted on one machine is still a
+    // guess about every other one: the number that matters is what *this*
+    // machine did. So every finished run writes one row here, and the next
+    // estimate multiplies itself by the ratio it finds (`calibration.ts`).
+    //
+    // `complete` is 0 for a run a ceiling stopped or that lost targets to
+    // errors. Those rows are kept — they are the record of what happened —
+    // and excluded from the correction, because a run that stopped early is
+    // not evidence about how long a whole one takes.
+    up: `
+CREATE TABLE IF NOT EXISTS card_runs (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  ran_at            TEXT    NOT NULL,
+  backend           TEXT    NOT NULL,
+  model             TEXT    NOT NULL,
+  concurrency       INTEGER NOT NULL DEFAULT 1,
+  targets           INTEGER NOT NULL DEFAULT 0,
+  predicted_calls   INTEGER NOT NULL DEFAULT 0,
+  predicted_seconds REAL    NOT NULL DEFAULT 0,
+  predicted_usd     REAL    NOT NULL DEFAULT 0,
+  actual_calls      INTEGER NOT NULL DEFAULT 0,
+  actual_seconds    REAL    NOT NULL DEFAULT 0,
+  actual_usd        REAL    NOT NULL DEFAULT 0,
+  time_ratio        REAL    NOT NULL DEFAULT 1,
+  usd_ratio         REAL    NOT NULL DEFAULT 1,
+  complete          INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS card_runs_backend ON card_runs(backend, ran_at);
+`,
+  },
 ];
 
 export function open(opts: OpenOptions = {}): Db {

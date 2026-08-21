@@ -225,14 +225,16 @@ export {
   tokensForText,
   API_MODEL_IDS,
   ASK_MODEL,
-  CALL_OVERHEAD_MS,
   CARD_MODEL,
+  callProfile,
+  effectiveConcurrency,
+  CALL_PROFILES,
   CHARS_PER_TOKEN,
   CHUNK_CHARS,
   HARNESS_OVERHEAD_USD,
+  IMPLAUSIBLE_TOKEN_FACTOR,
   MODEL_ALIASES,
   OUTPUT_CHARS_PER_CALL,
-  OUTPUT_TOKENS_PER_SECOND,
   PRICES,
   PROMPT_OVERHEAD_CHARS,
   REENTRANCY_ENV,
@@ -240,6 +242,8 @@ export {
   type Backend,
   type BackendChoice,
   type BudgetOptions,
+  type Calibration,
+  type CallProfile,
   type DetectOptions,
   type Estimate,
   type EstimateInput,
@@ -272,11 +276,27 @@ export {
 } from './cards/plan.js';
 export {
   renderEstimate,
+  approxDuration,
   compact as compactNumber,
   TARGET_SECONDS,
   TARGET_USD,
   type EstimateCardOptions,
 } from './render/estimate.js';
+// The estimator's self-check: what a run was quoted, what it cost, and the
+// correction the next quote inherits from it (`calibration.ts`).
+export {
+  accuracyNote,
+  accuracyShort,
+  cardRuns,
+  compareToEstimate,
+  readCalibration,
+  recordCardRun,
+  CALIBRATION_WINDOW,
+  MAX_RATIO as MAX_CALIBRATION_RATIO,
+  MIN_CALLS as MIN_CALIBRATION_CALLS,
+  type CardRunRecord,
+  type CardRunRow,
+} from './calibration.js';
 export * as cardSentinel from './cards/sentinel.js';
 
 // L5 — the ProMem-lite pipeline itself (`03` §6, T2.2). Five steps, in order,

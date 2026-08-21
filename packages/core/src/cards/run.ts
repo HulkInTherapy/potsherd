@@ -24,11 +24,13 @@ import {
 /**
  * `potsherd card --all`: the pipeline, over a plan, at concurrency.
  *
- * `03` §12, restated after measurement: the reference corpus is 126 targets
- * and 324 calls, which is **64 minutes serial and 9.9 at concurrency 6**. Wall
- * time is the budget that binds on the subscription path, and the only lever
- * on it is running several sessions at once — a card call is ~5.4 s of
- * spawning a harness and waiting, which is almost entirely idle.
+ * `03` §12, restated twice from measurement. The 2026-08-21 run over 33
+ * eligible sessions was **209 calls, 55m 25s at concurrency 6** — not the
+ * 9.9 min the old estimator quoted. A card call is ~46 s of fixed latency
+ * plus ~0.9 ms per input character (see `llm.ts`'s `CALL_PROFILES` for the
+ * twelve calls that were fitted), almost all of it idle waiting, and
+ * concurrency is still the only lever on wall time — but it returns about
+ * **0.8 of each extra slot**, not all of it.
  *
  * Three things this module is responsible for and the pipeline is not:
  *
@@ -111,6 +113,13 @@ export interface CardRunReport {
   usd: number;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * True when `inputTokens` is potsherd's own chars ÷ 3.6 estimate rather than
+   * a count the backend reported — which is every call on the agent-sdk path,
+   * whose `usage.input_tokens` excludes cache tokens and reported 1,980 for a
+   * 198-call run (`llm.ts`, `IMPLAUSIBLE_TOKEN_FACTOR`). T2.6.
+   */
+  inputTokensEstimated: boolean;
   /** Sessions whose finished card still cited an exchange that does not exist. */
   unresolved: number;
   supplemented: number;
@@ -148,6 +157,7 @@ export async function runCards(
     usd: 0,
     inputTokens: 0,
     outputTokens: 0,
+    inputTokensEstimated: false,
     unresolved: 0,
     supplemented: 0,
     degraded: 0,
@@ -268,6 +278,7 @@ export async function runCards(
   report.usd = spend.usd;
   report.inputTokens = spend.inputTokens;
   report.outputTokens = spend.outputTokens;
+  report.inputTokensEstimated = spend.estimatedInputCalls > 0;
   report.ms = Date.now() - started;
   report.cards.sort((a, b) => b.dropped - a.dropped || a.id.localeCompare(b.id));
   return report;

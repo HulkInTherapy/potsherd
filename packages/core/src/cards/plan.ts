@@ -10,9 +10,11 @@ import {
   CARD_MODEL,
   estimate,
   type Backend,
+  type Calibration,
   type Estimate,
   type EstimateSession,
 } from '../llm.js';
+import { readCalibration } from '../calibration.js';
 
 /**
  * What a card run would do, decided before any of it happens.
@@ -102,6 +104,11 @@ export interface PlanOptions {
   concurrency?: number;
   /** Cap the target list, for `card <session>` and for testing. */
   limit?: number;
+  /**
+   * What this machine's finished runs say the estimate is out by. Read from
+   * `card_runs` by default; pass `null` to quote the fitted constants alone.
+   */
+  calibration?: Calibration | null;
 }
 
 interface SessionRow {
@@ -237,6 +244,14 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
   const sessions: EstimateSession[] = capped.map((t) => ({ id: t.id, chars: t.chars }));
   const model = options.model ?? CARD_MODEL;
 
+  // The estimate corrects itself from this machine's own finished runs
+  // (`calibration.ts`). `undefined` means "look it up"; `null` means "don't",
+  // which is what a test that pins the fitted constants passes.
+  const calibration =
+    options.calibration === undefined
+      ? readCalibration(db, options.backend ? { backend: options.backend } : {})
+      : options.calibration;
+
   return {
     targets: capped,
     skipped,
@@ -249,6 +264,7 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
       ...(options.backend ? { backend: options.backend } : {}),
       ...(options.chargeable !== undefined ? { chargeable: options.chargeable } : {}),
       ...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
+      ...(calibration ? { calibration } : {}),
     }),
     model,
     ...(options.backend ? { backend: options.backend } : {}),
