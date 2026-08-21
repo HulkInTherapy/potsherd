@@ -1,0 +1,249 @@
+T5.5 `potsherd setup` — registration blocks for the integrator.
+
+Paste these verbatim. Seven files are touched, five of them RESERVED. Nothing
+else in any of them needs to change.
+
+Branch: task/T5.5-setup
+Shipped: packages/core/src/setup.ts · packages/cli/src/commands/setup.ts ·
+         tests/setup.test.ts (51 tests) · docs/mcp-clients.md
+
+The branch builds, typechecks and tests green *without* any of this, because
+the command file reaches its module directly while the barrel line is pending
+(step 2 below swaps that one line back). So this is registration, not repair.
+
+
+================================================================================
+1.  packages/core/src/index.ts                                        RESERVED
+================================================================================
+Append at the end of the phase-4 section, just above the final
+`export { VERSION } from './version.js';` line:
+
+// ---------------------------------------------------------------- phase 5
+// L8 — `setup`: the second, and last, place potsherd writes outside
+// `~/.potsherd`, and the only one that writes into another tool's directory
+// (`03` §9, phase-5 T5.5). A namespace, like `consent`, because the whole
+// module is one verb's worth of proposal-and-apply.
+export * as setup from './setup.js';
+
+
+================================================================================
+2.  packages/cli/src/commands/setup.ts                            (not reserved)
+================================================================================
+Once step 1 has landed, replace these lines near the top of the file
+
+  import { format as fmt, paths } from '@potsherd/core';
+  // `packages/core/src/index.ts` is reserved for the integrator this phase, so
+  // the barrel line — `export * as setup from './setup.js';` — is written out in
+  // `phases/phase-5/registration-T5.5.txt` rather than added here. Until it
+  // lands, this one import reaches the module directly, so the branch builds,
+  // typechecks and tests green; swap it for `setup` in the line above once the
+  // barrel carries it.
+  import * as setup from '../../../core/src/setup.js';
+
+with the one line every other command file uses:
+
+  import { format as fmt, paths, setup } from '@potsherd/core';
+
+Nothing else changes; `setup` is used as a namespace either way.
+
+
+================================================================================
+3.  packages/cli/src/index.ts                                         RESERVED
+================================================================================
+(a) add to the imports from './commands/…', after the `graft` line:
+
+import { runSetup, SETUP_CLIENTS } from './commands/setup.js';
+
+(b) the commander block. Place it after the `guard` block and before `index`,
+    so the help order reads  rescue -> guard -> setup -> index: guard and setup
+    are the two verbs that edit a file potsherd did not create, and they read
+    as a pair.
+
+  const setupCmd = addGlobals(
+    program
+      .command('setup')
+      .description("register potsherd's MCP server with the agent you name")
+      .option('--claude', 'Claude Code         ~/.claude.json')
+      .option('--codex', 'Codex CLI           ~/.codex/config.toml')
+      .option('--cursor', 'Cursor              ~/.cursor/mcp.json')
+      .option('--gemini', 'Gemini CLI          ~/.gemini/settings.json')
+      .option('--opencode', 'opencode            ~/.config/opencode/opencode.json')
+      .option('--copilot', 'GitHub Copilot CLI  ~/.copilot/mcp-config.json')
+      .option('--pi', 'pi                  ~/.pi/agent/settings.json')
+      .option('--all', 'every client above, skipping the ones not installed here')
+      .option('--dry-run', 'show the diff and write nothing')
+      .option('--status', 'report what is registered where; change nothing')
+      .option('--remove', 'remove potsherd again, leaving every other server alone')
+      .option('-y, --yes', 'accept the change without asking')
+      .option('-q, --quiet', 'drop the closing hint'),
+  ).addHelpText('after', `
+example:
+  potsherd setup --cursor --dry-run                 # the diff, and nothing written
+  potsherd setup --cursor
+  potsherd setup --all --status
+  potsherd setup --claude --remove`);
+  setupCmd.action(async (opts: Record<string, unknown>) => {
+    const o = globals(program, setupCmd, opts);
+    await run(
+      () =>
+        runSetup({
+          ...o,
+          clients: SETUP_CLIENTS.filter((id) => Boolean(opts[id])),
+          all: Boolean(opts['all']),
+          dryRun: Boolean(opts['dryRun']),
+          status: Boolean(opts['status']),
+          remove: Boolean(opts['remove']),
+        }),
+      o,
+    );
+  });
+
+(c) one row in `tour()`, after the `guard` row:
+
+    ['setup', 'reach potsherd from cursor, codex, gemini, opencode, copilot, pi'],
+
+
+================================================================================
+4.  packages/core/src/llm.ts                                          RESERVED
+================================================================================
+`OFFLINE_VERBS` must gain `'setup'`, or `tests/llm.test.ts` > "every registered
+command is in one of the two privacy lists" fails **the moment step 3 lands**.
+That test exists because `unpin` was in neither list for two phases and
+`doctor --privacy` answered "is this safe to run on a client's laptop?" by
+saying nothing at all.
+
+`setup` opens no socket: it reads config files, renders a diff, and writes one
+JSON key or one TOML table. Add it after `'guard'`, the other consent verb:
+
+export const OFFLINE_VERBS: readonly string[] = [
+  'audit',
+  'rescue',
+  'guard',
+  'setup',
+  'index',
+  ...
+
+That is the only change llm.ts needs.
+
+
+================================================================================
+5.  packages/cli/src/commands/doctor.ts        — THE `doctor --privacy` LINES
+================================================================================
+This is the largest privacy-relevant change since `graft`: `setup` adds seven
+write paths, and all seven are in *other tools'* directories, which
+`00-README.md` otherwise forbids outright. `03` §11 says the receipt lists every
+path written, and it has under-reported twice already. It must name all seven.
+
+(a) add `setup` to the `@potsherd/core` import block at the top of the file
+    (it already imports `consent`, `paths`, `MODEL_CALL_VERBS`, `OFFLINE_VERBS`):
+
+  setup,
+
+(b) replace this line — currently line 108 —
+
+  const consented = [paths.claudePaths(report.claudeDir).settings];
+
+with:
+
+  // `setup` is the second, and last, place potsherd can write outside
+  // ~/.potsherd, and the only one that writes into *another tool's* directory.
+  // Seven files, one per MCP client. Each is merged rather than replaced, each
+  // is backed up first, and none is touched without an explicit y at a diff.
+  // The list comes from `setup.setupWritePaths()` — the same array the writer
+  // walks — so it cannot drift from what the code actually opens.
+  const settingsFile = paths.claudePaths(report.claudeDir).settings;
+  const mcpConfigs = setup.setupWritePaths();
+  const consented = [settingsFile, ...mcpConfigs];
+
+(c) replace these two lines — currently lines 132-133 —
+
+    for (const p of consented) card.raw(`    ${show(p)}`);
+    card.raw(`      ${t.dim('cleanupPeriodDays, and one SessionStart hook entry')}`);
+
+with:
+
+    card.raw(`    ${show(settingsFile)}`);
+    card.raw(`      ${t.dim('cleanupPeriodDays, and one SessionStart hook entry')}`);
+    for (const p of mcpConfigs) card.raw(`    ${show(p)}`);
+    card.raw(`      ${t.dim('one "potsherd" MCP server entry each, from potsherd setup.')}`);
+    card.raw(`      ${t.dim('every other server in those files is preserved.')}`);
+
+Nothing else in doctor.ts changes: `writesWithConsent: consented` in the
+`--json` branch picks the seven up for free, and stays a flat array of paths,
+which is the shape `tests/cli.test.ts` already reads.
+
+The receipt then prints:
+
+  writes only after an explicit y at a diff:
+    ~/.claude/settings.json
+      cleanupPeriodDays, and one SessionStart hook entry
+    ~/.claude.json
+    ~/.codex/config.toml
+    ~/.cursor/mcp.json
+    ~/.gemini/settings.json
+    ~/.config/opencode/opencode.json
+    ~/.copilot/mcp-config.json
+    ~/.pi/agent/settings.json
+      one "potsherd" MCP server entry each, from potsherd setup.
+      every other server in those files is preserved.
+
+
+================================================================================
+6.  docs/screens/05-doctor-privacy.txt  and  README.md                RESERVED
+================================================================================
+CI fails if the published receipt drifts from the live one — the step is
+"the published privacy receipt still matches the live one" in ci.yml, and it
+compares both `docs/screens/05-doctor-privacy.txt` and the copy inside
+README.md against a fresh capture. Step 5 changes the live receipt, so both
+copies must be regenerated in the same commit:
+
+  bash scripts/make-screens.sh          # regenerates docs/screens/*
+  # then update the receipt block quoted in README.md to match
+
+Both are RESERVED and neither was touched on this branch.
+
+The eight new lines that will appear in the regenerated screen are the ones
+quoted at the end of section 5 above.
+
+
+================================================================================
+7.  .github/workflows/ci.yml                          RESERVED — one-line risk
+================================================================================
+Not required, but worth a look while you are in there.
+
+The receipt capture runs with `env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR ...
+HOME="$home"`. Six of the seven new paths are fixed relative to `$HOME`, but
+opencode's honours `XDG_CONFIG_HOME`, so on any runner that sets it the live
+receipt would name a path the committed screen does not, and the guard would
+fail for a reason that has nothing to do with potsherd. Adding
+
+  -u XDG_CONFIG_HOME
+
+to that `env` line (both invocations) makes the capture as deterministic as the
+other six paths already are. GitHub's hosted runners do not currently set it,
+so this is insurance, not a fix.
+
+
+================================================================================
+8.  what the integrator gets, and what to check afterwards
+================================================================================
+  potsherd setup --cursor --dry-run       # the diff, and nothing written
+  potsherd setup --all --status
+  potsherd doctor --privacy | sed -n '/explicit y/,/leaves this machine/p'
+  pnpm test                               # 1,092 with T5.5, up from 1,041
+
+Two things T5.5 could not do, both recorded OPEN rather than passed:
+
+  - four of the seven client schemas (gemini, opencode, copilot, pi) are from
+    documentation only. None of those four is installed on the reference
+    machine and this task had no network, so none could be verified against a
+    running tool or a config file it had written. `docs/mcp-clients.md` labels
+    all four, `ClientSpec.verified` carries the same fact in code, and the
+    consent screen prints "unverified" above the diff for each of them.
+
+  - `packages/mcp` does not exist yet (T5.1 owns it), so no stanza `setup`
+    writes has been spawned by a real client. `setup` assumes the server is
+    `potsherd-mcp` on PATH, or `<checkout>/packages/mcp/dist/index.js` run by
+    an absolute `node`. If T5.1 ships a different bin name or entry path, the
+    two constants to change are `MCP_BIN` and `MCP_ENTRY_RELATIVE` at the top
+    of `packages/core/src/setup.ts`, and nothing else.
