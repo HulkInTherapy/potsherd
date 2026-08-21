@@ -27,10 +27,12 @@ import {
   graft,
   graftDir,
   graftPath,
+  hasMaterial,
   resolveCitations,
   resolveTarget,
   safeCut,
   sourceLine,
+  stripHarnessBoilerplate,
   type ClipOutcome,
   type Counter,
 } from '../packages/core/src/graft.js';
@@ -64,12 +66,19 @@ const FIXTURE = path.join(here, '..', 'evals', 'fixture', 'claude');
 const ID = {
   pgbouncer: '0a2fbf9b',
   ghostPrinter: 'e6aa5ba7',
+  /**
+   * A real session with **no card** — nothing in `beforeAll` writes one for
+   * it. `graft <id>` with no `--about` on this session is the headline use
+   * case of the verb and the path T4.7a G1 found broken.
+   */
+  cardless: '0c68f4a1',
 } as const;
 
 let root: string;
 let db: Db;
 let pgbouncerId: string;
 let ghostId: string;
+let cardlessId: string;
 const dirs: string[] = [];
 
 /** A cwd for the `./.potsherd/` writes, so no test touches the repo. */
@@ -114,6 +123,9 @@ beforeAll(async () => {
     db.prepare('SELECT session_id AS id FROM ghosts WHERE session_id LIKE ?').get(
       `${ID.ghostPrinter}%`,
     ) as { id: string }
+  ).id;
+  cardlessId = (
+    db.prepare('SELECT id FROM sessions WHERE id LIKE ?').get(`${ID.cardless}%`) as { id: string }
   ).id;
 
   // One real card, so the card-only path and the prompt builder have the shape
@@ -161,6 +173,140 @@ const seqOf = (id: string, n = 0): number =>
   (db.prepare('SELECT seq FROM exchanges WHERE session_id = ? ORDER BY seq').all(id) as {
     seq: number;
   }[])[n]!.seq;
+
+// --------------------------------------------------- G1: never an empty prompt
+
+/**
+ * A transport that behaves the way a real model behaves, which a fixed-reply
+ * stub cannot: it **reads the prompt**, and if the prompt carries no session
+ * material it says so rather than inventing a brief.
+ *
+ * This is the whole of T4.7a G1 in one class. `graft <session>` with no
+ * `--about` on a session with no card built a prompt out of a header, a title
+ * and a list of rules — no transcript, no card, nothing — and the only reply
+ * available to a model given that is a refusal, which `via === 'model'` then
+ * wrote to `./.potsherd/graft-<id8>.md` and `--clip` copied to the clipboard.
+ * A stub with a canned reply cannot catch that, because a canned reply is not
+ * a function of the prompt. This one is.
+ */
+class PickyTransport implements Transport {
+  readonly sent: SendRequest[] = [];
+  closed = 0;
+  readonly backend: Backend = 'agent-sdk';
+
+  async send(req: SendRequest): Promise<SendResult> {
+    this.sent.push(req);
+    const prompt = req.prompt;
+    const beforeTask = prompt.split('## your task')[0] ?? '';
+    // `## card` or `## the last N exchanges …`: any section that is material.
+    if (!/^## /m.test(beforeTask)) {
+      return {
+        text:
+          `I don't have access to the session material. You've provided the session header ` +
+          'but not the transcript, logs, or notes from that session.\n' +
+          'Please provide the session material, and I will write the re-entry brief.',
+        inputTokens: 300,
+        outputTokens: 90,
+        usd: 0.002,
+      };
+    }
+    const legal = /The ONLY legal seq numbers are: ([\d, ]+)/.exec(prompt);
+    const seqs = (legal?.[1] ?? '')
+      .split(',')
+      .map((n) => Number(n.trim()))
+      .filter((n) => Number.isFinite(n));
+    const id8 = /^Session ([0-9a-f]{8})/m.exec(prompt)?.[1] ?? '';
+    return {
+      text: seqs
+        .slice(0, 3)
+        .map((s, i) => `- fact ${i + 1}, drawn from the material above [${id8}@${s}]`)
+        .join('\n'),
+      inputTokens: 900,
+      outputTokens: 120,
+      usd: 0.004,
+    };
+  }
+
+  async close(): Promise<void> {
+    this.closed++;
+  }
+}
+
+describe('a prompt never goes out with no session content in it', () => {
+  it('puts the tail of the transcript in the prompt when there is no --about and no card', async () => {
+    // The broken shape: `collectSource` populated `slice` only under
+    // `if (about)`, and `buildPrompt` included transcript text only under
+    // `if (src.slice.length)`. Card material only under `if (src.card)`. So a
+    // cardless session with no topic produced a prompt with neither.
+    const src = await collectSource(db, cardlessId, {});
+    expect(src.card).toBeNull();
+    expect(src.slice.length).toBeGreaterThan(0);
+    expect(src.sliceVia).toBe('recent');
+
+    const prompt = buildPrompt(src, { budget: DEFAULT_BUDGET });
+    const beforeTask = prompt.split('## your task')[0]!;
+    expect(beforeTask).toMatch(/^## the last \d+ exchanges? of the session$/m);
+    // Real transcript text, not just a heading — the first prompt of this
+    // fixture session, verbatim.
+    expect(prompt).toContain('the customer is charged twice');
+    // And never `## exchanges about "undefined"`, which is what the topic
+    // heading interpolated once this branch became reachable without a topic.
+    expect(prompt).not.toContain('undefined');
+  });
+
+  it('refuses to build a prompt at all when there is genuinely nothing to compress', async () => {
+    const src = await collectSource(db, cardlessId, {});
+    const empty = { ...src, card: null, slice: [], sliceVia: null } as typeof src;
+    expect(hasMaterial(empty)).toBe(false);
+    // A backstop in the function itself, not only in its one caller: a prompt
+    // with no material can only produce a refusal.
+    expect(() => buildPrompt(empty, { budget: DEFAULT_BUDGET })).toThrow(/no indexed material/);
+  });
+
+  it('writes a real brief, not the model saying it has nothing, on a cardless session', async () => {
+    const transport = new PickyTransport();
+    const llm = Llm.open({ transport });
+    const r = await graft(db, cardlessId, { budget: DEFAULT_BUDGET, llm, cwd: workdir() });
+    await llm.close();
+
+    // The exact failure, asserted against: the refusal must not be the brief.
+    expect(r.brief).not.toMatch(/I don't have access to the session material/);
+    expect(r.brief).not.toMatch(/Please provide the session material/);
+
+    expect(r.via).toBe('model');
+    expect(r.citations.length).toBeGreaterThan(0);
+    expect(r.citations.every((c) => c.resolves)).toBe(true);
+    expect(r.brief).toMatch(/^- fact 1, drawn from the material above \[/m);
+    // What went to disk is what was on screen, and it is attributable.
+    expect(fs.readFileSync(r.path, 'utf8')).toBe(r.brief);
+    expect(r.brief.trim().split('\n').pop()).toMatch(/^source: claude /);
+  });
+
+  it('never sends a prompt whose only sections are potsherd’s own rules', async () => {
+    const transport = new PickyTransport();
+    const llm = Llm.open({ transport });
+    await graft(db, cardlessId, { budget: DEFAULT_BUDGET, llm, cwd: workdir() });
+    await llm.close();
+    expect(transport.sent).toHaveLength(1);
+    const beforeTask = transport.sent[0]!.prompt.split('## your task')[0]!;
+    expect(beforeTask).toMatch(/^## /m);
+  });
+
+  it('still narrows to the topic when --about is given — the default is only a default', async () => {
+    const src = await collectSource(db, cardlessId, { about: 'double charge', root });
+    // `--about` still owns the slice; the recency default fires only when
+    // there is neither a topic nor a card.
+    expect(src.sliceVia === 'about' || src.slice.length === 0).toBe(true);
+  });
+
+  it('leaves a carded session alone — its prompt already had material', async () => {
+    const src = await collectSource(db, pgbouncerId, {});
+    expect(src.card).not.toBeNull();
+    expect(src.sliceVia).toBeNull();
+    expect(src.slice).toHaveLength(0);
+    expect(buildPrompt(src, { budget: DEFAULT_BUDGET })).toContain('## card');
+  });
+});
 
 // ----------------------------------------------------------------- budget
 
@@ -317,6 +463,84 @@ describe('every citation resolves, or it is not printed', () => {
     expect(pass.text).not.toMatch(/,\s*\]/);
   });
 
+  it('checks the shorthand second seq in [id8@24, 158], which was displayed and never checked', () => {
+    // **T4.7a G6.** T4.3 taught the pattern to see `[id8@24, id8@158]`, and it
+    // does. But a model that has written the id once shortens the second
+    // reference at least as often as it repeats it, and neither `158` nor
+    // `@158` is an `id8@seq` token — so `158` sat *inside the citation group*,
+    // was shown to the reader, was never resolved against the index, and never
+    // appeared in `GraftResult.citations`. That is the precise failure T4.3
+    // itself named as worse than a dropped citation: an unchecked one.
+    const real = seqOf(pgbouncerId);
+    const pass = resolveCitations(db, `- two exchanges [${ID.pgbouncer}@${real}, 999123]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.citations).toHaveLength(2);
+    expect(pass.citations.find((c) => c.seq === 999123)!.resolves).toBe(false);
+    expect(pass.text).not.toContain('999123');
+    expect(pass.text).toContain(`[${ID.pgbouncer}@${real}]`);
+  });
+
+  it('checks the [id8@24, @158] shorthand too', () => {
+    const real = seqOf(pgbouncerId);
+    const pass = resolveCitations(db, `- two exchanges [${ID.pgbouncer}@${real}, @999124]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.citations).toHaveLength(2);
+    expect(pass.citations.find((c) => c.seq === 999124)!.resolves).toBe(false);
+    expect(pass.text).not.toContain('999124');
+  });
+
+  it('resolves a shorthand seq that is real, and shows it expanded', () => {
+    const a = seqOf(pgbouncerId, 0);
+    const b = seqOf(pgbouncerId, 1);
+    const pass = resolveCitations(db, `- two exchanges [${ID.pgbouncer}@${a}, ${b}]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.citations.map((c) => c.seq).sort((x, y) => x - y)).toEqual([a, b].sort((x, y) => x - y));
+    expect(pass.citations.every((c) => c.resolves)).toBe(true);
+    // The reader is shown the canonical form, which is what they should have
+    // been shown in the first place.
+    expect(pass.text).toContain(`[${ID.pgbouncer}@${a}, ${ID.pgbouncer}@${b}]`);
+    expect(pass.droppedLines).toHaveLength(0);
+  });
+
+  it('leaves a bracket that is not a citation group completely alone', () => {
+    const real = seqOf(pgbouncerId);
+    const pass = resolveCitations(db, `- a list [a, 1, b] and a note [see 4] [${ID.pgbouncer}@${real}]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.text).toContain('[a, 1, b]');
+    expect(pass.text).toContain('[see 4]');
+    expect(pass.citations).toHaveLength(1);
+  });
+
+  it('does not truncate an eight-digit seq into a seq that was never written', () => {
+    // **T4.7a G7.** `CITATION_RE` bounded the seq at `\d{1,7}`, which did not
+    // *refuse* `[id8@12345678]` — it matched the first seven digits, and
+    // `--json` then reported `{"seq":1234567,"resolves":false}`: a number that
+    // appears nowhere in the brief and nowhere in the transcript. A citation
+    // checker that fabricates a citation of its own is worse than the
+    // fabrication it was checking.
+    const pass = resolveCitations(db, `- a fabricated source [${ID.pgbouncer}@12345678]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.citations).toHaveLength(1);
+    expect(pass.citations[0]!.seq).toBe(12345678);
+    expect(pass.citations[0]!.resolves).toBe(false);
+    expect(pass.droppedLines).toHaveLength(1);
+    expect(pass.text.trim()).toBe('');
+  });
+
+  it('reports an absurdly long seq as itself, unresolved, rather than as Infinity', () => {
+    const pass = resolveCitations(db, `- nonsense [${ID.pgbouncer}@${'9'.repeat(40)}]`, {
+      sessionId: pgbouncerId,
+    });
+    expect(pass.citations).toHaveLength(1);
+    expect(pass.citations[0]!.resolves).toBe(false);
+    expect(Number.isFinite(pass.citations[0]!.seq)).toBe(true);
+  });
+
   it('leaves no empty bracket behind when every citation in a group is invented', () => {
     const pass = resolveCitations(db, `- nothing real here [${ID.pgbouncer}@111111, ${ID.pgbouncer}@222222] tail`, {
       sessionId: pgbouncerId,
@@ -339,7 +563,21 @@ describe('every citation resolves, or it is not printed', () => {
     expect(pass.droppedLines).toHaveLength(1);
   });
 
-  it('drops any bullet with no citation at all, and keeps prose that is not a claim', () => {
+  it('drops an uncited bullet AND uncited prose, and keeps only structure', () => {
+    // **CHANGED BY T4.7a G3, and the assertion on the prose line is flipped on
+    // purpose.** This test used to assert that
+    // `'The session settled a pooling question.'` *survived*, on the reasoning
+    // that prose is potsherd's own text rather than an assertion about the
+    // transcript. That reasoning was wrong for the model path, which is where
+    // nearly all prose in a brief comes from: `isClaim` was a bullet-only
+    // rule, so a model's uncited paragraph sailed through, and a model's
+    // paragraph carrying a *fabricated* citation was kept while the fabricated
+    // citation was silently deleted — the product's answer to a fake source
+    // being to erase the evidence that it was fake. Every brief is headed
+    // "every claim carries `[id8@seq]`", and the reader of that header is the
+    // agent the brief gets pasted into, so the filter now covers what the
+    // header claims. Structure — headings, bold labels, rules, fences, blanks
+    // — asserts nothing and still stays.
     const real = seqOf(pgbouncerId);
     const pass = resolveCitations(
       db,
@@ -351,20 +589,66 @@ describe('every citation resolves, or it is not printed', () => {
       ].join('\n'),
       { sessionId: pgbouncerId },
     );
-    // Potsherd's own prose and its own headings are not assertions about the
-    // transcript, so they stay. The uncited bullet is an assertion, so it goes.
-    expect(pass.text).toContain('The session settled a pooling question.');
+    expect(pass.text).not.toContain('The session settled a pooling question.');
     expect(pass.text).toContain('**decided**');
     expect(pass.text).toContain(`[${ID.pgbouncer}@${real}]`);
     expect(pass.text).not.toContain('definitely fixed the load test');
-    expect(pass.droppedLines).toEqual(['- and also we definitely fixed the load test']);
+    expect(pass.droppedLines).toEqual([
+      'The session settled a pooling question.',
+      '- and also we definitely fixed the load test',
+    ]);
   });
 
-  it('the card-only summary survives the rule that drops uncited bullets', async () => {
+  it('takes out a prose claim whose only citation was fabricated, evidence and all', () => {
+    // The shape G3 called worse than a bare uncited claim: the claim was kept,
+    // the false citation deleted, and a dangling " ." left where it had been.
+    const pass = resolveCitations(
+      db,
+      'We migrated the whole fleet to Aurora Serverless v2 [4c9339e0aaaa@999].',
+      { sessionId: pgbouncerId },
+    );
+    expect(pass.text.trim()).toBe('');
+    expect(pass.droppedLines).toHaveLength(1);
+    expect(pass.citations).toEqual([{ id8: '4c9339e0aaaa', seq: 999, resolves: false }]);
+  });
+
+  it('keeps a prose claim that cites — the rule is cited-or-dropped, not bulleted', () => {
+    const real = seqOf(pgbouncerId);
+    const pass = resolveCitations(
+      db,
+      `The pooler question was settled in this session [${ID.pgbouncer}@${real}].`,
+      { sessionId: pgbouncerId },
+    );
+    expect(pass.text).toContain('The pooler question was settled in this session');
+    expect(pass.droppedLines).toHaveLength(0);
+  });
+
+  it('the card-only body no longer emits the summary it could not cite', async () => {
+    // **CHANGED BY T4.7a G3.** This test used to assert the card's summary
+    // *survived* the citation pass. Under the widened filter it is what it
+    // always was — an assertion about the session with no seq behind it, the
+    // card schema giving `evidence_seq` to `decisions` and `open_threads` and
+    // to nothing else — so the header's promise and the brief's contents now
+    // agree. `cardOnlyBody` drops it at the source rather than emit it to be
+    // deleted, because potsherd's own line appearing in `droppedLines` would
+    // report a fabrication that never happened.
     const r = await graft(db, pgbouncerId, { llm: null, cwd: workdir() });
-    // The summary has no seq of its own and must not be mistaken for a claim
-    // the citation pass should delete.
-    expect(r.brief).toContain('Chased a prepared-statement error under the pooler');
+    expect(r.brief).not.toContain('Chased a prepared-statement error under the pooler');
+    expect(r.droppedLines).toHaveLength(0);
+    // What a returning reader came for is still all there, and still cited.
+    expect(r.brief).toContain('use transaction pooling');
+    expect(r.brief).toContain('nobody re-ran the load test after the switch');
+    expect(r.citations.length).toBeGreaterThan(0);
+    expect(r.citations.every((c) => c.resolves)).toBe(true);
+    // The header's promise, asserted rather than trusted: every line of the
+    // brief either carries a citation or is structure/potsherd's own frame.
+    const body = r.brief
+      .split('\n')
+      .filter((l) => l.trim())
+      .filter((l) => !/^(#|>|---|source: |Brief from a past session)/.test(l))
+      .filter((l) => !/^\s*\*\*[^*]+\*\*:?\s*$/.test(l));
+    expect(body.length).toBeGreaterThan(0);
+    for (const line of body) expect(line).toMatch(/\[[0-9a-f]{6,40}@\d+\]/);
   });
 
   it('checks a bare id8@seq with no brackets at all', () => {
@@ -571,6 +855,112 @@ describe('the last line is always the source line', () => {
     const last = r.brief.trim().split('\n').pop()!;
     expect(last).toMatch(/ · \d+ prompts? · /);
     expect(last).not.toMatch(/exchange/);
+  });
+});
+
+// -------------------------------------------- G5: harness boilerplate
+
+describe('another agent’s instructions never reach the brief', () => {
+  const CAVEAT =
+    '<local-command-caveat>Caveat: The messages below were generated by the user while ' +
+    'running local commands. DO NOT respond to these messages or otherwise consider them ' +
+    'in your response unless the user explicitly asks you to.</local-command-caveat>';
+
+  it('strips the slash-command caveat that reached a real brief as a cited claim', () => {
+    // **T4.7a G5.** `graft <id> --no-model --budget 200` produced a brief whose
+    // only bullet was the caveat, carrying another agent's instruction text as
+    // a cited claim about the user's history. `graft` is the one verb whose
+    // output is designed to be pasted into a live agent's context, so that is
+    // injection-adjacent rather than merely noisy. Nothing filtered it:
+    // `grep -rn "local-command-caveat" packages/core/src evals tests` had no
+    // hits before this.
+    const out = stripHarnessBoilerplate(`${CAVEAT}\nthe real question I asked`);
+    expect(out).toBe('the real question I asked');
+    expect(out).not.toContain('DO NOT respond');
+    expect(out).not.toContain('local-command-caveat');
+  });
+
+  it('strips every wrapper block on the list, contents and all', () => {
+    for (const tag of [
+      'local-command-caveat',
+      'local-command-stdout',
+      'local-command-stderr',
+      'command-message',
+      'system-reminder',
+      'user-prompt-submit-hook',
+      'ide_selection',
+      'ide_opened_file',
+      'environment_context',
+      'user_instructions',
+    ]) {
+      const out = stripHarnessBoilerplate(`before <${tag}>SCAFFOLDING</${tag}> after`);
+      expect(out, tag).toBe('before after');
+    }
+  });
+
+  it('keeps the user’s own text inside a command wrapper — the tag goes, the words stay', () => {
+    // Conservative on purpose: `<command-name>/deploy</command-name>` is
+    // harness syntax around something the user actually did. Removing the
+    // block would be guessing at user content.
+    const out = stripHarnessBoilerplate(
+      '<command-name>/deploy</command-name><command-args>staging</command-args>',
+    );
+    expect(out).toContain('/deploy');
+    expect(out).toContain('staging');
+    expect(out).not.toContain('command-name');
+  });
+
+  it('leaves a transcript that merely discusses a wrapper completely alone', () => {
+    // Only a real open/close pair is matched, so a session about parsing these
+    // markers keeps every word of that discussion.
+    const prose = 'we should probably filter system-reminder blocks out of the index';
+    expect(stripHarnessBoilerplate(prose)).toBe(prose);
+  });
+
+  it('strips the caveat prose even when the tag did not survive the adapter', () => {
+    const out = stripHarnessBoilerplate(
+      'Caveat: The messages below were generated by the user while running local commands. ' +
+        'DO NOT respond to these messages.\nthe real question',
+    );
+    expect(out).toContain('the real question');
+    expect(out).not.toContain('Caveat:');
+  });
+
+  it('leaves no empty bullet when a whole message was boilerplate', async () => {
+    // Found while measuring this fix against the real corpus: the caveat
+    // arrives as a message of its own, so a message that is *entirely*
+    // scaffolding strips to nothing — and a brief must then carry no bullet
+    // for it at all, rather than an empty one with a citation attached.
+    expect(stripHarnessBoilerplate(CAVEAT)).toBe('');
+
+    const real = await collectSource(db, cardlessId, {});
+    const src = {
+      ...real,
+      card: null,
+      slice: [],
+      sliceVia: null,
+      show: {
+        ...real.show,
+        exchanges: [
+          { ...real.show.exchanges[0]!, seq: 1, userText: CAVEAT, assistantText: '' },
+          { ...real.show.exchanges[0]!, seq: 2, userText: 'a real question', assistantText: '' },
+        ],
+      },
+    } as typeof real;
+
+    const body = cardOnlyBody(src);
+    expect(body).toEqual([`- a real question [${src.id8}@2]`]);
+    for (const line of body) expect(line).not.toMatch(/^- (you:)?\s*\[/);
+  });
+
+  it('keeps boilerplate out of the prompt and out of the card-only brief', async () => {
+    const src = await collectSource(db, cardlessId, {});
+    const prompt = buildPrompt(src, { budget: DEFAULT_BUDGET });
+    for (const marker of ['<local-command-caveat>', '<system-reminder>', 'DO NOT respond to these']) {
+      expect(prompt).not.toContain(marker);
+    }
+    const body = cardOnlyBody(src).join('\n');
+    expect(body).not.toContain('local-command-caveat');
   });
 });
 
@@ -787,6 +1177,52 @@ describe('the pinned GraftResult', () => {
     expect(r.estimated).toBe(true);
     expect(r.tokens).toBe(tokensForText(r.brief));
     expect(renderGraft(r, new Theme({ color: false }))).toContain('est. (chars/3.6)');
+  });
+
+  it('labels the dollar figure est. too, not just the token count', async () => {
+    // **T4.7a G2.** `render/ask.ts:109`, `render/ask.ts:212` and
+    // `cli/commands/ask.ts:101` all guard money with `r.estimated`;
+    // `render/graft.ts:80` was the one site in the product that did not, and
+    // the unlabelled figure sat two rows under a `tokens` row that labels
+    // *itself* `est. (chars/3.6)`. On the subscription path it is an
+    // api-equivalent estimate, not money anyone was charged. Seen unlabelled
+    // on three real runs; `05`'s honesty contract is explicit.
+    const llm = stub(`- a fact [${ID.pgbouncer}@${seqOf(pgbouncerId)}]`, 'agent-sdk');
+    const r = await graft(db, pgbouncerId, { llm, cwd: workdir() });
+    await llm.close();
+    expect(r.estimated).toBe(true);
+    expect(r.spend.usd).toBeGreaterThan(0);
+    const out = renderGraft(r, new Theme({ color: false }));
+    const money = out.split('\n').find((l) => l.includes('$'))!;
+    expect(money).toBeDefined();
+    expect(money).toMatch(/\$[\d.]+ est\./);
+  });
+
+  it('a zero-citation brief never reads as clean', async () => {
+    // **T4.7a G4.** `citations 0/0 · "distinct, and all resolve"` read green
+    // on a brief with no citations at all — the receipt's most reassuring line
+    // above a brief with no evidence in it. "All of them resolve" is vacuously
+    // true of an empty set; the row exists to answer *is this backed by
+    // anything*, and on zero the answer is no.
+    const llm = stub('This session was about a thing.');
+    const r = await graft(db, pgbouncerId, { llm, cwd: workdir() });
+    await llm.close();
+    expect(r.citations).toHaveLength(0);
+    const out = renderGraft(r, new Theme({ color: false }));
+    const row = out.split('\n').find((l) => l.includes('citations'))!;
+    expect(row).toContain('0/0');
+    expect(row).not.toContain('distinct, and all resolve');
+    expect(row).toContain('nothing in this brief is cited');
+  });
+
+  it('still says all resolve when some actually did', async () => {
+    const llm = stub(`- a fact [${ID.pgbouncer}@${seqOf(pgbouncerId)}]`);
+    const r = await graft(db, pgbouncerId, { llm, cwd: workdir() });
+    await llm.close();
+    const row = renderGraft(r, new Theme({ color: false }))
+      .split('\n')
+      .find((l) => l.includes('citations'))!;
+    expect(row).toContain('distinct, and all resolve');
   });
 
   it('degrades to 60 columns without losing the next verb', async () => {

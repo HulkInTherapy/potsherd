@@ -1,0 +1,112 @@
+T4.7a `graft` defect fixes (G1-G7) — registration block for the integrator.
+Branch: task/T4.7a-graft-fixes, cut from c931016.
+
+Only ONE reserved file needs to change, and nothing already in it is removed:
+four names are added to the existing `./graft.js` export list.
+
+NOTHING IS BROKEN WITHOUT THIS EDIT. The CLI does not import any of the four,
+and `tests/graft.test.ts` imports them from `packages/core/src/graft.js`
+directly. This is a completeness edit so the four new exports are reachable
+from `@potsherd/core` like every other graft symbol.
+
+================================================================================
+1.  packages/core/src/index.ts   — RESERVED, hence this file
+================================================================================
+In the existing block that begins
+
+    // L7 — `graft`: the token-budgeted re-entry brief (`03` §8, T4.3).
+    export {
+      ABOUT_K,
+      CITATION_RE,
+      ...
+
+add these four names, keeping the list alphabetical as it already is:
+
+    RECENT_K,                  // after MIN_BUDGET, before SLICE_CHARS
+    expandCitationGroups,      // after ensureGraftDir, before graft
+    hasMaterial,               // after graftPath, before resolveCitations
+    stripHarnessBoilerplate,   // after sourceLine, before the `type` block
+
+The block then reads, in full:
+
+export {
+  ABOUT_K,
+  CITATION_RE,
+  DEFAULT_BUDGET,
+  GRAFT_SYSTEM,
+  GRAFT_WRITE_PATH_NOTE,
+  GraftError,
+  MIN_BUDGET,
+  RECENT_K,
+  SLICE_CHARS,
+  buildPrompt,
+  cardOnlyBody,
+  clipSafe,
+  collectSource,
+  copyToClipboard,
+  counterFor,
+  countTokens,
+  enforceBudget,
+  ensureGraftDir,
+  expandCitationGroups,
+  graft,
+  graftDir,
+  graftPath,
+  hasMaterial,
+  resolveCitations,
+  resolveTarget,
+  safeCut,
+  sourceLine,
+  stripHarnessBoilerplate,
+  type BudgetPass,
+  type CitationPass,
+  type ClipOutcome,
+  type Counter,
+  type GraftCitation,
+  type GraftOptions,
+  type GraftPath,
+  type GraftReport,
+  type GraftResult,
+  type GraftSource,
+  type TokenCount,
+} from './graft.js';
+export { graftJson, renderGraft } from './render/graft.js';
+
+what the four are:
+
+  RECENT_K                 8. Exchanges pulled when there is no `--about` and
+                           no card — the G1 default slice. A constant encoding
+                           a measured trade-off, so `08` rule 3 applies to it.
+  expandCitationGroups()   G6. Rewrites `[id8@24, 158]` and `[id8@24, @158]`
+                           into the canonical `[id8@24, id8@158]` before the
+                           citation scan.
+  hasMaterial()            G1. True when the prompt would carry actual session
+                           material (a card, or a slice). Checked before the
+                           model call and again inside `buildPrompt`.
+  stripHarnessBoilerplate() G5. Removes named harness wrapper blocks from text
+                           on its way into a brief.
+
+================================================================================
+2.  ALSO CHANGED, in files that are NOT reserved — for the integrator's diff
+================================================================================
+  packages/core/src/graft.ts          G1, G3, G5, G6, G7
+  packages/core/src/render/graft.ts   G2, G4
+  tests/graft.test.ts                 24 tests added, 2 changed
+
+  packages/cli/src/commands/graft.ts  UNCHANGED. No CLI flag was added or
+                                      removed; every fix is below the CLI.
+
+One public-shape note for whoever writes the phase-4 handoff:
+`GraftSource` gains a field, `sliceVia: 'about' | 'recent' | null`. It is not
+part of `GraftResult`, so `graft --json` is byte-identical in shape and the
+pinned interface is untouched.
+
+================================================================================
+3.  verification, after integration
+================================================================================
+  pnpm build
+  pnpm test                       # 1014 tests, was 990 at c931016
+  node packages/cli/bin/potsherd.js graft <cardless-id8> --potsherd-dir <ref>
+      # must NOT print "I don't have access to the session material"
+  node packages/cli/bin/potsherd.js graft <id8> --potsherd-dir <ref> --no-model --budget 200
+      # must NOT print <local-command-caveat>

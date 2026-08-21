@@ -38,11 +38,23 @@ export function renderGraft(r: GraftReport, t: Theme = new Theme()): string {
     note: budgetNote,
     tone: r.tokens <= r.budget ? 'accent' : 'warn',
   });
+  // **T4.7a G4.** `citations 0/0 · "distinct, and all resolve"` read *green*
+  // on a brief that cites nothing — the receipt's most reassuring line sitting
+  // above a brief with no evidence in it at all. "All of them resolve" is
+  // vacuously true of an empty set and useless to a reader deciding whether to
+  // trust what is underneath; the whole point of this row is to answer *is
+  // this brief backed by anything*, and on zero the answer is no. It is a
+  // `warn`, and it names the situation rather than congratulating it.
   card.row({
     label: 'citations',
     value: `${resolved}/${total}`,
-    note: bad > 0 ? `${bad} named an exchange the index has not got` : 'distinct, and all resolve',
-    tone: bad > 0 ? 'warn' : 'none',
+    note:
+      total === 0
+        ? 'nothing in this brief is cited'
+        : bad > 0
+          ? `${bad} named an exchange the index has not got`
+          : 'distinct, and all resolve',
+    tone: total === 0 || bad > 0 ? 'warn' : 'none',
   });
   card.row({
     label: 'exchanges',
@@ -77,7 +89,16 @@ export function renderGraft(r: GraftReport, t: Theme = new Theme()): string {
     card.row({
       label: 'model',
       value: fmt.duration(r.spend.ms),
-      note: `${r.spend.calls} call${r.spend.calls === 1 ? '' : 's'}${r.spend.usd > 0 ? `  ·  ${fmt.money(r.spend.usd)}` : ''}`,
+      // **T4.7a G2.** `render/ask.ts:109`, `render/ask.ts:212` and
+      // `cli/commands/ask.ts:101` all guard money with `r.estimated`; this was
+      // the one site in the product that printed a dollar figure bare — two
+      // rows under a `tokens` row that labels *itself* `est. (chars/3.6)`.
+      // On the subscription path that figure is an api-equivalent estimate and
+      // not money anybody was charged, and `05`'s honesty contract is explicit:
+      // *estimates are labelled `est.`*. Seen unlabelled on three real runs.
+      note:
+        `${r.spend.calls} call${r.spend.calls === 1 ? '' : 's'}` +
+        (r.spend.usd > 0 ? `  ·  ${fmt.money(r.spend.usd)}${r.estimated ? ' est.' : ''}` : ''),
       tone: 'dim',
     });
   }
