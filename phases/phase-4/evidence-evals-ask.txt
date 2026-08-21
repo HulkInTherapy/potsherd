@@ -1,0 +1,52 @@
+
+> potsherd-monorepo@0.0.0 evals:ask /Users/zebra/randomness/potsherd
+> tsx evals/ask-run.ts
+
+potsherd ask evals · ask.jsonl · 10 gold · 3 decoys · k=6 · 33 cards, 120 vectors
+
+       cites  sess  phrase  all  seqs  ev      ms
+  g01     ok  ✓     ✓       ✓     1/1   1   95709  how many requests a second did the checkout…
+  g02     ok  ✓     ✓       ✓     1/1   1   73321  how much weight came off once we stopped pu…
+  g03     ok  ✗     ✗       ·     0/1   0   40489  why did the big amounts stop being exact af…
+  g04     ok  ✓     ✓       ✓     2/2   2   98311  how were we going to keep the billing job f…
+  g05     ok  ✓     ✓       ✓     2/2   2  117823  why did the app store send the build back,…
+  g06     ok  ✓     ✓       ✓     2/2   2  141189  why could people not log in after coming ba…
+  g07     ok  ✓     ✓       ✓     2/2   3  138238  what went wrong with the finance report and…
+  g08     ok  ✓     ✓       ✓     3/3   3  149711  how long do we hang on to the ids that stop…
+  g09     ok  ✓     ✓       ·     1/3   3  151435  we had two separate cases of the reported t…
+  g10     ok  ✗     ✗       ·     0/2   1  115128  something was evicting our service several…
+
+  --strict on a question the corpus cannot answer · refusal, not a guess
+  d01  ✓ refused  ✓ cli exit 2  0 evidence  · what is the capital of france
+  d02  ✓ refused  ✓ cli exit 2  0 evidence  · which cloud provider did we migrate off…
+  d03  ✓ refused  ✓ cli exit 2  0 evidence  · what did we settle on for rate limiting…
+
+       text  card  max  in file
+  g01   13%    0%  13%     0.13  second
+  g02   22%    0%  22%     0.22  once icon
+  g03    0%    0%   0%     0.00
+  g04   29%    0%  29%     0.29  billing backup
+  g05   50%    0%  50%     0.50  app store build
+  g06   33%   50%  50%     0.50  back provider identity
+  g07   17%   50%  50%     0.50  march finance report
+  g08   43%   14%  43%     0.43  long ids twice
+  g09   11%   11%  11%     0.11  totals each
+  g10   36%   18%  36%     0.36  times afternoon straight back several
+
+  word overlap with the answer · min 0% · median 32% · max 50% · flag above 60%
+  none flagged — no question is a quotation of its own answer
+
+  decoys · the closest single session to each, over the whole corpus
+  d01  0%  nearest —
+  d02  20%  nearest 0a2fbf9b-c6fd-4486-86ee-d17cde32e587  shares: cost
+  d03  40%  nearest 6b3a9e24-8f05-4c31-b7d2-1a94e6035cb7  shares: rate endpoint
+
+  index · 120 exchanges embedded in 5.6s · 120 vectors · 33 cards
+
+  plans/06 §ask evals · the three gates
+  (a) citations    18 lines ✓ 0 faults, 100% clean required
+  (b) coverage      8/10  ✓ >= 7/10
+  (c) refusals      3/3   ✓ refused === true and cli exit 2
+      the set                 ✓ overlap as recorded  ✓ decoys still unanswerable
+  PASS — plans/06 phase 4 would accept this ask
+EXIT=0
