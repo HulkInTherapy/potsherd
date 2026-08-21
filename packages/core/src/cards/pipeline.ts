@@ -190,11 +190,23 @@ export async function cardTranscript(
     card = { ...card, outcome: 'unknown' };
   }
 
+  // `verified.kept` as the receipt reports it is a count of **claims the card
+  // holds**, not of claims that passed step 4. The two differ, and they differ
+  // by design: dedupe runs after verify, so a claim can pass verification and
+  // then be absorbed by an identical one. The run receipt said 224 kept where
+  // the database held 218 (T2.7 D7) — six claims that were verified and then
+  // correctly deduplicated, reported as if they were on disk. What is counted
+  // here is what was written. `dropped` still counts step 4's drops, because
+  // that is what it is named after and a deduplicated claim was not dropped:
+  // its text survives in the twin that absorbed it, which is why
+  // `dedupeRemoved` is a separate number.
+  const written = card.decisions.length + card.open_threads.length;
+
   return {
     transcript,
     card,
     chunks: extracted.chunks,
-    verified: verified.verified,
+    verified: { kept: written, dropped: verified.verified.dropped },
     drops: verified.drops,
     coverage,
     coverageBefore,

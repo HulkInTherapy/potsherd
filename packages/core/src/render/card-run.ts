@@ -95,7 +95,9 @@ export function renderCardRun(
     {
       label: 'claims kept',
       value: f.num(report.verified.kept),
-      note: 'decisions and open threads the transcript confirms',
+      // "the cards hold", not "verify passed": dedupe runs after verify, so
+      // the two numbers differ and only one of them is on disk (T2.7 D7).
+      note: 'decisions and open threads the cards hold',
     },
     {
       label: 'claims dropped',

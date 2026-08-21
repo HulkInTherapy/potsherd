@@ -521,13 +521,43 @@ potsherd doctor --privacy · 21 aug 2026
     ~/.claude/settings.json
       cleanupPeriodDays, and one SessionStart hook entry
 
-  no network, except the one-off embedding-model download that
+  leaves this machine:
+    redacted slices of your transcripts, sent to a model as the
+    text of one prompt. redaction runs first, in one place, on
+    every outgoing string — there is no --no-redact flag.
+    nothing else is ever sent: no file is uploaded, no path, no
+    index, no counts, no identifiers.
+
+  only these verbs call a model:
+    potsherd card        writes the cards; one call per slice
+    later phases add ask and graft, which send the same slices.
+
+  these never do, and open no socket at all:
+    audit, rescue, guard, index, ls, find, show, stats, tag, pin,
+    link, doctor
+
+  who receives them:
+    your own Claude subscription, via ~/.claude/local/claude
+    the same binary and the same account you already use by hand.
+    potsherd holds no key, no token and no account of its own.
+    the call runs with no tools, in an empty scratch directory, and
+    its session is never written to ~/.claude/projects.
+
+  no other network, except the one-off embedding-model download that
   `potsherd index` announces before it starts and `--no-embed` skips.
-  no telemetry. no account.
+  no telemetry. no account. potsherd stores no credential of its own.
 ```
 
 `~/.claude`, `~/.codex`, `~/.cursor`, `~/.pi` and `~/.gemini` are read-only
 inputs. Archived copies are written 0600 and keep their original mtime.
+
+The one thing that leaves your machine is the text `potsherd card` sends to a
+model: redacted slices of the transcripts being carded, and nothing else. It
+goes to the `claude` binary you already have, on your own subscription — or, if
+you have no `claude` and you set `ANTHROPIC_API_KEY`, to the API on your key.
+Redaction happens first, in one place, on every outgoing string, and there is
+no `--no-redact`. `audit`, `rescue`, `index`, `find`, `ls`, `show` and `stats`
+never call a model and open no socket at all.
 
 Run `potsherd doctor --privacy` on your machine to see the real list.
 

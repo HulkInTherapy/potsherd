@@ -2,6 +2,7 @@ import type { Db } from './db.js';
 import type { Harness, SessionStatus } from './adapters/types.js';
 import { buildGhostFilters, buildSessionFilters, type SearchFilters } from './search/filters.js';
 import { tagsForSessions } from './tags.js';
+import { readCard, type StoredCard } from './cards/write.js';
 import {
   fromGhostRow,
   fromSessionRow,
@@ -372,6 +373,15 @@ export interface ShowResult {
   ghostPrompts?: { seq: number; ts: string | null; text: string }[];
   /** Sidechains that name this session as their parent. */
   children: { id: string; agentName: string | null; exchanges: number }[];
+  /**
+   * The whole card, when this session has one (T2.7 D3).
+   *
+   * Until T2.7 `show` carried only `cardTitle` and `cardSource`, so the card —
+   * this phase's central artifact — was readable through the markdown mirror
+   * or a SQL client and nowhere else. The card is what a returning reader came
+   * for; the transcript is what they read if the card does not answer them.
+   */
+  card: StoredCard | null;
 }
 
 export interface ShowOptions {
@@ -441,6 +451,7 @@ export function showSession(db: Db, id: string, options: ShowOptions = {}): Show
         agentName: c.agent_name,
         exchanges: c.exchanges,
       })),
+      card: readCard(db, id),
     };
   }
 
@@ -466,7 +477,16 @@ export function showSession(db: Db, id: string, options: ShowOptions = {}): Show
     text: string;
   }[];
 
-  return { session, from, to, total, exchanges: [], ghostPrompts: prompts, children: [] };
+  return {
+    session,
+    from,
+    to,
+    total,
+    exchanges: [],
+    ghostPrompts: prompts,
+    children: [],
+    card: readCard(db, id),
+  };
 }
 
 function window(total: number, o: ShowOptions): { from: number; to: number } {

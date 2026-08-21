@@ -7,6 +7,7 @@ import { EMBEDDING_DIMENSIONS, embeddingToBlob } from '../embeddings.js';
 import { cardsDir } from '../paths.js';
 import { vecAvailable } from '../vec.js';
 import { PROMPTS_ONLY } from './ghost.js';
+import { isErroredSentinel } from './sentinel.js';
 import type { CardClaim, ExtractedCard } from './schema.js';
 import type { VerifyTotals } from './verify.js';
 
@@ -322,9 +323,20 @@ function vecCardsExist(db: Db): boolean {
 // ------------------------------------------------------------------- export
 
 export interface ExportResult {
+  /** Cards actually written into `dest`. Never a sentinel, never a promise. */
   files: number;
   bytes: number;
   dest: string;
+  /**
+   * Error sentinels and empty markers passed over.
+   *
+   * Reported rather than silently swallowed: "63 copied, 29 skipped" tells the
+   * user 29 sessions failed to card and where to look, which is the whole
+   * point of the sentinel. Before T2.7 they were copied instead — the run said
+   * "92 cards copied" when 63 cards existed, and wrote 29 files whose entire
+   * content was `__ERRORED__` into somebody's vault.
+   */
+  skipped: number;
 }
 
 /**
@@ -337,7 +349,7 @@ export interface ExportResult {
  */
 export function exportCards(root: string, dest: string): ExportResult {
   const from = cardsDir(root);
-  const result: ExportResult = { files: 0, bytes: 0, dest };
+  const result: ExportResult = { files: 0, bytes: 0, dest, skipped: 0 };
   if (!fs.existsSync(from)) return result;
 
   const walk = (dir: string, rel: string): void => {
@@ -349,15 +361,116 @@ export function exportCards(root: string, dest: string): ExportResult {
         continue;
       }
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+
+      // Not every `.md` under the mirror is a card. `cards/sentinel.ts` writes
+      // two other things there — an empty file for a session that can never be
+      // carded, and an `__ERRORED__` marker for one whose last attempt failed —
+      // and both are potsherd's own bookkeeping. Exporting them puts a file
+      // saying `__ERRORED__` in the user's vault and counts it as a card.
+      let content: string;
+      try {
+        content = fs.readFileSync(source, 'utf-8');
+      } catch {
+        result.skipped += 1;
+        continue;
+      }
+      if (content.length === 0 || isErroredSentinel(content)) {
+        result.skipped += 1;
+        continue;
+      }
+
       const target = path.join(dest, relative);
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.copyFileSync(source, target);
+      fs.writeFileSync(target, content, { mode: 0o600 });
+      // Counted after the write, from what the write actually put there: the
+      // receipt's number is a count of files that exist, not of files
+      // considered.
       result.files += 1;
-      result.bytes += fs.statSync(source).size;
+      result.bytes += Buffer.byteLength(content);
     }
   };
   walk(from, '');
   return result;
+}
+
+/**
+ * The whole card a session holds, for a reader rather than for the pipeline.
+ *
+ * {@link readPriorCard} already reads six of these columns, but it deliberately
+ * returns only the {@link ExtractedCard} — it exists to be shown back to a
+ * model as the prior, and `verified`, `source` and `model` are not the model's
+ * business. `show` needs the other half: a reader deciding how much to believe
+ * a card needs the counts, what it was written from, and by which model. So
+ * this is a second, wider read rather than a widened one.
+ *
+ * Null when the session has no card, which is the common case on a fresh
+ * index and is not an error.
+ */
+export interface StoredCard {
+  card: ExtractedCard;
+  /** `{ kept, dropped }` as `verify.ts` counted them, or null on an old row. */
+  verified: VerifyTotals | null;
+  /** `transcript`, or `prompts-only` for a ghost. */
+  source: string;
+  model: string | null;
+  createdAt: string | null;
+  costUsd: number;
+}
+
+export function readCard(db: Db, sessionId: string): StoredCard | null {
+  const row = db
+    .prepare(
+      `SELECT title, summary, topics, decisions, files, outcome, open_threads,
+              suggested_tags, verified, source, model, created_at, cost_usd
+         FROM cards WHERE session_id = ?`,
+    )
+    .get(sessionId) as
+    | {
+        title: string | null;
+        summary: string | null;
+        topics: string;
+        decisions: string;
+        files: string;
+        outcome: string | null;
+        open_threads: string;
+        suggested_tags: string;
+        verified: string | null;
+        source: string;
+        model: string | null;
+        created_at: string | null;
+        cost_usd: number;
+      }
+    | undefined;
+  if (!row) return null;
+  const parse = <T>(json: string | null, fallback: T): T => {
+    if (!json) return fallback;
+    try {
+      return JSON.parse(json) as T;
+    } catch {
+      return fallback;
+    }
+  };
+  const verified = parse<VerifyTotals | null>(row.verified, null);
+  return {
+    card: {
+      title: row.title ?? '',
+      summary: row.summary ?? '',
+      topics: parse<string[]>(row.topics, []),
+      decisions: parse<CardClaim[]>(row.decisions, []),
+      files: parse<string[]>(row.files, []),
+      outcome: (row.outcome as ExtractedCard['outcome']) ?? 'unknown',
+      open_threads: parse<CardClaim[]>(row.open_threads, []),
+      tags: parse<string[]>(row.suggested_tags, []),
+    },
+    verified:
+      verified && typeof verified.kept === 'number' && typeof verified.dropped === 'number'
+        ? verified
+        : null,
+    source: row.source,
+    model: row.model,
+    createdAt: row.created_at,
+    costUsd: row.cost_usd,
+  };
 }
 
 /** The card already written for a session, as the prior for a re-card. */

@@ -25,7 +25,7 @@ import {
   themeFrom,
   type GlobalOptions,
 } from '../output.js';
-import { openIndex, parseFilters, type FilterFlags } from '../filters.js';
+import { openIndex, parseFilters, parseLimit, type FilterFlags } from '../filters.js';
 
 /**
  * `potsherd card` — the quote, and (from T2.2) the run.
@@ -77,6 +77,16 @@ export interface CardCommandOptions extends GlobalOptions, FilterFlags {
    * already spells the same idea `--ghosts-only`.
    */
   ghostsOnly?: boolean;
+  /**
+   * `--limit n`: card at most this many targets.
+   *
+   * A shared filter flag, so it arrives here for free — but until T2.7 it was
+   * dropped on the floor between `filterFlags()` and `planCards()`, and
+   * `card --ghosts-only --limit 10` quoted and ran all ninety. A limit that
+   * the quote honours and the run ignores is worse than no limit at all: the
+   * confirmation says 10 and the machine spends an hour.
+   */
+  limit?: number;
 }
 
 export async function runCard(o: CardCommandOptions): Promise<number> {
@@ -126,9 +136,11 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
       missing = err;
     }
 
+    const limit = parseLimit(o.limit, 0);
     const plan = planCards(db, {
       filters,
       force: Boolean(o.force),
+      ...(limit > 0 ? { limit } : {}),
       ...(o.model ? { model: o.model } : {}),
       ...(choice ? { backend: choice.backend, chargeable: choice.chargeable } : {}),
       concurrency: o.concurrency ?? DEFAULT_CONCURRENCY,
@@ -254,13 +266,27 @@ function runExport(o: CardCommandOptions, dest: string): number {
   const t = themeFrom(o);
   print('');
   if (result.files === 0) {
-    print(`  no cards in ${paths.tildify(paths.cardsDir(root))} yet.`);
+    print(
+      result.skipped > 0
+        ? `  no cards in ${paths.tildify(paths.cardsDir(root))} — only ${result.skipped} error marker` +
+          `${result.skipped === 1 ? '' : 's'} from a failed run.`
+        : `  no cards in ${paths.tildify(paths.cardsDir(root))} yet.`,
+    );
     print(`  ${t.dim('try:')}  potsherd card --all`);
   } else {
     print(
       `  ${t.ok(String(result.files))} card${result.files === 1 ? '' : 's'} copied to ${dest}` +
         ` ${t.sep} ${(result.bytes / 1024).toFixed(0)} kB`,
     );
+    // The skipped ones are failed sessions, and a user who exported a vault
+    // should be told the vault is short rather than left to count.
+    if (result.skipped > 0) {
+      print(
+        `  ${t.dim(String(result.skipped) + ' not copied')} ${t.sep} ` +
+          `error markers from a failed card run, not cards`,
+      );
+      print(`  ${t.dim('try:')}  potsherd card --all --force`);
+    }
   }
   print('');
   return 0;

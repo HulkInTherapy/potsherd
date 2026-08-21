@@ -27,6 +27,28 @@ potsherd doctor --privacy · 21 aug 2026
     ~/.claude/settings.json
       cleanupPeriodDays, and one SessionStart hook entry
 
-  no network, except the one-off embedding-model download that
+  leaves this machine:
+    redacted slices of your transcripts, sent to a model as the
+    text of one prompt. redaction runs first, in one place, on
+    every outgoing string — there is no --no-redact flag.
+    nothing else is ever sent: no file is uploaded, no path, no
+    index, no counts, no identifiers.
+
+  only these verbs call a model:
+    potsherd card        writes the cards; one call per slice
+    later phases add ask and graft, which send the same slices.
+
+  these never do, and open no socket at all:
+    audit, rescue, guard, index, ls, find, show, stats, tag, pin,
+    link, doctor
+
+  who receives them:
+    your own Claude subscription, via ~/.claude/local/claude
+    the same binary and the same account you already use by hand.
+    potsherd holds no key, no token and no account of its own.
+    the call runs with no tools, in an empty scratch directory, and
+    its session is never written to ~/.claude/projects.
+
+  no other network, except the one-off embedding-model download that
   `potsherd index` announces before it starts and `--no-embed` skips.
-  no telemetry. no account.
+  no telemetry. no account. potsherd stores no credential of its own.

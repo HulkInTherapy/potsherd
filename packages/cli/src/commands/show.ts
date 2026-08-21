@@ -81,6 +81,10 @@ export async function runShow(o: ShowCommandOptions): Promise<number> {
         exchanges: result.exchanges,
         ghostPrompts: result.ghostPrompts ?? null,
         children: result.children,
+        // The whole card, not `cardTitle` and `cardSource`. A machine reader
+        // asking `show --json` for a carded session was getting the two
+        // fields the *title* needed and none of the card (T2.7 D3).
+        card: result.card,
       });
       return 0;
     }

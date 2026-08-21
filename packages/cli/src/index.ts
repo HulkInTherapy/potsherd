@@ -436,6 +436,7 @@ example:
   potsherd card --all --max-usd 2
   potsherd card 4c9339e0 --model sonnet
   potsherd card --ghosts-only --max-usd 2                # only what the sweep deleted
+  potsherd card --ghosts-only --limit 10             # a small run first
   potsherd card --export ~/vault/sessions            # copy the markdown mirror out
   potsherd card --probe                              # one tiny call: does the backend work?`);
   card.action(async (session: string | undefined, opts: Record<string, unknown>) => {
