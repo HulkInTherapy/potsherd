@@ -46,9 +46,9 @@ export function renderShow(r: ShowResult, t: Theme = new Theme(), now = new Date
   // below and nothing else — and `show` is where a reader decides how much to
   // believe it (`phase-2` T2.3).
   if (s.cardSource === 'prompts-only') {
+    const note = f.clip('— written from these prompts; the assistant side is gone', width - 22);
     lines.push(
-      INDENT + t.dim('card') + `  ${t.accent('prompts-only')}` +
-        t.dim('  — written from these prompts; the assistant side is gone'),
+      INDENT + t.dim('card') + `  ${t.accent('prompts-only')}` + t.dim(`  ${note}`),
     );
   }
 
