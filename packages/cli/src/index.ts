@@ -266,8 +266,6 @@ filters, one example each — they compose, and all of them are AND:
           vec: opts['vec'] !== false,
           explain: Boolean(opts['explain']),
           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
-          ...(opts['readersOut'] ? { readersOut: String(opts['readersOut']) } : {}),
-          ...(opts['readersIn'] ? { readersIn: String(opts['readersIn']) } : {}),
         }),
       o,
     );
@@ -339,6 +337,8 @@ exit codes:  0 answered  ·  1 nothing matched  ·  2 --strict refused`);
           ...(opts['model'] ? { model: String(opts['model']) } : {}),
           ...(opts['readerModel'] ? { readerModel: String(opts['readerModel']) } : {}),
           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
+          ...(opts['readersOut'] ? { readersOut: String(opts['readersOut']) } : {}),
+          ...(opts['readersIn'] ? { readersIn: String(opts['readersIn']) } : {}),
         }),
       o,
     );
