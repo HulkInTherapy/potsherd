@@ -1,0 +1,72 @@
+#!/bin/sh
+# The potsherd this plugin runs.
+#
+# `skills/potsherd/SKILL.md` pre-approves exactly this path
+# (`allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/potsherd *)`) and routes all
+# fifteen verbs through it, so every `/potsherd <verb>` arrives here.
+#
+# Resolution order, and why it is not phase 0's order:
+#
+#   `resolve-bin.ts` prefers `potsherd` on PATH, because it is installing a
+#   command into the *user's* settings.json, where a portable spelling survives
+#   upgrades and reads better in a diff. This file is the opposite situation.
+#   It belongs to a plugin that carries its own version number, and the archive
+#   format it speaks is pinned to that version. Reaching for PATH first would
+#   let a stale global install answer for a newer plugin -- on the machine this
+#   was written on, PATH held 0.1.0 while the checkout beside it was 0.4.0.
+#   So: this plugin's own potsherd first, PATH only as a last resort.
+#
+#   1. vendored inside the plugin        (T5.6's packaging, if it lands)
+#   2. the working copy this plugin was checked out inside, once built
+#   3. a global install on PATH
+#   4. nothing -- and then it says so, loudly, and exits non-zero
+#
+# Step 4 is the whole point. Phase 0's ruling was that a hook which looks
+# installed and silently does nothing is worse than no hook; a shim that exits
+# 0 having run nothing is the same failure wearing the skill's clothes. There
+# is no silent branch below.
+#
+# NOTE ON WHAT STEPS 1 AND 2 NEED. `dist/potsherd.js` is a single esbuild
+# bundle, but it is not self-contained: it still resolves `better-sqlite3` and
+# `sqlite-vec` at runtime through `createRequire`, so it needs a `node_modules`
+# beside it with those two built for the host platform. A git clone of this
+# repository has neither `dist/` (gitignored) nor `node_modules/`, which is why
+# a marketplace install falls through to step 3 and why the README tells you to
+# `npm i -g potsherd`. Making step 1 work for a marketplace install requires a
+# packaging change to `packages/cli` -- reserved ground, and T5.6's call.
+set -u
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# 1. vendored: plugins/claude-code/dist/potsherd.js
+if [ -f "$ROOT/dist/potsherd.js" ]; then
+  exec node "$ROOT/dist/potsherd.js" "$@"
+fi
+
+# 2. the surrounding checkout: <repo>/packages/cli/dist/potsherd.js
+if [ -f "$ROOT/../../packages/cli/dist/potsherd.js" ]; then
+  exec node "$ROOT/../../packages/cli/dist/potsherd.js" "$@"
+fi
+
+# 3. a global install
+if command -v potsherd >/dev/null 2>&1; then
+  exec potsherd "$@"
+fi
+
+# 4. no potsherd anywhere. Say which three places were tried.
+cat >&2 <<EOF
+potsherd: this plugin has no potsherd to run, so nothing was done.
+
+Looked in three places:
+  1. $ROOT/dist/potsherd.js                      (vendored in the plugin)
+  2. $ROOT/../../packages/cli/dist/potsherd.js   (the surrounding checkout)
+  3. potsherd on PATH                            (a global install)
+
+Fix it with either:
+  npm i -g potsherd                     installs the published CLI
+  pnpm install && pnpm build            if you are running from a checkout
+
+A marketplace install gets neither on its own: dist/ is gitignored and the
+bundle needs better-sqlite3 and sqlite-vec built for this platform.
+EOF
+exit 127

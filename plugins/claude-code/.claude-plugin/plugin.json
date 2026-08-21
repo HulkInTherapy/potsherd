@@ -1,0 +1,24 @@
+{
+  "name": "potsherd",
+  "displayName": "potsherd",
+  "version": "0.5.0",
+  "description": "Rescue, index, search, interrogate and re-enter every coding-agent session on your machine. Takes a copy before Claude Code's 30-day sweep can delete one.",
+  "author": {
+    "name": "HulkInTherapy",
+    "url": "https://github.com/HulkInTherapy"
+  },
+  "homepage": "https://github.com/HulkInTherapy/potsherd",
+  "repository": "https://github.com/HulkInTherapy/potsherd",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "session",
+    "history",
+    "transcript",
+    "memory",
+    "search",
+    "archive",
+    "rescue",
+    "mcp"
+  ]
+}

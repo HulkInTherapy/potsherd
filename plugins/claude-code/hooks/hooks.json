@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "if command -v potsherd >/dev/null 2>&1; then P=potsherd; A=; elif [ -f \"$CLAUDE_PLUGIN_ROOT/bin/potsherd.js\" ]; then P=node; A=\"$CLAUDE_PLUGIN_ROOT/bin/potsherd.js\"; elif [ -f \"$CLAUDE_PLUGIN_ROOT/../../packages/cli/bin/potsherd.js\" ]; then P=node; A=\"$CLAUDE_PLUGIN_ROOT/../../packages/cli/bin/potsherd.js\"; else printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\"},\"systemMessage\":\"potsherd: the SessionStart hook found no runnable potsherd, so NO copy was taken. Install it with  npm i -g potsherd  — see the plugin README.\"}\\n'; exit 0; fi; (trap '' HUP; \"$P\" ${A:+\"$A\"} rescue --yes --quiet --no-settings) </dev/null >/dev/null 2>&1 & exit 0"
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "CFG=\"${POTSHERD_DIR:-$HOME/.potsherd}/config.json\"; grep -q '\"briefOnStart\"[[:space:]]*:[[:space:]]*true' \"$CFG\" 2>/dev/null || exit 0; if command -v potsherd >/dev/null 2>&1; then P=potsherd; A=; elif [ -f \"$CLAUDE_PLUGIN_ROOT/bin/potsherd.js\" ]; then P=node; A=\"$CLAUDE_PLUGIN_ROOT/bin/potsherd.js\"; elif [ -f \"$CLAUDE_PLUGIN_ROOT/../../packages/cli/bin/potsherd.js\" ]; then P=node; A=\"$CLAUDE_PLUGIN_ROOT/../../packages/cli/bin/potsherd.js\"; else exit 0; fi; PROJ=$(basename \"${CLAUDE_PROJECT_DIR:-$PWD}\"); \"$P\" ${A:+\"$A\"} ls --project \"$PROJ\" --since 7d --limit 1 --json 2>/dev/null | node -e 'let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{try{process.exit(JSON.parse(s).total===0?0:1)}catch(e){process.exit(1)}})' || exit 0; \"$P\" ${A:+\"$A\"} ls --project \"$PROJ\" --limit 5 --no-color 2>/dev/null | node -e 'let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{s=s.trim().slice(0,4800);if(!s)process.exit(0);process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:\"potsherd: this project has been untouched for 7+ days. Its most recent sessions:\\n\"+s+\"\\nUse the potsherd MCP tools to read any of them before assuming context is lost.\"}}))})'"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "ID=$(sed -n 's/.*\"session_id\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' | head -1); [ -n \"$ID\" ] || exit 0; if command -v potsherd >/dev/null 2>&1; then P=potsherd; A=; elif [ -f \"$CLAUDE_PLUGIN_ROOT/bin/potsherd.js\" ]; then P=node; A=\"$CLAUDE_PLUGIN_ROOT/bin/potsherd.js\"; elif [ -f \"$CLAUDE_PLUGIN_ROOT/../../packages/cli/bin/potsherd.js\" ]; then P=node; A=\"$CLAUDE_PLUGIN_ROOT/../../packages/cli/bin/potsherd.js\"; else exit 0; fi; CFG=\"${POTSHERD_DIR:-$HOME/.potsherd}/config.json\"; if grep -q '\"cardOnEnd\"[[:space:]]*:[[:space:]]*true' \"$CFG\" 2>/dev/null; then CARD=1; else CARD=; fi; (trap '' HUP; \"$P\" ${A:+\"$A\"} index --session \"$ID\" --quiet; [ -n \"$CARD\" ] && \"$P\" ${A:+\"$A\"} card \"$ID\" --quiet --yes) </dev/null >/dev/null 2>&1 & exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}
