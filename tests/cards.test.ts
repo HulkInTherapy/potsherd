@@ -913,7 +913,7 @@ describe('writing a card', () => {
     expect(safeSlug('../../etc')).toBe('etc');
     expect(safeSlug('a/b')).toBe('a-b');
     // A real Claude Code slug is one segment and survives untouched.
-    expect(safeSlug('-Users-zebra-Fulcrum')).toBe('-Users-zebra-Fulcrum');
+    expect(safeSlug('-Users-example-Ledger')).toBe('-Users-example-Ledger');
     expect(safeSlug(null)).toBe('unknown');
     expect(safeSlug('')).toBe('unknown');
   });
@@ -983,7 +983,7 @@ describe('the run', () => {
     const db = seededDb(scratch());
     db.prepare(
       `INSERT INTO ghosts (session_id, harness, project, first_ts, last_ts, prompt_count)
-       VALUES ('g1', 'claude', '/Users/zebra/Fulcrum', '2026-08-01T00:00:00.000Z', '2026-08-01T01:00:00.000Z', 9)`,
+       VALUES ('g1', 'claude', '/Users/example/Ledger', '2026-08-01T00:00:00.000Z', '2026-08-01T01:00:00.000Z', 9)`,
     ).run();
     for (let i = 0; i < 9; i++) {
       db.prepare(
@@ -994,8 +994,8 @@ describe('the run', () => {
     db.close();
     // `rescue` recovers a cwd, not a slug; the target carries Claude Code's own
     // spelling of it so T2.3's cards land beside this project's sessions.
-    expect(ghost.projectSlug).toBe('-Users-zebra-Fulcrum');
-    expect(safeSlug(ghost.projectSlug)).toBe('-Users-zebra-Fulcrum');
+    expect(ghost.projectSlug).toBe('-Users-example-Ledger');
+    expect(safeSlug(ghost.projectSlug)).toBe('-Users-example-Ledger');
   });
 
   it('cards a session and a ghost in one run, through one pipeline', async () => {
@@ -1535,8 +1535,8 @@ describe('ghost cards', () => {
     // `ghosts` has no project_slug: the transcript that carried one is what
     // the sweep deleted. Re-deriving it with Claude Code's own encoding is
     // what keeps one project in one directory.
-    expect(ghostProjectSlug('/Users/zebra/Downloads/Protfolio_app')).toBe(
-      '-Users-zebra-Downloads-Protfolio-app',
+    expect(ghostProjectSlug('/Users/example/Downloads/Sample_app')).toBe(
+      '-Users-example-Downloads-Sample-app',
     );
     expect(ghostProjectSlug('/tmp/p')).toBe('-tmp-p');
     expect(ghostProjectSlug(null)).toBeNull();

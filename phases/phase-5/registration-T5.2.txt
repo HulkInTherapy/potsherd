@@ -42,7 +42,7 @@ loads.
   ${CLAUDE_PLUGIN_ROOT}                        VERIFIED  docs (skills.md)
 
 The second sources, by path (all read-only):
-  /Users/zebra/.claude/plugins/marketplaces/claude-plugins-official/plugins/
+  ~/.claude/plugins/marketplaces/claude-plugins-official/plugins/
       example-plugin/skills/example-command/SKILL.md
       example-plugin/skills/example-skill/SKILL.md
       claude-security/agents/explore.md

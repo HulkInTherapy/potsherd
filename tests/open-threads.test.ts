@@ -130,8 +130,8 @@ function addCard(db: Db, spec: CardSpec): string {
   return id;
 }
 
-const FULCRUM = '/Users/zebra/Fulcrum';
-const MEGHBRAIN = '/Users/zebra/meghbrain';
+const LEDGER = '/Users/example/Ledger';
+const BRAINSTORE = '/Users/example/brainstore';
 
 /** The shared vocabulary that makes two projects siblings rather than strangers. */
 const SIBLING_TOPICS = ['pgbouncer', 'prepared statements', 'connection pooling', 'postgres'];
@@ -150,13 +150,13 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
   it('produces one candidate when B genuinely never mentions the decision', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [DECIDED],
     });
     addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
@@ -167,8 +167,8 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
     const c = found[0]!;
     expect(c.what).toBe(DECIDED.what);
     expect(c.why).toBe(DECIDED.why);
-    expect(c.project).toBe(FULCRUM);
-    expect(c.otherProject).toBe(MEGHBRAIN);
+    expect(c.project).toBe(LEDGER);
+    expect(c.otherProject).toBe(BRAINSTORE);
     // Cited or dropped: the positive half of the claim is checkable.
     // Was `expect(c.evidenceSeq).toBe(7)` — changed in T4.5 (D3) because the
     // field is now every resolving seq, not the lowest one. Same seq, new shape.
@@ -188,13 +188,13 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
   it('carries every citation the decision made, not just the lowest', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ ...DECIDED, seq: [7, 12, 31] }],
     });
     addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
@@ -210,7 +210,7 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
   it('keeps only the seqs that resolve, so every one of them can be read', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ ...DECIDED, seq: [7, 999] }],
@@ -218,7 +218,7 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
       exchangeSeqs: [7],
     });
     addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
@@ -232,7 +232,7 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
   it('produces nothing when B did contain the decision, in different words', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [DECIDED],
@@ -240,7 +240,7 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
     // Same projects, same files, same topics — and B decided it too. This is
     // the false positive that reads as insight, and it must not be raised.
     addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [
@@ -257,13 +257,13 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
   it('counts an open thread in B as B having seen it', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [DECIDED],
     });
     addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
@@ -278,13 +278,13 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
     const db = memDb();
     // The brief's case: two projects that happen to share the word "auth".
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: ['auth', 'pgbouncer', 'prepared statements'],
       files: ['db/pool.ts'],
       decisions: [{ what: 'rotate the auth signing key every ninety days', seq: [3] }],
     });
     addCard(db, {
-      project: '/Users/zebra/maths_practice',
+      project: '/Users/example/field_notes',
       topics: ['auth', 'quadratics', 'worksheets'],
       files: ['sheets/algebra.md'],
       decisions: [{ what: 'generate one worksheet per topic', seq: [1] }],
@@ -296,34 +296,34 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
   it('does not fire across a project and its own subdirectory', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [DECIDED],
     });
     addCard(db, {
-      project: `${MEGHBRAIN}/docs`,
+      project: `${BRAINSTORE}/docs`,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ what: 'document the runbook', seq: [1] }],
     });
 
     expect(openThreadCandidates(db, [a])).toEqual([]);
-    expect(sameProject(MEGHBRAIN, `${MEGHBRAIN}/docs`)).toBe(true);
-    expect(sameProject(MEGHBRAIN, FULCRUM)).toBe(false);
-    expect(sameProject(MEGHBRAIN, '/Users/zebra/meghbrain-old')).toBe(false);
+    expect(sameProject(BRAINSTORE, `${BRAINSTORE}/docs`)).toBe(true);
+    expect(sameProject(BRAINSTORE, LEDGER)).toBe(false);
+    expect(sameProject(BRAINSTORE, '/Users/example/brainstore-old')).toBe(false);
   });
 
   it('drops a decision whose evidence_seq resolves to no exchange', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ ...DECIDED, seq: [99] }],
       exchangeSeqs: [1, 2, 3], // 99 is not among them
     });
-    addCard(db, { project: MEGHBRAIN, topics: SIBLING_TOPICS, files: SIBLING_FILES });
+    addCard(db, { project: BRAINSTORE, topics: SIBLING_TOPICS, files: SIBLING_FILES });
 
     expect(openThreadCandidates(db, [a])).toEqual([]);
   });
@@ -331,13 +331,13 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
   it('drops a decision that cites nothing at all', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ ...DECIDED, seq: [] }],
       exchangeSeqs: [1, 2, 3],
     });
-    addCard(db, { project: MEGHBRAIN, topics: SIBLING_TOPICS, files: SIBLING_FILES });
+    addCard(db, { project: BRAINSTORE, topics: SIBLING_TOPICS, files: SIBLING_FILES });
 
     // "Cited or dropped": an uncited decision is dropped, not marked, because
     // the negative half of an open thread can never be cited either.
@@ -347,7 +347,7 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
   it('honours the limit and orders by score', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [
@@ -357,7 +357,7 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
       ],
     });
     addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
@@ -375,14 +375,14 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
   it('raises one line per decision, not one per sibling project', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [DECIDED],
     });
     // Two related projects, neither of which ever mentions it. That is still
     // one claim, and `OpenThreadCandidate` can name only one `otherProject`.
-    for (const p of [MEGHBRAIN, '/Users/zebra/proteus']) {
+    for (const p of [BRAINSTORE, '/Users/example/proteus']) {
       addCard(db, {
         project: p,
         topics: SIBLING_TOPICS,
@@ -399,19 +399,19 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
   it('collapses the same decision reached from two sessions of A', () => {
     const db = memDb();
     const a1 = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [DECIDED],
     });
     const a2 = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [DECIDED],
     });
     addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
@@ -436,14 +436,14 @@ describe('T4.2 ghost cards — weak evidence may withdraw a candidate, never rai
     // assistant side, so a "decision" on one is a decision the user typed
     // about, not one the transcript shows being made.
     const ghost = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [DECIDED],
       ghost: true,
     });
     addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [2] }],
@@ -455,7 +455,7 @@ describe('T4.2 ghost cards — weak evidence may withdraw a candidate, never rai
   it('lets a ghost card in B withdraw a candidate', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [DECIDED],
@@ -464,7 +464,7 @@ describe('T4.2 ghost cards — weak evidence may withdraw a candidate, never rai
     // too weak to accuse anyone of anything, and quite strong enough to say
     // "this did come up over there" — which is all a withdrawal needs.
     addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [
@@ -479,13 +479,13 @@ describe('T4.2 ghost cards — weak evidence may withdraw a candidate, never rai
   it('a ghost in B that says nothing relevant does not suppress the candidate', () => {
     const db = memDb();
     const a = addCard(db, {
-      project: FULCRUM,
+      project: LEDGER,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [DECIDED],
     });
     addCard(db, {
-      project: MEGHBRAIN,
+      project: BRAINSTORE,
       topics: SIBLING_TOPICS,
       files: SIBLING_FILES,
       decisions: [{ what: 'move the nightly ingest onto a cron schedule', seq: [1] }],
@@ -654,10 +654,10 @@ function candidate(over: Partial<OpenThreadCandidate> = {}): OpenThreadCandidate
     why: DECIDED.why,
     sessionId: '4c9339e0-0000-4000-8000-000000000000',
     id8: '4c9339e0',
-    project: FULCRUM,
+    project: LEDGER,
     ts: '2026-07-01T17:00:00.000Z',
     evidenceSeqs: [7],
-    otherProject: MEGHBRAIN,
+    otherProject: BRAINSTORE,
     otherSessionIds: ['85ef9531-0000-4000-8000-000000000000'],
     overlap: { files: ['db/pool.ts'], topics: ['pgbouncer'] },
     score: 4,
@@ -670,7 +670,7 @@ describe('T4.2 model pass — advisory, batched, and overruled in code', () => {
     const t = new Replying([
       JSON.stringify({
         results: [
-          { i: 0, confirmed: true, note: 'meghbrain uses the same pooler and never turned this off.' },
+          { i: 0, confirmed: true, note: 'brainstore uses the same pooler and never turned this off.' },
           { i: 1, confirmed: false, note: 'the two projects only share the word postgres.' },
         ],
       }),
@@ -746,7 +746,7 @@ describe('T4.2 model pass — advisory, batched, and overruled in code', () => {
             confirmed: true,
             note: 'yes.',
             what: 'something the model made up',
-            otherProject: '/Users/zebra/not-a-project',
+            otherProject: '/Users/example/not-a-project',
             evidenceSeqs: [4242],
           },
         ],
@@ -754,7 +754,7 @@ describe('T4.2 model pass — advisory, batched, and overruled in code', () => {
     ]);
     const out = await confirmOpenThreads([candidate()], { llm: Llm.open({ transport: t }) });
     expect(out[0]!.what).toBe(DECIDED.what);
-    expect(out[0]!.otherProject).toBe(MEGHBRAIN);
+    expect(out[0]!.otherProject).toBe(BRAINSTORE);
     expect(out[0]!.evidenceSeqs).toEqual([7]);
   });
 
@@ -787,13 +787,13 @@ describe('T4.2 model pass — advisory, batched, and overruled in code', () => {
           {
             i: 0,
             confirmed: true,
-            note: 'meghbrain shares the pooler. It also shares the migration script. And more.',
+            note: 'brainstore shares the pooler. It also shares the migration script. And more.',
           },
         ],
       }),
     ]);
     const out = await confirmOpenThreads([candidate()], { llm: Llm.open({ transport: t }) });
-    expect(out[0]!.note).toBe('meghbrain shares the pooler.');
+    expect(out[0]!.note).toBe('brainstore shares the pooler.');
   });
 
   it('returns unconfirmed candidates when the backend fails mid-call', async () => {
@@ -823,8 +823,8 @@ describe('T4.2 model pass — advisory, batched, and overruled in code', () => {
     await confirmOpenThreads([candidate()], { llm: Llm.open({ transport: t }) });
     const sent = t.sent[0]!;
     expect(sent.prompt).toContain(DECIDED.what);
-    expect(sent.prompt).toContain(FULCRUM);
-    expect(sent.prompt).toContain(MEGHBRAIN);
+    expect(sent.prompt).toContain(LEDGER);
+    expect(sent.prompt).toContain(BRAINSTORE);
     expect(sent.prompt).toContain('db/pool.ts');
     // The absence is arithmetic and is not the model's to re-decide.
     expect(sent.system).toMatch(/not your job/);

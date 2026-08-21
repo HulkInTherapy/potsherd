@@ -1,0 +1,328 @@
+================================================================================
+T5.7 — scrub the live corpus out of a public repo, and guard it
+branch: task/T5.7-docs-scrub   ·   cut from 09955be
+================================================================================
+
+A NOTE ON THIS FILE
+
+  This file is committed to the public repo it is about, so it does not spell
+  the real project names, the real topics or the private paths it is assigning
+  the removal of. Where it needs to point at one it points at the entry in
+  `REAL_PROJECT_NAMES` / `CORPUS_TOPICS` in scripts/check-privacy.py, which is
+  the one place in the tree that has to hold them in plaintext — a denylist
+  cannot match what it will not name. Two red-run transcripts in section 4 are
+  verbatim except for those tokens, which are masked; the unmasked runs were
+  reported to the requester out of band.
+
+  That is itself a trade-off worth stating rather than burying: A DENYLIST GUARD
+  PUBLISHES ITS DENYLIST. scripts/make-screens.sh has published six of these
+  names since phase 0, so this is the established shape here and adds nothing
+  new — but if the requester would rather not ship the list at all, the fix is
+  to match on sha256 of each name instead of the literal. That costs the ability
+  to print the offending token in the failure message, which is most of what
+  makes the failure teachable. I did not make that call unilaterally.
+
+
+WHAT LANDED
+
+  docs/upstream/PHASE-1-SCOUT.md      40 lines: every human-authored value in
+                                      the codex, cursor and pi record dumps
+  docs/formats/cursor.md              1 line
+  scripts/make-demo-corpus.mjs        1 comment
+  phases/phase-5/registration-T5.2.txt   1 path
+  tests/{ask,cards,filters,open-threads}.test.ts   7 project names, 4 files
+  scripts/check-privacy.py            NEW — the guard
+  .github/workflows/ci.yml            the guard, first step, before install
+  package.json                        `pnpm privacy`
+  .gitignore                          __pycache__/
+  phases/phase-5/registration-T5.7.txt   this file
+
+  Baseline 1,137 tests, 27 files. After: 1,137 tests, 27 files. `pnpm build`
+  and `pnpm typecheck` clean. `pnpm privacy` green with 35 pinned violations.
+
+  Zero edits to packages/**, README.md, docs/screens/**, evals/ask.jsonl or the
+  plans folder. Section 2 is what an integrator has to apply.
+
+
+================================================================================
+1. THE RULE I CHOSE FOR "REAL CONTENT", AND WHY
+================================================================================
+
+The brief said this is a judgement call and asked for the reasoning rather than
+a heuristic. The rule is written in full at the top of scripts/check-privacy.py
+and repeated in its failure output, so a red run teaches it. In short:
+
+A committed file carries REAL-CORPUS CONTENT when it reproduces, or lets a
+reader reconstruct, something that was inside a live AI transcript or the
+private working tree that transcript ran in. Three families:
+
+  1. TRANSCRIPT PROSE — what a human typed, what an agent replied or reasoned,
+     verbatim or near-verbatim. And the subject matter of it: a topic that is in
+     this repo only because it was in somebody's real sessions is the same leak
+     in fewer words. The `potsherd find "<topic>"` example in `--help` is a leak
+     for exactly the reason the pasted user message was.
+
+  2. CORPUS IDENTITY — a session, thread or composer uuid that indexes a live
+     transcript, and a session title.
+
+  3. THE PRIVATE TREE — a home path or project slug naming a directory that is
+     NOT this repository, plus the file names and contents inside it.
+
+Family (3) is the part worth defending, because it is where "it's only a path"
+gets said. A project directory name is a fact about somebody's private life:
+two of the names in REAL_PROJECT_NAMES say what a person was studying and what
+they were building. And the slug is the join key back to the transcript —
+`-Users-<name>-<project>` is literally how Claude Code indexes it. So a project
+name is a violation on its own, with no prose attached.
+
+Three things that look like violations and are NOT, because banning them would
+cost the repo something it needs:
+
+  a. THIS REPO'S OWN CHECKOUT PATH. It names no private work. It is in the
+     banner of every pasted `pnpm test` and `vitest` run, and the unedited
+     banner is what makes a pasted run evidence instead of a claim. Editing it
+     would degrade the artefact to protect nothing.
+
+  b. A KEPT `--potsherd-dir` CITED AS EVIDENCE. plans/00-README.md's ground
+     rules REQUIRE it: "a real-corpus run is cited by its kept `--potsherd-dir`
+     and its numbers". The path is mandated. What must not follow it is the
+     transcript-derived prose. Re-examinable does not mean published, and the
+     citation is the re-examinable half.
+
+  c. OBVIOUSLY SYNTHETIC PLACEHOLDERS AND THE DEMO CORPUS'S OWN IDS.
+     `/path/to/project`, `/Users/example`, `00000000-…`, and evals/fixture/,
+     tests/fixtures/, docs/screens/, all generated from a seeded PRNG.
+
+This is why the guard is not `grep -r /Users/`. That heuristic would demand
+scrubbing the very citations the ground rules ask for, and a guard that asks you
+to break a rule is a guard people turn off. `is_private_home()` decides per
+token instead, against one short OWN_TREE_ROOTS list with the reason beside it.
+
+A MATERIALITY CLAUSE inside family (1), which is the one place I let real text
+stand. `"hello"`, `"yo"` and `"hello what is this project about??"` are real
+user messages, kept in PHASE-1-SCOUT.md. They identify no person, no project and
+no subject, and they are load-bearing: they are what proves pi's user prompts
+run 2–232 chars and that its `user` role is never overloaded. Same for the one
+generic thinking block ("The user is asking about the project in the current
+working directory"). The test is not "did a human write it" but "does it tell a
+reader something about a person, a project, or private work". Where the answer
+was yes, it went.
+
+TWO THINGS I DECIDED TO KEEP AND WANT ON THE RECORD, so a later reviewer can
+overrule me rather than rediscover them:
+
+  - `"timezone":"Asia/Kolkata"` and the `(UTC+5:30)` stamps in PHASE-1-SCOUT.md.
+    A timezone is coarse — it is shared with a fifth of the planet — and it is
+    structurally load-bearing here: the section's warning that "the filename
+    timestamp is LOCAL wall-clock, every timestamp inside is UTC, here they
+    differ by 5h30m" is built on it. Cheap to change if you disagree; say so.
+
+  - opaque provider-side response ids: `msg_08ae2935…`, `rs_08ae2935…`,
+    `ctc_08ae2935…`, `call_hfAHQ9CKZlI6yJ7TTpRAAmRK`, and pi's 8-hex DAG ids
+    (`f8625e40`, `1ce9aa20`, …). These are real, but they link to no person and
+    no machine, no guard can tell them from synthetic ones, and pi's ids carry
+    the parent/child chain the DAG section exists to explain. Every uuid in that
+    file is now one I minted; these are not uuids.
+
+WHAT I COULD NOT VERIFY, flagged rather than guessed: nothing. Every candidate
+resolved to real-or-synthetic from the repo alone — scripts/make-screens.sh line
+321 already held the authoritative list of the user's real project names, and
+phases/phase-4/HANDOFF.md line 203 already recorded two more as outstanding
+debt. I did not need to read ~/.codex, ~/.cursor, ~/.pi, ~/.claude or the
+archive, and did not.
+
+
+================================================================================
+2. WHAT AN INTEGRATOR HAS TO APPLY  (all in RESERVED files)
+================================================================================
+
+19 of the 35 pinned violations are in `packages/**`, which T5.7 may not edit.
+They are docstrings and `--help` copy that explain the slug algorithms by naming
+the real directories the algorithms were derived from. Each needs a synthetic
+example WITH THE SAME SHAPE — the shapes are the point of the docstrings: one
+name carries an underscore that cursor's slug encoding cannot invert, one
+carries literal hyphens that collide with the separator, one is a nested path.
+
+THE REPLACEMENT MAP IS ALREADY WRITTEN AND ALREADY PROVEN. Commit 940180d
+applied it to the four test files, kept every shape, and left the suite at
+1,137. Read it off `git show 940180d` and apply the same substitutions here, so
+a docstring and the test that exercises it keep saying the same thing.
+
+The one addition that map does not cover: the `--help` example query in
+packages/cli/src/index.ts line 240 is a topic from the live corpus
+(CORPUS_TOPICS entry 1). Replace it with a topic the DEMO corpus actually
+contains — `"connection pooling"` — so the example stays truthful against the
+shipped fixture instead of merely becoming vague.
+
+2a. THE FILES  (line numbers as of f806b63)
+
+    packages/core/src/adapters/cursor.ts     83, 84, 99, 611, 613
+    packages/core/src/cards/transcript.ts    300
+    packages/core/src/cards/write.ts         72
+    packages/core/src/claude/scan.ts         275
+    packages/core/src/open-threads.ts        458   (two paths on one line)
+    packages/core/src/paths.ts               184
+    packages/core/src/recall.ts              481, 508
+    packages/cli/src/filters.ts              24, 184, 185
+    packages/cli/src/index.ts                240, 245, 360
+    packages/mcp/src/tools/find.ts           18, 44
+    packages/mcp/src/tools/ls.ts             16
+
+    Two of these are USER-VISIBLE COPY, not comments, and want a second pair of
+    eyes: the `packages/cli/src/index.ts` `--help` text, and the `.describe()`
+    strings on the two MCP tools, which a model reads at tool-selection time.
+
+2b. TWO PAIRS THAT MUST MOVE TOGETHER
+
+    tests/filters.test.ts line 508 still asserts `--project <name>` with the
+    real name, because it asserts the LITERAL TEXT of `find --help`. Scrubbing
+    one side of an equality without the other only makes the test lie, so it
+    kept the real name with a comment saying why. Change
+    packages/cli/src/index.ts and this line in the same commit.
+
+    phases/phase-3/evidence-T3.2-T3.3/help.txt is a pasted `--help`. It is stale
+    the moment index.ts changes; re-paste it, do not hand-edit it.
+
+2c. AFTER EACH FIX, DELETE THE DEBT LINE
+
+    scripts/check-privacy.py FAILS when a pinned count shrinks as well as when
+    it grows. That is deliberate: a stale pin is how a list like this rots into
+    a suppression file. `pnpm privacy` will name the exact line to delete.
+
+
+================================================================================
+3. WHAT I DID NOT SCRUB, AND WHY  (the other 16 pins)
+================================================================================
+
+3a. PHASES 0–4  — out of scope, and I think correctly so.
+
+    T5.7's edit list is docs/, scripts/, ci.yml and phases/phase-5. Phases 0–4
+    are signed-off history and pasted evidence; rewriting another phase's
+    receipt is how a receipt stops being one. Pinned, not touched:
+
+      phases/phase-0/HANDOFF.md:35          two wiped-project names inside
+                                            pasted `potsherd audit` output
+      phases/phase-1/WAVE.md:100            finding F15 cites the real slug it
+                                            resolved
+      phases/phase-2/VERIFICATION.md:68     quotes a real prompt from the corpus
+      phases/phase-3/evidence-t31/ref-queries.txt:2
+      phases/phase-3/evidence-verify/evals-reference-set.txt:6
+      phases/phase-4/HANDOFF.md:203         the line that recorded this debt
+      phases/phase-4/evidence-T4.1/patch-tests.py:46,99
+      phases/phase-4/evidence-T4.3/doctor-privacy.txt:6,8,9
+      phases/phase-4/evidence-T4.3/run{1,2,6}*.txt:7
+
+    THE TWO HIGHEST-VALUE ITEMS IN THAT LIST are ref-queries.txt and
+    evals-reference-set.txt. Those are family (1), not family (3): they are
+    QUERIES SOMEBODY TYPED against their own corpus, which is the same class as
+    the user message this task took out of PHASE-1-SCOUT.md, and it is one line
+    each. If a phase-0–4 scrub is authorised, start there.
+
+    The pasted `ask` and `doctor --privacy` runs are a different problem: the
+    honest fix is to re-run them against the demo corpus, not to hand-edit
+    output and publish it as though a machine printed it.
+
+3b. FOUND CLEAN, NO ACTION  — reported because the brief asked me to look.
+
+    docs/screens/**   swept, clean. make-screens.sh's forbidden-string
+                      assertion has been holding. Its list is STRICTER than the
+                      repo-wide rule (it bans `/Users/` outright on a published
+                      screen, which is right for a screenshot), so screens are
+                      allowlisted in check-privacy.py and guarded where they are
+                      produced. Nothing to regenerate; no card pass needed.
+    README.md         swept, clean.
+    evals/ask.jsonl   swept, clean.
+    evals/fixture/**  synthetic by construction (seeded PRNG). Allowlisted.
+    tests/fixtures/** synthetic by construction. Allowlisted. A test already
+                      asserts this — tests/adapters/cursor.test.ts line 474
+                      greps the whole cursor fixture tree for the real names.
+
+3c. THREE FILES THAT MUST KEEP NAMING FORBIDDEN STRINGS, and so are allowlisted
+    rather than scrubbed:
+
+      scripts/check-privacy.py              the denylist itself
+      scripts/make-screens.sh line 321      the screens forbidden list
+      tests/adapters/cursor.test.ts:474     asserts the fixture contains none of
+                                            them
+
+    Scrubbing any of them deletes the assertion it exists to make. This is the
+    one case where an allowlist entry is the right answer, and all three have
+    the reason written beside them in ALLOW.
+
+
+================================================================================
+4. THE GUARD, RED THEN GREEN
+================================================================================
+
+Verbatim except for two masked tokens: <PROJECT> is REAL_PROJECT_NAMES entry 7,
+<TOPIC> is CORPUS_TOPICS entry 1. Planted into docs/09-RUNNING-WORKERS.md:
+
+    <!-- planted violation for T5.7: proving the guard is red -->
+    The run was indexed from `/Users/<user>/<PROJECT>` and the session that
+    mattered was the one about <TOPIC> chart generation.
+
+  $ python3 scripts/check-privacy.py
+  ==============================================================================
+  PRIVACY CHECK FAILED -- a committed file carries real-corpus content.
+  ==============================================================================
+
+  NEW VIOLATIONS:
+
+    docs/09-RUNNING-WORKERS.md  [corpus-topic]  subject matter that is here only because it was in a live corpus
+        line 283: <TOPIC>
+    docs/09-RUNNING-WORKERS.md  [home-path]  an absolute home path or project slug naming a directory that is not this repo
+        line 282: /Users/<user>/<PROJECT>
+    docs/09-RUNNING-WORKERS.md  [project-name]  a project directory name off a real machine
+        line 282: <PROJECT>
+
+  [then the rule, ~40 lines — verbatim in the script header, not repeated here]
+
+  EXIT=1
+
+One planted line caught all three rules at once. The ratchet, proven separately
+by appending a second occurrence to tests/filters.test.ts, which is pinned at 1:
+
+  $ python3 scripts/check-privacy.py
+  ==============================================================================
+  PRIVACY CHECK FAILED -- a committed file carries real-corpus content.
+  ==============================================================================
+
+  NEW VIOLATIONS:
+
+    tests/filters.test.ts  [project-name]  pinned at 1, found 2
+        line 546: <PROJECT>
+
+The stale-pin direction fired for real, not as a plant, while the counts were
+being settled: after tests/ was scrubbed, packages/core/src/adapters/cursor.ts
+was reported as "pinned at 5, found only 3" until the pin was corrected.
+
+Both plants reverted, working tree clean:
+
+  $ python3 scripts/check-privacy.py; echo "EXIT=$?"
+  privacy: 403 tracked text files swept, no real-corpus content, 35 pinned known violations all at their expected counts.
+  EXIT=0
+
+In CI it is the FIRST step, before `pnpm install` — it needs only python3 and
+the checkout, and it is the one failure a later commit cannot undo, because a
+merged leak is published the moment it lands.
+
+
+================================================================================
+5. THE HONEST LIMIT
+================================================================================
+
+No regex recognises prose. Family (1) is caught only by its known vocabulary and
+family (2) — a live session uuid — not at all, because nothing distinguishes a
+real uuid from a synthetic one by looking at it. This guard is a FLOOR, not a
+ceiling: green means the repo carries no leak we have already seen, not that it
+is clean. That sentence is in the script's header and in its failure output on
+purpose, so nobody reads a green run as a clearance.
+
+One known blind spot found while writing it: the home-path rule matches
+`/Users/x/y` but not an escaped form like a regex literal `/\/Users\/x/`, which
+is how tests/adapters/cursor.test.ts spells it. That file is allowlisted anyway,
+but a future file could hide a path the same way.
+
+The thing the guard does buy: PHASE-1-SCOUT.md was scrubbed twice, and the
+second pass (this one) found session-id fragments the first had missed, because
+between the two passes nothing was watching. From f806b63 something is.
