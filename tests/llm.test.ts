@@ -1235,24 +1235,62 @@ describe('which verbs may call a model (T2.7 D2)', () => {
    * *precisely* the drift this test exists to prevent, in the one shape it
    * could not see.
    *
-   * The scan now follows the command's `@potsherd/core` imports through the
-   * barrel into the module that actually implements them. That is a
-   * strengthening: nothing that used to be caught stops being caught.
+   * The scan now follows the command's workspace imports through the barrel
+   * into the module that actually implements them. That is a strengthening:
+   * nothing that used to be caught stops being caught.
+   *
+   * Phase 5 then found the *next* hole, and found it by reasoning rather than
+   * by being bitten: T5.1 declined to add a `potsherd mcp` verb partly because
+   * this guard would not have caught it. The scan followed `@potsherd/core`
+   * only, and a `commands/mcp.ts` imports `@potsherd/mcp` — whose tools call
+   * `ask()`, which opens a backend two hops away. So the guard is now over
+   * *every* workspace package, and it walks the module's own relative imports
+   * as well, because reaching a model through one more file is not a different
+   * thing from reaching it directly.
    */
+  const WORKSPACE: Record<string, string> = {
+    '@potsherd/core': 'packages/core/src',
+    '@potsherd/mcp': 'packages/mcp/src',
+  };
+
   const barrelExports = (): Map<string, string> => {
-    const barrel = fs.readFileSync(
-      path.resolve(process.cwd(), 'packages/core/src/index.ts'),
-      'utf-8',
-    );
     const map = new Map<string, string>();
-    for (const m of barrel.matchAll(/export\s*\{([^}]*)\}\s*from\s*'\.\/([^']+)\.js'/g)) {
-      const mod = path.resolve(process.cwd(), 'packages/core/src', `${m[2]}.ts`);
-      for (const raw of m[1].split(',')) {
-        const name = raw.replace(/\btype\b/, '').split(/\s+as\s+/)[0]?.trim();
-        if (name) map.set(name, mod);
+    for (const dir of Object.values(WORKSPACE)) {
+      const index = path.resolve(process.cwd(), dir, 'index.ts');
+      if (!fs.existsSync(index)) continue;
+      const barrel = fs.readFileSync(index, 'utf-8');
+      // A barrel can also *declare* what it exports rather than re-export it —
+      // `packages/mcp/src/index.ts` exports `main` directly. Those names map to
+      // the barrel itself, and `opensBackend` walks on from there.
+      for (const m of barrel.matchAll(
+        /export\s+(?:async\s+)?(?:function|const|class)\s+([A-Za-z_$][\w$]*)/g,
+      )) {
+        if (!map.has(m[1]!)) map.set(m[1]!, index);
+      }
+      for (const m of barrel.matchAll(/export\s*\{([^}]*)\}\s*from\s*'\.\/([^']+)\.js'/g)) {
+        const mod = path.resolve(process.cwd(), dir, `${m[2]}.ts`);
+        for (const raw of m[1].split(',')) {
+          const name = raw.replace(/\btype\b/, '').split(/\s+as\s+/)[0]?.trim();
+          if (name && !map.has(name)) map.set(name, mod);
+        }
       }
     }
     return map;
+  };
+
+  /** Does this module, or anything it imports relatively, open a backend? */
+  const opensBackend = (file: string, seen = new Set<string>()): boolean => {
+    if (seen.has(file) || !fs.existsSync(file)) return false;
+    seen.add(file);
+    // `llm.ts` *defines* `Llm`; importing a constant or a type from it is not
+    // reaching a model. `doctor` imports MODEL_CALL_VERBS to say who does.
+    if (file.endsWith(`${path.sep}llm.ts`)) return false;
+    const src = fs.readFileSync(file, 'utf-8');
+    if (/\bLlm\.open\(/.test(src)) return true;
+    for (const m of src.matchAll(/from\s*'(\.[^']+)\.js'/g)) {
+      if (opensBackend(path.resolve(path.dirname(file), `${m[1]}.ts`), seen)) return true;
+    }
+    return false;
   };
 
   it('no command outside MODEL_CALL_VERBS reaches Llm.open, directly or through core', () => {
@@ -1264,17 +1302,17 @@ describe('which verbs may call a model (T2.7 D2)', () => {
       const src = fs.readFileSync(path.join(dir, file), 'utf-8');
       let reaches = /\bLlm\.open\(/.test(src);
       if (!reaches) {
-        for (const imp of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*'@potsherd\/core'/g)) {
-          for (const raw of imp[1].split(',')) {
+        const pkgs = Object.keys(WORKSPACE).map((p) => p.replace('/', '\\/')).join('|');
+        for (const imp of src.matchAll(
+          new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*'(?:${pkgs})'`, 'g'),
+        )) {
+          for (const raw of imp[1]!.split(',')) {
             const name = raw.replace(/\btype\b/, '').split(/\s+as\s+/)[0]?.trim();
             const mod = name ? exportsMap.get(name) : undefined;
-            // `llm.ts` *defines* `Llm`, so importing a constant or a type from
-            // it is not reaching a model — `doctor` imports `MODEL_CALL_VERBS`
-            // and `OFFLINE_VERBS` precisely in order to say who does.
-            if (!mod || mod.endsWith(`${path.sep}llm.ts`) || !fs.existsSync(mod)) continue;
-            // And an import only counts if the command actually calls it.
+            if (!mod) continue;
+            // An import only counts if the command actually calls it.
             if (!name || !new RegExp(`\\b${name}\\s*\\(`).test(src)) continue;
-            if (/\bLlm\.open\(/.test(fs.readFileSync(mod, 'utf-8'))) reaches = true;
+            if (opensBackend(mod)) reaches = true;
           }
         }
       }
