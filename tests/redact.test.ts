@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { db as store, Theme, type Exchange } from '@potsherd/core';
 import {
   MASK_RE,
+  elideBinary,
+  elideExchange,
   maskFor,
   redact,
   redactExchange,
@@ -31,6 +33,26 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(here, 'fixtures', 'secrets');
 const PLANTED = fs.readFileSync(path.join(FIXTURES, 'planted.jsonl'), 'utf8');
 const CLEAN = fs.readFileSync(path.join(FIXTURES, 'clean.txt'), 'utf8');
+// The second clean fixture (T1.4b). `clean.txt` is ordinary code and prose;
+// this one is agent-transcript text, which is a different distribution and is
+// where the 165,088-mask regression actually lived.
+const AGENT = fs.readFileSync(path.join(FIXTURES, 'agent-transcript.txt'), 'utf8');
+
+/** The types the planted fixture plants, in file order. */
+const PLANTED_TYPES: SecretType[] = [
+  'aws',
+  'github',
+  'jwt',
+  'private-key',
+  'generic',
+  'entropy',
+  // T1.4b adversarial group, seq 8–12.
+  'generic',
+  'entropy',
+  'entropy',
+  'generic',
+  'generic',
+];
 
 /** Every string in a parsed record, the way the store will hand them over. */
 function strings(value: unknown, out: string[] = []): string[] {
@@ -47,17 +69,10 @@ function records(): Array<Record<string, unknown>> {
 }
 
 describe('planted fixture', () => {
-  it('masks all six planted secrets, each with the right type', () => {
+  it('masks every planted secret, each with the right type', () => {
     const { hits } = redact(PLANTED);
-    expect(hits.map((h) => h.type)).toEqual([
-      'aws',
-      'github',
-      'jwt',
-      'private-key',
-      'generic',
-      'entropy',
-    ]);
-    expect(hits).toHaveLength(6);
+    expect(hits.map((h) => h.type)).toEqual(PLANTED_TYPES);
+    expect(hits).toHaveLength(11);
   });
 
   it('reports the type the fixture says to expect, record by record', () => {
@@ -70,10 +85,25 @@ describe('planted fixture', () => {
         expect(hits, `unplanted record ${JSON.stringify(rec['seq'] ?? 'manifest')}`).toEqual([]);
         continue;
       }
-      expect(hits.map((h) => h.type)).toEqual([expected]);
+      expect(hits.map((h) => h.type), `seq ${String(rec['seq'])}`).toEqual([expected]);
       seen.push(expected);
     }
-    expect(seen).toEqual(['aws', 'github', 'jwt', 'private-key', 'generic', 'entropy']);
+    expect(seen).toEqual(PLANTED_TYPES);
+  });
+
+  it('names, in the manifest, the rule that actually claimed each one', () => {
+    // The manifest is documentation, and documentation that drifts is worse
+    // than none: this keeps `rule` honest as the rule table is retuned.
+    const manifest = records()[0] as { planted: Array<{ seq: number; rule: string }> };
+    const byRule = new Map<number, string>();
+    for (const rec of records()) {
+      if (rec['_expect'] === undefined) continue;
+      const hits = strings(rec).flatMap((s) => redact(s).hits);
+      byRule.set(rec['seq'] as number, hits[0]?.rule ?? '');
+    }
+    for (const p of manifest.planted) {
+      expect(byRule.get(p.seq), `seq ${p.seq}`).toBe(p.rule);
+    }
   });
 
   it('leaves no fragment of any planted secret in the output', () => {
@@ -85,6 +115,12 @@ describe('planted fixture', () => {
       'BEGIN RSA PRIVATE KEY',
       'Zt7Qw3nR9pLxV2mKd6Hs4YbG1eUa0JfC',
       '9pV2kR8mZ4tL6wY0bN3cX5hJ1qA7sD-fG_eK2uT',
+      // the T1.4b adversarial group
+      '3f9a1c2e-7b4d-4e19-9a55-2c8d0f6b17ae',
+      'Kq7nR2vX9bL4mT6yH1gF5dS8wJ3pQ7nR',
+      'mAg88Rlsa9ceIZPJeEYvRLCakxSMohvLscv9OuJU',
+      'toolu_9xQ2mR7bV4nK1pL8sT6yH3gF5dZ0aW',
+      'paperclip-tuesday-harmonica-sandstone-9Fq2',
     ]) {
       expect(out).not.toContain(needle);
     }
@@ -123,6 +159,192 @@ describe('clean fixture', () => {
     ]) {
       expect(out).toContain(shape);
     }
+  });
+});
+
+describe('agent-transcript fixture (T1.4b)', () => {
+  // The regression this fixture exists for: `potsherd index --full` over the
+  // reference corpus reported 165,088 masked secrets across 1,406 exchanges —
+  // 117 per exchange — while `clean.txt` sat at zero false positives. Agent
+  // transcripts are a different distribution: minted object ids, content
+  // hashes, url slugs, and above all base64 image payloads in tool results.
+  it('produces zero false positives through the pipeline ingest runs', () => {
+    const { hits, text } = redact(elideBinary(AGENT));
+    const detail = hits.map((h) => `${h.type}/${h.rule}: ${text.slice(h.start, h.start + h.length)}`);
+    expect(detail).toEqual([]);
+  });
+
+  it('would not be clean without the elision pass — the pass is doing work', () => {
+    // If this ever reaches zero the fixture has lost its image payload and the
+    // test above stops proving anything.
+    expect(redact(AGENT).hits.length).toBeGreaterThan(0);
+    expect(elideBinary(AGENT)).not.toBe(AGENT);
+  });
+
+  it('leaves every agent identifier shape byte-for-byte', () => {
+    const out = redactText(elideBinary(AGENT));
+    for (const shape of [
+      'toolu_014ZfaccgxvcYNpcTLq8qvkR',       // anthropic tool_use id
+      'srvtoolu_01Vx8KmR3nP7qL2tY6wZ4bHf',    // anthropic server tool_use id
+      'msg_01XFDUDYJgAACzvnptvVoYEL',         // anthropic message id
+      'req_011CQm4Xt7Rk9vZ2pN8bY3sF',         // anthropic request id
+      'chatcmpl-9xY2kP7mQ4vN8bR3tL6wZ1sHfDgJa', // openai completion id
+      'call_9fJk2LmPq8sTvXyZ0aBcDeFg',        // openai tool call id
+      'exec-4c9339e0-b186-4006-b5c1-e7537c8b9353', // prefixed uuid
+      'agent-af69275032b68b31a',              // claude code sidechain id
+      '01ARZ3NDEKTSV4RRFFQ69G5FAV',           // ulid
+      '5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03', // sha256
+      'blake3-af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262',
+      'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=', // SRI
+      'ANTHROPIC_VERTEX_PROJECT_ID=gpu-reservation-sarvam', // the `=` glue class
+      'reducto-has-just-raised-a-75m-series-b-activity-7383909473913880576-ba7M',
+      '0123456789ABCDEFGHJKMNPQRSTVWXYZ',     // crockford base32 table
+      'layout-4f8b2c1e9d6a0537.js',           // bundler hash
+    ]) {
+      expect(out, shape).toContain(shape);
+    }
+  });
+});
+
+describe('binary elision', () => {
+  const png = /"data":"(iVBORw0[^"]+)"/.exec(AGENT)?.[1] ?? '';
+
+  it('replaces an anthropic image content block with one marker', () => {
+    expect(png.length).toBeGreaterThan(512);
+    const block = `[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"${png}"}}]`;
+    const out = elideBinary(block);
+    expect(out).toContain(`‹elided:image/png:${png.length} bytes›`);
+    expect(out).not.toContain(png.slice(0, 40));
+    expect(out.length).toBeLessThan(200);
+  });
+
+  it('replaces a data: URI, the shape the codex adapter already elided', () => {
+    const uri = `data:image/png;base64,${png}`;
+    expect(elideBinary(`![shot](${uri})`)).toBe(`![shot](‹elided:image/png:${uri.length} bytes›)`);
+  });
+
+  it('replaces a bare payload that carries a file magic', () => {
+    const out = elideBinary(`$ base64 shot.png\n${png}\ndone`);
+    expect(out).toContain('‹elided:image/png:');
+    expect(out).toContain('done');
+  });
+
+  it('is idempotent — the marker holds no payload of its own', () => {
+    const once = elideBinary(`x ${png} y`);
+    expect(elideBinary(once)).toBe(once);
+    expect(redact(once).hits).toEqual([]);
+  });
+
+  it('leaves a private key block for the redactor, however long', () => {
+    // Elision runs first, so a pass that ate PEM bodies would silently turn a
+    // leaked key into a marker and report zero secrets.
+    const body = Array.from({ length: 12 }, () =>
+      'RkFLRUtFWUZBS0VLRVlGQUtFS0VZRkFLRUtFWUZBS0VLRVlGQUtFS0VZRkFLRUtF').join('\n');
+    const pem = `-----BEGIN RSA PRIVATE KEY-----\n${body}\n-----END RSA PRIVATE KEY-----`;
+    expect(body.length).toBeGreaterThan(512);
+    expect(elideBinary(pem)).toBe(pem);
+    expect(redact(pem).hits.map((h) => h.type)).toEqual(['private-key']);
+  });
+
+  it('leaves a long base64 value that has no media context and no magic', () => {
+    // The planted seq-10 case, isolated: `"data": "<640 chars>"` with nothing
+    // around it saying `base64` or naming a mime type.
+    const blob = 'mAg88Rlsa9ceIZPJeEYvRLCakxSMohvLscv9OuJUZPJtjHQDm1O9sYSp75q4z5HC1S2f6rKp'.repeat(9);
+    const json = `{"kind":"service-account","data":"${blob}"}`;
+    expect(blob.length).toBeGreaterThan(512);
+    expect(elideBinary(json)).toBe(json);
+    expect(redact(json).hits.map((h) => h.type)).toEqual(['entropy']);
+  });
+
+  it('elides every field 03 §5 redacts, without mutating the input', () => {
+    const ex: Exchange = {
+      id: 'x1', sessionId: 's1', seq: 1, ts: '2026-08-19T09:00:00.000Z',
+      userText: 'here is the screenshot',
+      assistantText: 'I can see it',
+      toolCalls: [{ name: 'Read', input: '{"file_path":"/tmp/shot.png"}', result: `[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"${png}"}}]` }],
+      filesTouched: ['/tmp/shot.png'], isSidechain: false, redacted: false,
+    };
+    const before = JSON.stringify(ex);
+    const { exchange, elisions } = elideExchange(ex);
+    expect(elisions.binaryParts).toBe(1);
+    expect(elisions.charsElided).toBe(png.length);
+    expect(exchange.toolCalls[0]?.result).toContain('‹elided:image/png:');
+    expect(JSON.stringify(ex)).toBe(before);
+  });
+
+  it('returns the same object when there is nothing binary to drop', () => {
+    const ex: Exchange = {
+      id: 'x1', sessionId: 's1', seq: 1, ts: '2026-08-19T09:00:00.000Z',
+      userText: 'nothing binary here', assistantText: 'agreed', toolCalls: [],
+      filesTouched: [], isSidechain: false, redacted: false,
+    };
+    const { exchange, elisions } = elideExchange(ex);
+    expect(exchange).toBe(ex);
+    expect(elisions).toEqual({ binaryParts: 0, charsElided: 0 });
+  });
+});
+
+describe('adversarial planted cases (T1.4b)', () => {
+  // Three or more secrets that a naive "just exclude the identifiers" fix
+  // would wrongly let through. The rule they hold in place: a shape exclusion
+  // applies only to a *bare* token; a value in a credential-shaped position is
+  // claimed by an earlier rule that never consults the allowlist.
+  const cases: Array<[name: string, line: string, type: SecretType, secret: string]> = [
+    [
+      'a signing secret shaped exactly like a uuid',
+      'WEBHOOK_SIGNING_SECRET=3f9a1c2e-7b4d-4e19-9a55-2c8d0f6b17ae',
+      'generic',
+      '3f9a1c2e-7b4d-4e19-9a55-2c8d0f6b17ae',
+    ],
+    [
+      'a credential bound to a variable called id',
+      'the worker connects with id = Kq7nR2vX9bL4mT6yH1gF5dS8wJ3pQ7nR and the broker closes the socket',
+      'entropy',
+      'Kq7nR2vX9bL4mT6yH1gF5dS8wJ3pQ7nR',
+    ],
+    [
+      'an api key under the toolu_ prefix the entropy rule excludes',
+      'ANTHROPIC_API_KEY=toolu_9xQ2mR7bV4nK1pL8sT6yH3gF5dZ0aW',
+      'generic',
+      'toolu_9xQ2mR7bV4nK1pL8sT6yH3gF5dZ0aW',
+    ],
+    [
+      'a four-word passphrase, which the prose exclusion drops as a bare token',
+      'curl -H "Authorization: Bearer paperclip-tuesday-harmonica-sandstone-9Fq2" https://api.internal.test/v1/jobs',
+      'generic',
+      'paperclip-tuesday-harmonica-sandstone-9Fq2',
+    ],
+    [
+      'an api key that is a bare uuid in a json body',
+      '{"apiKey":"a1b2c3d4-e5f6-4789-abcd-0123456789ef"}',
+      'generic',
+      'a1b2c3d4-e5f6-4789-abcd-0123456789ef',
+    ],
+  ];
+
+  for (const [name, line, type, secret] of cases) {
+    it(`still catches ${name}`, () => {
+      const { text, hits } = redact(line);
+      expect(hits.map((h) => h.type)).toEqual([type]);
+      expect(text).not.toContain(secret);
+      expect(text).toContain(maskFor(type, secret));
+    });
+  }
+
+  it('the same values are invisible to the bare entropy rule, which is the point', () => {
+    // Each secret above, on its own with no context. The uuid, the toolu_ id
+    // and the passphrase are all excluded by shape — only the context rules
+    // saved them. (The `id =` case is the exception: it has no context, which
+    // is exactly why the entropy fallback must survive.)
+    for (const bare of [
+      '3f9a1c2e-7b4d-4e19-9a55-2c8d0f6b17ae',
+      'toolu_9xQ2mR7bV4nK1pL8sT6yH3gF5dZ0aW',
+      'paperclip-tuesday-harmonica-sandstone-9Fq2',
+    ]) {
+      expect(redact(`saw ${bare} in the log`).hits, bare).toEqual([]);
+    }
+    expect(redact('saw Kq7nR2vX9bL4mT6yH1gF5dS8wJ3pQ7nR in the log').hits.map((h) => h.type))
+      .toEqual(['entropy']);
   });
 });
 
@@ -203,6 +425,7 @@ describe('idempotence', () => {
   const inputs: Array<[string, string]> = [
     ['planted fixture', PLANTED],
     ['clean fixture', CLEAN],
+    ['agent-transcript fixture', elideBinary(AGENT)],
     ['one secret', 'export GITHUB_TOKEN=ghp_' + 'FAKE'.repeat(9)],
     ['two of the same', `${'AKIAIOSFODNN7EXAMPLE'} and again ${'AKIAIOSFODNN7EXAMPLE'}`],
   ];
@@ -240,6 +463,11 @@ describe('rules', () => {
     ['generic', 'Zt7Qw3nR9pLxV2mKd6Hs4YbG1eUa0JfC', 'API_KEY="Zt7Qw3nR9pLxV2mKd6Hs4YbG1eUa0JfC"'],
     ['generic', 'Zt7Qw3nR9pLxV2mKd6Hs4YbG1eUa0JfC', '{"clientSecret": "Zt7Qw3nR9pLxV2mKd6Hs4YbG1eUa0JfC"}'],
     ['entropy', '9pV2kR8mZ4tL6wY0bN3cX5hJ1qA7sD-fG_eK2uT', 'X-Session-Id: 9pV2kR8mZ4tL6wY0bN3cX5hJ1qA7sD-fG_eK2uT'],
+    // T1.4b: the http authorization header, a credential *context* rather than
+    // a credential shape. It is what keeps the new entropy-shape exclusions
+    // safe to hold.
+    ['generic', 'Zt7Qw3nR9pLxV2mKd6Hs4YbG1eUa0JfC', 'curl -H "Authorization: Bearer Zt7Qw3nR9pLxV2mKd6Hs4YbG1eUa0JfC"'],
+    ['generic', 'Zt7Qw3nR9pLxV2mKd6Hs4YbG1eUa0JfC', 'Authorization: Token Zt7Qw3nR9pLxV2mKd6Hs4YbG1eUa0JfC'],
   ];
 
   for (const [type, secret, line] of positives) {
@@ -296,6 +524,21 @@ describe('rules', () => {
     'pk_live_51H8xKzFAKEFAKEFAKEFAKEFAKE is publishable by design',
     'apiKey: string;',
     'let apiKey: Promise<string> = resolveKey();',
+    // T1.4b — the shapes that made the reference corpus report 117 masks per
+    // exchange. Each is a *bare* token: none is in a credential position.
+    'tool_use id toolu_014ZfaccgxvcYNpcTLq8qvkR name=Read',              // E1
+    'assistant turn msg_01XFDUDYJgAACzvnptvVoYEL answered in 4.2s',      // E1
+    'x-request-id: req_011CQm4Xt7Rk9vZ2pN8bY3sF',                        // E1
+    'call_9fJk2LmPq8sTvXyZ0aBcDeFg returned two files',                  // E1
+    'exec-4c9339e0-b186-4006-b5c1-e7537c8b9353 finished with status 0',  // E2b
+    'blake3-af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262', // E4
+    '01ARZ3NDEKTSV4RRFFQ69G5FAV was minted at 2016-07-30T23:36:17Z',     // E5
+    'https://www.linkedin.com/posts/y-combinator_reducto-has-just-raised-a-75m-series-b-activity-7383909473913880576-ba7M', // E6
+    'https://r.jina.ai/https%3A%2F%2Fexample.com%2Fposts%2Freducto-ai_weve-raised-a-245m-series-a-led-by-benchmark-activity-7321593705629376512-69ej', // E6
+    'const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";',             // E7
+    'ANTHROPIC_VERTEX_PROJECT_ID=gpu-reservation-sarvam',                // `=` glue
+    'Authorization: Bearer <YOUR_TOKEN_HERE>',
+    'Authorization: Bearer $ACCESS_TOKEN',
   ];
 
   for (const line of negatives) {
@@ -329,6 +572,33 @@ describe('entropy', () => {
   it('is under threshold for hex digests and uuids at any length', () => {
     expect(shannonEntropy('9fceb02d0ae598e95dc970b74767f19372d61af8')).toBeLessThan(4.5);
     expect(shannonEntropy('550e8400-e29b-41d4-a716-446655440000')).toBeLessThan(4.5);
+  });
+
+  it('cannot tell random from merely varied, which is why shape rules exist', () => {
+    // The measurement behind exclusion E6. Both of these clear `03` §5's bar;
+    // one is a LinkedIn permalink and one is a base32 alphabet constant.
+    const slug = 'y-combinator_reducto-has-just-raised-a-75m-series-b-activity-7383909473913880576-ba7M';
+    expect(shannonEntropy(slug)).toBeGreaterThan(4.5);
+    expect(shannonEntropy('0123456789ABCDEFGHJKMNPQRSTVWXYZ')).toBeGreaterThan(4.5);
+    expect(redact(slug).hits).toEqual([]);
+  });
+
+  it('trims json and percent escape residue, so one secret is one mask', () => {
+    // `\ntvly-…` used to yield the token `ntvly-…`: the same secret with a
+    // different first character, a different sha8 and a different mask. Same
+    // for `%2F`-prefixed and `KEY=`-glued captures.
+    const secret = '9pV2kR8mZ4tL6wY0bN3cX5hJ1qA7sD-fG_eK2uT';
+    const mask = maskFor('entropy', secret);
+    for (const line of [
+      `header ${secret} sent`,
+      `{"note":"line one\\n${secret} on the next"}`,
+      `https://example.test/r/%2F${secret}`,
+      `-${secret}-`,
+    ]) {
+      const { text, hits } = redact(line);
+      expect(hits.map((h) => h.type), line).toEqual(['entropy']);
+      expect(text, line).toContain(mask);
+    }
   });
 });
 
@@ -381,25 +651,25 @@ describe('doctor', () => {
 
   it('counts by type', () => {
     const counts = tally(redact(PLANTED).hits);
-    expect(counts.total).toBe(6);
+    expect(counts.total).toBe(11);
     expect(counts.byType.aws).toBe(1);
     expect(counts.byType.jwt).toBe(1);
     expect(counts.byType.slack).toBe(0);
     expect(countsJson(counts)).toEqual({
-      total: 6,
+      total: 11,
       aws: 1,
       github: 1,
       jwt: 1,
       'private-key': 1,
-      generic: 1,
-      entropy: 1,
+      generic: 4,
+      entropy: 3,
     });
   });
 
   it('adds two tallies without double counting', () => {
     const a = tally(redact(PLANTED).hits);
     const sum = addCounts(a, a);
-    expect(sum.total).toBe(12);
+    expect(sum.total).toBe(22);
     expect(sum.byType.aws).toBe(2);
     expect(addCounts(a, emptyCounts())).toEqual(a);
   });
@@ -457,5 +727,42 @@ describe('performance', () => {
     const t0 = performance.now();
     for (const s of evil) redact(s);
     expect(performance.now() - t0).toBeLessThan(5_000);
+  });
+
+  it('elides binary at speed, on the shapes that hang a naive elider', () => {
+    // The elision pass runs over the whole corpus too, and its patterns carry
+    // `{512,}` quantifiers — which is exactly the shape that goes quadratic if
+    // it is not anchored on a literal. See BARE_RUN in redact-elide.ts.
+    const evil = [
+      'A'.repeat(1_000_000),
+      `${'iVBORw0KGgo'}${'A'.repeat(500_000)}`,
+      `${'"data":"'}${'/9j/'}${'B'.repeat(500_000)}`,
+      `data:image/png;base64,${'C'.repeat(500_000)}`,
+      `${'abcdefghij'.repeat(10)} `.repeat(5_000),
+    ];
+    const t0 = performance.now();
+    for (const s of evil) elideBinary(s);
+    expect(performance.now() - t0).toBeLessThan(5_000);
+  });
+
+  it('elides 10 MB of image-heavy transcript faster than it redacts it', () => {
+    let big = '';
+    while (big.length < 10 * 1024 * 1024) big += `${AGENT}\n`;
+    big = big.slice(0, 10 * 1024 * 1024);
+
+    const t0 = performance.now();
+    const lean = elideBinary(big);
+    const elideMs = performance.now() - t0;
+    const t1 = performance.now();
+    redact(lean);
+    const redactMs = performance.now() - t1;
+    // eslint-disable-next-line no-console
+    console.log(
+      `  elide: 10 MB in ${elideMs.toFixed(0)} ms (${(10 / (elideMs / 1000)).toFixed(1)} MB/s), ` +
+      `dropped ${(((big.length - lean.length) / big.length) * 100).toFixed(0)}%; ` +
+      `redact of what is left: ${redactMs.toFixed(0)} ms`,
+    );
+    expect(lean.length).toBeLessThan(big.length);
+    expect(elideMs).toBeLessThan(10_000);
   });
 });

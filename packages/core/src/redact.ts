@@ -12,6 +12,18 @@ import {
 } from './redact-rules.js';
 
 export type { SecretType } from './redact-rules.js';
+// The pre-redaction pass. Not redaction — it removes binary bulk that carries
+// no meaning for retrieval — but it runs immediately before this module on the
+// same strings, so it is re-exported here and the two are read together.
+export {
+  elideBinary,
+  elideExchange,
+  emptyElisions,
+  addElisions,
+  MIN_PAYLOAD,
+  ELISION_RE,
+  type Elisions,
+} from './redact-elide.js';
 export {
   RULES,
   SECRET_TYPES,
