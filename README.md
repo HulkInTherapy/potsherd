@@ -546,8 +546,11 @@ potsherd doctor --privacy · 22 aug 2026
     the call runs with no tools, in an empty scratch directory, and
     its session is never written to ~/.claude/projects.
 
-  no other network, except the one-off embedding-model download that
-  `potsherd index` announces before it starts and `--no-embed` skips.
+  no other network, except the one-off embedding-model download.
+  `potsherd index` names it before it starts, but `--quiet` and
+  `--json` suppress that line, and `--quiet` is how the plugin's
+  SessionEnd hook runs it — so its SessionStart hook warns you first.
+  `--no-embed` skips the download entirely.
   no telemetry. no account. potsherd stores no credential of its own.
 ```
 

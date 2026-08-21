@@ -164,8 +164,19 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
 
     card
       .blank()
-      .text('no other network, except the one-off embedding-model download that')
-      .text('`potsherd index` announces before it starts and `--no-embed` skips.')
+      // This paragraph asserted, until 2026-08-22, that `index` "announces
+      // before it starts" — full stop. Phase 5 built a path where it does
+      // not: the plugin's SessionEnd hook runs `index --quiet`, and `--quiet`
+      // returns from `onModelDownload` before printing. One SessionEnd firing
+      // fetched 33 MB with nothing shown. A receipt that describes an
+      // announcement it does not always make is the same failure as the
+      // "no network" line this project shipped once already (`08` rule 1), so
+      // the suppressing flags are named and the hook's own warning is stated.
+      .text('no other network, except the one-off embedding-model download.')
+      .text('`potsherd index` names it before it starts, but `--quiet` and')
+      .text('`--json` suppress that line, and `--quiet` is how the plugin\'s')
+      .text('SessionEnd hook runs it — so its SessionStart hook warns you first.')
+      .text('`--no-embed` skips the download entirely.')
       .text('no telemetry. no account. potsherd stores no credential of its own.');
     print(card.toString());
     return 0;
