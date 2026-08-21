@@ -1,18 +1,16 @@
-# Reconciling founder visions for Veyu AI's next move
+brief-run5-card-only.md
 
-Brief from a past session. Written by potsherd; every claim carries `[3ec2f5ca@seq]`, the exchange it came from.
+  WITHHELD FROM THE PUBLIC REPO — this artefact reproduces the *content* of real
+  sessions from the reference corpus, which includes a named third party's
+  business plans and a personal tweet. `00-README.md`'s secrets rule already
+  says committed artefacts use the synthetic demo corpus, not the live one;
+  phase 4 extends that from screenshots to every committed artefact.
 
-> **unsummarised.** No model call was made — no model was used. What follows is the stored card and transcript verbatim, not a summary.
+  The file itself is kept, unredacted and re-examinable, beside the repo at:
 
-User described Veyu AI's failed service attempts and strategic confusion. Claude proposed Fulcrum—an intelligence system to research and score monthly product cycles using code and media levers. Cofounder Rachit proposed a service-focused 81-day revenue plan. Claude reconciled both by recommending Way 1 (DM-conversion stack) as cycle one with a locked offer, single ICP, and immediate launch.
+      /Users/zebra/randomness/potsherd-p4-evidence/T4.3/brief-run5-card-only.md
 
-**left open**
-- Whether to launch Fulcrum research sweep with forced 72-hour decision clock on AI products, scoring matrix, and single top pick [3ec2f5ca@5]
-- Whether to lock Way 1 (DM-conversion stack) as cycle one and send reconciled plan to Rachit (offer, ICP, start date, Gurgaon trigger) [3ec2f5ca@7]
-- How to respond to Rachit's tweet about 'bro has trust issues' and what it signals for team alignment [3ec2f5ca@9]
-
-files: `/Users/zebra/Meghavi-Second-Brain/04-Startup/`, `/Users/zebra/Downloads/Veyu-Money-Plan-for-Meghavi.pdf`
-
----
-
-source: claude 3ec2f5ca-6972-4d62-a093-5537ff4114d6 · 9 exchanges · 2026-08-13
+  Evidence that cannot be re-examined is not evidence (`08` rule 5) — but
+  re-examinable does not mean published. The numbers this run produced are in
+  `README.txt` and in `phases/phase-4/HANDOFF.md`; only the transcript-derived
+  prose is held back.

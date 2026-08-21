@@ -29,7 +29,7 @@ THE RUNS
 
   file                       what                          tokens/budget  cites  wall
   run1-by-id.txt             graft 3ec2f5ca                262 / 1,200    3/3    1m 14s
-  run2-by-query.txt          graft "veyu positioning       244 / 800      3/3    1m 58s
+  run2-by-query.txt          graft "[query withheld]       244 / 800      3/3    1m 58s
                                strategy" --budget 800
   run3-about-clip.txt        graft a2cf864f --about        419 / 700      5/5    2m 12s
                                "session loss measurement"

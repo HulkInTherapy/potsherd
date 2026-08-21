@@ -1,11 +1,16 @@
-# Printer Web UI and Internet Social Experiment
+brief-run7-trimmed.md
 
-Brief from a past session. Written by potsherd; every claim carries `[f7ac67c0@seq]`, the exchange it came from.
+  WITHHELD FROM THE PUBLIC REPO — this artefact reproduces the *content* of real
+  sessions from the reference corpus, which includes a named third party's
+  business plans and a personal tweet. `00-README.md`'s secrets rule already
+  says committed artefacts use the synthetic demo corpus, not the live one;
+  phase 4 extends that from screenshots to every committed artefact.
 
-> **prompts only.** This session was deleted; `history.jsonl` kept what the user asked and nothing kept what the assistant answered. Nothing below describes the assistant side — it is not recoverable.
+  The file itself is kept, unredacted and re-examinable, beside the repo at:
 
-_trimmed 8 lines to fit --budget 150._
+      /Users/zebra/randomness/potsherd-p4-evidence/T4.3/brief-run7-trimmed.md
 
----
-
-source: claude f7ac67c0-e4a1-49da-82f1-b2b53e9b307c · 241 exchanges · 2026-07-02
+  Evidence that cannot be re-examined is not evidence (`08` rule 5) — but
+  re-examinable does not mean published. The numbers this run produced are in
+  `README.txt` and in `phases/phase-4/HANDOFF.md`; only the transcript-derived
+  prose is held back.
