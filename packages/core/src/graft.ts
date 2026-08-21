@@ -1338,11 +1338,23 @@ function buildHead(
   const head: string[] = [];
   head.push(`# ${src.title}`);
   head.push('');
-  head.push(
-    o.about
-      ? `Brief from a past session, about **${o.about}**. Written by potsherd; every claim carries \`[${src.id8}@seq]\`, the exchange it came from.`
-      : `Brief from a past session. Written by potsherd; every claim carries \`[${src.id8}@seq]\`, the exchange it came from.`,
-  );
+  // The header is the line the receiving agent reads first, so it must not
+  // assert a topic the body does not cover. `--about` that selected nothing
+  // used to say "about X" over the session's opening exchanges regardless —
+  // a claim about the brief that the brief itself contradicts. `sliceVia`
+  // carries exactly the fact needed: the topic is only claimed when the topic
+  // is what chose the material.
+  const cite = `Written by potsherd; every claim carries \`[${src.id8}@seq]\`, the exchange it came from.`;
+  if (o.about && src.sliceVia === 'about') {
+    head.push(`Brief from a past session, about **${o.about}**. ${cite}`);
+  } else if (o.about) {
+    head.push(
+      `Brief from a past session. Nothing in it matched **${o.about}**, so this covers the ` +
+        `session generally. ${cite}`,
+    );
+  } else {
+    head.push(`Brief from a past session. ${cite}`);
+  }
   if (src.isGhost) {
     head.push('');
     head.push(

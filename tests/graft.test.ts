@@ -1314,3 +1314,40 @@ describe('a ghost card is not mistaken for a transcript card', () => {
     expect(prompt).toContain('(prompts only)');
   });
 });
+
+describe('the header never asserts a topic the body does not cover', () => {
+  // Found by T4.7a and reported rather than fixed, which was the right call.
+  // `--about <topic>` that selected no exchanges still wrote
+  // "about **<topic>**" into the header while the body was the session's
+  // opening exchanges — a claim about the brief that the brief itself
+  // contradicts, in the one line the receiving agent reads first.
+  it('says the topic did not match rather than claiming the brief is about it', async () => {
+    const transport = new PickyTransport();
+    const llm = Llm.open({ transport });
+    const r = await graft(db, cardlessId, {
+      budget: DEFAULT_BUDGET,
+      about: 'zzzz-no-such-topic-anywhere-qqqq',
+      llm,
+      cwd: workdir(),
+    });
+    await llm.close();
+
+    expect(r.about).toBe('zzzz-no-such-topic-anywhere-qqqq');
+    expect(r.brief).not.toMatch(/about \*\*zzzz-no-such-topic-anywhere-qqqq\*\*\./);
+    expect(r.brief).toMatch(/Nothing in it matched \*\*zzzz-no-such-topic-anywhere-qqqq\*\*/);
+  });
+
+  it('still claims the topic when the topic is what chose the material', async () => {
+    const transport = new PickyTransport();
+    const llm = Llm.open({ transport });
+    const r = await graft(db, pgbouncerId, {
+      budget: DEFAULT_BUDGET,
+      about: 'pgbouncer',
+      llm,
+      cwd: workdir(),
+    });
+    await llm.close();
+    expect(r.brief).toMatch(/about \*\*pgbouncer\*\*\./);
+  });
+});
+
