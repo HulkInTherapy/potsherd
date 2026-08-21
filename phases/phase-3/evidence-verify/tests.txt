@@ -1,0 +1,30 @@
+ ✓ tests/adapters/claude.test.ts (19 tests) 4405ms
+   ✓ reference corpus (frozen, read-only) > parses every transcript with no fatal error and the expected counts 2101ms
+   ✓ live ~/.claude (read-only, floors only) > discovers at least the reference counts and parses them all 2263ms
+ ✓ tests/adapters/codex.test.ts (31 tests) 72ms
+ ✓ tests/index.test.ts (12 tests) 237ms
+ ✓ tests/annotate-cli.test.ts (81 tests) 10992ms
+   ✓ tag > adds tags and finds the session again through ls --tag 330ms
+   ✓ pin > pins, marks the row with a star and finds it again through ls --pinned 306ms
+   ✓ link > --remove takes it away from either side 385ms
+ ✓ tests/rescue.test.ts (24 tests) 657ms
+ ✓ tests/adapters/pi.test.ts (29 tests) 28ms
+ ✓ tests/parser.test.ts (23 tests) 16ms
+ ✓ tests/audit.test.ts (26 tests) 239ms
+ ✓ tests/terminal.test.ts (28 tests) 6363ms
+   ✓ --ascii > holds at 60 columns too, where more text has to be elided 1697ms
+   ✓ index reports the run, not the index > never claims the index holds no secrets on the strength of one pass 405ms
+ ✓ tests/query-cli.test.ts (44 tests) 5546ms
+   ✓ find > --ascii keeps the block inside 7-bit and inside the column 361ms
+ ✓ tests/consent.test.ts (23 tests) 87ms
+ ✓ tests/search-helpers.test.ts (20 tests) 5ms
+ ✓ tests/embeddings.test.ts (9 tests) 290ms
+ ✓ tests/adapters.test.ts (6 tests) 1607ms
+   ✓ adapter contract > compiles standalone, under the strictest settings, importing nothing 1605ms
+ ✓ tests/inherited.test.ts (5 tests) 3ms
+
+ Test Files  22 passed (22)
+      Tests  840 passed (840)
+   Start at  16:23:34
+   Duration  49.69s (transform 786ms, setup 60ms, collect 1.67s, tests 47.61s, environment 0ms, prepare 60ms)
+

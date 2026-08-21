@@ -170,7 +170,7 @@ const MODES: Record<ModeKey, Mode> = {
   vectors: {
     key: 'vectors',
     label: 'vectors only',
-    lists: ['vec_exchanges', 'vec_cards'],
+    lists: ['vec_exchanges', 'vec_ghost_prompts', 'vec_cards'],
     vectors: true,
     needsVectors: true,
   },

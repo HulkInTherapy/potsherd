@@ -1,0 +1,25 @@
+  hybrid (auto)   recall@5   8/10  80%     recall@1   8/10  80%    p50 66ms  p95 228ms
+  hybrid (always) recall@5   8/10  80%     recall@1   7/10  70%    p50 77ms  p95 150ms
+
+  word overlap with the answer · mean 80% · worst 100% · flag above 60%
+  100% instagram chat only client  shares: instagram chat client
+  100% vedic astrology skill versions  shares: vedic astrology skill versions
+  100% harry potter house sorting  shares: harry potter house sorting
+  100% best linkedin posting times  shares: best linkedin posting times
+  100% infinite context memory system for agents  shares: infinite context memory system agents
+  100% clean up mac storage  shares: clean mac storage
+  100% symbiote codex integration gaps  shares: symbiote codex integration gaps
+  100% session context search and memory tool  shares: session context search memory tool
+
+  phase-3 gate · hybrid ≥ 9/10 at recall@5, and above bm25-only and vec-only on the same set
+  hybrid (auto)     8/10  ✗ beats bm25  ✓ beats vectors  ✗ ≥ 9/10   FAIL
+  hybrid (always)   8/10  ✗ beats bm25  ✓ beats vectors  ✗ ≥ 9/10   FAIL
+  FAIL — plans/06 phase 3 would not merge this fusion
+ ELIFECYCLE  Command failed with exit code 1.
+> tsx evals/run.ts -- --set /Users/zebra/.potsherd/evals/queries.jsonl --potsherd-dir /private/tmp/claude-501/-Users-zebra-randomness/67084a1d-af81-4358-8eaa-43539f19cff0/scratchpad/refindex
+potsherd evals · queries.jsonl · 10 queries · 0 sidechain · 0 ghost · 0 card · existing index
+  bm25 only       recall@5   8/10  80%     recall@1   8/10  80%    p50 72ms  p95 224ms
+  vectors only    recall@5   7/10  70%     recall@1   6/10  60%    p50 77ms  p95 590ms
+  hybrid (auto)   recall@5   8/10  80%     recall@1   8/10  80%    p50 65ms  p95 238ms
+  hybrid (always) recall@5   8/10  80%     recall@1   7/10  70%    p50 81ms  p95 151ms
+  phase-3 gate · hybrid ≥ 9/10 at recall@5, and above bm25-only and vec-only on the same set

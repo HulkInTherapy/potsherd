@@ -1,0 +1,7 @@
+20 warm runs x 20 queries per mode
+
+  mode              p50      p95      max      n
+  bm25 only           81.4ms  167.1ms  207.1ms  400
+  vectors only        46.1ms  152.3ms  190.5ms  400
+  hybrid (auto)       70.0ms  179.2ms  240.6ms  400
+  hybrid (always)     68.0ms  178.3ms  207.7ms  400
