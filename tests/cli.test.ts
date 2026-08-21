@@ -308,7 +308,53 @@ describe('potsherd cli', () => {
     const r = run(['doctor', '--privacy', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
     expect(r.stdout).toContain('reads');
     expect(r.stdout).toContain('writes');
-    expect(r.stdout).toContain('no network');
+  });
+
+  /**
+   * The privacy receipt has to disclose the largest privacy-relevant thing the
+   * product does, and from phase 2 on that is model calls.
+   *
+   * It said "no network, except the one-off embedding-model download" for the
+   * whole of a phase that sends redacted transcript text to Claude on every
+   * `card` (verification D2). That is the worst class of bug this project can
+   * ship — not a wrong number, a wrong promise — so the four things a reader
+   * needs are asserted one by one: what leaves, that redaction runs first,
+   * which verbs send it, and which verbs never do.
+   */
+  it('doctor --privacy discloses the model calls, not just the paths', () => {
+    const root = scratchRoot();
+    const r = run(['doctor', '--privacy', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root, '--width', '100']);
+    const out = r.stdout;
+
+    // what leaves the machine, and that it is redacted first
+    expect(out).toContain('leaves this machine');
+    expect(out).toMatch(/redacted slices of your transcripts/);
+    expect(out).toMatch(/redaction runs first/);
+    expect(out).toContain('no --no-redact');
+
+    // when, and to whom
+    expect(out).toMatch(/only these verbs call a model/);
+    expect(out).toMatch(/potsherd card/);
+    expect(out).toMatch(/who receives them/);
+    expect(out).toMatch(/subscription|ANTHROPIC_API_KEY|no model backend/);
+
+    // and the verbs that never do — the question the receipt is read to answer
+    expect(out).toMatch(/never do, and open no socket/);
+    for (const verb of ['audit', 'rescue', 'index', 'find']) {
+      expect(out.slice(out.indexOf('never do'))).toContain(verb);
+    }
+
+    // the sentence that used to be false must not have survived anywhere
+    expect(out).not.toMatch(/^\s*no network[,.]/m);
+  });
+
+  it('doctor --privacy --json carries the same disclosure', () => {
+    const root = scratchRoot();
+    const r = run(['doctor', '--privacy', '--json', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    const j = JSON.parse(r.stdout) as { network?: { to?: string; detail?: string[] } };
+    expect(j.network).toBeTruthy();
+    expect(typeof j.network!.to).toBe('string');
+    expect(j.network!.to!.length).toBeGreaterThan(0);
   });
 
   it('every verb has --help with at least one example', () => {

@@ -51,6 +51,7 @@ import {
   cardMarkdown,
   cardPath,
   exportCards,
+  readCard,
   readPriorCard,
   safeSlug,
   writeCard,
@@ -64,7 +65,8 @@ import {
   type Transcript,
   type TranscriptUnit,
 } from '../packages/core/src/cards/transcript.js';
-import { PROMPTS_ONLY, statesDecision } from '../packages/core/src/cards/ghost.js';
+import { GHOST_SYSTEM, PROMPTS_ONLY, statesDecision } from '../packages/core/src/cards/ghost.js';
+import { ERROR_MARKER, formatErrorSentinel } from '../packages/core/src/cards/sentinel.js';
 import { MIN_GHOST_PROMPTS } from '../packages/core/src/cards/plan.js';
 import { listSessions, showSession } from '../packages/core/src/browse.js';
 import { recall } from '../packages/core/src/recall.js';
@@ -1313,6 +1315,191 @@ describe('potsherd card --export', () => {
     expect(r.stdout).toContain('no cards');
     expect(r.stdout).toContain('potsherd card --all');
   });
+
+  // T2.7 D4, at the verb: the count the user reads is the count of files that
+  // exist, and the sentinel never leaves ~/.potsherd.
+  it('reports the true count and leaves the sentinels behind', () => {
+    const root = scratch();
+    const dest = scratch();
+    const db = seededDb(root);
+    writeCard(db, root, RECORD());
+    db.close();
+    const failed = cardPath(root, 'claude', '-tmp-p', 's2');
+    fs.writeFileSync(failed, formatErrorSentinel(new Error('the model call did not answer')));
+
+    const r = cli(['card', '--export', dest, '--potsherd-dir', root], bare());
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('1 card copied');
+    expect(r.stdout).not.toContain('2 cards copied');
+    expect(r.stdout).toContain('1 not copied');
+    expect(fs.existsSync(path.join(dest, 'claude', '-tmp-p', 's2.md'))).toBe(false);
+    for (const f of fs.readdirSync(path.join(dest, 'claude', '-tmp-p'))) {
+      expect(fs.readFileSync(path.join(dest, 'claude', '-tmp-p', f), 'utf-8')).not.toContain(
+        ERROR_MARKER,
+      );
+    }
+  });
+});
+
+/**
+ * T2.7 D6 — `--limit` is a shared filter flag and `card` dropped it between
+ * the parser and the planner, so `card --ghosts-only --limit 10` quoted and
+ * ran all ninety. Asserted through the verb, because that is where it was
+ * lost: `planCards` honoured `limit` the whole time.
+ */
+describe('card --limit (T2.7 D6)', () => {
+  it('caps the targets the quote and the run share', () => {
+    const root = scratch();
+    const db = seededDb(root);
+    for (let i = 0; i < 5; i++) seedGhost(db, `g${i}`, GHOST_PROMPTS);
+    db.close();
+
+    const all = JSON.parse(
+      cli(['card', '--dry-run', '--ghosts-only', '--json', '--potsherd-dir', root], bare()).stdout,
+    ) as { targets: number };
+    expect(all.targets).toBe(5);
+
+    const two = JSON.parse(
+      cli(
+        ['card', '--dry-run', '--ghosts-only', '--limit', '2', '--json', '--potsherd-dir', root],
+        bare(),
+      ).stdout,
+    ) as { targets: number; ghosts: number; estimate: { calls: number } };
+    expect(two.targets).toBe(2);
+    // And the quote is the quote for two, not for five with a smaller header.
+    expect(two.estimate.calls).toBeLessThan(all.targets);
+  });
+
+  it('refuses a limit that is not a positive number', () => {
+    const root = scratch();
+    const db = seededDb(root);
+    seedGhost(db, 'g0', GHOST_PROMPTS);
+    db.close();
+    const r = cli(
+      ['card', '--dry-run', '--ghosts-only', '--limit', '0', '--potsherd-dir', root],
+      bare(),
+    );
+    expect(r.code).not.toBe(0);
+  });
+});
+
+/**
+ * T2.7 D3 — the card, on screen.
+ *
+ * `show` printed the card's *title* and then raw prompts: no summary, no
+ * decisions, no open threads, no counts. `plans/05` moment 3 says a stranger
+ * with no caption must understand what they are looking at, and a title over a
+ * wall of prompts is not that. So: the card leads, it carries its citations,
+ * and it fits the two widths the design system names.
+ */
+describe('potsherd show renders the card (T2.7 D3)', () => {
+  function cardedGhost(): string {
+    const root = scratch();
+    const db = seededDb(root);
+    seedGhost(db, 'g1', GHOST_PROMPTS);
+    writeCard(db, root, {
+      sessionId: 'g1',
+      harness: 'claude',
+      projectSlug: '-tmp-p',
+      project: '/tmp/p',
+      card: cardOf({
+        title: 'analytics events table',
+        summary: 'Asked for an events table for the analytics service and for the slow writes to be looked at.',
+        topics: ['postgres'],
+        decisions: [
+          claim('go with postgres, not mysql, for the events table', [2], 'the writes are slow'),
+        ],
+        open_threads: [claim('the load test still fails at 400 rps', [5])],
+        // The second one is longer than a 60-column line on its own: a
+        // path a card names is not guaranteed to fit the terminal.
+        files: [
+          'db/events.sql',
+          'services/analytics/infrastructure/migrations/0042_create_events_table.sql',
+        ],
+        tags: ['postgres'],
+      }),
+      verified: { kept: 2, dropped: 3 },
+      model: 'haiku',
+      costUsd: 0.01,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      source: PROMPTS_ONLY,
+    } as CardRecord);
+    db.close();
+    return root;
+  }
+
+  it('puts the card above the transcript, with its citations and its counts', () => {
+    const root = cardedGhost();
+    const out = cli(['show', 'g1', '--potsherd-dir', root, '--width', '80']).stdout;
+
+    expect(out).toContain('summary');
+    expect(out).toContain('Asked for an events table');
+    expect(out).toContain('decisions');
+    expect(out).toContain('go with postgres, not mysql');
+    expect(out).toContain('[2]');
+    expect(out).toContain('the writes are slow');
+    expect(out).toContain('open threads');
+    expect(out).toContain('400 rps');
+    expect(out).toContain('files');
+    expect(out).toContain('db/events.sql');
+    expect(out).toContain('tags');
+    expect(out).toContain('verified');
+    expect(out).toMatch(/2 kept/);
+    expect(out).toMatch(/3 dropped/);
+    expect(out).toContain(PROMPTS_ONLY);
+
+    // The card leads. The prompts are the evidence for it, not the headline.
+    expect(out.indexOf('summary')).toBeLessThan(out.indexOf('set up the events table'));
+    expect(out.indexOf('verified')).toBeLessThan(out.indexOf('set up the events table'));
+  });
+
+  it('fits 80 and 60 columns and stays pure ascii under --ascii', () => {
+    const root = cardedGhost();
+    for (const width of [80, 60]) {
+      for (const extra of [[], ['--ascii']]) {
+        const out = cli([
+          'show',
+          'g1',
+          '--potsherd-dir',
+          root,
+          '--width',
+          String(width),
+          ...extra,
+        ]).stdout;
+        for (const line of out.split('\n')) {
+          // Counted by character, not by byte: `·` and `—` are three bytes.
+          expect([...line].length, `"${line}" at ${width}`).toBeLessThanOrEqual(width);
+        }
+        if (extra.length) {
+          // eslint-disable-next-line no-control-regex
+          expect(/[^\x00-\x7F]/.test(out)).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('carries the whole card in --json, not just its title', () => {
+    const root = cardedGhost();
+    const j = JSON.parse(cli(['show', 'g1', '--json', '--potsherd-dir', root]).stdout) as {
+      card: { card: { summary: string; decisions: { what: string; evidence_seq: number[] }[] }; verified: { kept: number; dropped: number }; source: string } | null;
+    };
+    expect(j.card).toBeTruthy();
+    expect(j.card!.card.summary).toContain('Asked for');
+    expect(j.card!.card.decisions[0]!.evidence_seq).toEqual([2]);
+    expect(j.card!.verified).toEqual({ kept: 2, dropped: 3 });
+    expect(j.card!.source).toBe(PROMPTS_ONLY);
+  });
+
+  it('says nothing about a card when the session has none', () => {
+    const root = scratch();
+    const db = seededDb(root);
+    seedGhost(db, 'g2', GHOST_PROMPTS);
+    db.close();
+    const out = cli(['show', 'g2', '--potsherd-dir', root, '--width', '80']).stdout;
+    expect(out).not.toContain('open threads');
+    expect(out).not.toContain('verified');
+    expect(out).toContain('set up the events table');
+  });
 });
 
 // ------------------------------------------------------------ T2.3 ghosts
@@ -1574,5 +1761,194 @@ describe('ghost cards', () => {
     expect(j.targets).toBe(1);
     expect(j.ghosts).toBe(1);
     expect(j.sessions).toBe(0);
+  });
+});
+
+// ------------------------------------------------- T2.7: the verifier's nine
+
+/**
+ * The finding behind the finding.
+ *
+ * `EVIDENCE_COSINE` sat at 0.5 in code while `03` §6 said 0.6, and **all 81
+ * card tests passed at either value** — no test constrained the bar. A
+ * constant that encodes a measured trade-off needs a test that fails when it
+ * moves, so this is the smallest one that distinguishes the two: a claim whose
+ * best window scores between them, which must drop.
+ */
+describe('the evidence bar is a number a test constrains (T2.7)', () => {
+  // Five content words against six, sharing three: 3 / sqrt(5 x 6) = 0.5477.
+  const claimText = 'postgres pooler transaction mode leaking';
+  const unitText = 'postgres pooler transaction connection limits raised';
+
+  it('scores this claim strictly between 0.5 and 0.6', () => {
+    const c = cosine(toyVector(claimText), toyVector(unitText));
+    expect(c).toBeGreaterThan(0.5);
+    expect(c).toBeLessThan(0.6);
+  });
+
+  it('drops it, because the bar is 0.6', async () => {
+    expect(EVIDENCE_COSINE).toBe(0.6);
+    const card = cardOf({ decisions: [claim(claimText, [0])] });
+    const r = await verifyCard(card, [unit(0, unitText)], toyEmbedder().embed);
+    expect(r.verified).toEqual({ kept: 0, dropped: 1 });
+    expect(r.drops[0]!.reason).toBe('no-match');
+    expect(r.drops[0]!.best).toBeLessThan(EVIDENCE_COSINE);
+  });
+
+  it('and would have kept it at the 0.5 the code silently sat on', async () => {
+    const card = cardOf({ decisions: [claim(claimText, [0])] });
+    const r = await verifyCard(card, [unit(0, unitText)], toyEmbedder().embed, { cosine: 0.5 });
+    expect(r.verified).toEqual({ kept: 1, dropped: 0 });
+  });
+});
+
+/**
+ * T2.7 D4 — `card --export` reported "92 cards copied" while 63 cards existed,
+ * and put 29 files whose whole content is `__ERRORED__` into the user's
+ * directory. Both halves of that are one bug: it counted what it walked past
+ * instead of what it wrote.
+ */
+describe('card --export never exports a sentinel (T2.7 D4)', () => {
+  it('skips error markers and empty markers, and counts what it wrote', () => {
+    const root = scratch();
+    const cards = path.join(root, 'cards', 'claude', 'proj');
+    fs.mkdirSync(cards, { recursive: true });
+    fs.writeFileSync(path.join(cards, 'aaaa.md'), '# a real card\n\nsummary\n');
+    fs.writeFileSync(path.join(cards, 'bbbb.md'), '# another real card\n\nsummary\n');
+    fs.writeFileSync(path.join(cards, 'cccc.md'), formatErrorSentinel(new Error('boom')));
+    fs.writeFileSync(path.join(cards, 'dddd.md'), '');
+
+    const dest = path.join(scratch(), 'vault');
+    const r = exportCards(root, dest);
+
+    expect(r.files).toBe(2);
+    expect(r.skipped).toBe(2);
+    const written = fs.readdirSync(path.join(dest, 'claude', 'proj')).sort();
+    expect(written).toEqual(['aaaa.md', 'bbbb.md']);
+    for (const f of written) {
+      expect(fs.readFileSync(path.join(dest, 'claude', 'proj', f), 'utf-8')).not.toContain(
+        ERROR_MARKER,
+      );
+    }
+    // The byte count is of what landed, not of what was considered.
+    const landed = written.reduce(
+      (n, f) => n + fs.statSync(path.join(dest, 'claude', 'proj', f)).size,
+      0,
+    );
+    expect(r.bytes).toBe(landed);
+  });
+});
+
+/**
+ * T2.7 D7 — the run receipt said 224 claims kept where the database held 218,
+ * because dedupe runs *after* verify and the receipt reported verify's number.
+ * What is reported is now what was written.
+ */
+describe('the receipt counts what was written (T2.7 D7)', () => {
+  it('reports kept after dedupe, not before it', async () => {
+    const twin = 'switched the pooler to transaction mode';
+    const reply = JSON.stringify({
+      title: 'pooler',
+      summary: 'the pooler',
+      topics: [],
+      decisions: [
+        { what: twin, why: '', evidence_seq: [0] },
+        { what: twin, why: '', evidence_seq: [0] },
+      ],
+      files: [],
+      outcome: 'shipped',
+      open_threads: [],
+      tags: [],
+    });
+    const llm = llmWith([reply]);
+    try {
+      const t = transcriptOf([
+        unit(0, 'we switched the pooler to transaction mode because prepared statements leaked'),
+      ]);
+      const r = await cardTranscript(llm, t, { embed: toyEmbed, coverage: false });
+      // Both twins passed verification; dedupe then absorbed one of them.
+      expect(r.dedupeRemoved).toBeGreaterThan(0);
+      expect(r.card.decisions.length + r.card.open_threads.length).toBe(1);
+      expect(r.verified.kept).toBe(1);
+    } finally {
+      await llm.close();
+    }
+  });
+});
+
+/**
+ * T2.7 D5 — four of ten ghost summaries stated as done what the prompts only
+ * asked for. The fix is in the extraction prompt, and a prompt is only a fix
+ * while it still says the thing, so this pins the rule rather than the wording
+ * around it.
+ */
+describe('a ghost summary describes the request, not the result (T2.7 D5)', () => {
+  it('the prompt says so, in words a model can follow', () => {
+    expect(GHOST_SYSTEM).toMatch(/summary describes what this person ASKED FOR/);
+    // The four verbs the overstepping summaries actually used.
+    for (const verb of ['added', 'implemented', 'updated', 'redesigned']) {
+      expect(GHOST_SYSTEM.toLowerCase()).toContain(verb);
+    }
+    // And the shape of the mistake, named as wrong.
+    expect(GHOST_SYSTEM).toMatch(/Wrong:\s+"Added \.gitignore and README files\."/);
+    expect(GHOST_SYSTEM).toMatch(/still a request/);
+  });
+});
+
+/**
+ * T2.7 D3 — a card had no reading surface. `readCard` is the half of that fix
+ * `show` reads through: everything `readPriorCard` deliberately withholds from
+ * the model, a *reader* needs.
+ */
+describe('a written card can be read back whole (T2.7 D3)', () => {
+  it('carries the claims, the counts, the source and the model', () => {
+    const root = scratch();
+    const db = store.open({ root });
+    try {
+      const card = cardOf({
+        title: 'the pooler',
+        summary: 'asked for the pooler to move to transaction mode',
+        decisions: [claim('move the pooler to transaction mode', [3], 'prepared statements leak')],
+        open_threads: [claim('whether pgbouncer needs a restart', [7])],
+        files: ['db/pool.ts'],
+        topics: ['postgres'],
+        tags: ['postgres'],
+      });
+      writeCard(db, root, {
+        sessionId: 'ghost-1',
+        harness: 'claude',
+        projectSlug: '-tmp-p',
+        project: '/tmp/p',
+        card,
+        verified: { kept: 2, dropped: 5 },
+        model: 'haiku',
+        costUsd: 0.01,
+        createdAt: '2026-08-21T00:00:00.000Z',
+        source: 'prompts-only',
+      } as CardRecord);
+
+      const read = readCard(db, 'ghost-1');
+      expect(read).toBeTruthy();
+      expect(read!.card.summary).toContain('asked for');
+      expect(read!.card.decisions[0]!.evidence_seq).toEqual([3]);
+      expect(read!.card.decisions[0]!.why).toBe('prepared statements leak');
+      expect(read!.card.open_threads[0]!.what).toContain('pgbouncer');
+      expect(read!.card.files).toEqual(['db/pool.ts']);
+      expect(read!.verified).toEqual({ kept: 2, dropped: 5 });
+      expect(read!.source).toBe('prompts-only');
+      expect(read!.model).toBe('haiku');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('is null for a session with no card, which is not an error', () => {
+    const root = scratch();
+    const db = store.open({ root });
+    try {
+      expect(readCard(db, 'nobody')).toBeNull();
+    } finally {
+      db.close();
+    }
   });
 });

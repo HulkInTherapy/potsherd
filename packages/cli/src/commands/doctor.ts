@@ -7,6 +7,10 @@ import {
   codex as codexAdapter,
   countsJson,
   cursor as cursorAdapter,
+  detectBackend,
+  MODEL_CALL_VERBS,
+  NoBackendError,
+  OFFLINE_VERBS,
   db as store,
   paths,
   pi as piAdapter,
@@ -92,8 +96,9 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   const consented = [paths.claudePaths(report.claudeDir).settings];
 
   if (o.privacy) {
+    const network = networkDisclosure();
     if (o.json) {
-      printJson({ reads, writes: written, writesWithConsent: consented });
+      printJson({ reads, writes: written, writesWithConsent: consented, network });
       return 0;
     }
     const t = themeFrom(o);
@@ -113,11 +118,37 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     card.blank().text('writes only after an explicit y at a diff:');
     for (const p of consented) card.raw(`    ${show(p)}`);
     card.raw(`      ${t.dim('cleanupPeriodDays, and one SessionStart hook entry')}`);
+    // The largest privacy-relevant thing potsherd does is no longer "reads
+    // your files": from phase 2 on it *sends* some of them. A receipt that
+    // still said "no network" would be the worst class of bug this project
+    // has, so what leaves the machine is stated before what does not.
+    card.blank().text('leaves this machine:');
+    card.raw(`    ${t.accent('redacted slices of your transcripts')}, sent to a model as the`);
+    card.raw('    text of one prompt. redaction runs first, in one place, on');
+    card.raw('    every outgoing string — there is no --no-redact flag.');
+    card.raw('    nothing else is ever sent: no file is uploaded, no path, no');
+    card.raw('    index, no counts, no identifiers.');
+
+    card.blank().text('only these verbs call a model:');
+    for (const verb of MODEL_CALL_VERBS) {
+      card.raw(`    potsherd ${verb}${verb === 'card' ? '        writes the cards; one call per slice' : ''}`);
+    }
+    card.raw(`    ${t.dim('later phases add')} ask ${t.dim('and')} graft${t.dim(', which send the same slices.')}`);
+    card.blank().text('these never do, and open no socket at all:');
+    // Wrapped, not elided: the whole value of this line is that a reader can
+    // find their verb in it, and `ls…w, stats` is a list with the answer cut
+    // out of the middle.
+    for (const line of fmt.wrap(OFFLINE_VERBS.join(', '), pathW)) card.raw(`    ${line}`);
+
+    card.blank().text('who receives them:');
+    for (const line of fmt.wrap(network.to, pathW)) card.raw(`    ${line}`);
+    for (const line of network.detail) card.raw(`    ${t.dim(line)}`);
+
     card
       .blank()
-      .text('no network, except the one-off embedding-model download that')
+      .text('no other network, except the one-off embedding-model download that')
       .text('`potsherd index` announces before it starts and `--no-embed` skips.')
-      .text('no telemetry. no account.');
+      .text('no telemetry. no account. potsherd stores no credential of its own.');
     print(card.toString());
     return 0;
   }
@@ -440,3 +471,55 @@ function dedupe(xs: string[]): string[] {
 
 /** Re-exported under the old name so existing callers keep working. */
 export const VERSION_STRING = VERSION;
+
+/**
+ * Where this machine's model calls would actually go, detected rather than
+ * assumed.
+ *
+ * `04` Q4's backend choice *is* the answer to "who receives my transcripts",
+ * so the receipt runs the same detection `card` runs. It reads a binary's
+ * presence and one environment variable; it makes no call and needs no
+ * credential to answer, which is what lets `--privacy` stay the one section
+ * that is safe to run before you trust anything.
+ */
+export function networkDisclosure(): { backend: string | null; to: string; detail: string[] } {
+  try {
+    const choice = detectBackend();
+    if (choice.backend === 'api') {
+      return {
+        backend: 'api',
+        to: 'api.anthropic.com, on your own ANTHROPIC_API_KEY.',
+        detail: [
+          'metered against that key. potsherd never stores or logs it.',
+          'this is the fallback path: install Claude Code and it is not used.',
+        ],
+      };
+    }
+    // The path, shortened the way every other path in this receipt is: what
+    // identifies a binary is its last segment, and a shim path can be 100
+    // characters of temp directory.
+    const bin = choice.bin
+      ? fmt.elideMiddle(paths.tildify(choice.bin), 46, '...')
+      : choice.backend;
+    return {
+      backend: choice.backend,
+      to: `your own ${choice.backend === 'codex' ? 'codex' : 'Claude'} subscription, via ${bin}`,
+      detail: [
+        'the same binary and the same account you already use by hand.',
+        'potsherd holds no key, no token and no account of its own.',
+        'the call runs with no tools, in an empty scratch directory, and',
+        'its session is never written to ~/.claude/projects.',
+      ],
+    };
+  } catch (err) {
+    if (!(err instanceof NoBackendError)) throw err;
+    return {
+      backend: null,
+      to: 'nobody — there is no model backend on this machine.',
+      detail: [
+        'no `claude` binary and no ANTHROPIC_API_KEY, so `potsherd card`',
+        'refuses rather than calling anything. every other verb still works.',
+      ],
+    };
+  }
+}

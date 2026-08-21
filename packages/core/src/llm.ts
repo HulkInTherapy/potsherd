@@ -69,6 +69,41 @@ import { onPath } from './resolve-bin.js';
  * potsherd does not have. The pipeline passes the redacted slices instead.
  */
 
+/**
+ * The verbs that may make a model call, and the ones that never can.
+ *
+ * `doctor --privacy` prints these, and `03` §11 is the reason: the privacy
+ * receipt has to disclose the largest privacy-relevant thing the product does,
+ * and from phase 2 on that is no longer "reads your files" — it is "sends
+ * redacted slices of them to a model". A hand-written list would drift the
+ * first time a verb learned to call one, so the list lives here, beside the
+ * single entry point every call goes through, and `tests/llm.test.ts` asserts
+ * that no command outside {@link MODEL_CALL_VERBS} reaches `Llm.open`.
+ */
+export const MODEL_CALL_VERBS: readonly string[] = ['card'];
+
+/**
+ * Verbs that are guaranteed to make no model call and open no socket.
+ *
+ * Named explicitly rather than left as "everything else", because "which of
+ * these is safe to run on a client's laptop" is the question the receipt is
+ * read to answer, and an answer by omission is not one.
+ */
+export const OFFLINE_VERBS: readonly string[] = [
+  'audit',
+  'rescue',
+  'guard',
+  'index',
+  'ls',
+  'find',
+  'show',
+  'stats',
+  'tag',
+  'pin',
+  'link',
+  'doctor',
+];
+
 // ------------------------------------------------------------------ models
 
 export type Backend = 'agent-sdk' | 'codex' | 'api';
@@ -906,8 +941,24 @@ export interface Transport {
 /** Any backend failure the user can act on: missing binary, auth, timeout. */
 export class LlmError extends Error {
   readonly name = 'LlmError';
-  constructor(message: string, readonly fix?: string, readonly cause?: unknown) {
+  /**
+   * True when this error is a deadline, not a refusal.
+   *
+   * The distinction is the whole of {@link Llm.text}'s retry rule: a call that
+   * ran out of clock has told us nothing about whether it would ever have
+   * worked, and one more try is cheap. A call that came back `error_max_turns`
+   * or found no `claude` binary has told us, and retrying it just spends the
+   * clock twice.
+   */
+  readonly timedOut: boolean;
+  constructor(
+    message: string,
+    readonly fix?: string,
+    readonly cause?: unknown,
+    options: { timedOut?: boolean } = {},
+  ) {
     super(message);
+    this.timedOut = options.timedOut ?? false;
   }
 }
 
@@ -1015,8 +1066,9 @@ class AgentSdkTransport implements Transport {
       if (abort.signal.aborted && !req.signal?.aborted) {
         throw new LlmError(
           `the model call did not answer within ${Math.round(req.timeoutMs / 1000)}s`,
-          'POTSHERD_LLM_TIMEOUT_MS=300000 potsherd card …',
+          `POTSHERD_LLM_TIMEOUT_MS=${DEFAULT_TIMEOUT_MS * 2} potsherd card …`,
           err,
+          { timedOut: true },
         );
       }
       throw new LlmError(
@@ -1235,7 +1287,9 @@ function run(
       reject(
         new LlmError(
           `${path.basename(bin)} did not answer within ${Math.round(o.timeoutMs / 1000)}s`,
-          'POTSHERD_LLM_TIMEOUT_MS=300000 potsherd card …',
+          `POTSHERD_LLM_TIMEOUT_MS=${DEFAULT_TIMEOUT_MS * 2} potsherd card …`,
+          undefined,
+          { timedOut: true },
         ),
       );
     }, o.timeoutMs);
@@ -1287,7 +1341,7 @@ function errMessage(err: unknown): string {
 export interface LlmOptions extends DetectOptions {
   maxUsd?: number;
   maxTokens?: number;
-  /** Per call. Default 120s, or `POTSHERD_LLM_TIMEOUT_MS`. */
+  /** Per call. Default {@link DEFAULT_TIMEOUT_MS}, or `POTSHERD_LLM_TIMEOUT_MS`. */
   timeoutMs?: number;
   maxOutputTokens?: number;
   /** Test seam: use this instead of detecting and building a real backend. */
@@ -1373,7 +1427,52 @@ export interface JsonResult<T> extends LlmResult {
   parsed: boolean;
 }
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+/**
+ * The per-call deadline, **fitted to the measurements in `CALL_PROFILES`**.
+ *
+ * The old value was 120 s and it was not fitted to anything. T2.6 then
+ * measured what a card call actually costs — 58.9 s to 94.9 s serial, 191 s to
+ * 204 s each when six run at once — so 120 s cut through the middle of a
+ * normal distribution, and the verifier's default-settings run duly lost **28
+ * of 90 ghosts and 1 of 1 session** to `did not answer within 120s`. The same
+ * session carded in 25.9 s once the deadline was raised. A default that fails
+ * a third of a normal run is not a safety net, it is the largest bug in the
+ * product.
+ *
+ * The number below is derived, not chosen:
+ *
+ * ```
+ *   the largest call potsherd can make      60,000 chars   (slice.ts's
+ *                                                           SLICE_THRESHOLD_CHARS
+ *                                                           — above it, chunking)
+ *   the fit, serially                       46,200 + 915 x 60  = 101 s
+ *   x the measured concurrency stretch      204 s / 84 s        = 2.43
+ *   x the fit's own worst residual          +15%
+ *   ------------------------------------------------------------------
+ *   worst credible call at concurrency 6                      = 282 s
+ * ```
+ *
+ * Rounded up to **360 s**, which leaves 28% of headroom over that worst case
+ * and is the value the verifier's own 360 s run was proved against. It is not
+ * larger than that on purpose: past this point a call is not slow, it is
+ * wedged, and the run should say so rather than wait all afternoon.
+ *
+ * A deadline reached is now a **retry**, not a lost card — see
+ * {@link Llm.text} — so the cost of being wrong in the tight direction is one
+ * extra call rather than one missing card. `POTSHERD_LLM_TIMEOUT_MS` still
+ * overrides it, and `Llm.open({ timeoutMs })` still overrides that.
+ */
+export const DEFAULT_TIMEOUT_MS = 360_000;
+
+/**
+ * How many times a call that ran out of clock is tried again.
+ *
+ * One. A second deadline on the same prompt is evidence about the prompt or
+ * the machine, not about luck, and a run that retries forever is a run that
+ * never finishes. The retry is the cheap half of D1's fix: with it, a
+ * mis-fitted deadline costs a call, and without it, it costs a card.
+ */
+export const TIMEOUT_RETRIES = 1;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
 
 /**
@@ -1492,14 +1591,17 @@ export class Llm {
     });
 
     const started = Date.now();
-    const sent = await this.transport.send({
-      prompt: outgoing,
-      ...(system ? { system: system.text } : {}),
-      model: this.model,
-      maxOutputTokens,
-      timeoutMs: this.timeoutFor(req),
-      ...(req.signal ? { signal: req.signal } : {}),
-    });
+    const sent = await this.send(
+      {
+        prompt: outgoing,
+        ...(system ? { system: system.text } : {}),
+        model: this.model,
+        maxOutputTokens,
+        timeoutMs: this.timeoutFor(req),
+        ...(req.signal ? { signal: req.signal } : {}),
+      },
+      req.signal,
+    );
     const ms = Date.now() - started;
 
     const outputTokensEstimated = typeof sent.outputTokens !== 'number' || sent.outputTokens <= 0;
@@ -1535,6 +1637,30 @@ export class Llm {
     };
     this.budget.record(result);
     return result;
+  }
+
+  /**
+   * The transport call, with {@link TIMEOUT_RETRIES} retries on a deadline.
+   *
+   * Only on a deadline. Every other failure — no binary, no key, a refusal, a
+   * cancelled run — is a fact about the call that trying again cannot change,
+   * and retrying it would double the time the user waits for the same error.
+   * A cancellation from the caller's own signal is never a retry either: the
+   * budget ceiling aborts the run through exactly that signal, and a retry
+   * there would spend past the line the abort exists to hold.
+   */
+  private async send(req: SendRequest, outer?: AbortSignal): Promise<SendResult> {
+    let last: unknown;
+    for (let attempt = 0; attempt <= TIMEOUT_RETRIES; attempt++) {
+      try {
+        return await this.transport.send(req);
+      } catch (err) {
+        last = err;
+        const timedOut = err instanceof LlmError && err.timedOut;
+        if (!timedOut || outer?.aborted || attempt === TIMEOUT_RETRIES) throw err;
+      }
+    }
+    throw last;
   }
 
   /**

@@ -58,6 +58,21 @@ node "$repo/scripts/make-demo-corpus.mjs" "$demo/.claude"
 export HOME="$demo"
 unset CLAUDE_CONFIG_DIR POTSHERD_DIR NO_COLOR FORCE_COLOR
 
+# A stub `claude` inside the demo HOME, on the demo PATH.
+#
+# `doctor --privacy` now reports *which binary* would receive a model call
+# (T2.7 D2), resolved from PATH. Without this the capture would print whatever
+# absolute path this developer's `claude` happens to live at — a homebrew
+# prefix, a version-manager shim, a temp directory — which is a fact about the
+# machine that ran the script and not about potsherd. The stub makes that line
+# what every other path in these screens already is: the synthetic corpus's
+# own, rendered as `~/.claude/local/claude`. It is never executed: `--privacy`
+# resolves the binary and makes no call.
+mkdir -p "$demo/.claude/local"
+printf '#!/bin/sh\nexit 0\n' > "$demo/.claude/local/claude"
+chmod +x "$demo/.claude/local/claude"
+export PATH="$demo/.claude/local:$PATH"
+
 mkdir -p "$screens"
 # Every screen this run is about to write, plus the names earlier drafts used.
 # Removed up front so a stale screen can never survive a rename and go on being

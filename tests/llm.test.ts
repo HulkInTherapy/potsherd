@@ -7,6 +7,9 @@ import {
   Budget,
   BudgetError,
   CALL_PROFILES,
+  DEFAULT_TIMEOUT_MS,
+  TIMEOUT_RETRIES,
+  MODEL_CALL_VERBS,
   CARD_MODEL,
   CHARS_PER_TOKEN,
   Llm,
@@ -994,5 +997,123 @@ describe('renderEstimate', () => {
     const out = renderEstimate(plan, new Theme({ color: false, width: 80 }));
     expect(out).toContain('nothing');
     expect(out).toContain('potsherd index');
+  });
+});
+
+// ------------------------------------------------------- T2.7 D1: the clock
+
+/**
+ * The verification's largest finding: `POTSHERD_LLM_TIMEOUT_MS` defaulted to
+ * 120 s, a default-settings run lost **28 of 90 ghosts and 1 of 1 session** to
+ * it, and no test said the number had to be related to anything.
+ *
+ * These three do. The first pins the deadline to the same measurements the
+ * estimator is fitted to, so moving `CALL_PROFILES` without moving the
+ * deadline fails here rather than in somebody's run. The second and third pin
+ * the cheap half of the fix: a deadline is a retry, and only a deadline is.
+ */
+describe('the per-call deadline (T2.7 D1)', () => {
+  it('covers the largest call potsherd can make, at the default concurrency', () => {
+    const p = CALL_PROFILES['agent-sdk'];
+    // `slice.ts` chunks above 60k characters, so 60k is the biggest single
+    // prompt this pipeline ever builds.
+    const worstSerialMs = p.baseMs + p.msPerKChar * 60;
+    // Measured: six 40k calls at once took 191-204 s each where one alone
+    // takes ~84 s. 2.43 is the worst of that, and +15% is the fit's own worst
+    // residual over the six serial calls.
+    const worstCredibleMs = worstSerialMs * 2.43 * 1.15;
+    expect(DEFAULT_TIMEOUT_MS).toBeGreaterThan(worstCredibleMs);
+    // And not absurdly more than it: past this a call is wedged, not slow.
+    expect(DEFAULT_TIMEOUT_MS).toBeLessThan(worstCredibleMs * 2);
+    // The value that failed. 120 s does not even cover the *mean* call once
+    // six are in flight — which is why a third of a default run was lost.
+    expect(120_000).toBeLessThan(worstCredibleMs);
+    expect(120_000).toBeLessThan(worstSerialMs * 2.43);
+  });
+
+  it('retries a call that ran out of clock, rather than losing the card', async () => {
+    let attempts = 0;
+    const transport: Transport = {
+      backend: 'agent-sdk',
+      async send(): Promise<SendResult> {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new LlmError('the model call did not answer within 120s', 'fix', undefined, {
+            timedOut: true,
+          });
+        }
+        return { text: 'second time lucky', inputTokens: 10, outputTokens: 5, usd: 0.001 };
+      },
+      async close(): Promise<void> {},
+    };
+    const llm = Llm.open({ transport, env: {} });
+    try {
+      const r = await llm.text({ prompt: 'q' });
+      expect(r.text).toBe('second time lucky');
+      expect(attempts).toBe(1 + TIMEOUT_RETRIES);
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('does not retry a failure that is not a deadline', async () => {
+    let attempts = 0;
+    const transport: Transport = {
+      backend: 'agent-sdk',
+      async send(): Promise<SendResult> {
+        attempts += 1;
+        throw new LlmError('the model call ended as error_max_turns');
+      },
+      async close(): Promise<void> {},
+    };
+    const llm = Llm.open({ transport, env: {} });
+    try {
+      await expect(llm.text({ prompt: 'q' })).rejects.toThrow(/error_max_turns/);
+      expect(attempts).toBe(1);
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('gives up after the retry rather than trying for ever', async () => {
+    let attempts = 0;
+    const transport: Transport = {
+      backend: 'agent-sdk',
+      async send(): Promise<SendResult> {
+        attempts += 1;
+        throw new LlmError('the model call did not answer within 360s', 'fix', undefined, {
+          timedOut: true,
+        });
+      },
+      async close(): Promise<void> {},
+    };
+    const llm = Llm.open({ transport, env: {} });
+    try {
+      await expect(llm.text({ prompt: 'q' })).rejects.toThrow(/did not answer within/);
+      expect(attempts).toBe(1 + TIMEOUT_RETRIES);
+    } finally {
+      await llm.close();
+    }
+  });
+});
+
+/**
+ * T2.7 D2's other half: the privacy receipt names the verbs that call a model,
+ * and that list is only true while nothing else reaches `Llm.open`.
+ *
+ * Asserted against the source of the CLI's command files rather than against a
+ * second hand-written list, because a hand-written list is exactly what drifted
+ * into claiming "no network" for a whole phase.
+ */
+describe('which verbs may call a model (T2.7 D2)', () => {
+  it('no command outside MODEL_CALL_VERBS reaches Llm.open', () => {
+    const dir = path.resolve(process.cwd(), 'packages/cli/src/commands');
+    const found: string[] = [];
+    for (const file of fs.readdirSync(dir)) {
+      if (!file.endsWith('.ts')) continue;
+      const src = fs.readFileSync(path.join(dir, file), 'utf-8');
+      if (/\bLlm\.open\(/.test(src)) found.push(file.replace(/\.ts$/, ''));
+    }
+    expect(found.sort()).toEqual([...MODEL_CALL_VERBS].sort());
   });
 });

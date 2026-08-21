@@ -229,6 +229,10 @@ export {
   callProfile,
   effectiveConcurrency,
   CALL_PROFILES,
+  MODEL_CALL_VERBS,
+  OFFLINE_VERBS,
+  DEFAULT_TIMEOUT_MS,
+  TIMEOUT_RETRIES,
   CHARS_PER_TOKEN,
   CHUNK_CHARS,
   HARNESS_OVERHEAD_USD,
@@ -388,9 +392,11 @@ export {
   cardPath,
   exportCards,
   readPriorCard,
+  readCard,
   safeSlug,
   writeCard,
   type CardRecord,
+  type StoredCard,
   type ExportResult,
 } from './cards/write.js';
 export {
