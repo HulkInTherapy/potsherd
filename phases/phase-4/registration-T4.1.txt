@@ -162,7 +162,7 @@ import { runAsk } from './commands/ask.js';
   ).addHelpText('after', `
 example:
   potsherd ask "how did we handle pgbouncer with prepared statements?"
-  potsherd ask "what did we decide about the veyu positioning?" --project Fulcrum
+  potsherd ask "what did we decide about the pooler?" --project api --since 30d
   potsherd ask "what is the capital of france" --strict     # refuses, exit 2
   potsherd ask "the pooler decision" --json | jq '.evidence | length'
   potsherd ask "why did we drop the queue?" --k 10 --max-usd 0.25

@@ -64,7 +64,7 @@ the runs
     shortlist   6 of 56 candidate sessions
     readers     6 · 2 found · 4 not-found · **0 failed**
     filter      4 evidence lines proposed, 3 kept, **1 dropped** (`not-a-quote`
-                — the synthesizer stitched `MEGHBRAIN_INGEST_CONCURRENCY=4`
+                — the synthesizer stitched `<PROJECT>_INGEST_CONCURRENCY=4`
                 onto a shell command that follows it in a different exchange;
                 the seq resolved, the string did not occur, the line went)
                 3 sentences proposed, 3 kept, 0 dropped

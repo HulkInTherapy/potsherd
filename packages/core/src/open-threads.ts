@@ -439,7 +439,7 @@ function loadCards(db: Db): LoadedCard[] {
 /**
  * Are these two project paths the same project?
  *
- * `/Users/zebra/meghbrain` and `/Users/zebra/meghbrain/docs` are one codebase
+ * `/Users/zebra/notes` and `/Users/zebra/notes/docs` are one codebase
  * that the harness recorded from two working directories, and reporting a
  * decision as "never applied" to a subdirectory of where it was made is the
  * purest possible false positive. Path containment, not string equality.
@@ -509,7 +509,7 @@ export function openThreadCandidates(
   const byId = new Map(cards.map((c) => [c.sessionId, c]));
 
   // Project B, as one pooled view per project. Pooling is right: "never seen
-  // in meghbrain" is a claim about the project, and checking each of its
+  // in notes" is a claim about the project, and checking each of its
   // sessions separately would raise the same candidate once per session.
   //
   // Pooled once, before the session loop, and not once per session: the pools
