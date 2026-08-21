@@ -32,18 +32,30 @@ export function renderFind(
   lines.push('');
 
   if (result.sessions.length === 0) {
-    lines.push(INDENT + `nothing in the index matches ${JSON.stringify(result.query)}.`);
+    lines.push(
+      INDENT + f.clip(`nothing in the index matches ${JSON.stringify(result.query)}.`, t.width - 2, t),
+    );
     lines.push('');
     if (!result.vectors.available && result.vectors.reason) {
-      lines.push(
-        INDENT + t.dim(f.clip(plain(t, `text search only — ${result.vectors.reason}`), t.width - 2)),
-      );
+      lines.push(INDENT + t.dim(f.clip(`text search only ${t.dash} ${result.vectors.reason}`, t.width - 2, t)));
     }
+    // An empty `--ghosts only` on a directory that was indexed but never
+    // rescued reads as "you have no deleted sessions", which is the one thing
+    // potsherd exists to disprove: `index` does not build ghosts, `rescue`
+    // does. `index` says so on its own receipt (T1.7a); this is the other
+    // screen the same person hits, so it says the same thing.
+    if (result.ghostsOnly && result.indexedGhosts === 0) {
+      lines.push(
+        INDENT + t.dim('no ghosts indexed yet') + '  ' + t.dim(`${t.sep} run  potsherd rescue`),
+      );
+      return lines.join('\n');
+    }
+    // Two variants, because "run potsherd ls to see what is indexed, or
+    // potsherd index to add more" is 77 characters and the terminal may be 60.
+    const long = 'to see what is indexed, or  potsherd index  to add more';
+    const wide = INDENT + t.dim('run') + '  potsherd ls  ' + t.dim(long);
     lines.push(
-      INDENT +
-        t.dim('run') +
-        '  potsherd ls  ' +
-        t.dim('to see what is indexed, or  potsherd index  to add more'),
+      Theme.len(wide) <= t.width ? wide : INDENT + t.dim('run') + '  potsherd ls  ' + t.dim('or  potsherd index'),
     );
     return lines.join('\n');
   }
@@ -67,7 +79,7 @@ function headline(r: RecallResult, t: Theme): string {
   );
   parts.push(r.vectors.used ? 'bm25 + vectors' : 'bm25');
   parts.push(f.duration(r.ms));
-  return f.clip(parts.join(` ${t.sep} `), t.width);
+  return f.clip(parts.join(` ${t.sep} `), t.width, t);
 }
 
 function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[] {
@@ -77,7 +89,7 @@ function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[]
   // line 1 — the name, and what kind of thing it is.
   const right = [s.harness, statusWord(s)].join(` ${t.sep} `);
   const titleRoom = Math.max(12, width - right.length - 2);
-  const title = markerFor(s, t) + f.elide(s.displayTitle, titleRoom - markerLen(s));
+  const title = markerFor(s, t) + f.elide(s.displayTitle, titleRoom - markerLen(s), t);
   lines.push(
     INDENT +
       title +
@@ -97,7 +109,7 @@ function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[]
   if (s.gitBranch) meta.push(s.gitBranch);
   if (s.agentName) meta.push(s.agentName);
   const score = s.score.toFixed(4);
-  const metaLine = f.clip(meta.join(` ${t.sep} `), Math.max(10, width - score.length - 2));
+  const metaLine = f.clip(meta.join(` ${t.sep} `), Math.max(10, width - score.length - 2), t);
   lines.push(
     INDENT +
       t.dim(metaLine) +
@@ -127,7 +139,7 @@ function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[]
   // with no visible connection to what they typed. That was the T1.7 review's
   // sharpest complaint and it is a one-line fix.
   if (s.hits.length > 0 && !quotable.some((h) => h.snippet.match)) {
-    lines.push(INDENT + '  ' + t.dim(f.clip(plain(t, unmatchedReason(s, r)), width - 2)));
+    lines.push(INDENT + '  ' + t.dim(f.clip(unmatchedReason(s, r), width - 2, t)));
   }
 
   // last line — the one command that puts them back inside it.
@@ -161,19 +173,6 @@ function quotableOrder(hits: RecallHit[]): RecallHit[] {
     .map((x) => x.hit);
 }
 
-/**
- * Fold potsherd's own typography down to 7-bit for `--ascii`.
- *
- * The glyphs the *renderer* chooses already come from `Theme.g`. These are the
- * ones that arrive from the engine inside a string — the `…` a snippet marks
- * its own edges with, and the `—` in `no vector index — sqlite-vec did not
- * load` — and they would otherwise be the only non-ASCII left on a terminal
- * that asked for none.
- */
-function plain(t: Theme, s: string): string {
-  return t.ascii ? s.replace(/…/g, '...').replace(/[—–]/g, '-') : s;
-}
-
 /** One line saying why a block with no quotable match is in the results. */
 function unmatchedReason(s: RecallSession, r: RecallResult): string {
   if (s.hits.some((h) => h.kind === 'title')) {
@@ -192,16 +191,13 @@ function unmatchedReason(s: RecallSession, r: RecallResult): string {
  * back out again — so it shifts the window rather than clipping it away.
  */
 export function snippetLine(hit: RecallHit, t: Theme, width: number): string {
-  let text = hit.snippet.text.replace(/\s+/g, ' ').trim();
+  const text = hit.snippet.text.replace(/\s+/g, ' ').trim();
   if (!text) return '';
-  let m = hit.snippet.match;
-  if (t.ascii && text.includes('…')) {
-    // The cutter marks its own edges with `…`; under --ascii that has to become
-    // `...`, which is two characters wider and therefore moves the highlight.
-    const shift = ((text.slice(0, m?.start ?? 0).match(/…/g) ?? []).length) * 2;
-    text = plain(t, text);
-    if (m) m = { start: m.start + shift, end: m.end + shift };
-  }
+  const m = hit.snippet.match;
+  // The `…` the cutter marks its own edges with is left alone: `Theme.asciiLine`
+  // folds it to a single `.` at the boundary, which is width-preserving, and
+  // expanding it to `...` here would push the line past the column it was just
+  // measured against.
   if (!m || m.end > text.length) return t.dim(clipToWords(text, width, t.ellip));
 
   let start = 0;
@@ -212,7 +208,10 @@ export function snippetLine(hit: RecallHit, t: Theme, width: number): string {
     // Keep the match visible: centre the visible window on it, and say with an
     // ellipsis that the sentence continues — a snippet that begins mid-word
     // with no mark reads as corrupted text rather than as an excerpt.
-    const room = width - 2;
+    // Two ellipses, at whatever width this terminal renders one: `…` is a
+    // column, `...` is three, and reserving two for both overflows `--ascii`
+    // by four at the moment it matters most.
+    const room = width - 2 * t.ellip.length;
     const half = Math.max(0, Math.floor((room - (m.end - m.start)) / 2));
     start = Math.max(0, Math.min(m.start - half, text.length - room));
     end = Math.min(text.length, start + room);
@@ -262,7 +261,7 @@ function wordEdges(
 }
 
 function action(s: RecallSession, t: Theme, width: number): string {
-  if (s.resume) return f.clip(`run  ${s.resume}`, width);
+  if (s.resume) return f.clip(`run  ${s.resume}`, width, t);
   const show = `potsherd show ${idTag(s.id)}`;
   if (s.status === 'ghost') {
     // plans/05, the honesty contract: say the limitation before anyone finds it.
@@ -302,10 +301,10 @@ function footer(r: RecallResult, t: Theme): string {
   const sidechains = r.sessions.filter((s) => s.isSidechain).length;
   if (ghosts) parts.push(`${f.num(ghosts)} ghost ${f.plural(ghosts, 'hit')}`);
   if (sidechains) parts.push(`${f.num(sidechains)} from subagents`);
-  if (!r.vectors.used && r.vectors.reason) parts.push(plain(t, r.vectors.reason));
+  if (!r.vectors.used && r.vectors.reason) parts.push(r.vectors.reason);
   if (r.relaxed) parts.push('relaxed to any-word matching');
   if (parts.length === 0) parts.push(`run  potsherd show <id8>  to read one whole`);
   // joinFit, not clip: a footer that ends "(--v…" has lost a whole clause to
   // save two characters. Drop the last note instead of cutting one in half.
-  return f.joinFit(parts, t.width - INDENT.length, ` ${t.sep} `, t.ellip);
+  return f.joinFit(parts, t.width - INDENT.length, ` ${t.sep} `, t);
 }

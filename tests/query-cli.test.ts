@@ -215,12 +215,43 @@ describe('find', () => {
     }
   });
 
-  it('--ascii keeps the block inside 7-bit, ellipsis included', () => {
-    const r = run(['find', 'idempotency key on a replayed request', '--width', '80', '--ascii']);
-    // eslint-disable-next-line no-control-regex
-    expect(stripAnsi(r.stdout)).toMatch(/^[\x00-\x7f]*$/);
-    expect(r.stdout).toContain('Idempotency keys');
+  it('--ascii keeps the block inside 7-bit and inside the column', () => {
+    for (const width of ['80', '60']) {
+      const r = run(['find', 'idempotency key on a replayed request', '--width', width, '--ascii']);
+      // eslint-disable-next-line no-control-regex
+      expect(stripAnsi(r.stdout)).toMatch(/^[\x00-\x7f]*$/);
+      // The snippet window reserves room for two ellipses; under --ascii each
+      // is three characters, not one, and reserving two overflowed by four.
+      const { width: got, line } = widest(r.stdout);
+      expect(got, `widest --ascii line (${got}): ${line}`).toBeLessThanOrEqual(Number(width));
+    }
+    expect(run(['find', 'idempotency key', '--width', '80', '--ascii']).stdout).toContain(
+      'Idempotency keys',
+    );
   });
+
+  it('says rescue, not silence, when the index has no ghosts to search', async () => {
+    // `index` does not build ghosts — `rescue` does. An empty
+    // `find --ghosts only` on an indexed-but-never-rescued directory otherwise
+    // reads as "you have no deleted sessions", which is the belief potsherd
+    // exists to correct.
+    const bare = tempDir('potsherd-no-ghosts-');
+    dirs.push(bare);
+    await indexAll({ root: bare, claudeDir: FIXTURE, harnesses: ['claude'], embed: false, full: true });
+    // `find` exits 1 on no match, which is the point of this case.
+    let out = '';
+    try {
+      out = execFileSync(
+        'node',
+        [bin, 'find', 'printer', '--ghosts', 'only', '--potsherd-dir', bare, '--width', '60'],
+        { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] },
+      ).toString();
+    } catch (err) {
+      out = (err as { stdout?: string }).stdout ?? '';
+    }
+    expect(out).toContain('potsherd rescue');
+    expect(widest(out).width).toBeLessThanOrEqual(60);
+  }, 60_000);
 
   it('says why a result is there when no snippet can show it', () => {
     const r = run(['find', 'pay button spinner', '--width', '80']);
