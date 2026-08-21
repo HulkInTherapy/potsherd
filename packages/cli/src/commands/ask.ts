@@ -62,6 +62,8 @@ export interface AskCommandOptions extends GlobalOptions, FilterFlags {
   vec?: boolean;
   /** T5.6: record the reader inputs to this path and stop. No model call. */
   readersOut?: string;
+  /** T5.6: replay reader outputs from this path instead of running readers. */
+  readersIn?: string;
 }
 
 export async function runAsk(o: AskCommandOptions): Promise<number> {
@@ -74,6 +76,13 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
   }
 
   const readersOut = flagPath(o.readersOut);
+  const readersIn = flagPath(o.readersIn);
+  if (readersOut && readersIn) {
+    throw new UserError(
+      '--readers-out and --readers-in are the two halves of one round trip, not two flags for one run',
+      'potsherd ask "…" --readers-out r.json   # then run your readers, then --readers-in r.json',
+    );
+  }
 
   // A verb that is about to spend money says so before it spends it, and says
   // what would fix it when it cannot. `card --dry-run` is allowed to work with
@@ -125,20 +134,22 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
       return await recordReaders(db, question, base, readersOut, o, t);
     }
 
-    const result = await ask(db, question, {
-      ...base,
-      onProgress: (p) => {
-        if (p.step !== 'read') return;
-        // Cost and time, live, on stderr — so `ask --json > f` still shows it
-        // and the json stays parseable. `est.` is inherited from the result,
-        // never guessed here.
-        progress.update(
-          p.done,
-          p.total,
-          `${f.money(p.spend.usd)}${p.spend.estimatedInputCalls > 0 ? ' est.' : ''}`,
-        );
-      },
-    });
+    const result = readersIn
+      ? await replayReaders(db, question, base, readersIn)
+      : await ask(db, question, {
+          ...base,
+          onProgress: (p) => {
+            if (p.step !== 'read') return;
+            // Cost and time, live, on stderr — so `ask --json > f` still shows it
+            // and the json stays parseable. `est.` is inherited from the result,
+            // never guessed here.
+            progress.update(
+              p.done,
+              p.total,
+              `${f.money(p.spend.usd)}${p.spend.estimatedInputCalls > 0 ? ' est.' : ''}`,
+            );
+          },
+        });
     progress.done();
 
     if (o.debug) reportDrops(drops);
@@ -172,11 +183,6 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
 // `packages/core/src/ask.ts` is not edited by any of this, and does not need
 // to be. That was T5.2's claim and it holds; the two line references that
 // carry it are in `recorder()` below.
-//
-// This commit is `--readers-out` — the recording half. `--readers-in` reads
-// the same envelope back and is the next commit; the `outputs` field below is
-// declared here because the format is one format, defined by the flag that
-// writes it.
 
 /** The envelope's discriminator. A file without it is not one of ours. */
 export const READERS_FILE_KIND = 'potsherd.ask.readers';
@@ -356,10 +362,262 @@ function readersOutReceipt(
   // The claim this flag exists to make, stated where the user can check it.
   lines.push(`  ${t.dim(`no model call was made (${probe.spend.calls}). the excerpts are redacted, as sent.`)}`);
   lines.push('');
-  lines.push('  run your readers and add an "outputs" array to the file.');
+  lines.push('  run your readers, add an "outputs" array to the file, then:');
+  lines.push(`    potsherd ask "${file.question}" --readers-in ${abs}`);
   return lines.join('\n');
 }
 
+
+/**
+ * `--readers-in`: hand `ask()` the recorded outputs and let it do the rest.
+ *
+ * Two passes, and the first one is the point.
+ *
+ * `ask()` cannot skip the shortlist even here, and should not: `filterAnswer`
+ * checks every quote against the *live* transcript bytes at the `(sessionId,
+ * seq)` it names, so the shortlist is what makes the guarantee enforceable
+ * rather than a thing the file asserts about itself. T5.2's §2 says
+ * `--readers-in` "skips shortlist and readers"; it skips the readers, and it
+ * must not skip the shortlist.
+ *
+ * Given that, the recorded session ids and the live shortlist can disagree —
+ * the index moved, a session was indexed or dropped, a filter differs. Finding
+ * that out *after* `ask()` returns would mean paying for the synthesizer to
+ * learn the answer was built on a stale file. So pass one is the
+ * `--readers-out` recorder again, over the identical options: zero model calls
+ * by the same construction, and it yields the live shortlist to check the file
+ * against. It costs one extra `recall` (no model, no network beyond the local
+ * embedding pass) and it buys a failure that happens before any money does.
+ *
+ * Reusing the recorder rather than re-deriving the shortlist is deliberate.
+ * `ask()`'s `recall` call is tuned — candidate depth pinned to `find --limit
+ * k`, vectors defaulted on — with measured reasons in its own comments. A
+ * second copy of that call in this file would drift, and the drift would look
+ * exactly like a stale file.
+ */
+export async function replayReaders(
+  db: Parameters<typeof ask>[0],
+  question: string,
+  base: AskOptions,
+  path: string,
+): Promise<AskResult> {
+  const abs = nodePath.resolve(path);
+  const file = readReadersFile(abs);
+  const q = redactOutgoing(question).text;
+
+  if (file.question !== q) {
+    throw new UserError(
+      `${abs} was recorded against a different question — replaying it would answer ` +
+        `"${file.question}" and print it under "${q}"`,
+      `potsherd ask "${q}" --readers-out ${abs}    # record this question, then run your readers`,
+    );
+  }
+  const k = base.k ?? ASK_K;
+  if (file.k !== k) {
+    throw new UserError(
+      `${abs} was recorded with --k ${file.k} and this run asked for --k ${k}, ` +
+        'which is a different shortlist',
+      `potsherd ask "${q}" --k ${file.k} --readers-in ${abs}`,
+    );
+  }
+  const outputs = file.outputs;
+  if (!outputs) {
+    throw new UserError(
+      `${abs} has no "outputs" — it is a --readers-out recording that nobody has read yet`,
+      'run one reader per entry in "targets", then add ' +
+        '"outputs": [{ "sessionId": …, "found": …, "quotes": […], "answer_fragment": … }]',
+    );
+  }
+
+  // ---- pass one: the live shortlist, at zero model calls.
+  const rec = recorder();
+  await ask(db, question, { ...base, concurrency: 1, openThreads: false, readerFn: rec.fn });
+  const live = rec.seen.map((x) => x.sessionId);
+
+  matchOrFail(abs, q, 'recorded shortlist', file.sessionIds, live);
+  matchOrFail(abs, q, '"outputs"', outputs.map((x) => x.sessionId), live);
+
+  const byId = new Map<string, AskReaderOutput>();
+  for (const out of outputs) byId.set(out.sessionId, out);
+
+  // ---- pass two: the real run, with the recorded readers in place of the SDK.
+  const readerFn: AskReaderFn = async (input) => {
+    const out = byId.get(input.sessionId);
+    // Unreachable: `matchOrFail` proved the sets equal against the shortlist
+    // this same options object produces. Kept because `ask()` turns a thrown
+    // reader into `found: false` and a quietly thinner answer, and a thinner
+    // answer is the one failure this flag exists to prevent.
+    if (!out) throw new Error(`no recorded output for ${input.sessionId}`);
+    return out;
+  };
+  return ask(db, question, { ...base, readerFn });
+}
+
+/**
+ * The stale-file check, and the ruling on a partial match: **any difference is
+ * an error.**
+ *
+ * The tempting alternative is to answer from the overlap. It is wrong, and
+ * specifically it is wrong in a way the user cannot see. `AskResult.searched`
+ * and `AskResult.matching` are printed as "n of m sessions read", and on a
+ * partial replay they would be the live shortlist's numbers over a file that
+ * covers less than it. The answer would read as a full sweep of the corpus
+ * while a session the live shortlist ranked *into* the top k contributed
+ * nothing — and `filterAnswer` cannot see that, because it checks the quotes
+ * it is given and has no view of the ones nobody produced. That is precisely
+ * "silently answer from a stale file", arrived at one session at a time.
+ *
+ * The mismatch also always has the same cause — the index moved between the
+ * recording and the replay — and always the same one-command fix. So the error
+ * names both directions, because they fail differently and only one of them is
+ * dangerous: a session in the file and not in the shortlist is merely unused,
+ * while a session in the shortlist and not in the file is the hole.
+ */
+function matchOrFail(
+  abs: string,
+  question: string,
+  what: string,
+  recorded: readonly string[],
+  live: readonly string[],
+): void {
+  const have = new Set(recorded);
+  const want = new Set(live);
+  const missing = live.filter((id) => !have.has(id));
+  const extra = recorded.filter((id) => !want.has(id));
+  if (missing.length === 0 && extra.length === 0 && recorded.length === live.length) return;
+
+  const parts: string[] = [];
+  if (missing.length > 0) {
+    parts.push(`${missing.length} shortlisted session${missing.length === 1 ? '' : 's'} it does not cover (${id8s(missing)})`);
+  }
+  if (extra.length > 0) {
+    parts.push(`${extra.length} session${extra.length === 1 ? '' : 's'} no longer shortlisted (${id8s(extra)})`);
+  }
+  if (parts.length === 0) parts.push('a duplicated session id');
+  throw new UserError(
+    `${abs}'s ${what} does not match the shortlist this question produces now: ${parts.join(', ')}. ` +
+      'answering from it would print the live shortlist\'s counts over a stale file',
+    `potsherd ask "${question}" --readers-out ${abs}    # re-record, then run your readers again`,
+  );
+}
+
+function id8s(ids: readonly string[]): string {
+  return ids
+    .slice(0, 4)
+    .map((id) => id.slice(0, 8))
+    .join(' ')
+    .concat(ids.length > 4 ? ` +${ids.length - 4}` : '');
+}
+
+/**
+ * Read and validate the envelope.
+ *
+ * Every failure here is a `UserError` naming the file and the field. A reader
+ * file is written by a skill, by hand, or by an agent that may have got the
+ * shape wrong; the failure mode to design against is a file that parses into
+ * something plausible and empty, because `ask()` would then answer "no reader
+ * found anything" about a corpus that had plenty.
+ */
+function readReadersFile(abs: string): ReadersFile {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(abs, 'utf8');
+  } catch {
+    throw new UserError(`cannot read ${abs}`, `potsherd ask "…" --readers-out ${abs}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new UserError(`${abs} is not JSON — ${err instanceof Error ? err.message : String(err)}`, `potsherd ask "…" --readers-out ${abs}`);
+  }
+  if (!isRecord(parsed)) throw new UserError(`${abs} is not a reader file — expected a JSON object`, `potsherd ask "…" --readers-out ${abs}`);
+  if (parsed['kind'] !== READERS_FILE_KIND) {
+    throw new UserError(
+      `${abs} is not a reader file — "kind" is ${JSON.stringify(parsed['kind'] ?? null)}, expected "${READERS_FILE_KIND}"`,
+      `potsherd ask "…" --readers-out ${abs}`,
+    );
+  }
+  if (parsed['version'] !== READERS_FILE_VERSION) {
+    throw new UserError(
+      `${abs} is a v${String(parsed['version'])} reader file and this potsherd (${VERSION}) reads v${READERS_FILE_VERSION}`,
+      `potsherd ask "…" --readers-out ${abs}    # re-record with this build`,
+    );
+  }
+  const question = parsed['question'];
+  if (typeof question !== 'string' || question.trim() === '') {
+    throw new UserError(`${abs} has no "question" — a reader file that cannot say what it was recorded for is not replayable`, `potsherd ask "…" --readers-out ${abs}`);
+  }
+  const k = parsed['k'];
+  if (typeof k !== 'number' || !Number.isFinite(k) || k < 1) {
+    throw new UserError(`${abs} has no usable "k"`, `potsherd ask "…" --readers-out ${abs}`);
+  }
+  const sessionIds = parsed['sessionIds'];
+  if (!Array.isArray(sessionIds) || sessionIds.some((x) => typeof x !== 'string' || x === '')) {
+    throw new UserError(`${abs} has no usable "sessionIds"`, `potsherd ask "…" --readers-out ${abs}`);
+  }
+  const targets = Array.isArray(parsed['targets']) ? (parsed['targets'] as AskReaderInput[]) : [];
+
+  const rawOutputs = parsed['outputs'];
+  let outputs: RecordedOutput[] | undefined;
+  if (rawOutputs !== undefined && rawOutputs !== null) {
+    if (!Array.isArray(rawOutputs)) throw new UserError(`${abs}: "outputs" must be an array`, 'one entry per session in "targets"');
+    outputs = rawOutputs.map((entry, i) => readerOutput(abs, entry, i));
+  }
+
+  return {
+    kind: READERS_FILE_KIND,
+    version: READERS_FILE_VERSION,
+    potsherd: typeof parsed['potsherd'] === 'string' ? parsed['potsherd'] : '',
+    question,
+    k,
+    sessionIds: sessionIds as string[],
+    targets,
+    ...(outputs ? { outputs } : {}),
+  };
+}
+
+/**
+ * One `AskReaderOutput`, checked to the same shape the SDK reader is validated
+ * to in `ask.ts`. Loose here would mean a quote with no `seq`, which
+ * `filterAnswer` drops — correctly, but for a reason the user would read as
+ * "the model made it up" rather than "the file was malformed".
+ */
+function readerOutput(abs: string, entry: unknown, i: number): RecordedOutput {
+  const where = `${abs}: outputs[${i}]`;
+  if (!isRecord(entry)) throw new UserError(`${where} is not an object`, 'each entry is { sessionId, found, quotes, answer_fragment }');
+  const sessionId = entry['sessionId'];
+  if (typeof sessionId !== 'string' || sessionId === '') {
+    throw new UserError(`${where} has no "sessionId"`, 'copy it from the matching entry in "targets"');
+  }
+  if (typeof entry['found'] !== 'boolean') {
+    throw new UserError(`${where} ("${sessionId.slice(0, 8)}") has no boolean "found"`, 'a reader that found nothing records "found": false — it is not omitted');
+  }
+  const rawQuotes = entry['quotes'];
+  if (!Array.isArray(rawQuotes)) throw new UserError(`${where} ("${sessionId.slice(0, 8)}") has no "quotes" array`, '"quotes": [] when found is false');
+  const quotes = rawQuotes.map((qq, j) => {
+    if (!isRecord(qq)) throw new UserError(`${where}.quotes[${j}] is not an object`, '{ "seq": n, "ts": "…"|null, "text": "…" }');
+    const seq = qq['seq'];
+    if (typeof seq !== 'number' || !Number.isInteger(seq)) {
+      throw new UserError(`${where}.quotes[${j}] has no integer "seq"`, 'the seq must be one of that session\'s "seqs" in "targets"');
+    }
+    const text = qq['text'];
+    if (typeof text !== 'string') throw new UserError(`${where}.quotes[${j}] has no "text"`, 'copied character for character out of that session\'s excerpts');
+    const ts = qq['ts'];
+    return { seq, ts: typeof ts === 'string' ? ts : null, text };
+  });
+  const fragment = entry['answer_fragment'];
+  return {
+    sessionId,
+    found: entry['found'],
+    quotes,
+    answer_fragment: typeof fragment === 'string' ? fragment : '',
+  };
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
 
 function flagPath(v: unknown): string {
   if (typeof v !== 'string') return '';

@@ -36,6 +36,7 @@ import { Llm, redactOutgoing, type Backend, type SendRequest, type SendResult, t
 import {
   READERS_FILE_KIND,
   READERS_FILE_VERSION,
+  replayReaders,
   writeReadersFile,
 } from '../packages/cli/src/commands/ask.js';
 import type { Transcript, TranscriptUnit } from '../packages/core/src/cards/transcript.js';
@@ -1718,5 +1719,243 @@ describe('T5.6 --readers-out', () => {
     await writeReadersFile(db, 'pgbouncer prepared statements', { root }, target);
     expect(fs.readFileSync(target, 'utf8').endsWith('}\n')).toBe(true);
     db.close();
+  });
+});
+
+describe('T5.6 --readers-in', () => {
+  const QUESTION = 'how did we handle pgbouncer with prepared statements?';
+  /** What the SDK reader returns for `seedDb`'s one session, as a recording. */
+  const RECORDED = { sessionId: POOLER, ...(JSON.parse(READER_OK) as AskReaderOutput) };
+  const SYNTH = synthReply(
+    [{ text: 'The client cache was set to zero rather than changing the pooler mode.', cites: [1] }],
+    [{ n: 1, session_id: POOLER, seq: 12, quote: REAL_QUOTE }],
+  );
+
+  function outFile(): string {
+    return path.join(scratch('potsherd-readers-'), 'readers.json');
+  }
+
+  /** Record, then write `outputs` back into the same file, as a skill would. */
+  async function recordWithOutputs(
+    db: ReturnType<typeof store.open>,
+    root: string,
+    question: string,
+    outputs: unknown[],
+    extra: Record<string, unknown> = {},
+  ): Promise<string> {
+    const target = outFile();
+    await writeReadersFile(db, question, { root }, target);
+    const file = JSON.parse(fs.readFileSync(target, 'utf8')) as Record<string, unknown>;
+    fs.writeFileSync(target, JSON.stringify({ ...file, outputs, ...extra }, null, 2), 'utf8');
+    return target;
+  }
+
+  /** Everything an answer is made of. `ms` is a clock and `spend` is the point. */
+  function answerShape(r: AskResult): unknown {
+    return {
+      ...r,
+      ms: 0,
+      spend: null,
+      readers: r.readers.map((x) => ({ ...x, ms: 0 })),
+    };
+  }
+
+  it('produces the same AskResult as a normal run, and one fewer model call', async () => {
+    const { root, db } = seedDb();
+
+    // --- the normal run: SDK readers, then the synthesizer.
+    const readerLlm = Llm.open({ transport: new Scripted('agent-sdk', [READER_OK]), model: 'haiku' });
+    const normalSynth = new Scripted('agent-sdk', [SYNTH]);
+    const normalLlm = Llm.open({ transport: normalSynth, model: 'sonnet' });
+    const normal = await ask(db, QUESTION, { root, llm: normalLlm, readerLlm, openThreads: false });
+
+    // --- the replay: the same reader outputs, handed back through a file.
+    const target = await recordWithOutputs(db, root, QUESTION, [RECORDED]);
+    const replaySynth = new Scripted('agent-sdk', [SYNTH]);
+    const replayLlm = Llm.open({ transport: replaySynth, model: 'sonnet' });
+    const replayed = await replayReaders(db, QUESTION, { root, llm: replayLlm, openThreads: false }, target);
+
+    // Identical, field for field, including the evidence, the numbering, the
+    // dropped list, `searched`, `matching` and the reader reports. Nothing
+    // downstream of the readers knows which path it was on.
+    expect(JSON.stringify(answerShape(replayed))).toBe(JSON.stringify(answerShape(normal)));
+    expect(replayed.answer).toBe(normal.answer);
+    expect(replayed.evidence).toEqual(normal.evidence);
+
+    // The two fields that must differ, and why the flag exists: the readers
+    // are gone, so the run is one call instead of two.
+    expect(normal.spend.calls).toBe(2);
+    expect(replayed.spend.calls).toBe(1);
+    expect(replaySynth.sent).toHaveLength(1);
+
+    db.close();
+    await readerLlm.close();
+    await normalLlm.close();
+    await replayLlm.close();
+  });
+
+  it('runs filterAnswer on the replayed quotes — a fabricated one is still dropped', async () => {
+    const { root, db } = seedDb();
+    // A recording whose reader "quoted" something nobody wrote. This is the
+    // guarantee a SKILL.md cannot reproduce, running on the skill's own
+    // reader output.
+    const target = await recordWithOutputs(db, root, QUESTION, [
+      {
+        sessionId: POOLER,
+        found: true,
+        quotes: [{ seq: 12, ts: null, text: 'we moved the pooler to session mode' }],
+        answer_fragment: 'session mode',
+      },
+    ]);
+    const drops: AskDrop[] = [];
+    const llm = Llm.open({
+      transport: new Scripted('agent-sdk', [
+        synthReply(
+          [{ text: 'The pooler was moved to session mode.', cites: [1] }],
+          [{ n: 1, session_id: POOLER, seq: 12, quote: 'we moved the pooler to session mode' }],
+        ),
+      ]),
+      model: 'sonnet',
+    });
+    const r = await replayReaders(
+      db,
+      QUESTION,
+      { root, llm, openThreads: false, onDrop: (d) => drops.push(d) },
+      target,
+    );
+    expect(r.evidence).toHaveLength(0);
+    expect(r.answer).toBe('');
+    expect(r.dropped).toEqual(['The pooler was moved to session mode.']);
+    expect(drops.map((d) => d.reason)).toContain('not-a-quote');
+    db.close();
+    await llm.close();
+  });
+
+  it('--strict still refuses on a replay', async () => {
+    const { root, db } = seedDb();
+    const target = await recordWithOutputs(db, root, QUESTION, [RECORDED]);
+    const llm = Llm.open({ transport: new Scripted('agent-sdk', [SYNTH]), model: 'sonnet' });
+    const r = await replayReaders(db, QUESTION, { root, llm, strict: true, openThreads: false }, target);
+    // One surviving evidence line, and STRICT_MIN_EVIDENCE is two.
+    expect(r.refused).toBe(true);
+    expect(r.answer).toBe('');
+    db.close();
+    await llm.close();
+  });
+
+  it('refuses a file recorded against a different question', async () => {
+    const { root, db } = seedDb();
+    const target = await recordWithOutputs(db, root, QUESTION, [RECORDED]);
+    const transport = new Throwing();
+    const llm = Llm.open({ transport, model: 'sonnet' });
+    await expect(
+      replayReaders(db, 'what did we decide about the queue?', { root, llm, openThreads: false }, target),
+    ).rejects.toThrow(/recorded against a different question/);
+    // And it refused before it spent anything. A stale-file check that runs
+    // after the synthesizer has already been paid for is not a check.
+    expect(transport.sent).toHaveLength(0);
+    db.close();
+    await llm.close();
+  });
+
+  it('refuses a file recorded at a different --k', async () => {
+    const { root, db } = seedDb();
+    const target = await recordWithOutputs(db, root, QUESTION, [RECORDED], { k: 3 });
+    await expect(
+      replayReaders(db, QUESTION, { root, k: 6, openThreads: false }, target),
+    ).rejects.toThrow(/--k 3 and this run asked for --k 6/);
+    db.close();
+  });
+
+  it('refuses a recording nobody has read yet', async () => {
+    const { root, db } = seedDb();
+    const target = outFile();
+    await writeReadersFile(db, QUESTION, { root }, target);
+    await expect(replayReaders(db, QUESTION, { root, openThreads: false }, target)).rejects.toThrow(
+      /no "outputs"/,
+    );
+    db.close();
+  });
+
+  it('refuses a shortlist the file does not cover — a partial match is a failure, not an answer', async () => {
+    const { root, db } = seedDb();
+    // The file knows about a session the index no longer shortlists, and does
+    // not know about the one it does. Answering from the overlap would print
+    // the live shortlist's "n of m sessions read" over a file that covers
+    // less than it, and `filterAnswer` cannot see a quote nobody produced.
+    const target = await recordWithOutputs(db, root, QUESTION, [{ ...RECORDED, sessionId: 'sess-gone-0001' }], {
+      sessionIds: ['sess-gone-0001'],
+    });
+    const transport = new Throwing();
+    const llm = Llm.open({ transport, model: 'sonnet' });
+    await expect(replayReaders(db, QUESTION, { root, llm, openThreads: false }, target)).rejects.toThrow(
+      /does not match the shortlist this question produces now/,
+    );
+    expect(transport.sent).toHaveLength(0);
+    db.close();
+    await llm.close();
+  });
+
+  it('refuses an "outputs" array that misses a shortlisted session', async () => {
+    const { root, db } = seedDb();
+    const target = await recordWithOutputs(db, root, QUESTION, []);
+    await expect(replayReaders(db, QUESTION, { root, openThreads: false }, target)).rejects.toThrow(
+      /"outputs" does not match the shortlist/,
+    );
+    db.close();
+  });
+
+  it('refuses a file that is not one of ours, or is a version it cannot read', async () => {
+    const { root, db } = seedDb();
+    const alien = outFile();
+    fs.writeFileSync(alien, JSON.stringify({ kind: 'something.else', version: 1 }), 'utf8');
+    await expect(replayReaders(db, QUESTION, { root }, alien)).rejects.toThrow(/is not a reader file/);
+
+    const future = outFile();
+    await writeReadersFile(db, QUESTION, { root }, future);
+    const parsed = JSON.parse(fs.readFileSync(future, 'utf8')) as Record<string, unknown>;
+    fs.writeFileSync(future, JSON.stringify({ ...parsed, version: 99 }), 'utf8');
+    await expect(replayReaders(db, QUESTION, { root }, future)).rejects.toThrow(/v99 reader file/);
+
+    const notJson = outFile();
+    fs.writeFileSync(notJson, 'six agents said things', 'utf8');
+    await expect(replayReaders(db, QUESTION, { root }, notJson)).rejects.toThrow(/is not JSON/);
+    db.close();
+  });
+
+  it('refuses a malformed output rather than answering from a hole in it', async () => {
+    const { root, db } = seedDb();
+    // `found` omitted. `ask()` would read this as `found: false`, print "1
+    // session searched, none answered", and be wrong about the archive.
+    const noFound = await recordWithOutputs(db, root, QUESTION, [
+      { sessionId: POOLER, quotes: [], answer_fragment: '' },
+    ]);
+    await expect(replayReaders(db, QUESTION, { root }, noFound)).rejects.toThrow(/no boolean "found"/);
+
+    const noSeq = await recordWithOutputs(db, root, QUESTION, [
+      { sessionId: POOLER, found: true, quotes: [{ text: REAL_QUOTE }], answer_fragment: '' },
+    ]);
+    await expect(replayReaders(db, QUESTION, { root }, noSeq)).rejects.toThrow(/no integer "seq"/);
+
+    const noId = await recordWithOutputs(db, root, QUESTION, [{ found: false, quotes: [] }]);
+    await expect(replayReaders(db, QUESTION, { root }, noId)).rejects.toThrow(/no "sessionId"/);
+    db.close();
+  });
+
+  it('a reader that found nothing replays as a reader that found nothing', async () => {
+    const { root, db } = seedDb();
+    const target = await recordWithOutputs(db, root, QUESTION, [
+      { sessionId: POOLER, found: false, quotes: [], answer_fragment: '' },
+    ]);
+    const transport = new Throwing();
+    const llm = Llm.open({ transport, model: 'sonnet' });
+    const r = await replayReaders(db, QUESTION, { root, llm, openThreads: false }, target);
+    // `ask()`'s own `answered.length === 0` early return, reached honestly.
+    expect(r.searched).toBe(1);
+    expect(r.readers[0]!.found).toBe(false);
+    expect(r.answer).toBe('');
+    expect(transport.sent).toHaveLength(0);
+    db.close();
+    await llm.close();
   });
 });
