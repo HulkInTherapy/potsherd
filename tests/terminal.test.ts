@@ -130,6 +130,10 @@ function verbs(): { name: string; args: string[] }[] {
     { name: 'find', args: ['find', 'pgbouncer'] },
     { name: 'find --ghosts only', args: ['find', 'canon', '--ghosts', 'only'] },
     { name: 'find (no match)', args: ['find', 'zzzznotinthecorpus'] },
+    // The explain ledger is the widest thing `find` prints — six columns of
+    // numbers per row — so it is the one most likely to overflow 60.
+    { name: 'find --explain', args: ['find', 'pgbouncer', '--explain'] },
+    { name: 'find --explain (no match)', args: ['find', 'zzzznotinthecorpus', '--explain'] },
     { name: 'show', args: ['show', IDS.alive] },
     { name: 'guard --status', args: ['guard', '--status'] },
     { name: 'rescue --dry-run', args: ['rescue', '--dry-run', '--yes', '--no-settings'] },
@@ -188,6 +192,23 @@ describe('terminal width', () => {
       for (const ascii of [[], ['--ascii']]) {
         const r = invoke(
           ['index', '--no-embed', '--harness', 'claude'],
+          [...ascii, '--no-color', '--width', String(width)],
+        );
+        const over = r.stdout.split('\n').filter((l) => widthOf(l) > width);
+        expect(over, `overflowing lines at ${width}`).toEqual([]);
+      }
+    });
+
+    /**
+     * `find --explain` prints a six-column ledger — list, rank, raw score,
+     * weight, contribution, share — which is the widest thing any verb emits.
+     * At 60 columns the raw column has to go rather than the line wrapping, so
+     * this is the assertion that keeps that decision honest.
+     */
+    it(`find --explain fits --width ${width}`, () => {
+      for (const ascii of [[], ['--ascii']]) {
+        const r = invoke(
+          ['find', 'pgbouncer', '--explain'],
           [...ascii, '--no-color', '--width', String(width)],
         );
         const over = r.stdout.split('\n').filter((l) => widthOf(l) > width);

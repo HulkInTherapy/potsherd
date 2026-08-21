@@ -1,4 +1,4 @@
-import { recall, renderFind } from '@potsherd/core';
+import { recall, renderFind, search as searchNs } from '@potsherd/core';
 import { print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 import { openIndex, parseFilters, parseLimit, type FilterFlags } from '../filters.js';
 
@@ -9,6 +9,8 @@ export interface FindCommandOptions extends GlobalOptions, FilterFlags {
   vec?: boolean;
   /** `--vectors auto|on|off`. */
   vectors?: string;
+  /** `--explain` — print the fusion arithmetic instead of the snippets. */
+  explain?: boolean;
 }
 
 /**
@@ -44,6 +46,10 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
       printJson({
         query: result.query,
         filters,
+        // The same ledger the human view prints, so a script and a person are
+        // reading one number. `--explain --json` is how the eval harness will
+        // ask why a query lost without parsing a terminal layout.
+        ...(o.explain ? { explain: searchNs.explain(result) } : {}),
         vectors: result.vectors,
         lists: result.lists,
         relaxed: result.relaxed,
@@ -82,7 +88,7 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
       return result.sessions.length ? 0 : 1;
     }
 
-    print(renderFind(result, themeFrom(o)));
+    print(renderFind(result, themeFrom(o), new Date(), { explain: Boolean(o.explain) }));
     // Exit 1 on no match, so `potsherd find x || echo none` works in a script.
     return result.sessions.length ? 0 : 1;
   } finally {

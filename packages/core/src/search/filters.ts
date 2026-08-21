@@ -35,7 +35,12 @@ export interface SearchFilters {
   until?: string;
   tag?: string;
   branch?: string;
-  /** Substring match against `exchanges.files_touched`. */
+  /**
+   * A path, a fragment of one, or a pattern: matched against the **elements**
+   * of `exchanges.files_touched`, which is a JSON array. `%` and `*` are
+   * wildcards; a value with neither is matched as a substring. See
+   * {@link FILE_TOUCHED_SQL}.
+   */
   file?: string;
   /** Default `include` — the opposite of upstream's hard-coded exclusion. */
   sidechains?: TriState;
@@ -131,16 +136,16 @@ export function buildExchangeFilters(filters: SearchFilters = {}): BoundClause {
     params.push(filters.status);
   }
   if (filters.branch) {
-    parts.push('s.git_branch = ?');
-    params.push(filters.branch);
+    parts.push(branchClause(filters.branch, 's.git_branch'));
+    params.push(branchParam(filters.branch));
   }
   if (filters.sessionId) {
     parts.push('e.session_id = ?');
     params.push(filters.sessionId);
   }
   if (filters.file) {
-    parts.push('e.files_touched LIKE ?');
-    params.push(`%${filters.file}%`);
+    parts.push(FILE_TOUCHED_SQL('e.files_touched'));
+    params.push(likePattern(filters.file));
   }
   if (filters.tag) {
     parts.push('EXISTS (SELECT 1 FROM tags t WHERE t.session_id = e.session_id AND t.tag = ?)');
@@ -208,8 +213,8 @@ export function buildSessionFilters(filters: SearchFilters = {}): BoundClause {
     params.push(filters.status);
   }
   if (filters.branch) {
-    parts.push('s.git_branch = ?');
-    params.push(filters.branch);
+    parts.push(branchClause(filters.branch, 's.git_branch'));
+    params.push(branchParam(filters.branch));
   }
   if (filters.sessionId) {
     parts.push('s.id = ?');
@@ -217,9 +222,10 @@ export function buildSessionFilters(filters: SearchFilters = {}): BoundClause {
   }
   if (filters.file) {
     parts.push(
-      'EXISTS (SELECT 1 FROM exchanges e WHERE e.session_id = s.id AND e.files_touched LIKE ?)',
+      `EXISTS (SELECT 1 FROM exchanges e WHERE e.session_id = s.id
+                 AND ${FILE_TOUCHED_SQL('e.files_touched')})`,
     );
-    params.push(`%${filters.file}%`);
+    params.push(likePattern(filters.file));
   }
   if (filters.tag) {
     parts.push('EXISTS (SELECT 1 FROM tags t WHERE t.session_id = s.id AND t.tag = ?)');
@@ -277,8 +283,8 @@ export function buildGhostFilters(filters: SearchFilters = {}): BoundClause {
     params.push(filters.harness);
   }
   if (filters.branch) {
-    parts.push('g.git_branch = ?');
-    params.push(filters.branch);
+    parts.push(branchClause(filters.branch, 'g.git_branch'));
+    params.push(branchParam(filters.branch));
   }
   if (filters.sessionId) {
     parts.push('g.session_id = ?');
@@ -324,6 +330,68 @@ export function hasMetadataFilters(filters: SearchFilters = {}): boolean {
  */
 export function knnCandidates(limit: number, filters: SearchFilters = {}): number {
   return hasMetadataFilters(filters) ? limit * 3 : limit;
+}
+
+/**
+ * `--file` against `exchanges.files_touched`, which is a **JSON array**.
+ *
+ * The column holds `["packages/core/src/db/pool.ts","README.md"]`, so the
+ * obvious `files_touched LIKE '%/db/%'` is wrong in both directions: it matches
+ * the commas and brackets between elements (a session that touched `a/db` and
+ * `x.ts` matches a pattern spanning the two) and it cannot anchor a pattern to
+ * one path's end. json1's `json_each` turns the array into rows, and the
+ * pattern is then applied to one whole path at a time — which is what
+ * `--file "%/db/%"` means and what `03` §7 asks for by name.
+ *
+ * The `CASE` is not defensive decoration. `json_each` raises *malformed JSON*
+ * when handed a value that is not an array, and one unparseable row written by
+ * some future adapter would abort the whole search rather than not matching —
+ * a filter that turns a result set into an error. An unreadable value matches
+ * nothing, which is the honest answer.
+ *
+ * The pattern is still a bound `?`. Nothing the user types is concatenated
+ * into SQL here, and the ESCAPE clause means a literal `_` in a filename
+ * cannot act as a wildcard.
+ */
+export function FILE_TOUCHED_SQL(column: string): string {
+  return `EXISTS (SELECT 1 FROM json_each(
+                    CASE WHEN json_valid(${column}) THEN ${column} ELSE '[]' END
+                  ) jf WHERE jf.value LIKE ? ESCAPE '\\')`;
+}
+
+/**
+ * What a user's `--file` argument means as a LIKE pattern.
+ *
+ *   `pool.ts`      -> `%pool.ts%`   nobody types leading and trailing wildcards
+ *   `%/db/%`       -> `%/db/%`      already a pattern; left alone
+ *   `src/*.ts`     -> `src/%.ts`    the glob everyone's shell taught them
+ *
+ * `_` is escaped in every case, because `snake_case.py` is a filename and not
+ * a single-character wildcard, and the difference is silent otherwise.
+ */
+export function likePattern(value: string): string {
+  const hasWildcard = /[%*]/.test(value);
+  const escaped = value.replace(/[\\_]/g, (c) => `\\${c}`);
+  return hasWildcard ? escaped.replace(/\*/g, '%') : `%${escaped}%`;
+}
+
+/**
+ * `--branch` is an equality by default and a pattern when it is written as one.
+ *
+ * Branch names are typed in full far more often than paths are, and an
+ * unanchored substring match would make `--branch main` also select
+ * `feat/main-nav-redesign`. But `--branch "feat/*"` is what a person means when
+ * they ask what a whole line of work touched, so a value carrying a wildcard
+ * becomes a LIKE.
+ */
+export function branchClause(value: string, column: string): string {
+  return /[%*]/.test(value) ? `${column} LIKE ? ESCAPE '\\'` : `${column} = ?`;
+}
+
+export function branchParam(value: string): string {
+  return /[%*]/.test(value)
+    ? value.replace(/[\\_]/g, (c) => `\\${c}`).replace(/\*/g, '%')
+    : value;
 }
 
 export function validateISODate(value: string, paramName: string): void {

@@ -3,6 +3,7 @@ import { Theme } from '../theme.js';
 import * as f from '../format.js';
 import { idTag } from '../recall.js';
 import { clipToWords, isMostlyBoilerplate } from '../search/snippet.js';
+import { explain, type Explain, type HitExplain, type SessionExplain } from '../search/explain.js';
 import type { RecallHit, RecallResult, RecallSession } from '../recall.js';
 
 /**
@@ -22,11 +23,20 @@ import type { RecallHit, RecallResult, RecallSession } from '../recall.js';
  * deleted sessions is not recoverable*. The tool states its limitation on the
  * screen where the limitation bites.
  */
+export interface FindRenderOptions {
+  /** `--explain`: the fusion arithmetic in place of the snippets. */
+  explain?: boolean;
+}
+
 export function renderFind(
   result: RecallResult,
   t: Theme = new Theme(),
   now = new Date(),
+  opts: FindRenderOptions = {},
 ): string {
+  // An empty result has no arithmetic to show, so `--explain` falls through to
+  // the normal "nothing matches" block — which already says what to do next.
+  if (opts.explain && result.sessions.length > 0) return renderExplain(result, t);
   const lines: string[] = [];
   lines.push(t.dim(headline(result, t)));
   lines.push('');
@@ -310,4 +320,164 @@ function footer(r: RecallResult, t: Theme): string {
   // joinFit, not clip: a footer that ends "(--v…" has lost a whole clause to
   // save two characters. Drop the last note instead of cutting one in half.
   return f.joinFit(parts, t.width - INDENT.length, ` ${t.sep} `, t);
+}
+
+// ------------------------------------------------------------------ explain
+
+/**
+ * `find --explain` — the ledger.
+ *
+ * Every number on this screen is a term in one sum, and the sums add up:
+ *
+ * ```
+ *   1  0.0248  the pooler decision                        0a2fbf9b
+ *      exchange 12                                          0.0164
+ *        exchanges_fts   r1   bm25 -8.41   x1.00  0.0164   100%
+ *      exchange 7                                           0.0084
+ *        vec_exchanges   r2   cos 0.71     x0.50  0.0081    96%
+ *      0.0248 = 0.0164 best + 0.0084 corroboration
+ * ```
+ *
+ * Read it inwards. The **detail rows** are one per (hit, list): where that list
+ * ranked the row, the score the list itself gave it (bm25, negative and lower
+ * is better; or cosine similarity), the weight `recall` applies to that list,
+ * and the product — `weight / (k + rank)` — which is what the list actually
+ * contributed, with its share of the hit beside it. The **hit line** above them
+ * carries their total. The **session line** carries `best + min(rest/2,
+ * best/2)`, spelled out underneath, which is the number the page is sorted by.
+ *
+ * That is enough to answer "why is this one above that one" without leaving the
+ * terminal, and the closing line answers it out loud for the top two.
+ *
+ * The raw column is dropped below 72 columns rather than the pattern being
+ * broken: at 60 the reader still gets rank, weight, contribution and share,
+ * which is the part the arithmetic needs.
+ */
+export function renderExplain(result: RecallResult, t: Theme = new Theme()): string {
+  const e = explain(result);
+  const width = t.width - INDENT.length;
+  const lines: string[] = [];
+  lines.push(t.dim(headline(result, t)));
+  lines.push('');
+  lines.push(INDENT + t.dim(f.joinFit(explainNotes(e, result), width, ` ${t.sep} `, t)));
+  lines.push('');
+
+  for (const s of e.sessions) {
+    lines.push(...sessionLedger(s, t, width));
+    lines.push('');
+  }
+  lines.push(...tail(e, t, width));
+  return lines.join('\n');
+}
+
+function explainNotes(e: Explain, r: RecallResult): string[] {
+  const ran = e.lists.filter((l) => l.candidates > 0).length;
+  const notes = [
+    `rrf 1/(k+rank), k=${e.k}`,
+    `${f.num(ran)}/${f.num(e.lists.length)} lists matched`,
+  ];
+  // Both of these change how a number on the screen should be read, so they
+  // come before the decorative ones and are short enough to survive `--width 60`.
+  if (r.relaxed) notes.push('lighter weight = that list relaxed');
+  if (e.weights.some((w) => !w.solved)) notes.push('? = weight assumed to be 1');
+  return notes;
+}
+
+/** One session: its line, its hits, their detail rows, and the formula. */
+function sessionLedger(s: SessionExplain, t: Theme, width: number): string[] {
+  const lines: string[] = [];
+  const place = `${s.place}`;
+  const score = s.score.toFixed(4);
+  const id = idTag(s.id);
+  const room = Math.max(8, width - place.length - score.length - id.length - 6);
+  const title = f.elide(s.title, room, t);
+  const left = `${place}  ${t.accent(score)}  ${title}`;
+  const pad = Math.max(1, width - Theme.len(left) - id.length);
+  lines.push(INDENT + left + ' '.repeat(pad) + t.dim(id));
+
+  for (const hit of s.hits) lines.push(...hitLedger(hit, t, width));
+
+  const formula =
+    `${score} = ${s.best.toFixed(4)} best` +
+    (s.hits.length > 1
+      ? ` + ${s.corroboration.toFixed(4)} corroboration${s.capped ? ' (capped)' : ''}`
+      : '');
+  lines.push(INDENT + '   ' + t.dim(f.clip(formula, width - 3, t)));
+  return lines;
+}
+
+function hitLedger(hit: HitExplain, t: Theme, width: number): string[] {
+  const lines: string[] = [];
+  const score = hit.score.toFixed(4);
+  const label = f.elide(hit.label, Math.max(8, width - 3 - score.length - 2), t);
+  const pad = Math.max(1, width - 3 - Theme.len(label) - score.length);
+  lines.push(INDENT + '   ' + label + ' '.repeat(pad) + t.dim(score));
+  for (const l of hit.lists) lines.push(INDENT + '     ' + detailRow(l, t, width - 5));
+  return lines;
+}
+
+/** `exchanges_fts     r1   bm25 -8.41   x1.00  0.0164  100%`, fitted. */
+function detailRow(l: HitExplain['lists'][number], t: Theme, width: number): string {
+  const times = t.g('×', 'x');
+  const name = l.list.padEnd(LIST_COL);
+  const rank = `r${l.rank}`.padEnd(4);
+  const weight = `${times}${l.weight.toFixed(2)}${l.solved ? '' : '?'}`.padEnd(7);
+  const contribution = l.contribution.toFixed(4);
+  const share = `${Math.round(l.share * 100)}%`.padStart(4);
+  const raw = rawColumn(l).padEnd(12);
+  const wide = `${name} ${rank} ${raw} ${weight} ${contribution} ${share}`;
+  const narrow = `${name} ${rank} ${weight} ${contribution} ${share}`;
+  const line = Theme.len(wide) <= width ? wide : narrow;
+  return t.dim(f.clip(line, width, t));
+}
+
+/** The widest list name (`ghost_prompts_fts`), so the columns line up. */
+const LIST_COL = 17;
+
+/**
+ * What the list itself scored the row, in the list's own units — and the units
+ * are the point. bm25 is negative and lower is better; cosine is [-1, 1] and
+ * higher is better. Printing both in one column without saying which is which
+ * would be the exact confusion RRF exists to avoid.
+ */
+function rawColumn(l: HitExplain['lists'][number]): string {
+  if (l.list === 'vec_exchanges' || l.list === 'vec_cards') return `cos ${l.raw.toFixed(2)}`;
+  if (l.list === 'titles') return 'title match';
+  return `bm25 ${l.raw.toFixed(2)}`;
+}
+
+/** The closing lines: why the first result is first, and what it cost. */
+function tail(e: Explain, t: Theme, width: number): string[] {
+  const lines: string[] = [];
+  if (e.margin && e.sessions.length >= 2) {
+    const m = e.margin;
+    const gap = `#1 leads #2 by ${m.by.toFixed(4)}`;
+    // Naming the *reason* rather than the biggest number is the whole value of
+    // this line: "its best hit is weaker" is a sentence no reader would arrive
+    // at from a ranked list, and it is true surprisingly often.
+    const because =
+      m.reason === 'corroboration'
+        ? `${f.num(m.firstHits)} hits against ${f.num(m.secondHits)}, not a better one`
+        : m.list && m.firstRank !== null && m.secondRank !== null
+          ? `${m.list} ranked them ${m.firstRank} and ${m.secondRank}`
+          : m.list
+            ? `${m.list} found #1 and not #2`
+            : '';
+    lines.push(INDENT + t.dim(f.joinFit([gap, because].filter(Boolean), width, ` ${t.sep} `, t)));
+  }
+  const slowest = [...e.lists].sort((a, b) => b.ms - a.ms)[0];
+  if (slowest) {
+    lines.push(
+      INDENT +
+        t.dim(
+          f.joinFit(
+            [`slowest list ${slowest.list} ${f.duration(slowest.ms)}`, 'the same numbers are in --json'],
+            width,
+            ` ${t.sep} `,
+            t,
+          ),
+        ),
+    );
+  }
+  return lines;
 }

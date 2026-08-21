@@ -1,0 +1,84 @@
+# phase-3 verification command: --file (json_each) + --harness
+$ potsherd find supabase --file %/db/% --harness claude --no-color --width 80
+potsherd find "supabase" · no match · bm25 · 5ms
+
+  nothing in the index matches "supabase".
+
+  text search only — no embeddings in the index — run  potsherd index  without…
+  run  potsherd ls  to see what is indexed, or  potsherd index  to add more
+
+[exit 1] widest line: 79 characters
+
+# --file as a glob
+$ potsherd find the --file *.sql --no-color --width 80 --limit 3
+potsherd find "the" · no match · bm25 · 5ms
+
+  nothing in the index matches "the".
+
+  text search only — no embeddings in the index — run  potsherd index  without…
+  run  potsherd ls  to see what is indexed, or  potsherd index  to add more
+
+[exit 1] widest line: 79 characters
+
+# a date phrase
+$ potsherd find the --since in july --no-color --width 80 --limit 3
+potsherd find "the" · 3 sessions · bm25 · 8ms
+
+  Offline queue replays stale writes                               claude · live
+  potsherd-eval-mobile · 3 jul · 2 exchanges · main                       0.0243
+    when the phone comes back on the network it flushes the whole queue,…
+    how does the person see what was dropped
+    run  claude --resume c2f68b40-5e17-4d92-a836-71b39c0e45d2
+
+  potsherd-eval-data-47d9e281                                      claude · live
+  potsherd-eval-data · 1 jul · 2 exchanges · main                         0.0238
+    the analytics rollup counts an event twice whenever the producer redelivers
+    what if the id is missing
+    run  claude --resume 47d9e281-3b64-4c07-a9f8-25e1d0b73c6a
+
+  Push notifications arrive twice on android                       claude · live
+  potsherd-eval-mobile · 2 jul · 1 exchange · main                        0.0156
+    Both the sdk and our own handler display it. Set a collapse key and let…
+    run  claude --resume 8d31f7c5-2a49-4e83-b571-6c0d8f21943b
+
+  the words matched; --vectors on adds semantic search
+
+[exit 0] widest line: 80 characters
+
+# four filters at once
+$ potsherd find the --harness claude --branch main --since last year --sidechains exclude --no-color --width 80 --limit 3
+potsherd find "the" · 3 sessions · bm25 · 11ms
+
+  The hero image is 800 kB                                         claude · live
+  potsherd-eval-web · 22 jun · 2 exchanges · main                         0.0369
+    is the bundle the problem too
+    the hero image is 800 kB and blocks the first paint
+    run  claude --resume c8e14f60-7b18-42d9-a350-9e64f1b28d07
+
+  Focus escapes the dialog on tab                                  claude · live
+  potsherd-eval-web · 19 jun · 2 exchanges · main                         0.0363
+    tabbing out of the modal lands on the page behind it
+    …and aria-modal true. Without those the page behind is still in the…
+    run  claude --resume f4a8c317-5d29-4e60-b184-7c93a2f5e018
+
+  Timezone drift in the daily rollup                               claude · live
+  potsherd-eval-data · 29 jun · 2 exchanges · main                        0.0357
+    the eu region is always one day behind everyone else in the dashboard
+    what about the rows we already wrote
+    run  claude --resume 9a4e7c26-5f03-4b18-92d7-6ae481c530f9
+
+  the words matched; --vectors on adds semantic search
+
+[exit 0] widest line: 80 characters
+
+# an unparseable --since says what it accepts
+$ potsherd find x --since the day before the outage --no-color
+
+[stderr]
+potsherd: --since did not understand "the day before the outage"
+        it takes:  2026-08-01  2026-08  30d / 6w / 3m / 2y  today  yesterday
+                   last week  last month  in july  july 2025  3 days ago
+  try:  potsherd ls --since 30d
+
+[exit 1] widest line: 76 characters
+

@@ -4,11 +4,14 @@ import {
   normalizeTag,
   paths,
   resolveSession,
+  search as searchNs,
   type Harness,
   type SessionStatus,
 } from '@potsherd/core';
 import type { db as dbNs, search } from '@potsherd/core';
 import { UserError, type GlobalOptions } from './output.js';
+
+const { whenEdge, WHEN_FORMS } = searchNs;
 
 type Db = dbNs.Db;
 type SearchFilters = search.SearchFilters;
@@ -137,34 +140,44 @@ function one(flag: string, value: string, allowed: readonly string[]): string {
 }
 
 /**
- * `--since 30d`, `--since 2026-08-01`, `--since 6w`.
+ * `--since 30d`, `--since "last week"`, `--since "in july"`, `--until 2026-08-01`.
  *
- * The relative form is what people type (`phase-1` verifies with
- * `--since 30d`); the absolute form is what a script writes. Both end up as an
- * ISO string, which is what the store compares against.
+ * The parsing itself is `core/search/when.ts`, which returns the *interval* a
+ * phrase names; this picks the end of it the flag wants. That split is what
+ * makes `--since "in july"` and `--until "in july"` mean opposite edges of the
+ * same month instead of the same instant twice — and what makes
+ * `--until 2026-08-01` include the first of August rather than stopping at its
+ * first millisecond.
+ *
+ * The error lists the forms that parse, taken from the same array the parser
+ * is built around, so the message can never advertise a form that does not
+ * work. An unparseable date is the error a user is most likely to hit while
+ * typing quickly, and "not a date" with no examples is the least useful thing
+ * to say to them.
  */
 export function parseWhen(value: string, flag: string, now = new Date()): string {
-  const rel = /^(\d+)\s*([dwmy])$/i.exec(value.trim());
-  if (rel) {
-    const n = Number(rel[1]);
-    const unit = rel[2]!.toLowerCase();
-    const d = new Date(now);
-    if (unit === 'd') d.setDate(d.getDate() - n);
-    else if (unit === 'w') d.setDate(d.getDate() - n * 7);
-    else if (unit === 'm') d.setMonth(d.getMonth() - n);
-    else d.setFullYear(d.getFullYear() - n);
-    return d.toISOString();
-  }
-  if (!/^\d{4}-\d{2}-\d{2}([T ].*)?$/.test(value)) {
+  const edge = flag === '--until' ? 'until' : 'since';
+  const at = whenEdge(value, edge, now);
+  if (at === null) {
+    // Wrapped by hand at 60: the forms list is 130 characters long and an
+    // error that needs a wide terminal to be read is an error that gets
+    // skipped. The indent lines them up under "it takes:".
+    const lines: string[] = [];
+    for (const form of WHEN_FORMS) {
+      const last = lines[lines.length - 1];
+      if (last !== undefined && last.length + form.length + 2 <= 58) {
+        lines[lines.length - 1] = `${last}  ${form}`;
+      } else {
+        lines.push(form);
+      }
+    }
+    const forms = lines.map((l, i) => (i === 0 ? `it takes:  ${l}` : `           ${l}`));
     throw new UserError(
-      `${flag} takes YYYY-MM-DD or a span like 30d — not "${value}"`,
+      `${flag} did not understand "${value}"\n${forms.map((l) => `        ${l}`).join('\n')}`,
       `potsherd ls ${flag} 30d`,
     );
   }
-  if (Number.isNaN(new Date(value).getTime())) {
-    throw new UserError(`${flag}: "${value}" is not a calendar date`, `potsherd ls ${flag} 2026-08-01`);
-  }
-  return value;
+  return at;
 }
 
 /**
