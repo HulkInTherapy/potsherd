@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "evals": "tsx evals/run.ts",
+    "evals:ask": "tsx evals/ask-run.ts",
     "potsherd": "node packages/cli/bin/potsherd.js"
   },
   "devDependencies": {
