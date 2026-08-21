@@ -9,7 +9,14 @@ import {
   type SearchFilters,
 } from './search/filters.js';
 import { RRF_K, rrfScore, l2DistanceToCosineSimilarity } from './search/similarity.js';
-import { matchSnippet, type MatchSnippet } from './search/snippet.js';
+import {
+  denseSnippet,
+  isMostlyBoilerplate,
+  matchSnippet,
+  wordMatchesToken,
+  wordSpans,
+  type MatchSnippet,
+} from './search/snippet.js';
 import { vecStatus, vecTablesExist } from './vec.js';
 import {
   EMBEDDING_VERSION,
@@ -220,11 +227,36 @@ export const PER_SESSION = 3;
  */
 const RELAXED_PENALTY = 0.6;
 
+/**
+ * What {@link titleMatches} returns: the ranked titles, and *how much of the
+ * query* the best of them actually covered.
+ *
+ * The coverage is the correction T1.7b's eval set forced. `titles` is weighted
+ * at 1.5 because a session named after what you asked is stronger evidence
+ * than a paragraph mentioning it — but only when the title is named after what
+ * you asked. `titleMatches` keeps whichever titles matched *best*, and when
+ * nothing matches well "best" can be one common word out of six: on the new
+ * eval set, `find "stop counting the same event twice in the rollup"` filled
+ * the whole first page with sessions whose titles contain `twice`, and pushed
+ * the untitled session containing `event`, `twice` **and** `rollup` to sixth.
+ *
+ * Multiplying the list's weight by the fraction of the query the best title
+ * covered says the thing rank alone cannot: one word out of six is a hint
+ * (0.25), five out of six is an answer (1.25). It costs nothing when the title
+ * really is the answer, which is the case the weight was added for.
+ */
+interface TitleList {
+  hits: RawHit[];
+  /** Query words the best title matched, over query words asked for. */
+  coverage: number;
+}
+
 const WEIGHTS: Record<string, number> = {
   // A title is a statement about the *whole* session — Claude Code's own
   // `ai-title`, or codex's thread name. One paragraph out of four hundred
   // mentioning "instagram" and a session called "Build Instagram chat-only
-  // client" are not the same evidence, and rank alone cannot say so.
+  // client" are not the same evidence, and rank alone cannot say so. Scaled
+  // by coverage at fusion time; see {@link TitleList}.
   titles: 1.5,
   exchanges_fts: 1,
   ghosts_fts: 1,
@@ -370,18 +402,57 @@ export function displayTitleOf(
   return clean ? clean : fallbackTitle(project, id, harness);
 }
 
-/** The snippet, centred on whichever of the query's words actually appears. */
-function bestSnippet(text: string, query: string, tokens: string[]): MatchSnippet {
-  if (!text) return { text: '' };
-  const lower = text.toLowerCase();
-  if (query.trim() && lower.includes(query.trim().toLowerCase())) {
-    return matchSnippet(text, query);
-  }
-  // Longest token first: the rarest word is the one worth centring on.
-  for (const token of [...tokens].sort((a, b) => b.length - a.length)) {
-    if (lower.includes(token)) return matchSnippet(text, token);
-  }
-  return matchSnippet(text, '');
+/**
+ * The snippet, and which half of the exchange to cut it from.
+ *
+ * An exchange is a prompt *and* an answer, and the words the user is now
+ * searching for are as often in one as in the other. The first version always
+ * cut from `user_text` and only looked at `assistant_text` when the prompt was
+ * empty — which is how the T1.7 review got a top-three result whose entire
+ * snippet was `[Image: source: /var/folders/…/clipboard-…]`: that *was* the
+ * prompt. Someone pasted a screenshot, and the answer underneath — the part
+ * that actually matched — was never considered.
+ *
+ * So both sides are scored, by how many distinct query words each contains
+ * after machine boilerplate is discounted, and the winner is quoted. Ties go
+ * to the prompt, because a person recognises their own question faster than
+ * they recognise an answer they have forgotten.
+ */
+export function bestSnippet(
+  userText: string,
+  assistantText: string | undefined,
+  query: string,
+  tokens: readonly string[],
+): MatchSnippet {
+  const sides = [userText ?? '', assistantText ?? ''].filter((s) => s.trim().length > 0);
+  if (sides.length === 0) return { text: '' };
+
+  const exact = query.trim().toLowerCase();
+  const scored = sides.map((text) => {
+    const lower = text.toLowerCase();
+    const distinct = new Set(
+      wordSpans(text)
+        .map((s) => tokens.find((t) => wordMatchesToken(s.word, t)))
+        .filter((t): t is string => Boolean(t)),
+    ).size;
+    return {
+      text,
+      // The whole phrase, verbatim, beats any count of scattered words.
+      phrase: exact.length > 0 && lower.includes(exact) ? 1 : 0,
+      distinct,
+      boilerplate: isMostlyBoilerplate(text) ? 1 : 0,
+    };
+  });
+  scored.sort(
+    (a, b) =>
+      b.phrase - a.phrase ||
+      b.distinct - a.distinct ||
+      a.boilerplate - b.boilerplate ||
+      sides.indexOf(a.text) - sides.indexOf(b.text),
+  );
+  const chosen = scored[0]!;
+  if (chosen.phrase === 1 && chosen.distinct <= 1) return matchSnippet(chosen.text, query);
+  return denseSnippet(chosen.text, tokens);
 }
 
 // -------------------------------------------------------------------- lists
@@ -428,13 +499,18 @@ function tableExists(db: Db, name: string): boolean {
  * and when `cards_fts` arrives it becomes one more list beside this one rather
  * than a replacement for it.
  */
-function titleMatches(db: Db, allTokens: string[], filters: SearchFilters, depth: number): RawHit[] {
+function titleMatches(
+  db: Db,
+  allTokens: string[],
+  filters: SearchFilters,
+  depth: number,
+): TitleList {
   // Stopwords out: a title is a handful of words, so "the" matching is not
   // evidence of anything, and with the weight this list carries it would be
   // actively misleading.
   const meaningful = allTokens.filter((t) => !STOPWORDS.has(t));
   const tokens = meaningful.length > 0 ? meaningful : allTokens;
-  if (tokens.length === 0) return [];
+  if (tokens.length === 0) return { hits: [], coverage: 0 };
   const likes = tokens.map(() => 'LOWER(s.title) LIKE ?').join(' OR ');
   const params = tokens.map((t) => `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
   const f = buildSessionFilters(filters);
@@ -452,6 +528,7 @@ function titleMatches(db: Db, allTokens: string[], filters: SearchFilters, depth
     is_sidechain: number;
   }[];
 
+  if (rows.length === 0) return { hits: [], coverage: 0 };
   const scored = rows.map((r) => {
     const lower = r.title.toLowerCase();
     const matched = tokens.filter((t) => lower.includes(t)).length;
@@ -467,15 +544,18 @@ function titleMatches(db: Db, allTokens: string[], filters: SearchFilters, depth
   // Among equals, the title that says least else: "Build Instagram chat-only
   // client" over a sentence that mentions Instagram in passing.
   strongest.sort((a, b) => a.len - b.len);
-  return strongest.slice(0, depth).map(({ r }) => ({
-    key: `t:${r.id}`,
-    kind: 'title' as const,
-    sessionId: r.id,
-    ts: r.ts,
-    userText: r.title,
-    isSidechain: r.is_sidechain === 1,
-    raw: 0,
-  }));
+  return {
+    coverage: bestMatched / tokens.length,
+    hits: strongest.slice(0, depth).map(({ r }) => ({
+      key: `t:${r.id}`,
+      kind: 'title' as const,
+      sessionId: r.id,
+      ts: r.ts,
+      userText: r.title,
+      isSidechain: r.is_sidechain === 1,
+      raw: 0,
+    })),
+  };
 }
 
 function bm25Exchanges(db: Db, match: string, filters: SearchFilters, depth: number): RawHit[] {
@@ -804,8 +884,11 @@ export async function recall(
     return hits;
   };
 
+  const titles = wanted.has('titles')
+    ? titled(db, fts.tokens, filters, depth, listReports)
+    : { hits: [], coverage: 0 };
   const lists: Record<string, RawHit[]> = {
-    titles: wanted.has('titles') ? titled(db, fts.tokens, filters, depth, listReports) : [],
+    titles: titles.hits,
     exchanges_fts: textList('exchanges_fts', (m) => bm25Exchanges(db, m, filters, depth)),
     ghosts_fts: textList('ghosts_fts', (m) => bm25Ghosts(db, m, filters, depth)),
     ghost_prompts_fts: textList('ghost_prompts_fts', (m) =>
@@ -841,11 +924,21 @@ export async function recall(
     }
   }
 
+  // Stopwords do not make a snippet. `find "key on a replayed request"` that
+  // highlights `on` has pointed at the one word in the query that explains
+  // nothing, and the density search would happily centre a window on the
+  // three places a document says "a". The full token list still drives the
+  // *ranking*; only the quoting uses the meaningful half.
+  const meaningfulTokens = fts.tokens.filter((t) => !STOPWORDS.has(t));
+  const quotableTokens = meaningfulTokens.length > 0 ? meaningfulTokens : fts.tokens;
+
   // ---- reciprocal rank fusion
   const fused = new Map<string, RawHit & { score: number; from: RecallHit['from'] }>();
   for (const [name, hits] of Object.entries(lists)) {
     const weight =
-      (WEIGHTS[name] ?? 1) * (relaxedLists.has(name as ListName) ? RELAXED_PENALTY : 1);
+      (WEIGHTS[name] ?? 1) *
+      (name === 'titles' ? titles.coverage : 1) *
+      (relaxedLists.has(name as ListName) ? RELAXED_PENALTY : 1);
     hits.forEach((hit, i) => {
       const rank = i + 1;
       const contribution = weight * rrfScore(rank, k);
@@ -885,7 +978,7 @@ export async function recall(
       ts: hit.ts ?? null,
       userText: hit.userText,
       ...(hit.assistantText !== undefined ? { assistantText: hit.assistantText } : {}),
-      snippet: bestSnippet(hit.userText || hit.assistantText || '', query, fts.tokens),
+      snippet: bestSnippet(hit.userText, hit.assistantText, query, quotableTokens),
       isSidechain: hit.isSidechain,
       score: hit.score,
       from: hit.from,
@@ -1131,16 +1224,16 @@ function titled(
   filters: SearchFilters,
   depth: number,
   reports: RecallResult['lists'],
-): RawHit[] {
+): TitleList {
   const t0 = Date.now();
-  let hits: RawHit[] = [];
+  let list: TitleList = { hits: [], coverage: 0 };
   try {
-    hits = titleMatches(db, tokens, filters, depth);
+    list = titleMatches(db, tokens, filters, depth);
   } catch {
-    hits = [];
+    list = { hits: [], coverage: 0 };
   }
-  reports.push({ list: 'titles', candidates: hits.length, ms: Date.now() - t0 });
-  return hits;
+  reports.push({ list: 'titles', candidates: list.hits.length, ms: Date.now() - t0 });
+  return list;
 }
 
 function firstLine(s: string): string {

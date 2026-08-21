@@ -28,10 +28,17 @@ import { rmrf, tempDir } from './helpers.js';
  * can drift from the other's idea of what is in the corpus.
  *
  * What the corpus holds, and why each piece is there:
- *   8 sessions      one of them untitled, so the `<slug>-<id8>` fallback is exercised
+ *   24 sessions     two of them untitled, so the `<slug>-<id8>` fallback is exercised
  *   2 sidechains    a subagent transcript whose text exists nowhere else
- *   3 ghosts        prompts only, from history.jsonl — no assistant side at all
- *   4 projects      so `--project` has something to be wrong about
+ *   5 ghosts        prompts only, from history.jsonl — no assistant side at all
+ *   6 projects      so `--project` has something to be wrong about
+ *
+ * T1.7b grew it from eight sessions to twenty-four. Eleven candidates is not a
+ * corpus a recall@5 metric can fail against — with that few, bm25 cannot lose
+ * — so most of the new sessions are *distractors*: adjacent topics that share
+ * the query's words and must rank below the answer. One of them
+ * (`ID.pasted`) has pasted-screenshot placeholders where its prompts should
+ * be, which is what the snippet chooser is there to survive.
  */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -46,6 +53,9 @@ const ID = {
   fusion: 'cbcfda7e',
   ghostPrinter: 'e6aa5ba7',
   ghostBilling: '4ddd4b1f',
+  /** Untitled, and its prompts are `[Image: …]` placeholders. */
+  pasted: '5b0d7e92',
+  idempotency: '7c1d0e44',
 } as const;
 
 let root: string;
@@ -231,6 +241,99 @@ describe('recall: fusion', () => {
   });
 });
 
+/**
+ * The snippet is the only part of a `find` block that says *why* a session is
+ * on the screen. T1.7's review found three ways it failed to: it started
+ * mid-word, it quoted a pasted-screenshot placeholder, and its second line was
+ * boilerplate with none of the query's words in it. These run against the real
+ * index rather than against `denseSnippet` in isolation, because the bug that
+ * produced the `[Image: …]` screenshot was not in the snippet cutter at all —
+ * it was `recall` handing it the prompt when the answer was the evidence.
+ */
+describe('recall: the snippet is the evidence', () => {
+  const terms = (q: string): string[] => q.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+
+  it('quotes the assistant side when the prompt is a pasted screenshot', async () => {
+    const r = await recall(db, 'pay button spinner', {}, { vectors: false });
+    const s = r.sessions.find((x) => x.id.startsWith(ID.pasted))!;
+    expect(s, 'the pasted-screenshot session is findable').toBeTruthy();
+    for (const h of s.hits) {
+      expect(h.snippet.text).not.toContain('[Image:');
+      expect(h.snippet.text).not.toContain('/tmp/potsherd-eval-web/.cache');
+    }
+    expect(s.hits.some((h) => h.snippet.text.includes('spinner'))).toBe(true);
+  });
+
+  it('shows a query term whenever the session contains one', async () => {
+    for (const query of [
+      'pay button spinner',
+      'idempotency key on a replayed request',
+      'pgbouncer transaction pooling',
+      'docker layers on the ci runner',
+    ]) {
+      const r = await recall(db, query, {}, { vectors: false });
+      const words = terms(query);
+      for (const s of r.sessions.slice(0, 5)) {
+        const quotable = s.hits.filter((h) => h.kind !== 'title');
+        const evidence = quotable.filter((h) => h.snippet.match);
+        // Either something in the block carries a highlight, or nothing in the
+        // block's own text matched and the renderer says so instead.
+        const anyText = quotable.some((h) =>
+          words.some((w) => h.snippet.text.toLowerCase().includes(w.slice(0, 4))),
+        );
+        expect(evidence.length > 0 || !anyText, `${query} → ${s.displayTitle}`).toBe(true);
+        for (const h of evidence) {
+          const marked = h.snippet.text.slice(h.snippet.match!.start, h.snippet.match!.end);
+          expect(marked.length).toBeGreaterThan(0);
+          expect(words.some((w) => marked.toLowerCase().startsWith(w.slice(0, 4)))).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('never starts or ends a snippet in the middle of a word', async () => {
+    for (const query of ['idempotency key on a replayed request', 'the nightly job', 'ledger row']) {
+      const r = await recall(db, query, {}, { vectors: false, limit: 10 });
+      for (const h of r.hits) {
+        const text = h.snippet.text;
+        if (!text) continue;
+        // A leading or trailing ellipsis is the only thing allowed to sit
+        // against a word; a bare letter there means a word was cut in half.
+        const head = text.replace(/^…/, '');
+        const tail = text.replace(/…$/, '');
+        const source = (h.userText + ' ' + (h.assistantText ?? '')).toLowerCase();
+        const firstWord = head.toLowerCase().match(/^[a-z0-9]+/)?.[0];
+        const lastWord = tail.toLowerCase().match(/[a-z0-9]+$/)?.[0];
+        if (firstWord && firstWord.length > 2) {
+          expect(source, `starts mid-word: ${text}`).toMatch(
+            new RegExp(`(^|[^a-z0-9])${firstWord}`),
+          );
+        }
+        if (lastWord && lastWord.length > 2) {
+          expect(source, `ends mid-word: ${text}`).toMatch(
+            new RegExp(`${lastWord}([^a-z0-9]|$)`),
+          );
+        }
+      }
+    }
+  });
+
+  it('does not let a common word decide what gets quoted', async () => {
+    // `on` and `a` are in the query; a snippet centred on either of them shows
+    // the reader nothing. The highlight must land on a word that carries the
+    // question.
+    const r = await recall(db, 'idempotency key on a replayed request', {}, { vectors: false });
+    for (const s of r.sessions.slice(0, 5)) {
+      for (const h of s.hits.filter((x) => x.snippet.match)) {
+        const marked = h.snippet.text
+          .slice(h.snippet.match!.start, h.snippet.match!.end)
+          .toLowerCase();
+        expect(['on', 'a', 'the']).not.toContain(marked);
+      }
+    }
+  });
+});
+
 describe('recall: vectors are optional', () => {
   it('degrades to bm25 with a printable reason rather than erroring', async () => {
     const r = await recall(db, 'pgbouncer', {}, { vectors: false });
@@ -285,7 +388,7 @@ describe('ls', () => {
     expect(r.sessions.length).toBeGreaterThan(0);
     const when = r.sessions.map((s) => s.endedAt ?? s.startedAt ?? '');
     expect([...when].sort().reverse()).toEqual(when);
-    expect(r.ghosts).toBe(3);
+    expect(r.ghosts).toBe(5);
   });
 
   it('rolls subagents up under their parent instead of listing them flat', () => {
@@ -321,8 +424,8 @@ describe('ls', () => {
 
   it('--project filters both tables', () => {
     const r = listSessions(db, { project: '/tmp/potsherd-eval-devices' }, { limit: 50 });
-    expect(r.sessions.length).toBe(1);
-    expect(r.sessions[0]!.status).toBe('ghost');
+    expect(r.sessions.length).toBe(2);
+    expect(r.sessions.every((s) => s.status === 'ghost')).toBe(true);
   });
 });
 
@@ -394,9 +497,9 @@ describe('stats', () => {
   it('counts sessions, subagents and ghosts per harness', () => {
     const r = sessionStats(db, { root });
     const claude = r.harnesses.find((h) => h.harness === 'claude')!;
-    expect(claude.sessions).toBe(8);
+    expect(claude.sessions).toBe(24);
     expect(claude.sidechains).toBe(2);
-    expect(claude.ghosts).toBe(3);
+    expect(claude.ghosts).toBe(5);
     expect(claude.exchanges).toBeGreaterThan(0);
   });
 
@@ -410,7 +513,7 @@ describe('stats', () => {
 
   it('reports freshness against the files it actually read', () => {
     const r = sessionStats(db, { root });
-    expect(r.freshness.indexed).toBe(10);
+    expect(r.freshness.indexed).toBe(26);
     expect(r.freshness.missing).toBe(0);
     expect(r.freshness.stale).toBe(0);
     expect(r.freshness.lastIndexedAt).toBeTruthy();

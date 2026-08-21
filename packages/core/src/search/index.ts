@@ -22,4 +22,16 @@ export {
   type BoundClause,
   type TriState,
 } from './filters.js';
-export { leadSnippet, matchSnippet, SNIPPET_CHARS, type MatchSnippet } from './snippet.js';
+export {
+  clipToWords,
+  denseSnippet,
+  isMostlyBoilerplate,
+  leadSnippet,
+  matchSnippet,
+  stripBoilerplate,
+  wordMatchesToken,
+  wordSpans,
+  SNIPPET_CHARS,
+  type MatchSnippet,
+  type WordSpan,
+} from './snippet.js';
