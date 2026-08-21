@@ -1,0 +1,13 @@
+potsherd find "redacted aws" · 2 sessions · bm25 · 6ms
+
+  Add a timeout to mock server                                     claude · live
+  report-builder · 16 aug · 3 exchanges · feat/retry-budget               0.0098
+    the nightly deploy job is 403ing against the bucket. what does it actually…
+    run  claude --resume d3e6b7a1-5c04-4f92-9a83-27b6e0d418ca
+
+  Put the importer behind the pooler                              claude · ghost
+  crm-ingest · 22 nov 2025 · 6 prompts recovered · feat/retry-budget      0.0098
+    … the pooler — postgres://ingest:‹redacted:basic-auth:201b2d22›@db.internal…
+    assistant side not recoverable · potsherd show 840f40a5
+
+  1 ghost hit · …

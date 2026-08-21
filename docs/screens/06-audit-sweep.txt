@@ -13,24 +13,24 @@ potsherd audit · ~/.claude · 21 aug 2026
   run  potsherd rescue  to archive what is left and rebuild the ghosts.
 
   sessions the sweep takes next:
-    in 1 day        Move markdown renderer to a background job
-    in 1 day        Rewrite invoice renderer to stream
-    in 1 day        Speed up config loader
-    in 2 days       Find the leak in feature flag client
-    in 3 days       Add a timeout to file uploader
-    in 4 days       Stop health check double-writing
-    in 5 days       Speed up pdf splitter
-    in 6 days       Move seed script to a background job
-    in 7 days       Investigate terraform module regression
-    in 7 days       Stop webhook receiver double-writing
-    in 8 days       Make crawler idempotent
-    in 9 days       Add a timeout to csv importer
-    in 10 days      search-index-d3fe8113
-    in 11 days      Harden schema validator against bad input
-    in 12 days      Pin job scheduler behind a feature flag
-    in 13 days      mobile-shell-59c74bdb
-    in 14 days      Rewrite pdf splitter to stream
-    in 15 days      Investigate queue consumer regression
-    in 16 days      infra-terraform-f97a816e
-    in 17 days      infra-terraform-ab85c2b7
+    in 1 day        Split terraform module into io and logic
+    in 1 day        Trace a request through terraform module
+    in 1 day        Migrate thumbnail worker to the new loader
+    in 2 days       Bisect the test harness regression
+    in 3 days       Batch writes in release script
+    in 4 days       Make changelog generator idempotent
+    in 5 days       Add a dry-run mode to log formatter
+    in 6 days       Document ocr pipeline
+    in 7 days       Fix pagination in graphql resolver
+    in 7 days       Harden metrics exporter against bad input
+    in 8 days       billing-web-1045b6e3
+    in 9 days       search-index-0304d00d
+    in 10 days      search-index-20b138e1
+    in 11 days      search-index-888ea6ac
+    in 12 days      search-index-8546673b
+    in 13 days      mobile-shell-a686dd3a
+    in 14 days      mobile-shell-b969824b
+    in 15 days      mobile-shell-532a725c
+    in 16 days      Document dead-letter queue
+    in 17 days      infra-terraform-08327c8b
     11 more

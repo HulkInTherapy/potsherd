@@ -4,33 +4,27 @@ potsherd doctor · potsherd 0.1.0 · node v24.9.0
   potsherd dir                       ~/.potsherd
   database                           schema v4 of v4
 
-  sessions on disk              31   21 titled · 3 sdk · 539 KB
+  sessions on disk              31   21 titled · 3 sdk · 545 KB
   sidechains on disk           197   subagent transcripts
   ghosts stored                299   2,971 prompts
   files archived               278   1.1 MB of source, byte-exact
   rescue runs                    1
 
-  sessions indexed               0   nothing indexed yet — run potsherd index
+  sessions indexed             228   439 exchanges · 242 tool calls
   ghost prompts indexed      2,971   searchable in ghost_prompts_fts
-  secrets masked                 0   nothing matched — index holds no secrets
+  secrets masked                 5   aws 1 · gcp 1 · github 1 · stripe 1 · …
   vectors                        0   sqlite-vec v0.1.9 · bge-small, 384-d
 
-  record types seen (head/tail scan — run potsherd index for exact counts):
-    user                        675
-    assistant                   436
-    agent-name                  197
-    file-history-snapshot        88
-    queue-operation              63
-    ai-title                     63
-    atis-latch                   49
-    system                       36
-    last-prompt                  31
-    mode                         31
-    permission-mode              31
-    attachment                   31
-    summary                      31
-    frame-link                   28
-    file-history-delta           25
+  record types the parsers did not consume:
+    claude file-history-snapshot       90   5 versions  known
+    claude queue-operation             62   5 versions  known
+    claude atis-latch                  48   5 versions  known
+    claude last-prompt                 31   5 versions  known
+    claude mode                        31   5 versions  known
+    claude permission-mode             31   5 versions  known
+    claude frame-link                  28   5 versions  known
+    claude file-history-delta          21   5 versions  known
+  "new" means no note in research/formats.md describes it yet.
 
   adapters:
     claude      ready     ~/.claude/projects            31 sessions · 197 sidec…

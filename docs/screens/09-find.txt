@@ -1,0 +1,31 @@
+potsherd find "pgbouncer" · 5 sessions · bm25 · 5ms
+
+  Pool the ingest workers through pgbouncer                        claude · live
+  data-pipeline · 21 aug · 8 exchanges · main                             0.0369
+    put pgbouncer in front of it in transaction pooling mode
+    what happens to an in-flight batch when pgbouncer restarts?
+    run  claude --resume 9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43
+
+  Move payments-api onto pgbouncer                                claude · ghost
+  payments-api · 13 nov 2025 · 241 prompts recovered · main               0.0246
+    postgres is refusing connections under load. is a pooler the answer or do w…
+    …e prepared statements are failing behind pgbouncer — what are the options?
+    assistant side not recoverable · potsherd show 77c6a3a4
+
+  Put the importer behind the pooler                              claude · ghost
+  crm-ingest · 22 nov 2025 · 6 prompts recovered · feat/retry-budget      0.0241
+    copy the pgbouncer setup from payments-api onto the importer
+    what is a sane pgbouncer pool_size for twelve importer workers?
+    assistant side not recoverable · potsherd show 840f40a5
+
+  Keep LISTEN/NOTIFY off the pooler                               claude · ghost
+  agent-runner · 3 dec 2025 · 3 prompts recovered · chore/deps            0.0164
+    pgbouncer transaction pooling broke LISTEN/NOTIFY in the runner
+    assistant side not recoverable · potsherd show 9f9d323a
+
+  ↳ data-pipeline-01                                          claude · sidechain
+  data-pipeline · 21 aug · 1 exchange · main · schema-checker             0.0161
+    …y driver in the repo still prepares statements server-side under pgbouncer
+    run  claude --resume 9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43
+
+  3 ghost hits · 1 from subagents · …

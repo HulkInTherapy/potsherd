@@ -1,0 +1,80 @@
+potsherd show · Pool the ingest workers through pgbouncer
+
+  claude · live · data-pipeline · 21 aug 09:14 · main
+  9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43
+  8 exchanges
+  run  claude --resume 9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43
+
+    1  21 aug 09:14  you
+    the ingest workers open one postgres connection per task and we are hitting
+    max_connections again
+    claude
+    Confirmed from the pool metrics: 412 slots requested against a 400 limit at
+    peak, so the workers queue and then time out.
+    tools  Bash
+    files  ingest.ts
+
+    2  21 aug 09:23  you
+    put pgbouncer in front of it in transaction pooling mode
+    claude
+    That will hold, but transaction pooling drops session state: SET,
+    LISTEN/NOTIFY and server-side prepared statements stop surviving a
+    transaction boundary.
+    tools  Read
+    files  pool.ts
+
+    3  21 aug 09:31  you
+    we hit the prepared statement problem before, in payments-api. what did we
+    land on?
+    claude
+    Nothing about it is in this repository. The change here is one line either
+    way: the client has to stop preparing, which is statement_cache_size=0.
+    tools  Grep
+    files  pool.ts
+
+    4  21 aug 09:42  you
+    set statement_cache_size to 0 and add a test that runs two transactions
+    over one server connection
+    claude
+    Done. The test fails against the old client config with "prepared statement
+    already exists" and passes with the cache disabled.
+    tools  Edit
+    files  pool.ts
+
+    5  21 aug 09:56  you
+    what happens to an in-flight batch when pgbouncer restarts?
+    claude
+    The client sees a closed connection rather than a rollback, so a retry
+    replays a partially applied batch unless the writer is idempotent.
+    tools  Read
+    files  ingest.ts
+
+    6  21 aug 10:05  you
+    make the batch writer idempotent then — key it on the source digest
+    claude
+    Keyed on the sha256 of the source file plus the row offset, so a replay is
+    a no-op instead of a double insert.
+    tools  Edit
+    files  ingest.ts
+
+    7  21 aug 10:12  you
+    write the pooling decision down in the readme so nobody relearns it a third
+    time
+    claude
+    Added a "connection pooling" section: transaction mode, pool_size 24, and
+    statement_cache_size=0 called out as a requirement rather than a tuning
+    knob.
+    tools  Write
+    files  pooling.md
+
+    8  21 aug 10:20  you
+    run the suite and commit
+    claude
+    All green: 214 passed. Committed as "ingest: pool through pgbouncer in
+    transaction mode".
+    tools  Bash
+    files  ingest.ts
+
+  9 subagent transcripts:  schema-checker 01 · schema-checker 02 · …
+
+  run  potsherd show 9c4d2f18 --md  for markdown
