@@ -24,6 +24,7 @@ import {
   Theme,
   vecStatus,
   emptyCounts,
+  setup,
   type AuditReport,
   type RecordTypeRow,
   type RedactionCounts,
@@ -104,8 +105,18 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // under-reported once already, when it still said "no network" after the
     // product had started calling a model. So it lists this one.
     nodePath.join(process.cwd(), '.potsherd', 'graft-<id8>.md'),
+    // And `ask --readers-out` is the second, at a path the user names. It
+    // holds the same redacted excerpts a model would have been sent, and no
+    // model was called to write it.
+    '<the path you give to  ask --readers-out>',
   ];
-  const consented = [paths.claudePaths(report.claudeDir).settings];
+  const settingsFile = paths.claudePaths(report.claudeDir).settings;
+  // `setup` writes one MCP stanza into each agent's own config file. That is
+  // the only place potsherd writes into another tool's directory, it is gated
+  // on an explicit y at a diff, and every other server in those files is
+  // preserved — but it is a write, so it is listed.
+  const mcpConfigs = setup.setupWritePaths();
+  const consented = [settingsFile, ...mcpConfigs];
 
   if (o.privacy) {
     const network = networkDisclosure();
@@ -126,11 +137,24 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       card.raw(`    ${show(p)}${fs.existsSync(p) ? '' : t.dim('  (absent)')}`);
     }
     card.blank().text('writes:');
-    for (const p of written) card.raw(`    ${show(p)}`);
-    card.raw(`      ${t.dim('the graft path only when you run graft, in the directory you run it in')}`);
+    for (const p of written) {
+      card.raw(`    ${show(p)}`);
+      // A note per path, not one line after the loop: two of these are
+      // conditional now, and a single trailing sentence could only describe one
+      // of them truthfully.
+      if (p.endsWith('graft-<id8>.md')) {
+        card.raw(`      ${t.dim('only when you run graft, in the directory you run it in')}`);
+      } else if (p.startsWith('<the path you give')) {
+        card.raw(`      ${t.dim('only when you pass the flag. it holds the same redacted excerpts a')}`);
+        card.raw(`      ${t.dim('model would have been sent, and no model was called to write it')}`);
+      }
+    }
     card.blank().text('writes only after an explicit y at a diff:');
-    for (const p of consented) card.raw(`    ${show(p)}`);
+    card.raw(`    ${show(settingsFile)}`);
     card.raw(`      ${t.dim('cleanupPeriodDays, and one SessionStart hook entry')}`);
+    for (const p of mcpConfigs) card.raw(`    ${show(p)}`);
+    card.raw(`      ${t.dim('one "potsherd" MCP server entry each, from potsherd setup.')}`);
+    card.raw(`      ${t.dim('every other server in those files is preserved.')}`);
     // The largest privacy-relevant thing potsherd does is no longer "reads
     // your files": from phase 2 on it *sends* some of them. A receipt that
     // still said "no network" would be the worst class of bug this project

@@ -523,4 +523,11 @@ export {
 } from './graft.js';
 export { graftJson, renderGraft } from './render/graft.js';
 
+// ---------------------------------------------------------------- phase 5
+// L8 — `setup`: the second, and last, place potsherd writes outside
+// `~/.potsherd`, and the only one that writes into another tool's directory
+// (`03` §9, phase-5 T5.5). A namespace, like `consent`, because the whole
+// module is one verb's worth of proposal-and-apply.
+export * as setup from './setup.js';
+
 export { VERSION } from './version.js';

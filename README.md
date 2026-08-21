@@ -517,11 +517,23 @@ potsherd doctor --privacy · 22 aug 2026
     ~/.potsherd/potsherd.db
     ~/.potsherd/models
     ~/work/demo-project/.potsherd/graft-<id8>.md
-      the graft path only when you run graft, in the directory you run it in
+      only when you run graft, in the directory you run it in
+    <the path you give to  ask --readers-out>
+      only when you pass the flag. it holds the same redacted excerpts a
+      model would have been sent, and no model was called to write it
 
   writes only after an explicit y at a diff:
     ~/.claude/settings.json
       cleanupPeriodDays, and one SessionStart hook entry
+    ~/.claude.json
+    ~/.codex/config.toml
+    ~/.cursor/mcp.json
+    ~/.gemini/settings.json
+    ~/.config/opencode/opencode.json
+    ~/.copilot/mcp-config.json
+    ~/.pi/agent/settings.json
+      one "potsherd" MCP server entry each, from potsherd setup.
+      every other server in those files is preserved.
 
   leaves this machine:
     redacted slices of your transcripts, sent to a model as the
@@ -537,7 +549,7 @@ potsherd doctor --privacy · 22 aug 2026
 
   these never do, and open no socket at all:
     audit, rescue, guard, index, ls, find, show, stats, tag, pin,
-    unpin, link, doctor
+    unpin, link, setup, doctor
 
   who receives them:
     your own Claude subscription, via ~/.claude/local/claude

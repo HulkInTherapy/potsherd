@@ -1,12 +1,12 @@
 import process from 'node:process';
-import { format as fmt, paths } from '@potsherd/core';
+import { format as fmt, paths, setup } from '@potsherd/core';
 // `packages/core/src/index.ts` is reserved for the integrator this phase, so
 // the barrel line — `export * as setup from './setup.js';` — is written out in
 // `phases/phase-5/registration-T5.5.txt` rather than added here. Until it
 // lands, this one import reaches the module directly, so the branch builds,
 // typechecks and tests green; swap it for `setup` in the line above once the
 // barrel carries it.
-import * as setup from '../../../core/src/setup.js';
+
 import { confirm, print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 
 /**

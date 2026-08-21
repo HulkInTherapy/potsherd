@@ -170,13 +170,13 @@ Two things worth knowing before you enable anything:
 
 - The **first** `SessionEnd` after install downloads the 33 MB embedding model
   (`Xenova/bge-small-en-v1.5`). It is detached, so it never delays a session.
-  Be aware of one gap: `doctor --privacy` describes this as a download "that
-  `potsherd index` announces before it starts", and that is true when you run
-  `index` by hand — but the hook runs `index --quiet` in the background, so on
-  the hook path **there is no announcement**. It is disclosed here instead. If
-  you would rather it never happened, disable the `SessionEnd` hook (see below)
-  and index by hand with `--no-embed`; the cost is vector search on new
-  sessions.
+  You are told before it happens: the `SessionStart` hook checks whether the
+  model is on disk and warns you if it is not, because `SessionEnd` itself
+  cannot — Claude Code discards a `SessionEnd` hook's `systemMessage` by
+  design. The check costs about 4 ms and prints nothing once the model is
+  cached. If you would rather it never happened, disable the `SessionEnd` hook
+  (see below) and index by hand with `--no-embed`; the cost is vector search on
+  new sessions.
 - Model calls happen only for `card`, `ask` and `graft`. The hooks call a model
   only if you set `cardOnEnd`.
 

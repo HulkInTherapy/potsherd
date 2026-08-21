@@ -17,6 +17,7 @@ import { runPin } from './commands/pin.js';
 import { runLink } from './commands/link.js';
 import { runAsk } from './commands/ask.js';
 import { runGraft } from './commands/graft.js';
+import { runSetup, SETUP_CLIENTS } from './commands/setup.js';
 
 import { VERSION } from '@potsherd/core';
 export { VERSION };
@@ -265,6 +266,8 @@ filters, one example each — they compose, and all of them are AND:
           vec: opts['vec'] !== false,
           explain: Boolean(opts['explain']),
           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
+          ...(opts['readersOut'] ? { readersOut: String(opts['readersOut']) } : {}),
+          ...(opts['readersIn'] ? { readersIn: String(opts['readersIn']) } : {}),
         }),
       o,
     );
@@ -301,7 +304,12 @@ filters, one example each — they compose, and all of them are AND:
       // override it — which it did, for four real runs that all came back
       // "0 answered" on a bm25-only shortlist. See `vectorMode()` in
       // packages/cli/src/commands/ask.ts.
-      .option('--no-vec', 'text search only — the same as --vectors off'),
+      .option('--no-vec', 'text search only — the same as --vectors off')
+      // The pair that lets a caller run the reader fan-out itself — Claude
+      // Code's native Agent tool, say — and hand the outputs back, so the
+      // synthesizer, the citation filter and --strict all run unchanged.
+      .option('--readers-out <path>', 'write what the readers would be given to this file; makes no model call')
+      .option('--readers-in <path>', 'answer from reader outputs recorded in this file, filter and all'),
   ).addHelpText('after', `
 example:
   potsherd ask "how did we handle pgbouncer with prepared statements?"
@@ -593,6 +601,45 @@ example:
           ...(opts['concurrency'] !== undefined
             ? { concurrency: Number(opts['concurrency']) }
             : {}),
+        }),
+      o,
+    );
+  });
+
+  const setupCmd = addGlobals(
+    program
+      .command('setup')
+      .description("register potsherd's MCP server with the agent you name")
+      .option('--claude', 'Claude Code         ~/.claude.json')
+      .option('--codex', 'Codex CLI           ~/.codex/config.toml')
+      .option('--cursor', 'Cursor              ~/.cursor/mcp.json')
+      .option('--gemini', 'Gemini CLI          ~/.gemini/settings.json')
+      .option('--opencode', 'opencode            ~/.config/opencode/opencode.json')
+      .option('--copilot', 'GitHub Copilot CLI  ~/.copilot/mcp-config.json')
+      .option('--pi', 'pi                  ~/.pi/agent/settings.json')
+      .option('--all', 'every client above, skipping the ones not installed here')
+      .option('--dry-run', 'show the diff and write nothing')
+      .option('--status', 'report what is registered where; change nothing')
+      .option('--remove', 'remove potsherd again, leaving every other server alone')
+      .option('-y, --yes', 'accept the change without asking')
+      .option('-q, --quiet', 'drop the closing hint'),
+  ).addHelpText('after', `
+example:
+  potsherd setup --cursor --dry-run                 # the diff, and nothing written
+  potsherd setup --cursor
+  potsherd setup --all --status
+  potsherd setup --claude --remove`);
+  setupCmd.action(async (opts: Record<string, unknown>) => {
+    const o = globals(program, setupCmd, opts);
+    await run(
+      () =>
+        runSetup({
+          ...o,
+          clients: SETUP_CLIENTS.filter((id) => Boolean(opts[id])),
+          all: Boolean(opts['all']),
+          dryRun: Boolean(opts['dryRun']),
+          status: Boolean(opts['status']),
+          remove: Boolean(opts['remove']),
         }),
       o,
     );

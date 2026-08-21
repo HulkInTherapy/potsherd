@@ -113,6 +113,11 @@ export const OFFLINE_VERBS: readonly string[] = [
   'pin',
   'unpin',
   'link',
+  // `setup` writes MCP stanzas into other tools' config files, which is a
+  // consent-gated *local* write and not a model call. It belongs on this list
+  // for the same reason `unpin` does: `doctor --privacy` answers by omission
+  // otherwise, and an answer by omission is not one.
+  'setup',
   'doctor',
 ];
 
