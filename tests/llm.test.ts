@@ -598,6 +598,78 @@ describe('budget caps', () => {
     expect(e.fix).toContain('--max-usd');
   });
 
+  // --- D1 (T4.5): the cap has to hold *within* a batch, not only between them.
+  //
+  // Before the reservation, `admit` ran before a call and `record` after it, so
+  // at concurrency 6 all six workers cleared `admit` against a spend of $0 and
+  // the run overshot `--max-usd` by a whole batch. `card --all` shipped with
+  // this from v0.3.0. The numbers below are chosen to be exact in binary
+  // floating point (0.125 * 4 === 0.5) so the assertion is about the gate and
+  // not about rounding.
+  it('holds --max-usd within one concurrent batch, not just between batches', async () => {
+    const CONCURRENCY = 6;
+    const MAX_USD = 0.5;
+    const PER_CALL_USD = 0.125; // 4 fit exactly; the 5th and 6th must be refused
+    const b = new Budget({ maxUsd: MAX_USD });
+    b.progress(0, CONCURRENCY);
+
+    let admitted = 0;
+    let refused = 0;
+
+    // Every task runs synchronously up to its first `await`, so all six
+    // `admit`s happen before any `record` — which is exactly the in-flight
+    // window the old code could not see.
+    await Promise.all(
+      Array.from({ length: CONCURRENCY }, async () => {
+        let reservation;
+        try {
+          reservation = b.admit({ usd: PER_CALL_USD });
+          admitted += 1;
+        } catch (err) {
+          expect(err).toBeInstanceOf(BudgetError);
+          refused += 1;
+          return;
+        }
+        await Promise.resolve(); // the model call
+        b.record(
+          { inputTokens: 0, outputTokens: 0, usd: PER_CALL_USD, ms: 0 },
+          reservation,
+        );
+      }),
+    );
+
+    expect(admitted).toBe(4);
+    expect(refused).toBe(CONCURRENCY - 4);
+    expect(b.spend.usd).toBeLessThanOrEqual(MAX_USD);
+    expect(b.spend.usd).toBeCloseTo(0.5, 6);
+  });
+
+  it('gives a reservation back when the call throws, so one failure does not poison the cap', async () => {
+    const b = new Budget({ maxUsd: 0.5 });
+    const r = b.admit({ usd: 0.4 });
+    r.release();
+    // Without the release, 0.4 would still be held and this would throw.
+    expect(() => b.admit({ usd: 0.4 })).not.toThrow();
+  });
+
+  it('replaces the reservation with the actual, so a high estimate does not stick', async () => {
+    const b = new Budget({ maxUsd: 1 });
+    const r = b.admit({ usd: 0.9 }); // pessimistic: full output allowance
+    b.record({ inputTokens: 10, outputTokens: 10, usd: 0.01, ms: 1 }, r);
+    expect(b.spend.usd).toBeCloseTo(0.01, 6);
+    // The $0.89 the estimate over-reserved is available again.
+    expect(() => b.admit({ usd: 0.9 })).not.toThrow();
+  });
+
+  // A single estimate larger than the whole cap must refuse *that* call and
+  // leave the budget usable, rather than reserving itself into a state where
+  // nothing can ever be admitted again.
+  it('a huge estimate refuses itself and reserves nothing', () => {
+    const b = new Budget({ maxUsd: 0.5 });
+    expect(() => b.admit({ usd: 100 })).toThrow(BudgetError);
+    expect(() => b.admit({ usd: 0.4 })).not.toThrow();
+  });
+
   it('has a per-run token cap too', () => {
     const b = new Budget({ maxTokens: 1_000 });
     b.record({ inputTokens: 900, outputTokens: 50, usd: 0, ms: 0 });
