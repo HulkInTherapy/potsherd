@@ -51,23 +51,13 @@ Three things are expected to change from one run to the next, and are real outpu
 
 The readme quotes these screens verbatim, so a regeneration can leave its code blocks a millisecond or two out of date on those three wall-time lines and nothing else. Sync them when you regenerate.
 
-Everything else is byte-identical between consecutive runs — except `14-ask.txt`, which is written by a model and whose ANSWER, notes and wall time therefore differ every capture. What must not differ is asserted rather than diffed.
-
-### the one line on these screens that is over 80 columns
-
-`14-ask.txt`'s two `possible open thread` head lines are 82 characters, and that is a product defect rather than a capture mistake. `render/ask.ts` builds that line as `INDENT + clip(head, t.width)` — clipping to the full terminal width and only then adding the two-space indent, where every other line in that renderer clips to `t.width - INDENT` first. It is two columns over on every `ask` that raises a thread, at any width.
-
-It is compounded by a second one: `open-threads.ts` carries a project's whole working directory, so the line says `decided in /home/dev/event-bus, not seen in /home/dev/da…` where `ask`'s own EVIDENCE lines four rows above say `data-pipeline/9c4d2f18` — the same project, named two different ways on one screen, because `ask.ts` runs the evidence side through `projectName` and nothing runs the thread side through anything. The line therefore elides mid-path and **project B is not visible**, which matters because that is the line `plans/05` §4 calls "the moment people quote". With `/home/dev/` on both sides it cannot fit 80 columns for any realistic pair of project names.
-
-Both were found by this script's own column rule, in T4.8, and neither is fixed there — T4.8 owns the screens and the corpus, not `packages/core/src/render/ask.ts`. The column rule lets exactly this shape through (`known_ask_overflow`) and nothing else, so the rest of the screen is still held to 80; fixing the off-by-two makes the allowance stop matching, at which point delete it.
-
-Until it is fixed, phase 4's *"`ask` output … is legible whole at 80×24"* is **not** met, though *"one `ask` with an open-thread catch, saved to `docs/screens/`"* is.
+Everything else is byte-identical between consecutive runs — except the two model screens. `14-ask.txt`'s ANSWER, its open-thread notes, how many threads survive and its wall time differ every capture. `15-graft.txt` is `--no-model`, but what it prints verbatim is the stored *card*, which a model wrote, so re-carding rewords its title and its four decisions too. Neither is diffed; what must not change about them is asserted instead.
 
 ### what makes the script fail
 
 `scripts/make-screens.sh` **fails** if:
 
-- any screen has a line over 80 characters, the one known `ask` overflow above excepted. `15-graft.txt` is the one exception, and only below the `─` rule: `graft` prints the brief byte for byte as it wrote it to `./.potsherd/graft-<id8>.md`, because the thing you read and the thing you paste into an agent cannot be two different strings. The brief is markdown for a model, not a table for a terminal, and its lines run long. The receipt above the rule is held to 80 like everything else.
+- any screen has a line over 80 characters. `15-graft.txt` is the one exception, and only below the `─` rule: `graft` prints the brief byte for byte as it wrote it to `./.potsherd/graft-<id8>.md`, because the thing you read and the thing you paste into an agent cannot be two different strings. The brief is markdown for a model, not a table for a terminal, and its lines run long. The receipt above the rule is held to 80 like everything else.
 - a screen or `README.md` contains a real project name or a `/Users/` path;
 - an unredacted credential of any planted shape reaches a page;
 - any line of any screen, or of `README.md`, carries an unbalanced `‹` or `›`. Those two characters are reserved for the redaction and elision markers and cannot occur in base64, in a shell token or in a json key, so an unbalanced one is a mask that was cut in half — which is how `13-find-redacted.txt` came to publish `postgres://ingest:‹redacted…` for three phases;

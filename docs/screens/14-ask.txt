@@ -1,12 +1,12 @@
 potsherd ask "what did we decide about prepared statements behind the pooler?"
 
 ANSWER
-  Because transaction pooling drops session state, server-side prepared
-  statements don't survive a transaction boundary. [1] The decision was to
-  disable prepared statement caching on the client by setting
-  statement_cache_size=0. [2] This was verified with a test: it failed against
-  the old client config with a "prepared statement already exists" error, and
-  passed once the cache was disabled. [3]
+  Transaction pooling mode drops session state, so server-side prepared
+  statements don't survive across a transaction boundary. [1] The decision was
+  to have the client stop preparing statements by setting
+  statement_cache_size=0. [2] This was verified: the test failed with the old
+  client config, showing a "prepared statement already exists" error, and passed
+  once the cache was disabled. [3]
 
 EVIDENCE
   [1] data-pipeline/9c4d2f18  21 aug 09:23  "That will hold, but transaction p…"
@@ -14,21 +14,15 @@ EVIDENCE
   [3] data-pipeline/9c4d2f18  21 aug 09:42  "Done. The test fails against the…"
 
 OPEN THREADS
-  possible open thread · decided in /home/dev/event-bus, not seen in /home/dev/da…
-      Point delivery consumers at connection pooler (6432) instead of postgres
-      directly (5432)
-      /home/dev/event-bus/b2181bfe@1,2  11 aug 11:38
-      A concrete fix for hitting postgres's connection limit via a pooler is
-      exactly the kind of thing data-pipeline should be warned about if it also
-      connects directly to postgres.
-  possible open thread · decided in /home/dev/data-pipeline, not seen in /home/de…
-      Use pgbouncer in transaction pooling mode
-      /home/dev/data-pipeline/9c4d2f18@1,2  21 aug 09:14
-      Adopting pgbouncer transaction pooling to solve a postgres max_connections
-      problem is a substantive, transferable decision worth flagging to
-      event-bus.
+  possible open thread · decided in event-bus, not seen in data-pipeline
+      Route delivery consumers through connection pooler on port 6432 instead of
+      direct postgres on port 5432
+      event-bus/b2181bfe@1,2  11 aug 11:38
+      This is a concrete, reusable postgres infra practice (route many
+      concurrent consumers through a pooler to avoid hitting connection limits)
+      that's worth flagging if data-pipeline also connects directly to postgres.
 
-  6 of 65 sessions read · 1 answered · 31.6s · $0.132 est.
+  6 of 65 sessions read · 1 answered · 32.6s · $0.127 est.
   searched 6 of 65 matching sessions; raise --k to widen
 
   next  potsherd graft 9c4d2f18

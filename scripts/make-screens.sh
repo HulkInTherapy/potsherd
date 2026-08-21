@@ -37,9 +37,11 @@
 #   - `doctor`'s heading carries this machine's node version;
 #   - `index`, `find` and `stats` print how long they took, which is a
 #     measurement of this machine and moves by a few milliseconds a run;
-#   - 14-ask.txt is written by a model, so its prose differs every capture.
-#     What must not differ about it is asserted at the bottom of this file
-#     rather than diffed.
+#   - the two model screens carry model-written text. 14-ask.txt's ANSWER, its
+#     open-thread notes and how many threads survive differ every capture;
+#     15-graft.txt is `--no-model` but prints the stored *card* verbatim, and a
+#     model wrote that, so re-carding rewords it too. What must not change
+#     about either is asserted at the bottom of this file rather than diffed.
 # Everything else is byte-identical between runs. Regenerating on a different
 # day therefore produces a one-character-per-heading diff, and that is correct:
 # the date is real output, not a caption.
@@ -332,40 +334,6 @@ leaked = {
     'password in a url': re.compile(r'://[^\s:@/]*:[^\s:@/‹]{8,}@'),
 }
 
-# ---------------------------------------------------------------------------
-# One known product defect is let through the column rule, in exactly the shape
-# it has and in no other.
-#
-# `render/ask.ts` builds the open-thread head line as
-#
-#     INDENT + f.clip(head, t.width, t)
-#
-# — clipped to the *full* terminal width and only then given the two-space
-# indent, where every other line in that renderer clips to `t.width - INDENT`
-# first. So the line is exactly two columns over, at any width, on every `ask`
-# that raises a thread. It is compounded by `open-threads.ts` carrying the
-# project's whole working directory (`/home/dev/event-bus`) where `ask`'s own
-# EVIDENCE lines four rows above name the same project `event-bus`
-# (`ask.ts` runs those through `projectName`). Between the two, the line elides
-# mid-path and **project B — the entire point of the line — is not visible on
-# the screen**, which is the one line `plans/05` §4 calls "the moment people
-# quote".
-#
-# Neither half is fixable from the files T4.8 owns; both are reported rather
-# than patched. This allowance exists so that the rest of the screen is still
-# held to 80 columns rather than the whole screen being exempted, and it is
-# written as narrowly as it can be: only this screen, only a line that opens
-# with the open-thread label, and only at exactly two columns over. Widen the
-# defect and the build fails. **Fix the off-by-two in `render/ask.ts` and this
-# stops matching anything — delete this block when that happens.**
-def known_ask_overflow(name, line):
-    return (
-        name == '14-ask.txt'
-        and line.lstrip().startswith('possible open thread')
-        and len(line) == 82
-    )
-
-
 def columned(name, text):
     """
     The lines of a screen that are held to 80 columns.
@@ -400,7 +368,7 @@ for name, p in targets:
     # screen whose body is exempt, and why.
     if p != readme:
         for i, line in enumerate(columned(name, text), 1):
-            if len(line) > 80 and not known_ask_overflow(name, line):
+            if len(line) > 80:
                 bad.append(f'{name}:{i}: {len(line)} characters (max 80)\n    {line}')
     for word in forbidden:
         if word in text:
