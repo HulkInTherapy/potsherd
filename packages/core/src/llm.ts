@@ -661,18 +661,78 @@ export class BudgetError extends Error {
 }
 
 /**
+ * What {@link Budget.admit} hands back: the estimated cost it is holding
+ * against the cap on behalf of one in-flight call.
+ *
+ * Pass it to {@link Budget.record} when the call returns — the estimate is
+ * dropped and the actual takes its place — or {@link Reservation.release} it
+ * when the call throws. Either is idempotent, and doing neither is the one way
+ * to leak budget, so every caller does one of them in a `finally`.
+ */
+export interface Reservation {
+  /** The estimated dollars this reservation is holding. */
+  readonly usd: number;
+  /** The estimated tokens this reservation is holding. */
+  readonly tokens: number;
+  /** Give the estimate back without recording a spend. Idempotent. */
+  release(): void;
+}
+
+/**
  * The running total, and the gate in front of the next call.
  *
  * {@link admit} is checked **before** a call, against what that call is
  * projected to cost, so the cap is a ceiling on spend rather than a
  * post-mortem on it.
+ *
+ * **Why `admit` reserves (T4.5 / D1).** `admit` runs before a call and
+ * {@link record} after it, so at concurrency 6 all six workers used to clear
+ * `admit` against the same $0 of recorded spend: `--max-usd` was enforced
+ * *between* batches, not *within* one, and a $0.50 cap could be overshot by a
+ * whole batch. `card --all` shipped with that from `v0.3.0`.
+ *
+ * So `admit` now **reserves** the call's projected cost, and the gate is
+ * `spent + reserved + projected`. A reservation is dropped by `record` (the
+ * actual replaces it) or by `release` (the call threw). The projection is the
+ * same pessimistic one it always was — real input tokens plus the *full*
+ * output allowance at list price — and an estimate can be wrong in both
+ * directions:
+ *
+ *   - **Estimate too high** is the common case, because most replies are far
+ *     shorter than `maxOutputTokens`. The run then holds more than it spends
+ *     and can abort with headroom left: up to one batch of projections early,
+ *     where the serial code aborted one call early. That is conservative in
+ *     the direction of the promise, and `record` hands the difference straight
+ *     back, so an over-reserve never accumulates across calls.
+ *   - **Estimate too low** — a backend charging above list, a reply costing
+ *     more than its token count suggests — is not something *any* pre-call
+ *     gate can catch, in this design or another. `record` writes the actual,
+ *     so the next `admit` sees the overshoot and the run stops; the call
+ *     already made is still charged. `--max-usd` is therefore a ceiling to
+ *     within one call's actual cost, which is the strongest claim a pre-call
+ *     cap can make. `ask`'s "readers alone exceeded --max-usd" test walks that
+ *     path end to end.
+ *
+ * Two things this deliberately does **not** do. It never blocks: `admit`
+ * returns or throws, never waits, so no arrangement of workers can deadlock on
+ * the budget. And a projection larger than the whole cap refuses *itself* and
+ * reserves nothing — the throw happens before any accounting — so one huge
+ * estimate cannot wedge the budget shut against every call after it.
  */
 export class Budget {
   private readonly spent: Spend = emptySpend();
   private done = 0;
   private total = 0;
+  /** Estimated cost of calls in flight: admitted, not yet recorded or released. */
+  private reservedUsd = 0;
+  private reservedTokens = 0;
 
   constructor(private readonly limits: BudgetOptions = {}) {}
+
+  /** Dollars held for in-flight calls. For receipts and tests, not for display. */
+  get inFlightUsd(): number {
+    return this.reservedUsd;
+  }
 
   get spend(): Spend {
     return { ...this.spent };
@@ -692,53 +752,101 @@ export class Budget {
     this.total = total;
   }
 
-  /** Throws {@link BudgetError} when this call would cross a ceiling. */
-  admit(projected: { usd?: number; tokens?: number } = {}): void {
+  /**
+   * Throws {@link BudgetError} when this call would cross a ceiling, counting
+   * what other calls already hold in flight; otherwise reserves the projection
+   * and returns the {@link Reservation} that must later be recorded or
+   * released.
+   *
+   * The return value is safe to ignore only where nothing is ever in flight (a
+   * strictly serial caller, or a test): an ignored reservation is held for the
+   * life of the `Budget`.
+   */
+  admit(projected: { usd?: number; tokens?: number } = {}): Reservation {
     const usd = projected.usd ?? 0;
     const tokens = projected.tokens ?? 0;
     const { maxUsd, maxTokens } = this.limits;
 
-    if (maxUsd !== undefined && this.spent.usd + usd > maxUsd) {
+    // `committed` is spend that has happened plus spend already promised.
+    // Printing only `spent.usd` here would report $0.00 while six calls were in
+    // the air against the same cap — the shape of false number `08` rule 1
+    // exists to stop.
+    const committedUsd = this.spent.usd + this.reservedUsd;
+    if (maxUsd !== undefined && committedUsd + usd > maxUsd) {
+      const inFlight =
+        this.reservedUsd > 0 ? ` (${fmtUsd(this.reservedUsd)} of it in flight)` : '';
       throw new BudgetError(
         `stopped at --max-usd ${maxUsd.toFixed(2)}: ${this.done} of ${this.total} done, ` +
-          `${fmtUsd(this.spent.usd)} spent, next call needs ${fmtUsd(usd)}`,
+          `${fmtUsd(committedUsd)} committed${inFlight}, next call needs ${fmtUsd(usd)}`,
         {
           kind: 'usd',
           limit: maxUsd,
-          projected: this.spent.usd + usd,
+          projected: committedUsd + usd,
           done: this.done,
           total: this.total,
           spend: this.spend,
         },
-        `potsherd card --all --max-usd ${Math.ceil(this.spent.usd + usd + 1)}`,
+        `potsherd card --all --max-usd ${Math.ceil(committedUsd + usd + 1)}`,
       );
     }
 
     const spentTokens = this.spent.inputTokens + this.spent.outputTokens;
-    if (maxTokens !== undefined && spentTokens + tokens > maxTokens) {
+    const committedTokens = spentTokens + this.reservedTokens;
+    if (maxTokens !== undefined && committedTokens + tokens > maxTokens) {
       throw new BudgetError(
         `stopped at --max-tokens ${maxTokens}: ${this.done} of ${this.total} done, ` +
-          `${spentTokens} tokens spent, next call needs ${tokens}`,
+          `${committedTokens} tokens committed, next call needs ${tokens}`,
         {
           kind: 'tokens',
           limit: maxTokens,
-          projected: spentTokens + tokens,
+          projected: committedTokens + tokens,
           done: this.done,
           total: this.total,
           spend: this.spend,
         },
-        `potsherd card --all --max-tokens ${spentTokens + tokens + maxTokens}`,
+        `potsherd card --all --max-tokens ${committedTokens + tokens + maxTokens}`,
       );
     }
+
+    // Past both gates: only now is anything held. A refused call reserves
+    // nothing, so one oversized estimate cannot wedge the budget shut.
+    this.reservedUsd += usd;
+    this.reservedTokens += tokens;
+    let live = true;
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
+    return {
+      usd,
+      tokens,
+      release(): void {
+        if (!live) return;
+        live = false;
+        self.reservedUsd -= usd;
+        self.reservedTokens -= tokens;
+        // Float subtraction leaves atto-dollars behind; a budget with nothing
+        // in flight must read as exactly nothing.
+        if (self.reservedUsd < 1e-12) self.reservedUsd = 0;
+        if (self.reservedTokens < 1e-9) self.reservedTokens = 0;
+      },
+    };
   }
 
-  record(r: {
-    inputTokens: number;
-    outputTokens: number;
-    usd: number;
-    ms: number;
-    inputTokensEstimated?: boolean;
-  }): void {
+  /**
+   * The actual cost of a call that has returned. Pass the {@link Reservation}
+   * {@link admit} gave you and the estimate it held is dropped in the same
+   * step, so `spent + reserved` never double-counts one call.
+   */
+  record(
+    r: {
+      inputTokens: number;
+      outputTokens: number;
+      usd: number;
+      ms: number;
+      inputTokensEstimated?: boolean;
+    },
+    reservation?: Reservation,
+  ): void {
+    reservation?.release();
     this.spent.calls += 1;
     this.spent.inputTokens += r.inputTokens;
     this.spent.outputTokens += r.outputTokens;
@@ -1594,18 +1702,54 @@ export class Llm {
       req.maxOutputTokens ?? this.opts.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
     const inTokens = tokensForText(outgoing) + (system ? tokensForText(system.text) : 0);
     const price = PRICES[modelClass(this.model)];
-    this.budget.admit({
+    // The reservation is held for exactly the window between here and
+    // `record`, which is the window in which a concurrent worker would
+    // otherwise have seen a spend that had not happened yet. `settled` makes
+    // the `finally` a no-op once `record` has already dropped it.
+    const reservation = this.budget.admit({
       usd:
         (inTokens / 1e6) * price.inputPerMTok +
         (maxOutputTokens / 1e6) * price.outputPerMTok,
       tokens: inTokens + maxOutputTokens,
     });
 
+    try {
+      return await this.call(req, {
+        outgoing,
+        ...(system ? { system: system.text } : {}),
+        maxOutputTokens,
+        inTokens,
+        price,
+        redactions,
+        reservation,
+      });
+    } finally {
+      // Idempotent: a call that reached `record` released it there. A call
+      // that threw — no backend, a deadline, a refusal, an abort — releases it
+      // here, so a failure never leaves budget held against the cap forever.
+      reservation.release();
+    }
+  }
+
+  /** The body of {@link text}, split out so the reservation can be released in one place. */
+  private async call(
+    req: LlmRequest,
+    ctx: {
+      outgoing: string;
+      system?: string;
+      maxOutputTokens: number;
+      inTokens: number;
+      price: (typeof PRICES)[keyof typeof PRICES];
+      redactions: number;
+      reservation: Reservation;
+    },
+  ): Promise<LlmResult> {
+    const { outgoing, system, maxOutputTokens, inTokens, price, redactions } = ctx;
     const started = Date.now();
     const sent = await this.send(
       {
         prompt: outgoing,
-        ...(system ? { system: system.text } : {}),
+        ...(system ? { system } : {}),
         model: this.model,
         maxOutputTokens,
         timeoutMs: this.timeoutFor(req),
@@ -1646,7 +1790,8 @@ export class Llm {
       redactions,
       chargeable: this.chargeable,
     };
-    this.budget.record(result);
+    // Drops the estimate and writes the actual in one step.
+    this.budget.record(result, ctx.reservation);
     return result;
   }
 

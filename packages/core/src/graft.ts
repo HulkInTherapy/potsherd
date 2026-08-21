@@ -154,15 +154,32 @@ export const CITATION_RE = /([0-9a-f]{6,40})@(\d{1,7})/gi;
 /**
  * The one line every brief ends with, and the reason a pasted brief is still
  * attributable three tools later.
+ *
+ * **On a ghost the noun is `prompts`, not `exchanges` (T4.5 / D2).** `03` §8
+ * specifies this line as `· <n> exchanges ·` unconditionally, and that spec is
+ * wrong for a deleted session: the brief's own opening blockquote says
+ * *"prompts only. This session was deleted; `history.jsonl` kept what the user
+ * asked and nothing kept what the assistant answered"*, and then three lines
+ * later the mandated last line claimed 241 exchanges of a session that has
+ * none. An exchange is a prompt **and** a reply; a ghost kept only the prompt.
+ * The receipt in `render/graft.ts` already annotates its `exchanges` row with
+ * *"prompts only — the assistant side is gone"*, so this brings the brief's
+ * last line into line with the receipt the same run prints. The spec
+ * correction is logged with the orchestrator.
+ *
+ * Non-ghost wording is unchanged, singular included.
  */
 export function sourceLine(o: {
   harness: string;
   sessionId: string;
   exchanges: number;
   date: string;
+  /** True when the source is a ghost, in which case `exchanges` counts prompts. */
+  isGhost?: boolean;
 }): string {
   const n = o.exchanges;
-  return `source: ${o.harness} ${o.sessionId} · ${n} exchange${n === 1 ? '' : 's'} · ${o.date}`;
+  const noun = o.isGhost ? 'prompt' : 'exchange';
+  return `source: ${o.harness} ${o.sessionId} · ${n} ${noun}${n === 1 ? '' : 's'} · ${o.date}`;
 }
 
 // --------------------------------------------------------------- counting
@@ -1030,6 +1047,7 @@ function buildTail(src: GraftSource, pass: CitationPass): string[] {
       sessionId: src.sessionId,
       exchanges: src.exchanges,
       date: src.date,
+      isGhost: src.isGhost,
     }),
   );
   return tail;

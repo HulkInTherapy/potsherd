@@ -1,0 +1,20 @@
+# registration-T4.5 — barrel export requested by T4.5 (D1)
+
+packages/core/src/index.ts
+
+In the `export { ... } from './llm.js';` block (the phase-2 L5 block), add one
+type export, alphabetically between `type Price,` and `type SendRequest,`:
+
+  type Reservation,
+
+Why: `Budget.admit` now returns a `Reservation` instead of `void` (D1 — the
+`--max-usd` cap could be overshot by a whole batch at concurrency 6, because
+`admit` ran before a call and `record` after it). `Budget` is already exported
+from the barrel, so a consumer that writes down the type of what `admit`
+returned cannot currently name it. Nothing in the repo needs the export today —
+`tests/llm.test.ts` imports `Budget` from `packages/core/src/llm.js` directly,
+and `Llm.text` is the only production caller — so the build and the suite are
+green without it. It is a completeness fix on a now-public return type.
+
+No other barrel change is needed for T4.5. D2 (`sourceLine`) and D3
+(`OpenThreadCandidate.evidenceSeq`) touch no exported name.

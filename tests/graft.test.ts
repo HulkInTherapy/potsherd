@@ -512,6 +512,66 @@ describe('the last line is always the source line', () => {
       '· 1 exchange ·',
     );
   });
+
+  // --- D2 (T4.5). `03` §8 specifies this line as `· <n> exchanges ·`
+  // unconditionally, and on a ghost that made the brief contradict itself three
+  // lines apart: a prominent blockquote saying the assistant side was never
+  // kept, then a last line claiming 241 *exchanges* of a session that has none.
+  // An exchange is a prompt and a reply; a ghost kept only the prompt. The spec
+  // is wrong here and is logged as such; the receipt in `render/graft.ts`
+  // already annotates its row with "prompts only", so this matches it.
+  it('says "prompts", not "exchanges", on a ghost', () => {
+    expect(
+      sourceLine({ harness: 'claude', sessionId: 'x', exchanges: 241, date: 'd', isGhost: true }),
+    ).toContain('· 241 prompts ·');
+    expect(
+      sourceLine({ harness: 'claude', sessionId: 'x', exchanges: 1, date: 'd', isGhost: true }),
+    ).toContain('· 1 prompt ·');
+  });
+
+  it('keeps "exchanges" on a session that has both sides', () => {
+    const line = sourceLine({ harness: 'claude', sessionId: 'x', exchanges: 241, date: 'd' });
+    expect(line).toContain('· 241 exchanges ·');
+    expect(line).not.toContain('prompt');
+    // Explicit `false` reads the same as omitted.
+    expect(
+      sourceLine({ harness: 'claude', sessionId: 'x', exchanges: 241, date: 'd', isGhost: false }),
+    ).toBe(line);
+  });
+
+  it("a real ghost brief's last line does not contradict its own banner", async () => {
+    const seq = (
+      db.prepare('SELECT seq FROM ghost_prompts WHERE session_id = ? ORDER BY seq LIMIT 1').get(
+        ghostId,
+      ) as { seq: number }
+    ).seq;
+    const llm = stub(`- the user was chasing a bind failure [${ID.ghostPrinter}@${seq}]`);
+    const r = await graft(db, ghostId, { budget: DEFAULT_BUDGET, llm, cwd: workdir() });
+    await llm.close();
+
+    expect(r.isGhost).toBe(true);
+    expect(r.brief).toMatch(/prompts only/i);
+    const last = r.brief.trim().split('\n').pop()!;
+    expect(last).toMatch(/ · \d+ prompts? · \d{4}-\d{2}-\d{2}$/);
+    expect(last).not.toMatch(/exchange/);
+    expect(last).toBe(
+      sourceLine({
+        harness: 'claude',
+        sessionId: ghostId,
+        exchanges: r.exchanges,
+        date: r.date,
+        isGhost: true,
+      }),
+    );
+  });
+
+  it('the card-only ghost path gets the same noun — no model is involved in it', async () => {
+    const r = await graft(db, ghostId, { budget: DEFAULT_BUDGET, llm: null, cwd: workdir() });
+    expect(r.via).toBe('card-only');
+    const last = r.brief.trim().split('\n').pop()!;
+    expect(last).toMatch(/ · \d+ prompts? · /);
+    expect(last).not.toMatch(/exchange/);
+  });
 });
 
 // ----------------------------------------------------------------- target
