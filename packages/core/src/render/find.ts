@@ -2,7 +2,14 @@ import { INDENT } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
 import { idTag } from '../recall.js';
-import { clipToWords, isMostlyBoilerplate } from '../search/snippet.js';
+import {
+  clipToWords,
+  isMostlyBoilerplate,
+  maskAt,
+  maskSpans,
+  offMask,
+  type MaskSpan,
+} from '../search/snippet.js';
 import { explain, type Explain, type HitExplain, type SessionExplain } from '../search/explain.js';
 import type { RecallHit, RecallResult, RecallSession } from '../recall.js';
 
@@ -249,7 +256,16 @@ function unmatchedReason(s: RecallSession, r: RecallResult): string {
 export function snippetLine(hit: RecallHit, t: Theme, width: number): string {
   const text = hit.snippet.text.replace(/\s+/g, ' ').trim();
   if (!text) return '';
-  const m = hit.snippet.match;
+  const masks = maskSpans(text);
+  // A mask is one atom, and the highlight can land *inside* one: `find
+  // "redacted aws"` matches the word `redacted` in the middle of
+  // `‹redacted:basic-auth:201b2d22›`, and every window this function builds is
+  // then centred on eight characters of a thirty-character marker. Widening
+  // the match to the whole marker is what makes the rest of the arithmetic
+  // come out right — the window is sized around an atom instead of around a
+  // fragment of one — and it is also the more honest highlight: what matched
+  // is the mask, not a word inside it.
+  const m = widenToMask(hit.snippet.match, masks);
   // The `…` the cutter marks its own edges with is left alone: `Theme.asciiLine`
   // folds it to a single `.` at the boundary, which is width-preserving, and
   // expanding it to `...` here would push the line past the column it was just
@@ -274,7 +290,7 @@ export function snippetLine(hit: RecallHit, t: Theme, width: number): string {
     // …and an ellipsis is not enough on its own. `…wn) that book consultations`
     // still reads as a broken string, so both edges move to the nearest space
     // — inwards, never outwards, so the line can only get shorter than `room`.
-    ({ start, end } = wordEdges(text, start, end, m));
+    ({ start, end } = wordEdges(text, start, end, m, masks));
     // `start > 0` means this window already cut past whatever the snippet's
     // own leading ellipsis was, so one is owed here — testing
     // `text.startsWith('…')` instead (as the first version did) dropped the
@@ -290,14 +306,43 @@ export function snippetLine(hit: RecallHit, t: Theme, width: number): string {
 }
 
 /**
+ * The match, widened to the whole mask when it fell inside one.
+ *
+ * `find "redacted aws"` highlights the literal word `redacted` — which, in a
+ * redacted exchange, is eight characters in the middle of
+ * `‹redacted:basic-auth:201b2d22›`. Every window below is then built around a
+ * fragment, and {@link wordEdges} duly pulls the window's end back to exactly
+ * `m.end`, which is the middle of the marker. That is how
+ * `docs/screens/13-find-redacted.txt` came to publish
+ * `postgres://ingest:‹redacted…` and fail the screenshot script's own
+ * assertion that a mask is visible on it.
+ */
+function widenToMask(
+  m: { start: number; end: number } | undefined,
+  masks: readonly MaskSpan[],
+): { start: number; end: number } | undefined {
+  if (!m) return m;
+  const span = maskAt(masks, m.start) ?? maskAt(masks, m.end);
+  if (!span) return m;
+  return { start: Math.min(m.start, span.start), end: Math.max(m.end, span.end) };
+}
+
+/**
  * Move a character-counted window in to the nearest word edges, without ever
- * pushing the highlighted match out of it.
+ * pushing the highlighted match out of it — and without ever leaving an edge
+ * inside a redaction mask.
+ *
+ * The mask pass runs *after* the word pass rather than instead of it, because
+ * a word edge inside a marker is a legal word edge:
+ * `‹redacted:basic-auth:201b2d22›` is four words to `wordSpans`, and the
+ * search below will happily stop at any of their boundaries.
  */
 function wordEdges(
   text: string,
   start: number,
   end: number,
   m: { start: number; end: number },
+  masks: readonly MaskSpan[] = [],
 ): { start: number; end: number } {
   let s = start;
   let e = end;
@@ -313,7 +358,11 @@ function wordEdges(
   }
   while (s < e && /\s/.test(text[s] ?? '')) s++;
   while (e > s && /\s/.test(text[e - 1] ?? '')) e--;
-  return { start: s, end: e };
+  // `keep` is the match: an edge that has to move off a mask moves the way
+  // that keeps the reason this line is on the screen inside the window.
+  s = offMask(masks, s, 'forward', m);
+  e = offMask(masks, e, 'back', m);
+  return { start: s, end: Math.max(e, s) };
 }
 
 function action(s: RecallSession, t: Theme, width: number): string {

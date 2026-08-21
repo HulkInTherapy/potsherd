@@ -230,10 +230,26 @@ if stray:
 # The find screen is the one that carries the whole claim. If it ever stops
 # returning both halves, the readme is quoting a screenshot that no longer
 # proves anything, and that must break the build rather than pass quietly.
+#
+# `· sidechain` used to be one of the four strings required here, and it had
+# stopped appearing — not because the search screen lost its point, but
+# because T3.6 gave it a better one. A subagent hit no longer gets a block of
+# its own headed `claude · sidechain`; it is clustered under the session that
+# spawned it and labelled `↳ subagent <id8>` on its own snippet line, so the
+# reader sees the conversation rather than two disconnected rows. The screen
+# still proves what it is here to prove — the assertion was pinned to the old
+# rendering of the fact rather than to the fact — so it now asks for the
+# marker T3.6 prints and for the footer's own count of them.
 find = screens / '09-find.txt'
 if find.exists():
     text = find.read_text(encoding='utf-8')
-    for needed in ['· live', '· ghost', '· sidechain', 'assistant side not recoverable']:
+    for needed in [
+        '· live',
+        '· ghost',
+        'assistant side not recoverable',
+        '↳ subagent',
+        'from subagents',
+    ]:
         if needed not in text:
             bad.append(f'09-find.txt: no {needed!r} row — the search screen has lost its point')
 
