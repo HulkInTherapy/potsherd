@@ -805,6 +805,28 @@ export interface GraftSource {
 /** How much of one exchange reaches the prompt. Longer than this is a log. */
 export const SLICE_CHARS = 1_800;
 
+/**
+ * One exchange as the prompt sees it: `you: …` / `agent: …`, or the prompt
+ * alone on a ghost.
+ *
+ * **The strip runs per side, before the label goes on (T4.7a G5).** Stripping
+ * the joined string instead left `you:` standing over nothing whenever a
+ * message was *entirely* harness boilerplate — a real shape, since the
+ * slash-command caveat arrives as a message of its own — and the brief then
+ * carried `- you: [id8@1]`, an empty bullet with a citation on it. A side that
+ * is nothing but scaffolding contributes no line, and an exchange that is
+ * nothing but scaffolding contributes nothing at all.
+ */
+function sliceText(userText: string, assistantText: string, isGhost: boolean): string {
+  const user = stripHarnessBoilerplate(userText.trim());
+  if (isGhost) return clipSafe(user, SLICE_CHARS);
+  const assistant = stripHarnessBoilerplate(assistantText.trim());
+  const joined = [user && `you: ${user}`, assistant && `agent: ${assistant}`]
+    .filter(Boolean)
+    .join('\n');
+  return clipSafe(joined, SLICE_CHARS);
+}
+
 export async function collectSource(
   db: Db,
   sessionId: string,
@@ -833,16 +855,8 @@ export async function collectSource(
     );
     const wanted = hits.hits.filter((h) => h.sessionId === sessionId && typeof h.seq === 'number');
     for (const h of wanted.slice(0, o.k ?? ABOUT_K)) {
-      const user = h.userText?.trim() ?? '';
-      const assistant = h.assistantText?.trim() ?? '';
-      const text = isGhost
-        ? user
-        : [user && `you: ${user}`, assistant && `agent: ${assistant}`].filter(Boolean).join('\n');
-      slice.push({
-        seq: h.seq as number,
-        ts: h.ts ?? null,
-        text: clipSafe(stripHarnessBoilerplate(text), SLICE_CHARS),
-      });
+      const text = sliceText(h.userText ?? '', h.assistantText ?? '', isGhost);
+      if (text) slice.push({ seq: h.seq as number, ts: h.ts ?? null, text });
     }
     slice.sort((a, b) => a.seq - b.seq);
     sliceVia = slice.length ? 'about' : null;
@@ -866,13 +880,8 @@ export async function collectSource(
           assistant: e.assistantText ?? '',
         }));
     for (const u of units.slice(-Math.max(1, o.k ?? RECENT_K))) {
-      const user = u.user.trim();
-      const assistant = u.assistant.trim();
-      const text = isGhost
-        ? user
-        : [user && `you: ${user}`, assistant && `agent: ${assistant}`].filter(Boolean).join('\n');
-      const cleaned = clipSafe(stripHarnessBoilerplate(text), SLICE_CHARS);
-      if (cleaned) slice.push({ seq: u.seq, ts: u.ts, text: cleaned });
+      const text = sliceText(u.user, u.assistant, isGhost);
+      if (text) slice.push({ seq: u.seq, ts: u.ts, text });
     }
     slice.sort((a, b) => a.seq - b.seq);
     sliceVia = slice.length ? 'recent' : null;
