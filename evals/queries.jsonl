@@ -1,10 +1,32 @@
-{"query": "pgbouncer transaction pooling", "expected_session_prefix": "0a2fbf9b", "expected_harness": "claude", "note": "exact terms, titled session"}
-{"query": "csv importer backpressure", "expected_session_prefix": "a82ceb72", "expected_harness": "claude", "note": "two terms, one in the prompt and one in the answer"}
-{"query": "webhook rate limited by the gateway", "expected_session_prefix": "a0c57a31", "expected_harness": "claude", "note": "untitled session — must be findable without a title"}
-{"query": "dark mode semantic tokens", "expected_session_prefix": "e2749f91", "expected_harness": "claude", "note": "terms split across the prompt and the answer"}
-{"query": "checkout test fails one run in six", "expected_session_prefix": "a86656f1", "expected_harness": "claude", "note": "long natural-language query"}
-{"query": "tree shaking icon set", "expected_session_prefix": "4ae3102b", "expected_harness": "claude", "note": "SIDECHAIN — only the subagent transcript contains these words"}
-{"query": "liveness probe restarting the pod", "expected_session_prefix": "94f91303", "expected_harness": "claude", "note": "exact terms, titled session"}
-{"query": "reciprocal rank fusion k", "expected_session_prefix": "cbcfda7e", "expected_harness": "claude", "note": "one-letter token next to a phrase"}
-{"query": "brother laser printer driver", "expected_session_prefix": "e6aa5ba7", "expected_harness": "claude", "note": "GHOST — prompts only, rebuilt from history.jsonl"}
-{"query": "billing cron blocks the nightly backup", "expected_session_prefix": "4ddd4b1f", "expected_harness": "claude", "note": "GHOST — the whole session was deleted by the sweep"}
+// The committed set. Fixture corpus only — no real prompt text, no real
+// project, client or path appears in this file or in evals/fixture/.
+//
+// Every query is written the way somebody remembers a conversation weeks
+// later: the thing it was *about*, not the words they typed at the time. The
+// previous set failed that test — "webhook rate limited by the gateway"
+// against a prompt saying "the outbound webhook is getting rate limited by
+// their gateway" measures substring overlap, not retrieval, and scored 10/10
+// with every answer at rank 1. `class` records what each query is for.
+//
+//   concept   the answer shares almost no content words with the query. bm25
+//             can genuinely fail here; this is where the vector half earns its
+//             350 ms.
+//   ranking   the words appear, and so do they in three or four distractor
+//             sessions on adjacent topics. Getting it right is ordering.
+//   recall    the ordinary case: a couple of distinctive words remembered
+//             correctly, competing against a corpus that shares them.
+//
+// `expected_sidechain` asserts the answer came back as the subagent
+// transcript, not merely as some session whose id starts the same way — a
+// claude sidechain id is `<parent>:agent-<hash>`, so a prefix test alone
+// cannot tell the two apart.
+{"query": "charged the customer twice because the client retried", "expected_session_prefix": "7c1d0e44", "expected_harness": "claude", "class": "concept", "note": "concept — the session never says charged, customer or twice"}
+{"query": "combining keyword and vector search into one ranked list", "expected_session_prefix": "cbcfda7e", "expected_harness": "claude", "class": "recall", "note": "remembered by topic, not by phrase"}
+{"query": "which import made the icon set so big", "expected_session_prefix": "4ae3102b", "expected_harness": "claude", "expected_sidechain": true, "class": "ranking", "note": "SIDECHAIN — the parent session never mentions icons; the subagent does"}
+{"query": "the batch job that overran the backup window", "expected_session_prefix": "4ddd4b1f", "expected_harness": "claude", "class": "ranking", "note": "GHOST — prompts only; three other sessions are about nightly jobs"}
+{"query": "the ci runner filled up its disk with docker layers", "expected_session_prefix": "e83f5c17", "expected_harness": "claude", "class": "recall", "note": "GHOST — the whole session was deleted by the sweep"}
+{"query": "we were sending events faster than they would accept", "expected_session_prefix": "a0c57a31", "expected_harness": "claude", "class": "concept", "note": "concept, and the session is untitled — rate limiting said without the words"}
+{"query": "the pod kept getting killed even though the app was fine", "expected_session_prefix": "94f91303", "expected_harness": "claude", "class": "ranking", "note": "one shared word, against another session about pods"}
+{"query": "eu region reporting a day late", "expected_session_prefix": "9a4e7c26", "expected_harness": "claude", "class": "ranking", "note": "competes with the backfill session over the same table"}
+{"query": "changes the user had already undone came back", "expected_session_prefix": "c2f68b40", "expected_harness": "claude", "class": "concept", "note": "concept — the session says undid, mutation and superseded"}
+{"query": "stop counting the same event twice in the rollup", "expected_session_prefix": "47d9e281", "expected_harness": "claude", "class": "ranking", "note": "untitled session, and four other sessions contain twice"}

@@ -74,6 +74,9 @@ const VERBS: [string, string[]][] = [
   ['ls --ghosts only', ['ls', '--ghosts', 'only']],
   ['ls --sidechains only', ['ls', '--sidechains', 'only']],
   ['find', ['find', 'pgbouncer transaction pooling']],
+  // A query whose best evidence is on the assistant side of a session whose
+  // prompts are pasted-screenshot placeholders.
+  ['find over boilerplate', ['find', 'pay button spinner']],
   ['find --ghosts only', ['find', 'brother laser printer', '--ghosts', 'only']],
   ['stats', ['stats']],
   ['show', ['show', '0a2fbf9b']],
@@ -99,7 +102,7 @@ describe('width: every verb fits the terminal it was designed for', () => {
 
 describe('ls', () => {
   it('shows titles rather than uuids', () => {
-    const r = run(['ls', '--width', '80']);
+    const r = run(['ls', '--width', '80', '--project', '/tmp/potsherd-eval-api']);
     expect(r.stdout).toContain('Pin the pgbouncer');
     expect(r.stdout).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-4/);
   });
@@ -122,7 +125,7 @@ describe('ls', () => {
       rolledUp: number;
       sessions: Record<string, unknown>[];
     };
-    expect(j.ghosts).toBe(3);
+    expect(j.ghosts).toBe(5);
     expect(j.rolledUp).toBe(2);
     const first = j.sessions[0]!;
     for (const key of ['id', 'harness', 'project', 'displayTitle', 'status', 'isSidechain', 'resume']) {
@@ -182,6 +185,46 @@ describe('find', () => {
     // No embeddings in this index, so the verb must say why it is text-only.
     expect(j.vectors.used).toBe(false);
     expect(j.vectors.reason).toBeTruthy();
+  });
+
+  it('shows the matched word rather than a pasted-screenshot placeholder', () => {
+    // The T1.7 review's sharpest complaint: a top-three result whose only
+    // snippet was `[Image: source: /var/folders/…/clipboard-…]`, so nothing on
+    // the screen said why that result was there.
+    const r = run(['find', 'pay button spinner', '--width', '80']);
+    expect(r.stdout).not.toContain('[Image:');
+    expect(r.stdout).toContain('spinner');
+  });
+
+  it('every snippet line begins on a word, at 80 columns and at 60', () => {
+    for (const width of ['80', '60']) {
+      const r = run(['find', 'idempotency key on a replayed request', '--width', width]);
+      const lines = stripAnsi(r.stdout).split('\n');
+      for (const line of lines) {
+        // Snippet lines are the four-space-indented ones that are not the
+        // `run …` action line.
+        const m = /^ {4}(?!run )(.*)$/.exec(line);
+        if (!m) continue;
+        const body = m[1]!;
+        if (!body || body.startsWith('the session title matched')) continue;
+        // Either it starts at a sentence, or it starts with the ellipsis that
+        // says an excerpt begins here. What it may never do is start with the
+        // tail of a word, which is what `…wn) that book consultations` was.
+        expect(body[0] === '…' || /^[\w"'(\[]/.test(body), `snippet: ${body}`).toBe(true);
+      }
+    }
+  });
+
+  it('--ascii keeps the block inside 7-bit, ellipsis included', () => {
+    const r = run(['find', 'idempotency key on a replayed request', '--width', '80', '--ascii']);
+    // eslint-disable-next-line no-control-regex
+    expect(stripAnsi(r.stdout)).toMatch(/^[\x00-\x7f]*$/);
+    expect(r.stdout).toContain('Idempotency keys');
+  });
+
+  it('says why a result is there when no snippet can show it', () => {
+    const r = run(['find', 'pay button spinner', '--width', '80']);
+    expect(r.stdout).toContain('the session title matched');
   });
 
   it('says text-only in the human view too, rather than pretending', () => {
@@ -255,9 +298,9 @@ describe('stats', () => {
       redaction: unknown;
     };
     const claude = j.harnesses.find((h) => h.harness === 'claude')!;
-    expect(claude.sessions).toBe(8);
+    expect(claude.sessions).toBe(24);
     expect(claude.sidechains).toBe(2);
-    expect(claude.ghosts).toBe(3);
+    expect(claude.ghosts).toBe(5);
     expect(j.freshness.stale).toBe(0);
     expect(j.freshness.missing).toBe(0);
     expect(j.redaction).toBeTruthy();

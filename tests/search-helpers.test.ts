@@ -10,6 +10,10 @@ const {
   rrfScore,
   leadSnippet,
   matchSnippet,
+  clipToWords,
+  denseSnippet,
+  isMostlyBoilerplate,
+  wordMatchesToken,
 } = search;
 
 /**
@@ -99,5 +103,100 @@ describe('snippets', () => {
     const snip = matchSnippet('nothing relevant here', 'pgbouncer');
     expect(snip.match).toBeUndefined();
     expect(snip.text).toBe('nothing relevant here');
+  });
+});
+
+/**
+ * The T1.7 review's three complaints about `find`, as tests.
+ *
+ *   1. snippets began mid-word — `"wn) that book consultations via Instagram"`
+ *   2. a top-three result's only snippet was `[Image: source: /var/folders/…]`,
+ *      so nothing on screen said why that result was there
+ *   3. the second snippet line was routinely boilerplate with no query term in
+ *      it at all
+ *
+ * Each of the three is one `it` below. The bar the reviewer set is the one
+ * these encode: a stranger sees the block with no caption and understands what
+ * was found and why.
+ */
+describe('snippet selection', () => {
+  const tokens = ['idempotency', 'key', 'replay'];
+
+  it('never starts or ends in the middle of a word', () => {
+    const text =
+      'A very long preamble about unrelated matters that goes on for quite a while ' +
+      'and mentions nothing of interest whatsoever, before finally arriving at the ' +
+      'idempotency key which is the thing that was actually asked about, and then ' +
+      'continuing for another long stretch of prose that also has to be cut off.';
+    const snip = denseSnippet(text, tokens, 90);
+    const body = snip.text.replace(/^…/, '').replace(/…$/, '');
+    // Both edges of the quoted span exist verbatim in the source, bounded by
+    // whitespace or by the ends of the text.
+    const at = text.indexOf(body.slice(0, 20));
+    expect(at, snip.text).toBeGreaterThanOrEqual(0);
+    expect(at === 0 || /\s/.test(text[at - 1]!)).toBe(true);
+    const tail = body.slice(-20);
+    const end = text.indexOf(tail) + tail.length;
+    expect(end === text.length || /\s/.test(text[end]!)).toBe(true);
+  });
+
+  it('quotes a short text whole rather than windowing it for no reason', () => {
+    const text = 'two rows land in the ledger when a replay arrives';
+    const snip = denseSnippet(text, tokens, 200);
+    expect(snip.text).toBe(text);
+    expect(snip.text.slice(snip.match!.start, snip.match!.end)).toBe('replay');
+  });
+
+  it('picks the densest span, not the first one', () => {
+    const filler = 'padding words that carry no meaning at all here. '.repeat(4);
+    const text =
+      'the key was rotated last week. ' +
+      filler +
+      'the idempotency key makes a replay safe. ' +
+      filler;
+    const snip = denseSnippet(text, tokens, 80);
+    expect(snip.text).toContain('idempotency');
+    expect(snip.text).toContain('replay');
+  });
+
+  it('highlights the rarest matched word, not the commonest', () => {
+    const text = 'the key is fine; the idempotency key is the one that matters';
+    const snip = denseSnippet(text, tokens, 200);
+    expect(snip.text.slice(snip.match!.start, snip.match!.end)).toBe('idempotency');
+  });
+
+  it('matches across a plural without highlighting nothing', () => {
+    expect(wordMatchesToken('requests', 'request')).toBe(true);
+    expect(wordMatchesToken('icon', 'icons')).toBe(true);
+    expect(wordMatchesToken('catastrophe', 'cat')).toBe(false);
+  });
+
+  it('knows machine text when it sees it', () => {
+    expect(isMostlyBoilerplate('[Image: source: /var/folders/x7/T/clipboard-1.png]')).toBe(true);
+    expect(isMostlyBoilerplate('/Users/someone/projects/thing/src/index.ts')).toBe(true);
+    expect(isMostlyBoilerplate('<system-reminder>')).toBe(true);
+    expect(isMostlyBoilerplate('the idempotency key makes a replay safe')).toBe(false);
+  });
+
+  it('skips a boilerplate span when a real sentence is available', () => {
+    const text =
+      '[Image: source: /var/folders/x7/878s1bxj4c950snx6h2200k00000gn/T/clipboard-1.png]\n' +
+      'the idempotency key makes a replay safe when the client gives up and tries again';
+    const snip = denseSnippet(text, tokens, 90);
+    expect(snip.text).not.toContain('[Image:');
+    expect(snip.text).toContain('idempotency');
+  });
+
+  it('still says something when the whole text is boilerplate', () => {
+    const text = '[Image: source: /var/folders/x7/T/clipboard-1.png]';
+    const snip = denseSnippet(text, tokens, 90);
+    expect(snip.text.length).toBeGreaterThan(0);
+    expect(snip.match).toBeUndefined();
+  });
+
+  it('clips to a word edge, and gives up when there is no edge to find', () => {
+    expect(clipToWords('one two three four', 12)).toBe('one two…');
+    expect(clipToWords('x'.repeat(40), 12)).toBe('x'.repeat(11) + '…');
+    expect(clipToWords('short', 12)).toBe('short');
   });
 });
