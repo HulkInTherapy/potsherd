@@ -284,8 +284,9 @@ things get said:
    held `0.1.0` while the checkout beside it was `0.4.0`. So `SessionStart`
    asks the resolved binary directly, `index --help`, and reports the version
    it found if that fails. A capability probe, not a version comparison: the
-   question is "can it do this?". Costs a **measured 128 ms**, once per thread
-   (17 ms before it existed; the difference is Node starting the bundle).
+   question is "can it do this?". Costs a **measured 128–133 ms**, once per
+   thread, over three runs of ten (17 ms before it existed; almost all of the
+   difference is Node starting the bundle).
 
    Both hooks reach that binary through `bin/potsherd` and resolve nothing
    themselves. Before T5.9 each re-implemented the resolution inline in

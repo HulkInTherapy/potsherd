@@ -129,9 +129,10 @@ exact verb `SessionEnd` will run — and if that fails it says so in a
 cannot take. A capability probe rather than a version comparison, because the
 question is "can it do this?", not "what number does it call itself?".
 
-The probe costs a **measured 137 ms** on `SessionStart` with nothing else to do
-(28 ms before it existed; ~125 ms of the difference is Node starting the
-bundle). It runs once per session, before the detached `rescue`.
+It costs a **measured 128–146 ms** on `SessionStart` with nothing else to do,
+over three runs of ten (28 ms before it existed; almost all of the difference
+is Node starting the bundle, which nothing can make cheaper). It runs once per
+session, before the detached `rescue`.
 
 `SessionEnd` cannot talk at all — Claude Code discards its `systemMessage` by
 design — so when it fails it appends a line to
@@ -216,7 +217,7 @@ Two things worth knowing before you enable anything:
   model is on disk and warns you if it is not, because `SessionEnd` itself
   cannot — Claude Code discards a `SessionEnd` hook's `systemMessage` by
   design. The pure-shell model check costs about 4 ms and prints nothing once
-  the model is cached; the capability probe beside it costs 137 ms (above). If you would rather it never happened, disable the `SessionEnd` hook
+  the model is cached; the capability probe beside it costs 128–146 ms (above). If you would rather it never happened, disable the `SessionEnd` hook
   (see below) and index by hand with `--no-embed`; the cost is vector search on
   new sessions.
 - Model calls happen only for `card`, `ask` and `graft`. The hooks call a model

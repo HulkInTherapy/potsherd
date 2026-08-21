@@ -21,9 +21,10 @@
 #      is the exact question ("does the potsherd this plugin resolves have the
 #      verb SessionEnd is going to run?"), which a version-number comparison
 #      only approximates -- and it keeps working across whatever the version
-#      scheme does next. It costs one process; see the README for the measured
-#      figure. If it fails, this hook says so and does NOT go on to promise a
-#      copy it cannot take.
+#      scheme does next. It costs one process -- a measured 128-146 ms on a
+#      SessionStart with nothing else to do, against 28 ms before it existed,
+#      almost all of it Node starting the bundle. If it fails, this hook says
+#      so and does NOT go on to promise a copy it cannot take.
 #   2. A FAILURE LOG. SessionEnd has no channel to the user at all, so it
 #      writes what went wrong to `$POTSHERD_DIR/hook-failures.log` and this
 #      hook reads it back at the start of the next session and clears it.
