@@ -652,6 +652,53 @@ describe('the verb', () => {
   });
 });
 
+// ---------------------------------------------------------------------- docs
+
+/**
+ * `docs/mcp-clients.md` is deliverable 4 of the phase, and it is a published
+ * artefact that can lie about what the product does — the same class of thing
+ * as the privacy receipt, which has drifted from the live command twice. So the
+ * snippets in it are checked against the ones `setup` actually writes, and the
+ * honesty labels are checked against `ClientSpec.verified`.
+ */
+describe('docs/mcp-clients.md', () => {
+  const doc = fs.readFileSync(path.resolve(process.cwd(), 'docs', 'mcp-clients.md'), 'utf8');
+  const onPathRes: McpResolution = { command: 'potsherd-mcp', args: [], via: 'path', exists: true };
+
+  const jsonBlocks = [...doc.matchAll(/```json\n([\s\S]*?)```/g)].map(
+    (m) => JSON.parse(m[1]!) as Record<string, unknown>,
+  );
+
+  it('shows a snippet that matches what setup would write, for every client', () => {
+    for (const spec of CLIENTS) {
+      const snippet = snippetFor(spec, spec.entry(onPathRes));
+      if (spec.format === 'toml') {
+        expect(doc).toContain(snippet.trimEnd());
+        continue;
+      }
+      expect(jsonBlocks, `no snippet for ${spec.id}`).toContainEqual(JSON.parse(snippet) as unknown);
+    }
+  });
+
+  it('names every config path it claims to configure', () => {
+    for (const spec of CLIENTS) {
+      const shown = detectClient(spec).path.replace(home, '~');
+      expect(doc, `${spec.id} path missing`).toContain(shown);
+    }
+  });
+
+  it('labels every unverified snippet as unverified, and no other', () => {
+    // One "> Unverified" callout per docs-only client, and none for the three
+    // that were checked.
+    const callouts = [...doc.matchAll(/^> Unverified/gim)].length;
+    expect(callouts).toBe(CLIENTS.filter((c) => c.verified === 'docs').length);
+    for (const spec of CLIENTS.filter((c) => c.verified !== 'docs')) {
+      const section = doc.split(`## ${spec.label}`)[1]?.split('\n## ')[0] ?? '';
+      expect(section).not.toMatch(/^> Unverified/im);
+    }
+  });
+});
+
 // ------------------------------------------------------------------- privacy
 
 describe('the privacy receipt', () => {
