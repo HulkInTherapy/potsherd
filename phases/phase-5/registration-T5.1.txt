@@ -1,0 +1,263 @@
+T5.1 — the MCP stdio server — REGISTRATION
+branch: task/T5.1-mcp   ·   cut from 6a58271 (v0.5.0, 1,041 tests)
+
+
+================================================================================
+0. THE HEADLINE FOR THE INTEGRATOR
+================================================================================
+
+  **There is nothing to paste into any RESERVED file.** Section 1 is a list of
+  things that were checked and found not to be needed, not a list of edits.
+
+  Files this task owns and delivers:
+
+    packages/mcp/package.json
+    packages/mcp/tsconfig.json
+    packages/mcp/build.mjs
+    packages/mcp/bin/potsherd-mcp.js
+    packages/mcp/src/index.ts          the entry point: argv, stdio, shutdown
+    packages/mcp/src/server.ts         the six registrations, in order
+    packages/mcp/src/context.ts        per-call index, graft cwd, ask deadline
+    packages/mcp/src/descriptions.ts   the six tool descriptions
+    packages/mcp/src/result.ts         tool results and the one try/catch
+    packages/mcp/src/errors.ts         core errors → one actionable line
+    packages/mcp/src/testing.ts        the in-memory client harness
+    packages/mcp/src/selftest.ts       `--selftest`
+    packages/mcp/src/tools/shapes.ts   shared zod fragments
+    packages/mcp/src/tools/{find,read,ask,graft,ls,tag}.ts
+    tests/mcp.test.ts                  26 tests
+    phases/phase-5/registration-T5.1.txt   (this file)
+
+  One file outside `packages/mcp/**` and `tests/`: **`pnpm-lock.yaml`**, which
+  moves because `packages/mcp/package.json` declares dependencies. Both
+  `@modelcontextprotocol/sdk` (1.30.0) and `zod` (4.4.3) were **already in the
+  lockfile** as peers of `@anthropic-ai/claude-agent-sdk`, so no new package is
+  resolved — only a new link into `packages/mcp/node_modules`. `pnpm-lock.yaml`
+  is not on the RESERVED list; if another worker also moves it, take either
+  side and re-run `pnpm install`, which is idempotent here.
+
+
+================================================================================
+1. RESERVED FILES — CHECKED, AND NOT NEEDED
+================================================================================
+
+1a. `package.json` (root) and `pnpm-workspace.yaml` — **no edit**.
+
+    The workspace glob is `packages/*`, so `packages/mcp` is picked up with no
+    change to either file. Verified, twice:
+
+        $ pnpm build
+        Scope: 3 of 4 workspace projects
+        packages/mcp build$ node build.mjs
+        packages/mcp build:   dist/index.js      341.3kb
+
+        $ pnpm typecheck
+        Scope: 3 of 4 workspace projects
+        packages/mcp typecheck: Done
+
+1b. `packages/core/src/index.ts` (the barrel) — **no edit**.
+
+    Every symbol this server needs was already exported: `recall`,
+    `showSession`, `listSessions`, `resolveSession`, `applyTags`, `sessionTags`,
+    `parseTagArgs`, `graft`, `graftJson`, `ask`, `ASK_K`, `detectBackend`,
+    `Llm`, `NoBackendError`, `ReentrancyError`, `GraftError`, `DEFAULT_BUDGET`,
+    `MIN_BUDGET`, `indexAll`, `paths`, `VERSION`. Nothing new is exported and
+    nothing in `packages/core` is touched.
+
+1c. `packages/cli/src/index.ts` — **no edit, and deliberately so.** See §4.
+
+1d. `.github/workflows/ci.yml` — **no edit made; one step recommended.**
+
+    `--selftest` is the only thing that proves the *wiring* of this package on
+    a clean machine, and it costs 154 ms. Suggested placement is immediately
+    after the existing `the ask eval scorer still scores` step:
+
+      - name: the mcp server answers on all six tools
+        run: node packages/mcp/dist/index.js --selftest
+
+    It needs `pnpm build` to have run (the CI job already does) and needs no
+    HOME, no corpus and no credentials: it builds a throwaway index from
+    `evals/fixture/claude` in a temp directory and removes it. It never reads a
+    real `~/.claude`, and it hides the model backend on purpose, so it makes no
+    model call and spends nothing.
+
+1e. `packages/core/src/llm.ts` / `MODEL_CALL_VERBS` — **no edit.**
+
+    The list stays `['card','ask','graft']`. The guard in `tests/llm.test.ts`
+    walks `packages/cli/src/commands/*.ts`, and this package adds no command
+    there. `pnpm test` is green at 1,067. See §4 for the one way that changes.
+
+
+================================================================================
+2. THE .mcp.json STANZA A CLIENT NEEDS
+================================================================================
+
+The server is a plain stdio server: one command, no arguments required.
+
+2a. Claude Code plugin (`plugins/claude-code/.mcp.json`, T5.3's file):
+
+    {
+      "mcpServers": {
+        "potsherd": {
+          "command": "node",
+          "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/index.js"],
+          "env": {
+            "POTSHERD_GRAFT_CWD": "${CLAUDE_PROJECT_DIR}"
+          }
+        }
+      }
+    }
+
+    `${CLAUDE_PLUGIN_ROOT}/mcp/index.js` assumes the plugin bundles
+    `packages/mcp/dist/index.js` at `mcp/index.js`, in the same way it bundles
+    the CLI at `bin/potsherd`. If T5.3 lays the plugin out differently, only
+    that one path changes. **`POTSHERD_GRAFT_CWD` is worth setting** — see §3.
+
+2b. Cursor (`.cursor/mcp.json`), and the same JSON for gemini cli, opencode,
+    copilot and pi, which all take the stdio shape:
+
+    {
+      "mcpServers": {
+        "potsherd": {
+          "command": "node",
+          "args": ["/absolute/path/to/potsherd/packages/mcp/dist/index.js"]
+        }
+      }
+    }
+
+    Cursor launches a stdio server in the workspace folder, so `graft`'s brief
+    lands in the project without `POTSHERD_GRAFT_CWD` being set. A client that
+    launches it somewhere else needs the variable; the tool says so in its own
+    reply when it happens.
+
+2c. Every environment variable this server reads, in full:
+
+    POTSHERD_DIR                  the index to read. Same as --potsherd-dir.
+    POTSHERD_GRAFT_CWD            where potsherd_graft writes its brief.
+    POTSHERD_MCP_ASK_TIMEOUT_MS   how long potsherd_ask may run. Default 240000.
+
+    There is no other configuration and no config file.
+
+2d. Verifying an install without a client:
+
+        node packages/mcp/dist/index.js --selftest    # exits 0
+        node packages/mcp/dist/index.js --help
+
+
+================================================================================
+3. THE DECISION ABOUT `graft`'s CWD — READ THIS BEFORE T5.3 WRITES .mcp.json
+================================================================================
+
+`graft` writes `./.potsherd/graft-<id8>.md` into the process's working
+directory. For the CLI that is where the user typed the command, which is by
+construction the project they meant. **For a stdio server it is wherever the
+client happened to launch it**, which is `/` in some desktop clients and the
+client's own bundle directory in others.
+
+The rule implemented (`resolveGraftCwd` in `packages/mcp/src/context.ts`):
+
+  1. `POTSHERD_GRAFT_CWD` wins absolutely.
+  2. otherwise the process's cwd, if it exists, is a writable directory, and is
+     **not** the filesystem root, `$HOME`, or the system temp directory.
+  3. otherwise nothing is written: `graft` runs with `write: false`, the reply
+     carries `path: null`, `wrote: false` and a `writeNote` naming
+     `POTSHERD_GRAFT_CWD`, and the brief — always the actual deliverable — is
+     returned inline.
+
+Consequences the integrator should know:
+
+  - **No new write path exists.** `./.potsherd/graft-<id8>.md` is the same path
+    `doctor --privacy` already discloses, and no `.potsherd/` directory is ever
+    created in `$HOME` or `/`. The published privacy receipt does not drift and
+    the CI guard on it stays green (verified: `pnpm test` 1,067 green, which
+    includes the three `doctor --privacy` tests in `tests/cli.test.ts`).
+  - **A `.mcp.json` should still set `POTSHERD_GRAFT_CWD`** where the client
+    exposes a project variable, because rule 2 is a guess and rule 1 is a fact.
+
+
+================================================================================
+4. WHAT IS DELIBERATELY NOT HERE: A `potsherd mcp` VERB
+================================================================================
+
+`03` §9 lists `mcp` among the CLI's verbs. It is **not** added, for two
+reasons, and both are the integrator's to overrule rather than mine:
+
+  1. It needs `packages/cli/src/index.ts`, which is RESERVED.
+  2. It would put a command in `packages/cli/src/commands/` that reaches a
+     model — `potsherd_ask` and `potsherd_graft` both call `Llm.open` — while
+     `MODEL_CALL_VERBS` is `['card','ask','graft']`.
+
+  **And the guard would not catch it.** `tests/llm.test.ts` follows a command's
+  imports *from `@potsherd/core`* and checks whether the module behind each one
+  calls `Llm.open`. A `commands/mcp.ts` importing from `@potsherd/mcp` matches
+  no `@potsherd/core` import, so the guard would pass a verb that spends money.
+  This is a real blind spot in a guard whose whole job is to have none, and it
+  is reported rather than patched because `llm.ts` and the test are not mine.
+
+  If the verb is wanted, the smallest correct change is:
+
+    packages/cli/src/index.ts:
+      import { runMcp } from './commands/mcp.js';
+      program.command('mcp').description('speak MCP on stdin/stdout')
+        .action(async () => { await runMcp(globals(program, mcp, {})); });
+
+    packages/core/src/llm.ts:
+      export const MODEL_CALL_VERBS: readonly string[] =
+        ['card', 'ask', 'graft', 'mcp'];
+
+    and `tests/llm.test.ts`'s scanner extended to follow `@potsherd/mcp`
+    imports the same way it follows `@potsherd/core` ones.
+
+  Until then the server is reached as `node packages/mcp/dist/index.js` or as
+  the `potsherd-mcp` bin, which is what every `.mcp.json` in §2 names.
+
+
+================================================================================
+5. ONE PLACE THE PINNED CONTRACT AND MCP'S OWN VOCABULARY DISAGREE
+================================================================================
+
+Reported, not changed, per the brief.
+
+`WAVE.md` says *every tool is read-only except `potsherd_tag`*, and in the next
+clause *nothing writes outside `~/.potsherd` except `potsherd_graft`'s brief,
+which lands in the cwd*. So the contract knows `graft` creates a file and calls
+it read-only anyway — which fixes what "read-only" means here: **it modifies no
+state that anything else reads.** Not the index, not the archive, not a
+transcript, not a tag.
+
+MCP's `readOnlyHint` is defined more broadly, as "does not modify its
+environment", and by that reading a new `./.potsherd/graft-<id8>.md` is a
+modification. `potsherd_graft` therefore ships with `readOnlyHint: true`,
+following the pinned wording, because four workers are compiling against it.
+
+Nothing is hidden by that choice: the tool's description says it writes the
+brief and names the file, and every reply carries `path`, `wrote` and
+`writeNote`. If the orchestrator would rather the annotation followed MCP's
+definition, the change is one line in
+`packages/mcp/src/tools/graft.ts` (`readOnlyHint: ctx.graftCwd === null`) plus
+the matching line in `packages/mcp/src/server.ts`'s `WRITE_TOOLS` and one test.
+
+No other field, name or shape in the pinned contract needed changing. All six
+tools were buildable exactly as written.
+
+
+================================================================================
+6. NUMBERS, FOR THE HANDOFF
+================================================================================
+
+  tests before   1,041 green (25 files)
+  tests after    1,067 green (26 files) — `tests/mcp.test.ts` adds 26
+  tools          6, asserted in `tests/mcp.test.ts` and in `--selftest`
+  selftest       20 checks, all passed, ~155 ms, exit 0
+  bundle         packages/mcp/dist/index.js, 341 kb
+  typecheck      clean across all three packages
+
+  `potsherd_ask` and its ~100 s: no job/poll pair (that is a seventh tool), and
+  `k` is not quietly lowered (phase 4 reported the latency as a miss rather
+  than meeting it by narrowing the fan-out). Instead: `detectBackend` before
+  anything else, so no backend is a tool error in **1 ms** rather than after
+  two minutes; MCP progress notifications forwarded from `ask`'s own per-reader
+  callback, which is also what resets a spec-compliant client's request timeout;
+  a 240 s deadline (`POTSHERD_MCP_ASK_TIMEOUT_MS`) that returns a tool error
+  and never an empty answer; and the cost stated in the first sentence of the
+  tool's description with `potsherd_find` named as the cheaper move.
