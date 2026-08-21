@@ -1,0 +1,389 @@
+T5.3 — claude code plugin manifest, hooks, marketplace — REGISTRATION
+branch: task/T5.3-plugin   ·   cut from 6a58271   ·   written 22 aug 2026
+
+Files this task owns and delivers:
+  plugins/claude-code/.claude-plugin/plugin.json
+  plugins/claude-code/hooks/hooks.json
+  plugins/claude-code/.mcp.json
+  plugins/claude-code/bin/potsherd                 (reassigned mid-task; see §6)
+  plugins/claude-code/README.md
+  .claude-plugin/marketplace.json                  (REPO ROOT — see §2)
+  phases/phase-5/registration-T5.3.txt             (this file)
+
+Nothing under `packages/` was read-modify-written. No CLI flag was added.
+The plugin was NOT installed into `~/.claude`; §5 gives the throwaway path.
+Baseline on this branch: `pnpm install && pnpm build` clean, 1,041 tests green
+before and after.
+
+
+================================================================================
+0. PINNED — VERIFIED AGAINST CLAUDE CODE 2.1.239
+================================================================================
+
+`claude --version` -> `2.1.239 (Claude Code)`. The phase file's risk section
+says plugin env var names drift and to read the live docs at build time. Every
+name below was checked against code.claude.com/docs/en/{hooks,plugins-reference,
+plugin-marketplaces}.md and, where possible, against a real install.
+
+  NAME / KEY                        STATUS       NOTE
+  CLAUDE_PLUGIN_ROOT                EXISTS       hook commands + .mcp.json
+  CLAUDE_PROJECT_DIR                EXISTS       project root at session start
+  CLAUDE_SESSION_ID                 DOES NOT     ** see below **
+                                    EXIST
+  hooks.json top level              {"hooks":{}} outer `hooks` key REQUIRED
+  SessionStart matcher              startup, resume, clear, compact, fork
+  "startup|resume"                  VALID        letters/digits/_/-/space/,/|
+                                                 => list of EXACT strings, not
+                                                 a regex. consent.ts was right.
+  hookSpecificOutput.additionalContext  VALID    SessionStart only
+  SessionEnd                        EXISTS       cannot block, cannot add
+                                                 context, 1.5 s shared budget
+  timeout (seconds)                 VALID        per handler
+  ${CLAUDE_PLUGIN_ROOT} in .mcp.json  INTERPOLATES
+  mcpServers / hooks in plugin.json  VALID KEYS  but DO NOT USE — see §3
+
+** THE ONE THAT WOULD HAVE FAILED SILENTLY **
+
+  The phase file specifies `index --session $CLAUDE_SESSION_ID`.
+  `CLAUDE_SESSION_ID` IS NOT A HOOK ENVIRONMENT VARIABLE. It is not in the
+  documented list and never has been. Written as specified, the hook would
+  expand it to the empty string and index nothing, forever, with exit 0 — the
+  exact failure phase 0 legislated against.
+
+  The session id is available only on the hook's STDIN, as `session_id` in the
+  event JSON. The SessionEnd hook therefore reads stdin:
+
+      ID=$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+           | head -1); [ -n "$ID" ] || exit 0
+
+  Tested against pretty-printed event JSON, which is what arrives; the pattern
+  is line-based and works for compact JSON too. If no id is found it exits 0
+  having done nothing, which is correct — there is nothing to index.
+
+  ACTION FOR THE ORCHESTRATOR: `03 §9` and phase-5's deliverable 2 both still
+  say `$CLAUDE_SESSION_ID`. That line is wrong and should be corrected in the
+  plan folder per `00-README.md` rule 5.
+
+
+================================================================================
+1. THE NUMBERS
+================================================================================
+
+Corpus: a byte-for-byte clone of the reference machine's ~/.claude —
+282 transcripts, 794 MB; the archive built from it holds 283 files / 427 MB.
+`audit` on it: 334 sessions ever, 35 on disk, 299 deleted, 2,971 prompts lost.
+
+MEASURED NO-CHANGE SessionStart WALL TIME:  6.5 – 10.5 ms  (8 runs)
+
+  8.3 / 6.5 / 8.3 / 7.8 / 8.9 / 10.5 / 9.5 / 9.0 ms
+
+  This is the hook's OWN wall time: one `/bin/sh -c "<command>"` forked and
+  waited on by perl, exactly as Claude Code runs it, timed with Time::HiRes.
+  A `node -e Date.now()` clock was rejected because ~40 ms of interpreter
+  startup is the same order as the thing being measured.
+
+PROOF THAT IT IS THE HOOK, NOT THE WORK  (`--background` has to mean something)
+
+  Archive wiped first, so the detached rescue had ~1.75 s of real work:
+
+      archive wiped, transcripts now: 0
+      exit=0  hook_wall_ms=7.0
+      t+0ms    archived: 0      <- the instant the hook returned
+      t+250ms  archived: 36
+      t+500ms  archived: 74
+      t+1000ms archived: 180
+      t+1500ms archived: 279
+      t+1750ms archived: 283
+      -> settled at 283
+
+  The hook returned with zero files copied and the work finished 250x later.
+
+FOR COMPARISON — the same command NOT detached, run in the foreground:
+
+      no-change path:  0.13 / 0.14 / 0.13 / 0.13 / 0.14 s   (5 runs)
+      cold path:       1.63 s
+
+  So this one would have passed the < 1 s bar in the foreground anyway on the
+  no-change path. It is detached because the COLD path is 1.63 s and would not
+  have. Reported rather than assumed, per the brief.
+
+EVERY OTHER HOOK, SAME METHOD:
+
+  SessionEnd                              16.7 – 20.5 ms  (3 runs)
+      well inside the 1.5 s shared SessionEnd budget.
+  SessionStart brief, DISABLED (default)  23 – 60 ms      (3 runs)
+      one failed `grep` on a config.json that does not exist.
+  SessionStart brief, enabled, project touched < 7d   338 ms  (stays silent)
+  SessionStart brief, enabled, project untouched 7d+  725 ms  (emits)
+
+  Default-configuration total added to a session start: ~32 ms.
+
+
+================================================================================
+2. MARKETPLACE PATH — .claude-plugin/marketplace.json AT THE REPOSITORY ROOT
+================================================================================
+
+The brief allowed either location and asked which and why. It is the repo root,
+and it is NOT under plugins/claude-code/.
+
+  plugin-marketplaces.md, verbatim:
+    "Create `.claude-plugin/marketplace.json` in your repository root."
+    "Paths resolve relative to the marketplace root, which is the directory
+     containing `.claude-plugin/`. In the example above, `./plugins/my-plugin`
+     points to `<repo>/plugins/my-plugin`, even though `marketplace.json` lives
+     at `<repo>/.claude-plugin/marketplace.json`. Don't use `../` to reference
+     paths outside the marketplace root."
+
+`/plugin marketplace add HulkInTherapy/potsherd` clones the repo and reads its
+ROOT. A marketplace.json under plugins/claude-code/ would never be found, and
+because sources may not use `../`, it could not point back at the plugin from
+there either. Hence root, with `"source": "./plugins/claude-code"`.
+
+Marketplace name is `potsherd`, so installs read `potsherd@potsherd`. Not one
+of the reserved names.
+
+
+================================================================================
+3. THE VALIDATOR PASSES A PLUGIN THAT DOES NOT LOAD
+================================================================================
+
+`claude plugin validate` EXISTS and RAN. Both pass:
+
+    claude plugin validate plugins/claude-code   ->  ✔ Validation passed
+    claude plugin validate .                     ->  ✔ Validation passed
+
+IT IS NOT SUFFICIENT. The first manifest declared, as the phase file's
+deliverable list implies it should:
+
+    "hooks": "./hooks/hooks.json",
+    "mcpServers": "./.mcp.json"
+
+The validator passed it. Installing it did not:
+
+    Status: ✘ failed to load
+    Error: Hook load failed: Duplicate hooks file detected: ./hooks/hooks.json
+    resolves to already-loaded file .../hooks/hooks.json. The standard
+    hooks/hooks.json is loaded automatically, so manifest.hooks should only
+    reference additional hook files.
+
+`hooks/hooks.json` and `.mcp.json` are discovered BY CONVENTION. Declaring them
+loads them twice and the ENTIRE PLUGIN is dropped — every hook, the MCP server,
+and T5.2's skills and agents with it. Both declarations are now removed. After
+the fix:
+
+    Component inventory
+      Skills (0)
+      Agents (0)
+      Hooks (2)  SessionStart, SessionEnd  (harness-only — no model context cost)
+      MCP servers (1)  potsherd  (tool schemas resolved at runtime; not counted)
+      LSP servers (0)
+    Projected token cost
+      Always-on:   ~0 tok   added to every session
+
+  (Skills 0 / Agents 0 because T5.2 is on its own branch. They are picked up by
+  the same convention once merged — which is the other reason plugin.json
+  declares no `skills` or `agents` path: declaring `agents` REPLACES the default
+  scan rather than adding to it, so declaring it would have deleted T5.2's work
+  at load time.)
+
+BINDING ON ANYONE WHO TOUCHES THIS MANIFEST: verify with `claude plugin list`,
+never with the validator alone.
+
+
+================================================================================
+4. NAMES THAT ARE LOAD-BEARING — CONFIRMED FOR T5.2
+================================================================================
+
+  .claude-plugin/plugin.json   "name": "potsherd"          <- literally
+  .mcp.json                    "mcpServers": { "potsherd" } <- literally
+
+Claude Code derives plugin MCP tool names as
+`mcp__plugin_<plugin-name>_<server-name>__<tool-name>`, so T5.2's
+`agents/session-archaeologist.md` tool list resolves as
+`mcp__plugin_potsherd_potsherd__potsherd_find` and friends. Renaming either
+gives the agent NO TOOLS without any load error. README.md carries this warning
+in its own section.
+
+
+================================================================================
+5. WHERE THE THROWAWAY INSTALL LIVES
+================================================================================
+
+The plugin was never installed into ~/.claude. A throwaway CLAUDE_CONFIG_DIR
+was used for the full marketplace round trip — add, install, list, details,
+update, uninstall, remove:
+
+  config dir   /private/tmp/claude-501/-Users-zebra-randomness/
+               169ced20-27ee-4647-9d2c-8fac9217f6bd/scratchpad/t53-cfg
+  corpus       .../scratchpad/t53-home/.claude      (clone of ~/.claude)
+  potsherd dir .../scratchpad/t53-home/.potsherd    (every number in §1)
+  harness      .../scratchpad/{time-hook,prove-background,check-sessionend}.sh
+
+Confirmed afterwards that the real machine was untouched:
+  ~/.claude/plugins/known_marketplaces.json   0 occurrences of "potsherd"
+  ~/.claude/plugins/installed_plugins.json    0 occurrences of "potsherd"
+  ~/.claude/settings.json                     1 occurrence — phase 0's guard
+                                              hook, mtime 01:10, predating this
+                                              task's first command at 02:33.
+
+`rescue --yes` was never pointed at a fixture or at the real ~/.claude; the
+corpus it ran against is a clone made with `cp -Rc`.
+
+
+================================================================================
+6. bin/potsherd — REASSIGNED MID-TASK, AND WHAT IT CANNOT DO
+================================================================================
+
+T5.2 flagged that `bin/**` was in nobody's WAVE column while its skills route
+all fifteen verbs through `${CLAUDE_PLUGIN_ROOT}/bin/potsherd`; the orchestrator
+reassigned it here. Delivered, mode 0755.
+
+RESOLUTION ORDER — deliberately not phase 0's:
+
+  1. ${CLAUDE_PLUGIN_ROOT}/dist/potsherd.js               vendored
+  2. ${CLAUDE_PLUGIN_ROOT}/../../packages/cli/dist/…      the checkout
+  3. potsherd on PATH                                     global install
+  4. nothing -> names all three paths, exits 127
+
+`resolve-bin.ts` prefers PATH because it writes into the user's settings.json,
+where a portable spelling survives upgrades. A plugin is the opposite case: it
+carries a version and speaks a pinned archive format, so a stale global must
+not answer for it. Not hypothetical here — PATH holds 0.1.0, the checkout
+holds 0.4.0.
+
+PROVEN, as asked:
+
+    $ plugins/claude-code/bin/potsherd --version
+    0.4.0                     (PATH's `potsherd --version` prints 0.1.0)
+
+    $ plugins/claude-code/bin/potsherd doctor
+    potsherd doctor · potsherd 0.4.0 · node v24.9.0
+      database                schema v8 of v8
+      vectors            56   sqlite-vec v0.1.9 · bge-small, 384-d
+      fatal parse errors  0   none
+    EXIT=0
+
+    $ <from a marketplace install, clean PATH>
+    potsherd: this plugin has no potsherd to run, so nothing was done.
+    Looked in three places: ... EXIT=127
+
+WHAT IT CANNOT DO, AND WHAT IS NEEDED — T5.6's call, not made here.
+
+T5.2's measured constraint is confirmed: `packages/cli/dist/potsherd.js` is one
+602 KB esbuild file but is NOT self-contained — it still resolves
+`better-sqlite3` and `sqlite-vec` through `createRequire` at runtime, so it
+needs a `node_modules` beside it with both built for the host platform.
+
+A marketplace install is a git clone. This repo gitignores `dist/`, and a clone
+has no `node_modules`. Verified end to end: after a real
+`claude plugin install potsherd@potsherd`, the installed shim skipped steps 1
+and 2 and answered `0.1.0` from PATH.
+
+  SO, TODAY: a marketplace install of this plugin REQUIRES `npm i -g potsherd`.
+  Steps 1 and 2 are dead on that path.
+
+Making step 1 live needs a packaging change to `packages/cli` — RESERVED, and
+T5.1 and T5.5 are both live in there — so it is reported, not done. One of:
+  (i)  vendor dist/ + a per-platform node_modules into the plugin (large, and
+       needs a build step in the release pipeline), or
+  (ii) keep `npm i -g potsherd` as a declared prerequisite (small; what the
+       README documents today), or
+  (iii) make the marketplace entry `"source": {"source": "npm", ...}` so the
+       published package IS the plugin.
+The same constraint applies to `.mcp.json`, which points at
+`${CLAUDE_PLUGIN_ROOT}/../../packages/mcp/dist/index.js` — the path the phase
+file's own verification command uses. It works from a built checkout and not
+from a marketplace clone, for exactly the same reason.
+
+
+================================================================================
+7. CLI FLAGS THE SPEC ASKED FOR THAT DO NOT EXIST
+================================================================================
+
+Checked each of the three named in the brief against packages/cli/src/index.ts.
+
+  --quiet         EXISTS on rescue, index, card.        used as specified.
+  --no-settings   EXISTS on rescue.                     used as specified.
+  --background    DOES NOT EXIST on rescue, or anywhere.
+
+No flag was added. The hooks detach in the shell instead:
+
+    (trap '' HUP; "$P" ${A:+"$A"} rescue --yes --quiet --no-settings) \
+      </dev/null >/dev/null 2>&1 & exit 0
+
+`trap '' HUP` in a subshell rather than `nohup`, so the same line works when
+`nohup` is absent; all three stdio streams are closed so Claude Code's pipe
+sees EOF and does not wait. Measured effect in §1: 7.0 ms to return, 1.75 s of
+work afterwards.
+
+ALSO NOT PRESENT, and worked around rather than added:
+
+  `index` has no `--card`. The phase file wants a card on SessionEnd only when
+  `cardOnEnd` is set, so the hook greps ~/.potsherd/config.json itself and
+  chains `card "$ID" --quiet --yes` after `index`. Nothing in core reads
+  `cardOnEnd` — `paths.ts` knows where config.json is and nothing parses it.
+  If a later task gives config.json a real reader, this grep should become a
+  call to it.
+
+  There is no `brief` verb. The optional SessionStart injection is assembled
+  from two `potsherd ls` calls (`--since 7d` to decide whether the project is
+  cold, then `--limit 5` for the titles) and capped at 4,800 chars ~= 1,200
+  tokens. It is gated on `briefOnStart` in the same config.json and costs
+  ~25 ms to decline. Measured output on a cold project: 448 chars, ~112 tokens.
+
+
+================================================================================
+8. A PRIVACY-RECEIPT GAP THIS HOOK CREATES — ORCHESTRATOR DECISION
+================================================================================
+
+`doctor --privacy` says, verbatim:
+
+    no other network, except the one-off embedding-model download that
+    `potsherd index` announces before it starts and `--no-embed` skips.
+
+"announces before it starts" is true when a human runs `index`. It is NOT true
+on the hook path: SessionEnd runs `index --session <id> --quiet`, detached, so
+the announcement is suppressed and nothing is shown.
+
+MEASURED: one SessionEnd hook firing produced 33 MB in
+`<potsherd-dir>/models/Xenova/bge-small-en-v1.5/` — a network fetch the user
+neither typed nor saw.
+
+Not narrowed to fit. Adding `--no-embed` to the hook would kill vector search
+on every newly-ended session, and the brief is explicit that shrinking the work
+to hit a target is the wrong move. The README discloses it in plain text. The
+real options are a product decision:
+  (a) leave it, disclosed in the README only;
+  (b) reword the receipt so the sentence is true on both paths (packages/core,
+      and the receipt is CI-guarded, so it is a deliberate change);
+  (c) have the plugin's first run fetch the model once, visibly, at install.
+
+The published receipt itself is UNCHANGED by this task — nothing under
+packages/ was touched, so the CI privacy guard has nothing to catch.
+
+
+================================================================================
+9. ACCEPTANCE
+================================================================================
+
+  [x] hooks never block: measured < 1 s no-change path.
+      6.5 – 10.5 ms of hook wall time; proof it is the hook and not the work
+      in §1.
+
+  [x] SessionEnd indexes the just-finished session, confirmable by
+      `potsherd ls --since 1h`. After one hook firing:
+
+          t+0s  ls --since 1h total=1
+          [ { "id": "169ced20", "status": "live", "prompts": 22 } ]
+
+      (id truncated to 8 chars; no title, project name or transcript prose from
+      the reference corpus appears in any committed file.)
+
+  [x] the plugin passes the current validator — `claude plugin validate`,
+      2.1.239 — AND a real local marketplace install, which is the stronger
+      test and the one that caught §3.
+
+  [ ] NOT DONE HERE: the in-session manual tests. `WAVE.md` assigns those to
+      the orchestrator because they need an interactive session — `/potsherd`
+      invoked for real, `remembering-sessions` firing unprompted, and `graft`
+      visibly changing the next answer. Recorded OPEN, not passed.
