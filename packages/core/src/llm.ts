@@ -1327,6 +1327,13 @@ function run(
       resolve({ stdout, stderr, code: code ?? 0 });
     });
 
+    // A child that exits before it drains stdin makes this write fail. On
+    // macOS that is silent; on Linux it raises EPIPE, and an unhandled EPIPE
+    // on a stream takes the whole process down. The exit code and stderr are
+    // what we actually report on, so the failed write is not interesting —
+    // but it must be caught, or `codex exec` refusing early kills potsherd
+    // rather than producing an error the user can act on.
+    child.stdin.on('error', () => { /* the child is gone; `close` reports it */ });
     if (o.input !== undefined) child.stdin.end(o.input);
     else child.stdin.end();
   });
