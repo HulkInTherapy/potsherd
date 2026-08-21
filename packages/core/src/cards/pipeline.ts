@@ -4,6 +4,7 @@ import { measureCoverage, mergeSupplement, type CoverageReport } from './coverag
 import { dedupeCard } from './dedupe.js';
 import { extractCard, supplementCard, type ExtractSpend } from './extract.js';
 import type { Gate } from './gate.js';
+import { ghostClaimGate } from './ghost.js';
 import { normaliseCard, type ExtractedCard } from './schema.js';
 import type { Transcript } from './transcript.js';
 import { unresolvedEvidence, verifyCard, type DroppedClaim, type VerifyTotals } from './verify.js';
@@ -35,6 +36,16 @@ import { cachedEmbedder, type CachedEmbedder } from './vectors.js';
  *
  * Two of the five steps cost nothing. That is the point: the expensive half is
  * the model's opinion and the cheap half is the transcript's veto.
+ *
+ * ## Ghosts run the same five steps
+ *
+ * A ghost — a session Claude Code's sweep deleted, rebuilt from its prompts —
+ * is a {@link Transcript} whose units came from `ghost_prompts`, and it goes
+ * through this function unchanged. Two things differ, both of them
+ * *restrictions* applied here rather than new machinery: the verify step
+ * carries `ghostClaimGate`, and the finished card's `outcome` is overwritten
+ * with `unknown`. See `cards/ghost.ts` for why each one is a taking rather
+ * than an asking.
  */
 
 export interface CardPipelineOptions {
@@ -147,8 +158,14 @@ export async function cardTranscript(
   }
 
   // ---- 4: verify. No model runs past this line.
+  //
+  // A ghost brings one extra rule with it (`cards/ghost.ts`): a decision is
+  // kept only when a prompt *states* it. It is applied here, inside the same
+  // filter and with the same lookup-not-model discipline, so that a claim the
+  // supplement added faces it exactly as the first pass's claims do.
   const verified = await verifyCard(card, transcript.units, embedder.embed, {
     ...(options.verifyCosine !== undefined ? { cosine: options.verifyCosine } : {}),
+    ...(transcript.kind === 'ghost' ? { claimGate: ghostClaimGate } : {}),
   });
   card = verified.card;
   options.onStep?.('verify', `${verified.verified.kept} kept, ${verified.verified.dropped} dropped`);
@@ -162,6 +179,15 @@ export async function cardTranscript(
   // the session was something. `fallbackCard` already writes one that says so.
   if (!card.title.trim()) {
     card = normaliseCard({ ...card, title: transcript.title ?? transcript.id.slice(0, 8) });
+  }
+
+  // A ghost's outcome is `unknown`, always, and it is taken rather than asked
+  // for. Whether a session shipped is a fact about what the assistant did, and
+  // a ghost has none of that — so a model shown ten confident prompts will
+  // answer `shipped`, and the answer is removed instead of trusted.
+  // `cards/ghost.ts` has the rest of the reasoning.
+  if (transcript.kind === 'ghost' && card.outcome !== 'unknown') {
+    card = { ...card, outcome: 'unknown' };
   }
 
   return {

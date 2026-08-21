@@ -41,6 +41,17 @@ export function renderShow(r: ShowResult, t: Theme = new Theme(), now = new Date
       : `${f.num(r.from)}–${f.num(r.to)} of ${f.num(total)}`;
   lines.push(INDENT + t.dim(range + (s.pinned ? `  ${t.star} pinned` : '')));
 
+  // The caveat on the title, in the one place the title is largest. A carded
+  // ghost's heading is a card title — written by a model from the prompts
+  // below and nothing else — and `show` is where a reader decides how much to
+  // believe it (`phase-2` T2.3).
+  if (s.cardSource === 'prompts-only') {
+    lines.push(
+      INDENT + t.dim('card') + `  ${t.accent('prompts-only')}` +
+        t.dim('  — written from these prompts; the assistant side is gone'),
+    );
+  }
+
   if (s.resume) {
     lines.push(INDENT + t.dim('run') + `  ${s.resume}`);
   } else if (s.status === 'ghost') {
@@ -161,6 +172,7 @@ export function renderShowMarkdown(r: ShowResult): string {
   out.push(`- harness: ${s.harness}`);
   out.push(`- project: ${s.project ?? '—'}`);
   out.push(`- status: ${s.status}${s.isSidechain ? ' (sidechain)' : ''}`);
+  if (s.cardSource) out.push(`- card source: ${s.cardSource}`);
   if (s.startedAt) out.push(`- started: ${s.startedAt}`);
   if (s.gitBranch) out.push(`- branch: ${s.gitBranch}`);
   if (s.resume) out.push(`- resume: \`${s.resume}\``);

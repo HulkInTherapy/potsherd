@@ -408,6 +408,7 @@ example:
         .description('write a verified card for every session — what it was, decided, left open')
         .argument('[session]', 'one session id, or the first 8 characters of one')
         .option('--all', 'every session and ghost in the index')
+        .option('--ghosts-only', 'only the sessions Claude Code deleted, carded from their prompts')
         .option('--dry-run', 'print sessions, tokens, cost and minutes; call nothing')
         .option('--force', 're-card even when the card is newer than the transcript')
         .option('--probe', 'make one tiny model call to prove the backend works, then stop')
@@ -434,6 +435,7 @@ example:
   potsherd card --dry-run --all --json | jq .estimate
   potsherd card --all --max-usd 2
   potsherd card 4c9339e0 --model sonnet
+  potsherd card --ghosts-only --max-usd 2                # only what the sweep deleted
   potsherd card --export ~/vault/sessions            # copy the markdown mirror out
   potsherd card --probe                              # one tiny call: does the backend work?`);
   card.action(async (session: string | undefined, opts: Record<string, unknown>) => {
@@ -445,6 +447,7 @@ example:
           ...filterFlags(opts),
           ...(session ? { session } : {}),
           all: Boolean(opts['all']),
+          ghostsOnly: Boolean(opts['ghostsOnly']),
           dryRun: Boolean(opts['dryRun']),
           force: Boolean(opts['force']),
           probe: Boolean(opts['probe']),

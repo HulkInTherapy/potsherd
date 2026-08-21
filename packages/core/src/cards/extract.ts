@@ -1,6 +1,7 @@
 import type { Llm } from '../llm.js';
 import type { ExtractedCard } from './schema.js';
 import { CARD_SCHEMA, minimalCard, validateCard } from './schema.js';
+import { GHOST_SYSTEM } from './ghost.js';
 import { extractCalls, sliceUnits, MAX_UNIT_CHARS, type SliceOptions } from './slice.js';
 import { openGate, type Gate } from './gate.js';
 import { renderUnit, type Transcript, type TranscriptUnit } from './transcript.js';
@@ -59,6 +60,24 @@ const SYSTEM = [
   '- files are paths the session actually touched or discussed.',
 ].join('\n');
 
+/**
+ * The system prompt for one transcript, by what survives of it.
+ *
+ * A ghost gets a different one, not a modified one: half the rules above are
+ * about the assistant's side, and a prompt that says "describe what happened"
+ * to a model holding only the user's half is an invitation to fill the other
+ * half in. `cards/ghost.ts` owns the replacement and the reasoning.
+ */
+function systemFor(transcript: Transcript): string {
+  return transcript.kind === 'ghost' ? GHOST_SYSTEM : SYSTEM;
+}
+
+/** `exchanges` for a session, `prompts` for a ghost. Used in every prompt. */
+function unitNoun(transcript: Transcript, n: number): string {
+  const noun = transcript.kind === 'ghost' ? 'prompt' : 'exchange';
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
 export interface ExtractOptions extends SliceOptions {
   /** The previous card, when this session is being re-carded (`03` §6). */
   prior?: ExtractedCard | null;
@@ -109,13 +128,24 @@ function addSpend(
   into.ms += r.ms;
 }
 
-/** `<transcript>` … `</transcript>`, one fenced block of numbered exchanges. */
-export function transcriptBlock(units: readonly TranscriptUnit[]): string {
+/**
+ * `<transcript>` … `</transcript>`, one fenced block of numbered exchanges.
+ *
+ * A ghost's block is fenced as `<prompts>` instead. The tag is the one place
+ * the framing is stated in the data rather than the instructions, and calling
+ * a list of user prompts a transcript is exactly the confusion a ghost card
+ * has to avoid.
+ */
+export function transcriptBlock(units: readonly TranscriptUnit[], tag = 'transcript'): string {
   return [
-    '<transcript>',
+    `<${tag}>`,
     units.map((u) => renderUnit(u, MAX_UNIT_CHARS)).join('\n\n'),
-    '</transcript>',
+    `</${tag}>`,
   ].join('\n');
+}
+
+function blockTag(transcript: Transcript): string {
+  return transcript.kind === 'ghost' ? 'prompts' : 'transcript';
 }
 
 /** The card a failed parse falls back to: findable by name, asserting nothing. */
@@ -183,7 +213,7 @@ export async function extractCard(
   const call = async (label: string, prompt: string): Promise<{ card: ExtractedCard; parsed: boolean }> => {
     const r = await gate(() => llm.json<ExtractedCard>({
       prompt,
-      system: SYSTEM,
+      system: systemFor(transcript),
       schema: CARD_SCHEMA,
       fallback,
       validate: validateCard,
@@ -199,9 +229,12 @@ export async function extractCard(
   if (chunks.length === 1) {
     const seqs = seqRange(chunks[0]!);
     const prompt = [
-      `Write the memory card for this session (${chunks[0]!.length} exchanges, seq ${seqs}).`,
+      transcript.kind === 'ghost'
+        ? `Write the memory card for this deleted session from its surviving prompts ` +
+          `(${unitNoun(transcript, chunks[0]!.length)}, seq ${seqs}). There is no assistant side.`
+        : `Write the memory card for this session (${unitNoun(transcript, chunks[0]!.length)}, seq ${seqs}).`,
       '',
-      transcriptBlock(chunks[0]!),
+      transcriptBlock(chunks[0]!, blockTag(transcript)),
       priorBlock(options.prior),
     ].join('\n');
     const { card, parsed } = await call(`extract ${transcript.id.slice(0, 8)}`, prompt);
@@ -215,11 +248,11 @@ export async function extractCard(
     chunks.map((chunk, i) => {
       const prompt = [
         `This is part ${i + 1} of ${chunks.length} of one long session ` +
-          `(${chunk.length} exchanges, seq ${seqRange(chunk)}).`,
+          `(${unitNoun(transcript, chunk.length)}, seq ${seqRange(chunk)}).`,
         'Write the card for THIS PART only. Do not guess at what the other parts contain.',
         'The seq numbers are the whole session\'s, so cite them exactly as shown.',
         '',
-        transcriptBlock(chunk),
+        transcriptBlock(chunk, blockTag(transcript)),
       ].join('\n');
       return call(`extract ${transcript.id.slice(0, 8)} ${i + 1}/${chunks.length}`, prompt);
     }),
@@ -276,23 +309,24 @@ export async function supplementCard(
   const chunk =
     sliceUnits(units, { ...options, thresholdChars: 0 })[0] ?? units;
 
+  const noun = transcript.kind === 'ghost' ? 'prompts' : 'exchanges';
   const prompt = [
-    'These exchanges are from a session that already has a card, and the card says nothing',
+    `These ${noun} are from a session that already has a card, and the card says nothing`,
     'about them. Return a card containing ONLY what is new here: topics, decisions, open',
     'threads, files and tags the existing card is missing. Leave title and summary empty.',
-    'If these exchanges really contain nothing worth recording, return empty arrays.',
+    `If these ${noun} really contain nothing worth recording, return empty arrays.`,
     '',
     '<existing-card>',
     JSON.stringify({ topics: card.topics, decisions: card.decisions.map((d) => d.what) }, null, 1),
     '</existing-card>',
     '',
-    transcriptBlock(chunk),
+    transcriptBlock(chunk, blockTag(transcript)),
   ].join('\n');
 
   const gate = options.gate ?? openGate;
   const r = await gate(() => llm.json<ExtractedCard>({
     prompt,
-    system: SYSTEM,
+    system: systemFor(transcript),
     schema: CARD_SCHEMA,
     fallback: minimalCard('', ''),
     // The supplement has no title and no summary by design, so the card

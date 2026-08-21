@@ -6,10 +6,11 @@ import type { EmbeddingsOptions } from '../embeddings.js';
 import { BudgetError, type Llm } from '../llm.js';
 import { modelsDir } from '../paths.js';
 import { makeGate } from './gate.js';
+import { PROMPTS_ONLY } from './ghost.js';
 import { cardTranscript, type CardResult } from './pipeline.js';
 import type { CardKind, CardTarget } from './plan.js';
 import { formatErrorSentinel } from './sentinel.js';
-import { loadSessionTranscript, type Transcript } from './transcript.js';
+import { loadGhostTranscript, loadSessionTranscript, type Transcript } from './transcript.js';
 import type { DropReason } from './verify.js';
 import { cachedEmbedder } from './vectors.js';
 import {
@@ -38,10 +39,14 @@ import {
  *   2. **One bad session does not lose the run.** A target that throws is
  *      counted, given an error sentinel (upstream's fix: without one it
  *      re-queues forever and pins the head of the queue) and stepped over.
- *   3. **Ghosts are not carded here.** They are in the plan — `planCards`
- *      selects them and prices them — and T2.3 owns writing them. The seam is
- *      {@link CardRunOptions.kinds}: T2.3 adds a `loadGhostTranscript`, passes
- *      `kinds: ['session', 'ghost']`, and changes nothing else.
+ *   3. **Ghosts are carded here too, through the same pipeline** (T2.3). The
+ *      only difference is which loader {@link loadTranscript} calls; from
+ *      there it is one `Transcript` and one set of five steps. That matters
+ *      more than it sounds: on the reference machine 299 of 329 targets are
+ *      ghosts, so the ghost path *is* the run, and a second pipeline for it
+ *      would have been the pipeline that gets less testing and more of the
+ *      traffic. {@link CardRunOptions.kinds} remains, as the way to card one
+ *      side or the other on purpose.
  */
 
 export interface CardRunOptions {
@@ -50,7 +55,10 @@ export interface CardRunOptions {
   targets: readonly CardTarget[];
   /** `03` §12: 6 is the default from phase 2 on. */
   concurrency?: number;
-  /** Which kinds this build knows how to card. Default `['session']` (T2.2). */
+  /**
+   * Which kinds to card. Default: both. `['ghost']` is what
+   * `potsherd card --ghosts-only` passes.
+   */
   kinds?: readonly CardKind[];
   /** Re-card even when a fresh card exists; also passes the old card as prior. */
   force?: boolean;
@@ -76,6 +84,8 @@ export interface CardSummary {
   kind: CardKind;
   title: string;
   outcome: string;
+  /** `transcript`, or `prompts-only` for a ghost (T2.3). */
+  source: string;
   decisions: number;
   openThreads: number;
   kept: number;
@@ -92,7 +102,7 @@ export interface CardSummary {
 export interface CardRunReport {
   written: number;
   failed: number;
-  /** Kinds this build does not card yet — ghosts, until T2.3. */
+  /** Targets the run's `kinds` excluded. Zero unless a caller narrowed them. */
   deferred: number;
   verified: { kept: number; dropped: number };
   /** Why claims were dropped, so a zero is diagnosable and so is a hundred. */
@@ -118,7 +128,7 @@ export async function runCards(
   options: CardRunOptions,
 ): Promise<CardRunReport> {
   const started = Date.now();
-  const kinds = new Set<CardKind>(options.kinds ?? ['session']);
+  const kinds = new Set<CardKind>(options.kinds ?? ['session', 'ghost']);
   const queue = options.targets.filter((t) => kinds.has(t.kind));
   const deferred = options.targets.length - queue.length;
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 6));
@@ -128,7 +138,12 @@ export async function runCards(
     failed: 0,
     deferred,
     verified: { kept: 0, dropped: 0 },
-    dropsByReason: { 'no-citation': 0, 'unresolved-seq': 0, 'no-match': 0 },
+    dropsByReason: {
+      'no-citation': 0,
+      'unresolved-seq': 0,
+      'no-match': 0,
+      'asked-not-decided': 0,
+    },
     calls: 0,
     usd: 0,
     inputTokens: 0,
@@ -259,7 +274,7 @@ export async function runCards(
 }
 
 function loadTranscript(db: Db, target: CardTarget): Transcript | null {
-  // T2.3: `if (target.kind === 'ghost') return loadGhostTranscript(db, target.id);`
+  if (target.kind === 'ghost') return loadGhostTranscript(db, target.id);
   return loadSessionTranscript(db, target.id);
 }
 
@@ -291,11 +306,23 @@ async function persist(
     model: result.model || model,
     costUsd: result.spend.usd,
     createdAt: new Date().toISOString(),
-    source: transcript.kind === 'ghost' ? 'prompts-only' : 'transcript',
+    source: sourceOf(transcript),
     ...(result.degraded ? { degraded: true } : {}),
     ...(result.coverage ? { coverage: 1 - result.coverage.fraction } : {}),
   };
   return writeCard(db, options.root, record, embedding);
+}
+
+/**
+ * `cards.source`: what the card was written from.
+ *
+ * The one field that tells a reader a card is half a conversation. It travels
+ * from here into `cards`, the mirror's frontmatter, `ls` and `show`, and it is
+ * derived from the transcript rather than from the target so that it can never
+ * disagree with the loader that actually ran.
+ */
+function sourceOf(transcript: Transcript): string {
+  return transcript.kind === 'ghost' ? PROMPTS_ONLY : 'transcript';
 }
 
 function absorb(report: CardRunReport, result: CardResult, target: CardTarget, file: string): void {
@@ -311,6 +338,7 @@ function absorb(report: CardRunReport, result: CardResult, target: CardTarget, f
     kind: target.kind,
     title: result.card.title,
     outcome: result.card.outcome,
+    source: sourceOf(result.transcript),
     decisions: result.card.decisions.length,
     openThreads: result.card.open_threads.length,
     kept: result.verified.kept,

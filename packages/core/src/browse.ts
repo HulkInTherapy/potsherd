@@ -36,6 +36,17 @@ export interface BrowseSession extends Omit<RecallSession, 'score' | 'hits'> {
    * them apart and a later `card --force` can be judged against it.
    */
   cardTitle: string | null;
+  /**
+   * `cards.source`: what the card was written from — `transcript`, or
+   * `prompts-only` for a ghost card (`phase-2` T2.3).
+   *
+   * It exists because {@link cardTitle} is otherwise indistinguishable from a
+   * full session's. On the reference machine 299 of 330 sessions are ghosts,
+   * so most rows in a real `ls` carry a title written from one half of a
+   * conversation, and a listing that did not say so would be quietly claiming
+   * more than it knows.
+   */
+  cardSource: string | null;
   /** The user's own tags, sorted. Empty until `potsherd tag` writes one. */
   tags: string[];
 }
@@ -83,7 +94,8 @@ const SESSION_COLUMNS = `s.id, s.harness, s.title, s.project, s.started_at, s.en
        (SELECT COUNT(*) FROM exchanges e WHERE e.session_id = s.id) AS exchanges,
        (SELECT COUNT(*) FROM sessions c WHERE c.parent_session_id = s.id) AS subagents,
        (SELECT COUNT(*) FROM pins p WHERE p.session_id = s.id) AS pinned,
-       (SELECT c.title FROM cards c WHERE c.session_id = s.id) AS card_title`;
+       (SELECT c.title FROM cards c WHERE c.session_id = s.id) AS card_title,
+       (SELECT c.source FROM cards c WHERE c.session_id = s.id) AS card_source`;
 
 const GHOST_COLUMNS = `g.session_id, g.harness, g.title, g.first_prompt, g.project,
        g.first_ts, g.last_ts, g.prompt_count, g.git_branch,
@@ -91,29 +103,38 @@ const GHOST_COLUMNS = `g.session_id, g.harness, g.title, g.first_prompt, g.proje
           AND p.text NOT LIKE '/%' AND length(trim(p.text)) > 3
         ORDER BY p.seq LIMIT 1) AS best_prompt,
        (SELECT COUNT(*) FROM pins p WHERE p.session_id = g.session_id) AS pinned,
-       (SELECT c.title FROM cards c WHERE c.session_id = g.session_id) AS card_title`;
+       (SELECT c.title FROM cards c WHERE c.session_id = g.session_id) AS card_title,
+       (SELECT c.source FROM cards c WHERE c.session_id = g.session_id) AS card_source`;
 
 /**
- * The two column lists above select one field `recall.ts` does not know about,
- * so the row types are widened here rather than there: `recall` is the search
- * path and has no business growing a card column for `ls`'s sake.
+ * The two column lists above select two fields `recall.ts` does not know
+ * about, so the row types are widened here rather than there: `recall` is the
+ * search path and has no business growing card columns for `ls`'s sake.
  */
-type SessionRowPlus = SessionRow & { card_title: string | null };
-type GhostRowPlus = GhostRow & { card_title: string | null };
+type CardColumns = { card_title: string | null; card_source: string | null };
+type SessionRowPlus = SessionRow & CardColumns;
+type GhostRowPlus = GhostRow & CardColumns;
 
 /**
  * Card title beats harness title, everywhere a session is listed.
  *
  * The harness's title is a summary of the opening prompt written before the
  * session happened; the card's is a summary of what the session turned out to
- * be. `cards` is empty until T2.2 writes the first one, so today this function
- * is a no-op on every row — it is here now so that the day cards exist, every
- * listing picks them up without a second edit.
+ * be.
+ *
+ * `cardSource` rides along because it is the caveat on the title it replaced:
+ * a `prompts-only` title was written without the assistant's half of the
+ * conversation, and every surface that shows the title has to be able to say
+ * so.
  */
-function withCardTitle(s: Omit<BrowseSession, 'cardTitle' | 'tags'>, cardTitle: string | null | undefined): BrowseSession {
-  const clean = cardTitle?.replace(/\s+/g, ' ').trim();
-  if (!clean) return { ...s, cardTitle: null, tags: [] };
-  return { ...s, title: clean, displayTitle: clean, cardTitle: clean, tags: [] };
+function withCardTitle(
+  s: Omit<BrowseSession, 'cardTitle' | 'cardSource' | 'tags'>,
+  card: Partial<CardColumns> | null | undefined,
+): BrowseSession {
+  const clean = card?.card_title?.replace(/\s+/g, ' ').trim();
+  const source = card?.card_source?.trim() || null;
+  if (!clean) return { ...s, cardTitle: null, cardSource: source, tags: [] };
+  return { ...s, title: clean, displayTitle: clean, cardTitle: clean, cardSource: source, tags: [] };
 }
 
 /**
@@ -174,7 +195,7 @@ export function listSessions(
           LIMIT ?`,
       )
       .all(...f.params, want) as SessionRowPlus[];
-    for (const r of found) rows.push(withCardTitle(fromSessionRow(r), r.card_title));
+    for (const r of found) rows.push(withCardTitle(fromSessionRow(r), r));
 
     const counted = db
       .prepare(
@@ -203,7 +224,7 @@ export function listSessions(
           LIMIT ?`,
       )
       .all(...f.params, want) as GhostRowPlus[];
-    for (const r of found) rows.push(withCardTitle(fromGhostRow(r), r.card_title));
+    for (const r of found) rows.push(withCardTitle(fromGhostRow(r), r));
 
     const counted = db
       .prepare(`SELECT COUNT(*) AS n FROM ghosts g WHERE 1=1 ${f.sql}`)
@@ -364,7 +385,7 @@ export function showSession(db: Db, id: string, options: ShowOptions = {}): Show
     .get(id) as SessionRowPlus | undefined;
 
   if (sessionRow) {
-    const session = withTags(db, [withCardTitle(fromSessionRow(sessionRow), sessionRow.card_title)])[0]!;
+    const session = withTags(db, [withCardTitle(fromSessionRow(sessionRow), sessionRow)])[0]!;
     const total = session.exchanges;
     const { from, to } = window(total, options);
     const rows = db
@@ -428,7 +449,7 @@ export function showSession(db: Db, id: string, options: ShowOptions = {}): Show
     .get(id) as GhostRowPlus | undefined;
   if (!ghostRow) return null;
 
-  const session = withTags(db, [withCardTitle(fromGhostRow(ghostRow), ghostRow.card_title)])[0]!;
+  const session = withTags(db, [withCardTitle(fromGhostRow(ghostRow), ghostRow)])[0]!;
   const total = (
     db.prepare('SELECT COUNT(*) AS n FROM ghost_prompts WHERE session_id = ?').get(id) as {
       n: number;

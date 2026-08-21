@@ -194,6 +194,12 @@ function dropNote(report: CardRunReport, t: Theme): string {
       ? `${report.dropsByReason['unresolved-seq']} bad seq`
       : '',
     report.dropsByReason['no-citation'] ? `${report.dropsByReason['no-citation']} uncited` : '',
+    // Ghosts only, and worth its own word: these claims *were* in the prompts.
+    // They were dropped because the prompt asked about the choice instead of
+    // making it (`cards/ghost.ts`).
+    report.dropsByReason['asked-not-decided']
+      ? `${report.dropsByReason['asked-not-decided']} asked, not decided`
+      : '',
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(` ${t.sep} `) : 'no evidence in the cited exchanges';
 }

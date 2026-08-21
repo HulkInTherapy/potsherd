@@ -54,7 +54,30 @@ export type DropReason =
   /** Every seq it cited is absent from this transcript. */
   | 'unresolved-seq'
   /** The cited exchanges exist and do not contain the claim. */
-  | 'no-match';
+  | 'no-match'
+  /**
+   * T2.3, ghosts only: the cited prompts are about the claim but only *ask*
+   * about it. A decision the user asked about is not a decision they made.
+   * See `cards/ghost.ts`.
+   */
+  | 'asked-not-decided';
+
+/**
+ * One more question, asked of the exchanges that already supported a claim.
+ *
+ * The seam T2.3 needs and nothing else uses: the cosine check answers "is this
+ * claim *in* the cited text", which is the only question a session card has to
+ * settle. A ghost card has a second one — "is this a decision that was *made*"
+ * — and it is answered by reading the prompt, not by a model. Returning a
+ * {@link DropReason} drops the claim; returning null keeps it.
+ */
+export type ClaimGate = (input: {
+  claim: CardClaim;
+  kind: 'decision' | 'open_thread';
+  /** The cited units that cleared the cosine threshold, in seq order. */
+  supporting: readonly TranscriptUnit[];
+  best: number;
+}) => DropReason | null;
 
 export interface DroppedClaim {
   kind: 'decision' | 'open_thread';
@@ -85,6 +108,8 @@ export interface VerifyOptions {
   cosine?: number;
   windowChars?: number;
   maxWindows?: number;
+  /** T2.3's extra rule for ghosts. See {@link ClaimGate}. */
+  claimGate?: ClaimGate;
 }
 
 export async function verifyCard(
@@ -139,6 +164,19 @@ export async function verifyCard(
 
     if (supporting.length === 0) {
       drops.push({ kind, what: claim.what, reason: 'no-match', cited, resolved, best });
+      return null;
+    }
+
+    // The claim is in the cited text. Whether that is enough is the caller's
+    // second question, and only a ghost card asks one.
+    const gated = options.claimGate?.({
+      claim,
+      kind,
+      supporting: supporting.map((s) => bySeq.get(s)!),
+      best,
+    });
+    if (gated) {
+      drops.push({ kind, what: claim.what, reason: gated, cited, resolved: supporting, best });
       return null;
     }
 

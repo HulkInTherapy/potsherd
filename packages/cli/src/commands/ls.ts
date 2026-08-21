@@ -64,6 +64,7 @@ export async function runLs(o: LsCommandOptions): Promise<number> {
           title: s.title,
           displayTitle: s.displayTitle,
           cardTitle: s.cardTitle,
+          cardSource: s.cardSource,
           project: s.project,
           projectName: s.projectName,
           startedAt: s.startedAt,
