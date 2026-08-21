@@ -1330,12 +1330,15 @@ async function tryOpenThreads(
       targets.map((t) => t.sessionId),
     );
     if (cands.length === 0) return [];
-    return await confirmOpenThreads(cands, {
+    const confirmed = await confirmOpenThreads(cands, {
       ...(llm ? { llm } : {}),
       ...(o.model ? { model: o.model } : { model: ASK_MODEL }),
       budget,
       ...(o.signal ? { signal: o.signal } : {}),
     });
+    // `open-threads.ts`: "confirmed:false candidates are dropped by the
+    // caller." This is the caller.
+    return confirmed.filter((c) => c.confirmed);
   } catch {
     return [];
   }
