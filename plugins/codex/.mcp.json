@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "potsherd": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["../../packages/mcp/dist/index.js"],
+      "cwd": "."
+    }
+  }
+}

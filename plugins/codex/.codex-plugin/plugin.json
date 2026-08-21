@@ -1,0 +1,39 @@
+{
+  "name": "potsherd",
+  "version": "0.5.0",
+  "description": "Rescue, index, search, interrogate and re-enter every coding-agent session on your machine. Indexes each Codex thread as it ends, and exposes the whole archive over MCP.",
+  "author": {
+    "name": "HulkInTherapy",
+    "url": "https://github.com/HulkInTherapy"
+  },
+  "homepage": "https://github.com/HulkInTherapy/potsherd",
+  "repository": "https://github.com/HulkInTherapy/potsherd",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "session",
+    "history",
+    "transcript",
+    "memory",
+    "search",
+    "archive",
+    "mcp"
+  ],
+  "interface": {
+    "displayName": "potsherd",
+    "shortDescription": "Search and re-enter every past coding session",
+    "longDescription": "potsherd keeps a local, searchable archive of every coding-agent session on your machine and answers questions over it. This plugin indexes each Codex thread as it ends and exposes the archive to Codex over MCP.",
+    "developerName": "HulkInTherapy",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/HulkInTherapy/potsherd",
+    "defaultPrompt": [
+      "What did we decide about the connection pooler last month?",
+      "Find the session where I set up the release workflow",
+      "Summarise what I was doing in this repo before I stopped"
+    ]
+  }
+}
