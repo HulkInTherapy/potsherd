@@ -1,0 +1,396 @@
+T4.1 — `potsherd ask` — REGISTRATION
+branch: task/T4.1-ask
+
+Everything below is for the integrator to paste. Nothing in this task's branch
+touches `packages/core/src/index.ts` or `packages/cli/src/index.ts`; both were
+patched locally to build and to take the real measurements in
+`phases/phase-4/evidence-T4.1/`, then restored before the commit.
+
+Files this task owns and delivers:
+  packages/core/src/ask.ts
+  packages/core/src/render/ask.ts
+  packages/cli/src/commands/ask.ts
+  tests/ask.test.ts
+  phases/phase-4/registration-T4.1.txt          (this file)
+  phases/phase-4/evidence-T4.1/                 (the real-run outputs)
+
+One file in the commit is NOT mine — read the note at the bottom.
+
+
+  !! `pnpm typecheck` FAILS ON THIS BRANCH UNTIL SECTION 1 IS PASTED. !!
+
+  `packages/cli/src/commands/ask.ts` imports `ask`, `renderAsk`, `ASK_K`,
+  `ASK_MAX_USD`, `ASK_CONCURRENCY`, `AskDrop` and `AskResult` from
+  `@potsherd/core`, exactly as every other command imports its own core
+  surface, and the barrel is reserved. So on a clean checkout of this branch:
+
+      pnpm build      passes  (esbuild never reaches the file — nothing
+                               imports it until section 2c is pasted)
+      pnpm test       passes  (901 tests; `tests/ask.test.ts` imports from
+                               `../packages/core/src/ask.js` directly)
+      pnpm typecheck  FAILS   9 errors, all of them
+                              "Module '@potsherd/core' has no exported member"
+
+  Applying section 1 clears all nine. Verified both ways, and the order
+  matters: `pnpm typecheck` runs `tsc --noEmit`, so the CLI is checked against
+  `packages/core/dist/index.d.ts` as it stands on disk. **Run `pnpm build`
+  first** or the barrel you just edited is not the one being read.
+
+      $ pnpm build && pnpm typecheck
+      packages/core typecheck: Done
+      packages/cli   typecheck: Done
+
+  That is the state every measurement in `evidence-T4.1/` was taken in.
+  Reverted before this commit because the two files are RESERVED.
+
+
+================================================================================
+1. packages/core/src/index.ts   — append to the end of the file
+================================================================================
+
+// ---------------------------------------------------------------- phase 4
+// L7 — `ask`: shortlist → readers → synthesizer → the code-level citation
+// filter (`03` §8, phase-4 T4.1). `filterAnswer` is the whole claim and is
+// exported so it can be tested, and audited, without a backend.
+export {
+  ask,
+  filterAnswer,
+  excerptUnits,
+  excerptText,
+  normaliseQuote,
+  quoteOccursIn,
+  matchSpan,
+  quotableText,
+  MIN_UNIT_CHARS,
+  ANSWER_MAX_WORDS,
+  ASK_CONCURRENCY,
+  ASK_K,
+  ASK_MAX_USD,
+  ASK_SCAN,
+  ASK_SESSION_CHARS,
+  ASK_TOP_EXCHANGES,
+  MIN_QUOTE_CHARS,
+  READER_GHOST_NOTE,
+  READER_SYSTEM,
+  STRICT_MIN_EVIDENCE,
+  SYNTH_SYSTEM,
+  type AskDrop,
+  type AskDropReason,
+  type AskEvidence,
+  type AskOptions,
+  type AskProgress,
+  type AskReaderFn,
+  type AskReaderInput,
+  type AskReaderOutput,
+  type AskReaderQuote,
+  type AskReaderReport,
+  type AskRefusal,
+  type AskResult,
+  type AskSentence,
+  type AskStep,
+  type EvidenceSource,
+  type FilterOutput,
+  type ProposedEvidence,
+  type ProposedSentence,
+} from './ask.js';
+export {
+  OPEN_THREAD_LABEL,
+  openThreadCandidates,
+  confirmOpenThreads,
+  type CandidateOptions,
+  type ConfirmOptions,
+  type OpenThread,
+  type OpenThreadCandidate,
+} from './open-threads.js';
+export { renderAsk, clipQuote, maskSafeCut, QUOTE_CHARS, type AskRenderOptions } from './render/ask.js';
+
+  NOTE for the integrator: the `./open-threads.js` block above is T4.2's
+  surface, not mine. If T4.2's registration file carries the same block, take
+  theirs and delete this one — it is here only because `render/ask.ts` imports
+  `OPEN_THREAD_LABEL` and `ask.ts` imports the two functions, and the barrel
+  has to name them exactly once.
+
+
+================================================================================
+2. packages/cli/src/index.ts   — three edits
+================================================================================
+
+2a. the import line at the top (replace the existing `Theme` import):
+
+import { Theme, ASK_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
+
+2b. beside the other command imports, after `import { runLink } ...`:
+
+import { runAsk } from './commands/ask.js';
+
+2c. the commander block. It goes inside `main()`, immediately BEFORE
+    `const ls = addFilters(` — so the help lists find → ask → ls in the order
+    `05` teaches the verbs.
+
+  const ask = addFilters(
+    addGlobals(
+      program
+        .command('ask')
+        .description('answer a question from your own history, with citations that resolve')
+        .argument('<question>', 'what you want to know'),
+    )
+      .option('--file <path>', 'only sessions that touched a path containing this')
+      .addOption(new Option('--k <n>', 'sessions to read').argParser(Number).default(ASK_K))
+      .option('--strict', 'refuse rather than answer when fewer than 2 quotes survive')
+      .addOption(
+        new Option('--max-usd <n>', 'stop before crossing this')
+          .argParser(Number)
+          .default(ASK_MAX_USD),
+      )
+      .option('--model <name>', 'synthesizer model (default sonnet-class)')
+      .option('--reader-model <name>', 'reader model (default haiku-class)')
+      .addOption(
+        new Option('--concurrency <n>', 'model calls in flight at once')
+          .argParser(Number)
+          .default(ASK_CONCURRENCY),
+      )
+      .addOption(
+        new Option('--vectors <mode>', 'the vector half of the shortlist (default on)')
+          .choices(['auto', 'on', 'off']),
+      )
+      // NO `.default('auto')` here, unlike `find`. `ask` defaults to
+      // vectors-ON in the library and a commander default would silently
+      // override it — which it did, for four real runs that all came back
+      // "0 answered" on a bm25-only shortlist. See `vectorMode()` in
+      // packages/cli/src/commands/ask.ts.
+      .option('--no-vec', 'text search only — the same as --vectors off'),
+  ).addHelpText('after', `
+example:
+  potsherd ask "how did we handle pgbouncer with prepared statements?"
+  potsherd ask "what did we decide about the veyu positioning?" --project Fulcrum
+  potsherd ask "what is the capital of france" --strict     # refuses, exit 2
+  potsherd ask "the pooler decision" --json | jq '.evidence | length'
+  potsherd ask "why did we drop the queue?" --k 10 --max-usd 0.25
+
+every sentence in ANSWER carries an evidence number. a sentence whose citation
+does not resolve to a real quote in a real exchange is dropped by code before
+the answer is printed — see  potsherd ask "…" --debug  for what was dropped.
+
+exit codes:  0 answered  ·  1 nothing matched  ·  2 --strict refused`);
+  ask.action(async (question: string, opts: Record<string, unknown>) => {
+    const o = globals(program, ask, opts);
+    await run(
+      () =>
+        runAsk({
+          ...o,
+          ...filterFlags(opts),
+          question,
+          strict: Boolean(opts['strict']),
+          vec: opts['vec'] !== false,
+          ...(opts['k'] !== undefined ? { k: opts['k'] } : {}),
+          ...(opts['maxUsd'] !== undefined ? { maxUsd: opts['maxUsd'] } : {}),
+          ...(opts['concurrency'] !== undefined ? { concurrency: opts['concurrency'] } : {}),
+          ...(opts['model'] ? { model: String(opts['model']) } : {}),
+          ...(opts['readerModel'] ? { readerModel: String(opts['readerModel']) } : {}),
+          ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
+        }),
+      o,
+    );
+  });
+
+
+================================================================================
+3. `MODEL_CALL_VERBS` in packages/core/src/llm.ts
+================================================================================
+
+`llm.ts` line 83 currently reads:
+
+    export const MODEL_CALL_VERBS: readonly string[] = ['card'];
+
+`ask` is now the second verb that reaches a backend. I did not edit `llm.ts`
+(not mine, and T4.3's `graft` is a third). The integrator should make it:
+
+    export const MODEL_CALL_VERBS: readonly string[] = ['card', 'ask', 'graft'];
+
+`doctor` reads this list to say which verbs need credentials; leaving `ask` out
+of it makes `doctor` understate what the tool will try to do.
+
+
+================================================================================
+3b. T4.0's one line, reconciled
+================================================================================
+
+`phases/phase-4/WAVE.md` records that the ask-eval harness had to write
+
+    ask(db, g.question, { k: o.k, root, strict: false } as unknown as AskOptions)
+
+because `AskOptions` was named in the pinned interface but never defined.
+**The cast can simply be deleted.** `AskOptions` defines `k?: number`,
+`root?: string` and `strict?: boolean` with exactly those names and types, so
+the object literal is directly assignable:
+
+    ask(db, g.question, { k: o.k, root, strict: false })
+
+Two other things the harness relies on, confirmed against it:
+
+  - `runCliStrict` spawns `ask <q> --strict --json --k <n> --potsherd-dir <root>`
+    and reads the **exit status**. `ask` exits 2 on a refusal, 1 when nothing
+    matched or nothing survived without `--strict`, 0 on an answer. Verified on
+    the synthetic corpus: `s2-decoy-strict.txt`, exit 2.
+  - `checkCitations` counts a quote that matches its exchange **only after case
+    folding** as a fault — "a quote is a quotation". `filterAnswer` therefore
+    emits **the transcript's own bytes**: folding is used to locate the passage
+    (`matchSpan`) and the span is then sliced out of the source, so a model that
+    re-cased, re-wrapped or curly-quoted its quote has that undone rather than
+    forgiven. It also matches against `quotableText(unit.text)` — the two sides
+    of the exchange with the `user:` / `assistant:` labels removed — which is
+    exactly the string the harness's `dbCorpus` builds from `user_text` and
+    `assistant_text`, so a quote can never carry a label that is in no exchange.
+    `tests/ask.test.ts` holds all three.
+
+
+================================================================================
+4. T4.4 — the library interface, for `packages/core/README.md`
+================================================================================
+
+`ask()` is a library function first and a CLI verb second. The phase-5 Claude
+Code plugin runs the readers with Claude Code's **native Agent tool** instead of
+the Agent SDK, at zero marginal cost, by supplying one function.
+
+```ts
+import { ask, type AskReaderFn, type AskResult } from '@potsherd/core';
+import { db as store } from '@potsherd/core';
+
+// Called once per shortlisted session, in parallel, under `ask`'s own gate.
+const readerFn: AskReaderFn = async (input) => {
+  // input.question    the user's question
+  // input.sessionId   the session this excerpt came from — the PER-HIT session,
+  //                   so a subagent is read as itself and not as its parent
+  // input.id8         the eight characters that name it on screen
+  // input.project     last path segment, e.g. "Fulcrum"
+  // input.harness     'claude' | 'codex' | 'cursor' | 'pi' | …
+  // input.isSidechain a subagent transcript
+  // input.isGhost     PROMPTS ONLY — the assistant side was swept and is not
+  //                   recoverable. A reader must be told, and must not imply
+  //                   what the assistant answered.
+  // input.excerpts    "[seq 12 · 2026-08-21]\n<text>\n\n[seq 13 · …]\n<text>"
+  //                   already capped at ~8 kB and redacted at rest
+  // input.seqs        the seq numbers in `excerpts` — the only citable ones
+
+  const reply = await runNativeAgent({
+    system: READER_SYSTEM,           // exported; the phase plan's contract, verbatim
+    prompt: input.excerpts,
+  });
+  return {
+    found: true,
+    quotes: [{ seq: 12, ts: null, text: 'copied character for character' }],
+    answer_fragment: 'one or two sentences',
+  };
+};
+
+const db = store.open({ root });
+const result: AskResult = await ask(db, question, { readerFn, strict: true });
+```
+
+Guarantees that hold whatever `readerFn` does:
+
+  - **Every quote it returns is re-checked by code** against the excerpt at the
+    `(sessionId, seq)` it names, after whitespace/case/glyph normalisation. A
+    reader cannot get an unverifiable quote onto the screen by being confident.
+  - **`result.answer === result.sentences.map(s => s.text).join(' ')`**, always.
+    There is no second copy of the model's prose in the module, so no path
+    exists by which an unfiltered sentence reaches a caller.
+  - **A rejected promise is not an error.** That session reports
+    `found: false` with `readers[i].error` set and the run continues; one dead
+    reader never fails the verb.
+  - `readerFn` costs `ask` nothing: with it supplied, `result.spend.calls` is
+    1 (the synthesizer) rather than k + 1.
+
+Other `AskOptions` worth naming in the README:
+
+  `filters`   the `03` §7 SearchFilters, exactly as `find` and `ls` take them
+  `k`         sessions to read (default 6); `matching` reports what was skipped
+  `strict`    refuse below 2 surviving evidence lines; `refused: true`, exit 2
+  `maxUsd`    one ceiling across readers and synthesizer (default 0.10)
+  `llm` / `readerLlm`   caller-owned backends. Their spend is measured as a
+              **delta** and folded into `result.spend`; the caller closes them.
+  `budget`    a shared `Budget`, for a caller running many questions under one cap
+  `onProgress`  live cost and time; `spend.estimatedInputCalls > 0` is what
+              `est.` means and the CLI inherits the label rather than guessing
+  `onDrop`    every drop the filter made, with its reason. This is the audit
+              trail for the product's central claim; `potsherd ask … --debug`
+              prints it to stderr.
+  `refusal`   on the result, not the options: why a refusal happened —
+              `'strict'`, `'budget'`, `'no-answer'`, `'no-match'`. Not
+              inferable from the rest of `AskResult`, which is why it is
+              carried. See the note in section 5.
+  `openThreads: false`  skip T4.2 entirely (it is skipped anyway when it throws)
+
+
+================================================================================
+5. ONE FILE IN THIS COMMIT IS NOT MINE
+================================================================================
+
+  packages/core/src/open-threads.ts
+
+It is byte-identical to the orchestrator's pinned file as it stood in the
+shared checkout at the time of this branch:
+
+  sha256  7df5705207ba72a51e1b9f6f81b93e7c48984c234ca152db0037063f4380446b
+
+It is committed here only because it is untracked in the shared checkout and
+this branch cannot compile without it. It was NOT edited, extended or stubbed.
+**At integration, take T4.2's version unconditionally.**
+
+Note for the orchestrator: the pinned `OpenThreadCandidate` in
+`phases/phase-4/WAVE.md` and the one in `open-threads.ts` have drifted — WAVE
+has `decision: string; what: string` and no `why` / `evidenceSeq`, the file has
+`what` / `why` / `evidenceSeq` and no `decision`. `render/ask.ts` is written
+against **the file**, since that is what compiles. If T4.2 lands WAVE's shape
+instead, `threadLines()` in `packages/core/src/render/ask.ts` needs one line
+changed (`o.what` → `o.decision`).
+
+
+================================================================================
+6. two numbers the orchestrator has to decide about
+================================================================================
+
+Both are measured, both are in `phases/phase-4/evidence-T4.1/real-runs.txt`
+with the runs behind them, and neither is changed here because both are set by
+the plan.
+
+**`03` §12: "ask p50 < 20 s and < $0.05 per question at k=6" is MISSED on the
+subscription path.** Five real runs: 57 s, 92 s, 93 s, 100 s, 183 s. The
+readers alone cost $0.061–$0.123 est. The cause is the one `03` §12 already
+records for `card`: a real haiku-class call through the agent SDK is 60–160 s,
+and six in parallel realise ~4.9x. The target predates any agent-SDK
+measurement. **Reported as a miss rather than met by narrowing k.**
+
+**`--max-usd`'s default of 0.10 aborts a normal k=6 run before the
+synthesizer.** That is the phase-4 ruling working exactly as written — an abort
+that still printed an ungrounded answer would be worse — and it fired on a real
+run at $0.123 est. after six readers. `ASK_MAX_USD` is left at 0.10 because
+the phase plan sets it there. The measurement says ~0.30 for k=6 on the api
+path; and on the subscription path, which `04` Q4 chose, the figure being
+compared against is an api-equivalent rather than money spent, exactly as `03`
+§12 already says of `card`'s $2.
+
+There is also **a race in `llm.ts` this exposed and did not fix.** `Budget.admit`
+runs before a call and `Budget.record` after it, so at concurrency 6 all six
+readers clear `admit` against a spend of $0 before any of them records
+anything. The ceiling is enforced between batches, not within one. `ask`
+catches the overshoot after the fan-out and aborts before the synthesizer, so
+no run here spent past the ceiling by more than the readers' own cost — but the
+race is in `llm.ts`, is not T4.1's file, and affects `card --all` the same way.
+
+
+================================================================================
+7. running `ask` before the blocks are pasted
+================================================================================
+
+`phases/phase-4/evidence-T4.1/wire-up.py` applies the blocks in sections 1 and
+2 by reading them **out of this file**, so there is no second copy to drift,
+and `--revert` takes them out again:
+
+    python3 phases/phase-4/evidence-T4.1/wire-up.py && pnpm build
+    sh phases/phase-4/evidence-T4.1/run-synthetic.sh …
+    python3 phases/phase-4/evidence-T4.1/wire-up.py --revert && pnpm build
+
+Every measurement in `evidence-T4.1/` was taken with them applied. The script
+is for reproducing those; at integration the blocks are pasted for good and it
+becomes dead weight the orchestrator can delete.

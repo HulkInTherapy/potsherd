@@ -1,0 +1,2 @@
+  filter: nothing dropped
+--- exit=2 wall=66s   cmd: potsherd ask "what is the capital of france" --strict --max-usd 0.50

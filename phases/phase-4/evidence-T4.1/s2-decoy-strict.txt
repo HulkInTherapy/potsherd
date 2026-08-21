@@ -1,0 +1,8 @@
+potsherd ask "what is the capital of france"
+
+  no grounded answer in 6 sessions searched
+
+  no session read addressed the question.
+
+  6 of 7 sessions read · 0 answered · 1m 6s · $0.060 est.
+  searched 6 of 7 matching sessions; raise --k to widen

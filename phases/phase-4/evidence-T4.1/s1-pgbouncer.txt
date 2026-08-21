@@ -1,0 +1,13 @@
+potsherd ask "how do we pin the pgbouncer prepared-statement setting?"
+
+ANSWER
+  Pin the pgbouncer prepared-statement setting by setting statement_cache_size
+  to 0 and using transaction pooling. [1]
+
+EVIDENCE
+  [1] potsherd-alpha/11111111  1 aug 14:30  "Set statement_cache_size to 0 and…"
+
+  6 of 7 sessions read · 1 answered · 1m 14s · $0.067 est.
+  searched 6 of 7 matching sessions; raise --k to widen
+
+  next  potsherd graft 11111111

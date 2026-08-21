@@ -1,0 +1,2 @@
+  filter: nothing dropped
+--- exit=1 wall=68s   cmd: potsherd ask "what did we decide about the kubernetes ingress controller and the service mesh rollout?" --max-usd 0.50
