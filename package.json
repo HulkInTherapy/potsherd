@@ -11,6 +11,7 @@
     "build": "pnpm -r --filter \"./packages/*\" build",
     "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",
     "test": "vitest run",
+    "privacy": "python3 scripts/check-privacy.py",
     "test:watch": "vitest",
     "evals": "tsx evals/run.ts",
     "evals:ask": "tsx evals/ask-run.ts",

@@ -23,6 +23,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # First, because it is the one failure that cannot be undone by a later
+      # commit: this repository is public, its subject is other people's
+      # transcripts, and a merged file that quotes somebody's live corpus is
+      # published the moment it lands. `scripts/make-screens.sh` has asserted a
+      # forbidden-string list over docs/screens/ and the README since phase 0;
+      # this is that assertion over every tracked file. The script's own header
+      # is where the rule for "real content" is written down, and its failure
+      # output repeats it, so a red run teaches rather than just blocks.
+      - name: no committed file carries real-corpus content
+        run: python3 scripts/check-privacy.py
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10.18.0

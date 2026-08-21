@@ -14,3 +14,6 @@ packages/cli/README.md
 
 # agent worktrees
 .claude/
+
+# python bytecode from scripts/
+__pycache__/
