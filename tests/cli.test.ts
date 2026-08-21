@@ -35,7 +35,9 @@ interface RunResult { code: number; stdout: string; stderr: string }
 
 function run(args: string[], env: Record<string, string> = {}): RunResult {
   try {
-    const stdout = execFileSync('node', [bin, ...args], {
+    // process.execPath, not 'node': the card tests run with a PATH that has
+    // nothing on it, which is the whole point of them.
+    const stdout = execFileSync(process.execPath, [bin, ...args], {
       encoding: 'utf8',
       // POTSHERD_DIR and CLAUDE_CONFIG_DIR come from tests/setup.ts and point
       // at a throwaway sandbox, so a missing --potsherd-dir can never reach the
@@ -396,5 +398,167 @@ describe('potsherd cli', () => {
     for (const harness of ['claude', 'codex', 'cursor', 'pi']) {
       expect(d.adapters.find((a) => a.harness === harness)?.supported, harness).toBe(true);
     }
+  });
+});
+
+/**
+ * `potsherd card` — the T2.1 half: the estimate, the backend, the caps.
+ *
+ * Every test here runs the shipped bundle, because the acceptance criterion is
+ * a command line (`potsherd card --dry-run --all` exits 0 having called
+ * nothing) rather than a function. The no-backend cases run with a PATH that
+ * contains nothing at all and no key, which is the machine potsherd has to
+ * behave well on: no `claude`, no `codex`, no credentials, no network.
+ */
+describe('potsherd card', () => {
+  /**
+   * A claude directory with sessions long enough to be worth a card.
+   *
+   * The committed fixture's sessions are two exchanges each — deliberately, it
+   * exists to test parsing — and `03` §6 does not card a session under three.
+   * So these tests write their own, rather than lowering the floor to make a
+   * test pass.
+   */
+  function cardableClaudeDir(sessions = 2, exchanges = 5): string {
+    const dir = path.join(scratchRoot(), 'claude');
+    const project = path.join(dir, 'projects', '-tmp-potsherd-cards');
+    fs.mkdirSync(project, { recursive: true });
+    for (let s = 0; s < sessions; s++) {
+      const id = `${String(s + 1).repeat(8)}-1111-4111-8111-111111111111`;
+      const lines: string[] = [];
+      const base = {
+        sessionId: id,
+        cwd: '/tmp/potsherd-cards',
+        version: '2.1.237',
+        gitBranch: 'main',
+        userType: 'external',
+        entrypoint: 'cli',
+        isSidechain: false,
+      };
+      let uuid = 0;
+      for (let e = 0; e < exchanges; e++) {
+        const u = `u${uuid++}`;
+        const a = `u${uuid++}`;
+        lines.push(JSON.stringify({
+          ...base, type: 'user', uuid: u, parentUuid: null, promptId: `p${e}`,
+          timestamp: `2026-08-0${s + 1}T09:0${e}:00.000Z`,
+          message: { role: 'user', content: `question ${e} about the pooler ${'x'.repeat(200)}` },
+        }));
+        lines.push(JSON.stringify({
+          ...base, type: 'assistant', uuid: a, parentUuid: u, requestId: `r${e}`,
+          timestamp: `2026-08-0${s + 1}T09:0${e}:30.000Z`,
+          message: {
+            role: 'assistant',
+            model: 'claude-haiku-4-5-20251001',
+            content: [{ type: 'text', text: `answer ${e} ${'y'.repeat(400)}` }],
+          },
+        }));
+      }
+      fs.writeFileSync(path.join(project, `${id}.jsonl`), lines.join('\n') + '\n');
+    }
+    return dir;
+  }
+
+  /** That directory, indexed and ready to card. */
+  function indexed(): string {
+    const root = scratchRoot();
+    const r = run([
+      'index', '--harness', 'claude', '--no-embed', '--full',
+      '--claude-dir', cardableClaudeDir(), '--potsherd-dir', root,
+    ]);
+    expect(r.code).toBe(0);
+    return root;
+  }
+
+  /** A machine with no claude, no codex and no api key. */
+  function bare(): Record<string, string> {
+    const empty = scratchRoot();
+    return { PATH: empty, ANTHROPIC_API_KEY: '', POTSHERD_LLM_BACKEND: '' };
+  }
+
+  it('--dry-run --all prints sessions, tokens, cost and minutes, and exits 0', () => {
+    const root = indexed();
+    const r = run(['card', '--dry-run', '--all', '--potsherd-dir', root]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('sessions to card');
+    expect(r.stdout).toContain('input tokens');
+    expect(r.stdout).toContain('output tokens');
+    expect(r.stdout).toMatch(/\$\d/);
+    expect(r.stdout).toMatch(/estimated time\s+\d/);
+    expect(r.stdout).toContain('nothing was called');
+  });
+
+  it('--dry-run --all --json carries the same four numbers', () => {
+    const root = indexed();
+    const r = run(['card', '--dry-run', '--all', '--json', '--potsherd-dir', root]);
+    expect(r.code).toBe(0);
+    const d = JSON.parse(r.stdout) as {
+      dryRun: boolean;
+      estimate: { sessions: number; inputTokens: number; outputTokens: number; usd: number; minutes: number };
+    };
+    expect(d.dryRun).toBe(true);
+    expect(d.estimate.sessions).toBeGreaterThan(0);
+    expect(d.estimate.inputTokens).toBeGreaterThan(0);
+    expect(d.estimate.outputTokens).toBeGreaterThan(0);
+    expect(d.estimate.usd).toBeGreaterThan(0);
+    expect(d.estimate.minutes).toBeGreaterThan(0);
+  });
+
+  it('--dry-run still works on a machine with no claude, no codex and no key', () => {
+    const root = indexed();
+    const r = run(['card', '--dry-run', '--all', '--potsherd-dir', root], bare());
+    // Asking what it would cost must never require a credential.
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('no backend');
+    expect(r.stdout).toMatch(/\$\d/);
+  });
+
+  it('a real run with no backend names both options and exits non-zero', () => {
+    const root = indexed();
+    const r = run(['card', '--all', '--yes', '--potsherd-dir', root], bare());
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain('claude');
+    expect(r.stderr).toContain('ANTHROPIC_API_KEY');
+    // No stack trace, ever.
+    expect(r.stderr).not.toContain('    at ');
+  });
+
+  it('picks the api path when there is no claude binary but a key is set', () => {
+    const root = indexed();
+    const r = run(
+      ['card', '--dry-run', '--all', '--json', '--potsherd-dir', root],
+      { ...bare(), ANTHROPIC_API_KEY: 'sk-ant-not-a-real-key' },
+    );
+    expect(r.code).toBe(0);
+    const d = JSON.parse(r.stdout) as { backend: { name: string; chargeable: boolean } | null };
+    expect(d.backend?.name).toBe('api');
+    expect(d.backend?.chargeable).toBe(true);
+  });
+
+  it('says which sessions it needs rather than carding everything by accident', () => {
+    const root = indexed();
+    const r = run(['card', '--dry-run', '--potsherd-dir', root]);
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain('which sessions');
+    expect(r.stderr).toContain('--all');
+  });
+
+  it('names a session reference it cannot resolve', () => {
+    const root = indexed();
+    const r = run(['card', 'deadbeef', '--dry-run', '--potsherd-dir', root]);
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain('deadbeef');
+  });
+
+  it('--help shows the dry run first', () => {
+    const r = run(['card', '--help']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('--dry-run');
+    expect(r.stdout).toContain('--max-usd');
+    expect(r.stdout).toContain('potsherd card --dry-run --all');
+  });
+
+  it('is on the tour', () => {
+    expect(run([]).stdout).toContain('potsherd card');
   });
 });

@@ -11,6 +11,7 @@ import { runFind } from './commands/find.js';
 import { runLs } from './commands/ls.js';
 import { runShow } from './commands/show.js';
 import { runStats } from './commands/stats.js';
+import { runCard } from './commands/card.js';
 
 export const VERSION = '0.1.0';
 
@@ -298,6 +299,62 @@ example:
     await run(() => runStats({ ...o, fresh: opts['fresh'] !== false }), o);
   });
 
+  const card = addFilters(
+    addGlobals(
+      program
+        .command('card')
+        .description('write a verified card for every session — what it was, decided, left open')
+        .argument('[session]', 'one session id, or the first 8 characters of one')
+        .option('--all', 'every session and ghost in the index')
+        .option('--dry-run', 'print sessions, tokens, cost and minutes; call nothing')
+        .option('--force', 're-card even when the card is newer than the transcript')
+        .option('--probe', 'make one tiny model call to prove the backend works, then stop')
+        .option('--model <name>', 'haiku, sonnet, opus, or an explicit model id')
+        .addOption(
+          new Option('--backend <name>', 'force a backend instead of detecting one')
+            .choices(['agent-sdk', 'codex', 'api']),
+        )
+        .addOption(
+          new Option('--max-usd <n>', 'hard ceiling; the run stops before it crosses this')
+            .argParser(Number),
+        )
+        .addOption(new Option('--max-tokens <n>', 'per-run token ceiling').argParser(Number))
+        .addOption(
+          new Option('--concurrency <n>', 'how many sessions to card at once').argParser(Number),
+        )
+        .option('-y, --yes', 'skip the estimate confirmation'),
+    ),
+  ).addHelpText('after', `
+example:
+  potsherd card --dry-run --all                      # what it would cost, calls nothing
+  potsherd card --dry-run --all --json | jq .estimate
+  potsherd card --all --max-usd 2
+  potsherd card 4c9339e0 --model sonnet
+  potsherd card --probe                              # one tiny call: does the backend work?`);
+  card.action(async (session: string | undefined, opts: Record<string, unknown>) => {
+    const o = globals(program, card, opts);
+    await run(
+      () =>
+        runCard({
+          ...o,
+          ...filterFlags(opts),
+          ...(session ? { session } : {}),
+          all: Boolean(opts['all']),
+          dryRun: Boolean(opts['dryRun']),
+          force: Boolean(opts['force']),
+          probe: Boolean(opts['probe']),
+          ...(opts['model'] ? { model: String(opts['model']) } : {}),
+          ...(opts['backend'] ? { backend: String(opts['backend']) } : {}),
+          ...(opts['maxUsd'] !== undefined ? { maxUsd: Number(opts['maxUsd']) } : {}),
+          ...(opts['maxTokens'] !== undefined ? { maxTokens: Number(opts['maxTokens']) } : {}),
+          ...(opts['concurrency'] !== undefined
+            ? { concurrency: Number(opts['concurrency']) }
+            : {}),
+        }),
+      o,
+    );
+  });
+
   const doctor = addGlobals(
     program
       .command('doctor')
@@ -366,6 +423,7 @@ function tour(): void {
     ['ls', 'every session by title, newest first — ghosts included'],
     ['find', 'search every prompt, every subagent, every deleted session'],
     ['show', 'read one session end to end'],
+    ['card', 'summarise each session into a card you can scan'],
     ['stats', 'what is in the index, per harness'],
     ['doctor', 'what potsherd can see, and every path it reads or writes'],
   ];

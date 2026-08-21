@@ -73,11 +73,17 @@ export function fail(err: unknown, o: GlobalOptions): never {
     if (err.fix) process.stderr.write(`  try:  ${err.fix}\n`);
     process.exit(err.code);
   }
-  const e = err as Error;
+  const e = err as Error & { fix?: unknown; code?: unknown };
   process.stderr.write(`${t.warn('potsherd:')} ${e?.message ?? String(err)}\n`);
+  // Core throws its own typed errors (NoBackendError, BudgetError, LlmError),
+  // and each one already knows the single command that resolves it. Printing
+  // "re-run with --debug" over the top of a real fix would be a downgrade, so
+  // any error that carries a `fix` string is treated like a UserError here.
+  const fix = typeof e?.fix === 'string' && e.fix ? e.fix : null;
+  if (fix) process.stderr.write(`  try:  ${fix}\n`);
+  else if (!o.debug) process.stderr.write('  try:  re-run with --debug for the full error\n');
   if (o.debug && e?.stack) process.stderr.write(e.stack + '\n');
-  else process.stderr.write('  try:  re-run with --debug for the full error\n');
-  process.exit(1);
+  process.exit(typeof e?.code === 'number' && e.code > 0 ? e.code : 1);
 }
 
 /**

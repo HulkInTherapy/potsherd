@@ -24,11 +24,11 @@ export interface BinResolution {
   file?: string;
 }
 
-export function onPath(name = 'potsherd'): string | null {
-  const raw = process.env['PATH'];
+export function onPath(name = 'potsherd', env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = env['PATH'];
   if (!raw) return null;
   const exts = process.platform === 'win32'
-    ? (process.env['PATHEXT'] ?? '.EXE;.CMD;.BAT').split(';')
+    ? (env['PATHEXT'] ?? '.EXE;.CMD;.BAT').split(';')
     : [''];
   for (const dir of raw.split(path.delimiter)) {
     if (!dir) continue;
