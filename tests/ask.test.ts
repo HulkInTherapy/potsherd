@@ -24,7 +24,11 @@ import {
 } from '../packages/core/src/ask.js';
 import { matchSpan, quotableText } from '../packages/core/src/ask.js';
 import { QUOTE_CHARS, clipQuote, maskSafeCut, renderAsk } from '../packages/core/src/render/ask.js';
-import { OPEN_THREAD_LABEL } from '../packages/core/src/open-threads.js';
+import {
+  NO_MODEL_NOTE,
+  OPEN_THREAD_LABEL,
+  openThreadCandidates,
+} from '../packages/core/src/open-threads.js';
 import { Theme, stripAnsi } from '../packages/core/src/theme.js';
 import { Llm, type Backend, type SendRequest, type SendResult, type Transport } from '../packages/core/src/llm.js';
 import type { Transcript, TranscriptUnit } from '../packages/core/src/cards/transcript.js';
@@ -533,6 +537,249 @@ const READER_OK = JSON.stringify({
 function synthReply(sentences: ProposedSentence[], evidence: { n: number; session_id: string; seq: number; quote: string }[]): string {
   return JSON.stringify({ evidence, answer: sentences.map((s) => ({ text: s.text, cites: s.cites })) });
 }
+
+/**
+ * The open-thread fixture, laid on top of {@link seedDb}.
+ *
+ * `ask()`'s own end-to-end tests all pass `openThreads: false`, so the whole
+ * open-thread path — the model pass and what the caller does with its verdicts
+ * — was reachable from `ask()` in production and from nothing in this file.
+ * That is how `tryOpenThreads` came to return `confirmed` unfiltered while
+ * `open-threads.ts` documented the opposite ("confirmed:false candidates are
+ * dropped by the caller"), and how a real run printed
+ *
+ *     possible open thread · decided in alpha, not seen in beta
+ *         no model was available to confirm this, so it is unconfirmed and
+ *         not shown.
+ *
+ * — a note saying "not shown" while being shown — next to a candidate whose
+ * note was *the model rejected this*. With T4.2's measurement that only 1–2 of
+ * 8 candidates are worth raising, the unconfirmed path was showing roughly six
+ * false threads for every real one, and the model pass was decorative.
+ *
+ * The fixture is the same shape as `tests/open-threads.test.ts`'s: two
+ * projects that share a vocabulary and a file, a decision recorded in one, and
+ * no matching decision in the other. Its cards and its sibling session are
+ * written *after* `seedDb` publishes `exchanges_fts`, so the sibling's filler
+ * exchanges stay out of the shortlist and `ask` still retrieves exactly the
+ * one session the other tests here retrieve.
+ */
+const SIBLING_TOPICS = ['pgbouncer', 'prepared statements', 'connection pooling', 'postgres'];
+const SIBLING_FILES = ['db/pool.ts', 'db/migrate.ts'];
+const DECIDED_WHAT =
+  'disable prepared statements when pgbouncer runs in transaction pooling mode';
+const DECIDED_WHY = 'pgbouncer cannot route a prepared statement to the same backend twice';
+const SIBLING_SESSION = '5a5a5a5a-1111-4111-8111-111111111111';
+
+function withOpenThreadMaterial(db: ReturnType<typeof store.open>): void {
+  const card = db.prepare(
+    `INSERT INTO cards (session_id, title, summary, topics, decisions, files, outcome,
+        open_threads, source)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+  );
+  // A: the session `ask` answers from. Its decision cites seq 12, which is a
+  // real exchange in `seedDb`, so the positive half of the claim is checkable.
+  card.run(
+    POOLER, 'the pooler', 'what happened',
+    JSON.stringify(SIBLING_TOPICS),
+    JSON.stringify([{ what: DECIDED_WHAT, why: DECIDED_WHY, evidence_seq: [12] }]),
+    JSON.stringify(SIBLING_FILES), 'shipped', '[]', 'transcript',
+  );
+
+  // B: a sibling project, same files and topics, a different decision. This is
+  // the project the decision was "never seen in".
+  db.prepare(
+    'INSERT INTO sessions (id, harness, project, started_at, status) VALUES (?,?,?,?,?)',
+  ).run(SIBLING_SESSION, 'claude', '/tmp/Meghbrain', '2026-07-01T10:00:00.000Z', 'archived');
+  db.prepare(
+    'INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text) VALUES (?,?,?,?,?,?)',
+  ).run(`${SIBLING_SESSION}#2`, SIBLING_SESSION, 2, '2026-07-01T12:00:00.000Z', 'q', 'a');
+  card.run(
+    SIBLING_SESSION, 'the importer', 'what happened',
+    JSON.stringify(SIBLING_TOPICS),
+    JSON.stringify([
+      { what: 'move the nightly ingest onto a cron schedule', why: '', evidence_seq: [2] },
+    ]),
+    JSON.stringify(SIBLING_FILES), 'shipped', '[]', 'transcript',
+  );
+}
+
+/** The synthesizer reply every open-thread test below reuses. */
+const SYNTH_OK = synthReply(
+  [{ text: 'The client cache was set to zero rather than changing the pooler mode.', cites: [1] }],
+  [{ n: 1, session_id: POOLER, seq: 12, quote: REAL_QUOTE }],
+);
+
+/**
+ * The open-thread path through `ask()`, which nothing exercised.
+ *
+ * Every case here is non-vacuous by construction: each one asserts that
+ * `openThreadCandidates` on the same database raises at least one candidate
+ * *before* looking at what `ask` did with it, so a fixture that quietly stopped
+ * generating candidates fails loudly instead of passing empty.
+ */
+describe('ask() open threads', () => {
+  const QUESTION = 'how did we handle pgbouncer with prepared statements?';
+
+  /** `ask()` with the open-thread pass on, and `confirmReply` scripted for it. */
+  async function askWithThreads(confirmReply: string | Error) {
+    const { root, db } = seedDb();
+    withOpenThreadMaterial(db);
+
+    // The fixture has to be capable of producing a thread, or nothing below
+    // means anything. This is the guard against a vacuous pass.
+    const candidates = openThreadCandidates(db, [POOLER]);
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates[0]!.what).toBe(DECIDED_WHAT);
+
+    const readerLlm = Llm.open({
+      transport: new Scripted('agent-sdk', [READER_OK]),
+      model: 'haiku',
+    });
+    // One transport, two calls: the synthesizer first, then the open-thread
+    // confirmation — `ask` hands its own synth llm to `tryOpenThreads`.
+    const llm = Llm.open({
+      transport: new Scripted('agent-sdk', [SYNTH_OK, confirmReply]),
+      model: 'sonnet',
+    });
+    const r = await ask(db, QUESTION, { root, llm, readerLlm, openThreads: true });
+    // The sibling session is not in the shortlist, so the answer half of the
+    // run is the same one the tests above make.
+    expect(r.searched).toBe(1);
+    expect(r.refused).toBe(false);
+    db.close();
+    await llm.close();
+    await readerLlm.close();
+    return { r, candidates };
+  }
+
+  const verdicts = (results: { i: number; confirmed: boolean; note: string }[]): string =>
+    JSON.stringify({ results });
+
+  it('shows nothing when the model returns no verdict for any candidate', async () => {
+    const { r, candidates } = await askWithThreads(verdicts([]));
+
+    // The bug: before the fix this was `candidates.length`, every one of them
+    // carrying `confirmed: false`.
+    expect(r.openThreads).toEqual([]);
+    expect(candidates.length).toBeGreaterThan(0);
+
+    // And nothing reaches the screen, which is where a reader would have met it.
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).not.toContain(OPEN_THREAD_LABEL);
+    expect(text).not.toContain(DECIDED_WHAT);
+  });
+
+  it('shows nothing when the model rejects the candidate outright', async () => {
+    const { r } = await askWithThreads(
+      verdicts([
+        { i: 0, confirmed: false, note: 'meghbrain already handles the pooler in its own config.' },
+      ]),
+    );
+
+    // A candidate the model *rejected*, printed anyway, is what made the whole
+    // model pass decorative. The screen is asserted before the array because
+    // the screen is where a reader met it: `render/ask.ts` prints every element
+    // of `openThreads` and has never looked at `confirmed`, by design — the
+    // drop is the caller's job and this is the test that says so.
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).not.toContain('already handles the pooler');
+    expect(text).not.toContain(OPEN_THREAD_LABEL);
+    expect(r.openThreads).toEqual([]);
+  });
+
+  it('never prints the note that says it is not being shown', async () => {
+    // The line that gave the bug away: `NO_MODEL_NOTE` reads "…so it is
+    // unconfirmed and not shown", and a build that renders that sentence is
+    // contradicting itself in the user's own terminal.
+    expect(NO_MODEL_NOTE).toContain('not shown');
+
+    // The confirmation call fails outright, which is the reachable form of
+    // "nothing could be confirmed" when a model *is* configured: every
+    // candidate comes back unconfirmed, carrying a note that says so.
+    const { r, candidates } = await askWithThreads(new Error('the backend went away'));
+    expect(candidates.length).toBeGreaterThan(0);
+
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).not.toContain('not shown');
+    expect(text).not.toContain('unconfirmed');
+    expect(text).not.toContain(OPEN_THREAD_LABEL);
+    expect(r.openThreads).toEqual([]);
+  });
+
+  it('shows the confirmed thread, and only it', async () => {
+    const { r, candidates } = await askWithThreads(
+      verdicts([{ i: 0, confirmed: true, note: 'meghbrain still opens raw connections here.' }]),
+    );
+
+    expect(r.openThreads).toHaveLength(1);
+    const t = r.openThreads[0]!;
+    expect(t.confirmed).toBe(true);
+    expect(t.what).toBe(DECIDED_WHAT);
+    expect(t.project).toBe('/tmp/Fulcrum');
+    expect(t.otherProject).toBe('/tmp/Meghbrain');
+    // Cited or dropped applies here too: the positive half points at a real
+    // exchange of the session `ask` answered from.
+    expect(t.evidenceSeqs).toEqual([12]);
+    expect(t.sessionId).toBe(POOLER);
+    // Every field except `confirmed` and `note` is the rule pass's own.
+    expect(t.what).toBe(candidates[0]!.what);
+    expect(t.why).toBe(candidates[0]!.why);
+
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).toContain(OPEN_THREAD_LABEL);
+    expect(text).toContain('meghbrain still opens raw connections here.');
+  });
+
+  it('keeps the confirmed one and drops the rejected one from the same batch', async () => {
+    // Two candidates in one confirmation call, one verdict each. This is the
+    // case the filter has to get right per-item rather than all-or-nothing.
+    const { root, db } = seedDb();
+    withOpenThreadMaterial(db);
+    // A second decision in A, same shape, so the batch carries two.
+    const second = 'pin the pooler pool_size to twelve for the importer workers';
+    db.prepare('UPDATE cards SET decisions = ? WHERE session_id = ?').run(
+      JSON.stringify([
+        { what: DECIDED_WHAT, why: DECIDED_WHY, evidence_seq: [12] },
+        { what: second, why: 'twelve workers, one connection each', evidence_seq: [11] },
+      ]),
+      POOLER,
+    );
+
+    const candidates = openThreadCandidates(db, [POOLER]);
+    expect(candidates).toHaveLength(2);
+    const rejected = candidates.findIndex((c) => c.what === second);
+    expect(rejected).toBeGreaterThanOrEqual(0);
+    const kept = 1 - rejected;
+
+    const readerLlm = Llm.open({
+      transport: new Scripted('agent-sdk', [READER_OK]),
+      model: 'haiku',
+    });
+    const llm = Llm.open({
+      transport: new Scripted('agent-sdk', [
+        SYNTH_OK,
+        verdicts([
+          { i: kept, confirmed: true, note: 'meghbrain still opens raw connections here.' },
+          { i: rejected, confirmed: false, note: 'meghbrain sets pool_size in its own compose file.' },
+        ]),
+      ]),
+      model: 'sonnet',
+    });
+    const r = await ask(db, QUESTION, { root, llm, readerLlm, openThreads: true });
+
+    expect(r.openThreads).toHaveLength(1);
+    expect(r.openThreads[0]!.what).toBe(candidates[kept]!.what);
+    expect(r.openThreads.map((t) => t.what)).not.toContain(second);
+
+    const text = stripAnsi(renderAsk(r, new Theme({ color: false, width: 80 }), new Date()));
+    expect(text).not.toContain('own compose file');
+
+    db.close();
+    await llm.close();
+    await readerLlm.close();
+  });
+});
 
 describe('ask() end to end', () => {
   it('answers, and answer is exactly the kept sentences joined', async () => {
