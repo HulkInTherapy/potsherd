@@ -128,28 +128,27 @@ export async function runSetup(o: SetupOptions): Promise<number> {
       );
     }
     if (!approved) {
-      print(`  no change made to ${paths.tildify(plan.path)}.`);
-      print('');
+      print(`  no change made to ${short(plan.path, t, 22)}`);
       continue;
     }
     const { backup } = setup.applySetupPlan(plan);
     changed++;
     print(
       o.remove
-        ? `  ${t.ok('removed')}  ${paths.tildify(plan.path)}`
+        ? `  ${t.ok('removed')}  ${short(plan.path, t, 11)}`
         : `  ${t.ok('registered')}  ${plan.label} can now reach your sessions`,
     );
-    if (backup) print(`  ${t.dim('backup:')} ${paths.tildify(backup)}`);
-    print('');
+    if (backup) print(`  ${t.dim('backup:')} ${short(backup, t, 11)}`);
   }
 
   for (const plan of done) {
     print('');
-    print(
-      o.remove
-        ? `  ${plan.label}: potsherd was not registered; nothing to remove.`
-        : `  ${plan.label}: already registered, unchanged.  ${t.dim(paths.tildify(plan.path))}`,
-    );
+    if (o.remove) {
+      print(`  ${plan.label}: potsherd was not registered; nothing to remove.`);
+    } else {
+      print(`  ${plan.label}: already registered, unchanged.`);
+      print(`  ${t.dim(short(plan.path, t, 2))}`);
+    }
   }
 
   for (const plan of blocked) {
@@ -161,9 +160,8 @@ export async function runSetup(o: SetupOptions): Promise<number> {
   for (const plan of absent) {
     print('');
     print(`  ${plan.label} is not installed here — nothing was written.`);
-    print(
-      `  ${t.dim(`no ${paths.tildify(plan.path)}, and no ${plan.detection.bins.join(' or ')} on your PATH`)}`,
-    );
+    print(`  ${t.dim(`no ${short(plan.path, t, 6)}`)}`);
+    print(`  ${t.dim(`and no ${plan.detection.bins.join(' or ')} on your PATH`)}`);
     if (!o.remove) {
       print(`  ${t.dim('when you install it, this is the stanza:')}`);
       for (const line of plan.snippet.trimEnd().split('\n')) print('    ' + t.dim(line));
@@ -289,14 +287,27 @@ function nextStep(
 ): void {
   print('');
   if (o.dryRun) {
-    const flags = s.plans.map((p) => `--${p.client}`).join(' ');
-    print(`  run  ${t.accent(`potsherd setup ${flags}`)}  to write it.`);
+    // `--all` is one flag; spelling out all seven would run to 96 columns.
+    const flags = o.all ? '--all' : s.plans.map((p) => `--${p.client}`).join(' ');
+    const cmd = fmt.clip(`potsherd setup ${flags}`, Math.max(24, t.width - 22), t);
+    print(`  run  ${t.accent(cmd)}  to write it.`);
+  } else if (s.changed && o.remove) {
+    print(`  run  ${t.accent('potsherd setup --status')}  to confirm it is gone.`);
   } else if (s.changed) {
     print(`  restart the client, then ask it:  ${t.accent('"what did we decide about X last month?"')}`);
   } else {
     print(`  run  ${t.accent('potsherd setup --status')}  to see what is registered where.`);
   }
   print('');
+}
+
+/**
+ * A path, folded to `~` and elided in the middle so it cannot outrun the
+ * terminal (`05`: never wrap, elide in the middle, the last segment is what
+ * identifies a file). `indent` is the width of whatever precedes it.
+ */
+function short(p: string, t: ReturnType<typeof themeFrom>, indent: number): string {
+  return fmt.elideMiddle(paths.tildify(p), Math.max(24, t.width - indent), t);
 }
 
 /** The six tools of the pinned MCP contract (`phases/phase-5/WAVE.md`). */

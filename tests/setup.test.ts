@@ -594,6 +594,28 @@ describe('the verb', () => {
     for (const c of CLIENTS) expect(out).toContain(c.label);
   });
 
+  /**
+   * `05`: designed for 80 columns, never wraps a table, long paths elide in the
+   * middle. The paths this verb prints are other people's config paths and the
+   * backups beside them, which are exactly the long ones.
+   */
+  it('keeps to 80 columns, whatever the path lengths', async () => {
+    fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
+    const runs = [
+      () => runSetup({ ...base, all: true, status: true, width: 80 }),
+      () => runSetup({ ...base, all: true, dryRun: true, width: 80 }),
+    ];
+    for (const r of runs) {
+      const { out } = await capture(r);
+      for (const line of out.split('\n')) {
+        // A diff body line carries file content verbatim; clipping it would
+        // misreport what is about to be written. Everything else is ours.
+        if (/^ {2}[-+ ]/.test(line) && !/^ {2}(---|\+\+\+) /.test(line)) continue;
+        expect([...line].length, line).toBeLessThanOrEqual(80);
+      }
+    }
+  });
+
   it('--json carries the same data as the human view', async () => {
     write(cursorConfig(), THREE_OTHERS);
     const { out } = await capture(() =>
