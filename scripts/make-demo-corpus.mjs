@@ -40,6 +40,28 @@
  *
  * The script self-verifies: it runs the built binary's `audit --json` against
  * what it just wrote and exits non-zero on the first number that disagrees.
+ *
+ * ## what phase 1 added
+ *
+ * `audit` and `rescue` only need counts. `find`, `ls` and `show` need
+ * *content*: a corpus of independently generated prompts makes every search
+ * result a coincidence, and a screenshot of coincidences teaches nobody what
+ * the tool is for. So three things were added, all by **overwriting** existing
+ * prompt text so that not one headline count can move:
+ *
+ *   1. **one thread that runs through the corpus** — a connection-pooling
+ *      decision taken in a project the sweep has since wiped, reused twice,
+ *      and needed again today in a project that still exists. It gives `find`
+ *      a query whose answer is a live session, three ghosts and a subagent,
+ *      and `show` a session that reads like a session ({@link HERO}).
+ *   2. **titles where a screen can see them** — the measured 21 titled
+ *      sessions are spent on the ten the sweep takes next (`audit --sweep`)
+ *      and the newest eleven (`ls`), leaving two sdk sessions and two ordinary
+ *      ones untitled in the default `ls` view, which is the honest picture.
+ *   3. **five generated credentials**, in the two places credentials actually
+ *      reach a transcript: a `cat .env` and a CI log, plus one dsn pasted into
+ *      a prompt. Without them `index` prints "secrets masked 0", which
+ *      demonstrates nothing about the redactor.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -180,13 +202,24 @@ const SESSION_AGES_DAYS = [
 /** Indices into the age list that are SDK-driven: no title, never in history. */
 const SDK_INDICES = new Set([12, 19, 26]);
 /**
- * Which surviving sessions carry an `ai-title`. The ten the sweep is about to
- * take are all titled, because `audit --sweep` naming them is the whole point
- * of that screen; eleven more make up the measured 21.
+ * Which surviving sessions carry an `ai-title`. The measured count is 21 and
+ * that is what the self-check enforces; *which* 21 is free, and two screens
+ * need it spent in different places:
+ *
+ *   - `audit --sweep` names the ten sessions the sweep takes next, so indices
+ *     0..9 (the oldest, and therefore the doomed) are all titled;
+ *   - `ls` is "the archive, finally legible" and shows the fifteen *newest*
+ *     first, so the remaining eleven go to the top of the list rather than
+ *     being scattered through the middle where no screen ever sees them.
+ *
+ * What is deliberately left untitled in that top fifteen: the two sdk-driven
+ * sessions (19, 26 — an sdk run never gets an `ai-title`) and two ordinary
+ * ones. `ls` falls back to `project-<id8>` for those, which is the honest
+ * thing for it to do and is worth having on the screen.
  */
 const TITLED_INDICES = new Set([
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-  10, 11, 13, 14, 16, 17, 20, 22, 24, 27, 29,
+  18, 20, 21, 22, 23, 24, 25, 27, 28, 29, 30,
 ]);
 
 /** How many subagent transcripts hang off each surviving session (sums to 197). */
@@ -338,6 +371,141 @@ const MEMORY_TOPICS = [
   'perf-notes', 'open-questions', 'runbook', 'glossary',
 ];
 
+// ------------------------------------------------------------- the planted thread
+//
+// A grid of independent prompts is enough to make `audit` and `rescue` true,
+// but not enough to make `find`, `show` and `ls` mean anything: search is only
+// legible when several sessions are about the *same* thing and one of them has
+// been deleted. So one story runs through the corpus — a connection-pooling
+// decision taken in a project the sweep has since wiped, then re-applied twice,
+// and finally needed again today in a project that still exists.
+//
+// It is planted by *overwriting* prompt text, never by adding prompts: every
+// headline count (2,971 lost, 299 ghosts, 330 ever) is a target the self-check
+// enforces, and content must not be able to move one.
+//
+// Every line below was written for this file. None of it is from a transcript.
+
+/**
+ * The live session `show` and `find` land on. Its id is fixed rather than
+ * drawn from the PRNG so the readme can name it and stay right.
+ */
+const HERO = {
+  id: '9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43',
+  /** Index into SESSION_AGES_DAYS: the newest surviving session (data-pipeline). */
+  index: 30,
+  title: 'Pool the ingest workers through pgbouncer',
+  exchanges: [
+    {
+      text: 'the ingest workers open one postgres connection per task and we are hitting max_connections again',
+      assistant: 'Confirmed from the pool metrics: 412 slots requested against a 400 limit at peak, so the workers queue and then time out.',
+      tool: 'Bash',
+      file: 'workers/ingest.ts',
+    },
+    {
+      text: 'put pgbouncer in front of it in transaction pooling mode',
+      assistant: 'That will hold, but transaction pooling drops session state: SET, LISTEN/NOTIFY and server-side prepared statements stop surviving a transaction boundary.',
+      tool: 'Read',
+      file: 'db/pool.ts',
+    },
+    {
+      text: 'we hit the prepared statement problem before, in payments-api. what did we land on?',
+      assistant: 'Nothing about it is in this repository. The change here is one line either way: the client has to stop preparing, which is statement_cache_size=0.',
+      tool: 'Grep',
+      file: 'db/pool.ts',
+    },
+    {
+      text: 'set statement_cache_size to 0 and add a test that runs two transactions over one server connection',
+      assistant: 'Done. The test fails against the old client config with "prepared statement already exists" and passes with the cache disabled.',
+      tool: 'Edit',
+      file: 'db/pool.ts',
+    },
+    {
+      text: 'what happens to an in-flight batch when pgbouncer restarts?',
+      assistant: 'The client sees a closed connection rather than a rollback, so a retry replays a partially applied batch unless the writer is idempotent.',
+      tool: 'Read',
+      file: 'workers/ingest.ts',
+    },
+    {
+      text: 'make the batch writer idempotent then — key it on the source digest',
+      assistant: 'Keyed on the sha256 of the source file plus the row offset, so a replay is a no-op instead of a double insert.',
+      tool: 'Edit',
+      file: 'workers/ingest.ts',
+    },
+    {
+      text: 'write the pooling decision down in the readme so nobody relearns it a third time',
+      assistant: 'Added a "connection pooling" section: transaction mode, pool_size 24, and statement_cache_size=0 called out as a requirement rather than a tuning knob.',
+      tool: 'Write',
+      file: 'docs/pooling.md',
+    },
+    {
+      text: 'run the suite and commit',
+      assistant: 'All green: 214 passed. Committed as "ingest: pool through pgbouncer in transaction mode".',
+      tool: 'Bash',
+      file: 'workers/ingest.ts',
+    },
+  ],
+};
+
+/** The subagent the hero session sent off to check the claim. */
+const HERO_SIDECHAIN = 'check whether any driver in the repo still prepares statements server-side under pgbouncer';
+
+/**
+ * The same thread as the sweep left it: prompts only, in three projects whose
+ * every transcript is gone. `title` is written into the surviving
+ * `sessions-index.json`, which is the only way a ghost gets a name back.
+ */
+const GHOST_THREADS = [
+  {
+    project: 'payments-api',
+    title: 'Move payments-api onto pgbouncer',
+    prompts: [
+      'postgres is refusing connections under load. is a pooler the answer or do we fix the app first?',
+      'compare pgbouncer session pooling against transaction pooling for a worker pool this shape',
+      'if we go with transaction pooling, list everything that stops working',
+      'server-side prepared statements are failing behind pgbouncer — what are the options?',
+      'set statement_cache_size=0 in the client and prove it clears the prepared statement error',
+      'write the pooling decision up so the next project does not redo this from scratch',
+    ],
+  },
+  {
+    project: 'crm-ingest',
+    title: 'Put the importer behind the pooler',
+    prompts: [
+      'copy the pgbouncer setup from payments-api onto the importer',
+      'the importer still opens a connection per row — move it behind the pooler',
+      // `{DSN}` is substituted with a generated connection string. Pasting a
+      // live dsn into a prompt is the commonest way a transcript ends up
+      // holding a credential, and it is what the redactor exists for.
+      'the importer cannot reach the pooler — {DSN} times out but the direct port is fine',
+      'what is a sane pgbouncer pool_size for twelve importer workers?',
+    ],
+  },
+  {
+    project: 'agent-runner',
+    title: 'Keep LISTEN/NOTIFY off the pooler',
+    prompts: [
+      'pgbouncer transaction pooling broke LISTEN/NOTIFY in the runner',
+      'move the notify path onto its own direct connection, outside the pooler',
+    ],
+  },
+];
+
+// ------------------------------------------------------------ planted secrets
+//
+// A corpus with no credentials in it makes `index` print "secrets masked 0",
+// which proves nothing. Real transcripts are full of them — phase 1 found five
+// live api keys in the reference machine's own history — so the demo corpus
+// carries a few too, and the screens show redaction actually firing.
+//
+// They are generated from the seeded PRNG rather than written out as literals:
+// the shapes are what the rule pack matches, and no string that looks like a
+// key is committed to this repository. Each one is planted where a real one
+// leaks from — a `cat .env`, a CI log, a pasted curl — not in prose.
+
+const ALNUM = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const UPPER_ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
 // ------------------------------------------------------------------- plumbing
 
 /** mulberry32 — 32 bits of state, no dependencies, identical on every runtime. */
@@ -367,6 +535,76 @@ function uuid() {
   }
   return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
 }
+
+/** `n` characters from an alphabet, drawn from the seeded PRNG. */
+function token(n, alphabet = ALNUM) {
+  let s = '';
+  for (let i = 0; i < n; i++) s += alphabet[Math.floor(rnd() * alphabet.length)];
+  return s;
+}
+
+/**
+ * The credentials the corpus leaks. Generated, not written down: each has the
+ * shape its rule matches (`packages/core/src/redact-rules.ts`, ported from
+ * gitleaks and secretlint), and none of them is a string this repository
+ * stores. They authorise nothing anywhere.
+ */
+const SECRETS = {
+  aws: `AKIA${token(16, UPPER_ALNUM)}`,
+  stripe: `sk_live_${token(24)}`,
+  gcp: `AIza${token(35)}`,
+  github: `ghp_${token(36)}`,
+  pgPassword: token(24),
+};
+
+/**
+ * Where they leak from. Each entry rewrites one exchange of one surviving
+ * session — a `cat .env` and a CI log, which is how a key reaches a transcript
+ * in practice. Nothing is appended, so no count moves.
+ */
+const PLANTED_LEAKS = [
+  {
+    // Fixed, like the hero's, so `make-screens.sh` and the readme can name the
+    // session whose transcript holds a credential and show it masked.
+    id: 'd3e6b7a1-5c04-4f92-9a83-27b6e0d418ca',
+    index: 27,
+    exchange: 0,
+    text: 'the nightly deploy job is 403ing against the bucket. what does it actually load?',
+    assistant: 'The job reads .env at startup and the aws key in it is not the one the bucket policy names.',
+    tool: 'Bash',
+    file: '.env',
+    result: [
+      'AWS_ACCESS_KEY_ID=' + SECRETS.aws,
+      'AWS_DEFAULT_REGION=eu-west-1',
+      'STRIPE_SECRET_KEY=' + SECRETS.stripe,
+      'GOOGLE_API_KEY=' + SECRETS.gcp,
+      'REPORT_BUCKET=reports-nightly',
+    ].join('\n'),
+  },
+  {
+    index: 21,
+    exchange: 0,
+    text: 'the release workflow fails at the publish step. paste me what it printed',
+    assistant: 'The workflow echoes its environment before publishing, so the token is in the log; that is a second bug.',
+    tool: 'Bash',
+    file: '.github/workflows/release.yml',
+    result: [
+      'Run npm publish --access public',
+      '  env:',
+      '    GITHUB_TOKEN=' + SECRETS.github,
+      'npm error code E401',
+    ].join('\n'),
+  },
+];
+
+/**
+ * Session ids that are pinned rather than drawn: the two sessions the readme
+ * and `make-screens.sh` name by id. Everything else gets a PRNG id.
+ */
+const FIXED_IDS = new Map([
+  [HERO.index, HERO.id],
+  ...PLANTED_LEAKS.filter((l) => l.id).map((l) => [l.index, l.id]),
+]);
 
 const slugify = (cwd) => cwd.replace(/\//g, '-');
 const iso = (ms) => new Date(ms).toISOString();
@@ -433,9 +671,12 @@ const aliveSessions = [];
     const cwd = `${DEV}/${name}`;
     for (let k = 0; k < count; k++) {
       const ageDays = SESSION_AGES_DAYS[idx];
+      // uuid() is called for every session, fixed or not, so that pinning an
+      // id cannot shift the PRNG stream every other id is drawn from.
+      const drawn = uuid();
       aliveSessions.push({
         idx,
-        id: uuid(),
+        id: FIXED_IDS.get(idx) ?? drawn,
         cwd,
         slug: slugify(cwd),
         ageDays,
@@ -462,11 +703,38 @@ const aliveSessions = [];
 // Prompts for the sessions that survived. Their count is not one of the
 // headline targets (only `prompts lost` is), so it is free to be plausible.
 for (const s of aliveSessions) {
-  const n = between(3, 12);
+  // between() is called unconditionally: the hero's fixed length must not move
+  // the PRNG stream the other thirty sessions draw from.
+  const drawn = between(3, 12);
+  const n = s.idx === HERO.index ? HERO.exchanges.length : drawn;
+  // Cumulative, not `i * gap`: a fresh jitter multiplied by the index runs
+  // backwards as often as forwards, and `show` prints the clock on every
+  // exchange, so a non-monotonic session is visible on the screen.
+  let t = s.startedAt;
   for (let i = 0; i < n; i++) {
-    s.prompts.push({ ts: s.startedAt + i * (7 * MIN + between(0, 400) * 1000), text: promptText() });
+    const gap = 7 * MIN + between(0, 400) * 1000;
+    s.prompts.push({ ts: t, text: promptText() });
+    t += gap;
   }
   if (s.titled) s.title = titleText();
+}
+
+// The planted thread and the planted leaks, both by overwrite.
+{
+  const hero = aliveSessions[HERO.index];
+  hero.title = HERO.title;
+  for (const [i, ex] of HERO.exchanges.entries()) Object.assign(hero.prompts[i], ex);
+
+  let leaked = 0;
+  for (const leak of PLANTED_LEAKS) {
+    const s = aliveSessions[leak.index];
+    const p = s.prompts[leak.exchange];
+    if (!p) throw new Error(`leak target ${leak.index}/${leak.exchange} has no exchange`);
+    const { id, index, exchange, ...rest } = leak;
+    Object.assign(p, rest);
+    leaked++;
+  }
+  if (leaked !== PLANTED_LEAKS.length) throw new Error('a planted leak found no home');
 }
 
 // ------------------------------------------------------------ deleted sessions
@@ -517,8 +785,36 @@ const deletedSessions = [];
     });
   }
   for (const g of deletedSessions) {
+    let t = g.startedAt;
     for (let i = 0; i < g.promptCount; i++) {
-      g.prompts.push({ ts: g.startedAt + i * (9 * MIN + between(0, 600) * 1000), text: promptText() });
+      const gap = 9 * MIN + between(0, 600) * 1000;
+      g.prompts.push({ ts: t, text: promptText() });
+      t += gap;
+    }
+  }
+
+  // The deleted half of the planted thread. The first ghost in each project is
+  // taken because it is also the one the surviving `sessions-index.json` still
+  // names, which is the only route by which a deleted session gets its title
+  // back — exactly the path `find` shows off.
+  const dsn = `postgres://ingest:${SECRETS.pgPassword}@db.internal:6432/crm`;
+  // Ascending, because deletedSessions is in start order and the thread has to
+  // read forwards: the decision is taken, then reused, then it bites.
+  let after = -1;
+  for (const thread of GHOST_THREADS) {
+    const at = deletedSessions.findIndex(
+      (x, i) => i > after && x.cwd === `${DEV}/${thread.project}`,
+    );
+    const g = deletedSessions[at];
+    if (!g) throw new Error(`planted thread: no ghost in ${thread.project} after ${after}`);
+    after = at;
+    if (g.promptCount < thread.prompts.length) {
+      throw new Error(`planted thread: ${thread.project} ghost has only ${g.promptCount} prompts`);
+    }
+    thread.sessionId = g.id;
+    g.title = thread.title;
+    for (const [i, text] of thread.prompts.entries()) {
+      g.prompts[i].text = text.replace('{DSN}', dsn);
     }
   }
 }
@@ -607,7 +903,12 @@ function sessionRecords(s) {
       message: { role: 'user', content: p.text },
     });
     const a = next();
-    const tool = pick(TOOL_NAMES);
+    // pick() is called either way so that a planted override cannot shift the
+    // PRNG stream for the sessions around it.
+    const drawnTool = pick(TOOL_NAMES);
+    const drawnLine = pick(ASSISTANT_LINES);
+    const tool = p.tool ?? drawnTool;
+    const file = `${s.cwd}/${p.file ?? 'src/index.ts'}`;
     out.push({
       ...base,
       type: 'assistant',
@@ -619,8 +920,8 @@ function sessionRecords(s) {
         role: 'assistant',
         model: MODELS[i % MODELS.length],
         content: [
-          { type: 'text', text: pick(ASSISTANT_LINES) },
-          { type: 'tool_use', id: `t${i}`, name: tool, input: { file_path: `${s.cwd}/src/index.ts` } },
+          { type: 'text', text: p.assistant ?? drawnLine },
+          { type: 'tool_use', id: `t${i}`, name: tool, input: { file_path: file } },
         ],
       },
     });
@@ -633,8 +934,8 @@ function sessionRecords(s) {
       uuid: r,
       parentUuid: a,
       timestamp: iso(p.ts + 11 * 1000),
-      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: 'ok' }] },
-      toolUseResult: { filePath: `${s.cwd}/src/index.ts` },
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: p.result ?? 'ok' }] },
+      toolUseResult: { filePath: file },
     });
     if (i % 3 === 0) out.push({ type: 'file-history-snapshot', messageId: a, snapshot: { trackedFileBackups: {} } });
     if (i % 4 === 1) out.push({ type: 'queue-operation', operation: 'drain', sessionId: s.id });
@@ -668,15 +969,26 @@ function sidechainRecords(s, n) {
     isSidechain: true,
   };
   const at = s.startedAt + (n + 1) * 3 * MIN;
+  const drawnAgent = pick(AGENT_NAMES);
+  const drawnPrompt = promptText();
+  const drawnLine = pick(ASSISTANT_LINES);
+  // The hero session's first subagent is on the same thread as its parent, so
+  // `find` has a sidechain hit to return alongside the live and ghost ones.
+  const hero = s.idx === HERO.index && n === 0;
   return [
-    { type: 'agent-name', sessionId: s.id, agentName: pick(AGENT_NAMES), isSidechain: true },
+    {
+      type: 'agent-name',
+      sessionId: s.id,
+      agentName: hero ? 'schema-checker' : drawnAgent,
+      isSidechain: true,
+    },
     {
       ...base,
       type: 'user',
       uuid: `s${n}a`,
       promptId: `sp${n}`,
       timestamp: iso(at),
-      message: { role: 'user', content: promptText() },
+      message: { role: 'user', content: hero ? HERO_SIDECHAIN : drawnPrompt },
     },
     {
       ...base,
@@ -684,7 +996,15 @@ function sidechainRecords(s, n) {
       uuid: `s${n}b`,
       parentUuid: `s${n}a`,
       timestamp: iso(at + 21 * 1000),
-      message: { role: 'assistant', content: [{ type: 'text', text: pick(ASSISTANT_LINES) }] },
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'text',
+          text: hero
+            ? 'Two call sites still prepare: db/pool.ts and the reporting reader. Both take statement_cache_size=0.'
+            : drawnLine,
+        }],
+      },
     },
   ];
 }
@@ -722,7 +1042,14 @@ if (sidechainsWritten !== TARGET.sidechainFiles) {
   const titledGhosts = deletedSessions
     .filter((g) => indexDirs.some((d) => g.cwd === `${DEV}/${d}`))
     .slice(0, GHOSTS_WITH_TITLES);
-  for (const g of titledGhosts) g.title = titleText();
+  // `??=`: the three ghosts on the planted thread already carry the title the
+  // story gives them, and a generated one would overwrite it.
+  for (const g of titledGhosts) g.title ??= titleText();
+  for (const thread of GHOST_THREADS) {
+    if (!titledGhosts.some((g) => g.id === thread.sessionId)) {
+      throw new Error(`planted thread in ${thread.project} is outside the titled ${GHOSTS_WITH_TITLES}`);
+    }
+  }
 
   for (const name of indexDirs) {
     const cwd = `${DEV}/${name}`;
@@ -879,6 +1206,12 @@ function verify() {
   console.log(`  top wiped projects        ${json.projectsWiped.slice(0, 4).map((p) => p.name).join(' · ')}`);
   console.log(`  corpus size               ${(json.bytes / 1024 / 1024).toFixed(1)} MB` +
     '   (the reference machine had 329 MB; only counts are reproduced)');
+  console.log('');
+  console.log(`  planted thread            live ${HERO.id.slice(0, 8)} · ghosts ` +
+    GHOST_THREADS.map((t) => `${t.sessionId.slice(0, 8)} (${t.project})`).join(' · '));
+  console.log(`  planted credentials       ${Object.keys(SECRETS).length}` +
+    `   generated, in ${PLANTED_LEAKS.length} tool results and 1 pasted dsn`);
+  console.log(`  the leaked .env is in     ${PLANTED_LEAKS[0].id.slice(0, 8)}  exchange 1`);
   console.log('');
   if (bad) console.error(`${bad} target${bad === 1 ? '' : 's'} missed.`);
   return bad ? 1 : 0;
