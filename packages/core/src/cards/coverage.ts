@@ -2,7 +2,7 @@ import type { ExtractedCard } from './schema.js';
 import { MAX_CLAIMS, MAX_FILES, MAX_TAGS, MAX_TOPICS } from './schema.js';
 import type { TranscriptUnit } from './transcript.js';
 import type { Embedder } from './vectors.js';
-import { cosine } from './vectors.js';
+import { bestMatch } from './vectors.js';
 
 /**
  * Step 3 of `03` §6: **coverage** — the answer to ProMem's *ahead-of-time
@@ -91,11 +91,7 @@ export async function measureCoverage(
   const uncovered: number[] = [];
   for (const unit of live) {
     const vector = unit.embedding ?? (await embed(unit.text));
-    let top = -1;
-    for (const iv of itemVectors) {
-      const c = cosine(vector, iv);
-      if (c > top) top = c;
-    }
+    const top = bestMatch(vector, itemVectors).score;
     best.push(top);
     if (top < COVERAGE_COSINE) uncovered.push(unit.seq);
   }

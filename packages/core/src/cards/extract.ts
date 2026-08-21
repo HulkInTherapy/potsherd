@@ -225,8 +225,7 @@ export async function extractCard(
     }),
   );
   const partials = mapped.map((m) => m.card);
-  const parsed0 = mapped.every((m) => m.parsed);
-  let parsed = parsed0;
+  let parsed = mapped.every((m) => m.parsed);
 
   // ---- reduce
   const prompt = [

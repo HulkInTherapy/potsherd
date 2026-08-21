@@ -150,6 +150,15 @@ interface Options {
   set: string;
   potsherdDir: string | null;
   k: number;
+  /**
+   * Drop `cards_fts` and `vec_cards` from every mode.
+   *
+   * The honest A/B for "did cards help the fusion" is the *same index* and the
+   * *same queries* with the card lists on and off — not a carded index against
+   * an uncarded one, which also differs in when it was built and what else had
+   * changed. T2.2 reports both halves of exactly this switch.
+   */
+  noCards: boolean;
   modes: ModeKey[] | null;
   /** Back-compatible single-mode switch. */
   vectors: 'auto' | 'on' | 'off' | null;
@@ -162,6 +171,7 @@ function parseArgs(argv: string[]): Options {
     set: path.join(here, 'queries.jsonl'),
     potsherdDir: null,
     k: 5,
+    noCards: false,
     modes: null,
     vectors: null,
     json: false,
@@ -172,6 +182,7 @@ function parseArgs(argv: string[]): Options {
     if (a === '--set') o.set = String(argv[++i]);
     else if (a === '--potsherd-dir') o.potsherdDir = String(argv[++i]);
     else if (a === '--k') o.k = Number(argv[++i]);
+    else if (a === '--no-cards') o.noCards = true;
     else if (a === '--modes') {
       o.modes = String(argv[++i])
         .split(',')
@@ -200,6 +211,8 @@ potsherd evals — recall@5 over a known-answer query set
   --set <file>          queries.jsonl (default: the committed fixture set)
   --potsherd-dir <dir>  search this index instead of building one from the fixture
   --k <n>               recall@k (default 5)
+  --no-cards            drop cards_fts and vec_cards from every mode, for the
+                        same-index A/B on whether cards help the fusion
   --modes a,b,c         any of bm25, vectors, hybrid, always (default: all four)
   --vectors auto|on|off legacy single-mode switch
   --keep                do not delete the temporary fixture index
@@ -396,7 +409,13 @@ async function main(): Promise<void> {
   const runs: { mode: Mode; outcomes: Outcome[] }[] = [];
   try {
     for (const key of wanted) {
-      runs.push({ mode: MODES[key], outcomes: await runMode(root, queries, MODES[key], o.k) });
+      const mode = o.noCards
+        ? {
+            ...MODES[key],
+            lists: MODES[key].lists.filter((l) => l !== 'cards_fts' && l !== 'vec_cards'),
+          }
+        : MODES[key];
+      runs.push({ mode, outcomes: await runMode(root, queries, mode, o.k) });
     }
   } finally {
     built?.cleanup();

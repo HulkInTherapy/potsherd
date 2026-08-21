@@ -113,7 +113,7 @@ export async function cardTranscript(
   options.onStep?.('extract', `${extracted.chunks} chunk(s), ${extracted.spend.calls} call(s)`);
   let card = extracted.card;
   const spend = { ...extracted.spend };
-  let degraded = !extracted.parsed;
+  const degraded = !extracted.parsed;
 
   // ---- 3: coverage, and at most one supplement
   let coverageBefore: CoverageReport | null = null;

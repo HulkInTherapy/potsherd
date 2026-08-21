@@ -438,4 +438,5 @@ function dedupe(xs: string[]): string[] {
   return [...new Set(xs)];
 }
 
-export { VERSION as VERSION_STRING };
+/** Re-exported under the old name so existing callers keep working. */
+export const VERSION_STRING = VERSION;
