@@ -1,0 +1,307 @@
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Theme, toAscii } from '@potsherd/core';
+import { copyFixtureClaude, IDS, rmrf, tempDir } from './helpers.js';
+
+/**
+ * The two promises the terminal design system (plans/05) makes about *shape*
+ * rather than content, checked against the shipped binary for every verb:
+ *
+ *   `--ascii` output contains no non-ASCII character. Not "mostly" — the flag
+ *   exists so the output survives a terminal with no unicode font, and one
+ *   stray `…` in a screenshot is the whole point missed. Before T1.7a `ls
+ *   --ascii` emitted eleven of them, `stats --ascii` seven em dashes, and
+ *   `doctor --ascii` all three glyphs at once.
+ *
+ *   No line is wider than the terminal. Counted in characters, because the
+ *   design system uses multi-byte glyphs and a byte count would let `·` hide a
+ *   column of overflow.
+ */
+
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const bin = path.join(repo, 'packages', 'cli', 'bin', 'potsherd.js');
+
+const ASCII_ONLY = /^[\x00-\x7F]*$/;
+const created: string[] = [];
+
+/** Characters, not UTF-16 code units: an emoji is one column, not two. */
+function widthOf(line: string): number {
+  return [...line].length;
+}
+
+interface RunResult { code: number; stdout: string; stderr: string }
+
+function run(args: string[]): RunResult {
+  try {
+    const stdout = execFileSync('node', [bin, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, NO_COLOR: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { code: 0, stdout, stderr: '' };
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string; stderr?: string };
+    return { code: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+  }
+}
+
+let claudeDir = '';
+let potsherdDir = '';
+
+/**
+ * A corpus with unicode in it, because a corpus of pure ASCII would let a
+ * broken `--ascii` pass. The title carries an em dash, a middle dot, an
+ * accented letter and an emoji — one of each thing the fold has to handle.
+ */
+function writeUnicodeTranscript(dir: string): void {
+  const sid = '99999999-9999-4999-8999-999999999999';
+  const project = path.join(dir, 'projects', '-tmp-potsherd-unicode');
+  fs.mkdirSync(project, { recursive: true });
+  const common = {
+    sessionId: sid,
+    cwd: '/tmp/potsherd-unicode',
+    version: '2.1.240',
+    gitBranch: 'main',
+    userType: 'external',
+    entrypoint: 'cli',
+    isSidechain: false,
+  };
+  const lines = [
+    // A record type no parser consumes, with a name long enough to be worth
+    // eliding — it is the D6 regression, and it must survive whole.
+    JSON.stringify({ type: 'user:injected-continuation', sessionId: sid }),
+    JSON.stringify({ type: 'user:injected-continuation', sessionId: sid }),
+    JSON.stringify({
+      ...common,
+      type: 'user',
+      uuid: 'un1',
+      parentUuid: null,
+      promptId: 'unp1',
+      timestamp: '2026-08-06T09:00:05.000Z',
+      message: { role: 'user', content: 'résumé — naïve · fiancé 🎉 pgbouncer' },
+    }),
+    JSON.stringify({
+      ...common,
+      type: 'assistant',
+      uuid: 'un2',
+      parentUuid: 'un1',
+      requestId: 'unr1',
+      timestamp: '2026-08-06T09:00:12.000Z',
+      message: {
+        role: 'assistant',
+        model: 'claude-haiku-4-5-20251001',
+        content: [{ type: 'text', text: 'café — ½ done ★ pgbouncer' }],
+      },
+    }),
+  ];
+  fs.writeFileSync(path.join(project, `${sid}.jsonl`), lines.join('\n') + '\n');
+}
+
+beforeAll(() => {
+  execFileSync('node', ['build.mjs'], { cwd: path.join(repo, 'packages', 'cli'), stdio: 'pipe' });
+  claudeDir = copyFixtureClaude();
+  created.push(path.dirname(claudeDir));
+  writeUnicodeTranscript(claudeDir);
+  potsherdDir = tempDir('potsherd-terminal-');
+  created.push(potsherdDir);
+  // Ghosts come from `rescue`, so run it: `find --ghosts only` on an index
+  // that has none is a different (and separately reported) problem.
+  run(['rescue', '--yes', '--no-settings', '--quiet', '--claude-dir', claudeDir, '--potsherd-dir', potsherdDir]);
+  run(['index', '--full', '--no-embed', '--harness', 'claude', '--claude-dir', claudeDir, '--potsherd-dir', potsherdDir]);
+});
+
+afterAll(() => {
+  while (created.length) rmrf(created.pop()!);
+});
+
+/** Every verb, in the form a person types it. */
+function verbs(): { name: string; args: string[] }[] {
+  return [
+    { name: 'audit', args: ['audit'] },
+    { name: 'doctor', args: ['doctor'] },
+    { name: 'doctor --privacy', args: ['doctor', '--privacy'] },
+    { name: 'index', args: ['index', '--no-embed', '--harness', 'claude'] },
+    { name: 'stats', args: ['stats'] },
+    { name: 'ls', args: ['ls'] },
+    { name: 'ls --ghosts only', args: ['ls', '--ghosts', 'only'] },
+    { name: 'find', args: ['find', 'pgbouncer'] },
+    { name: 'find --ghosts only', args: ['find', 'canon', '--ghosts', 'only'] },
+    { name: 'find (no match)', args: ['find', 'zzzznotinthecorpus'] },
+    { name: 'show', args: ['show', IDS.alive] },
+    { name: 'guard --status', args: ['guard', '--status'] },
+    { name: 'rescue --dry-run', args: ['rescue', '--dry-run', '--yes', '--no-settings'] },
+  ];
+}
+
+function invoke(args: string[], extra: string[]): RunResult {
+  return run([...args, ...extra, '--claude-dir', claudeDir, '--potsherd-dir', potsherdDir]);
+}
+
+describe('--ascii', () => {
+  for (const v of verbs()) {
+    it(`${v.name} emits no non-ASCII character`, () => {
+      const r = invoke(v.args, ['--ascii', '--no-color', '--width', '80']);
+      expect(ASCII_ONLY.test(r.stdout), `stdout of ${v.name}:\n${r.stdout}`).toBe(true);
+      expect(ASCII_ONLY.test(r.stderr), `stderr of ${v.name}:\n${r.stderr}`).toBe(true);
+    });
+  }
+
+  it('holds at 60 columns too, where more text has to be elided', () => {
+    for (const v of verbs()) {
+      const r = invoke(v.args, ['--ascii', '--no-color', '--width', '60']);
+      expect(ASCII_ONLY.test(r.stdout + r.stderr), `${v.name}:\n${r.stdout}`).toBe(true);
+    }
+  });
+
+  it('replaces the glyphs rather than dropping them, and never widens a line', () => {
+    const t = new Theme({ color: false, ascii: true, width: 80 });
+    expect(t.asciiLine('a … b · c — d → e ★ f ≤ g • h')).toBe('a . b . c - d > e * f < g * h');
+    // Never longer, in characters: the fold runs after a line has been fitted.
+    for (const s of ['résumé', 'naïve · café', '🎉 done', 'ばか', 'a b', '½']) {
+      expect(widthOf(toAscii(s))).toBeLessThanOrEqual(widthOf(s));
+      expect(ASCII_ONLY.test(toAscii(s))).toBe(true);
+    }
+    // A theme without --ascii is left exactly alone.
+    expect(new Theme({ color: false, width: 80 }).asciiLine('a … b')).toBe('a … b');
+  });
+});
+
+describe('terminal width', () => {
+  /**
+   * `doctor` overflowed `--width 60` by exactly one character on every `known`
+   * record-type row: three spaces after the count where two fit. One character
+   * is enough to wrap every row of a card in a screenshot.
+   */
+  for (const width of [60, 80]) {
+    it(`doctor fits --width ${width}`, () => {
+      for (const ascii of [[], ['--ascii']]) {
+        const r = invoke(['doctor'], [...ascii, '--no-color', '--width', String(width)]);
+        const over = r.stdout.split('\n').filter((l) => widthOf(l) > width);
+        expect(over, `overflowing lines at ${width}${ascii.length ? ' --ascii' : ''}`).toEqual([]);
+      }
+    });
+
+    it(`index fits --width ${width}`, () => {
+      for (const ascii of [[], ['--ascii']]) {
+        const r = invoke(
+          ['index', '--no-embed', '--harness', 'claude'],
+          [...ascii, '--no-color', '--width', String(width)],
+        );
+        const over = r.stdout.split('\n').filter((l) => widthOf(l) > width);
+        expect(over, `overflowing lines at ${width}`).toEqual([]);
+      }
+    });
+  }
+});
+
+describe('doctor keeps the record type name', () => {
+  /**
+   * `cursor user:injected-continua…` sends a reader nowhere. The name is the
+   * one field that identifies what the parser skipped, so the version column
+   * gives ground instead, and at any width the name is printed whole.
+   */
+  for (const width of [60, 80]) {
+    it(`prints the whole name at --width ${width}`, () => {
+      const r = invoke(['doctor'], ['--no-color', '--width', String(width)]);
+      expect(r.stdout).toContain('claude user:injected-continuation');
+      expect(r.stdout).not.toContain('user:injected-continua…');
+    });
+  }
+});
+
+describe('find --json', () => {
+  /**
+   * The shape is an object, not an array: it carries `vectors` (whether the
+   * embedding index was consulted, and why not when it was not) and `ms`,
+   * which a bare array of sessions cannot. `plans/phases/phase-1-foundation.md`
+   * documents `jq '.[0].session'` and is the thing that needs correcting.
+   */
+  it('is an object with .sessions, not a bare array', () => {
+    const r = invoke(['find', 'pgbouncer'], ['--json']);
+    const j = JSON.parse(r.stdout) as Record<string, unknown>;
+    expect(Array.isArray(j)).toBe(false);
+    expect(Array.isArray(j['sessions'])).toBe(true);
+    expect(j).toHaveProperty('vectors');
+    expect(j).toHaveProperty('ms');
+  });
+});
+
+/**
+ * D2: a run reports what the run did; the index reports what the index holds.
+ *
+ * The receipt used to print `secrets masked 0 · nothing matched — index holds
+ * no secrets` after an incremental pass that re-read one file, on an index
+ * that held three masks. Both halves were wrong: the count was the run's and
+ * the sentence was about the index.
+ */
+describe('index reports the run, not the index', () => {
+  const AWS_KEY = 'AKIAIOSFODNN7EXAMPLE'; // AWS's own published example key
+  const SESSION = 'dddd1111-0000-4000-8000-00000000000d';
+
+  const CLEAN = 'dddd1111-0000-4000-8000-00000000000e';
+
+  /**
+   * Two sessions: one whose prompt carries an aws key, one that carries
+   * nothing. The clean one is the file the incremental pass re-reads, so the
+   * run genuinely masks nothing while the index genuinely holds a mask —
+   * which is the exact situation the old wording lied about.
+   */
+  function corpus(): { claude: string; pot: string; file: string } {
+    const base = tempDir('potsherd-honesty-');
+    created.push(base);
+    const claude = path.join(base, 'claude');
+    const dir = path.join(claude, 'projects', '-tmp-potsherd-honesty');
+    fs.mkdirSync(dir, { recursive: true });
+    const write = (id: string, rows: Record<string, unknown>[]): string => {
+      const file = path.join(dir, `${id}.jsonl`);
+      fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+      return file;
+    };
+    const b = (id: string) => ({ sessionId: id, cwd: '/tmp/potsherd-honesty', version: '2.1.237', gitBranch: 'main' });
+    write(SESSION, [
+      { ...b(SESSION), type: 'user', promptId: 'p1', uuid: 'u1', timestamp: '2026-08-19T09:00:00.000Z', message: { role: 'user', content: `deploy with ${AWS_KEY} please` } },
+      { ...b(SESSION), type: 'assistant', uuid: 'a1', timestamp: '2026-08-19T09:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'done.' }] } },
+    ]);
+    const file = write(CLEAN, [
+      { ...b(CLEAN), type: 'user', promptId: 'p1', uuid: 'c1', timestamp: '2026-08-19T10:00:00.000Z', message: { role: 'user', content: 'nothing sensitive in this one' } },
+      { ...b(CLEAN), type: 'assistant', uuid: 'c2', timestamp: '2026-08-19T10:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'agreed.' }] } },
+    ]);
+    return { claude, pot: path.join(base, 'potsherd'), file };
+  }
+
+  it('never claims the index holds no secrets on the strength of one pass', () => {
+    const c = corpus();
+    const args = ['--no-embed', '--harness', 'claude', '--no-color', '--width', '80',
+      '--claude-dir', c.claude, '--potsherd-dir', c.pot];
+    const first = run(['index', '--full', ...args]);
+    expect(first.stdout).toContain('masked this run');
+    expect(first.stdout).toMatch(/masked this run\s+1\s/);
+
+    fs.appendFileSync(
+      c.file,
+      JSON.stringify({ sessionId: CLEAN, cwd: '/tmp/potsherd-honesty', version: '2.1.237', type: 'user', promptId: 'p2', uuid: 'c3', timestamp: '2026-08-19T10:02:00.000Z', message: { role: 'user', content: 'nothing secret here either' } }) + '\n',
+    );
+    const second = run(['index', ...args]);
+    expect(second.stdout).toContain('1 parsed');
+    expect(second.stdout).toContain('1 unchanged');
+    // The run masked nothing, and says exactly that.
+    expect(second.stdout).toContain('nothing matched in what was re-read');
+    // It never speaks for the index.
+    expect(second.stdout).not.toContain('index holds no secrets');
+
+    // And `doctor`, which does speak for the index, still counts the mask.
+    const doc = run(['doctor', '--no-color', '--width', '80', '--claude-dir', c.claude, '--potsherd-dir', c.pot]);
+    expect(doc.stdout).toMatch(/secrets masked\s+1\s/);
+  });
+
+  it('says where ghosts come from rather than printing a bare zero', () => {
+    const c = corpus();
+    const r = run(['index', '--full', '--no-embed', '--harness', 'claude', '--no-color',
+      '--width', '80', '--claude-dir', c.claude, '--potsherd-dir', c.pot]);
+    expect(r.stdout).toContain('ghosts indexed');
+    expect(r.stdout).toContain('run potsherd rescue');
+  });
+});

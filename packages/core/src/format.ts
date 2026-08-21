@@ -74,8 +74,32 @@ export function bytes(n: number): string {
   return `${s} ${units[i]}`;
 }
 
+/**
+ * Where an ellipsis comes from.
+ *
+ * `--ascii` promises that no non-ASCII glyph reaches the terminal
+ * (`theme.ts`), and the ellipsis is the glyph these helpers insert on their
+ * own. Hard-coding `'…'` here is what broke that promise once already: every
+ * call site had to remember to pass `t.ellip`, and eleven of them did not.
+ *
+ * So the parameter takes the {@link Theme} itself as well as a literal — pass
+ * `t` and the right glyph *and* the right width arithmetic follow from it
+ * (`'...'` is three columns wide, `'…'` is one). `render.ts` threads the theme
+ * through every card and table for exactly this reason, and folds any glyph
+ * that still gets through as a last line of defence.
+ */
+export type EllipsisSource = string | { readonly ellip: string };
+
+/** The default, for the non-ascii terminal that is the common case. */
+export const ELLIPSIS = '…';
+
+function ellipsisOf(e: EllipsisSource): string {
+  return typeof e === 'string' ? e : e.ellip;
+}
+
 /** Elide in the middle, never at the end: `.../Second-Brain/85ef9531`. */
-export function elideMiddle(s: string, max: number, ellip = '…'): string {
+export function elideMiddle(s: string, max: number, ellipsis: EllipsisSource = ELLIPSIS): string {
+  const ellip = ellipsisOf(ellipsis);
   if (s.length <= max) return s;
   if (max <= ellip.length) return ellip.slice(0, max);
   const keep = max - ellip.length;
@@ -88,8 +112,8 @@ export function elideMiddle(s: string, max: number, ellip = '…'): string {
  * Elide at the end, collapsing whitespace. For titles, prompts and any other
  * text that arrived from a transcript and may contain newlines.
  */
-export function elide(s: string, max: number, ellip = '…'): string {
-  return clip(s.replace(/\s+/g, ' ').trim(), max, ellip);
+export function elide(s: string, max: number, ellipsis: EllipsisSource = ELLIPSIS): string {
+  return clip(s.replace(/\s+/g, ' ').trim(), max, ellipsis);
 }
 
 /**
@@ -97,15 +121,22 @@ export function elide(s: string, max: number, ellip = '…'): string {
  * itself, where the double space in `run  potsherd rescue  to ...` is the
  * design, not an accident.
  */
-export function clip(s: string, max: number, ellip = '…'): string {
+export function clip(s: string, max: number, ellipsis: EllipsisSource = ELLIPSIS): string {
   if (s.length <= max) return s;
+  const ellip = ellipsisOf(ellipsis);
   if (max <= ellip.length) return ellip.slice(0, max);
   return s.slice(0, max - ellip.length).trimEnd() + ellip;
 }
 
 /** Join items with a separator, dropping the tail that does not fit. */
-export function joinFit(items: string[], max: number, sepChar = ' · ', ellip = '…'): string {
+export function joinFit(
+  items: string[],
+  max: number,
+  sepChar = ' · ',
+  ellipsis: EllipsisSource = ELLIPSIS,
+): string {
   if (items.length === 0) return '';
+  const ellip = ellipsisOf(ellipsis);
   let out = '';
   let shown = 0;
   for (const item of items) {

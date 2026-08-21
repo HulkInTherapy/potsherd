@@ -5,7 +5,7 @@ export * as lock from './lock.js';
 export * as consent from './consent.js';
 export { onPath, resolveHookCommand, type BinResolution } from './resolve-bin.js';
 
-export { Theme, stripAnsi, type ThemeOptions } from './theme.js';
+export { Theme, stripAnsi, toAscii, type ThemeOptions } from './theme.js';
 export { Card, table, fitLine, noteWidth, INDENT, type Row } from './render.js';
 
 export { readArchiveState, type ArchiveState } from './archive-state.js';

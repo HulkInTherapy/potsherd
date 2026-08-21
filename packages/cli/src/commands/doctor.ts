@@ -15,6 +15,7 @@ import {
   redactionRow,
   storedRecordTypes,
   storedRedactionCounts,
+  Theme,
   vecStatus,
   emptyCounts,
   type AuditReport,
@@ -100,7 +101,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // Paths are the one thing here that can outrun any terminal, so they elide
     // in the middle: the last segment is what identifies a file.
     const pathW = Math.max(24, t.width - 16);
-    const show = (p: string) => fmt.elideMiddle(paths.tildify(p), pathW, t.ellip);
+    const show = (p: string) => fmt.elideMiddle(paths.tildify(p), pathW, t);
 
     card.text('reads (never modified):');
     for (const p of reads) {
@@ -149,9 +150,9 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       },
       redaction: countsJson(redaction),
       recordTypes: unknownTypes,
-      // Exact per-(harness, version, type) counts, from the last `index` run.
-      // `recordTypes` above is the audit's head/tail estimate and stays for
-      // machines that have never indexed.
+      // Exact per-(harness, version, type) counts over every session in the
+      // index, summed from `session_record_types`. `recordTypes` above is the
+      // audit's head/tail estimate and stays for machines that never indexed.
       indexedRecordTypes: indexedTypes,
       adapters,
       guard: { installed: consent.guardInstalled(o.claudeDir) },
@@ -176,7 +177,9 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       label: 'sessions on disk',
       value: fmt.num(report.onDiskFiles),
       // The live corpus's size belongs to this row, not to `files archived`.
-      note: `${fmt.num(report.titledSessions)} titled · ${fmt.num(report.sdkSessions)} sdk · ${fmt.bytes(report.bytes)}`,
+      note:
+        `${fmt.num(report.titledSessions)} titled ${t.mid} ${fmt.num(report.sdkSessions)} sdk ` +
+        `${t.mid} ${fmt.bytes(report.bytes)}`,
     },
     { label: 'sidechains on disk', value: fmt.num(report.sidechainFiles), note: 'subagent transcripts' },
     {
@@ -203,7 +206,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       label: 'sessions indexed',
       value: fmt.num(counts['sessions'] ?? 0),
       note: indexedAt
-        ? `${fmt.num(counts['exchanges'] ?? 0)} ${fmt.plural(counts['exchanges'] ?? 0, 'exchange')} · ` +
+        ? `${fmt.num(counts['exchanges'] ?? 0)} ${fmt.plural(counts['exchanges'] ?? 0, 'exchange')} ${t.mid} ` +
           `${fmt.num(counts['tool_calls'] ?? 0)} tool ${fmt.plural(counts['tool_calls'] ?? 0, 'call')}`
         : 'nothing indexed yet — run potsherd index',
       tone: indexedAt ? 'none' : 'dim',
@@ -218,9 +221,9 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     redactionRow(redaction, t, card.noteWidth()),
     {
       label: 'vectors',
-      value: vec.available ? fmt.num(counts['vec_exchanges'] ?? 0) : '—',
+      value: vec.available ? fmt.num(counts['vec_exchanges'] ?? 0) : t.dash,
       note: vec.available
-        ? `sqlite-vec ${vec.version ?? 'loaded'} · bge-small, 384-d`
+        ? `sqlite-vec ${vec.version ?? 'loaded'} ${t.mid} bge-small, 384-d`
         : `no vector index: ${vec.reason ?? 'sqlite-vec unavailable'} — text search still works`,
       tone: vec.available ? 'ok' : 'dim',
     },
@@ -236,31 +239,27 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // is in `--json`, and on this corpus it is a hundred rows. What a person
     // needs on screen is which types exist, how many, in how many builds, and
     // whether any of them is one no format note has described yet.
-    card.blank().text('record types the parsers did not consume:');
-    for (const row of foldRecordTypes(indexedTypes)) {
-      const left = `${row.harness} ${row.type}`;
-      const mark = row.novel ? t.warn('new') : t.dim('known');
-      const versions = row.versions === 1 ? '1 version' : `${row.versions} versions`;
-      card.raw(
-        `    ${fmt.elide(left, 30).padEnd(30)}${fmt.num(row.count).padStart(7)}  ` +
-          `${t.dim(versions.padEnd(11))} ${mark}`,
-      );
-    }
+    //
+    // These are the counts over everything the index currently holds, not over
+    // whatever the last `index` pass happened to open: they are stored per
+    // session (`session_record_types`, migration 5) and summed here.
+    card.blank().text('record types the parsers did not consume, over the whole index:');
+    for (const line of recordTypeLines(foldRecordTypes(indexedTypes), t)) card.raw(line);
     card.text(t.dim('"new" means no note in research/formats.md describes it yet.'));
   } else {
     card.blank().text('record types seen (head/tail scan — run potsherd index for exact counts):');
     for (const [type, n] of Object.entries(unknownTypes).sort((a, b) => b[1] - a[1])) {
-      card.raw(`    ${type.padEnd(24)}${fmt.num(n).padStart(7)}`);
+      card.raw(`    ${fmt.elide(type, Math.max(12, t.width - 13), t).padEnd(24)}${fmt.num(n).padStart(7)}`);
     }
   }
 
   card.blank().text('adapters:');
   for (const a of adapters) {
     // Clipped, never wrapped: `render.ts`'s one rule.
-    const line = fmt.clip(a.line, Math.max(20, t.width - 4));
+    const line = fmt.clip(a.line, Math.max(20, t.width - 4), t);
     card.raw(`    ${a.supported ? line : t.dim(line)}`);
   }
-  card.text(t.dim(fmt.clip(cursorAdapter.CURSOR_DOCTOR_NOTE, Math.max(20, t.width - 4))));
+  card.text(t.dim(fmt.clip(cursorAdapter.CURSOR_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
 
   const fatal = report.warnings.filter((w) => w.startsWith('unreadable transcript'));
   card.blank();
@@ -358,6 +357,45 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
       path: dir,
       line: `${harness.padEnd(12)}${'phase 6'.padEnd(10)}${paths.tildify(dir).padEnd(28)}  not yet parsed`,
     });
+  }
+  return out;
+}
+
+/**
+ * One line per record type, laid out so that **the name is never the thing
+ * that gets elided**.
+ *
+ * The name is the only part a reader can act on — `queue-operation` sends you
+ * to a format note, `user:injected-continua…` sends you nowhere — so it takes
+ * every column the fixed fields do not need, and when even that is not enough
+ * the row wraps onto a second line rather than losing its identity. The
+ * version column is what gives ground at 60 columns (`2 versions` → `2v`), and
+ * the whole line is exactly `t.width` at 80 and at 60: the two-space gap after
+ * the count is deliberate, and a third space is what pushed every `known` row
+ * one character past `--width 60`.
+ */
+function recordTypeLines(rows: readonly FoldedRecordType[], t: Theme): string[] {
+  const wide = t.width >= 74;
+  const countW = 7;
+  const versionW = wide ? 11 : 3;
+  const markW = 5;
+  const nameW = Math.max(12, t.width - 4 - countW - 2 - versionW - 1 - markW);
+  const out: string[] = [];
+  for (const row of rows) {
+    const name = `${row.harness} ${row.type}`;
+    const mark = row.novel ? t.warn('new') : t.dim('known');
+    const versions = wide
+      ? row.versions === 1 ? '1 version' : `${row.versions} versions`
+      : `${row.versions}v`;
+    const tail = `${fmt.num(row.count).padStart(countW)}  ${t.dim(versions.padEnd(versionW))} ${mark}`;
+    if (name.length <= nameW) {
+      out.push(`    ${name.padEnd(nameW)}${tail}`);
+    } else {
+      // Wrapped, not truncated. A name too long for any terminal still elides
+      // in the middle, where the least identifying characters are.
+      out.push(`    ${fmt.elideMiddle(name, Math.max(12, t.width - 4), t)}`);
+      out.push(`    ${' '.repeat(nameW)}${tail}`);
+    }
   }
   return out;
 }

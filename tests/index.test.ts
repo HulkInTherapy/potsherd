@@ -64,6 +64,27 @@ function writeTranscript(claudeDir: string, id = 'aaaa1111-0000-4000-8000-000000
   return file;
 }
 
+const QUEUE_HEAVY_ID = 'aaaa1111-0000-4000-8000-000000000002';
+
+/**
+ * A second claude transcript, on a different claude build, carrying ten
+ * `queue-operation` records and seven `last-prompt` records — types no parser
+ * consumes. It exists so an incremental pass has something it is *not* meant
+ * to touch, and so `doctor`'s counts have to be a sum rather than a snapshot.
+ */
+function writeQueueHeavyTranscript(claudeDir: string): string {
+  const file = path.join(claudeDir, 'projects', '-tmp-potsherd-index-2', `${QUEUE_HEAVY_ID}.jsonl`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const base = { sessionId: QUEUE_HEAVY_ID, cwd: '/tmp/potsherd-index-2', version: '2.1.240', gitBranch: 'main' };
+  const rows: Record<string, unknown>[] = [];
+  for (let i = 0; i < 10; i++) rows.push({ ...base, type: 'queue-operation', uuid: `q${i}` });
+  for (let i = 0; i < 7; i++) rows.push({ ...base, type: 'last-prompt', leafUuid: `l${i}` });
+  rows.push({ ...base, type: 'user', promptId: 'p1', uuid: 'u1', timestamp: '2026-08-20T09:00:00.000Z', message: { role: 'user', content: 'a second session, on a newer build' } });
+  rows.push({ ...base, type: 'assistant', uuid: 'a1', timestamp: '2026-08-20T09:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'noted.' }] } });
+  fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  return file;
+}
+
 function openDb(root: string): Db {
   return store.open({ root });
 }
@@ -216,6 +237,73 @@ describe('index: adapter output into the store', () => {
     expect(novel).toMatchObject({ harness: 'claude', version: '2.1.237', count: 1, novel: true });
     // A documented, deliberately-ignored type is counted but not cried wolf over.
     expect(rows.find((r) => r.type === 'queue-operation')).toMatchObject({ novel: false });
+    db.close();
+  });
+
+  /**
+   * The counts belong to the index, not to the last pass over it.
+   *
+   * They used to live in one `sync_state` blob that each run rewrote with
+   * whatever *that run* had re-read. Appending a line to one transcript and
+   * re-indexing therefore took `queue-operation 11` down to `queue-operation
+   * 1` and made every type absent from that one file vanish from `doctor`
+   * altogether — an archive tool quietly losing the record of what it skipped.
+   */
+  it('keeps the counts of the sessions an incremental pass did not open', async () => {
+    const { claudeDir, root } = scratch();
+    const fileA = writeTranscript(claudeDir);
+    writeQueueHeavyTranscript(claudeDir);
+    const db = openDb(root);
+    await indexAll({ db, root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+
+    const total = (rows: ReturnType<typeof storedRecordTypes>, type: string): number =>
+      rows.filter((r) => r.type === type).reduce((a, r) => a + r.count, 0);
+    const versions = (rows: ReturnType<typeof storedRecordTypes>, type: string): number =>
+      new Set(rows.filter((r) => r.type === type).map((r) => r.version)).size;
+
+    const full = storedRecordTypes(db);
+    expect(total(full, 'queue-operation')).toBe(11);
+    expect(versions(full, 'queue-operation')).toBe(2);
+    expect(total(full, 'last-prompt')).toBe(7);
+    expect(total(full, 'artifact-comment-monitor')).toBe(1);
+
+    // One line appended to one transcript; the other file is not opened.
+    fs.appendFileSync(
+      fileA,
+      JSON.stringify({
+        sessionId: 'aaaa1111-0000-4000-8000-000000000001',
+        cwd: '/tmp/potsherd-index',
+        version: '2.1.237',
+        type: 'user',
+        promptId: 'p3',
+        uuid: 'u9',
+        timestamp: '2026-08-19T09:02:00.000Z',
+        message: { role: 'user', content: 'one more question' },
+      }) + '\n',
+    );
+    const incremental = await indexAll({ db, root, claudeDir, harnesses: ['claude'], embed: false });
+    expect(incremental.totals.parsed).toBe(1);
+    expect(incremental.totals.skipped).toBe(1);
+
+    const after = storedRecordTypes(db);
+    expect(total(after, 'queue-operation')).toBe(11);
+    expect(versions(after, 'queue-operation')).toBe(2);
+    // The type that only ever appeared in the file this pass never opened.
+    expect(total(after, 'last-prompt')).toBe(7);
+    expect(total(after, 'artifact-comment-monitor')).toBe(1);
+    db.close();
+  });
+
+  it('retires the counts of a session with the session', async () => {
+    const { claudeDir, root } = scratch();
+    writeTranscript(claudeDir);
+    writeQueueHeavyTranscript(claudeDir);
+    const db = openDb(root);
+    await indexAll({ db, root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+    db.prepare('DELETE FROM sessions WHERE id = ?').run(QUEUE_HEAVY_ID);
+    const rows = storedRecordTypes(db);
+    expect(rows.filter((r) => r.type === 'queue-operation').reduce((a, r) => a + r.count, 0)).toBe(1);
+    expect(rows.some((r) => r.type === 'last-prompt')).toBe(false);
     db.close();
   });
 });
