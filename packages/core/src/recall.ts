@@ -154,6 +154,19 @@ export interface RecallResult {
   lists: { list: ListName; candidates: number; ms: number }[];
   /** True when the exact-AND pass found too little and the OR pass was run. */
   relaxed: boolean;
+  /** True when the search was restricted to ghosts (`--ghosts only`). */
+  ghostsOnly: boolean;
+  /**
+   * Ghosts in the index, counted **only** when the search came back empty —
+   * `null` otherwise, because a result with hits in it never needs to explain
+   * itself and the count would be a query for nothing.
+   *
+   * An empty `find --ghosts only` on a directory that was indexed but never
+   * rescued is the one silence potsherd cannot afford: `index` does not build
+   * ghosts, `rescue` does, and "no results" reads as "you have no deleted
+   * sessions" — the exact belief the tool exists to correct.
+   */
+  indexedGhosts: number | null;
   ms: number;
 }
 
@@ -320,6 +333,35 @@ const PREFIX_MIN = 6;
 const STOPWORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'for', 'with',
   'is', 'it', 'this', 'that', 'be', 'was', 'are', 'as', 'by', 'we', 'i',
+]);
+
+/**
+ * The longer list, used **only** to decide what a snippet quotes and
+ * highlights — never to rank.
+ *
+ * {@link STOPWORDS} is deliberately short because potsherd searches technical
+ * prose where "not", "no" and "off" carry meaning, and dropping them from the
+ * *query* would lose real matches. Quoting is the opposite problem: a snippet
+ * exists to show the reader why a session is on the screen, and `up`, `its`
+ * and `about` never do. When every token in a query is on this list the
+ * shorter one is used instead, so a query that really is all function words
+ * still gets a highlight.
+ *
+ * Not filtered by length: `eu` and `k` are two characters and both are real
+ * queries against this corpus.
+ */
+const QUOTE_STOPWORDS = new Set([
+  ...STOPWORDS,
+  'about', 'after', 'again', 'all', 'also', 'any', 'because', 'been', 'before',
+  'being', 'but', 'can', 'could', 'did', 'do', 'does', 'down', 'each', 'even',
+  'ever', 'every', 'few', 'from', 'had', 'has', 'have', 'he', 'her', 'him',
+  'his', 'how', 'if', 'into', 'its', 'just', 'may', 'me', 'might', 'more',
+  'most', 'much', 'must', 'my', 'no', 'not', 'now', 'off', 'one', 'only',
+  'other', 'our', 'out', 'over', 'own', 'same', 'she', 'should', 'so', 'some',
+  'still', 'such', 'than', 'them', 'their', 'then', 'there', 'these', 'they',
+  'those', 'through', 'too', 'two', 'under', 'until', 'up', 'us', 'very',
+  'were', 'what', 'when', 'where', 'which', 'while', 'who', 'why', 'will',
+  'would', 'yet', 'you', 'your',
 ]);
 
 // ------------------------------------------------------------------ helpers
@@ -804,6 +846,8 @@ export async function recall(
     vectors,
     lists: listReports,
     relaxed: false,
+    ghostsOnly: ghosts === 'only',
+    indexedGhosts: countGhosts(db),
     ms: Date.now() - started,
   });
 
@@ -924,13 +968,17 @@ export async function recall(
     }
   }
 
-  // Stopwords do not make a snippet. `find "key on a replayed request"` that
-  // highlights `on` has pointed at the one word in the query that explains
-  // nothing, and the density search would happily centre a window on the
-  // three places a document says "a". The full token list still drives the
-  // *ranking*; only the quoting uses the meaningful half.
+  // Function words do not make a snippet. `find "key on a replayed request"`
+  // that highlights `on`, or `find "the ci runner filled up its disk"` that
+  // points at `up` in a session about refunds, has picked the one word in the
+  // query that explains nothing — and a block that cannot show a real match is
+  // better off *saying* so, which is what the renderer does when this list
+  // comes back empty-handed. The full token list still drives the **ranking**;
+  // only the quoting uses this half.
+  const quotable = fts.tokens.filter((t) => !QUOTE_STOPWORDS.has(t));
   const meaningfulTokens = fts.tokens.filter((t) => !STOPWORDS.has(t));
-  const quotableTokens = meaningfulTokens.length > 0 ? meaningfulTokens : fts.tokens;
+  const quotableTokens =
+    quotable.length > 0 ? quotable : meaningfulTokens.length > 0 ? meaningfulTokens : fts.tokens;
 
   // ---- reciprocal rank fusion
   const fused = new Map<string, RawHit & { score: number; from: RecallHit['from'] }>();
@@ -1030,6 +1078,8 @@ export async function recall(
     vectors,
     lists: listReports,
     relaxed,
+    ghostsOnly: ghosts === 'only',
+    indexedGhosts: sessions.length === 0 ? countGhosts(db) : null,
     ms: Date.now() - started,
   };
 }
@@ -1234,6 +1284,15 @@ function titled(
   }
   reports.push({ list: 'titles', candidates: list.hits.length, ms: Date.now() - t0 });
   return list;
+}
+
+/** How many ghosts the index holds. Zero means `rescue` has not run. */
+function countGhosts(db: Db): number {
+  try {
+    return (db.prepare('SELECT COUNT(*) AS n FROM ghosts').get() as { n: number }).n;
+  } catch {
+    return 0;
+  }
 }
 
 function firstLine(s: string): string {
