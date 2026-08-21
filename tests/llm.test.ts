@@ -644,6 +644,54 @@ describe('budget caps', () => {
     expect(b.spend.usd).toBeCloseTo(0.5, 6);
   });
 
+  // The same defect one layer up: `Llm.text` is what `card --all` and `ask`
+  // actually call, so the reservation has to be threaded through it and not
+  // only exist on `Budget`. Six calls are launched at once against a cap that
+  // affords four; the transport parks every call until all six have been
+  // admitted or refused, which is the in-flight window the old code was blind
+  // to. `--max-usd 0.02` is chosen against this transport's $0.001 recorded
+  // spend and its ~$0.005 projection, so the arithmetic is the gate's.
+  it('Llm.text holds --max-usd across six calls in flight at once', async () => {
+    let release = (): void => {};
+    const parked = new Promise<void>((r) => {
+      release = r;
+    });
+    let inFlight = 0;
+    const t: Transport = {
+      backend: 'agent-sdk',
+      async send() {
+        inFlight += 1;
+        await parked;
+        return { text: 'ok', inputTokens: 100, outputTokens: 20, usd: 0.001 };
+      },
+      async close() {},
+    };
+    const llm = Llm.open({ transport: t, maxUsd: 0.02, maxOutputTokens: 1_000 });
+
+    const settled = Promise.allSettled(
+      Array.from({ length: 6 }, () => llm.text({ prompt: 'hello' })),
+    );
+    // Everything that is going to be admitted has been by now; nothing has
+    // returned, so no `record` has run.
+    await Promise.resolve();
+    await Promise.resolve();
+    release();
+    const results = await settled;
+    await llm.close();
+
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    const refused = results.filter(
+      (r) => r.status === 'rejected' && r.reason instanceof BudgetError,
+    ).length;
+    expect(ok + refused).toBe(6);
+    // Refusals happened, and they happened *before* the backend was reached —
+    // which is the whole promise of a pre-call cap.
+    expect(refused).toBeGreaterThan(0);
+    expect(inFlight).toBe(ok);
+    expect(llm.spend.calls).toBe(ok);
+    expect(llm.spend.usd).toBeLessThanOrEqual(0.02);
+  });
+
   it('gives a reservation back when the call throws, so one failure does not poison the cap', async () => {
     const b = new Budget({ maxUsd: 0.5 });
     const r = b.admit({ usd: 0.4 });
