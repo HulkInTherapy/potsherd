@@ -48,6 +48,13 @@ export interface CardTarget {
   harness: Harness;
   title: string | null;
   project: string | null;
+  /**
+   * The single path segment the markdown mirror lives under
+   * (`~/.potsherd/cards/<harness>/<slug>/<id>.md`). Carried on the target so a
+   * run that fails before it can load the transcript still knows where to
+   * leave its error sentinel.
+   */
+  projectSlug: string | null;
   /** Exchanges for a session, prompts for a ghost. */
   units: number;
   /**
@@ -101,6 +108,7 @@ interface SessionRow {
   harness: Harness;
   title: string | null;
   project: string | null;
+  project_slug: string | null;
   is_sidechain: number;
   source_mtime: number | null;
   exchanges: number;
@@ -138,7 +146,7 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
     const f = buildSessionFilters(filters);
     const rows = db
       .prepare(
-        `SELECT s.id, s.harness, s.title, s.project, s.is_sidechain, s.source_mtime,
+        `SELECT s.id, s.harness, s.title, s.project, s.project_slug, s.is_sidechain, s.source_mtime,
                 (SELECT COUNT(*) FROM exchanges e WHERE e.session_id = s.id) AS exchanges,
                 (SELECT COALESCE(SUM(length(e.user_text) + length(e.assistant_text)), 0)
                    FROM exchanges e WHERE e.session_id = s.id) AS chars,
@@ -167,6 +175,7 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
         harness: r.harness,
         title: r.title,
         project: r.project,
+        projectSlug: r.project_slug,
         units: r.exchanges,
         chars: r.chars + r.exchanges * SEQ_HEADER_CHARS,
         carded: r.carded > 0,
@@ -207,6 +216,9 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
         harness: r.harness,
         title: r.title,
         project: r.project,
+        // Ghosts have no `project_slug` column; `project` is what `rescue`
+        // recovered and the mirror path is derived from it.
+        projectSlug: r.project,
         units: r.prompts,
         chars: r.chars + r.prompts * SEQ_HEADER_CHARS,
         carded: r.carded > 0,

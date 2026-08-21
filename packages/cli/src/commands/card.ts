@@ -1,14 +1,29 @@
+import process from 'node:process';
+
 import {
   Llm,
   NoBackendError,
   detectBackend,
+  exportCards,
+  paths,
   planCards,
+  renderCardRun,
   renderEstimate,
   resolveSession,
+  runCards,
   type BackendChoice,
   type CardPlan,
+  type CardRunReport,
 } from '@potsherd/core';
-import { UserError, confirm, print, printJson, themeFrom, type GlobalOptions } from '../output.js';
+import {
+  Progress,
+  UserError,
+  confirm,
+  print,
+  printJson,
+  themeFrom,
+  type GlobalOptions,
+} from '../output.js';
 import { openIndex, parseFilters, type FilterFlags } from '../filters.js';
 
 /**
@@ -24,6 +39,16 @@ import { openIndex, parseFilters, type FilterFlags } from '../filters.js';
  * `claude` and no key can still ask what carding their archive would cost, and
  * gets a real number plus the one sentence that tells them what they would
  * need. Nothing else in potsherd is allowed to make that decision later.
+ *
+ * T2.2 adds the second half: past the confirmation, `runCards()` executes the
+ * ProMem-lite pipeline over `plan.targets` at concurrency and prints the
+ * receipt. The estimate is still rendered first on every path, so the quote
+ * and the bill are shown by the same command in the same run.
+ *
+ * **Ghosts are planned but not carded here.** `planCards` selects them and
+ * prices them — they are 90 of the reference machine's 126 targets and a quote
+ * that hid them would be a lie — and `runCards({ kinds: ['session'] })` steps
+ * over them until T2.3 supplies a ghost transcript loader.
  */
 
 export interface CardCommandOptions extends GlobalOptions, FilterFlags {
@@ -37,10 +62,13 @@ export interface CardCommandOptions extends GlobalOptions, FilterFlags {
   maxUsd?: number;
   maxTokens?: number;
   concurrency?: number;
+  /** `--export <dir>`: copy the markdown mirror out. No model, no index. */
+  export?: string;
 }
 
 export async function runCard(o: CardCommandOptions): Promise<number> {
   if (o.probe) return probe(o);
+  if (o.export) return runExport(o, o.export);
 
   const { db, root } = openIndex(o);
   try {
@@ -78,15 +106,20 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
       force: Boolean(o.force),
       ...(o.model ? { model: o.model } : {}),
       ...(choice ? { backend: choice.backend, chargeable: choice.chargeable } : {}),
-      ...(o.concurrency !== undefined ? { concurrency: o.concurrency } : {}),
+      concurrency: o.concurrency ?? DEFAULT_CONCURRENCY,
     });
 
-    if (o.json) {
+    // `--json` on a dry run is the quote and nothing else. `--json` on a real
+    // run has to wait for the run: printing the plan here and the receipt
+    // afterwards would emit two json documents on one stream, which nothing
+    // downstream can parse. (T2.1 returned here unconditionally because there
+    // was no second half to wait for.)
+    if (o.json && (o.dryRun || missing || plan.targets.length === 0)) {
       printJson(cardJson(plan, choice, missing, o));
       return o.dryRun || !missing ? 0 : 1;
     }
 
-    print(
+    if (!o.json && !o.quiet) print(
       renderEstimate(plan, themeFrom(o), {
         root,
         backendNote: backendNote(choice, missing),
@@ -100,7 +133,7 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
     // Past this line something would actually be spent.
     if (missing) throw new UserError(missing.message, missing.fix);
     if (plan.targets.length === 0) return 0;
-    if (!o.yes) {
+    if (!o.yes && !o.json) {
       const ok = await confirm(`  card ${plan.targets.length} sessions?`, { default: false });
       if (!ok) {
         print('  nothing was called.');
@@ -108,15 +141,86 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
       }
     }
 
-    // T2.2 replaces this line with the ProMem-lite pipeline. Everything it
-    // needs is already built: `plan.targets`, and an `Llm` from `Llm.open()`.
-    throw new UserError(
-      'the card pipeline is not wired yet — T2.1 ships the estimator, the caps and the backend',
-      'potsherd card --dry-run --all',
-    );
+    const llm = Llm.open({
+      ...(o.model ? { model: o.model } : {}),
+      ...(o.backend ? { backend: o.backend as BackendChoice['backend'] } : {}),
+      ...(o.maxUsd !== undefined ? { maxUsd: o.maxUsd } : {}),
+      ...(o.maxTokens !== undefined ? { maxTokens: o.maxTokens } : {}),
+    });
+
+    const showProgress = !o.json && !o.quiet && Boolean(process.stderr.isTTY);
+    const bar = new Progress('carding', showProgress);
+    const concurrency = o.concurrency ?? DEFAULT_CONCURRENCY;
+
+    let report: CardRunReport;
+    try {
+      report = await runCards(db, llm, {
+        root,
+        targets: plan.targets,
+        concurrency,
+        force: Boolean(o.force),
+        onProgress: (p) => {
+          if (p.phase === 'start') bar.update(p.done, p.total, p.target.id.slice(0, 8));
+          else bar.update(p.done, p.total, p.detail ?? '');
+        },
+      });
+    } finally {
+      bar.done();
+      await llm.close();
+    }
+
+    if (o.json) {
+      printJson(runJson(report, choice, concurrency));
+      return report.aborted || report.failed > 0 ? 1 : 0;
+    }
+    if (!o.quiet) {
+      print(
+        renderCardRun(report, themeFrom(o), {
+          root,
+          model: plan.model,
+          concurrency,
+          backendNote: backendNote(choice, missing),
+          chargeable: choice?.chargeable ?? true,
+          ...(o.maxUsd !== undefined ? { maxUsd: o.maxUsd } : {}),
+        }),
+      );
+    }
+    return report.aborted || report.failed > 0 ? 1 : 0;
   } finally {
     db.close();
   }
+}
+
+/** `03` §12: concurrency 6 is the default from phase 2 on. */
+export const DEFAULT_CONCURRENCY = 6;
+
+/**
+ * `potsherd card --export <dir>` — copy the markdown mirror into a repo.
+ *
+ * Deliberately not a model verb: it reads `~/.potsherd/cards` and writes
+ * files, and it must work on a machine with no backend at all. That is why it
+ * short-circuits before `openIndex` needs anything but a path.
+ */
+function runExport(o: CardCommandOptions, dest: string): number {
+  const root = paths.potsherdDir(o.potsherdDir);
+  const result = exportCards(root, dest);
+  if (o.json) {
+    printJson({ ...result, from: paths.cardsDir(root) });
+    return 0;
+  }
+  const t = themeFrom(o);
+  print('');
+  if (result.files === 0) {
+    print(`  no cards in ${paths.tildify(paths.cardsDir(root))} yet.`);
+    print(`  ${t.dim('try:')}  potsherd card --all`);
+  } else {
+    print(
+      `  ${t.ok(String(result.files))} card${result.files === 1 ? '' : 's'} copied to ${dest}` +
+        ` ${t.sep} ${(result.bytes / 1024).toFixed(0)} kB`,
+    );
+  }
+  print('');
+  return 0;
 }
 
 /**
@@ -166,6 +270,41 @@ async function probe(o: CardCommandOptions): Promise<number> {
   } finally {
     await llm.close();
   }
+}
+
+/**
+ * The receipt, as data.
+ *
+ * `verified` and `dropsByReason` are at the top level rather than buried per
+ * card because they are the numbers `phase-2` T2.2's acceptance is written
+ * against, and a check that has to reduce an array to find them is a check
+ * nobody runs.
+ */
+function runJson(
+  report: CardRunReport,
+  choice: BackendChoice | null,
+  concurrency: number,
+): unknown {
+  return {
+    written: report.written,
+    failed: report.failed,
+    deferred: report.deferred,
+    degraded: report.degraded,
+    supplemented: report.supplemented,
+    verified: report.verified,
+    dropsByReason: report.dropsByReason,
+    unresolved: report.unresolved,
+    calls: report.calls,
+    inputTokens: report.inputTokens,
+    outputTokens: report.outputTokens,
+    usd: Number(report.usd.toFixed(4)),
+    seconds: Math.round(report.ms / 1000),
+    concurrency,
+    backend: choice ? { name: choice.backend, model: choice.model, chargeable: choice.chargeable } : null,
+    aborted: report.aborted ?? null,
+    errors: report.errors,
+    cards: report.cards,
+  };
 }
 
 function backendNote(choice: BackendChoice | null, missing: NoBackendError | null): string {

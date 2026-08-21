@@ -175,6 +175,9 @@ function quotableOrder(hits: RecallHit[]): RecallHit[] {
 
 /** One line saying why a block with no quotable match is in the results. */
 function unmatchedReason(s: RecallSession, r: RecallResult): string {
+  if (s.hits.some((h) => h.kind === 'card')) {
+    return 'the session card matched; the transcript does not use those words';
+  }
   if (s.hits.some((h) => h.kind === 'title')) {
     return 'the session title matched; the body does not use those words';
   }

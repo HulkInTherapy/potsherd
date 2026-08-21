@@ -423,6 +423,8 @@ example:
         .addOption(
           new Option('--concurrency <n>', 'how many sessions to card at once').argParser(Number),
         )
+        .option('--export <dir>', 'copy the markdown mirror into this directory and stop')
+        .option('-q, --quiet', 'print nothing on success')
         .option('-y, --yes', 'skip the estimate confirmation'),
     ),
   ).addHelpText('after', `
@@ -431,6 +433,7 @@ example:
   potsherd card --dry-run --all --json | jq .estimate
   potsherd card --all --max-usd 2
   potsherd card 4c9339e0 --model sonnet
+  potsherd card --export ~/vault/sessions            # copy the markdown mirror out
   potsherd card --probe                              # one tiny call: does the backend work?`);
   card.action(async (session: string | undefined, opts: Record<string, unknown>) => {
     const o = globals(program, card, opts);
@@ -448,6 +451,7 @@ example:
           ...(opts['backend'] ? { backend: String(opts['backend']) } : {}),
           ...(opts['maxUsd'] !== undefined ? { maxUsd: Number(opts['maxUsd']) } : {}),
           ...(opts['maxTokens'] !== undefined ? { maxTokens: Number(opts['maxTokens']) } : {}),
+          ...(opts['export'] ? { export: String(opts['export']) } : {}),
           ...(opts['concurrency'] !== undefined
             ? { concurrency: Number(opts['concurrency']) }
             : {}),

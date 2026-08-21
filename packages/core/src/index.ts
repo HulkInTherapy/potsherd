@@ -279,4 +279,111 @@ export {
 } from './render/estimate.js';
 export * as cardSentinel from './cards/sentinel.js';
 
+// L5 — the ProMem-lite pipeline itself (`03` §6, T2.2). Five steps, in order,
+// and two of them cost nothing: `verify` and `dedupe` are arithmetic against
+// the transcript, which is what lets a card claim to be checkable.
+export {
+  cardTranscript,
+  type CardPipelineOptions,
+  type CardResult,
+  type CardStep,
+} from './cards/pipeline.js';
+export {
+  runCards,
+  type CardProgress,
+  type CardRunOptions,
+  type CardRunReport,
+  type CardSummary,
+} from './cards/run.js';
+export {
+  loadSessionTranscript,
+  unitHeader,
+  unitText,
+  renderUnit,
+  elideMiddle,
+  loadVectors,
+  type Transcript,
+  type TranscriptUnit,
+} from './cards/transcript.js';
+export {
+  extractCalls,
+  sliceUnits,
+  MAX_UNIT_CHARS,
+  SLICE_CHUNK_CHARS,
+  SLICE_THRESHOLD_CHARS,
+  type SliceOptions,
+} from './cards/slice.js';
+export {
+  extractCard,
+  supplementCard,
+  fallbackCard,
+  transcriptBlock,
+  type ExtractOptions,
+  type ExtractResult,
+  type ExtractSpend,
+} from './cards/extract.js';
+export {
+  cardItems,
+  measureCoverage,
+  mergeSupplement,
+  COVERAGE_COSINE,
+  UNCOVERED_FRACTION,
+  type CoverageReport,
+} from './cards/coverage.js';
+export {
+  verifyCard,
+  unresolvedEvidence,
+  EVIDENCE_COSINE,
+  EVIDENCE_WINDOWS,
+  EVIDENCE_WINDOW_CHARS,
+  type DropReason,
+  type DroppedClaim,
+  type VerifyResult,
+  type VerifyTotals,
+} from './cards/verify.js';
+export { dedupeCard, DEDUPE_COSINE, type DedupeReport, type DedupeResult } from './cards/dedupe.js';
+export { makeGate, openGate, type Gate } from './cards/gate.js';
+export {
+  cachedEmbedder,
+  cosine,
+  bestMatch,
+  rankedWindows,
+  windows,
+  type CachedEmbedder,
+  type Embedder,
+} from './cards/vectors.js';
+export {
+  cardEmbeddingText,
+  cardMarkdown,
+  cardPath,
+  exportCards,
+  readPriorCard,
+  safeSlug,
+  writeCard,
+  type CardRecord,
+  type ExportResult,
+} from './cards/write.js';
+export {
+  CARD_OUTCOMES,
+  CARD_SCHEMA,
+  MAX_CLAIMS,
+  MAX_CLAIM_CHARS,
+  MAX_FILES,
+  MAX_SUMMARY_WORDS,
+  MAX_TAGS,
+  MAX_TITLE_WORDS,
+  MAX_TOPICS,
+  asSeqList,
+  clampWords,
+  emptyCard,
+  minimalCard,
+  normaliseCard,
+  tagify,
+  validateCard,
+  type CardClaim,
+  type CardOutcome,
+  type ExtractedCard,
+} from './cards/schema.js';
+export { renderCardRun, type CardRunOptions as CardRunCardOptions } from './render/card-run.js';
+
 export const VERSION = '0.1.0';

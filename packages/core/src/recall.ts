@@ -70,26 +70,36 @@ export type ListName =
   | 'ghosts_fts'
   | 'ghost_prompts_fts'
   | 'vec_exchanges'
-  /** phase 2 */
   | 'cards_fts'
-  /** phase 2 */
   | 'vec_cards';
 
-/** The lists `recall` runs today. `cards_fts`/`vec_cards` join in phase 2. */
+/**
+ * The five-then-seven lists of `03` §7.
+ *
+ * `cards_fts` and `vec_cards` were named here through phase 1 and switched
+ * off, because a list with no rows is not a list — it is a way to make a
+ * fusion look richer than it is. T2.2 fills them, so they are on. Both still
+ * disappear from the set at query time when the table is missing or empty,
+ * which is what makes `find` work on an index that has never seen a model.
+ */
 export const LISTS: readonly ListName[] = [
   'titles',
   'exchanges_fts',
+  'cards_fts',
   'ghosts_fts',
   'ghost_prompts_fts',
   'vec_exchanges',
+  'vec_cards',
 ];
 
 export interface RecallHit {
   /**
    * `exchange` has both sides; `ghost` has the prompt side only; `title` is the
-   * session's own name matching, which has no body text behind it.
+   * session's own name matching, which has no body text behind it; `card` is
+   * the verified summary of a whole session (`03` §6), which has no single
+   * exchange behind it either but does have text worth quoting.
    */
-  kind: 'exchange' | 'ghost' | 'title';
+  kind: 'exchange' | 'ghost' | 'title' | 'card';
   sessionId: string;
   /** `exchanges.id`, or `ghost_prompts.id`. Absent for a `ghosts_fts` hit. */
   id?: string;
@@ -271,10 +281,21 @@ const WEIGHTS: Record<string, number> = {
   // client" are not the same evidence, and rank alone cannot say so. Scaled
   // by coverage at fusion time; see {@link TitleList}.
   titles: 1.5,
+  // A card is a statement about the whole session, like a title, but unlike a
+  // title it has been checked against the transcript (`cards/verify.ts`) and
+  // carries the session's topics and decisions rather than six words a model
+  // wrote before the session was over. It is weighted between the two: above a
+  // single exchange, below a title that names the thing outright.
+  cards_fts: 1.2,
   exchanges_fts: 1,
   ghosts_fts: 1,
   ghost_prompts_fts: 1,
   vec_exchanges: 0.5,
+  // Card vectors are the semantic half of the same statement. Same weight as
+  // the exchange vectors: rank-based fusion needs no common scale, but a list
+  // that answers "about the same thing" still should not outvote one that
+  // answers "says these words".
+  vec_cards: 0.5,
 };
 
 // -------------------------------------------------------------- fts5 syntax
@@ -501,7 +522,7 @@ export function bestSnippet(
 
 interface RawHit {
   key: string;
-  kind: 'exchange' | 'ghost' | 'title';
+  kind: 'exchange' | 'ghost' | 'title' | 'card';
   sessionId: string;
   id?: string;
   seq?: number;
@@ -510,6 +531,23 @@ interface RawHit {
   assistantText?: string;
   isSidechain: boolean;
   raw: number;
+}
+
+/**
+ * Whether a table has anything in it, without ever throwing.
+ *
+ * `vec_cards` is a vec0 virtual table and counting it on a connection that has
+ * not loaded the extension raises "no such module"; an index written by an
+ * older build may not have the table at all. Either way the answer a caller
+ * wants is "no rows", not an exception in the middle of a search.
+ */
+function countRows(db: Db, name: string): number {
+  try {
+    const row = db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get() as { n: number };
+    return row.n;
+  } catch {
+    return 0;
+  }
 }
 
 function tableExists(db: Db, name: string): boolean {
@@ -638,6 +676,102 @@ function bm25Exchanges(db: Db, match: string, filters: SearchFilters, depth: num
     isSidechain: r.is_sidechain === 1,
     raw: r.rank,
   }));
+}
+
+/**
+ * bm25 over `cards_fts`.
+ *
+ * The card's own words, which are not the session's words: a session that says
+ * "pgbouncer" four hundred times and a card that says *"switched the pooler to
+ * transaction mode because prepared statements were leaking"* are different
+ * evidence, and this is the list that carries the second kind.
+ *
+ * Joined to `sessions`, so `--project`, `--since`, `--branch` and the rest
+ * filter cards exactly as they filter exchanges. **T2.3 note:** ghost cards
+ * live in the same table with no `sessions` row, so this join hides them; when
+ * ghost cards land, this needs the ghost half too (a second query against
+ * `ghosts`, fused as the same list — not a LEFT JOIN, which would defeat the
+ * filter builder's bound-parameter guarantee).
+ */
+function bm25Cards(db: Db, match: string, filters: SearchFilters, depth: number): RawHit[] {
+  const f = buildSessionFilters(filters);
+  const rows = db
+    .prepare(
+      `SELECT c.session_id AS session_id, c.title AS title, c.summary AS summary,
+              s.started_at AS ts, s.is_sidechain AS is_sidechain,
+              bm25(cards_fts, 2.0, 1.5, 1.0, 1.0, 1.0) AS rank
+         FROM cards_fts
+         JOIN cards c    ON c.rowid = cards_fts.rowid
+         JOIN sessions s ON s.id = c.session_id
+        WHERE cards_fts MATCH ?
+          ${f.sql}
+        ORDER BY rank
+        LIMIT ?`,
+    )
+    .all(match, ...f.params, depth) as {
+    session_id: string;
+    title: string | null;
+    summary: string | null;
+    ts: string | null;
+    is_sidechain: number;
+    rank: number;
+  }[];
+  return rows.map((r) => ({
+    key: `c:${r.session_id}`,
+    kind: 'card' as const,
+    sessionId: r.session_id,
+    ts: r.ts,
+    userText: r.title ?? '',
+    assistantText: r.summary ?? '',
+    isSidechain: r.is_sidechain === 1,
+    raw: r.rank,
+  }));
+}
+
+/** KNN over `vec_cards` — `title + summary + topics`, one vector per session. */
+function vecCards(db: Db, embedding: number[], filters: SearchFilters, depth: number): RawHit[] {
+  const wanted = knnCandidates(depth, filters);
+  const near = db
+    .prepare(
+      `SELECT session_id, distance FROM vec_cards
+        WHERE embedding MATCH ? ORDER BY distance LIMIT ?`,
+    )
+    .all(embeddingToBlob(embedding), wanted) as { session_id: string; distance: number }[];
+  if (near.length === 0) return [];
+
+  const order = new Map(near.map((n, i) => [n.session_id, i]));
+  const f = buildSessionFilters(filters);
+  const placeholders = near.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT c.session_id AS session_id, c.title AS title, c.summary AS summary,
+              s.started_at AS ts, s.is_sidechain AS is_sidechain
+         FROM cards c
+         JOIN sessions s ON s.id = c.session_id
+        WHERE c.session_id IN (${placeholders})
+          ${f.sql}`,
+    )
+    .all(...near.map((n) => n.session_id), ...f.params) as {
+    session_id: string;
+    title: string | null;
+    summary: string | null;
+    ts: string | null;
+    is_sidechain: number;
+  }[];
+
+  return rows
+    .sort((a, b) => (order.get(a.session_id) ?? 0) - (order.get(b.session_id) ?? 0))
+    .slice(0, depth)
+    .map((r) => ({
+      key: `c:${r.session_id}`,
+      kind: 'card' as const,
+      sessionId: r.session_id,
+      ts: r.ts,
+      userText: r.title ?? '',
+      assistantText: r.summary ?? '',
+      isSidechain: r.is_sidechain === 1,
+      raw: 0,
+    }));
 }
 
 function bm25Ghosts(db: Db, match: string, filters: SearchFilters, depth: number): RawHit[] {
@@ -882,10 +1016,16 @@ export async function recall(
     wanted.delete('ghost_prompts_fts');
   }
   if (!vectors.available) wanted.delete('vec_exchanges');
-  // Phase 2 owns these two; they are empty until a card writer runs.
-  if (!tableExists(db, 'cards_fts')) wanted.delete('cards_fts');
-  wanted.delete('vec_cards');
-  wanted.delete('cards_fts');
+  // The card lists are real from T2.2 on, and still leave the set the moment
+  // there is nothing behind them: an index that has never run `potsherd card`
+  // has an empty `cards` table, and running two extra queries per search to
+  // find that out again is a cost with no answer attached.
+  if (!tableExists(db, 'cards_fts') || countRows(db, 'cards') === 0) {
+    wanted.delete('cards_fts');
+  }
+  if (!vectors.available || !tableExists(db, 'vec_cards') || countRows(db, 'vec_cards') === 0) {
+    wanted.delete('vec_cards');
+  }
 
   let relaxed = false;
   const relaxedLists = new Set<ListName>();
@@ -934,6 +1074,7 @@ export async function recall(
   const lists: Record<string, RawHit[]> = {
     titles: titles.hits,
     exchanges_fts: textList('exchanges_fts', (m) => bm25Exchanges(db, m, filters, depth)),
+    cards_fts: textList('cards_fts', (m) => bm25Cards(db, m, filters, depth)),
     ghosts_fts: textList('ghosts_fts', (m) => bm25Ghosts(db, m, filters, depth)),
     ghost_prompts_fts: textList('ghost_prompts_fts', (m) =>
       bm25GhostPrompts(db, m, filters, depth),
@@ -949,19 +1090,34 @@ export async function recall(
   const settled = !relaxedLists.has('exchanges_fts') && (lists['exchanges_fts']?.length ?? 0) > 0;
   if (vecMode === 'auto' && settled) {
     wanted.delete('vec_exchanges');
+    wanted.delete('vec_cards');
     vectors.reason = 'the words matched; --vectors on adds semantic search';
   }
 
-  if (wanted.has('vec_exchanges')) {
-    const t0 = Date.now();
+  // One forward pass, two lists. The query embedding is the expensive part
+  // (~350 ms); `vec_exchanges` and `vec_cards` are two KNN seeks against it,
+  // so a search that pays for the vector half should get both halves of it.
+  if (wanted.has('vec_exchanges') || wanted.has('vec_cards')) {
     try {
       const embedding = await generateQueryEmbedding(query, {
         cacheDir: modelsDir(potsherdDir(options.root)),
       });
-      const hits = vecExchanges(db, embedding, filters, depth);
-      listReports.push({ list: 'vec_exchanges', candidates: hits.length, ms: Date.now() - t0 });
-      lists['vec_exchanges'] = hits;
-      vectors.used = hits.length > 0;
+      let used = false;
+      if (wanted.has('vec_exchanges')) {
+        const t0 = Date.now();
+        const hits = vecExchanges(db, embedding, filters, depth);
+        listReports.push({ list: 'vec_exchanges', candidates: hits.length, ms: Date.now() - t0 });
+        lists['vec_exchanges'] = hits;
+        used ||= hits.length > 0;
+      }
+      if (wanted.has('vec_cards')) {
+        const t0 = Date.now();
+        const hits = vecCards(db, embedding, filters, depth);
+        listReports.push({ list: 'vec_cards', candidates: hits.length, ms: Date.now() - t0 });
+        lists['vec_cards'] = hits;
+        used ||= hits.length > 0;
+      }
+      vectors.used = used;
     } catch (err) {
       vectors.used = false;
       vectors.reason = `vectors unavailable: ${firstLine((err as Error)?.message ?? String(err))}`;
