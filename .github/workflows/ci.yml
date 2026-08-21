@@ -56,6 +56,16 @@ jobs:
       - name: the demo corpus still hits its targets
         run: node scripts/make-demo-corpus.mjs
 
+      # `plans/06` makes gate (a) of the ask evals the one that must be 100% or
+      # the build fails, and `evals/ask-selftest.ts` is what proves the scorer
+      # behind it: sixteen hand-built results, no model, no index, no `ask`,
+      # each one required to fail the single gate it is named for. Nothing ran
+      # it — not `pnpm test`, not CI — so a scorer that had stopped scoring
+      # would have been found by a person reading output, if at all. It exits
+      # non-zero when any case is judged wrongly.
+      - name: the ask eval scorer still scores
+        run: npx tsx evals/ask-selftest.ts
+
       # The privacy receipt is the one published artefact that can lie about
       # what the product does, and it has: `doctor --privacy` once said "no
       # network" after potsherd had started sending transcript text to a model.

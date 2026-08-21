@@ -597,11 +597,26 @@ export function verdictFor(
   const all = [...golds, ...decoys];
   const lines = all.reduce((n, r) => n + (r.result.evidence?.length ?? 0), 0);
   const faults = all.reduce((n, r) => n + r.faults.length, 0);
+  // `lines > 0` is the whole of B4, and it is not a formality.
+  //
+  // Gate (a) is the one `plans/06` says must be 100% or the build fails, and
+  // with no floor on evidence it read
+  //
+  //     gate (a) citations: {"lines":0,"faults":0,"rate":1,"pass":true}
+  //     gate (b) coverage : {"covered":0,"total":10,"rate":0,"pass":false}
+  //
+  // — a perfect score on nothing. A run that emitted no evidence at all cannot
+  // have a citation fault, so "no faults" and "no citations" produced the same
+  // number, and the strongest gate in the suite was the one most easily
+  // satisfied. Gate (b) happened to catch that case, which made this
+  // unexploitable rather than harmless: a gate that reports 100% on zero
+  // evidence is a number that means nothing, and `plans/08` rule 1 is about
+  // exactly that. A gate can only pass on evidence it actually checked.
   const citations = {
     lines,
     faults,
-    rate: faults === 0 ? 1 : 0,
-    pass: faults === 0,
+    rate: lines > 0 && faults === 0 ? 1 : 0,
+    pass: lines > 0 && faults === 0,
   };
   const covered = golds.filter((g) => g.coverage.covered).length;
   const cov = {
