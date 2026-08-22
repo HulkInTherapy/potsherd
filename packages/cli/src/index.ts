@@ -215,14 +215,15 @@ example:
       .option('--full', 're-read every transcript, ignoring what has not changed')
       .option('--incremental', 'only what changed since the last run (the default)')
       .option('--harness <list>', 'only these harnesses: claude,codex,cursor,pi')
-      .option('--no-embed', 'skip embeddings entirely — text search only, no model, no network')
+      .option('--embed', 'add semantic search: fetch the 32 MB model once, then embed (~6 min)')
+      .option('--no-embed', 'text only, and stop offering --embed (text only is the default)')
       .option('--session <id>', 'index one session id and nothing else')
       .option('-q, --quiet', 'print nothing on success (for hooks)'),
   ).addHelpText('after', `
 example:
-  potsherd index
+  potsherd index                                    # text only: no model, no network
+  potsherd index --embed                            # ...and semantic search, once
   potsherd index --full
-  potsherd index --harness claude --no-embed        # offline, fts only
   potsherd index --json | jq .totals`);
   index.action(async (opts: Record<string, unknown>) => {
     const o = globals(program, index, opts);
@@ -232,7 +233,12 @@ example:
           ...o,
           full: Boolean(opts['full']),
           incremental: Boolean(opts['incremental']),
-          embed: opts['embed'] !== false,
+          // Tri-state, and commander gives all three because both spellings
+          // are declared (T8.E): absent = no flag = text only and offer the
+          // upgrade, true = --embed, false = --no-embed = text only and stop
+          // offering. `!== false` collapsed the first two and made the 32 MB
+          // download the default.
+          ...(opts['embed'] === undefined ? {} : { embed: Boolean(opts['embed']) }),
           ...(opts['harness'] ? { harness: String(opts['harness']) } : {}),
           ...(opts['session'] ? { session: String(opts['session']) } : {}),
         }),
