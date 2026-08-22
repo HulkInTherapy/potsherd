@@ -1,14 +1,16 @@
 # state of play — read this first if you are picking potsherd up
 
-**last updated:** 22 aug 2026, after the `v1.0.0` tag and the master's own verification of it
+**last updated:** 22 aug 2026, after the master's verification of `v1.0.0` **and its fix to the
+prose leak that verification confirmed** — see §5, which is now closed
 **repo:** https://github.com/HulkInTherapy/potsherd (public, MIT)
 **local:** `/Users/zebra/randomness/potsherd` — the plan folder is **beside** it at
 `/Users/zebra/randomness/plans`, not inside it, and **must never be copied into it**: `01`, `02`,
 `04`, `05` and `06` carry real project names, real session ids and a real session title.
 Orchestrator 2 tried mirroring the folder in and the privacy guard refused within seconds.
 
-**tags:** `v0.1.0` … `v1.0.0` (phases 0–7), all on `origin`. `v1.0.0` = `5ae62a0`, and `HEAD`,
-`origin/main` and the tag all agree. Note that `v1.0.0`–`v1.4.2` **also** exist locally as
+**tags:** `v0.1.0` … `v1.0.0` (phases 0–7), all on `origin`. `v1.0.0` = `548b5b5`, and the tag and
+`origin/main` agree. **The history was rewritten after the tag** to purge a prose leak, so any SHA
+older than that in an older document will not resolve — `git log --oneline` is the authority. Note that `v1.0.0`–`v1.4.2` **also** exist locally as
 `upstream-v*`: they are obra/episodic-memory's, pulled in with the fork, and were never on origin.
 **tests:** 1,434 green, 35 files · CI green on macos + ubuntu × node 22 + 24, **and again under
 `POTSHERD_SQLITE=node`** — the whole suite on Node's own SQLite
@@ -134,30 +136,29 @@ narrowed to make the number fit; the target was corrected instead.
 | 13 | **the upstream PR has not been submitted**, and **`obra/episodic-memory#128` is already open and overlaps it** — by d-walp, *"make subagent and workflow (sidechain) conversations searchable"*. Read it first. `docs/release/upstream.md` |
 | 14 | no GitHub release was created and no asset attached |
 
-### 5 — the most serious open item, and it is not in `FINAL-REPORT.md`
+### 5 — CLOSED by the master, and worth keeping as a record of how it survived
 
-**`docs/upstream/PHASE-1-SCOUT.md` still publishes real transcript prose from this machine to a
-public repository.** Phase 5 found it, scrubbed the session ids and the thread title, assigned the
-prose scrub, and **it was never done.** Orchestrator 3 checked rather than repeating the claim, and
-the master's own verification confirmed it.
+**`docs/upstream/PHASE-1-SCOUT.md` published real transcript prose from this machine to a public
+repository from phase 1 until 22 aug 2026.** A real assistant `thinking` block from `~/.pi` with its
+message id, `parentId` and timestamp; a real truncated `<user_query>` from `~/.cursor`.
+
+Phase 5 found it, scrubbed the session ids and the thread title, **assigned the prose scrub, and it
+was never done.** Two orchestrators read "assigned" in the previous handoff and moved on.
+Orchestrator 3 checked rather than repeating the claim and found it still there; the master's own
+verification confirmed it; **the master then fixed it** — the samples are synthetic now and the
+file's git history was purged, which is why SHAs from before 22 aug do not resolve.
+
+Verify:
 
 ```bash
-sed -n '1246p;1531p' docs/upstream/PHASE-1-SCOUT.md
+sed -n '1246p;1531p' docs/upstream/PHASE-1-SCOUT.md          # synthetic records
+git log --all -S "the user is asking about the project" --oneline   # empty
 ```
 
-Line 1531 is a real assistant `thinking` block from `~/.pi` with its real message id, `parentId` and
-timestamp. Line 1246 is a real truncated `<user_query>` from `~/.cursor` with a real workspace path
-shape. Section **C** (from line 644) is where the samples live.
-
-**`scripts/check-privacy.py` passes this file and always has**, because its own header says *"no
-regex recognises prose."* It catches ids, titles, home paths and known project names; it cannot
-catch a sentence. This is the failure mode the guard documents, in the file the guard was pointed at.
-
-It is a handful of sentences and two paths, no credentials — but the repository's stated subject is
-other people's transcripts and it has been public since phase 1. The likely repair is to replace the
-sample records with synthetic ones of the same shape (the guard's own *"replace the content, keep
-the structure"*), because the file is 1,582 lines of otherwise useful format research that should
-not simply be deleted.
+**Keep this entry.** Two things in it are permanent lessons, and both are in the rules list below:
+`scripts/check-privacy.py` passed this file for six phases because — as its own header says — *"no
+regex recognises prose"*, and **an item marked "assigned" in a handoff is not an item that was
+done.**
 
 ### 6 — verification gaps
 

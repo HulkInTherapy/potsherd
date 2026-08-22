@@ -71,7 +71,8 @@ Protect it above features.
 │   │                              headed "unmeasured")
 │   └── phases/phase-0…7-*.md     one file per phase. phase-8 does not exist yet.
 ├── potsherd/         ← THE REPO (public, MIT, github.com/HulkInTherapy/potsherd)
-│   │                   HEAD = tag v1.0.0 = 5ae62a0, origin/main in sync
+│   │                   tag v1.0.0 = 548b5b5. History was rewritten after the tag to
+│   │                   purge a prose leak, so older SHAs do not resolve.
 │   ├── FINAL-REPORT.md           what exists, how to check each shareable moment in five
 │   │                             minutes, every measurement with its target, §6 = open items
 │   ├── CHANGELOG.md              one entry per tag
@@ -173,8 +174,8 @@ Non-negotiables, all learned the hard way:
   a personal tweet.** Every committed artefact comes from the synthetic demo corpus. Real-corpus
   runs are cited by their kept `--potsherd-dir` and their numbers; their prose stays out.
   `scripts/check-privacy.py` enforces this and runs first in CI — **run it after every change** —
-  **and read its header's caveats as open items.** It says "no regex recognises prose", and there is
-  a live prose leak it cannot see (`08` §5).
+  **and read its header's caveats as open items.** It says "no regex recognises prose", and a
+  prose leak it could not see lived in this repo for six phases (`08` §5, now closed).
 - When the plan is wrong about a fact, **fix the plan file and log it in `04-DECISIONS.md`.** That
   has happened 138 times and is expected.
 
@@ -202,17 +203,15 @@ leaves a machine-readable record of every tool the model chose.
 **This is not a task list. It is what is open**, in the order a reader of `08-STATE-OF-PLAY.md`
 would rank it. The master decides what, if any, of it is worth a phase.
 
-1. **The prose leak in `docs/upstream/PHASE-1-SCOUT.md`** (`08` §5). Public since phase 1, every
-   automated guard passes it, and the previous handoff said "assigned" when it had not been done.
-2. **The fusion gate** (`08` §1). Red for four phases. Closing it honestly means either a better
+1. **The fusion gate** (`08` §1). Red for four phases. Closing it honestly means either a better
    fusion or an argued change to what `06` measures — both are real work and both are judgement
    calls above an orchestrator's pay grade.
-3. **The three adapters that have never met real data**, the codex plugin, and four of `setup`'s
+2. **The three adapters that have never met real data**, the codex plugin, and four of `setup`'s
    seven clients. Every one needs a machine that has the thing installed.
-4. **Publication** — npm, the marketplace, the upstream PR. A person's job by `00-README.md`.
-5. **The eleven evidence pastes still pinned in the privacy guard.** The honest repair is re-running
+3. **Publication** — npm, the marketplace, the upstream PR. A person's job by `00-README.md`.
+4. **The eleven evidence pastes still pinned in the privacy guard.** The honest repair is re-running
    the evidence against the demo corpus, not editing the paste.
-6. **A real macOS user account**, and `npx potsherd audit` from the registry once it exists.
+5. **A real macOS user account**, and `npx potsherd audit` from the registry once it exists.
 
 ## 8. what the three sessions before you would say, one line each
 
