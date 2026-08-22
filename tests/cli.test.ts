@@ -350,6 +350,44 @@ describe('potsherd cli', () => {
 
     // the sentence that used to be false must not have survived anywhere
     expect(out).not.toMatch(/\bno network[,.]/);
+
+    // D5, phase 9's verifier: the receipt's paragraph about the model download
+    // described the PLUGIN, and described it wrongly — it ended "so its
+    // SessionStart hook warns you first" after phase 8 deleted that warning
+    // from both hooks, about a download session-end.sh cannot cause because it
+    // never passes `--embed`. Nothing pinned it, so it was published verbatim
+    // in the README too.
+    //
+    // The premise is established from the hooks themselves rather than from
+    // this file's memory of them: a claim about another artefact is checked
+    // against that artefact.
+    const startHook = fs.readFileSync(
+      path.join(repo, 'plugins', 'claude-code', 'hooks', 'session-start.sh'),
+      'utf8',
+    );
+    const endHook = fs.readFileSync(
+      path.join(repo, 'plugins', 'claude-code', 'hooks', 'session-end.sh'),
+      'utf8',
+    );
+    const spoken = (sh: string): string =>
+      sh
+        .split('\n')
+        .filter((l) => !l.trim().startsWith('#'))
+        .join('\n');
+
+    // What the hooks actually do, asserted first.
+    expect(spoken(startHook), 'SessionStart announces a download again').not.toMatch(
+      /downloads? one|no embedding model/i,
+    );
+    expect(endHook).toMatch(/index --session .*--quiet/);
+    expect(endHook, 'SessionEnd now embeds, so the receipt is wrong again').not.toContain(
+      '--embed',
+    );
+
+    // ...and only then, that the receipt does not claim otherwise.
+    expect(out, 'the receipt still promises a SessionStart warning').not.toMatch(
+      /SessionStart hook warns/i,
+    );
   });
 
   /**

@@ -1,4 +1,4 @@
-potsherd find "redacted aws" · 2 sessions · bm25 · 11ms
+potsherd find "redacted aws" · 2 sessions · bm25 · 12ms
 
   Add a timeout to mock server                                     claude · live
   report-builder · 16 aug · 3 exchanges · feat/retry-budget               0.0098

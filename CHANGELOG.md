@@ -1,7 +1,13 @@
 # changelog
 
-Every entry is a tag. Numbers in this file were produced by a command whose
-output is in the matching `phases/phase-N/HANDOFF.md`.
+Every entry is a tag. **Every number in this file was produced by a command
+whose output is recorded under `phases/phase-N/`** — in that phase's
+`HANDOFF.md`, its `VERIFICATION.md`, or a worker's evidence file beside them.
+
+The rule used to name `HANDOFF.md` alone, which was too narrow in a way that
+mattered: a figure measured by a phase's own verifier had nowhere legitimate to
+be cited from, and one was rounded and restated instead of quoted. If a number
+here cannot be traced to a file under `phases/`, it does not belong here.
 
 ## v1.1.0 — 22 August 2026 · hardening before the public moment
 
@@ -37,8 +43,10 @@ checks this repository stopped being a list of leaks it had already seen.**
   search is an explicit `potsherd index --embed`, offered in one line at the
   end of every run. A fresh-`$HOME` walk of `audit → rescue → index → ls →
   find`, with the network denied by sandbox and proven denied, completes in
-  **14.5 s** on an idle machine against a 30 s target. Under load the same walk
-  has measured 24.6–65.0 s; the target is met, and that is the honest range.
+  **12.3 s** on an idle machine against a 30 s target — the median of three runs
+  in `phases/phase-8/W5-T8E-evidence.txt`; an independent re-run recorded in
+  `phases/phase-8/VERIFICATION.md` measured 14.5 s. Under load the same walk has
+  measured 24.6–65.0 s; the target is met, and that is the honest range.
 - `card --limit N` errored without `--all`. It is a scope now: `--limit` implies
   `--all`, newest first, and the dry-run's quote and the run agree.
 
@@ -66,7 +74,7 @@ checks this repository stopped being a list of leaks it had already seen.**
 - **`audit` discloses what the deleted sessions contained.** No count changed:
   330 ever, 299 deleted, 2,971 prompts lost are all still exactly what they
   were. But `history.jsonl` records no field distinguishing a session from a
-  resume-picker invocation, and **140 of the 299 recorded nothing but a slash
+  resume-picker invocation, and **143 of the 299 recorded nothing but a slash
   command or a stub** — so a conditional row says so, and **the standalone
   python that `audit --verify` prints recomputes that number too**.
 - **8.8** `stack` states its claim asymmetry in a legend above the table rather

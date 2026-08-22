@@ -10,6 +10,12 @@ here, **stop and report — do not improvise a fix against a live registry.**
 
 The only step that needs a person is **2**, and only if `npm whoami` fails.
 
+**It does not currently fail.** So an agent running this file top to bottom
+publishes to a public registry with no human in the loop. That is the intended
+shape after meghavi re-scoped rule 7 on 22 August 2026, and it is written here
+plainly rather than left implicit, because it is the most consequential sentence
+in the document.
+
 ---
 
 ## before you start
@@ -116,12 +122,24 @@ _actual:_
 
 ## 5. the GitHub release
 
+**`npm publish` does not leave a tarball on disk, and no earlier step makes
+one** — so build it here, before the release that attaches it. Verified: after
+`npm publish --dry-run`, `ls *.tgz` finds nothing.
+
 ```bash
+( cd packages/cli && npm pack )          # -> packages/cli/potsherd-1.1.0.tgz
+ls -l packages/cli/potsherd-1.1.0.tgz    # expect ~957 kB
+
 gh release create v1.1.0 \
   --title "potsherd v1.1.0" \
   --notes-file docs/release/RELEASE-NOTES-v1.1.0.md \
   packages/cli/potsherd-1.1.0.tgz
 ```
+
+`npm pack` runs `prepack`, which copies the root README over
+`packages/cli/README.md` — the file npm renders. That is deliberate: the copy is
+gitignored and was hand-made once, went a whole release stale, and announced
+`Status: v1.0.0` on the page for `1.1.0`.
 
 **Expected:** a release URL. Then:
 
@@ -185,9 +203,18 @@ a different opening and this step stops until it has one.
 gh pr view 128 --repo obra/episodic-memory --json state,merged,comments
 ```
 
-Then, with the body taken verbatim from `docs/release/upstream.md`:
+Then extract the body **from `upstream.md` itself** rather than retyping it —
+nothing else writes `/tmp/128-comment.md`, and a comment going into somebody
+else's repository is not a thing to improvise:
 
 ```bash
+python3 - <<'PY' > /tmp/128-comment.md
+import io, re
+doc = io.open('docs/release/upstream.md', encoding='utf-8').read()
+body = re.search(r'```markdown\n(.*?)\n```', doc, re.S).group(1)
+print(body)
+PY
+cat /tmp/128-comment.md          # READ IT. This is the last chance.
 gh pr comment 128 --repo obra/episodic-memory --body-file /tmp/128-comment.md
 ```
 

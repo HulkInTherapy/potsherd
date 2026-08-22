@@ -23232,7 +23232,7 @@ async function runDoctor(o) {
     for (const line of network.detail) note(line, 4);
     card2.blank().text("no other network, except the one-off embedding-model download,").text("and only when you ask for it.");
     for (const line of format_exports.wrap(
-      "A plain `potsherd index` fetches nothing: text search is the default, it needs no model, and it opens no socket at all. `potsherd index --embed` is what asks for the model, and it names the download before it starts \u2014 but `--quiet` and `--json` suppress that line, and `--quiet` is how the plugin's SessionEnd hook runs it, so its SessionStart hook warns you first.",
+      "A plain `potsherd index` fetches nothing: text search is the default, it needs no model, and it opens no socket at all. `potsherd index --embed` is what asks for the model, and it names the download before it starts \u2014 but `--quiet` and `--json` suppress that line. The plugin's SessionEnd hook runs `index --quiet` without `--embed`, so it downloads nothing at all.",
       Math.max(20, t2.width - 3)
     )) {
       card2.raw(`  ${line}`);

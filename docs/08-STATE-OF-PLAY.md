@@ -14,7 +14,7 @@ older than that in an older document will not resolve — `git log --oneline` is
 `upstream-v*`: they are obra/episodic-memory's, pulled in with the fork, and were never on origin.
 **tests:** 1,532 green, 38 files · CI green on macos + ubuntu × node 22 + 24, **and again under
 `POTSHERD_SQLITE=node`** — the whole suite on Node's own SQLite
-**privacy guard:** `python3 scripts/check-privacy.py` — 506 files swept, **0 pinned** (34 at the
+**privacy guard:** `python3 scripts/check-privacy.py` — 510 files swept, **0 pinned** (34 at the
 start of phase 7, 14 at the start of phase 8), ratchet only shrinks. 25 probes in `--selftest`,
 including the transcript-record shape the `PHASE-1-SCOUT` leak had. Its id rule is an **inventory**
 rather than a blocklist: 177 id-shaped tokens, **148 accounted for against a source the repo can

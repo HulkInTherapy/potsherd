@@ -13,8 +13,11 @@ One generic fix came out of the port and is written up as a pull request in
 [`docs/upstream/PR-sidechain-flag.md`](../upstream/PR-sidechain-flag.md):
 upstream hard-codes `AND e.is_sidechain = 0` into both of its search queries, so
 no subagent transcript can ever be a result. On the reference machine that is
-**197 transcripts against 31 live sessions** — six files of delegated work for
-every session a person remembers having.
+**197 sidechains of 227 transcripts, against 30 live sessions** — better than six
+files of delegated work for every session a person remembers having. (This
+sentence said `31` until phase 9's verifier caught it: `31` is the demo corpus's
+figure, in the very document that boasts of having caught the same substitution
+once already.)
 
 ## before anybody submits it
 

@@ -1,5 +1,20 @@
 # tag day, in order
 
+**SUPERSEDED for v1.1.0 and later by [`GO-LIVE.md`](GO-LIVE.md), which is the
+runbook that is actually executed.**
+
+This file is kept because steps 1–4 — version, build, verify, tarball — are still
+exactly right and are what `GO-LIVE.md` assumes has already been done. **Its two
+`HUMAN` steps are not**: meghavi re-scoped rule 7 on 22 August 2026 and the
+orchestrator publishes to npm and creates the GitHub release itself. The
+marketplace listing is neither an agent's job nor a `HUMAN` step in the sense
+meant here — it is an authenticated form on a person's account, and
+[`marketplace.md`](marketplace.md) says why.
+
+Phase 9's verifier found this file contradicting `GO-LIVE.md` about who
+publishes. Two runbooks in one directory disagreeing on the irreversible step is
+worse than either of them being wrong on its own.
+
 Every step is a command. Nothing here is a judgement call except the two marked
 **HUMAN**.
 

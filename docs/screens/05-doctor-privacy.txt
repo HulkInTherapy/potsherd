@@ -1,4 +1,4 @@
-potsherd doctor --privacy · 22 aug 2026
+potsherd doctor --privacy · 23 aug 2026
 
   reads (never modified):
     ~/.claude/projects
@@ -96,6 +96,6 @@ potsherd doctor --privacy · 22 aug 2026
   A plain `potsherd index` fetches nothing: text search is the default, it
   needs no model, and it opens no socket at all. `potsherd index --embed` is
   what asks for the model, and it names the download before it starts — but
-  `--quiet` and `--json` suppress that line, and `--quiet` is how the plugin's
-  SessionEnd hook runs it, so its SessionStart hook warns you first.
+  `--quiet` and `--json` suppress that line. The plugin's SessionEnd hook runs
+  `index --quiet` without `--embed`, so it downloads nothing at all.
   no telemetry. no account. potsherd stores no credential of its own.

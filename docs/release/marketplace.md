@@ -63,7 +63,8 @@ The plugin carries:
 
 - `skills/potsherd/SKILL.md` — `/potsherd <verb>`, user-invocable
 - `skills/remembering-sessions/SKILL.md` — model-invocable, dispatches the agent
-- `agents/session-archaeologist.md` — haiku-class, five MCP tools and `Read`
+- `agents/session-archaeologist.md` — haiku-class, **four** MCP tools and `Read`
+  (`find`, `read`, `ls`, `ask`; not `graft` or `tag`). The server itself serves six
 - `hooks/hooks.json` — `SessionStart` rescue, `SessionEnd` index
 - `.mcp.json` — the stdio server, six tools
 - **`dist/potsherd.js` and `dist/mcp.js`, committed** — an install is a git

@@ -39,9 +39,11 @@ correction.** It is also the phase that found the most things nobody had describ
 | **8.8** README caption | the disclaimer was two paragraphs below the block | above it, where a screenshot crop cannot lose it |
 | **T8.H** *(not in the plan)* | the id rule was a blocklist | an **inventory**; real ids **25 → 11** |
 
-**Gates at `dbee0d2`:** `pnpm test` **1,530 / 69 files**, and the same under `POTSHERD_SQLITE=node`.
+**Gates at `dbee0d2`:** `pnpm test` **1,532 / 38 files**, and the same under `POTSHERD_SQLITE=node`.
+*(This line read `1,530 / 69 files` until phase 9's verifier re-ran it — corrected against a
+measurement rather than against memory.)*
 `check-privacy.py` **506 files, 0 pins, 25 probes, exit 0**. `ask-selftest` PASS on 16 cases.
-`pnpm evals` **exit 0**. `vendor-plugin` no diff. 17 screens. Fixtures byte-identical. **22 verbs.**
+`pnpm evals` **exit 0**. `vendor-plugin` no diff. 17 screens. Fixtures byte-identical. **21 verbs** (plus `help`).
 
 ## 2. the two P0s that were not in the phase file
 

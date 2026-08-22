@@ -55,7 +55,9 @@ what the first five minutes feel like:
 - **`index` is offline by default.** It used to fetch a 32 MB model and take
   6m 44s. It is 9.6 s now; semantic search is an explicit `index --embed`. A
   fresh-`$HOME` walk of `audit → rescue → index → ls → find` completes in
-  **14.5 s** with the network denied.
+  **12.3 s** on an idle machine with the network denied — median of three runs;
+  an independent re-run of the same walk measured 14.5 s, and under load it has
+  measured 24.6–65.0 s. The target was 30 s.
 - **Recovered sessions have readable names.** 165 of 299 used to display as
   `/resume`, `/model` or `clear`. Zero do.
 - **`potsherd ignore <project>`** keeps a repository out of `ls`, `find`, `ask`
@@ -69,9 +71,13 @@ what the first five minutes feel like:
 **The claim is not "a search tool". The claim is that potsherd's output can be
 checked.**
 
-- Every `ask` answer cites the exchanges that support it, and every quote is
-  verified against the live transcript bytes at the sequence number it claims.
-  A sentence whose citation does not resolve is dropped in code, not by a model.
+- Every `ask` answer cites the exchanges that support it, and **every quote is
+  re-checked, in code, as an exact substring of the stored exchange at the
+  sequence number it claims** — not by asking a model whether it looks right. A
+  sentence whose citation does not resolve is dropped before you see it.
+  The check is against potsherd's own archived, redacted copy of the transcript,
+  which for the 91% of sessions the harness has already deleted is the only copy
+  there is.
 - **Every number this project prints is measured or labelled `est.`**
 - `potsherd audit --verify` prints **standalone Python that recomputes its own
   headline numbers**, so nobody has to trust potsherd to check potsherd. It
@@ -92,7 +98,7 @@ revision is recorded in [NOTICE](../../NOTICE).
 ```
 1,532 tests, 38 files · macOS and Ubuntu × Node 22 and 24
 the same suite again on Node's own SQLite (POTSHERD_SQLITE=node)
-privacy guard: 506 files swept, 0 pinned violations, 25 probes
+privacy guard: 510 files swept, 0 pinned violations, 25 probes, 29 unaccounted ids (ceiling 29)
 evals: recall@5 hybrid 22/25, recall@1 hybrid 11/25 — the gate passes and can still fail
 ```
 

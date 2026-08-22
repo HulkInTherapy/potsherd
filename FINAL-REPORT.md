@@ -1,6 +1,6 @@
 # potsherd — final report
 
-**v1.0.0, 22 August 2026.** Eight phases, from an empty directory to a tagged
+**v1.1.0, 23 August 2026.** Nine phases, from an empty directory to a published
 release. This file is the one place that says what exists, how to check each
 claim in it yourself in under five minutes, and everything that is still open.
 
@@ -81,10 +81,12 @@ From a tarball, for a global install (**17 MB, ~1.6 s**):
 
 ```bash
 cd packages/cli && npm pack
-npm install -g ./potsherd-1.0.0.tgz
+npm install -g ./potsherd-1.1.0.tgz
 ```
 
-`npm view potsherd` is a 404: publishing is a person's job, and the commands are
+`npm view potsherd` is a 404 until phase 9's runbook runs. Rule 7 was re-scoped
+on 22 August 2026 and the orchestrator publishes; `npm login` is the one act
+that is still a person's. The commands are
 in [`docs/release/npm.md`](docs/release/npm.md).
 
 ## 4. how to check each shareable moment yourself, in five minutes
@@ -149,7 +151,7 @@ POTSHERD_SQLITE=node pnpm test                  # the same, on Node's own sqlite
 | plugin `SessionStart` | 6.5–10.5 ms hook time, 128–146 ms total | < 1 s | met |
 | fresh Debian container, node 24, clone only | audit 122 ms, index 397 ms | < 60 s to first audit | met |
 | fresh Debian container, node 22, clone only | audit 146 ms, index 420 ms | < 60 s | met |
-| fresh macOS `$HOME`, every override cleared | audit 183 ms, whole `audit→find` walk 1.86 s | < 60 s | met |
+| fresh macOS `$HOME`, every override cleared | audit 183 ms, whole `audit→find` walk 1.86 s | — | **not a target.** That `$HOME` holds a synthetic demo corpus and this row exists to show the walk is *offline* — no model directory is created — not to clear a time budget. A walk over a small corpus cannot miss 60 s, so scoring it `met` was a gate that could not fail. The timed walk that does carry a target is the reference-scale one: **12.3 s median against 30 s** |
 | npm tarball into an empty project | 17 MB installed, `audit` runs | — | met |
 | tarball install | 17 MB; 1.6 s on one run and 2.9 s on another | — | recorded (was 764 MB) |
 
@@ -183,7 +185,7 @@ the number look better.
 
 | # | item |
 |---|---|
-| 9 | `npm publish` and the marketplace submission — a person's job; commands in `docs/release/` |
+| 9 | version 1.1.0, the changelog, three fresh-machine proofs, `npm publish`, the GitHub release and one upstream comment — run from `docs/release/GO-LIVE.md`. **The marketplace listing is an authenticated form on a person's account and is not submitted by the agent** |
 | 10 | the upstream PR to obra/episodic-memory — prepared, unsubmitted, and **`#128` is already open and overlaps it** |
 | 11 | **closed in phase 8 (T8.A).** All fourteen were phase-0..4 evidence and prose across nine files; **none was a forbidden-string list** — those three are `ALLOW` entries, not `DEBT`, and an earlier version of this row said otherwise, which is where phase 8's own acceptance criterion got its wrong "3 pins". Five pasted command outputs were re-run against the demo corpus; six prose and code records had the identity substituted with a visible note. Every one was confirmed by the guard as *"pinned at N, now clean"* before its line was deleted. `DEBT` is empty |
 | 12 | `evals/ask-selftest.ts` has no case for `quote-empty` or `answer-missing` |

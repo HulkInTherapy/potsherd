@@ -344,15 +344,23 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       // 8.6 flipped the default, so the sentence that used to end '`--no-embed`
       // skips the download entirely' now describes an escape hatch from a thing
       // that no longer happens by default. It says what does happen instead.
+      //
+      // And phase 9's verifier caught the half of that rewrite which was still
+      // false: it ended '...so its SessionStart hook warns you first', which
+      // phase 8 had DELETED from both hooks in the same release, describing a
+      // download session-end.sh cannot cause because it never passes --embed.
+      // Two false halves in one sentence, in the receipt this project nominates
+      // as its trust anchor, four lines under a comment warning against exactly
+      // that. tests/cli.test.ts pins it against the hooks themselves now.
       .text('no other network, except the one-off embedding-model download,')
       .text('and only when you ask for it.');
     for (const line of fmt.wrap(
       'A plain `potsherd index` fetches nothing: text search is the ' +
         'default, it needs no model, and it opens no socket at all. `potsherd index ' +
         '--embed` is what asks for the model, and it names the download before it ' +
-        "starts — but `--quiet` and `--json` suppress that line, and `--quiet` is " +
-        "how the plugin's SessionEnd hook runs it, so its SessionStart hook warns " +
-        'you first.',
+        "starts — but `--quiet` and `--json` suppress that line. The plugin's " +
+        'SessionEnd hook runs `index --quiet` without `--embed`, so it downloads ' +
+        'nothing at all.',
       Math.max(20, t.width - 3),
     )) {
       card.raw(`  ${line}`);
