@@ -32583,6 +32583,11 @@ var ASK_MAX_USD = 0.5;
 var ASK_CONCURRENCY = 6;
 var ASK_SESSION_CHARS = 8e3;
 var ASK_TOP_EXCHANGES = 4;
+var ASK_CHEAP_K = 3;
+var ASK_CHEAP_MODEL = CARD_MODEL;
+var ASK_CHEAP_TOP_EXCHANGES = 2;
+var ASK_CHEAP_SESSION_CHARS = 3e3;
+var ASK_CARD_CHARS = 900;
 var ASK_SCAN = 50;
 var ANSWER_MAX_WORDS = 150;
 var STRICT_MIN_EVIDENCE = 2;
@@ -32850,6 +32855,7 @@ function excerptText(units) {
   return units.map((u) => renderUnit(u)).join("\n\n");
 }
 var READER_SYSTEM = "You are given one session's excerpts with seq numbers. Answer the question using only quotes from the excerpts. Output json {found: bool, quotes:[{seq, ts, text}], answer_fragment}. If the excerpts do not address the question, found=false and nothing else.\n\nSet found=true whenever any excerpt bears on the question at all \u2014 a partial answer, a related decision, the question being raised and left open, or evidence that the question's premise is wrong. Quote what is there and say what is missing in answer_fragment; do not withhold a real quote because it is not the whole answer. found=false is for excerpts that are about a different subject.\n\nEvery quote must be copied character for character from an excerpt and must carry the seq number of the excerpt it was copied from. Do not paraphrase inside a quote. Do not quote from memory. A quote that does not appear in the excerpts is discarded by code before anyone reads it, and the claim it was meant to support is discarded with it. Two to four short quotes is the right size for an answer.";
+var READER_CARD_NOTE = "A CARD for this session is included above the excerpts. It is a previously written summary of the whole session and it is CONTEXT ONLY: use it to understand what the session was about and which exchange to look in. Never quote from the card. Every quote must come from the numbered excerpts, which are the only citable text. If the card names a decision whose exchange is not in the excerpts, say so in answer_fragment rather than quoting the card.";
 var READER_GHOST_NOTE = "These excerpts are PROMPTS ONLY. This session was deleted by Claude Code's 30-day sweep and rebuilt from history; the assistant's replies are gone and are not recoverable. You may say what was asked. You may not say, or imply, what was answered or what was done.";
 var SYNTH_SYSTEM = "You are given what several readers found in separate sessions of one person's coding-agent history, each quote carrying the session it came from and its seq number.\n\nWrite an ANSWER of at most " + ANSWER_MAX_WORDS + " words, as a list of sentences. Build an EVIDENCE list first: each entry is one verbatim quote copied from a reader, with the session_id and seq that reader gave it. Then write the sentences, and give every sentence the evidence numbers that support it.\n\nRules that are enforced by code after you reply, not by trust:\n  - a quote is checked against the exchange it names. A quote that was paraphrased, shortened in the middle, or attributed to the wrong seq is deleted.\n  - a sentence whose evidence was all deleted is itself deleted and never shown.\n  - so: assert nothing you cannot quote, and quote nothing you did not receive.\nPrefer fewer, well-supported sentences over a complete-sounding answer. If the readers do not settle the question, say so in one sentence and cite what they did find. Where the only evidence is from a ghost session (prompts only), say that the assistant's side is not recoverable rather than implying it is known.";
 var SYNTH_SCHEMA = '{"evidence":[{"n":1,"session_id":"<the session_id given with the quote>","seq":<number>,"quote":"<verbatim>"}],"answer":[{"text":"<one sentence>","cites":[1,2]}]}';
@@ -32885,7 +32891,8 @@ async function ask(db, question, o = {}) {
   const started = Date.now();
   const q = question.trim();
   const strict = Boolean(o.strict);
-  const k = Math.max(1, Math.floor(o.k ?? ASK_K));
+  const cheap = Boolean(o.cheap);
+  const k = Math.max(1, Math.floor(o.k ?? (cheap ? ASK_CHEAP_K : ASK_K)));
   const budget = o.budget ?? new Budget({ maxUsd: o.maxUsd ?? ASK_MAX_USD });
   const maxUsd = o.maxUsd ?? ASK_MAX_USD;
   const meter = new SpendMeter();
@@ -32896,7 +32903,7 @@ async function ask(db, question, o = {}) {
     ...o.root !== void 0 ? { root: o.root } : {},
     vectors: o.vectors ?? true
   });
-  const { targets, candidates } = shortlist(db, found.sessions, k);
+  const { targets, candidates } = shortlist(db, found.sessions, k, cheap);
   const matching2 = candidates;
   o.onProgress?.({
     step: "shortlist",
@@ -32920,6 +32927,7 @@ async function ask(db, question, o = {}) {
     strict,
     spend: meter.total,
     estimated: meter.total.estimatedInputCalls > 0,
+    cheap,
     ms: Date.now() - started,
     ...extra
   });
@@ -32957,12 +32965,14 @@ async function ask(db, question, o = {}) {
         };
       } finally {
         done += 1;
+        const report = readers[i];
         o.onProgress?.({
           step: "read",
           done,
           total: targets.length,
           spend: meter.total,
-          detail: readers[i]?.found ? "found" : "nothing"
+          detail: report?.error ? "failed" : report?.found ? "found" : "nothing",
+          ...report ? { reader: report } : {}
         });
       }
     })));
@@ -32975,7 +32985,7 @@ async function ask(db, question, o = {}) {
       return base({ refused: true, refusal: "budget" });
     }
     o.onProgress?.({ step: "synthesize", done: 0, total: 1, spend: meter.total });
-    const ownSynth = o.llm ?? openLlm(o.model ?? ASK_MODEL, budget, o);
+    const ownSynth = o.llm ?? openLlm(o.model ?? (cheap ? ASK_CHEAP_MODEL : ASK_MODEL), budget, o);
     meter.track(ownSynth);
     let proposed;
     try {
@@ -33021,6 +33031,7 @@ async function ask(db, question, o = {}) {
       strict,
       spend: meter.total,
       estimated: meter.total.estimatedInputCalls > 0,
+      cheap,
       ms: Date.now() - started
     };
   } finally {
@@ -33035,7 +33046,7 @@ function openLlm(model, budget, o) {
 function message(err) {
   return err instanceof Error ? err.message : String(err);
 }
-function shortlist(db, sessions, k) {
+function shortlist(db, sessions, k, cheap = false) {
   const order = [];
   const seqs = /* @__PURE__ */ new Map();
   const scores = /* @__PURE__ */ new Map();
@@ -33061,20 +33072,80 @@ function shortlist(db, sessions, k) {
     order.push(...inBlock);
   }
   const targets = [];
+  const cards = cheap ? cardBriefs(db, order.slice(0, Math.max(k * 3, k))) : /* @__PURE__ */ new Map();
   for (const sessionId of order) {
     if (targets.length >= k)
       break;
-    const t = loadTarget(db, sessionId, seqs.get(sessionId) ?? [], scores.get(sessionId) ?? 0);
+    const t = loadTarget(db, sessionId, seqs.get(sessionId) ?? [], scores.get(sessionId) ?? 0, cards.get(sessionId));
     if (t && t.units.length > 0)
       targets.push(t);
   }
   return { targets, candidates: order.length };
 }
-function loadTarget(db, sessionId, seqs, score) {
+function cardBriefs(db, sessionIds) {
+  const out = /* @__PURE__ */ new Map();
+  if (sessionIds.length === 0)
+    return out;
+  try {
+    const rows = db.prepare(`SELECT session_id, title, summary, decisions, outcome FROM cards
+          WHERE session_id IN (${sessionIds.map(() => "?").join(",")})`).all(...sessionIds);
+    for (const r of rows) {
+      const brief = cardBrief(r);
+      if (brief)
+        out.set(r.session_id, brief);
+    }
+  } catch {
+    return out;
+  }
+  return out;
+}
+function cardBrief(r) {
+  const parts = [];
+  if (r.title?.trim())
+    parts.push(`title: ${r.title.trim()}`);
+  if (r.summary?.trim())
+    parts.push(`summary: ${r.summary.trim()}`);
+  const decisions = parseDecisions(r.decisions);
+  if (decisions.length > 0) {
+    parts.push("decisions:\n" + decisions.slice(0, 4).map((d) => {
+      const seqs = d.evidence_seq.length ? ` [seq ${d.evidence_seq.join(", ")}]` : "";
+      return `  - ${d.what}${d.why ? ` \u2014 ${d.why}` : ""}${seqs}`;
+    }).join("\n"));
+  }
+  if (r.outcome?.trim())
+    parts.push(`outcome: ${r.outcome.trim()}`);
+  const text = parts.join("\n").trim();
+  if (!text)
+    return "";
+  return text.length > ASK_CARD_CHARS ? `${text.slice(0, ASK_CARD_CHARS).trimEnd()}\u2026` : text;
+}
+function parseDecisions(raw) {
+  if (!raw)
+    return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed))
+      return [];
+    return parsed.filter((x) => typeof x === "object" && x !== null).map((x) => ({
+      what: typeof x["what"] === "string" ? x["what"] : "",
+      why: typeof x["why"] === "string" ? x["why"] : "",
+      evidence_seq: Array.isArray(x["evidence_seq"]) ? x["evidence_seq"].map(Number).filter(Number.isInteger) : []
+    })).filter((x) => x.what.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+function loadTarget(db, sessionId, seqs, score, card) {
   const transcript = loadSessionTranscript(db, sessionId) ?? loadGhostTranscript(db, sessionId);
   if (!transcript)
     return null;
-  const units = excerptUnits(transcript, seqs);
+  const full = excerptUnits(transcript, seqs);
+  const narrow = card ? excerptUnits(transcript, seqs, {
+    top: ASK_CHEAP_TOP_EXCHANGES,
+    maxChars: ASK_CHEAP_SESSION_CHARS
+  }) : null;
+  const worthIt = narrow !== null && excerptText(narrow).length + card.length < excerptText(full).length;
+  const units = worthIt ? narrow : full;
   return {
     sessionId,
     id8: idTag(sessionId),
@@ -33083,7 +33154,8 @@ function loadTarget(db, sessionId, seqs, score) {
     isSidechain: transcript.isSidechain,
     isGhost: transcript.kind === "ghost",
     units,
-    score
+    score,
+    ...worthIt ? { card } : {}
   };
 }
 function readerInput(question, t) {
@@ -33096,7 +33168,8 @@ function readerInput(question, t) {
     isSidechain: t.isSidechain,
     isGhost: t.isGhost,
     excerpts: excerptText(t.units),
-    seqs: t.units.map((u) => u.seq)
+    seqs: t.units.map((u) => u.seq),
+    ...t.card ? { card: t.card } : {}
   };
 }
 function sdkReader(llm, signal) {
@@ -33104,15 +33177,20 @@ function sdkReader(llm, signal) {
     const prompt = `Question: ${input.question}
 
 Session ${input.id8} (${input.project}, ${input.harness}${input.isSidechain ? ", subagent transcript" : ""}${input.isGhost ? ", GHOST \u2014 prompts only" : ""}).
+` + // The card goes above the excerpts and is labelled as not citable, so
+    // the last thing the model reads before the question's evidence is the
+    // evidence itself.
+    (input.card ? `
+Card (context only, NOT citable):
+${input.card}
+` : "") + `
 Citable seq numbers: ${input.seqs.join(", ")}
 
 Excerpts:
 ${input.excerpts}`;
     const r = await llm.json({
       prompt,
-      system: input.isGhost ? `${READER_SYSTEM}
-
-${READER_GHOST_NOTE}` : READER_SYSTEM,
+      system: readerSystem(input),
       schema: READER_SCHEMA,
       label: `reader ${input.id8}`,
       fallback: { found: false, quotes: [], answer_fragment: "" },
@@ -33121,6 +33199,14 @@ ${READER_GHOST_NOTE}` : READER_SYSTEM,
     });
     return r.value;
   };
+}
+function readerSystem(input) {
+  const parts = [READER_SYSTEM];
+  if (input.isGhost)
+    parts.push(READER_GHOST_NOTE);
+  if (input.card)
+    parts.push(READER_CARD_NOTE);
+  return parts.join("\n\n");
 }
 function validateReader(v) {
   if (typeof v !== "object" || v === null)
@@ -33204,7 +33290,7 @@ async function tryOpenThreads(db, targets, llm, budget, o) {
       return [];
     const confirmed = await confirmOpenThreads(cands, {
       ...llm ? { llm } : {},
-      ...o.model ? { model: o.model } : { model: ASK_MODEL },
+      ...o.model ? { model: o.model } : { model: o.cheap ? ASK_CHEAP_MODEL : ASK_MODEL },
       budget,
       ...o.signal ? { signal: o.signal } : {}
     });

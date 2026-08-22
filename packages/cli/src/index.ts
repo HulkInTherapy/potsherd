@@ -1,6 +1,6 @@
 import process from 'node:process';
 import { Command, Option } from 'commander';
-import { ASK_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
+import { ASK_K, ASK_CHEAP_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
 import { closeAgentMemoryClients } from '@potsherd/bridges';
 import { fail, print, printJson, themeFrom, type GlobalOptions } from './output.js';
 import { runAudit } from './commands/audit.js';
@@ -312,7 +312,19 @@ filters, one example each — they compose, and all of them are AND:
         .argument('<question>', 'what you want to know'),
     )
       .option('--file <path>', 'only sessions that touched a path containing this')
-      .addOption(new Option('--k <n>', 'sessions to read').argParser(Number).default(ASK_K))
+      // NOT `.default(ASK_K)`. With a commander default, `opts['k']` is 6 on
+      // every run whether or not the user typed --k, so runAsk cannot tell
+      // 'unset' from 'six' and --cheap silently read six sessions. The
+      // default lives in runAsk now, and an explicit --k still beats both.
+      .addOption(
+        new Option('--k <n>', `sessions to read (default ${ASK_K}; ${ASK_CHEAP_K} with --cheap)`).argParser(
+          Number,
+        ),
+      )
+      .option(
+        '--cheap',
+        'k 3, a haiku-class synthesizer, and cards in place of long slices — about half the cost, not faster, and it can miss',
+      )
       .option('--strict', 'refuse rather than answer when fewer than 2 quotes survive')
       .addOption(
         new Option('--max-usd <n>', 'stop before crossing this')
@@ -348,6 +360,7 @@ example:
   potsherd ask "what is the capital of france" --strict     # refuses, exit 2
   potsherd ask "the pooler decision" --json | jq '.evidence | length'
   potsherd ask "why did we drop the queue?" --k 10 --max-usd 0.25
+  potsherd ask "the pooler decision" --cheap                  # 3 sessions, cards first
 
 every sentence in ANSWER carries an evidence number. a sentence whose citation
 does not resolve to a real quote in a real exchange is dropped by code before
@@ -362,6 +375,7 @@ exit codes:  0 answered  ·  1 nothing matched  ·  2 --strict refused`);
           ...o,
           ...filterFlags(opts),
           question,
+          cheap: Boolean(opts['cheap']),
           strict: Boolean(opts['strict']),
           vec: opts['vec'] !== false,
           ...(opts['k'] !== undefined ? { k: opts['k'] } : {}),

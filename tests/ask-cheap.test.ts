@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { db as store } from '@potsherd/core';
 import {
   ASK_CARD_CHARS,
-  ASK_FAST_K,
-  ASK_FAST_MODEL,
-  ASK_FAST_SESSION_CHARS,
-  ASK_FAST_TOP_EXCHANGES,
+  ASK_CHEAP_K,
+  ASK_CHEAP_MODEL,
+  ASK_CHEAP_SESSION_CHARS,
+  ASK_CHEAP_TOP_EXCHANGES,
   ASK_K,
   ASK_SESSION_CHARS,
   READER_CARD_NOTE,
@@ -18,7 +18,7 @@ import {
   type AskResult,
   type EvidenceSource,
 } from '../packages/core/src/ask.js';
-import { fastNote, readerLine, renderAsk } from '../packages/core/src/render/ask.js';
+import { cheapNote, readerLine, renderAsk } from '../packages/core/src/render/ask.js';
 import { Theme, stripAnsi } from '../packages/core/src/theme.js';
 import {
   Llm,
@@ -32,7 +32,7 @@ import { themeFrom } from '../packages/cli/src/output.js';
 import { rmrf, tempDir } from './helpers.js';
 
 /**
- * 8.7 — the wait, and the fast path.
+ * 8.7 — the wait, and the cheap path.
  *
  * Two claims are under test here and they are not the same kind of claim.
  *
@@ -44,7 +44,7 @@ import { rmrf, tempDir } from './helpers.js';
  * argument to {@link askProgress} and the test watches both streams, rather
  * than asserting about a terminal it does not have.
  *
- * **`--fast` reads less, and says so, and still cannot guess.** The three
+ * **`--cheap` reads less, and says so, and still cannot guess.** The three
  * levers (k, a haiku-class synthesizer, cards-first) are all reductions in
  * what was looked at. The one thing they may not reduce is the citation rule,
  * and cards-first is where that could quietly go wrong: the card is prose the
@@ -54,7 +54,7 @@ import { rmrf, tempDir } from './helpers.js';
  *
  * ## what is not observable here
  *
- * **Wall time is not tested.** `--fast`'s acceptance is a p50 in seconds
+ * **Wall time is not tested.** `--cheap`'s acceptance is a p50 in seconds
  * against a real backend, and a deadline asserted in this file would be a test
  * of the machine it runs on. That measurement is a run, recorded with its
  * evidence directories, not an assertion — and the reason is on the record:
@@ -70,7 +70,7 @@ afterEach(() => {
   while (created.length) rmrf(created.pop()!);
 });
 
-function scratch(prefix = 'potsherd-ask-fast-'): string {
+function scratch(prefix = 'potsherd-ask-cheap-'): string {
   const dir = tempDir(prefix);
   created.push(dir);
   return dir;
@@ -114,8 +114,11 @@ class Sink {
 
 function report(o: Partial<AskReaderReport> = {}): AskReaderReport {
   return {
-    sessionId: 'a498837d-1111-4111-8111-111111111111',
-    id8: 'a498837d',
+    // A demo-corpus id. The phase file's worked example used a real session
+    // id from the reference machine and it reached this file by being copied
+    // out of the plan; the id-inventory guard refused it.
+    sessionId: '9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43',
+    id8: '9c4d2f18',
     found: true,
     quotes: 2,
     ms: 12_100,
@@ -128,7 +131,11 @@ function report(o: Partial<AskReaderReport> = {}): AskReaderReport {
 describe('one line per reader, as it returns', () => {
   it('is the shape the phase file specifies', () => {
     const t = new Theme({ color: false, width: 80 });
-    expect(readerLine(report(), 3, 6, t)).toBe('  reader 3/6 · a498837d · found   ·  12.1s');
+    // The id column is 11 wide, not 8: a sidechain reader prints
+    // `<parent>↳<tag>`, because `idTag` alone returns `01` for an id like
+    // `<uuid>:agent-01` and `01` is not something a reader can pass to
+    // `show` — it matched six sessions when this was checked by hand.
+    expect(readerLine(report(), 3, 6, t)).toBe('  reader 3/6 · 9c4d2f18    · found   ·  12.1s');
   });
 
   it('lines the four columns up, whatever the verdict or the id', () => {
@@ -363,7 +370,7 @@ function seedFast(o: { card?: boolean; secret?: string; short?: boolean } = {}):
     `INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text, files_touched)
      VALUES (?,?,?,?,?,?,?)`,
   );
-  // Filler wide enough that eight seqs cannot fit in ASK_FAST_SESSION_CHARS
+  // Filler wide enough that eight seqs cannot fit in ASK_CHEAP_SESSION_CHARS
   // but do fit in ASK_SESSION_CHARS.
   const filler = 'the pooler and the connection pool were discussed at length. '.repeat(
     o.short ? 1 : 20,
@@ -428,7 +435,7 @@ function seedFast(o: { card?: boolean; secret?: string; short?: boolean } = {}):
 async function readerInputs(
   db: ReturnType<typeof store.open>,
   root: string,
-  opts: { fast?: boolean; k?: number } = {},
+  opts: { cheap?: boolean; k?: number } = {},
 ): Promise<AskReaderInput[]> {
   const seen: AskReaderInput[] = [];
   const readerFn: AskReaderFn = async (input) => {
@@ -444,50 +451,50 @@ async function readerInputs(
   return seen;
 }
 
-describe('--fast is cards-first, and only where there is a card', () => {
+describe('--cheap is cards-first, and only where there is a card', () => {
   it('hands a carded session the card plus a short slice', async () => {
     const { root, db } = seedFast();
-    const fast = await readerInputs(db, root, { fast: true });
-    const carded = fast.find((x) => x.sessionId === POOLER)!;
+    const cheap = await readerInputs(db, root, { cheap: true });
+    const carded = cheap.find((x) => x.sessionId === POOLER)!;
     expect(carded.card).toBeTruthy();
     expect(carded.card).toContain('disable prepared statements behind pgbouncer');
     // The seq the card names is carried so the reader can go and quote the
     // exchange rather than the card's paraphrase of it.
     expect(carded.card).toContain('seq 12');
     expect(carded.card!.length).toBeLessThanOrEqual(ASK_CARD_CHARS + 1);
-    expect(carded.excerpts.length).toBeLessThanOrEqual(ASK_FAST_SESSION_CHARS + 200);
-    expect(carded.seqs.length).toBeLessThanOrEqual(ASK_FAST_TOP_EXCHANGES * 3);
+    expect(carded.excerpts.length).toBeLessThanOrEqual(ASK_CHEAP_SESSION_CHARS + 200);
+    expect(carded.seqs.length).toBeLessThanOrEqual(ASK_CHEAP_TOP_EXCHANGES * 3);
     db.close();
   });
 
-  it('leaves an uncarded session its full slice, even under --fast', async () => {
+  it('leaves an uncarded session its full slice, even under --cheap', async () => {
     const { root, db } = seedFast();
-    const fast = await readerInputs(db, root, { fast: true });
-    const uncarded = fast.find((x) => x.sessionId === QUIET)!;
+    const cheap = await readerInputs(db, root, { cheap: true });
+    const uncarded = cheap.find((x) => x.sessionId === QUIET)!;
     // Nothing is standing in for what a cut would remove here, so nothing is
     // cut. A third of a transcript and no summary of the rest is a miss the
     // user cannot see.
     expect(uncarded.card).toBeUndefined();
-    expect(uncarded.excerpts.length).toBeGreaterThan(ASK_FAST_SESSION_CHARS);
+    expect(uncarded.excerpts.length).toBeGreaterThan(ASK_CHEAP_SESSION_CHARS);
     db.close();
   });
 
   it('never sends more than the default path would have', async () => {
     // The whole trade assumes the default slice is near its 8 kB ceiling. On a
     // short session it is not, and a 900-character card bolted onto a 1 kB
-    // slice makes `--fast` send more than the path it replaces. Measured on
+    // slice makes `--cheap` send more than the path it replaces. Measured on
     // the synthetic demo corpus: 4,518 characters against 3,032.
     const { root, db } = seedFast({ short: true });
-    const fast = await readerInputs(db, root, { fast: true });
+    const cheap = await readerInputs(db, root, { cheap: true });
     const slow = await readerInputs(db, root, {});
     const sent = (xs: AskReaderInput[]): number =>
       xs.reduce((a, x) => a + x.excerpts.length + (x.card?.length ?? 0), 0);
-    const carded = fast.find((x) => x.sessionId === POOLER)!;
+    const carded = cheap.find((x) => x.sessionId === POOLER)!;
     // Nothing to trade away, so nothing is traded: no card, and the same
     // excerpt the default path would have sent.
     expect(carded.card).toBeUndefined();
     expect(carded.excerpts).toBe(slow.find((x) => x.sessionId === POOLER)!.excerpts);
-    expect(sent(fast)).toBeLessThanOrEqual(sent(slow));
+    expect(sent(cheap)).toBeLessThanOrEqual(sent(slow));
     db.close();
   });
 
@@ -496,30 +503,30 @@ describe('--fast is cards-first, and only where there is a card', () => {
     const slow = await readerInputs(db, root, {});
     expect(slow.every((x) => x.card === undefined)).toBe(true);
     expect(slow.find((x) => x.sessionId === POOLER)!.excerpts.length).toBeGreaterThan(
-      ASK_FAST_SESSION_CHARS,
+      ASK_CHEAP_SESSION_CHARS,
     );
     db.close();
   });
 
   it('degrades to the ordinary slice when the corpus has no cards', async () => {
     const { root, db } = seedFast({ card: false });
-    const fast = await readerInputs(db, root, { fast: true });
-    expect(fast.every((x) => x.card === undefined)).toBe(true);
-    expect(fast.every((x) => x.excerpts.length > ASK_FAST_SESSION_CHARS)).toBe(true);
+    const cheap = await readerInputs(db, root, { cheap: true });
+    expect(cheap.every((x) => x.card === undefined)).toBe(true);
+    expect(cheap.every((x) => x.excerpts.length > ASK_CHEAP_SESSION_CHARS)).toBe(true);
     db.close();
   });
 
-  it('reads ASK_FAST_K sessions by default and obeys an explicit --k', async () => {
+  it('reads ASK_CHEAP_K sessions by default and obeys an explicit --k', async () => {
     const { root, db } = seedFast();
     const r = await ask(db, 'pgbouncer prepared statements pooler', {
       root,
       readerFn: async () => ({ found: false, quotes: [], answer_fragment: '' }),
       openThreads: false,
-      fast: true,
+      cheap: true,
     });
-    expect(ASK_FAST_K).toBeLessThan(ASK_K);
-    expect(r.searched).toBe(ASK_FAST_K);
-    expect(r.fast).toBe(true);
+    expect(ASK_CHEAP_K).toBeLessThan(ASK_K);
+    expect(r.searched).toBe(ASK_CHEAP_K);
+    expect(r.cheap).toBe(true);
     // The control: the same corpus, the same question, the default path.
     const slow = await ask(db, 'pgbouncer prepared statements pooler', {
       root,
@@ -527,12 +534,12 @@ describe('--fast is cards-first, and only where there is a card', () => {
       openThreads: false,
     });
     expect(slow.searched).toBe(ASK_K);
-    expect(slow.fast).toBe(false);
+    expect(slow.cheap).toBe(false);
 
-    // An explicit --k beats --fast, in both directions, because the footer
+    // An explicit --k beats --cheap, in both directions, because the footer
     // prints the shortlist it actually built.
-    expect((await readerInputs(db, root, { fast: true, k: 2 })).length).toBe(2);
-    expect((await readerInputs(db, root, { fast: true, k: 5 })).length).toBe(5);
+    expect((await readerInputs(db, root, { cheap: true, k: 2 })).length).toBe(2);
+    expect((await readerInputs(db, root, { cheap: true, k: 5 })).length).toBe(5);
     db.close();
   });
 });
@@ -587,7 +594,7 @@ describe('the card is context, never evidence', () => {
       readerLlm,
       llm: Llm.open({ transport: new Scripted('agent-sdk', ['{}']), model: 'haiku' }),
       openThreads: false,
-      fast: true,
+      cheap: true,
     });
     const carded = transport.sent.find((r) => r.prompt.includes('Card (context only'));
     expect(carded).toBeTruthy();
@@ -615,11 +622,11 @@ describe('there is no --no-redact, and the card does not get one', () => {
       readerLlm,
       llm: Llm.open({ transport: new Scripted('agent-sdk', ['{}']), model: 'haiku' }),
       openThreads: false,
-      fast: true,
+      cheap: true,
     });
     const carded = transport.sent.find((r) => r.prompt.includes('Card (context only'))!;
     // `llm.ts` redacts every outgoing prompt and there is no flag that turns
-    // it off. `--fast` changes what is sent, not whether it is redacted.
+    // it off. `--cheap` changes what is sent, not whether it is redacted.
     expect(carded.prompt).toContain('Card (context only');
     expect(carded.prompt).not.toContain('0123456789abcdef0123456789abcdef01234567');
     expect(carded.prompt).toContain('‹redacted:');
@@ -628,9 +635,9 @@ describe('there is no --no-redact, and the card does not get one', () => {
   });
 });
 
-// ================================================ the line --fast owes the user
+// ================================================ the line --cheap owes the user
 
-describe('--fast is honest about what it traded away', () => {
+describe('--cheap is honest about what it traded away', () => {
   function base(o: Partial<AskResult> = {}): AskResult {
     return {
       question: 'what did we decide about the pooler?',
@@ -661,7 +668,7 @@ describe('--fast is honest about what it traded away', () => {
       strict: false,
       spend: { calls: 4, inputTokens: 0, outputTokens: 0, usd: 0.02, ms: 0, estimatedInputCalls: 4 },
       estimated: true,
-      fast: true,
+      cheap: true,
       ms: 21_400,
       ...o,
     };
@@ -671,7 +678,7 @@ describe('--fast is honest about what it traded away', () => {
 
   it('says it on the screen, not only in --help', () => {
     const text = stripAnsi(renderAsk(base(), t, new Date('2026-08-22T12:00:00Z')));
-    expect(text).toContain('--fast');
+    expect(text).toContain('--cheap');
     expect(text).toContain('can miss');
   });
 
@@ -682,43 +689,43 @@ describe('--fast is honest about what it traded away', () => {
         t,
       ),
     );
-    expect(refusedText).toContain('--fast');
+    expect(refusedText).toContain('--cheap');
     const nothingText = stripAnsi(
       renderAsk(base({ sentences: [], evidence: [], answer: '' }), t),
     );
     // The screen a narrow read is most likely to produce is the one it most
     // needs to disclose on: "nothing found" after reading three sessions is
     // not the same statement as "nothing found" after reading six.
-    expect(nothingText).toContain('--fast');
+    expect(nothingText).toContain('--cheap');
   });
 
   it('says nothing at all on the default path', () => {
-    const text = stripAnsi(renderAsk(base({ fast: false, searched: 6 }), t));
-    expect(text).not.toContain('--fast');
+    const text = stripAnsi(renderAsk(base({ cheap: false, searched: 6 }), t));
+    expect(text).not.toContain('--cheap');
   });
 
   it('fits 80 columns and 60, with "can miss" surviving the narrow one', () => {
     for (const width of [80, 60]) {
-      const line = fastNote(base(), new Theme({ color: false, width }));
+      const line = cheapNote(base(), new Theme({ color: false, width }));
       expect(Theme.len(line)).toBeLessThanOrEqual(width);
       expect(line).toContain('can miss');
     }
   });
 
   it('is pure ASCII under --ascii', () => {
-    const line = fastNote(base(), new Theme({ color: false, ascii: true, width: 80 }));
+    const line = cheapNote(base(), new Theme({ color: false, ascii: true, width: 80 }));
     const folded = new Theme({ ascii: true }).asciiLine(line);
     // eslint-disable-next-line no-control-regex
     expect(/[^\x00-\x7F]/.test(folded)).toBe(false);
   });
 
   it('is carried in --json as a field, not inferred from the prose', () => {
-    expect(base().fast).toBe(true);
-    expect(base({ fast: false }).fast).toBe(false);
+    expect(base().cheap).toBe(true);
+    expect(base({ cheap: false }).cheap).toBe(false);
   });
 });
 
-describe('the fast path picks a cheaper synthesizer without being asked', () => {
+describe('the cheap path picks a cheaper synthesizer without being asked', () => {
   it('uses a haiku-class model, and an explicit --model still wins', async () => {
     const { root, db } = seedFast();
     const seen: string[] = [];
@@ -740,15 +747,15 @@ describe('the fast path picks a cheaper synthesizer without being asked', () => 
         root,
         readerFn,
         openThreads: false,
-        fast: true,
+        cheap: true,
       });
-      expect(seen).toContain(ASK_FAST_MODEL);
+      expect(seen).toContain(ASK_CHEAP_MODEL);
       seen.length = 0;
       await ask(db, 'pgbouncer prepared statements pooler', {
         root,
         readerFn,
         openThreads: false,
-        fast: true,
+        cheap: true,
         model: 'opus',
       });
       expect(seen).toContain('opus');

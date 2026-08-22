@@ -2,7 +2,7 @@
 #
 # Five edits, all in RESERVED files. Nothing else in this branch needs an
 # integrator. After edit 1 lands, delete the two deep imports at the top of
-# `packages/cli/src/commands/ask.ts` and take `ASK_FAST_K` / `readerLine` from
+# `packages/cli/src/commands/ask.ts` and take `ASK_CHEAP_K` / `readerLine` from
 # `@potsherd/core` instead (the cast on the `readerLine` call goes with them).
 
 
@@ -20,10 +20,10 @@ ASK_* constants. Line 455-460 at 67dfaa5:
 INSERT after `ASK_CONCURRENCY,` these five lines:
 
   ASK_CARD_CHARS,
-  ASK_FAST_K,
-  ASK_FAST_MODEL,
-  ASK_FAST_SESSION_CHARS,
-  ASK_FAST_TOP_EXCHANGES,
+  ASK_CHEAP_K,
+  ASK_CHEAP_MODEL,
+  ASK_CHEAP_SESSION_CHARS,
+  ASK_CHEAP_TOP_EXCHANGES,
 
 ANCHOR — the same block, the run of READER_* constants. Line 462 at 67dfaa5:
 
@@ -42,7 +42,7 @@ REPLACE that whole line with:
 export {
   renderAsk,
   readerLine,
-  fastNote,
+  cheapNote,
   clipQuote,
   maskSafeCut,
   QUOTE_CHARS,
@@ -51,7 +51,7 @@ export {
 
 
 ================================================================================
-2. packages/cli/src/index.ts — the `--fast` flag
+2. packages/cli/src/index.ts — the `--cheap` flag
 ================================================================================
 
 ANCHOR — the `ask` command's option chain. Line 306 at 67dfaa5, in full:
@@ -60,7 +60,7 @@ ANCHOR — the `ask` command's option chain. Line 306 at 67dfaa5, in full:
 
 INSERT before it:
 
-      .option('--fast', 'k 3, a haiku-class synthesizer, and cards in place of long slices — reads less and can miss')
+      .option('--cheap', 'k 3, a haiku-class synthesizer, and cards in place of long slices — reads less and can miss')
 
 
 ================================================================================
@@ -69,10 +69,10 @@ INSERT before it:
 
 WHY (this one is load-bearing, not tidying). `--k` is registered with
 `.default(ASK_K)`, so `opts['k']` is `6` on every run whether or not the user
-typed `--k`. `runAsk` cannot then tell "unset" from "6", and `--fast` silently
-read six sessions. Measured before the fix: `potsherd ask "…" --fast` printed
+typed `--k`. `runAsk` cannot then tell "unset" from "6", and `--cheap` silently
+read six sessions. Measured before the fix: `potsherd ask "…" --cheap` printed
 `6 of 53 sessions read`. Dropping the commander default lets `runAsk` choose
-between {@link ASK_K} and {@link ASK_FAST_K}, and an explicit `--k` still wins
+between {@link ASK_K} and {@link ASK_CHEAP_K}, and an explicit `--k` still wins
 over both. The default moves into the description so `--help` still states it.
 
 ANCHOR — line 305 at 67dfaa5, in full:
@@ -81,7 +81,7 @@ ANCHOR — line 305 at 67dfaa5, in full:
 
 REPLACE that whole line with:
 
-      .addOption(new Option('--k <n>', `sessions to read (default ${ASK_K}; ${ASK_FAST_K} with --fast)`).argParser(Number))
+      .addOption(new Option('--k <n>', `sessions to read (default ${ASK_K}; ${ASK_CHEAP_K} with --cheap)`).argParser(Number))
 
 
 ================================================================================
@@ -95,7 +95,7 @@ ANCHOR — inside `ask.action(...)`, the `runAsk({...})` literal. Line 355 at
 
 INSERT before it:
 
-          fast: Boolean(opts['fast']),
+          cheap: Boolean(opts['cheap']),
 
 
 ================================================================================
@@ -109,14 +109,14 @@ in full:
 
 INSERT after it:
 
-  potsherd ask "the pooler decision" --fast                  # 3 sessions, cards first
+  potsherd ask "the pooler decision" --cheap                  # 3 sessions, cards first
 
 
 ================================================================================
-5. packages/cli/src/index.ts — ASK_FAST_K has to be in scope for edits 2 and 2b
+5. packages/cli/src/index.ts — ASK_CHEAP_K has to be in scope for edits 2 and 2b
 ================================================================================
 
-Once edit 1 has landed, `ASK_FAST_K` is on the `@potsherd/core` barrel.
+Once edit 1 has landed, `ASK_CHEAP_K` is on the `@potsherd/core` barrel.
 
 ANCHOR — line 3 at 67dfaa5, in full:
 
@@ -124,7 +124,7 @@ ANCHOR — line 3 at 67dfaa5, in full:
 
 REPLACE that whole line with:
 
-import { ASK_K, ASK_FAST_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
+import { ASK_K, ASK_CHEAP_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
 
 
 ================================================================================

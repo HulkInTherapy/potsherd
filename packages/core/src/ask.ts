@@ -109,13 +109,13 @@ export const ASK_SESSION_CHARS = 8_000;
 /** Top-n exchanges per session, by hybrid score, before the ±1 neighbours. */
 export const ASK_TOP_EXCHANGES = 4;
 
-// ------------------------------------------------------- the fast path
+// ------------------------------------------------------- the cheap path
 //
 // 8.7. The default path is not narrowed to hit a number: `k = 6` is what the
 // quality gate was measured at and `03` §12 records the wall-time miss as a
-// miss rather than re-tuning `k` to fit. `--fast` is a **second** path, chosen
+// miss rather than re-tuning `k` to fit. `--cheap` is a **second** path, chosen
 // per question, that trades coverage for latency and is required to say so on
-// every screen it prints (see `render/ask.ts`'s `fastNote`).
+// every screen it prints (see `render/ask.ts`'s `cheapNote`).
 //
 // Three levers, in the order they matter:
 //
@@ -139,30 +139,30 @@ export const ASK_TOP_EXCHANGES = 4;
 // What does **not** change: the reader contract, {@link filterAnswer}, and the
 // rule that a quote is checked against the excerpt the reader was shown. The
 // card is context and is never citable — a quote from it resolves to no unit
-// and is dropped like any other unsourced line. That is why `--fast` can be
+// and is dropped like any other unsourced line. That is why `--cheap` can be
 // faster without being a different product: it reads less, and what it does
 // say is grounded the same way.
 
-/** `--fast`: sessions read. Never lower than this. */
-export const ASK_FAST_K = 3;
+/** `--cheap`: sessions read. Never lower than this. */
+export const ASK_CHEAP_K = 3;
 
-/** `--fast`: the synthesizer, haiku-class rather than {@link ASK_MODEL}. */
-export const ASK_FAST_MODEL = CARD_MODEL;
+/** `--cheap`: the synthesizer, haiku-class rather than {@link ASK_MODEL}. */
+export const ASK_CHEAP_MODEL = CARD_MODEL;
 
-/** `--fast`: exchanges per session when a card carries the context. */
-export const ASK_FAST_TOP_EXCHANGES = 2;
+/** `--cheap`: exchanges per session when a card carries the context. */
+export const ASK_CHEAP_TOP_EXCHANGES = 2;
 
 /**
- * `--fast`: the slice a carded session gets, in characters.
+ * `--cheap`: the slice a carded session gets, in characters.
  *
  * Only ever applied **with** a card, and only when card plus slice comes to
  * less than the full slice would have. A session with no card keeps the full
- * {@link ASK_SESSION_CHARS} slice under `--fast` too, because there is then
+ * {@link ASK_SESSION_CHARS} slice under `--cheap` too, because there is then
  * nothing standing in for what the cut would remove, and a reader given a
  * third of a transcript and no summary of the rest is the shape of a miss the
  * user cannot see. See `loadTarget` for why the size check is there.
  */
-export const ASK_FAST_SESSION_CHARS = 3_000;
+export const ASK_CHEAP_SESSION_CHARS = 3_000;
 
 /** The card block handed to a reader, capped. Context, never citable. */
 export const ASK_CARD_CHARS = 900;
@@ -293,15 +293,15 @@ export interface AskResult {
   /** True if any figure in `spend` is `est.` (`05` honesty contract). */
   estimated: boolean;
   /**
-   * 8.7: this run took the `--fast` path and read less of the archive.
+   * 8.7: this run took the `--cheap` path and read less of the archive.
    *
    * Carried on the result rather than left to the caller to remember, for the
    * same reason {@link AskResult.refusal} is: the renderer must print the
-   * trade-off line on **every** `--fast` screen, including the ones that
+   * trade-off line on **every** `--cheap` screen, including the ones that
    * refuse or find nothing, and a screen that cannot tell whether it was a
    * narrow read is a screen that will eventually forget to say so.
    */
-  fast: boolean;
+  cheap: boolean;
   ms: number;
 }
 
@@ -326,7 +326,7 @@ export interface AskReaderInput {
   /** The seq numbers in `excerpts`, so a caller can check what it may cite. */
   seqs: number[];
   /**
-   * 8.7 cards-first: this session's card, as context, when `--fast` found one.
+   * 8.7 cards-first: this session's card, as context, when `--cheap` found one.
    *
    * **Not citable, and that is structural rather than a request.** A card is
    * the model's own prose about the transcript; it has no `seq`, so a quote
@@ -427,11 +427,11 @@ export interface AskOptions {
   filters?: SearchFilters;
   k?: number;
   /**
-   * 8.7 `--fast`: {@link ASK_FAST_K} sessions, a haiku-class synthesizer, and
+   * 8.7 `--cheap`: {@link ASK_CHEAP_K} sessions, a haiku-class synthesizer, and
    * cards-first excerpts. An explicit `k`, `model` or `readerModel` still
    * wins — this only moves the defaults.
    */
-  fast?: boolean;
+  cheap?: boolean;
   strict?: boolean;
   maxUsd?: number;
   /** Synthesizer model. Default {@link ASK_MODEL} (sonnet-class). */
@@ -1088,7 +1088,7 @@ interface Target {
   isGhost: boolean;
   units: TranscriptUnit[];
   score: number;
-  /** 8.7 cards-first: set only when `--fast` found a card for this session. */
+  /** 8.7 cards-first: set only when `--cheap` found a card for this session. */
   card?: string;
 }
 
@@ -1096,12 +1096,12 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
   const started = Date.now();
   const q = question.trim();
   const strict = Boolean(o.strict);
-  const fast = Boolean(o.fast);
-  // `--fast` moves the *defaults* and nothing else. A caller that passed `--k`
+  const cheap = Boolean(o.cheap);
+  // `--cheap` moves the *defaults* and nothing else. A caller that passed `--k`
   // or `--model` asked for a number, and a flag that silently overrode it
-  // would make `ask --fast --k 8` a lie on the screen: the footer prints `k`
+  // would make `ask --cheap --k 8` a lie on the screen: the footer prints `k`
   // from the shortlist it actually built.
-  const k = Math.max(1, Math.floor(o.k ?? (fast ? ASK_FAST_K : ASK_K)));
+  const k = Math.max(1, Math.floor(o.k ?? (cheap ? ASK_CHEAP_K : ASK_K)));
   const budget = o.budget ?? new Budget({ maxUsd: o.maxUsd ?? ASK_MAX_USD });
   const maxUsd = o.maxUsd ?? ASK_MAX_USD;
   const meter = new SpendMeter();
@@ -1136,7 +1136,7 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
   // counting blocks against a `searched` that counts sessions printed
   // "6 of 5 sessions read" on a corpus with two subagents in it. Both numbers
   // now come out of the same expansion.
-  const { targets, candidates } = shortlist(db, found.sessions, k, fast);
+  const { targets, candidates } = shortlist(db, found.sessions, k, cheap);
   const matching = candidates;
   o.onProgress?.({
     step: 'shortlist',
@@ -1161,7 +1161,7 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
     strict,
     spend: meter.total,
     estimated: meter.total.estimatedInputCalls > 0,
-    fast,
+    cheap,
     ms: Date.now() - started,
     ...extra,
   });
@@ -1254,7 +1254,7 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
     // ---- 4. synthesizer, one call.
     o.onProgress?.({ step: 'synthesize', done: 0, total: 1, spend: meter.total });
     const ownSynth =
-      o.llm ?? openLlm(o.model ?? (fast ? ASK_FAST_MODEL : ASK_MODEL), budget, o);
+      o.llm ?? openLlm(o.model ?? (cheap ? ASK_CHEAP_MODEL : ASK_MODEL), budget, o);
     meter.track(ownSynth);
     let proposed: SynthReply;
     try {
@@ -1304,7 +1304,7 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
       strict,
       spend: meter.total,
       estimated: meter.total.estimatedInputCalls > 0,
-      fast,
+      cheap,
       ms: Date.now() - started,
     };
   } finally {
@@ -1337,7 +1337,7 @@ function shortlist(
   db: Db,
   sessions: readonly RecallSession[],
   k: number,
-  fast = false,
+  cheap = false,
 ): { targets: Target[]; candidates: number } {
   // Recall's block order is kept — it is the ranking `find` shows and the one
   // phase 3 measured — and each block is expanded into the distinct sessions
@@ -1375,8 +1375,8 @@ function shortlist(
   // One query for the whole shortlist rather than one per target: `loadTarget`
   // is called for candidates that may not survive `units.length > 0`, and a
   // per-target lookup would run `k` statements to answer a question one
-  // statement answers. Empty on the default path — cards-first is `--fast`'s.
-  const cards = fast ? cardBriefs(db, order.slice(0, Math.max(k * 3, k))) : new Map<string, string>();
+  // statement answers. Empty on the default path — cards-first is `--cheap`'s.
+  const cards = cheap ? cardBriefs(db, order.slice(0, Math.max(k * 3, k))) : new Map<string, string>();
   for (const sessionId of order) {
     if (targets.length >= k) break;
     const t = loadTarget(
@@ -1403,7 +1403,7 @@ function shortlist(
  * The text is already redacted: cards are extracted from the index, and the
  * index is redacted at ingest (L2). It is redacted **again** on the way out by
  * `llm.ts`, which masks every outgoing prompt and system string and has no
- * flag that turns it off. `tests/ask-fast.test.ts` asserts the second pass on
+ * flag that turns it off. `tests/ask-cheap.test.ts` asserts the second pass on
  * the wire rather than trusting the first.
  */
 function cardBriefs(db: Db, sessionIds: readonly string[]): Map<string, string> {
@@ -1498,14 +1498,14 @@ function loadTarget(
   // Two conditions, and the second was found by measurement rather than by
   // reasoning. The first is obvious: no card, no substitution — there would be
   // nothing standing in for what the cut removed, so an uncarded session keeps
-  // its full slice even under `--fast`.
+  // its full slice even under `--cheap`.
   //
   // The second: **the substitution has to be smaller than what it replaces.**
   // The trade assumes the default slice is near its 8 kB ceiling, and on a
   // long session it is. On a short one it is not: measured on the synthetic
   // demo corpus, three shortlisted sessions had default slices of 1,048 /
   // 1,023 / 257 characters, and adding a 900-character card to each made the
-  // `--fast` fan-out send **more** than the default path it was meant to be
+  // `--cheap` fan-out send **more** than the default path it was meant to be
   // cheaper than (4,518 characters against 3,032). A latency flag that
   // enlarges the prompt is not a slower version of the trade, it is the
   // opposite of it. So both forms are costed here and the smaller wins; a
@@ -1515,8 +1515,8 @@ function loadTarget(
   const full = excerptUnits(transcript, seqs);
   const narrow = card
     ? excerptUnits(transcript, seqs, {
-        top: ASK_FAST_TOP_EXCHANGES,
-        maxChars: ASK_FAST_SESSION_CHARS,
+        top: ASK_CHEAP_TOP_EXCHANGES,
+        maxChars: ASK_CHEAP_SESSION_CHARS,
       })
     : null;
   const worthIt =
@@ -1730,7 +1730,7 @@ async function tryOpenThreads(
     if (cands.length === 0) return [];
     const confirmed = await confirmOpenThreads(cands, {
       ...(llm ? { llm } : {}),
-      ...(o.model ? { model: o.model } : { model: o.fast ? ASK_FAST_MODEL : ASK_MODEL }),
+      ...(o.model ? { model: o.model } : { model: o.cheap ? ASK_CHEAP_MODEL : ASK_MODEL }),
       budget,
       ...(o.signal ? { signal: o.signal } : {}),
     });

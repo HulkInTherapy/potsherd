@@ -48,7 +48,12 @@ export const QUOTE_CHARS = 90;
 // -------------------------------------------------------- reader progress
 
 /**
- * One reader, as it returns: `reader 3/6 · a498837d · found · 12.1s`.
+ * One reader, as it returns: `reader 3/6 · 9c4d2f18 · found · 12.1s`.
+ *
+ * The id here is the demo corpus's, not the one the phase file's example
+ * used: that one is a real session on the reference machine, and this file
+ * is vendored into both plugin bundles. `scripts/check-privacy.py`'s
+ * id-inventory rule caught it in the same phase that introduced it.
  *
  * 8.7. `ask` is 44 to 180 seconds of one spinner, and a spinner is a claim
  * that something is happening rather than evidence that it is. The defect is
@@ -92,9 +97,11 @@ export function readerLine(
   // elapsed. Padded rather than joined, because six of these arrive one under
   // another over two or three minutes and a ragged column is the difference
   // between a table and a log. The widths are the widest each field can be:
-  // `nothing` is 7, an id8 is 8 — except on the harnesses whose ids carry a
-  // `:` suffix, where `idTag` legitimately returns two characters, and an
-  // unpadded line then reads as corrupt output rather than as a short id.
+  // `nothing` is 7, an id8 is 8, and a sidechain is 11: `idTag` returns the
+  // suffix alone for an id like `<uuid>:agent-01`, which is `01` — correct in
+  // `ls` and `find`, where the parent row is directly above it, and useless
+  // here, where the line arrives on its own. `01` is not something a reader
+  // can pass to `show`. So a sidechain names its parent and marks itself.
   const verdict = (r.error ? 'failed' : r.found ? 'found' : 'nothing').padEnd(7);
   const counter = `${String(done).padStart(String(total).length)}/${total}`;
   const sep = ` ${t.sep} `;
@@ -103,7 +110,10 @@ export function readerLine(
   // string would cut a 39-column line at 39 *bytes of escape codes* and leave
   // a dangling reset. So width is decided on the text, and colour is applied
   // only to a line that was going to fit anyway.
-  const id = r.id8.padEnd(8);
+  // A sidechain reader prints `<parent>↳<tag>`; a top-level one is its own
+  // id8. Padded to the sidechain width so the grid holds either way.
+  const colon = r.sessionId.lastIndexOf(':');
+  const id = (colon === -1 ? r.id8 : `${r.sessionId.slice(0, 8)}${t.g('\u21b3', '>')}${r.id8}`).padEnd(11);
   const took = f.duration(r.ms).padStart(6);
   // `03` §8 asks `ask` for a "cost cap and live cost display", and the bar
   // this replaced carried the running spend in its note. It is a fifth column
@@ -131,9 +141,9 @@ export function readerLine(
 }
 
 /**
- * 8.7: the one line `--fast` owes the user, on every screen, every time.
+ * 8.7: the one line `--cheap` owes the user, on every screen, every time.
  *
- * `--fast` reads three sessions instead of six and hands a reader a card in
+ * `--cheap` reads three sessions instead of six and hands a reader a card in
  * place of most of a transcript. Both are real reductions in what was looked
  * at, so both can turn an answer into a miss — and a miss on this verb does
  * not look like a miss. It looks like an archive that had nothing, which is a
@@ -141,22 +151,43 @@ export function readerLine(
  * entire purpose is not making those.
  *
  * So the disclosure is not in `--help`, where it would be read once by people
- * who did not need it. It is in the footer of every `--fast` render including
+ * who did not need it. It is in the footer of every `--cheap` render including
  * the refusals, it leads with the consequence rather than the mechanism, and
  * the consequence is the half that survives a clip to 60 columns.
  */
-export function fastNote(r: AskResult, t: Theme): string {
+/**
+ * The line every `--cheap` screen carries, refusals included.
+ *
+ * It states the trade in the order the user cares about and does not flatter
+ * it. Measured over ten runs each of the same five questions on the reference
+ * corpus: `--cheap` p50 **50.5 s** against the default's **45.0 s**, and
+ * $0.065 a run against $0.139 — so it is 2.1x cheaper and, on this corpus,
+ * fractionally SLOWER. It also answered 7 of 10 where the default answered 10.
+ *
+ * The flag was called `--fast` when it was written, which is why the numbers
+ * are in this comment: the unit of latency here is a model call, not a token,
+ * because each reader is a separate agent-SDK `query()` that spawns its own
+ * process. Cutting a reader's prompt by 31% moved wall time not at all, and
+ * fewer readers run in the same wall time as more readers do. Nothing that
+ * only shrinks prompts can make this verb faster, so the flag says what it
+ * actually does.
+ */
+export function cheapNote(r: AskResult, t: Theme): string {
   const read = `${f.num(r.searched || r.matching)} ${f.plural(r.searched || r.matching, 'session')}`;
-  return (
-    INDENT +
-    t.dim(
-      f.clip(
-        `--fast ${t.sep} reads less and can miss ${t.sep} ${read}, cards over transcripts`,
-        t.width - INDENT.length,
-        t,
-      ),
-    )
-  );
+  // Built in three lengths and CHOSEN by width, never clipped. The clause
+  // that has to survive a narrow terminal is the one that warns, and clipping
+  // cuts from the right — which is exactly where `and it can miss` sits in
+  // the sentence that reads best. Two earlier wordings lost it: one at 80
+  // columns, one at 60. So the cost clause is dropped first and the warning
+  // is the last thing standing, the same way `readerLine` drops its running
+  // cost rather than shortening the grid.
+  const room = t.width - INDENT.length;
+  const warn = `${read}, and it can miss`;
+  const full = `--cheap ${t.sep} about half the cost, not faster ${t.sep} ${warn}`;
+  const mid = `--cheap ${t.sep} ${warn}`;
+  const bare = `--cheap ${t.sep} it can miss`;
+  const line = full.length <= room ? full : mid.length <= room ? mid : bare;
+  return INDENT + t.dim(f.clip(line, room, t));
 }
 
 /**
@@ -581,7 +612,7 @@ function footer(
   // Directly under the counts, so the number of sessions read and the reason
   // it is that number are one glance apart. Before the drop/trim notes,
   // because it qualifies every line below it as well as the counts above it.
-  if (r.fast) out.push(fastNote(r, t));
+  if (r.cheap) out.push(cheapNote(r, t));
 
   // Dropped sentences are printed as a count and never as text: `dropped`
   // exists so a person can audit the filter, and reprinting the prose it

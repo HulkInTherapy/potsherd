@@ -3,6 +3,7 @@ import nodePath from 'node:path';
 import process from 'node:process';
 
 import {
+  ASK_CHEAP_K,
   ASK_CONCURRENCY,
   ASK_K,
   ASK_MAX_USD,
@@ -10,6 +11,7 @@ import {
   VERSION,
   ask,
   detectBackend,
+  readerLine,
   redactOutgoing,
   renderAsk,
   type AskDrop,
@@ -20,16 +22,6 @@ import {
   type AskReaderOutput,
   type AskResult,
 } from '@potsherd/core';
-// `packages/core/src/index.ts` is reserved for the integrator this phase, so
-// the barrel line — `readerLine` and `fastNote` added to the `render/ask.js`
-// export on line 485 — is written out in
-// `phases/phase-8/registration-W6.txt` rather than added here. Until it lands
-// this import reaches the module directly, so the branch builds, typechecks
-// and tests green; fold it into the `@potsherd/core` import above once the
-// barrel carries it.
-import { ASK_FAST_K } from '../../../core/src/ask.js';
-import type { Theme as CoreTheme } from '../../../core/src/theme.js';
-import { readerLine } from '../../../core/src/render/ask.js';
 import {
   UserError,
   print,
@@ -74,7 +66,7 @@ export interface AskCommandOptions extends GlobalOptions, FilterFlags {
   /** T5.6: replay reader outputs from this path instead of running readers. */
   readersIn?: string;
   /** 8.7: k 3, a haiku-class synthesizer, and cards-first excerpts. */
-  fast?: boolean;
+  cheap?: boolean;
 }
 
 // ===================================================== the wait, made legible
@@ -130,14 +122,8 @@ export function askProgress(
   return (p) => {
     if (!enabled) return;
     if (p.step !== 'read' || !p.reader) return;
-    // The cast is an artefact of the temporary deep import above and goes
-    // with it: `themeFrom` hands back the `Theme` from the built barrel and
-    // `readerLine` is typed against the one in `core/src`, which TypeScript
-    // holds apart because `Theme` has a private field. Same class, same file,
-    // two module identities — nothing structural, and nothing this function
-    // does with a theme could tell them apart.
     sink.write(
-      `${readerLine(p.reader, p.done, p.total, t as unknown as CoreTheme, {
+      `${readerLine(p.reader, p.done, p.total, t, {
         usd: p.spend.usd,
         // `est.` is inherited from what the backend reported, never guessed
         // here: the agent SDK returns a constant `input_tokens: 10`, which
@@ -191,11 +177,11 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
 
   try {
     const filters = parseFilters(db, o);
-    const fast = Boolean(o.fast);
-    // `--k` still wins over `--fast`, so the default is chosen here rather
-    // than in `positive()`: `ask --fast --k 6` reads six sessions and the
+    const cheap = Boolean(o.cheap);
+    // `--k` still wins over `--cheap`, so the default is chosen here rather
+    // than in `positive()`: `ask --cheap --k 6` reads six sessions and the
     // footer's counts say six, which is the only reading that is not a lie.
-    const k = positive(o.k, fast ? ASK_FAST_K : ASK_K, '--k');
+    const k = positive(o.k, cheap ? ASK_CHEAP_K : ASK_K, '--k');
     // One options object for every path below, so the shortlist a
     // `--readers-out` run records, the shortlist a `--readers-in` run checks
     // against, and the shortlist a normal run reads are the same shortlist
@@ -205,7 +191,7 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
       filters,
       root,
       k,
-      fast,
+      cheap,
       strict: Boolean(o.strict),
       maxUsd: money(o.maxUsd),
       concurrency: positive(o.concurrency, ASK_CONCURRENCY, '--concurrency'),
@@ -410,7 +396,7 @@ export async function writeReadersFile(
   // extracted from the index, and the index is redacted at ingest), `llm.ts`
   // redacts it again on the wire, and this third pass keeps the recorded file
   // byte-identical to what a model would have been sent. Present only on a
-  // `--fast` recording of a carded session.
+  // `--cheap` recording of a carded session.
   const targets = rec.seen.map((input) => ({
     ...input,
     excerpts: redactOutgoing(input.excerpts).text,

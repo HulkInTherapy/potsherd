@@ -452,6 +452,11 @@ export {
   quotableText,
   MIN_UNIT_CHARS,
   ANSWER_MAX_WORDS,
+  ASK_CARD_CHARS,
+  ASK_CHEAP_K,
+  ASK_CHEAP_MODEL,
+  ASK_CHEAP_SESSION_CHARS,
+  ASK_CHEAP_TOP_EXCHANGES,
   ASK_CONCURRENCY,
   ASK_K,
   ASK_MAX_USD,
@@ -459,6 +464,7 @@ export {
   ASK_SESSION_CHARS,
   ASK_TOP_EXCHANGES,
   MIN_QUOTE_CHARS,
+  READER_CARD_NOTE,
   READER_GHOST_NOTE,
   READER_SYSTEM,
   STRICT_MIN_EVIDENCE,
@@ -482,7 +488,15 @@ export {
   type ProposedEvidence,
   type ProposedSentence,
 } from './ask.js';
-export { renderAsk, clipQuote, maskSafeCut, QUOTE_CHARS, type AskRenderOptions } from './render/ask.js';
+export {
+  renderAsk,
+  readerLine,
+  cheapNote,
+  clipQuote,
+  maskSafeCut,
+  QUOTE_CHARS,
+  type AskRenderOptions,
+} from './render/ask.js';
 
 // ------------------------------------------------------------------ phase 4
 export {
