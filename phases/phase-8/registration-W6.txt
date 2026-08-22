@@ -1,0 +1,138 @@
+# registration-W6 — T8.F / 8.7  (branch p8/w6-ask)
+#
+# Five edits, all in RESERVED files. Nothing else in this branch needs an
+# integrator. After edit 1 lands, delete the two deep imports at the top of
+# `packages/cli/src/commands/ask.ts` and take `ASK_FAST_K` / `readerLine` from
+# `@potsherd/core` instead (the cast on the `readerLine` call goes with them).
+
+
+================================================================================
+1. packages/core/src/index.ts
+================================================================================
+
+ANCHOR — inside the `} from './ask.js';` export block, the alphabetical run of
+ASK_* constants. Line 455-460 at 67dfaa5:
+
+      ASK_CONCURRENCY,
+      ASK_K,
+      ASK_MAX_USD,
+
+INSERT after `ASK_CONCURRENCY,` these five lines:
+
+  ASK_CARD_CHARS,
+  ASK_FAST_K,
+  ASK_FAST_MODEL,
+  ASK_FAST_SESSION_CHARS,
+  ASK_FAST_TOP_EXCHANGES,
+
+ANCHOR — the same block, the run of READER_* constants. Line 462 at 67dfaa5:
+
+      READER_GHOST_NOTE,
+
+INSERT before it:
+
+  READER_CARD_NOTE,
+
+ANCHOR — line 485 at 67dfaa5, in full:
+
+      export { renderAsk, clipQuote, maskSafeCut, QUOTE_CHARS, type AskRenderOptions } from './render/ask.js';
+
+REPLACE that whole line with:
+
+export {
+  renderAsk,
+  readerLine,
+  fastNote,
+  clipQuote,
+  maskSafeCut,
+  QUOTE_CHARS,
+  type AskRenderOptions,
+} from './render/ask.js';
+
+
+================================================================================
+2. packages/cli/src/index.ts — the `--fast` flag
+================================================================================
+
+ANCHOR — the `ask` command's option chain. Line 306 at 67dfaa5, in full:
+
+      .option('--strict', 'refuse rather than answer when fewer than 2 quotes survive')
+
+INSERT before it:
+
+      .option('--fast', 'k 3, a haiku-class synthesizer, and cards in place of long slices — reads less and can miss')
+
+
+================================================================================
+2b. packages/cli/src/index.ts — `--k` must stop defaulting in commander
+================================================================================
+
+WHY (this one is load-bearing, not tidying). `--k` is registered with
+`.default(ASK_K)`, so `opts['k']` is `6` on every run whether or not the user
+typed `--k`. `runAsk` cannot then tell "unset" from "6", and `--fast` silently
+read six sessions. Measured before the fix: `potsherd ask "…" --fast` printed
+`6 of 53 sessions read`. Dropping the commander default lets `runAsk` choose
+between {@link ASK_K} and {@link ASK_FAST_K}, and an explicit `--k` still wins
+over both. The default moves into the description so `--help` still states it.
+
+ANCHOR — line 305 at 67dfaa5, in full:
+
+      .addOption(new Option('--k <n>', 'sessions to read').argParser(Number).default(ASK_K))
+
+REPLACE that whole line with:
+
+      .addOption(new Option('--k <n>', `sessions to read (default ${ASK_K}; ${ASK_FAST_K} with --fast)`).argParser(Number))
+
+
+================================================================================
+3. packages/cli/src/index.ts — pass it through
+================================================================================
+
+ANCHOR — inside `ask.action(...)`, the `runAsk({...})` literal. Line 355 at
+67dfaa5, in full:
+
+          strict: Boolean(opts['strict']),
+
+INSERT before it:
+
+          fast: Boolean(opts['fast']),
+
+
+================================================================================
+4. packages/cli/src/index.ts — the worked example
+================================================================================
+
+ANCHOR — the `ask` help text, `addHelpText('after', ...)`. Line 341 at 67dfaa5,
+in full:
+
+  potsherd ask "why did we drop the queue?" --k 10 --max-usd 0.25
+
+INSERT after it:
+
+  potsherd ask "the pooler decision" --fast                  # 3 sessions, cards first
+
+
+================================================================================
+5. packages/cli/src/index.ts — ASK_FAST_K has to be in scope for edits 2 and 2b
+================================================================================
+
+Once edit 1 has landed, `ASK_FAST_K` is on the `@potsherd/core` barrel.
+
+ANCHOR — line 3 at 67dfaa5, in full:
+
+      import { ASK_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
+
+REPLACE that whole line with:
+
+import { ASK_K, ASK_FAST_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
+
+
+================================================================================
+note for whoever re-records docs/demo-ask.cast
+================================================================================
+
+`scripts/make-screens.sh`'s `shot_model` sends stderr to /dev/null, so
+`docs/screens/14-ask.txt` is unchanged by this branch. `scripts/make-cast.sh`
+records a real terminal, so `docs/demo-ask.cast` WILL change: the six reader
+lines now appear during the wait. That is the point of 8.7 and the cast is
+better for it, but it means the cast is stale until it is re-recorded.

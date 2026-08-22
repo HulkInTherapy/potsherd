@@ -10,18 +10,27 @@ import {
   VERSION,
   ask,
   detectBackend,
-  format as f,
   redactOutgoing,
   renderAsk,
   type AskDrop,
   type AskOptions,
+  type AskProgress,
   type AskReaderFn,
   type AskReaderInput,
   type AskReaderOutput,
   type AskResult,
 } from '@potsherd/core';
+// `packages/core/src/index.ts` is reserved for the integrator this phase, so
+// the barrel line — `readerLine` and `fastNote` added to the `render/ask.js`
+// export on line 485 — is written out in
+// `phases/phase-8/registration-W6.txt` rather than added here. Until it lands
+// this import reaches the module directly, so the branch builds, typechecks
+// and tests green; fold it into the `@potsherd/core` import above once the
+// barrel carries it.
+import { ASK_FAST_K } from '../../../core/src/ask.js';
+import type { Theme as CoreTheme } from '../../../core/src/theme.js';
+import { readerLine } from '../../../core/src/render/ask.js';
 import {
-  Progress,
   UserError,
   print,
   printJson,
@@ -64,6 +73,80 @@ export interface AskCommandOptions extends GlobalOptions, FilterFlags {
   readersOut?: string;
   /** T5.6: replay reader outputs from this path instead of running readers. */
   readersIn?: string;
+  /** 8.7: k 3, a haiku-class synthesizer, and cards-first excerpts. */
+  fast?: boolean;
+}
+
+// ===================================================== the wait, made legible
+//
+// 8.7. What `ask` printed while it worked was a 24-cell progress bar and a
+// running cost, redrawn in place on stderr, and only when stderr was a TTY.
+// Everywhere else — piped, redirected, under `--json`, in CI, in the cast
+// recorder — it printed nothing at all for up to three minutes.
+//
+// The replacement is one line per reader, written once, as that reader
+// returns. `packages/core/src/render/ask.ts`'s `readerLine` owns the shape;
+// this file owns two decisions the renderer must not make.
+//
+// **Where it goes: stderr, always, on every path.** `ask --json` writes an
+// `AskResult` to stdout and the eval harness pipes it into `jq`. A progress
+// line on stdout would corrupt that, and it would corrupt it *intermittently*
+// — only on runs slow enough to print one — which is the worst version of the
+// bug. So the stream is decided once, here, and {@link askProgress} takes its
+// sink as an argument so a test can prove where each byte went instead of
+// inspecting a terminal.
+//
+// **When it is silent: `--quiet`, and nothing else.** Not `--json` (stderr is
+// not stdout and a person watching a redirect still deserves to see the
+// readers arrive), and *not* "stdout is not a TTY", which is what the old bar
+// keyed on: a run whose output is being piped into a file is exactly the run
+// whose wait is otherwise invisible.
+
+/** Where a progress line is written. `process.stderr` in production. */
+export interface ProgressSink {
+  write(chunk: string): unknown;
+}
+
+/**
+ * The `onProgress` handler `ask()` is given, and the whole of what the CLI
+ * prints while the readers run.
+ *
+ * Only `step: 'read'` events carry a reader, and only those print. The other
+ * steps — shortlist, synthesize, filter, threads — are single events with
+ * nothing per-item to show; the synthesizer is one serial call and a line
+ * saying so would be the spinner again with different words.
+ *
+ * The theme is the one the *answer* will be rendered with, which keys colour
+ * off stdout. So `ask > f` prints these uncoloured even when stderr is still a
+ * terminal. That is the conservative direction and it is deliberate: the cost
+ * is a monochrome progress line on one uncommon setup, and the alternative
+ * risks writing escape codes into a stream somebody is capturing.
+ */
+export function askProgress(
+  t: ReturnType<typeof themeFrom>,
+  sink: ProgressSink,
+  enabled: boolean,
+): (p: AskProgress) => void {
+  return (p) => {
+    if (!enabled) return;
+    if (p.step !== 'read' || !p.reader) return;
+    // The cast is an artefact of the temporary deep import above and goes
+    // with it: `themeFrom` hands back the `Theme` from the built barrel and
+    // `readerLine` is typed against the one in `core/src`, which TypeScript
+    // holds apart because `Theme` has a private field. Same class, same file,
+    // two module identities — nothing structural, and nothing this function
+    // does with a theme could tell them apart.
+    sink.write(
+      `${readerLine(p.reader, p.done, p.total, t as unknown as CoreTheme, {
+        usd: p.spend.usd,
+        // `est.` is inherited from what the backend reported, never guessed
+        // here: the agent SDK returns a constant `input_tokens: 10`, which
+        // `llm.ts` discards, so on the subscription path every call is an
+        // api-equivalent estimate and the line says so.
+        estimated: p.spend.estimatedInputCalls > 0,
+      })}\n`,
+    );
+  };
 }
 
 export async function runAsk(o: AskCommandOptions): Promise<number> {
@@ -104,11 +187,15 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
   const { db, root } = openIndex(o);
   const t = themeFrom(o);
   const drops: AskDrop[] = [];
-  const progress = new Progress('reading', !o.json && !o.quiet && Boolean(process.stderr.isTTY));
+  const onProgress = askProgress(t, process.stderr, !o.quiet);
 
   try {
     const filters = parseFilters(db, o);
-    const k = positive(o.k, ASK_K, '--k');
+    const fast = Boolean(o.fast);
+    // `--k` still wins over `--fast`, so the default is chosen here rather
+    // than in `positive()`: `ask --fast --k 6` reads six sessions and the
+    // footer's counts say six, which is the only reading that is not a lie.
+    const k = positive(o.k, fast ? ASK_FAST_K : ASK_K, '--k');
     // One options object for every path below, so the shortlist a
     // `--readers-out` run records, the shortlist a `--readers-in` run checks
     // against, and the shortlist a normal run reads are the same shortlist
@@ -118,6 +205,7 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
       filters,
       root,
       k,
+      fast,
       strict: Boolean(o.strict),
       maxUsd: money(o.maxUsd),
       concurrency: positive(o.concurrency, ASK_CONCURRENCY, '--concurrency'),
@@ -136,21 +224,7 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
 
     const result = readersIn
       ? await replayReaders(db, question, base, readersIn)
-      : await ask(db, question, {
-          ...base,
-          onProgress: (p) => {
-            if (p.step !== 'read') return;
-            // Cost and time, live, on stderr — so `ask --json > f` still shows it
-            // and the json stays parseable. `est.` is inherited from the result,
-            // never guessed here.
-            progress.update(
-              p.done,
-              p.total,
-              `${f.money(p.spend.usd)}${p.spend.estimatedInputCalls > 0 ? ' est.' : ''}`,
-            );
-          },
-        });
-    progress.done();
+      : await ask(db, question, { ...base, onProgress });
 
     if (o.debug) reportDrops(drops);
 
@@ -165,7 +239,6 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
     print(renderAsk(result, t, new Date()));
     return exitCode(result);
   } finally {
-    progress.done();
     db.close();
   }
 }
@@ -332,7 +405,17 @@ export async function writeReadersFile(
   // the two rule sets ever drift. Running it also keeps the two paths
   // *identical*: a native reader quoting this text quotes what an SDK reader
   // would have been shown.
-  const targets = rec.seen.map((input) => ({ ...input, excerpts: redactOutgoing(input.excerpts).text }));
+  // The card block goes through the same pass as the excerpts, for the same
+  // reason and with the same result: it is redacted at rest (a card is
+  // extracted from the index, and the index is redacted at ingest), `llm.ts`
+  // redacts it again on the wire, and this third pass keeps the recorded file
+  // byte-identical to what a model would have been sent. Present only on a
+  // `--fast` recording of a carded session.
+  const targets = rec.seen.map((input) => ({
+    ...input,
+    excerpts: redactOutgoing(input.excerpts).text,
+    ...(input.card ? { card: redactOutgoing(input.card).text } : {}),
+  }));
   const q = redactOutgoing(question).text;
   const file: ReadersFile = {
     kind: READERS_FILE_KIND,

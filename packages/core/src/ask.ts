@@ -109,6 +109,64 @@ export const ASK_SESSION_CHARS = 8_000;
 /** Top-n exchanges per session, by hybrid score, before the ±1 neighbours. */
 export const ASK_TOP_EXCHANGES = 4;
 
+// ------------------------------------------------------- the fast path
+//
+// 8.7. The default path is not narrowed to hit a number: `k = 6` is what the
+// quality gate was measured at and `03` §12 records the wall-time miss as a
+// miss rather than re-tuning `k` to fit. `--fast` is a **second** path, chosen
+// per question, that trades coverage for latency and is required to say so on
+// every screen it prints (see `render/ask.ts`'s `fastNote`).
+//
+// Three levers, in the order they matter:
+//
+//   1. **k = 3.** Wall time is dominated by one round of the reader fan-out,
+//      not by the number of readers — concurrency 6 realises ~4.9x — so k
+//      alone buys little. It is here because it also shrinks the synthesizer's
+//      prompt, and because reading half as much is the honest half of the
+//      trade the note has to disclose.
+//   2. **a haiku-class synthesizer.** `ASK_MODEL` is sonnet-class; the
+//      synthesizer is one serial call on the critical path *after* every
+//      reader has returned, so its latency is added, never overlapped.
+//   3. **cards-first.** Where a session already has a card, the reader is
+//      handed the card plus the top-2 exchanges instead of an
+//      {@link ASK_SESSION_CHARS}-character slice. The card is the expensive
+//      reading already done once; re-reading 8 kB of transcript to rediscover
+//      it is the part of the wait that was already paid for. Applied only
+//      when it is genuinely smaller — see `loadTarget`, which costs both
+//      forms and takes the cheaper, because on short sessions a 900-character
+//      card added to a 1 kB slice sends *more* than the path it replaces.
+//
+// What does **not** change: the reader contract, {@link filterAnswer}, and the
+// rule that a quote is checked against the excerpt the reader was shown. The
+// card is context and is never citable — a quote from it resolves to no unit
+// and is dropped like any other unsourced line. That is why `--fast` can be
+// faster without being a different product: it reads less, and what it does
+// say is grounded the same way.
+
+/** `--fast`: sessions read. Never lower than this. */
+export const ASK_FAST_K = 3;
+
+/** `--fast`: the synthesizer, haiku-class rather than {@link ASK_MODEL}. */
+export const ASK_FAST_MODEL = CARD_MODEL;
+
+/** `--fast`: exchanges per session when a card carries the context. */
+export const ASK_FAST_TOP_EXCHANGES = 2;
+
+/**
+ * `--fast`: the slice a carded session gets, in characters.
+ *
+ * Only ever applied **with** a card, and only when card plus slice comes to
+ * less than the full slice would have. A session with no card keeps the full
+ * {@link ASK_SESSION_CHARS} slice under `--fast` too, because there is then
+ * nothing standing in for what the cut would remove, and a reader given a
+ * third of a transcript and no summary of the rest is the shape of a miss the
+ * user cannot see. See `loadTarget` for why the size check is there.
+ */
+export const ASK_FAST_SESSION_CHARS = 3_000;
+
+/** The card block handed to a reader, capped. Context, never citable. */
+export const ASK_CARD_CHARS = 900;
+
 /** How deep recall looks so `matching` can be reported honestly. */
 export const ASK_SCAN = 50;
 
@@ -234,6 +292,16 @@ export interface AskResult {
   spend: Spend;
   /** True if any figure in `spend` is `est.` (`05` honesty contract). */
   estimated: boolean;
+  /**
+   * 8.7: this run took the `--fast` path and read less of the archive.
+   *
+   * Carried on the result rather than left to the caller to remember, for the
+   * same reason {@link AskResult.refusal} is: the renderer must print the
+   * trade-off line on **every** `--fast` screen, including the ones that
+   * refuse or find nothing, and a screen that cannot tell whether it was a
+   * narrow read is a screen that will eventually forget to say so.
+   */
+  fast: boolean;
   ms: number;
 }
 
@@ -257,6 +325,18 @@ export interface AskReaderInput {
   excerpts: string;
   /** The seq numbers in `excerpts`, so a caller can check what it may cite. */
   seqs: number[];
+  /**
+   * 8.7 cards-first: this session's card, as context, when `--fast` found one.
+   *
+   * **Not citable, and that is structural rather than a request.** A card is
+   * the model's own prose about the transcript; it has no `seq`, so a quote
+   * taken from it resolves to no unit in {@link filterAnswer} and is dropped
+   * with the sentence that leaned on it. The reader is told so in the prompt
+   * only to save the round trip, not because the prompt is what enforces it.
+   *
+   * Absent on the default path and on any session that has no card.
+   */
+  card?: string;
 }
 
 export interface AskReaderQuote {
@@ -299,6 +379,24 @@ export interface AskProgress {
   /** Running spend, so the CLI can show cost live without its own arithmetic. */
   spend: Spend;
   detail?: string;
+  /**
+   * 8.7: on `step: 'read'`, the reader that just returned — id, verdict and
+   * its own elapsed time.
+   *
+   * The counters above say *how many* have come back; a user waiting 40 to 180
+   * seconds on six model calls is watching for *which*, and for whether the
+   * archive is producing evidence or silence. `done`/`total` alone is a
+   * spinner with numbers on it. This field is what lets the CLI print one line
+   * per reader as evidence arrives, and it carries the report rather than a
+   * pre-rendered string so the renderer owns the shape, the width and the
+   * `--ascii` fold.
+   *
+   * Emitted for every reader, including one that failed: `error` set is the
+   * difference between "read it and found nothing" and "never answered", and
+   * a progress line that conflates them is the same lie the `nothing()`
+   * renderer was fixed for.
+   */
+  reader?: AskReaderReport;
 }
 
 export type AskDropReason =
@@ -328,6 +426,12 @@ export interface AskDrop {
 export interface AskOptions {
   filters?: SearchFilters;
   k?: number;
+  /**
+   * 8.7 `--fast`: {@link ASK_FAST_K} sessions, a haiku-class synthesizer, and
+   * cards-first excerpts. An explicit `k`, `model` or `readerModel` still
+   * wins — this only moves the defaults.
+   */
+  fast?: boolean;
   strict?: boolean;
   maxUsd?: number;
   /** Synthesizer model. Default {@link ASK_MODEL} (sonnet-class). */
@@ -882,6 +986,22 @@ export const READER_SYSTEM =
   'anyone reads it, and the claim it was meant to support is discarded with it. Two to four ' +
   'short quotes is the right size for an answer.';
 
+/**
+ * 8.7 cards-first: what a reader is told about the card block.
+ *
+ * The card is context and is not evidence. A reader that quotes it produces a
+ * line {@link filterAnswer} cannot resolve — a card has no `seq` — and the
+ * sentence leaning on it is dropped with it, so a reader that treats the card
+ * as quotable simply answers less. Saying so here saves that round trip; it is
+ * not what makes it true.
+ */
+export const READER_CARD_NOTE =
+  'A CARD for this session is included above the excerpts. It is a previously written summary ' +
+  'of the whole session and it is CONTEXT ONLY: use it to understand what the session was ' +
+  'about and which exchange to look in. Never quote from the card. Every quote must come from ' +
+  'the numbered excerpts, which are the only citable text. If the card names a decision whose ' +
+  'exchange is not in the excerpts, say so in answer_fragment rather than quoting the card.';
+
 export const READER_GHOST_NOTE =
   'These excerpts are PROMPTS ONLY. This session was deleted by Claude Code\'s 30-day sweep and ' +
   'rebuilt from history; the assistant\'s replies are gone and are not recoverable. You may say ' +
@@ -968,13 +1088,20 @@ interface Target {
   isGhost: boolean;
   units: TranscriptUnit[];
   score: number;
+  /** 8.7 cards-first: set only when `--fast` found a card for this session. */
+  card?: string;
 }
 
 export async function ask(db: Db, question: string, o: AskOptions = {}): Promise<AskResult> {
   const started = Date.now();
   const q = question.trim();
   const strict = Boolean(o.strict);
-  const k = Math.max(1, Math.floor(o.k ?? ASK_K));
+  const fast = Boolean(o.fast);
+  // `--fast` moves the *defaults* and nothing else. A caller that passed `--k`
+  // or `--model` asked for a number, and a flag that silently overrode it
+  // would make `ask --fast --k 8` a lie on the screen: the footer prints `k`
+  // from the shortlist it actually built.
+  const k = Math.max(1, Math.floor(o.k ?? (fast ? ASK_FAST_K : ASK_K)));
   const budget = o.budget ?? new Budget({ maxUsd: o.maxUsd ?? ASK_MAX_USD });
   const maxUsd = o.maxUsd ?? ASK_MAX_USD;
   const meter = new SpendMeter();
@@ -1009,7 +1136,7 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
   // counting blocks against a `searched` that counts sessions printed
   // "6 of 5 sessions read" on a corpus with two subagents in it. Both numbers
   // now come out of the same expansion.
-  const { targets, candidates } = shortlist(db, found.sessions, k);
+  const { targets, candidates } = shortlist(db, found.sessions, k, fast);
   const matching = candidates;
   o.onProgress?.({
     step: 'shortlist',
@@ -1034,6 +1161,7 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
     strict,
     spend: meter.total,
     estimated: meter.total.estimatedInputCalls > 0,
+    fast,
     ms: Date.now() - started,
     ...extra,
   });
@@ -1083,12 +1211,19 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
             };
           } finally {
             done += 1;
+            // `done` is the count of readers that have *returned*, so the
+            // ordinal on the printed line is arrival order rather than
+            // shortlist order. That is the honest one: the user is watching a
+            // race, and `reader 3/6` next to a session that came third is what
+            // they saw happen.
+            const report = readers[i];
             o.onProgress?.({
               step: 'read',
               done,
               total: targets.length,
               spend: meter.total,
-              detail: readers[i]?.found ? 'found' : 'nothing',
+              detail: report?.error ? 'failed' : report?.found ? 'found' : 'nothing',
+              ...(report ? { reader: report } : {}),
             });
           }
         }),
@@ -1118,7 +1253,8 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
 
     // ---- 4. synthesizer, one call.
     o.onProgress?.({ step: 'synthesize', done: 0, total: 1, spend: meter.total });
-    const ownSynth = o.llm ?? openLlm(o.model ?? ASK_MODEL, budget, o);
+    const ownSynth =
+      o.llm ?? openLlm(o.model ?? (fast ? ASK_FAST_MODEL : ASK_MODEL), budget, o);
     meter.track(ownSynth);
     let proposed: SynthReply;
     try {
@@ -1168,6 +1304,7 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
       strict,
       spend: meter.total,
       estimated: meter.total.estimatedInputCalls > 0,
+      fast,
       ms: Date.now() - started,
     };
   } finally {
@@ -1200,6 +1337,7 @@ function shortlist(
   db: Db,
   sessions: readonly RecallSession[],
   k: number,
+  fast = false,
 ): { targets: Target[]; candidates: number } {
   // Recall's block order is kept — it is the ranking `find` shows and the one
   // phase 3 measured — and each block is expanded into the distinct sessions
@@ -1234,12 +1372,115 @@ function shortlist(
   }
 
   const targets: Target[] = [];
+  // One query for the whole shortlist rather than one per target: `loadTarget`
+  // is called for candidates that may not survive `units.length > 0`, and a
+  // per-target lookup would run `k` statements to answer a question one
+  // statement answers. Empty on the default path — cards-first is `--fast`'s.
+  const cards = fast ? cardBriefs(db, order.slice(0, Math.max(k * 3, k))) : new Map<string, string>();
   for (const sessionId of order) {
     if (targets.length >= k) break;
-    const t = loadTarget(db, sessionId, seqs.get(sessionId) ?? [], scores.get(sessionId) ?? 0);
+    const t = loadTarget(
+      db,
+      sessionId,
+      seqs.get(sessionId) ?? [],
+      scores.get(sessionId) ?? 0,
+      cards.get(sessionId),
+    );
     if (t && t.units.length > 0) targets.push(t);
   }
   return { targets, candidates: order.length };
+}
+
+/**
+ * 8.7 cards-first: one compact context block per carded session.
+ *
+ * What goes in is what a reader cannot reconstruct from two exchanges — the
+ * shape of the session and what it concluded — and nothing that would read as
+ * quotable prose. Decisions carry their `evidence_seq` so a reader that wants
+ * to quote one knows which exchange to look for rather than quoting the
+ * card's paraphrase of it, which {@link filterAnswer} would drop.
+ *
+ * The text is already redacted: cards are extracted from the index, and the
+ * index is redacted at ingest (L2). It is redacted **again** on the way out by
+ * `llm.ts`, which masks every outgoing prompt and system string and has no
+ * flag that turns it off. `tests/ask-fast.test.ts` asserts the second pass on
+ * the wire rather than trusting the first.
+ */
+function cardBriefs(db: Db, sessionIds: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  if (sessionIds.length === 0) return out;
+  try {
+    const rows = db
+      .prepare(
+        `SELECT session_id, title, summary, decisions, outcome FROM cards
+          WHERE session_id IN (${sessionIds.map(() => '?').join(',')})`,
+      )
+      .all(...sessionIds) as {
+      session_id: string;
+      title: string | null;
+      summary: string | null;
+      decisions: string | null;
+      outcome: string | null;
+    }[];
+    for (const r of rows) {
+      const brief = cardBrief(r);
+      if (brief) out.set(r.session_id, brief);
+    }
+  } catch {
+    // A corpus with no `cards` table is not an error, it is a corpus nobody
+    // has run `card` on. Cards-first then degrades to the ordinary slice,
+    // which is the default path's behaviour and is correct.
+    return out;
+  }
+  return out;
+}
+
+function cardBrief(r: {
+  title: string | null;
+  summary: string | null;
+  decisions: string | null;
+  outcome: string | null;
+}): string {
+  const parts: string[] = [];
+  if (r.title?.trim()) parts.push(`title: ${r.title.trim()}`);
+  if (r.summary?.trim()) parts.push(`summary: ${r.summary.trim()}`);
+  const decisions = parseDecisions(r.decisions);
+  if (decisions.length > 0) {
+    parts.push(
+      'decisions:\n' +
+        decisions
+          .slice(0, 4)
+          .map((d) => {
+            const seqs = d.evidence_seq.length ? ` [seq ${d.evidence_seq.join(', ')}]` : '';
+            return `  - ${d.what}${d.why ? ` — ${d.why}` : ''}${seqs}`;
+          })
+          .join('\n'),
+    );
+  }
+  if (r.outcome?.trim()) parts.push(`outcome: ${r.outcome.trim()}`);
+  const text = parts.join('\n').trim();
+  if (!text) return '';
+  return text.length > ASK_CARD_CHARS ? `${text.slice(0, ASK_CARD_CHARS).trimEnd()}…` : text;
+}
+
+function parseDecisions(raw: string | null): { what: string; why: string; evidence_seq: number[] }[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+      .map((x) => ({
+        what: typeof x['what'] === 'string' ? x['what'] : '',
+        why: typeof x['why'] === 'string' ? x['why'] : '',
+        evidence_seq: Array.isArray(x['evidence_seq'])
+          ? x['evidence_seq'].map(Number).filter(Number.isInteger)
+          : [],
+      }))
+      .filter((x) => x.what.trim().length > 0);
+  } catch {
+    return [];
+  }
 }
 
 function loadTarget(
@@ -1247,11 +1488,40 @@ function loadTarget(
   sessionId: string,
   seqs: readonly number[],
   score: number,
+  card?: string,
 ): Target | null {
   const transcript =
     loadSessionTranscript(db, sessionId) ?? loadGhostTranscript(db, sessionId);
   if (!transcript) return null;
-  const units = excerptUnits(transcript, seqs);
+  // Cards-first, and only where it actually costs less to send.
+  //
+  // Two conditions, and the second was found by measurement rather than by
+  // reasoning. The first is obvious: no card, no substitution — there would be
+  // nothing standing in for what the cut removed, so an uncarded session keeps
+  // its full slice even under `--fast`.
+  //
+  // The second: **the substitution has to be smaller than what it replaces.**
+  // The trade assumes the default slice is near its 8 kB ceiling, and on a
+  // long session it is. On a short one it is not: measured on the synthetic
+  // demo corpus, three shortlisted sessions had default slices of 1,048 /
+  // 1,023 / 257 characters, and adding a 900-character card to each made the
+  // `--fast` fan-out send **more** than the default path it was meant to be
+  // cheaper than (4,518 characters against 3,032). A latency flag that
+  // enlarges the prompt is not a slower version of the trade, it is the
+  // opposite of it. So both forms are costed here and the smaller wins; a
+  // session with nothing to trade away is read exactly as the default path
+  // reads it, and `AskReaderInput.card` is absent so the screen and the
+  // recorded reader file both say so.
+  const full = excerptUnits(transcript, seqs);
+  const narrow = card
+    ? excerptUnits(transcript, seqs, {
+        top: ASK_FAST_TOP_EXCHANGES,
+        maxChars: ASK_FAST_SESSION_CHARS,
+      })
+    : null;
+  const worthIt =
+    narrow !== null && excerptText(narrow).length + card!.length < excerptText(full).length;
+  const units = worthIt ? narrow! : full;
   return {
     sessionId,
     id8: idTag(sessionId),
@@ -1261,6 +1531,7 @@ function loadTarget(
     isGhost: transcript.kind === 'ghost',
     units,
     score,
+    ...(worthIt ? { card: card! } : {}),
   };
 }
 
@@ -1275,6 +1546,7 @@ function readerInput(question: string, t: Target): AskReaderInput {
     isGhost: t.isGhost,
     excerpts: excerptText(t.units),
     seqs: t.units.map((u) => u.seq),
+    ...(t.card ? { card: t.card } : {}),
   };
 }
 
@@ -1286,11 +1558,15 @@ function sdkReader(llm: Llm, signal?: AbortSignal): AskReaderFn {
       `Session ${input.id8} (${input.project}, ${input.harness}` +
       `${input.isSidechain ? ', subagent transcript' : ''}` +
       `${input.isGhost ? ', GHOST — prompts only' : ''}).\n` +
-      `Citable seq numbers: ${input.seqs.join(', ')}\n\n` +
+      // The card goes above the excerpts and is labelled as not citable, so
+      // the last thing the model reads before the question's evidence is the
+      // evidence itself.
+      (input.card ? `\nCard (context only, NOT citable):\n${input.card}\n` : '') +
+      `\nCitable seq numbers: ${input.seqs.join(', ')}\n\n` +
       `Excerpts:\n${input.excerpts}`;
     const r = await llm.json<AskReaderOutput>({
       prompt,
-      system: input.isGhost ? `${READER_SYSTEM}\n\n${READER_GHOST_NOTE}` : READER_SYSTEM,
+      system: readerSystem(input),
       schema: READER_SCHEMA,
       label: `reader ${input.id8}`,
       fallback: { found: false, quotes: [], answer_fragment: '' },
@@ -1299,6 +1575,20 @@ function sdkReader(llm: Llm, signal?: AbortSignal): AskReaderFn {
     });
     return r.value;
   };
+}
+
+/**
+ * The reader's system prompt, with the notes this session's shape earns.
+ *
+ * Both notes are additive and both are about what may **not** be said: a ghost
+ * has no assistant side, a card is not a transcript. A session that is both
+ * gets both, in that order, because the ghost note is the stronger claim.
+ */
+function readerSystem(input: AskReaderInput): string {
+  const parts = [READER_SYSTEM];
+  if (input.isGhost) parts.push(READER_GHOST_NOTE);
+  if (input.card) parts.push(READER_CARD_NOTE);
+  return parts.join('\n\n');
 }
 
 function validateReader(v: unknown): AskReaderOutput | null {
@@ -1440,7 +1730,7 @@ async function tryOpenThreads(
     if (cands.length === 0) return [];
     const confirmed = await confirmOpenThreads(cands, {
       ...(llm ? { llm } : {}),
-      ...(o.model ? { model: o.model } : { model: ASK_MODEL }),
+      ...(o.model ? { model: o.model } : { model: o.fast ? ASK_FAST_MODEL : ASK_MODEL }),
       budget,
       ...(o.signal ? { signal: o.signal } : {}),
     });
