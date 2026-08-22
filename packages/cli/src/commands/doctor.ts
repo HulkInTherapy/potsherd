@@ -36,6 +36,13 @@ import {
 } from '@potsherd/core';
 import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
 import { BRIDGE_READ_PATHS, EXPORT_WRITE_PATHS } from '../privacy-paths.js';
+import { search as searchNs } from '@potsherd/core';
+
+// The ignore list. It reaches `doctor` through the `search` namespace because
+// that is where the filter vocabulary lives (`SearchFilters.excludeProjects`),
+// and because `packages/core/src/index.ts` is reserved on the branch this
+// landed on.
+const { readIgnoreConfig, ignoredProjectsInIndex, countIgnoredSessions } = searchNs;
 
 export interface DoctorOptions extends GlobalOptions {
   privacy?: boolean;
@@ -89,6 +96,13 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     }
   }
 
+  // The ignore list, read whether or not it is empty. `doctor` is the one
+  // screen that prints it in full and by name: `ls`, `find` and `stats` print
+  // only a count, because they are screenshot surfaces and these are
+  // directories off the user's own machine.
+  const ignoreConfig = readIgnoreConfig(root);
+  const ignoreProjects = ignoreList(root, dbExists, ignoreConfig.list);
+
   const unknownTypes = collectRecordTypes(report);
   const adapters = await adapterStatus(o);
   // `audit` only ever reads claude's tree. `index` reads all seven harnesses,
@@ -104,6 +118,13 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     paths.archiveDir(root),
     dbFile,
     paths.modelsDir(root),
+    // `03` §11 promises "~/.potsherd and the four things inside it" and then
+    // lists three. This is the fourth, and until `potsherd ignore` there was
+    // nothing that wrote it — the path had been resolvable since phase 0 and
+    // unused. It is an unprompted write inside potsherd's own directory, so it
+    // is named here rather than left to the reader to infer from the directory
+    // above it.
+    paths.configPath(root),
     // `graft` is the one verb that writes outside ~/.potsherd: the brief lands
     // in the project you run it in, which is the entire point of the verb.
     // `03` §11 says this receipt lists *every* path written — and it has
@@ -149,6 +170,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
         writes: written,
         writesWithConsent: [...consented, ...backups],
         network,
+        ignore: ignoreConfig.list,
       });
       return 0;
     }
@@ -209,7 +231,9 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       // A note per path, not one line after the loop: two of these are
       // conditional now, and a single trailing sentence could only describe one
       // of them truthfully.
-      if (p.endsWith('graft-<id8>.md')) {
+      if (p.endsWith('config.json')) {
+        note('your settings: the ignore list, written by potsherd ignore / unignore');
+      } else if (p.endsWith('graft-<id8>.md')) {
         note('only when you run graft, in the directory you run it in');
       } else if (p.startsWith('<the path you give')) {
         note(
@@ -374,6 +398,13 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
         vectors: counts['vec_exchanges'] ?? 0,
         vec,
       },
+      ignore: {
+        config: ignoreConfig.file,
+        entries: ignoreConfig.list,
+        ...(ignoreConfig.error ? { error: ignoreConfig.error } : {}),
+        projects: ignoreProjects.projects,
+        sessions: ignoreProjects.sessions,
+      },
       redaction: countsJson(redaction),
       recordTypes: unknownTypes,
       // Exact per-(harness, version, type) counts over every session in the
@@ -497,6 +528,29 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   card.text(t.dim(fmt.clip(opencodeAdapter.OPENCODE_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
   card.text(t.dim(fmt.clip(copilotAdapter.COPILOT_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
 
+  // `03` §8.4: "doctor prints the ignore list". Printed only when there is one
+  // — a fresh install ignores nothing, and a line saying so on every doctor run
+  // would be a permanent answer to a question nobody asked. A *broken*
+  // config.json is always printed, because an unreadable settings file and an
+  // empty list look identical from the outside and only one of them is a
+  // problem the user can fix.
+  if (ignoreConfig.error) {
+    card.blank().text(t.warn(`ignore list: ${ignoreConfig.error}`));
+    card.text(t.dim(fmt.elideMiddle(paths.tildify(ignoreConfig.file), Math.max(20, t.width - 4), t)));
+  } else if (ignoreConfig.list.length > 0) {
+    card.blank().text('ignored — hidden from ls, find, ask and stats (--all shows them):');
+    for (const entry of ignoreConfig.list) {
+      card.raw(`    ${fmt.elideMiddle(paths.tildify(entry), Math.max(20, t.width - 4), t)}`);
+    }
+    const p = ignoreProjects.projects.length;
+    const n = ignoreProjects.sessions;
+    card.text(
+      t.dim(
+        `${fmt.num(p)} ${fmt.plural(p, 'project')} in the index ${t.mid} ${fmt.num(n)} ${fmt.plural(n, 'session')} hidden ${t.mid} potsherd unignore <project>`,
+      ),
+    );
+  }
+
   const fatal = report.warnings.filter((w) => w.startsWith('unreadable transcript'));
   card.blank();
   card.rows([{
@@ -514,6 +568,28 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   );
   print(card.toString());
   return fatal.length ? 1 : 0;
+}
+
+/**
+ * The projects an ignore list actually names in this index, and their session
+ * count. Zero of both when there is no database yet — `doctor` runs before
+ * `index` does, and an ignore list is legal before anything is indexed.
+ */
+function ignoreList(
+  root: string,
+  dbExists: boolean,
+  entries: readonly string[],
+): { projects: string[]; sessions: number } {
+  if (!dbExists || entries.length === 0) return { projects: [], sessions: 0 };
+  const db = store.open({ root, readonly: true });
+  try {
+    const projects = ignoredProjectsInIndex(db, entries);
+    return { projects, sessions: countIgnoredSessions(db, projects) };
+  } catch {
+    return { projects: [], sessions: 0 };
+  } finally {
+    db.close();
+  }
 }
 
 function collectRecordTypes(report: AuditReport): Record<string, number> {

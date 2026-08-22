@@ -65,12 +65,14 @@ export function renderFind(
       lines.push(
         INDENT + t.dim('no ghosts indexed yet') + '  ' + t.dim(`${t.sep} run  potsherd rescue`),
       );
+      lines.push(...ignoreNote(result, t));
       return lines.join('\n');
     }
     // Two variants, because "run potsherd ls to see what is indexed, or
     // potsherd index to add more" is 77 characters and the terminal may be 60.
     const long = 'to see what is indexed, or  potsherd index  to add more';
     const wide = INDENT + t.dim('run') + '  potsherd ls  ' + t.dim(long);
+    lines.push(...ignoreNote(result, t));
     lines.push(
       Theme.len(wide) <= t.width ? wide : INDENT + t.dim('run') + '  potsherd ls  ' + t.dim('or  potsherd index'),
     );
@@ -96,8 +98,32 @@ export function renderFind(
       lines.push(INDENT + t.dim(line));
     }
   }
+  lines.push(...ignoreNote(result, t));
   lines.push(nextVerb(t));
   return lines.join('\n');
+}
+
+/**
+ * "not searching 47 sessions in 2 ignored projects  ·  --all".
+ *
+ * `find` reports what it did not look at rather than what it dropped: a
+ * ranking cannot say what it would have returned without being run a second
+ * time, and "these projects were not searched" is the fact the reader needs
+ * either way. It prints under an empty result as well as under a full one —
+ * an empty `find` with an ignore list in force is exactly where the line earns
+ * itself, because "nothing matches" would otherwise be false.
+ *
+ * Counts, never names: the projects are directories off the user's machine and
+ * `find` is a screenshot surface. `doctor` and `--json` carry the names.
+ */
+function ignoreNote(result: RecallResult, t: Theme): string[] {
+  const n = result.ignored.hidden;
+  if (n <= 0) return [];
+  const p = result.ignored.projects.length;
+  const what = `not searching ${f.num(n)} ${f.plural(n, 'session')} in ${f.num(p)} ignored ${f.plural(p, 'project')}`;
+  const wide = `${what}  ${t.sep}  --all`;
+  const text = Theme.len(INDENT + wide) <= t.width ? wide : what;
+  return f.wrap(text, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
 }
 
 /**

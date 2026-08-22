@@ -60,6 +60,12 @@ export function renderLs(result: ListResult, t: Theme = new Theme(), now = new D
 
   lines.push('');
   lines.push(INDENT + t.dim(summary(result, t)));
+  // Its own line, not a fourth item in the summary's joinFit, because the
+  // summary elides and this is the one line on the screen the user cannot be
+  // allowed to miss: it is the difference between "this is my archive" and
+  // "this is my archive minus what I told potsherd to skip". `05` gives every
+  // line the command that acts on it, and here that command is the way back.
+  for (const line of ignoreNote(result, t)) lines.push(line);
   lines.push(
     fitLine(
       t,
@@ -161,6 +167,23 @@ function statusCell(s: BrowseSession, t: Theme): string {
   }
   if (s.status === 'archived') return 'archived';
   return t.dim('live');
+}
+
+/**
+ * "hiding 41 rows in 2 ignored projects · potsherd ls --all".
+ *
+ * Counts, never names. The projects are directory paths off the user's own
+ * machine and this line is on the one screen `05` asks people to screenshot;
+ * `potsherd doctor` and `--json` are where the names belong.
+ */
+function ignoreNote(r: ListResult, t: Theme): string[] {
+  const n = r.ignored.hidden;
+  if (n <= 0) return [];
+  const p = r.ignored.projects.length;
+  const what = `hiding ${f.num(n)} ${f.plural(n, 'row')} in ${f.num(p)} ignored ${f.plural(p, 'project')}`;
+  const wide = `${INDENT}${t.dim(what)}  ${t.dim(t.sep)}  ${t.dim('potsherd ls --all')}`;
+  const narrow = `${INDENT}${t.dim(what)}  ${t.dim(t.sep)} ${t.dim('--all')}`;
+  return [Theme.len(wide) <= t.width ? wide : narrow];
 }
 
 function summary(r: ListResult, t: Theme): string {

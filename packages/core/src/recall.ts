@@ -25,6 +25,7 @@ import {
   isModelCached,
 } from './embeddings.js';
 import { modelsDir, potsherdDir } from './paths.js';
+import { applyIgnore, countIgnoredSessions, type IgnoreReport } from './ignore.js';
 
 /**
  * L6 — recall.
@@ -200,6 +201,20 @@ export interface RecallResult {
    * sessions" — the exact belief the tool exists to correct.
    */
   indexedGhosts: number | null;
+  /**
+   * The ignore list, and what it removed from this search.
+   *
+   * `hidden` counts the **sessions** the list took out of the candidate set,
+   * measured by running the same shortlist without the exclusion. `find` puts
+   * it on screen and `--json` carries it, because "nothing matches pgbouncer"
+   * and "nothing matches pgbouncer outside the projects you ignore" are
+   * different answers and only one of them is true.
+   *
+   * `ask` shortlists through this function, so an ignored project is out of
+   * the readers' reach as well as off the `find` screen — one list, one
+   * behaviour, whichever verb asked.
+   */
+  ignored: IgnoreReport;
   ms: number;
 }
 
@@ -250,6 +265,10 @@ export interface RecallOptions {
   vectors?: boolean | 'auto';
   /** potsherd root, so the embedding model is found under `--potsherd-dir`. */
   root?: string;
+  /** `--all`: search the projects the ignore list hides. */
+  all?: boolean;
+  /** The ignore list, instead of reading it. Tests, and cached callers. */
+  ignore?: readonly string[];
 }
 
 /** Max exchange hits from one session in the top list (`03` §7). */
@@ -1184,10 +1203,31 @@ export function vectorState(db: Db, root?: string): VectorState {
 export async function recall(
   db: Db,
   query: string,
-  filters: SearchFilters = {},
+  requested: SearchFilters = {},
   options: RecallOptions = {},
 ): Promise<RecallResult> {
   const started = Date.now();
+  // The ignore list, folded into the filters once, before any list runs — so
+  // every one of the six lists, the vector KNN's candidate depth and the
+  // clustering all see the same archive. `ask` calls this function and passes
+  // no ignore option of its own, which is the point: honouring the list here
+  // is what makes `ask` honour it.
+  const ignore = applyIgnore(db, requested, {
+    ...(options.all !== undefined ? { all: options.all } : {}),
+    ...(options.root !== undefined ? { root: options.root } : {}),
+    ...(options.ignore !== undefined ? { entries: options.ignore } : {}),
+  });
+  const filters = ignore.filters;
+  const ignored: IgnoreReport = {
+    entries: ignore.entries,
+    projects: ignore.projects,
+    // Sessions in the ignored projects, not hits withheld: a search cannot
+    // report what it would have found without running twice, and a number
+    // that took 150 ms to earn would be a strange price for a caveat. What
+    // this says on screen is "these projects were not searched", which is
+    // exactly what it counts.
+    hidden: ignore.applied ? countIgnoredSessions(db, ignore.projects) : 0,
+  };
   const limit = Math.max(1, options.limit ?? 10);
   const k = options.k ?? RRF_K;
   const perSession = Math.max(1, options.perSession ?? PER_SESSION);
@@ -1220,6 +1260,7 @@ export async function recall(
     relaxed: false,
     ghostsOnly: ghosts === 'only',
     indexedGhosts: countGhosts(db),
+    ignored,
     ms: Date.now() - started,
   });
 
@@ -1549,6 +1590,7 @@ export async function recall(
     relaxed,
     ghostsOnly: ghosts === 'only',
     indexedGhosts: sessions.length === 0 ? countGhosts(db) : null,
+    ignored,
     ms: Date.now() - started,
   };
 }

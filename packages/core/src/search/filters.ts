@@ -67,6 +67,20 @@ export interface SearchFilters {
    * to run the ghost lists alone — see `buildGhostFilters`.
    */
   status?: SessionStatus;
+  /**
+   * Projects to leave out, as **exact `project` values**, already resolved
+   * from the user's ignore list (`ignore.ts`). It is a filter and not a
+   * special case: `ls`, `find`, `ask` and `stats` all AND it in beside
+   * `--project` and `--since` and get one consistent answer, and `--all`
+   * simply does not set it.
+   *
+   * Exact values rather than the patterns the user typed, because the ignore
+   * rule is about paths (`potsherd` matches every segment called `potsherd`)
+   * and SQL is about literals. `applyIgnore` resolves one into the other
+   * against the projects actually in the index, which is also what lets every
+   * surface print *how many* rows it hid.
+   */
+  excludeProjects?: readonly string[];
 }
 
 /**
@@ -98,6 +112,16 @@ const UNTITLED_GHOST_SQL = `COALESCE(TRIM(g.title), '') = ''
        AND NOT EXISTS (SELECT 1 FROM ghost_prompts p
                         WHERE p.session_id = g.session_id
                           AND p.text NOT LIKE '/%' AND length(trim(p.text)) > 3)`;
+
+/**
+ * `AND (project IS NULL OR project NOT IN (?, ?))` — the ignore list, bound.
+ *
+ * A NULL project is never excluded: the list names projects, and a session
+ * whose project is unknown has not been named by anything.
+ */
+function excludeProjectsClause(column: string, projects: readonly string[]): string {
+  return `(${column} IS NULL OR ${column} NOT IN (${projects.map(() => '?').join(', ')}))`;
+}
 
 export interface BoundClause {
   /** Already prefixed with `AND `, or empty. Safe to interpolate. */
@@ -161,6 +185,10 @@ export function buildExchangeFilters(filters: SearchFilters = {}): BoundClause {
   // `s` is already in scope here — every exchange query joins `sessions`, which
   // is what `s.project = ?` above relies on.
   if (filters.untitled) parts.push(UNTITLED_SESSION_SQL);
+  if (filters.excludeProjects?.length) {
+    parts.push(excludeProjectsClause('s.project', filters.excludeProjects));
+    params.push(...filters.excludeProjects);
+  }
 
   // include -> no clause at all. This is the line upstream does not have.
   const sidechains = filters.sidechains ?? 'include';
@@ -239,6 +267,10 @@ export function buildSessionFilters(filters: SearchFilters = {}): BoundClause {
     params.push(filters.linkedTo, filters.linkedTo);
   }
   if (filters.untitled) parts.push(UNTITLED_SESSION_SQL);
+  if (filters.excludeProjects?.length) {
+    parts.push(excludeProjectsClause('s.project', filters.excludeProjects));
+    params.push(...filters.excludeProjects);
+  }
 
   const sidechains = filters.sidechains ?? 'include';
   if (sidechains === 'only') parts.push('s.is_sidechain = 1');
@@ -302,6 +334,10 @@ export function buildGhostFilters(filters: SearchFilters = {}): BoundClause {
     params.push(filters.linkedTo, filters.linkedTo);
   }
   if (filters.untitled) parts.push(UNTITLED_GHOST_SQL);
+  if (filters.excludeProjects?.length) {
+    parts.push(excludeProjectsClause('g.project', filters.excludeProjects));
+    params.push(...filters.excludeProjects);
+  }
 
   return { sql: parts.length ? `AND ${parts.join(' AND ')}` : '', params };
 }
@@ -319,6 +355,7 @@ export function hasMetadataFilters(filters: SearchFilters = {}): boolean {
       filters.pinned ||
       filters.linkedTo ||
       filters.untitled ||
+      filters.excludeProjects?.length ||
       (filters.sidechains && filters.sidechains !== 'include'),
   );
 }

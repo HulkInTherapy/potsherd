@@ -5,6 +5,20 @@ import { openIndex, parseFilters, parseLimit, type FilterFlags } from '../filter
 export interface LsCommandOptions extends GlobalOptions, FilterFlags {
   limit?: unknown;
   resumeMenu?: boolean;
+  /**
+   * `--all`: show the projects the ignore list hides.
+   *
+   * Deliberately **not** part of the shared `addFilters` registration, though
+   * every other flag on this verb is. `potsherd card --all` already exists and
+   * means "every session in the index"; a single `--all` registered across the
+   * shared block would have put two meanings on one word. So `ls`, `find` and
+   * `stats` each declare it, with the same description and the same effect,
+   * and nothing else does.
+   *
+   * It overrides the ignore list and only the ignore list: every other filter
+   * still applies.
+   */
+  all?: boolean;
 }
 
 /**
@@ -23,7 +37,7 @@ export interface LsCommandOptions extends GlobalOptions, FilterFlags {
  * typed.
  */
 export async function runLs(o: LsCommandOptions): Promise<number> {
-  const { db } = openIndex(o);
+  const { db, root } = openIndex(o);
   try {
     const filters = parseFilters(db, o);
     // 15 rows plus the heading, the column header, the summary and the next verb
@@ -33,7 +47,10 @@ export async function runLs(o: LsCommandOptions): Promise<number> {
     // The resume menu is not a screenshot — it is pasted into a shell and
     // scrolled — so it gets a longer default.
     const limit = parseLimit(o.limit, o.resumeMenu ? 25 : 15);
-    const result = listSessions(db, filters, { limit });
+    // `--all` overrides the ignore list — and only the ignore list. Every
+    // other filter still applies, so `ls --all --ghosts only` is what the
+    // sweep took across every project including the ignored ones.
+    const result = listSessions(db, filters, { limit, root, all: Boolean(o.all) });
 
     if (o.json) {
       printJson({
@@ -42,6 +59,9 @@ export async function runLs(o: LsCommandOptions): Promise<number> {
         ghosts: result.ghosts,
         sidechains: result.sidechains,
         rolledUp: result.rolledUp,
+        // The names of the ignored projects live here and not on the screen:
+        // a script needs them, a screenshot must not carry them.
+        ignored: result.ignored,
         filters,
         // The same lines the human view prints, so a script never has to
         // rebuild `claude --resume <id>  # <title>` for itself.

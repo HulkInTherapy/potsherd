@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest';
 import {
   claudeAdapter,
   discover,
+  isClaudeWorktree,
   isNovelRecordType,
+  owningProjectPath,
   parse,
   recordTypeStats,
   sourceDir,
@@ -171,6 +173,108 @@ describe('claude parse', () => {
       'atis-latch': 1,
     });
     expect(result.malformedLines).toBe(0);
+  });
+});
+
+/**
+ * 8.4 — a subagent worktree is not a project.
+ *
+ * On the reference machine one `ls` row's *project* column read
+ * `agent-a3e88991…`. That is not a directory anybody made: Claude Code runs an
+ * agent in a git worktree of its own under `<project>/.claude/worktrees/`, the
+ * transcript records that as its `cwd`, and `cwd` is what becomes
+ * `sessions.project`. The last path segment is what `ls` prints, so a
+ * harness-managed scratch directory took a project row beside the user's real
+ * projects.
+ *
+ * The whole premise is built here rather than read off a machine: the tree,
+ * the slug (with the doubled `-` that `.claude` produces), the `cwd` in the
+ * records and the branch name Claude Code writes. A test whose premise is
+ * "the developer happens to have run an agent worktree" would pass nowhere
+ * else and prove nothing here.
+ */
+describe('claude agent worktrees are not projects', () => {
+  const SESSION = '33333333-3333-4333-8333-333333333333';
+  const OWNER = '/tmp/potsherd-worktree-owner';
+  const WORKTREE = `${OWNER}/.claude/worktrees/agent-a3e8899153a5e0b54`;
+  // `/a/b/.claude/worktrees/agent-x` with every separator turned into `-`,
+  // which is exactly how Claude Code names the directory — the `--` is the
+  // leading dot of `.claude`.
+  const SLUG = '-tmp-potsherd-worktree-owner--claude-worktrees-agent-a3e8899153a5e0b54';
+
+  function plantWorktreeSession(): string {
+    const dir = tempDir('potsherd-worktree-');
+    const projectDir = path.join(dir, 'projects', SLUG);
+    fs.mkdirSync(projectDir, { recursive: true });
+    const base = {
+      sessionId: SESSION,
+      cwd: WORKTREE,
+      version: '2.1.239',
+      entrypoint: 'cli',
+      gitBranch: 'worktree-agent-a3e8899153a5e0b54',
+      isSidechain: false,
+    };
+    const lines = [
+      {
+        ...base,
+        type: 'user',
+        uuid: 'w1',
+        promptId: 'wp1',
+        timestamp: '2026-08-22T01:10:00.000Z',
+        message: { role: 'user', content: 'run the migration' },
+      },
+      {
+        ...base,
+        type: 'assistant',
+        uuid: 'w2',
+        parentUuid: 'w1',
+        timestamp: '2026-08-22T01:10:09.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+      },
+    ];
+    fs.writeFileSync(
+      path.join(projectDir, `${SESSION}.jsonl`),
+      lines.map((l) => JSON.stringify(l)).join('\n') + '\n',
+    );
+    return dir;
+  }
+
+  it('files the session under the project that owns the worktree', async () => {
+    const dir = plantWorktreeSession();
+    try {
+      const sources = discover({ claudeDir: dir, archive: false });
+      expect(sources).toHaveLength(1);
+      // Discovery still reports the directory it actually read — the bug is
+      // not that the slug exists, it is what the session is filed under.
+      expect(sources[0]!.projectSlug).toBe(SLUG);
+
+      const result = await parse(sources[0]!);
+      expect(result.session.project).toBe(OWNER);
+      expect(result.session.projectSlug).toBe('-tmp-potsherd-worktree-owner');
+      // The column `ls` actually prints. Before the fix this was
+      // `agent-a3e8899153a5e0b54`.
+      expect(result.session.project.split('/').pop()).toBe('potsherd-worktree-owner');
+      // Nothing is lost: which worktree it was is still on the row.
+      expect(result.session.gitBranch).toBe('worktree-agent-a3e8899153a5e0b54');
+      expect(result.session.isSidechain).toBe(false);
+    } finally {
+      rmrf(dir);
+    }
+  });
+
+  it('leaves a directory the user called worktrees alone', () => {
+    // The rule is `.claude/worktrees/`, not `worktrees/`. Somebody's own
+    // ~/code/worktrees/feature-x is a project and stays one.
+    expect(isClaudeWorktree('/home/dev/worktrees/feature-x')).toBe(false);
+    expect(owningProjectPath('/home/dev/worktrees/feature-x')).toBe('/home/dev/worktrees/feature-x');
+
+    expect(isClaudeWorktree(`${OWNER}/.claude/worktrees/agent-x`)).toBe(true);
+    expect(owningProjectPath(`${OWNER}/.claude/worktrees/agent-x`)).toBe(OWNER);
+    // A path *inside* the worktree belongs to the owner too.
+    expect(owningProjectPath(`${OWNER}/.claude/worktrees/agent-x/packages/core`)).toBe(OWNER);
+    // `.claude/worktrees` with nothing under it is not a worktree.
+    expect(isClaudeWorktree(`${OWNER}/.claude/worktrees`)).toBe(false);
+    expect(owningProjectPath(null)).toBe(null);
   });
 });
 

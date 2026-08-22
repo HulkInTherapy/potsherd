@@ -5,6 +5,12 @@ import { HARNESSES } from './adapters/types.js';
 import { storedRedactionCounts } from './ingest.js';
 import { emptyCounts, type RedactionCounts } from './redact.js';
 import { dbPath, potsherdDir } from './paths.js';
+import {
+  countIgnoredSessions,
+  ignoredProjectsInIndex,
+  readIgnoreList,
+  type IgnoreReport,
+} from './ignore.js';
 import { vecStatus, vecTablesExist } from './vec.js';
 
 /**
@@ -68,6 +74,18 @@ export interface StatsReport {
   redactedExchanges: number;
   redactedPrompts: number;
   freshness: FreshnessStats;
+  /**
+   * The ignore list, and the sessions and ghosts it kept out of the counts
+   * above. `renderStats` prints one line for it whenever `entries` is not
+   * empty — a count of "your archive" that quietly excludes a third of it is
+   * the one number in this verb that could be wrong without looking wrong.
+   *
+   * **`freshness` is deliberately not filtered.** It is a fact about the index
+   * — how many rows are behind their source, how many sources have vanished,
+   * how large the file is — and a user chasing a stale index needs the whole
+   * of it. Ignoring is a view of your history, not of potsherd's health.
+   */
+  ignored: IgnoreReport;
   ranAt: string;
   root: string;
 }
@@ -92,10 +110,41 @@ export interface StatsOptions {
   root?: string;
   /** Skip the per-file stat pass. Off by default; it costs ~2 ms per 100 files. */
   freshness?: boolean;
+  /** `stats --all`: count the projects the ignore list hides, like every other row. */
+  all?: boolean;
+  /** The ignore list, instead of reading it from `<root>/config.json`. */
+  ignore?: readonly string[];
 }
 
 export function stats(db: Db, options: StatsOptions = {}): StatsReport {
   const root = potsherdDir(options.root);
+
+  // The ignore list becomes one `AND project NOT IN (…)` spliced into the two
+  // aggregate queries. Spliced rather than appended to a filter object because
+  // `stats` has no filters at all: it is the one verb that has always counted
+  // everything, which is exactly why it has to say when it stops.
+  const entries = options.all ? [] : [...(options.ignore ?? readIgnoreList(root))];
+  const ignoredProjects = ignoredProjectsInIndex(db, entries);
+  const ignoredMarks = ignoredProjects.map(() => '?').join(', ');
+  const notIgnored = (column: string): string =>
+    ignoredProjects.length === 0
+      ? ''
+      : `WHERE (${column} IS NULL OR ${column} NOT IN (${ignoredMarks}))`;
+  const ignoredParams = ignoredProjects;
+  const ignored: IgnoreReport = {
+    entries: options.all ? [...(options.ignore ?? readIgnoreList(root))] : entries,
+    projects: ignoredProjects,
+    hidden: countIgnoredSessions(db, ignoredProjects),
+  };
+
+  // The exclusion is repeated inside the two correlated subqueries as well as
+  // in the outer FROM: an exchange count that still included the ignored
+  // projects' exchanges, under a session count that did not, would be a stats
+  // card that fails its own arithmetic.
+  const andNotIgnored = (column: string): string =>
+    ignoredProjects.length === 0
+      ? ''
+      : `AND (${column} IS NULL OR ${column} NOT IN (${ignoredMarks}))`;
 
   const sessionRows = db
     .prepare(
@@ -110,22 +159,23 @@ export function stats(db: Db, options: StatsOptions = {}): StatsReport {
               MIN(s.started_at)        AS first_ts,
               MAX(COALESCE(s.ended_at, s.started_at)) AS last_ts,
               (SELECT COUNT(*) FROM exchanges e JOIN sessions s2 ON s2.id = e.session_id
-                 WHERE s2.harness = s.harness) AS exchanges,
+                 WHERE s2.harness = s.harness ${andNotIgnored('s2.project')}) AS exchanges,
               (SELECT COUNT(*) FROM tool_calls tc JOIN exchanges e2 ON e2.id = tc.exchange_id
-                 JOIN sessions s3 ON s3.id = e2.session_id WHERE s3.harness = s.harness) AS tool_calls
-         FROM sessions s GROUP BY s.harness`,
+                 JOIN sessions s3 ON s3.id = e2.session_id
+                WHERE s3.harness = s.harness ${andNotIgnored('s3.project')}) AS tool_calls
+         FROM sessions s ${notIgnored('s.project')} GROUP BY s.harness`,
     )
-    .all() as AggRow[];
+    .all(...ignoredParams, ...ignoredParams, ...ignoredParams) as AggRow[];
 
   const ghostRows = db
     .prepare(
       `SELECT g.harness AS harness, COUNT(*) AS ghosts, SUM(g.prompt_count) AS prompts,
               MIN(g.first_ts) AS first_ts, MAX(COALESCE(g.last_ts, g.first_ts)) AS last_ts,
               (SELECT COUNT(*) FROM ghost_prompts p JOIN ghosts g2 ON g2.session_id = p.session_id
-                 WHERE g2.harness = g.harness) AS prompt_rows
-         FROM ghosts g GROUP BY g.harness`,
+                 WHERE g2.harness = g.harness ${andNotIgnored('g2.project')}) AS prompt_rows
+         FROM ghosts g ${notIgnored('g.project')} GROUP BY g.harness`,
     )
-    .all() as {
+    .all(...ignoredParams, ...ignoredParams) as {
     harness: Harness;
     ghosts: number;
     prompts: number;
@@ -133,6 +183,7 @@ export function stats(db: Db, options: StatsOptions = {}): StatsReport {
     last_ts: string | null;
     prompt_rows: number;
   }[];
+
 
   const byHarness = new Map<Harness, HarnessStats>();
   const blank = (harness: Harness): HarnessStats => ({
@@ -228,6 +279,7 @@ export function stats(db: Db, options: StatsOptions = {}): StatsReport {
     redactedExchanges,
     redactedPrompts,
     freshness: freshness(db, root, options.freshness !== false),
+    ignored,
     ranAt: new Date().toISOString(),
     root,
   };

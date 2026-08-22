@@ -77,6 +77,7 @@ export async function runFind(ctx: ServerContext, args: FindArgs): Promise<Recor
       query: result.query,
       filters,
       vectors: result.vectors,
+      ignored: result.ignored,
       lists: result.lists,
       relaxed: result.relaxed,
       ms: result.ms,
