@@ -5703,4067 +5703,361 @@ function renderVerify(claudeDir2, t = new Theme()) {
 }
 
 // ../core/dist/rescue.js
-import fs10 from "node:fs";
-import path8 from "node:path";
-import crypto from "node:crypto";
-var HARNESS = "claude";
-async function rescue(opts = {}) {
-  const root = opts.root ?? potsherdDir();
-  return withLockAsync("rescue", () => rescueUnlocked(opts, root), { root, wait: 1e4 });
-}
-async function rescueUnlocked(opts, root) {
-  const started = Date.now();
-  const now = opts.now ?? /* @__PURE__ */ new Date();
-  const src = claudeDir(opts.claudeDir);
-  const cp = claudePaths(src);
-  const dest = path8.join(archiveDir(root), HARNESS);
-  const result = {
-    ranAt: now.toISOString(),
-    dryRun: Boolean(opts.dryRun),
-    claudeDir: src,
-    archiveDir: dest,
-    filesConsidered: 0,
-    filesCopied: 0,
-    filesSkipped: 0,
-    filesFailed: [],
-    bytesCopied: 0,
-    bytesArchived: 0,
-    sessionsArchived: 0,
-    sessionsInArchive: 0,
-    sidechainsArchived: 0,
-    memoryFilesArchived: 0,
-    sessionIndexesArchived: 0,
-    historyArchived: false,
-    ghostsBuilt: 0,
-    ghostsUpdated: 0,
-    ghostPrompts: 0,
-    promptsRecovered: 0,
-    ghostsWithTitles: 0,
-    durationMs: 0,
-    warnings: []
-  };
-  const disk = scanClaudeDisk(src, { titles: false, content: false });
-  if (!disk.exists) {
-    result.warnings.push(`no projects directory at ${cp.projects}`);
-  }
-  const db = opts.dryRun ? open({ root, file: ":memory:" }) : open({ root });
-  try {
-    if (!opts.ghostsOnly) {
-      copyPass(db, disk.projectsDir, cp.history, dest, result, opts);
-    }
-    await ghostPass(db, src, disk, result, opts);
-    if (!opts.dryRun) {
-      db.prepare(`INSERT INTO rescue_log (ran_at, harness, sessions_copied, files_copied, files_skipped,
-           ghosts_built, prompts_recovered, bytes, duration_ms, settings_changed)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(result.ranAt, HARNESS, result.sessionsArchived, result.filesCopied, result.filesSkipped, result.ghostsBuilt, result.promptsRecovered, result.bytesCopied, Date.now() - started, null);
-    }
-  } finally {
-    db.close();
-  }
-  result.durationMs = Date.now() - started;
-  return result;
-}
-function copyPass(db, projectsDir, historyPath, dest, result, opts) {
-  const files = collectSourceFiles(projectsDir);
-  if (fs10.existsSync(historyPath)) {
-    files.unshift({ abs: historyPath, rel: "history.jsonl", kind: "history" });
-  }
-  if (files.length === 0)
-    return;
-  const known = /* @__PURE__ */ new Map();
-  for (const row2 of db.prepare("SELECT source_path, sha256, bytes, source_mtime FROM archive_files").all()) {
-    known.set(row2.source_path, row2);
-  }
-  const upsert = db.prepare(`INSERT INTO archive_files (source_path, archive_path, sha256, bytes, source_mtime, copied_at, harness)
-     VALUES (@source_path, @archive_path, @sha256, @bytes, @source_mtime, @copied_at, @harness)
-     ON CONFLICT(source_path) DO UPDATE SET
-       archive_path = excluded.archive_path, sha256 = excluded.sha256, bytes = excluded.bytes,
-       source_mtime = excluded.source_mtime, copied_at = excluded.copied_at`);
-  let done = 0;
-  for (const f of files) {
-    result.filesConsidered++;
-    done++;
-    opts.onProgress?.({ phase: "copy", done, total: files.length, label: path8.basename(f.rel) });
-    const target = path8.join(dest, f.rel);
-    let stat;
-    try {
-      stat = fs10.statSync(f.abs);
-    } catch (err) {
-      result.filesFailed.push({ path: f.abs, error: err.message });
-      continue;
-    }
-    result.bytesArchived += stat.size;
-    const prev = known.get(f.abs);
-    if (prev && prev.bytes === stat.size && prev.source_mtime === Math.floor(stat.mtimeMs) && fs10.existsSync(target)) {
-      result.filesSkipped++;
-      countKind(result, f.kind, false);
-      continue;
-    }
-    let sha;
-    try {
-      sha = sha256File(f.abs);
-    } catch (err) {
-      result.filesFailed.push({ path: f.abs, error: err.message });
-      continue;
-    }
-    if (fs10.existsSync(target) && safeSize(target) === stat.size && sha256File(target) === sha) {
-      result.filesSkipped++;
-      countKind(result, f.kind, false);
-      if (!opts.dryRun) {
-        upsert.run({
-          source_path: f.abs,
-          archive_path: target,
-          sha256: sha,
-          bytes: stat.size,
-          source_mtime: Math.floor(stat.mtimeMs),
-          copied_at: result.ranAt,
-          harness: HARNESS
-        });
-      }
-      continue;
-    }
-    if (!opts.dryRun) {
-      try {
-        fs10.mkdirSync(path8.dirname(target), { recursive: true, mode: 448 });
-        const tmp = `${target}.potsherd-tmp`;
-        fs10.copyFileSync(f.abs, tmp);
-        fs10.chmodSync(tmp, 384);
-        fs10.utimesSync(tmp, stat.atime, stat.mtime);
-        fs10.renameSync(tmp, target);
-        upsert.run({
-          source_path: f.abs,
-          archive_path: target,
-          sha256: sha,
-          bytes: stat.size,
-          source_mtime: Math.floor(stat.mtimeMs),
-          copied_at: result.ranAt,
-          harness: HARNESS
-        });
-      } catch (err) {
-        result.filesFailed.push({ path: f.abs, error: err.message });
-        continue;
-      }
-    }
-    result.filesCopied++;
-    result.bytesCopied += stat.size;
-    countKind(result, f.kind, true);
-  }
-}
-function collectSourceFiles(projectsDir) {
-  const out = [];
-  const slugs = readdirSafe2(projectsDir, true);
-  for (const slugEntry of slugs) {
-    if (!slugEntry.isDirectory())
-      continue;
-    const slug = slugEntry.name;
-    const dir = path8.join(projectsDir, slug);
-    for (const e of readdirSafe2(dir, true)) {
-      if (e.isFile()) {
-        if (e.name.endsWith(".jsonl")) {
-          out.push({ abs: path8.join(dir, e.name), rel: path8.join(slug, e.name), kind: "session" });
-        } else if (e.name === "sessions-index.json") {
-          out.push({ abs: path8.join(dir, e.name), rel: path8.join(slug, e.name), kind: "index" });
-        }
-      } else if (e.isDirectory()) {
-        if (e.name === "memory") {
-          for (const m of readdirSafe2(path8.join(dir, "memory"))) {
-            out.push({
-              abs: path8.join(dir, "memory", m),
-              rel: path8.join(slug, "memory", m),
-              kind: "memory"
-            });
-          }
-        } else {
-          const nested = e.name === SIDECHAIN_DIR;
-          const subDir = nested ? path8.join(dir, e.name) : path8.join(dir, e.name, SIDECHAIN_DIR);
-          const relDir = nested ? path8.join(slug, e.name) : path8.join(slug, e.name, SIDECHAIN_DIR);
-          for (const s of readdirSafe2(subDir)) {
-            if (!s.endsWith(".jsonl"))
-              continue;
-            out.push({
-              abs: path8.join(subDir, s),
-              rel: path8.join(relDir, s),
-              kind: "sidechain"
-            });
-          }
-        }
-      }
-    }
-  }
-  return out;
-}
-function countKind(result, kind, copied) {
-  if (kind === "session")
-    result.sessionsInArchive++;
-  if (!copied)
-    return;
-  if (kind === "session")
-    result.sessionsArchived++;
-  else if (kind === "sidechain")
-    result.sidechainsArchived++;
-  else if (kind === "memory")
-    result.memoryFilesArchived++;
-  else if (kind === "index")
-    result.sessionIndexesArchived++;
-  else if (kind === "history")
-    result.historyArchived = true;
-}
-function ghostFingerprint(historyPath, disk) {
-  let hs;
-  try {
-    hs = fs10.statSync(historyPath);
-  } catch {
-    return null;
-  }
-  const parts = [`history:${hs.size}:${Math.floor(hs.mtimeMs)}`];
-  const ids = disk.sessions.map((s) => s.sessionId).sort();
-  parts.push(`sessions:${ids.length}:${crypto.createHash("sha256").update(ids.join("\n")).digest("hex")}`);
-  for (const proj of (disk.projects ?? []).filter((p) => p.hasSessionsIndex)) {
-    const p = path8.join(proj.dir, "sessions-index.json");
-    try {
-      const st = fs10.statSync(p);
-      parts.push(`index:${p}:${st.size}:${Math.floor(st.mtimeMs)}`);
-    } catch {
-      parts.push(`index:${p}:gone`);
-    }
-  }
-  return crypto.createHash("sha256").update(parts.sort().join("\n")).digest("hex");
-}
-var GHOST_FINGERPRINT_KEY = "claude:ghosts";
-function ghostTotals(db) {
-  const g = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(prompt_count), 0) AS prompts,
-              COALESCE(SUM(title IS NOT NULL), 0) AS titled FROM ghosts`).get();
-  const rows = db.prepare("SELECT COUNT(*) AS n FROM ghost_prompts").get();
-  return { ghosts: g.n, prompts: g.prompts, promptRows: rows.n, withTitles: g.titled };
-}
-async function ghostPass(db, src, disk, result, opts) {
-  const fingerprint = opts.dryRun ? null : ghostFingerprint(claudePaths(src).history, disk);
-  if (fingerprint) {
-    const seen = db.prepare("SELECT value FROM sync_state WHERE key = ?").get(GHOST_FINGERPRINT_KEY);
-    const totals = ghostTotals(db);
-    if (seen?.value === fingerprint && totals.ghosts > 0) {
-      result.ghostsUpdated = totals.ghosts;
-      result.promptsRecovered = totals.prompts;
-      result.ghostPrompts = totals.promptRows;
-      result.ghostsWithTitles = totals.withTitles;
-      return;
-    }
-  }
-  const history = await readHistory(src, { withPrompts: true });
-  if (!history.exists) {
-    result.warnings.push("no history.jsonl \u2014 nothing to rebuild ghosts from");
-    return;
-  }
-  const index = readSessionsIndexes(src);
-  const onDisk = new Set(disk.sessions.map((s) => s.sessionId));
-  const existing = /* @__PURE__ */ new Map();
-  for (const row2 of db.prepare("SELECT session_id, prompt_count FROM ghosts").all()) {
-    existing.set(row2.session_id, row2.prompt_count);
-  }
-  const upsertGhost = db.prepare(`INSERT INTO ghosts (session_id, harness, project, first_ts, last_ts, prompt_count,
-        first_prompt, title, message_count, git_branch, source)
-     VALUES (@session_id, @harness, @project, @first_ts, @last_ts, @prompt_count,
-        @first_prompt, @title, @message_count, @git_branch, @source)
-     ON CONFLICT(session_id) DO UPDATE SET
-       project = excluded.project, first_ts = excluded.first_ts, last_ts = excluded.last_ts,
-       prompt_count = excluded.prompt_count, first_prompt = excluded.first_prompt,
-       title = COALESCE(excluded.title, ghosts.title),
-       message_count = COALESCE(excluded.message_count, ghosts.message_count),
-       git_branch = COALESCE(excluded.git_branch, ghosts.git_branch),
-       source = excluded.source`);
-  const clearPrompts = db.prepare("DELETE FROM ghost_prompts WHERE session_id = ?");
-  const insertPrompt = db.prepare(`INSERT INTO ghost_prompts (id, session_id, seq, ts, text, redacted)
-     VALUES (?, ?, ?, ?, ?, 0)`);
-  const ghosts = [...history.sessions.values()].filter((s) => !onDisk.has(s.sessionId));
-  let done = 0;
-  const run3 = db.transaction(() => {
-    for (const g of ghosts) {
-      done++;
-      if (done % 25 === 0) {
-        opts.onProgress?.({ phase: "ghosts", done, total: ghosts.length });
-      }
-      const idx = index.entries.get(g.sessionId);
-      const source = idx ? "both" : "history";
-      const title = idx?.summary ?? null;
-      const row2 = {
-        session_id: g.sessionId,
-        harness: HARNESS,
-        project: g.project || idx?.projectPath || null,
-        first_ts: g.firstTs ? new Date(g.firstTs).toISOString() : null,
-        last_ts: g.lastTs ? new Date(g.lastTs).toISOString() : null,
-        prompt_count: g.promptCount,
-        first_prompt: g.firstPrompt || idx?.firstPrompt || null,
-        title,
-        message_count: idx?.messageCount ?? null,
-        git_branch: idx?.gitBranch ?? null,
-        source
-      };
-      const had = existing.has(g.sessionId);
-      if (!opts.dryRun) {
-        upsertGhost.run(row2);
-        clearPrompts.run(g.sessionId);
-        let seq = 0;
-        for (const p of g.prompts) {
-          insertPrompt.run(`${g.sessionId}:${seq}`, g.sessionId, seq, p.ts ? new Date(p.ts).toISOString() : null, p.text);
-          seq++;
-        }
-      }
-      if (had)
-        result.ghostsUpdated++;
-      else
-        result.ghostsBuilt++;
-      if (title)
-        result.ghostsWithTitles++;
-      result.ghostPrompts += g.prompts.length;
-      result.promptsRecovered += g.promptCount;
-    }
-  });
-  run3();
-  if (!opts.dryRun) {
-    const orphanRun = db.transaction(() => {
-      for (const [id, e] of index.entries) {
-        if (onDisk.has(id) || history.sessions.has(id) || e.isSidechain)
-          continue;
-        upsertGhost.run({
-          session_id: id,
-          harness: HARNESS,
-          project: e.projectPath ?? null,
-          first_ts: e.created ?? null,
-          last_ts: e.modified ?? null,
-          prompt_count: 0,
-          first_prompt: e.firstPrompt ?? null,
-          title: e.summary ?? null,
-          message_count: e.messageCount ?? null,
-          git_branch: e.gitBranch ?? null,
-          source: "sessions-index"
-        });
-        if (existing.has(id))
-          result.ghostsUpdated++;
-        else
-          result.ghostsBuilt++;
-        if (e.summary)
-          result.ghostsWithTitles++;
-      }
-    });
-    orphanRun();
-    if (fingerprint) {
-      db.prepare(`INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(GHOST_FINGERPRINT_KEY, fingerprint, result.ranAt);
-    }
-  }
-}
-function sha256File(p) {
-  const hash = crypto.createHash("sha256");
-  const fd = fs10.openSync(p, "r");
-  try {
-    const buf = Buffer.allocUnsafe(1 << 20);
-    for (; ; ) {
-      const read = fs10.readSync(fd, buf, 0, buf.length, null);
-      if (read <= 0)
-        break;
-      hash.update(buf.subarray(0, read));
-    }
-  } finally {
-    fs10.closeSync(fd);
-  }
-  return hash.digest("hex");
-}
-function safeSize(p) {
-  try {
-    return fs10.statSync(p).size;
-  } catch {
-    return -1;
-  }
-}
-function readdirSafe2(dir, withTypes) {
-  try {
-    return withTypes ? fs10.readdirSync(dir, { withFileTypes: true }) : fs10.readdirSync(dir);
-  } catch {
-    return [];
-  }
-}
-
-// ../core/dist/render/rescue-receipt.js
-function renderRescueReceipt(r, t = new Theme(), extras = { settingsChanged: null }) {
-  const card = new Card(t);
-  const verb = r.dryRun ? "rescue --dry-run" : "rescue";
-  card.heading(verb, tildify(r.archiveDir), date(r.ranAt)).blank();
-  const ghostsTouched = r.ghostsBuilt + r.ghostsUpdated;
-  card.rows([
-    {
-      label: r.dryRun ? "files to copy" : "files copied",
-      value: num(r.filesCopied),
-      note: r.filesCopied ? bytes(r.bytesCopied) : "nothing new since last rescue",
-      tone: r.filesCopied ? "ok" : "none"
-    },
-    {
-      label: "already archived",
-      value: num(r.filesSkipped),
-      note: bytes(r.bytesArchived) + " total on disk"
-    },
-    {
-      // "sessions 0" on a second run reads as "the archive holds no sessions".
-      // Both halves are spelled out instead: newly archived, then the total.
-      label: "sessions archived",
-      value: num(r.sessionsArchived),
-      note: sessionNote(r)
-    },
-    {
-      label: "ghosts rebuilt",
-      value: num(r.ghostsBuilt),
-      note: ghostNote(r)
-    },
-    {
-      label: "prompts recovered",
-      value: num(r.promptsRecovered),
-      note: promptNote(r, ghostsTouched, t),
-      tone: r.promptsRecovered ? "accent" : "none"
-    }
-  ]);
-  card.blank();
-  card.rows([sweepRow(t, extras)]);
-  if (r.filesFailed.length) {
-    card.blank();
-    card.text(t.warn(`${num(r.filesFailed.length)} files could not be read:`));
-    for (const fail2 of r.filesFailed.slice(0, 3)) {
-      card.text(t.dim(`  ${elideMiddle(fail2.path, t.width - 8, t.ellip)} \u2014 ${fail2.error}`));
-    }
-  }
-  for (const w of r.warnings.slice(0, 2))
-    card.text(t.dim(`note: ${w}`));
-  card.blank();
-  if (r.dryRun) {
-    card.fit("nothing was written. run  potsherd rescue  to do it for real.", "nothing was written. run  potsherd rescue  for real.");
-    return card.toString();
-  }
-  card.text(`archive: ${elideMiddle(tildify(r.archiveDir), Math.max(24, t.width - 11), t.ellip)}`);
-  closing2(card, extras);
-  return card.toString();
-}
-function closing2(card, e) {
-  if (e.settingsRefused) {
-    const days = e.settingsTo ?? 3650;
-    card.fit(`potsherd cannot edit settings.json. add  "cleanupPeriodDays": ${days}  by hand.`, `add  "cleanupPeriodDays": ${days}  to settings.json by hand.`, `add  "cleanupPeriodDays": ${days}  by hand.`);
-    return;
-  }
-  const sweepOff = e.settingsChanged === true || (e.settingsEffective ?? 30) >= 365;
-  if (!sweepOff) {
-    card.fix("potsherd rescue --yes", "to stop the sweep deleting any more.", "to stop the sweep.");
-  } else if (!e.guardInstalled) {
-    card.fix("potsherd guard", "to take a copy at every startup, automatically.", "to copy at every startup.");
-  } else {
-    card.fix("potsherd audit", "to confirm nothing is due for deletion.", "to check nothing is due.");
-  }
-}
-function n(count2, one2, many = one2 + "s") {
-  return `${num(count2)} ${plural(count2, one2, many)}`;
-}
-function sessionNote(r) {
-  const bits = [];
-  if (r.sessionsInArchive)
-    bits.push(`${num(r.sessionsInArchive)} in the archive`);
-  if (r.sidechainsArchived)
-    bits.push(n(r.sidechainsArchived, "sidechain"));
-  if (r.memoryFilesArchived)
-    bits.push(n(r.memoryFilesArchived, "memory note"));
-  if (r.sessionIndexesArchived)
-    bits.push(n(r.sessionIndexesArchived, "index", "indexes"));
-  if (r.historyArchived)
-    bits.push("history.jsonl");
-  return bits.join(" \xB7 ");
-}
-function ghostNote(r) {
-  if (!r.ghostsBuilt && !r.ghostsUpdated)
-    return "";
-  if (!r.ghostsBuilt)
-    return `${num(r.ghostsUpdated)} in the archive, none new`;
-  return r.ghostsUpdated ? `${num(r.ghostsUpdated)} refreshed` : "";
-}
-function promptNote(r, ghostsTouched, t) {
-  const bits = [];
-  if (ghostsTouched)
-    bits.push(`from ${n(ghostsTouched, "ghost")}`);
-  if (r.ghostsWithTitles) {
-    bits.push(r.ghostsWithTitles === 1 ? "1 with a title" : `${num(r.ghostsWithTitles)} with titles`);
-  }
-  return bits.join(` ${t.sep} `);
-}
-function sweepRow(t, e) {
-  if (e.settingsChanged === true) {
-    return {
-      label: "the sweep",
-      value: "off",
-      note: `cleanupPeriodDays ${e.settingsFrom ?? "unset"} ${t.arrow} ${e.settingsTo}`,
-      tone: "ok"
-    };
-  }
-  const days = e.settingsEffective ?? e.settingsFrom ?? 30;
-  const off = days >= 365;
-  if (e.settingsChanged === false) {
-    return {
-      label: "the sweep",
-      value: off ? "off" : "on",
-      note: off ? `cleanupPeriodDays ${days}` : `still ${days} days \u2014 rescue again before it runs`,
-      tone: off ? "ok" : "warn"
-    };
-  }
-  return {
-    label: "the sweep",
-    value: off ? "off" : "on",
-    note: off ? `cleanupPeriodDays ${days}` : e.settingsRefused ? "settings.json left untouched" : e.settingsSkippedReason ?? "not asked (--no-settings)",
-    tone: off ? "ok" : "warn"
-  };
-}
-
-// ../core/dist/adapters/types.js
-var HARNESSES = [
-  "claude",
-  "codex",
-  "cursor",
-  "pi",
-  "gemini",
-  "opencode",
-  "copilot"
-];
-
-// ../core/dist/adapters/claude.js
-var claude_exports = {};
-__export(claude_exports, {
-  IGNORED_RECORD_TYPES: () => IGNORED_RECORD_TYPES,
-  archiveSourceDir: () => archiveSourceDir,
-  claudeAdapter: () => claudeAdapter,
-  discover: () => discover,
-  doctorLine: () => doctorLine,
-  isNovelRecordType: () => isNovelRecordType,
-  parse: () => parse,
-  readTranscriptVersion: () => readTranscriptVersion,
-  recordTypeStats: () => recordTypeStats,
-  sourceDir: () => sourceDir
-});
-import fs13 from "node:fs";
-import path10 from "node:path";
-
-// ../core/dist/doctor-line.js
-function formatDoctorLine(o) {
-  return `${o.harness.padEnd(12)}${o.status.padEnd(10)}${tildify(o.dir).padEnd(28)}  ${o.note}`;
-}
-
-// ../core/dist/parser/claude.js
-import fs12 from "node:fs";
-import path9 from "node:path";
-import crypto2 from "node:crypto";
-
-// ../core/dist/parser/jsonl.js
 import fs11 from "node:fs";
-var LF = 10;
-async function* readJsonlLines(filePath, options = {}) {
-  const start = options.start ?? 0;
-  let offset = start;
-  let lineNumber = options.startLine ?? 0;
-  let held = Buffer.alloc(0);
-  const stream = fs11.createReadStream(filePath, { start });
-  for await (const chunk of stream) {
-    held = held.length === 0 ? chunk : Buffer.concat([held, chunk]);
-    let idx = held.indexOf(LF);
-    while (idx !== -1) {
-      const raw = held.subarray(0, idx);
-      const end = offset + idx + 1;
-      lineNumber += 1;
-      yield { text: decode(raw), lineNumber, start: offset, end, terminated: true };
-      offset = end;
-      held = held.subarray(idx + 1);
-      idx = held.indexOf(LF);
-    }
-  }
-  if (held.length > 0) {
-    lineNumber += 1;
-    yield {
-      text: decode(held),
-      lineNumber,
-      start: offset,
-      end: offset + held.length,
-      terminated: false
-    };
-  }
-}
-function decode(raw) {
-  const text = raw.toString("utf8");
-  return text.endsWith("\r") ? text.slice(0, -1) : text;
-}
-function parseJsonLine(text) {
-  if (!text.trim())
-    return void 0;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return void 0;
-  }
-}
+import path9 from "node:path";
+import crypto from "node:crypto";
 
-// ../core/dist/parser/content.js
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function extractTextFromContent(content) {
-  if (typeof content === "string")
-    return content;
-  if (!Array.isArray(content))
-    return "";
-  return content.filter((block2) => isRecord(block2) && typeof block2.text === "string").map((block2) => block2.text).join("\n");
-}
-function extractTypedText(content, blockType = "text") {
-  if (typeof content === "string")
-    return content;
-  if (!Array.isArray(content))
-    return "";
-  return content.filter((b) => isRecord(b) && b.type === blockType && typeof b.text === "string").map((b) => b.text).join("\n");
-}
-function safeParseJson(value) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
-function stringifyToolOutput(output) {
-  if (output === void 0 || output === null)
-    return void 0;
-  if (typeof output === "string")
-    return output;
-  const text = extractTextFromContent(output);
-  if (text.trim())
-    return text;
-  try {
-    return JSON.stringify(output);
-  } catch {
-    return void 0;
-  }
-}
-function stringifyToolInput(input) {
-  if (input === void 0 || input === null)
-    return "";
-  if (typeof input === "string")
-    return input;
-  try {
-    return JSON.stringify(input);
-  } catch {
-    return String(input);
-  }
-}
-var FILE_KEYS = ["file_path", "filePath", "notebook_path", "notebookPath", "path"];
-function filesFromToolInput(input) {
-  if (!isRecord(input))
-    return [];
-  const out = [];
-  for (const key of FILE_KEYS) {
-    const value = input[key];
-    if (typeof value === "string" && value.trim())
-      out.push(value);
-  }
-  for (const value of Object.values(input)) {
-    if (!Array.isArray(value))
-      continue;
-    for (const item of value) {
-      for (const f of filesFromToolInput(item))
-        out.push(f);
-    }
-  }
-  return out;
-}
-function uniq(values) {
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  for (const v of values) {
-    if (seen.has(v))
-      continue;
-    seen.add(v);
-    out.push(v);
-  }
-  return out;
-}
-
-// ../core/dist/parser/claude.js
-var SIDECHAIN_DIR2 = "subagents";
-var HANDLED_TYPES = /* @__PURE__ */ new Set([
-  "user",
-  "assistant",
-  "ai-title",
-  "agent-name",
-  "attachment",
-  "summary",
-  "system"
-]);
-async function parseClaudeTranscript(filePath, options = {}) {
-  const absolute2 = path9.resolve(filePath);
-  const fromOffset = options.fromOffset ?? 0;
-  const unknownTypes = {};
-  let malformedLines = 0;
-  let endOffset = fromOffset;
-  const exchanges = [];
-  let current = null;
-  let seq = options.fromSeq ?? 0;
-  let recordSessionId;
-  let cwd;
-  let gitBranch;
-  let entrypoint;
-  let model;
-  let title;
-  let agentName;
-  let sidechainFlag = false;
-  let firstTs;
-  let lastTs;
-  let userPrompts = 0;
-  let assistantTurns = 0;
-  let toolCallCount = 0;
-  const finalize = () => {
-    if (!current)
-      return;
-    const b = current;
-    current = null;
-    if (!b.userText.trim() && b.toolCalls.length === 0)
-      return;
-    exchanges.push({
-      id: exchangeId(sessionIdSoFar(), b.seq),
-      sessionId: sessionIdSoFar(),
-      seq: b.seq,
-      ts: b.ts,
-      userText: b.userText,
-      assistantText: b.assistantTexts.join("\n\n"),
-      toolCalls: b.toolCalls,
-      filesTouched: uniq(b.files),
-      isSidechain: sidechainFlag,
-      ...b.parentUuid ? { parentUuid: b.parentUuid } : {},
-      redacted: false
-    });
-  };
-  const sessionIdSoFar = () => resolveSessionId(absolute2, options, recordSessionId, sidechainFlag);
-  for await (const line of readJsonlLines(absolute2, { start: fromOffset })) {
-    if (!line.terminated)
-      break;
-    endOffset = line.end;
-    const parsed = parseJsonLine(line.text);
-    if (parsed === void 0) {
-      if (line.text.trim())
-        malformedLines += 1;
-      continue;
-    }
-    if (!isRecord(parsed)) {
-      malformedLines += 1;
-      continue;
-    }
-    const type = typeof parsed.type === "string" ? parsed.type : "";
-    if (!HANDLED_TYPES.has(type)) {
-      unknownTypes[type || "(no type)"] = (unknownTypes[type || "(no type)"] ?? 0) + 1;
-    }
-    if (typeof parsed.sessionId === "string")
-      recordSessionId = parsed.sessionId;
-    if (typeof parsed.cwd === "string")
-      cwd = parsed.cwd;
-    if (typeof parsed.gitBranch === "string")
-      gitBranch = parsed.gitBranch;
-    if (typeof parsed.entrypoint === "string")
-      entrypoint = parsed.entrypoint;
-    if (parsed.isSidechain === true)
-      sidechainFlag = true;
-    if (typeof parsed.timestamp === "string") {
-      firstTs ??= parsed.timestamp;
-      lastTs = parsed.timestamp;
-    }
-    if (type === "ai-title") {
-      if (typeof parsed.aiTitle === "string" && parsed.aiTitle.trim())
-        title = parsed.aiTitle;
-      continue;
-    }
-    if (type === "agent-name") {
-      if (typeof parsed.agentName === "string")
-        agentName = parsed.agentName;
-      continue;
-    }
-    if (type !== "user" && type !== "assistant")
-      continue;
-    const message2 = parsed.message;
-    if (!isRecord(message2))
-      continue;
-    const role = message2.role;
-    const content = message2.content;
-    const ts = typeof parsed.timestamp === "string" ? parsed.timestamp : (/* @__PURE__ */ new Date()).toISOString();
-    if (role === "user") {
-      const text2 = extractTypedText(content);
-      const results = toolResultBlocks(content);
-      const isHumanPrompt = typeof parsed.promptId === "string" && parsed.promptId.length > 0 && results.length === 0 && hasTextItem(content);
-      if (isHumanPrompt) {
-        finalize();
-        seq += 1;
-        userPrompts += 1;
-        current = {
-          seq,
-          ts,
-          userText: text2,
-          assistantTexts: [],
-          toolCalls: [],
-          byToolUseId: /* @__PURE__ */ new Map(),
-          files: [],
-          ...typeof parsed.parentUuid === "string" ? { parentUuid: parsed.parentUuid } : {}
-        };
-        continue;
-      }
-      if (current) {
-        for (const block2 of results) {
-          const id = typeof block2.tool_use_id === "string" ? block2.tool_use_id : void 0;
-          if (!id)
-            continue;
-          const at = current.byToolUseId.get(id);
-          if (at === void 0)
-            continue;
-          const call = current.toolCalls[at];
-          if (!call)
-            continue;
-          const out = stringifyToolOutput(block2.content);
-          if (out !== void 0)
-            call.result = out;
-          if (block2.is_error === true)
-            call.isError = true;
-        }
-        if (results.length === 0 && text2.trim()) {
-          current.userText = current.userText ? `${current.userText}
-${text2}` : text2;
-        }
-      }
-      continue;
-    }
-    if (role !== "assistant" || !current)
-      continue;
-    if (typeof message2.model === "string")
-      model = message2.model;
-    const text = extractTypedText(content);
-    if (text.trim()) {
-      current.assistantTexts.push(text);
-      assistantTurns += 1;
-    }
-    for (const block2 of toolUseBlocks(content)) {
-      const name = typeof block2.name === "string" ? block2.name : "unknown";
-      const call = { name, input: stringifyToolInput(block2.input) };
-      current.toolCalls.push(call);
-      toolCallCount += 1;
-      if (typeof block2.id === "string")
-        current.byToolUseId.set(block2.id, current.toolCalls.length - 1);
-      for (const f of filesFromToolInput(block2.input))
-        current.files.push(f);
-    }
-  }
-  finalize();
-  const sessionId = resolveSessionId(absolute2, options, recordSessionId, sidechainFlag);
-  const projectSlug = options.projectSlug ?? deriveProjectSlug(absolute2);
-  const bytes2 = options.bytes ?? statBytes(absolute2);
-  const isSidechain = options.isSidechain ?? sidechainFlag;
-  const session = {
-    id: sessionId,
-    harness: "claude",
-    sourcePath: absolute2,
-    project: cwd ?? unslugify(projectSlug),
-    projectSlug,
-    startedAt: firstTs ?? "",
-    endedAt: lastTs ?? firstTs ?? "",
-    ...title ? { title } : {},
-    ...gitBranch ? { gitBranch } : {},
-    ...entrypoint ? { entrypoint } : {},
-    ...model ? { model } : {},
-    isSidechain,
-    ...isSidechain ? { parentSessionId: options.parentSessionId ?? recordSessionId ?? "" } : {},
-    ...agentName ? { agentName } : {},
-    counts: { userPrompts, assistantTurns, toolCalls: toolCallCount, bytes: bytes2 },
-    status: options.status ?? "live"
-  };
-  return { session, exchanges, unknownTypes, endOffset, malformedLines };
-}
-function resolveSessionId(absolute2, options, recordSessionId, sidechainFlag) {
-  if (options.sessionId)
-    return options.sessionId;
-  const base2 = path9.basename(absolute2, ".jsonl");
-  const isSidechain = options.isSidechain ?? sidechainFlag ?? false;
-  if (isSidechain) {
-    const parent = options.parentSessionId ?? recordSessionId;
-    return parent ? `${parent}:${base2}` : base2;
-  }
-  return recordSessionId ?? base2;
-}
-function deriveProjectSlug(absolute2) {
-  const parts = absolute2.split(path9.sep);
-  for (let i = parts.length - 2; i >= 0; i -= 1) {
-    const part = parts[i];
-    if (!part)
-      continue;
-    if (part === SIDECHAIN_DIR2)
-      continue;
-    if (UUID_DIR.test(part))
-      continue;
-    return part;
-  }
-  return "unknown";
-}
-var UUID_DIR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function statBytes(absolute2) {
-  try {
-    return fs12.statSync(absolute2).size;
-  } catch {
-    return 0;
-  }
-}
-function toolUseBlocks(content) {
-  if (!Array.isArray(content))
-    return [];
-  return content.filter((b) => isRecord(b) && b.type === "tool_use");
-}
-function hasTextItem(content) {
-  if (typeof content === "string")
-    return true;
-  if (!Array.isArray(content))
-    return false;
-  return content.some((b) => isRecord(b) && b.type === "text" && typeof b.text === "string");
-}
-function toolResultBlocks(content) {
-  if (!Array.isArray(content))
-    return [];
-  return content.filter((b) => isRecord(b) && b.type === "tool_result");
-}
-function exchangeId(sessionId, seq) {
-  return crypto2.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
-}
-
-// ../core/dist/adapters/claude.js
-function sourceDir(claudeConfigDir) {
-  return claudePaths(claudeDir(claudeConfigDir)).projects;
-}
-function archiveSourceDir(root) {
-  return path10.join(archiveDir(root ?? potsherdDir()), "claude");
-}
-function discover(options = {}) {
-  const live = walkProjects(sourceDir(options.claudeDir), "live");
-  const byRel = /* @__PURE__ */ new Map();
-  for (const found of live)
-    byRel.set(found.rel, found);
-  if (options.archive !== false) {
-    const archiveRoot = archiveSourceDir(options.potsherdDir);
-    for (const found of walkProjects(archiveRoot, "archived")) {
-      if (byRel.has(found.rel))
-        continue;
-      found.originalPath = path10.join(sourceDir(options.claudeDir), found.rel);
-      byRel.set(found.rel, found);
-    }
-  }
-  return [...byRel.values()].sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
-}
-async function parse(source, options = {}) {
-  const raw = await parseClaudeTranscript(source.path, {
-    ...options,
-    // Only ever assert `true`: a top-level transcript that happens to carry a
-    // record with `isSidechain:true` is still a session, and forcing `false`
-    // would throw away the flag for a subagent file the path did not reveal.
-    ...source.isSidechain ? { isSidechain: true } : {},
-    ...source.parentSessionId ? { parentSessionId: source.parentSessionId } : {},
-    projectSlug: options.projectSlug ?? source.projectSlug,
-    status: source.status ?? "live",
-    bytes: source.bytes || void 0
-  });
-  const folded = foldContinuations(raw.exchanges, options.fromSeq ?? 0);
-  const version = await readTranscriptVersion(source.path);
-  return {
-    ...raw,
-    exchanges: folded.exchanges,
-    ...version ? { version } : {},
-    continuationsFolded: folded.folded,
-    orphanContinuations: folded.orphans
-  };
-}
-function doctorLine(options = {}) {
-  const dir = sourceDir(options.claudeDir);
-  let found = [];
-  try {
-    found = discover(options);
-  } catch {
-    found = [];
-  }
-  const exists = fs13.existsSync(dir);
-  const sidechains = found.filter((f) => f.isSidechain).length;
-  const archived = found.filter((f) => f.status === "archived").length;
-  const sessions = found.length - sidechains;
-  const parts = [`${sessions} session${sessions === 1 ? "" : "s"}`];
-  if (sidechains > 0)
-    parts.push(`${sidechains} sidechains`);
-  if (archived > 0)
-    parts.push(`${archived} from the archive`);
-  return formatDoctorLine({
-    harness: "claude",
-    status: exists || found.length > 0 ? "ready" : "absent",
-    dir,
-    note: exists || found.length > 0 ? parts.join(" \xB7 ") : "Claude Code not installed"
-  });
-}
-var claudeAdapter = {
-  harness: "claude",
-  displayName: "Claude Code",
-  sourceDir: () => sourceDir(),
-  discover: () => discover(),
-  parse: (source, options) => parse(source, options)
-};
-function walkProjects(projectsDir, status3) {
-  const out = [];
-  for (const slugEntry of readdirSafe3(projectsDir, true)) {
-    if (!slugEntry.isDirectory())
-      continue;
-    const slug = slugEntry.name;
-    const dir = path10.join(projectsDir, slug);
-    for (const entry of readdirSafe3(dir, true)) {
-      if (entry.isFile()) {
-        if (!entry.name.endsWith(".jsonl"))
-          continue;
-        push(out, {
-          file: path10.join(dir, entry.name),
-          rel: path10.join(slug, entry.name),
-          slug,
-          sessionId: basename3(entry.name),
-          isSidechain: false,
-          status: status3
-        });
-        continue;
-      }
-      if (!entry.isDirectory())
-        continue;
-      if (entry.name === "memory")
-        continue;
-      const flat = entry.name === SIDECHAIN_DIR;
-      const subDir = flat ? path10.join(dir, entry.name) : path10.join(dir, entry.name, SIDECHAIN_DIR);
-      const relDir = flat ? path10.join(slug, entry.name) : path10.join(slug, entry.name, SIDECHAIN_DIR);
-      for (const name of readdirSafe3(subDir)) {
-        if (!name.endsWith(".jsonl"))
-          continue;
-        push(out, {
-          file: path10.join(subDir, name),
-          rel: path10.join(relDir, name),
-          slug,
-          sessionId: flat ? basename3(name) : `${entry.name}:${basename3(name)}`,
-          isSidechain: true,
-          ...flat ? {} : { parentSessionId: entry.name },
-          status: status3
-        });
-      }
-    }
-  }
-  return out;
-}
-function push(out, spec) {
-  const st = statSafe(spec.file);
-  if (!st)
-    return;
-  out.push({
-    sessionId: spec.sessionId,
-    harness: "claude",
-    path: spec.file,
-    rel: spec.rel,
-    projectSlug: spec.slug,
-    bytes: st.size,
-    mtimeMs: st.mtimeMs,
-    isSidechain: spec.isSidechain,
-    ...spec.parentSessionId ? { parentSessionId: spec.parentSessionId } : {},
-    status: spec.status
-  });
-}
-function foldContinuations(exchanges, fromSeq) {
-  const kept = [];
-  let folded = 0;
-  let orphans = 0;
-  for (const exchange of exchanges) {
-    const previous = kept[kept.length - 1];
-    if (exchange.userText.trim()) {
-      kept.push(exchange);
-      continue;
-    }
-    if (!previous) {
-      orphans += 1;
-      continue;
-    }
-    folded += 1;
-    previous.assistantText = [previous.assistantText, exchange.assistantText].filter((t) => t.trim()).join("\n\n");
-    previous.toolCalls = [...previous.toolCalls, ...exchange.toolCalls];
-    previous.filesTouched = uniq([...previous.filesTouched, ...exchange.filesTouched]);
-  }
-  let seq = fromSeq;
-  for (const exchange of kept) {
-    seq += 1;
-    exchange.seq = seq;
-    exchange.id = exchangeId(exchange.sessionId, seq);
-  }
-  return { exchanges: kept, folded, orphans };
-}
-var VERSION_SCAN_LINES = 200;
-async function readTranscriptVersion(filePath) {
-  let seen = 0;
-  try {
-    for await (const line of readJsonlLines(filePath)) {
-      if (seen >= VERSION_SCAN_LINES)
-        break;
-      seen += 1;
-      const parsed = parseJsonLine(line.text);
-      if (!isRecord(parsed))
-        continue;
-      if (typeof parsed.version === "string" && parsed.version)
-        return parsed.version;
-    }
-  } catch {
-    return void 0;
-  }
-  return void 0;
-}
-var IGNORED_RECORD_TYPES = [
-  "last-prompt",
-  "mode",
-  "permission-mode",
-  "queue-operation",
-  "atis-latch",
-  "file-history-snapshot",
-  "file-history-delta",
-  "frame-link",
-  // Phase 1 found this as the sixteenth Claude Code record type, in no draft of
-  // `formats.md`, and left it OFF this list on purpose: "novel" was the honest
-  // answer until somebody opened one. Nobody did, for six phases, so `index`
-  // has been reporting it as an undocumented format change on every run since.
-  //
-  // Opened in phase 7, over the frozen snapshot: every instance is
-  //   { type, v, sessionId, artifacts: { <uuid>: { state, title, writtenAtMs } } }
-  // -- no `cwd`, no `timestamp`, no `message`, no `parentUuid`. It is the
-  // editor's bookkeeping for published artifacts, and there is nothing in it an
-  // exchange could carry. `tests/adapters/claude.test.ts` pins that shape, so a
-  // build that starts putting conversation into it fails rather than being
-  // silently skipped.
-  "artifact-comment-monitor"
-];
-var IGNORED = new Set(IGNORED_RECORD_TYPES);
-function isNovelRecordType(type) {
-  return !IGNORED.has(type);
-}
-function recordTypeStats(results) {
-  const rows = /* @__PURE__ */ new Map();
-  for (const result of results) {
-    const version = result.version ?? "unknown";
-    for (const [type, count2] of Object.entries(result.unknownTypes)) {
-      const key = `${version}\0${type}`;
-      const row2 = rows.get(key);
-      if (row2) {
-        row2.count += count2;
-        row2.files += 1;
-      } else {
-        rows.set(key, {
-          harness: "claude",
-          version,
-          type,
-          count: count2,
-          files: 1,
-          novel: isNovelRecordType(type)
-        });
-      }
-    }
-  }
-  return [...rows.values()].sort((a, b) => Number(b.novel) - Number(a.novel) || b.count - a.count || (a.version < b.version ? -1 : a.version > b.version ? 1 : 0) || (a.type < b.type ? -1 : 1));
-}
-function basename3(fileName) {
-  return fileName.slice(0, -".jsonl".length);
-}
-function statSafe(file) {
-  try {
-    return fs13.statSync(file);
-  } catch {
+// ../core/dist/tags.js
+var MAX_TAG_LENGTH = 32;
+function normalizeTag(raw) {
+  const trimmed = raw.trim().replace(/^[+-]+/, "");
+  const cleaned = trimmed.toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9./-]+/g, "").replace(/-{2,}/g, "-").replace(/^[-./]+|[-./]+$/g, "");
+  if (!cleaned)
     return null;
+  return cleaned.slice(0, MAX_TAG_LENGTH).replace(/[-./]+$/, "") || null;
+}
+function parseTagArgs(args) {
+  const add = [];
+  const remove = [];
+  const rejected = [];
+  for (const raw of args) {
+    const arg = raw.trim();
+    if (!arg)
+      continue;
+    const tag = normalizeTag(arg);
+    if (!tag) {
+      rejected.push(arg);
+      continue;
+    }
+    if (arg.startsWith("-"))
+      remove.push(tag);
+    else
+      add.push(tag);
   }
+  return { add: unique(add), remove: unique(remove), rejected };
 }
-function readdirSafe3(dir, withFileTypes) {
-  try {
-    return withFileTypes ? fs13.readdirSync(dir, { withFileTypes: true }) : fs13.readdirSync(dir);
-  } catch {
-    return [];
-  }
+function sessionTags(db, sessionId) {
+  return db.prepare("SELECT tag FROM tags WHERE session_id = ? ORDER BY tag").all(sessionId).map((r) => r.tag);
 }
-
-// ../core/dist/adapters/codex.js
-var codex_exports = {};
-__export(codex_exports, {
-  DEFAULT_MAX_MESSAGE_BYTES: () => DEFAULT_MAX_MESSAGE_BYTES,
-  DEFAULT_MAX_VALUE_BYTES: () => DEFAULT_MAX_VALUE_BYTES,
-  clearSessionIndexCache: () => clearSessionIndexCache,
-  codexAdapter: () => codexAdapter,
-  codexDir: () => codexDir,
-  codexDoctor: () => codexDoctor,
-  codexEntrypoint: () => codexEntrypoint,
-  codexPaths: () => codexPaths,
-  discover: () => discover2,
-  doctorLine: () => doctorLine2,
-  filesFromCodexToolInput: () => filesFromCodexToolInput,
-  parse: () => parse2,
-  readCodexHeader: () => readCodexHeader,
-  readSessionIndex: () => readSessionIndex,
-  renderCodexDoctorLine: () => renderCodexDoctorLine,
-  sessionIdFromRolloutPath: () => sessionIdFromRolloutPath
-});
-import fs15 from "node:fs";
-import path12 from "node:path";
-
-// ../core/dist/parser/codex.js
-import fs14 from "node:fs";
-import path11 from "node:path";
-var TOOL_CALL_TYPES = /* @__PURE__ */ new Set([
-  "function_call",
-  "custom_tool_call",
-  "tool_search_call",
-  "local_shell_call"
-]);
-var TOOL_OUTPUT_TYPES = /* @__PURE__ */ new Set([
-  "function_call_output",
-  "custom_tool_call_output",
-  "tool_search_output",
-  "local_shell_call_output"
-]);
-var HANDLED_ENVELOPES = /* @__PURE__ */ new Set([
-  "session_meta",
-  "turn_context",
-  "response_item",
-  "event_msg",
-  "world_state",
-  "compacted"
-]);
-async function parseCodexTranscript(filePath, options = {}) {
-  const absolute2 = path11.resolve(filePath);
-  const fromOffset = options.fromOffset ?? 0;
-  const humanPrompts = await collectHumanPrompts(absolute2, fromOffset);
-  const unknownTypes = {};
-  let malformedLines = 0;
-  let endOffset = fromOffset;
-  const exchanges = [];
-  let current = null;
-  let seq = options.fromSeq ?? 0;
-  let sessionId = options.sessionId;
-  let cwd;
-  let model;
-  let entrypoint;
-  let firstTs;
-  let lastTs;
-  let userPrompts = 0;
-  let assistantTurns = 0;
-  let toolCallCount = 0;
-  const resolvedId = () => sessionId ?? sessionIdFromPath(absolute2);
-  const finalize = () => {
-    if (!current)
-      return;
-    const b = current;
-    current = null;
-    if (!b.userText.trim() && b.toolCalls.length === 0)
-      return;
-    exchanges.push({
-      id: exchangeId(resolvedId(), b.seq),
-      sessionId: resolvedId(),
-      seq: b.seq,
-      ts: b.ts,
-      userText: b.userText,
-      assistantText: b.assistantTexts.join("\n\n"),
-      toolCalls: b.toolCalls,
-      filesTouched: uniq(b.files),
-      isSidechain: false,
-      redacted: false
-    });
-  };
-  for await (const line of readJsonlLines(absolute2, { start: fromOffset })) {
-    if (!line.terminated)
-      break;
-    endOffset = line.end;
-    const parsed = parseJsonLine(line.text);
-    if (parsed === void 0) {
-      if (line.text.trim())
-        malformedLines += 1;
-      continue;
-    }
-    if (!isRecord(parsed)) {
-      malformedLines += 1;
-      continue;
-    }
-    const envelope = typeof parsed.type === "string" ? parsed.type : "";
-    if (!HANDLED_ENVELOPES.has(envelope)) {
-      unknownTypes[envelope || "(no type)"] = (unknownTypes[envelope || "(no type)"] ?? 0) + 1;
-    }
-    const ts = typeof parsed.timestamp === "string" ? parsed.timestamp : (/* @__PURE__ */ new Date()).toISOString();
-    if (typeof parsed.timestamp === "string") {
-      firstTs ??= parsed.timestamp;
-      lastTs = parsed.timestamp;
-    }
-    const payload = parsed.payload;
-    if (!isRecord(payload))
-      continue;
-    if (envelope === "session_meta") {
-      if (!options.sessionId) {
-        const id2 = payload.session_id ?? payload.id;
-        if (typeof id2 === "string")
-          sessionId = id2;
-      }
-      if (typeof payload.cwd === "string")
-        cwd = payload.cwd;
-      if (typeof payload.originator === "string")
-        entrypoint = payload.originator;
-      else if (typeof payload.source === "string")
-        entrypoint = payload.source;
-      continue;
-    }
-    if (envelope === "turn_context") {
-      if (typeof payload.cwd === "string")
-        cwd = payload.cwd;
-      if (typeof payload.model === "string")
-        model = payload.model;
-      continue;
-    }
-    if (envelope !== "response_item")
-      continue;
-    const kind = typeof payload.type === "string" ? payload.type : "";
-    if (kind === "message") {
-      const text = extractTextFromContent(payload.content);
-      if (!text.trim())
-        continue;
-      if (payload.role === "user") {
-        if (humanPrompts.size > 0 && !humanPrompts.has(normalise(text)))
-          continue;
-        finalize();
-        seq += 1;
-        userPrompts += 1;
-        current = {
-          seq,
-          ts,
-          userText: text,
-          assistantTexts: [],
-          toolCalls: [],
-          byCallId: /* @__PURE__ */ new Map(),
-          files: []
-        };
-      } else if (payload.role === "assistant" && current) {
-        current.assistantTexts.push(text);
-        current.ts = ts;
-        assistantTurns += 1;
-      }
-      continue;
-    }
-    if (TOOL_CALL_TYPES.has(kind) && current) {
-      let input = payload.arguments;
-      if (typeof input === "string")
-        input = safeParseJson(input);
-      else if (payload.input !== void 0)
-        input = payload.input;
-      else if (payload.action !== void 0)
-        input = payload.action;
-      const name = typeof payload.name === "string" && payload.name || typeof payload.namespace === "string" && payload.namespace || kind;
-      const call = { name, input: stringifyToolInput(input) };
-      current.toolCalls.push(call);
-      toolCallCount += 1;
-      if (typeof payload.call_id === "string") {
-        current.byCallId.set(payload.call_id, current.toolCalls.length - 1);
-      }
-      for (const f of filesFromToolInput(input))
-        current.files.push(f);
-      continue;
-    }
-    if (TOOL_OUTPUT_TYPES.has(kind) && current) {
-      const callId = typeof payload.call_id === "string" ? payload.call_id : void 0;
-      if (!callId)
-        continue;
-      const at = current.byCallId.get(callId);
-      if (at === void 0)
-        continue;
-      const call = current.toolCalls[at];
-      if (!call)
-        continue;
-      const out = stringifyToolOutput(payload.output);
-      if (out !== void 0)
-        call.result = out;
-    }
-  }
-  finalize();
-  const id = resolvedId();
-  const projectSlug = options.projectSlug ?? (cwd ? path11.basename(cwd) : "unknown");
-  const bytes2 = options.bytes ?? statBytes2(absolute2);
-  const session = {
-    id,
-    harness: "codex",
-    sourcePath: absolute2,
-    project: cwd ?? projectSlug,
-    projectSlug,
-    startedAt: firstTs ?? "",
-    endedAt: lastTs ?? firstTs ?? "",
-    ...options.title ? { title: options.title } : {},
-    ...options.gitBranch ? { gitBranch: options.gitBranch } : {},
-    ...entrypoint ? { entrypoint } : {},
-    ...model ? { model } : {},
-    isSidechain: false,
-    counts: { userPrompts, assistantTurns, toolCalls: toolCallCount, bytes: bytes2 },
-    status: options.status ?? "live"
-  };
-  return { session, exchanges, unknownTypes, endOffset, malformedLines };
-}
-async function collectHumanPrompts(absolute2, start) {
-  const out = /* @__PURE__ */ new Set();
-  for await (const line of readJsonlLines(absolute2, { start })) {
-    if (!line.terminated)
-      break;
-    const parsed = parseJsonLine(line.text);
-    if (!isRecord(parsed) || parsed.type !== "event_msg")
-      continue;
-    const payload = parsed.payload;
-    if (!isRecord(payload) || payload.type !== "user_message")
-      continue;
-    if (typeof payload.message === "string")
-      out.add(normalise(payload.message));
-  }
-  return out;
-}
-function normalise(text) {
-  return text.trim();
-}
-function sessionIdFromPath(filePath) {
-  const base2 = path11.basename(filePath, ".jsonl");
-  const matches = base2.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
-  const last2 = matches?.[matches.length - 1];
-  return last2 ?? base2;
-}
-function statBytes2(absolute2) {
-  try {
-    return fs14.statSync(absolute2).size;
-  } catch {
-    return 0;
-  }
-}
-
-// ../core/dist/codex/version.js
-var MIN_CODEX_VERSION = "0.130.0";
-function parseCodexCliVersion(output) {
-  return output.match(/\b(\d+\.\d+\.\d+)\b/)?.[1];
-}
-function compareSemver(a, b) {
-  const aParts = a.split(".").map((part) => Number.parseInt(part, 10));
-  const bParts = b.split(".").map((part) => Number.parseInt(part, 10));
-  for (let i = 0; i < 3; i += 1) {
-    const rawA = aParts[i];
-    const rawB = bParts[i];
-    const aPart = typeof rawA === "number" && Number.isFinite(rawA) ? rawA : 0;
-    const bPart = typeof rawB === "number" && Number.isFinite(rawB) ? rawB : 0;
-    if (aPart !== bPart)
-      return aPart - bPart;
-  }
-  return 0;
-}
-function versionMeetsMinimum(version, minimum = MIN_CODEX_VERSION) {
-  return compareSemver(version, minimum) >= 0;
-}
-
-// ../core/dist/adapters/codex.js
-var ROLLOUT_FILE = /^rollout-.*\.jsonl$/i;
-var UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
-var MAX_WALK_DEPTH = 8;
-function sessionIdFromRolloutPath(filePath) {
-  const base2 = path12.basename(filePath, ".jsonl");
-  const matches = base2.match(UUID);
-  return matches?.[matches.length - 1] ?? base2;
-}
-function discover2(options = {}) {
-  const paths = codexPaths(codexDir(options.codexHome));
-  const out = [];
-  walk(paths.sessions, "live", 0, out);
-  walk(paths.archived, "archived", 0, out);
-  out.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  return out;
-}
-function walk(dir, status3, depth, out) {
-  if (depth > MAX_WALK_DEPTH)
-    return;
-  let entries;
-  try {
-    entries = fs15.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const full = path12.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walk(full, status3, depth + 1, out);
-      continue;
-    }
-    if (!entry.isFile() && !entry.isSymbolicLink())
-      continue;
-    if (!ROLLOUT_FILE.test(entry.name))
-      continue;
-    let stat;
-    try {
-      stat = fs15.statSync(full);
-    } catch {
-      continue;
-    }
-    if (!stat.isFile())
-      continue;
-    out.push({
-      sessionId: sessionIdFromRolloutPath(full),
-      harness: "codex",
-      path: full,
-      projectSlug: "",
-      bytes: stat.size,
-      mtimeMs: stat.mtimeMs,
-      isSidechain: false,
-      status: status3
-    });
-  }
-}
-function readSessionIndex(options = {}) {
-  const file = codexPaths(codexDir(options.codexHome)).sessionIndex;
+function tagsForSessions(db, ids) {
   const out = /* @__PURE__ */ new Map();
-  let text;
-  try {
-    text = fs15.readFileSync(file, "utf8");
-  } catch {
+  if (ids.length === 0)
     return out;
-  }
-  for (const line of text.split("\n")) {
-    if (!line.trim())
-      continue;
-    const parsed = parseJsonLine(line);
-    if (!isRecord(parsed) || typeof parsed["id"] !== "string")
-      continue;
-    const id = parsed["id"];
-    const threadName = parsed["thread_name"];
-    const updatedAt = parsed["updated_at"];
-    out.set(id, {
-      id,
-      ...typeof threadName === "string" && threadName.trim() ? { threadName } : {},
-      ...typeof updatedAt === "string" ? { updatedAt } : {}
-    });
+  const rows = db.prepare(`SELECT session_id, tag FROM tags WHERE session_id IN (${ids.map(() => "?").join(",")})
+        ORDER BY session_id, tag`).all(...ids);
+  for (const r of rows) {
+    const list = out.get(r.session_id);
+    if (list)
+      list.push(r.tag);
+    else
+      out.set(r.session_id, [r.tag]);
   }
   return out;
 }
-var indexCache = /* @__PURE__ */ new Map();
-function sessionIndexCached(codexHome) {
-  const file = codexPaths(codexDir(codexHome)).sessionIndex;
-  let mtimeMs = -1;
-  try {
-    mtimeMs = fs15.statSync(file).mtimeMs;
-  } catch {
-  }
-  const hit2 = indexCache.get(file);
-  if (hit2 && hit2.mtimeMs === mtimeMs)
-    return hit2.entries;
-  const entries = readSessionIndex({ ...codexHome ? { codexHome } : {} });
-  indexCache.set(file, { mtimeMs, entries });
-  return entries;
+function allTags(db) {
+  return db.prepare(`SELECT tag, COUNT(*) AS sessions FROM tags GROUP BY tag
+        ORDER BY sessions DESC, tag`).all();
 }
-function clearSessionIndexCache() {
-  indexCache.clear();
-}
-async function readCodexHeader(filePath) {
-  for await (const line of readJsonlLines(filePath)) {
-    if (!line.terminated)
-      return void 0;
-    const parsed = parseJsonLine(line.text);
-    if (!isRecord(parsed) || parsed["type"] !== "session_meta")
-      return void 0;
-    const payload = parsed["payload"];
-    if (!isRecord(payload))
-      return void 0;
-    const str2 = (key) => typeof payload[key] === "string" ? payload[key] : void 0;
-    const timestamp = typeof parsed["timestamp"] === "string" ? parsed["timestamp"] : void 0;
-    const header = {
-      ...str2("session_id") ?? str2("id") ? { sessionId: str2("session_id") ?? str2("id") } : {},
-      ...str2("cwd") ? { cwd: str2("cwd") } : {},
-      ...str2("originator") ? { originator: str2("originator") } : {},
-      ...str2("source") ? { source: str2("source") } : {},
-      ...str2("cli_version") ? { cliVersion: str2("cli_version") } : {},
-      ...str2("model_provider") ? { modelProvider: str2("model_provider") } : {},
-      ...str2("timestamp") ?? timestamp ? { startedAt: str2("timestamp") ?? timestamp } : {}
-    };
-    return header;
-  }
-  return void 0;
-}
-function codexEntrypoint(header) {
-  for (const raw of [header.originator, header.source]) {
-    if (!raw || !raw.trim())
-      continue;
-    const v = raw.trim().toLowerCase();
-    if (v.includes("desktop"))
-      return "desktop";
-    if (v.includes("vscode") || v.includes("vs code"))
-      return "vscode";
-    if (v.includes("cli"))
-      return "cli";
-    if (v.includes("exec"))
-      return "exec";
-    return v.replace(/\s+/g, "-");
-  }
-  return void 0;
-}
-var DATA_URI = /data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+)?(?:;[a-zA-Z0-9.+=-]+)*;base64,[A-Za-z0-9+/=\s]{64,}/g;
-var DEFAULT_MAX_VALUE_BYTES = 32 * 1024;
-var DEFAULT_MAX_MESSAGE_BYTES = 256 * 1024;
-function elideBinary(text, tally2) {
-  if (!text.includes("base64,"))
-    return text;
-  return text.replace(DATA_URI, (match, mime) => {
-    tally2.binaryParts += 1;
-    tally2.charsElided += match.length;
-    return `\u2039elided:${mime ?? "application/octet-stream"}:${match.length} bytes\u203A`;
-  });
-}
-function cap(text, max2, tally2) {
-  if (text.length <= max2)
-    return text;
-  const dropped = text.length - max2;
-  tally2.truncatedValues += 1;
-  tally2.charsElided += dropped;
-  return `${text.slice(0, max2)}
-\u2039elided:oversize:${dropped} bytes\u203A`;
-}
-var PATCH_FILE = /\*\*\* (?:Add|Update|Delete) File: ([^\n"\\]+)/g;
-var PATCH_MOVE = /\*\*\* Move to: ([^\n"\\]+)/g;
-function filesFromCodexToolInput(input) {
-  if (!input.includes("*** "))
-    return [];
-  const out = [];
-  for (const re of [PATCH_FILE, PATCH_MOVE]) {
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(input)) !== null) {
-      const file = m[1]?.trim();
-      if (file)
-        out.push(file);
-    }
-  }
-  return out;
-}
-async function parse2(source, options = {}) {
-  const header = await readCodexHeader(source.path);
-  const id = options.sessionId ?? header?.sessionId ?? source.sessionId;
-  const entries = sessionIndexCached(options.codexHome);
-  const indexed = entries.get(id);
-  const title = options.title ?? indexed?.threadName;
-  const result = await parseCodexTranscript(source.path, {
-    ...options.fromOffset !== void 0 ? { fromOffset: options.fromOffset } : {},
-    ...options.fromSeq !== void 0 ? { fromSeq: options.fromSeq } : {},
-    // The header is the file's own record, so passing it satisfies "parse() is
-    // allowed to correct the id" while still working from a byte offset, where
-    // the parser would never see `session_meta` again.
-    sessionId: id,
-    ...options.projectSlug ?? source.projectSlug ? { projectSlug: options.projectSlug ?? source.projectSlug } : {},
-    ...title ? { title } : {},
-    ...options.gitBranch ? { gitBranch: options.gitBranch } : {},
-    status: source.status ?? "live",
-    bytes: source.bytes
-  });
-  const tally2 = { binaryParts: 0, truncatedValues: 0, charsElided: 0 };
-  const maxValue = options.maxValueBytes ?? DEFAULT_MAX_VALUE_BYTES;
-  const maxMessage = options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES;
-  const exchanges = result.exchanges.map((exchange) => {
-    const toolCalls = exchange.toolCalls.map((call) => {
-      const input = cap(elideBinary(call.input, tally2), maxValue, tally2);
-      const next = { ...call, input };
-      if (call.result !== void 0) {
-        next.result = cap(elideBinary(call.result, tally2), maxValue, tally2);
-      }
-      return next;
-    });
-    const extraFiles = exchange.toolCalls.flatMap((call) => filesFromCodexToolInput(call.input));
-    return {
-      ...exchange,
-      userText: cap(elideBinary(exchange.userText, tally2), maxMessage, tally2),
-      assistantText: cap(elideBinary(exchange.assistantText, tally2), maxMessage, tally2),
-      toolCalls,
-      filesTouched: uniq([...exchange.filesTouched, ...extraFiles])
-    };
-  });
-  const entrypoint = header ? codexEntrypoint(header) : void 0;
-  const session = {
-    ...result.session,
-    id,
-    ...header?.cwd ? { project: header.cwd, projectSlug: pickSlug(result.session, header.cwd) } : {},
-    ...entrypoint ? { entrypoint } : {},
-    status: source.status ?? result.session.status
-  };
-  if (title)
-    session.title = title;
-  const cliVersion = header?.cliVersion;
-  const semver = cliVersion ? parseCodexCliVersion(cliVersion) : void 0;
-  return {
-    ...result,
-    session,
-    exchanges,
-    codex: {
-      ...cliVersion ? { cliVersion } : {},
-      // Unknown version == not yet proven unsupported; only a version we can
-      // read AND that is below the floor counts as unsupported.
-      versionSupported: semver ? versionMeetsMinimum(semver) : true,
-      headerUnreadable: header === void 0,
-      titled: Boolean(indexed?.threadName),
-      elisions: tally2
-    }
-  };
-}
-function pickSlug(session, cwd) {
-  if (session.projectSlug && session.projectSlug !== "unknown")
-    return session.projectSlug;
-  return path12.basename(cwd) || "unknown";
-}
-var codexAdapter = {
-  harness: "codex",
-  displayName: "Codex CLI",
-  sourceDir: () => codexPaths().sessions,
-  discover: () => discover2(),
-  parse: (source, options) => parse2(source, options ?? {})
-};
-async function codexDoctor(options = {}) {
-  const paths = codexPaths(codexDir(options.codexHome));
-  const sources = discover2(options);
-  const entries = readSessionIndex(options);
-  const versions = {};
-  const unsupported = /* @__PURE__ */ new Set();
-  const unreadable = [];
-  let titled2 = 0;
-  let bytes2 = 0;
-  let archived = 0;
-  for (const source of sources) {
-    bytes2 += source.bytes;
-    if (source.status === "archived")
-      archived += 1;
-    const header = await readCodexHeader(source.path);
-    if (!header) {
-      unreadable.push(source.path);
-      continue;
-    }
-    const id = header.sessionId ?? source.sessionId;
-    if (entries.get(id)?.threadName)
-      titled2 += 1;
-    const raw = header.cliVersion;
-    if (raw) {
-      versions[raw] = (versions[raw] ?? 0) + 1;
-      const semver = parseCodexCliVersion(raw);
-      if (semver && !versionMeetsMinimum(semver))
-        unsupported.add(raw);
-    }
-  }
-  return {
-    harness: "codex",
-    displayName: "Codex CLI",
-    sourceDir: paths.sessions,
-    present: fs15.existsSync(paths.root),
-    sessions: sources.length,
-    archived,
-    bytes: bytes2,
-    titled: titled2,
-    versions,
-    unsupportedVersions: [...unsupported].sort(),
-    unreadable
-  };
-}
-function renderCodexDoctorLine(report) {
-  if (!report.present) {
-    return `codex     not installed        ${tildify(report.sourceDir)}`;
-  }
-  if (report.sessions === 0) {
-    return `codex     0 sessions           ${tildify(report.sourceDir)}`;
-  }
-  const parts = [
-    `${report.sessions} session${report.sessions === 1 ? "" : "s"}`,
-    formatBytes(report.bytes),
-    `${report.titled} titled`
+function applyTags(db, sessionId, change) {
+  const add = unique((change.add ?? []).map(String));
+  const remove = new Set(unique((change.remove ?? []).map(String)));
+  const before = new Set(sessionTags(db, sessionId));
+  const added = add.filter((t) => !before.has(t) && !remove.has(t));
+  const removed = [...remove].filter((t) => before.has(t));
+  const unchanged = [
+    ...add.filter((t) => before.has(t)),
+    ...[...remove].filter((t) => !before.has(t)).map((t) => `-${t}`)
   ];
-  if (report.archived > 0)
-    parts.push(`${report.archived} archived`);
-  const versions = Object.keys(report.versions).sort();
-  if (versions.length > 0)
-    parts.push(`cli ${versions.join(", ")}`);
-  if (report.unsupportedVersions.length > 0) {
-    parts.push(`${report.unsupportedVersions.join(", ")} < ${MIN_CODEX_VERSION}, unsupported`);
+  if (added.length || removed.length) {
+    const insert = db.prepare("INSERT OR IGNORE INTO tags (session_id, tag) VALUES (?, ?)");
+    const del = db.prepare("DELETE FROM tags WHERE session_id = ? AND tag = ?");
+    db.transaction(() => {
+      for (const t of added)
+        insert.run(sessionId, t);
+      for (const t of removed)
+        del.run(sessionId, t);
+    })();
   }
-  if (report.unreadable.length > 0) {
-    parts.push(`${report.unreadable.length} unreadable header${report.unreadable.length === 1 ? "" : "s"}`);
+  return { sessionId, tags: sessionTags(db, sessionId), added, removed, unchanged };
+}
+function isPinned(db, sessionId) {
+  const row2 = db.prepare("SELECT pinned_at FROM pins WHERE session_id = ?").get(sessionId);
+  return { pinned: Boolean(row2), pinnedAt: row2?.pinned_at ?? null };
+}
+function pinSession(db, sessionId, at = iso()) {
+  const existing = isPinned(db, sessionId);
+  if (existing.pinned) {
+    return { sessionId, pinned: true, pinnedAt: existing.pinnedAt, changed: false };
   }
-  return `codex     ${parts.join(" \xB7 ")}   ${tildify(report.sourceDir)}`;
+  db.prepare("INSERT OR REPLACE INTO pins (session_id, pinned_at) VALUES (?, ?)").run(sessionId, at);
+  return { sessionId, pinned: true, pinnedAt: at, changed: true };
 }
-function doctorLine2(report) {
-  if (!report.present) {
-    return formatDoctorLine({
-      harness: "codex",
-      status: "absent",
-      dir: report.sourceDir,
-      note: "Codex CLI not installed"
-    });
-  }
-  const parts = [`${report.sessions} session${report.sessions === 1 ? "" : "s"}`];
-  if (report.sessions > 0)
-    parts.push(formatBytes(report.bytes));
-  if (report.titled > 0)
-    parts.push(`${report.titled} titled`);
-  if (report.archived > 0)
-    parts.push(`${report.archived} archived`);
-  const versions = Object.keys(report.versions).sort();
-  if (versions.length > 0)
-    parts.push(`cli ${versions.join(", ")}`);
-  if (report.unsupportedVersions.length > 0) {
-    parts.push(`${report.unsupportedVersions.join(", ")} < ${MIN_CODEX_VERSION}`);
-  }
-  if (report.unreadable.length > 0)
-    parts.push(`${report.unreadable.length} unreadable`);
-  return formatDoctorLine({
-    harness: "codex",
-    status: "ready",
-    dir: report.sourceDir,
-    note: parts.join(" \xB7 ")
-  });
+function unpinSession(db, sessionId) {
+  const existing = isPinned(db, sessionId);
+  if (!existing.pinned)
+    return { sessionId, pinned: false, pinnedAt: null, changed: false };
+  db.prepare("DELETE FROM pins WHERE session_id = ?").run(sessionId);
+  return { sessionId, pinned: false, pinnedAt: existing.pinnedAt, changed: true };
 }
-function formatBytes(n2) {
-  if (n2 < 1024)
-    return `${n2} B`;
-  if (n2 < 1024 * 1024)
-    return `${(n2 / 1024).toFixed(1)} KB`;
-  return `${(n2 / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-// ../core/dist/adapters/cursor.js
-var cursor_exports = {};
-__export(cursor_exports, {
-  CURSOR_DOCTOR_NOTE: () => CURSOR_DOCTOR_NOTE,
-  SIDECHAIN_DIR: () => SIDECHAIN_DIR3,
-  TRANSCRIPTS_DIR: () => TRANSCRIPTS_DIR,
-  classifyProjectSlug: () => classifyProjectSlug,
-  cursorAdapter: () => cursorAdapter,
-  cursorDir: () => cursorDir,
-  cursorProjectsDir: () => cursorProjectsDir,
-  cursorSlug: () => cursorSlug,
-  discover: () => discover3,
-  doctorLine: () => doctorLine3,
-  filesFromCursorInput: () => filesFromCursorInput,
-  parse: () => parse3,
-  parseCursorTimestamp: () => parseCursorTimestamp,
-  readPrompt: () => readPrompt,
-  recoverCwd: () => recoverCwd,
-  toolName: () => toolName
-});
-import fs16 from "node:fs";
-import path13 from "node:path";
-var TRANSCRIPTS_DIR = "agent-transcripts";
-var SIDECHAIN_DIR3 = "subagents";
-var CURSOR_DOCTOR_NOTE = "cursor: no timestamps on assistant turns (session times come from file mtime), no tool results recorded at all, and title/model/git-branch are unavailable \u2014 they live in VS Code's workspaceStorage, which potsherd does not read.";
-function cursorSlug(cwd) {
-  return cwd.replace(/^[/\\]+/, "").replace(/[/\\_]/g, "-");
-}
-function classifyProjectSlug(slug) {
-  if (slug === "empty-window")
-    return "empty-window";
-  if (/^\d{10,}$/.test(slug))
-    return "window-id";
-  return "path";
-}
-function discover3(dirOverride) {
-  const root = cursorProjectsDir(dirOverride);
-  const out = [];
-  for (const slug of readdirSafe4(root, "dir")) {
-    const transcripts = path13.join(root, slug, TRANSCRIPTS_DIR);
-    for (const sessionId of readdirSafe4(transcripts, "dir")) {
-      const sessionDir = path13.join(transcripts, sessionId);
-      for (const file of readdirSafe4(sessionDir, "file")) {
-        if (!file.endsWith(".jsonl"))
-          continue;
-        const source = statSource(path13.join(sessionDir, file), slug, {
-          sessionId: basenameId(file),
-          isSidechain: false
-        });
-        if (source)
-          out.push(source);
-      }
-      const sidechains = path13.join(sessionDir, SIDECHAIN_DIR3);
-      for (const file of readdirSafe4(sidechains, "file")) {
-        if (!file.endsWith(".jsonl"))
-          continue;
-        const source = statSource(path13.join(sidechains, file), slug, {
-          sessionId: basenameId(file),
-          isSidechain: true,
-          parentSessionId: sessionId
-        });
-        if (source)
-          out.push(source);
-      }
+var LINKED_TO_SQL = (column) => `EXISTS (SELECT 1 FROM links l
+             WHERE (l.a_session_id = ${column} AND l.b_session_id = ?)
+                OR (l.b_session_id = ${column} AND l.a_session_id = ?))`;
+function linkSessions(db, a, b, note, at = iso()) {
+  const existing = db.prepare(`SELECT a_session_id, b_session_id, note, created_at FROM links
+        WHERE (a_session_id = ? AND b_session_id = ?) OR (a_session_id = ? AND b_session_id = ?)`).get(a, b, b, a);
+  if (existing) {
+    const kept = note ?? existing.note;
+    if (kept !== existing.note) {
+      db.prepare("UPDATE links SET note = ? WHERE a_session_id = ? AND b_session_id = ?").run(kept, existing.a_session_id, existing.b_session_id);
     }
-  }
-  return out.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-}
-function basenameId(file) {
-  return file.slice(0, -".jsonl".length);
-}
-function readdirSafe4(dir, want) {
-  let entries;
-  try {
-    entries = fs16.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const names = [];
-  for (const e of entries) {
-    if (e.name.startsWith("."))
-      continue;
-    if (want === "dir" ? e.isDirectory() : e.isFile())
-      names.push(e.name);
-  }
-  return names.sort();
-}
-function statSource(file, projectSlug, rest) {
-  let st;
-  try {
-    st = fs16.statSync(file);
-  } catch {
-    return null;
-  }
-  return {
-    sessionId: rest.sessionId,
-    harness: "cursor",
-    path: file,
-    projectSlug,
-    bytes: st.size,
-    mtimeMs: st.mtimeMs,
-    isSidechain: rest.isSidechain,
-    ...rest.parentSessionId ? { parentSessionId: rest.parentSessionId } : {},
-    status: "live"
-  };
-}
-async function parse3(source, options = {}) {
-  const sessionId = options.sessionId ?? source.sessionId;
-  const projectSlug = options.projectSlug ?? source.projectSlug;
-  const isSidechain = source.isSidechain;
-  const unknownTypes = {};
-  const bump = (key) => {
-    unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
-  };
-  const exchanges = [];
-  const cwdCandidates = [];
-  let malformedLines = 0;
-  let endOffset = options.fromOffset ?? 0;
-  let seq = options.fromSeq ?? 0;
-  let userPrompts = 0;
-  let assistantTurns = 0;
-  let toolCallCount = 0;
-  let firstTs;
-  let lastTs;
-  let open2;
-  const flush = () => {
-    if (!open2)
-      return;
-    exchanges.push({
-      id: exchangeId(sessionId, open2.seq),
-      sessionId,
-      seq: open2.seq,
-      // Every exchange needs a ts. A prompt with no `<timestamp>` (all of the
-      // subagent ones) inherits the last one seen, and if there was none, the
-      // session's mtime-derived start. Never invented, always explained.
-      ts: open2.ts ?? lastTs ?? firstTs ?? isoFromMs(source.mtimeMs),
-      userText: open2.userText,
-      assistantText: open2.assistantTexts.join("\n\n"),
-      toolCalls: open2.toolCalls,
-      filesTouched: uniq(open2.files),
-      isSidechain,
-      // No `parentUuid`: cursor records carry no ids of any kind, so an
-      // exchange cannot name its parent. Left off rather than faked.
-      redacted: false
-      // L2 redacts between here and the index.
-    });
-    open2 = void 0;
-  };
-  const openFor = (ts, userText) => {
-    flush();
-    seq += 1;
-    open2 = { seq, ts, userText, assistantTexts: [], toolCalls: [], files: [] };
-  };
-  for await (const line of readJsonlLines(source.path, { start: options.fromOffset ?? 0 })) {
-    const record = parseJsonLine(line.text);
-    if (!line.terminated) {
-      if (record === void 0) {
-        if (line.text.trim())
-          malformedLines += 1;
-        break;
-      }
-    }
-    endOffset = line.end;
-    if (record === void 0) {
-      if (line.text.trim())
-        malformedLines += 1;
-      continue;
-    }
-    if (!isRecord(record)) {
-      bump("(not an object)");
-      continue;
-    }
-    const role = record.role;
-    const message2 = record.message;
-    const content = isRecord(message2) ? message2.content : void 0;
-    if (typeof role !== "string") {
-      bump("(no role)");
-      continue;
-    }
-    if (!Array.isArray(content)) {
-      bump(`role:${role} (no message.content)`);
-      continue;
-    }
-    if (role === "user") {
-      const text = joinText(content, bump, role);
-      const prompt = readPrompt(text);
-      if (prompt.injected && open2) {
-        bump("user:injected-continuation");
-        continue;
-      }
-      if (prompt.ts) {
-        if (!firstTs)
-          firstTs = prompt.ts;
-        lastTs = prompt.ts;
-      }
-      openFor(prompt.ts, prompt.text);
-      userPrompts += 1;
-      continue;
-    }
-    if (role !== "assistant") {
-      bump(`role:${role}`);
-      continue;
-    }
-    assistantTurns += 1;
-    if (!open2)
-      openFor(lastTs, "");
-    for (const raw of content) {
-      if (!isRecord(raw)) {
-        bump("block:(not an object)");
-        continue;
-      }
-      const block2 = raw;
-      if (block2.type === "text") {
-        if (typeof block2.text === "string" && block2.text)
-          open2.assistantTexts.push(block2.text);
-        continue;
-      }
-      if (block2.type === "tool_use") {
-        toolCallCount += 1;
-        open2.toolCalls.push({
-          name: toolName(block2.name),
-          input: stringifyToolInput(block2.input)
-          // `result` is deliberately absent: cursor persists no tool output.
-          // See CURSOR_DOCTOR_NOTE. `isError` is unknowable for the same reason.
-        });
-        for (const f of filesFromCursorInput(block2.input))
-          open2.files.push(f);
-        for (const p of absolutePaths(block2.input))
-          cwdCandidates.push(p);
-        continue;
-      }
-      bump(`block:${typeof block2.type === "string" ? block2.type : String(block2.type)}`);
-    }
-  }
-  flush();
-  const mtimeIso = isoFromMs(source.mtimeMs);
-  const startedAt = firstTs ?? mtimeIso;
-  const endedAt = mtimeIso >= (lastTs ?? "") ? mtimeIso : lastTs;
-  const session = {
-    id: sessionId,
-    harness: "cursor",
-    sourcePath: source.path,
-    // `project` is a *recovered* cwd: an absolute directory seen in this
-    // session's own tool inputs whose cursorSlug() equals the project
-    // directory name. Empty when nothing corroborates — window-id and
-    // empty-window projects never have a cwd, and neither is invented.
-    project: recoverCwd(projectSlug, cwdCandidates) ?? "",
-    projectSlug,
-    startedAt,
-    endedAt,
-    // title / gitBranch / entrypoint / model / agentName: **not knowable from
-    // ~/.cursor**. Cursor keeps all four in VS Code's workspaceStorage and
-    // globalStorage sqlite, which potsherd does not read. Left undefined.
-    isSidechain,
-    ...source.parentSessionId ? { parentSessionId: source.parentSessionId } : {},
-    counts: {
-      userPrompts,
-      assistantTurns,
-      toolCalls: toolCallCount,
-      bytes: source.bytes
-    },
-    status: source.status ?? "live"
-  };
-  return { session, exchanges, unknownTypes, endOffset, malformedLines };
-}
-var TIMESTAMP_RE = /<timestamp>([^<]*)<\/timestamp>/;
-var OPEN_QUERY = "<user_query>";
-var CLOSE_QUERY = "</user_query>";
-function readPrompt(text) {
-  const open2 = text.indexOf(OPEN_QUERY);
-  const preamble = open2 >= 0 ? text.slice(0, open2) : text;
-  const stamp = preamble.match(TIMESTAMP_RE);
-  const ts = stamp ? parseCursorTimestamp(stamp[1]) : void 0;
-  if (open2 < 0) {
-    return { text: text.replace(TIMESTAMP_RE, "").trim(), injected: false, ...ts ? { ts } : {} };
-  }
-  const bodyStart = open2 + OPEN_QUERY.length;
-  const injected = text[bodyStart] !== "\n";
-  const close = text.lastIndexOf(CLOSE_QUERY);
-  const body = close > bodyStart ? text.slice(bodyStart, close) : text.slice(bodyStart);
-  return { text: body.trim(), injected, ...ts ? { ts } : {} };
-}
-var MONTHS2 = [
-  "january",
-  "february",
-  "march",
-  "april",
-  "may",
-  "june",
-  "july",
-  "august",
-  "september",
-  "october",
-  "november",
-  "december"
-];
-var CURSOR_TS_RE = new RegExp("^(?:[A-Za-z]+,\\s*)?([A-Za-z]+)\\s+(\\d{1,2}),\\s*(\\d{4}),\\s*(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*([AaPp])\\.?[Mm]\\.?(?:\\s*\\(\\s*UTC(?:\\s*([+-]\\d{1,2})(?::?(\\d{2}))?)?\\s*\\))?\\s*$");
-function parseCursorTimestamp(raw) {
-  const m = raw.trim().match(CURSOR_TS_RE);
-  if (!m)
-    return void 0;
-  const month = MONTHS2.indexOf(m[1].toLowerCase());
-  if (month < 0)
-    return void 0;
-  const day = Number(m[2]);
-  const year = Number(m[3]);
-  let hour = Number(m[4]);
-  const minute = Number(m[5]);
-  const second = m[6] ? Number(m[6]) : 0;
-  const meridiem = m[7].toLowerCase();
-  if (hour === 12)
-    hour = 0;
-  if (meridiem === "p")
-    hour += 12;
-  if (day < 1 || day > 31 || minute > 59 || second > 59 || hour > 23)
-    return void 0;
-  const offsetHours = m[8] ? Number(m[8]) : 0;
-  const offsetMinutes = m[9] ? Number(m[9]) : 0;
-  const sign = m[8]?.startsWith("-") ? -1 : 1;
-  const offset = offsetHours * 60 + sign * offsetMinutes;
-  const ms = Date.UTC(year, month, day, hour, minute, second) - offset * 6e4;
-  if (!Number.isFinite(ms))
-    return void 0;
-  return new Date(ms).toISOString();
-}
-function toolName(name) {
-  if (typeof name !== "string")
-    return "unknown";
-  const first = name.split("\n")[0].trim();
-  return first || "unknown";
-}
-var CURSOR_FILE_KEYS = ["target_notebook", "paths"];
-var PATCH_FILE_RE = /^\*\*\* (?:Add|Update|Delete) File:\s*(.+)$/gm;
-function filesFromCursorInput(input) {
-  if (typeof input === "string") {
-    const out2 = [];
-    for (const m of input.matchAll(PATCH_FILE_RE)) {
-      const file = m[1].trim();
-      if (file)
-        out2.push(file);
-    }
-    return uniq(out2);
-  }
-  if (!isRecord(input))
-    return [];
-  const out = filesFromToolInput(input);
-  for (const key of CURSOR_FILE_KEYS) {
-    const value = input[key];
-    if (typeof value === "string" && value.trim())
-      out.push(value);
-    else if (Array.isArray(value)) {
-      for (const item of value)
-        if (typeof item === "string" && item.trim())
-          out.push(item);
-    }
-  }
-  return uniq(out);
-}
-function absolutePaths(input) {
-  const out = [];
-  const visit = (value, depth) => {
-    if (depth > 4)
-      return;
-    if (typeof value === "string") {
-      if (value.startsWith("/") && !value.includes("\n"))
-        out.push(value);
-      return;
-    }
-    if (Array.isArray(value)) {
-      for (const item of value)
-        visit(item, depth + 1);
-      return;
-    }
-    if (isRecord(value)) {
-      for (const item of Object.values(value))
-        visit(item, depth + 1);
-    }
-  };
-  if (typeof input === "string") {
-    for (const m of input.matchAll(PATCH_FILE_RE)) {
-      const file = m[1].trim();
-      if (file.startsWith("/"))
-        out.push(file);
-    }
-    return out;
-  }
-  visit(input, 0);
-  return out;
-}
-function recoverCwd(projectSlug, candidates) {
-  if (classifyProjectSlug(projectSlug) !== "path")
-    return void 0;
-  const hits = /* @__PURE__ */ new Map();
-  for (const candidate of candidates) {
-    let dir = candidate;
-    for (let depth = 0; depth < 32 && dir !== "/" && dir !== "."; depth += 1) {
-      if (cursorSlug(dir) === projectSlug) {
-        hits.set(dir, (hits.get(dir) ?? 0) + 1);
-        break;
-      }
-      const parent = path13.dirname(dir);
-      if (parent === dir)
-        break;
-      dir = parent;
-    }
-  }
-  let best;
-  let bestCount = 0;
-  for (const [dir, count2] of [...hits].sort((a, b) => a[0] < b[0] ? -1 : 1)) {
-    if (count2 > bestCount) {
-      best = dir;
-      bestCount = count2;
-    }
-  }
-  return best;
-}
-function joinText(content, bump, role) {
-  const parts = [];
-  for (const raw of content) {
-    if (!isRecord(raw)) {
-      bump("block:(not an object)");
-      continue;
-    }
-    if (raw.type === "text") {
-      if (typeof raw.text === "string")
-        parts.push(raw.text);
-      continue;
-    }
-    bump(`${role}/block:${typeof raw.type === "string" ? raw.type : String(raw.type)}`);
-  }
-  return parts.join("\n");
-}
-function isoFromMs(ms) {
-  return new Date(ms).toISOString();
-}
-function doctorLine3(dirOverride) {
-  const dir = cursorProjectsDir(dirOverride);
-  let found = [];
-  try {
-    found = discover3(dirOverride);
-  } catch {
-    found = [];
-  }
-  const exists = fs16.existsSync(dir);
-  const sidechains = found.filter((f) => f.isSidechain).length;
-  const sessions = found.length - sidechains;
-  const parts = [`${sessions} session${sessions === 1 ? "" : "s"}`];
-  if (sidechains > 0)
-    parts.push(`${sidechains} sidechains`);
-  parts.push("no titles, no tool results");
-  return formatDoctorLine({
-    harness: "cursor",
-    status: exists || found.length > 0 ? "ready" : "absent",
-    dir,
-    note: exists || found.length > 0 ? parts.join(" \xB7 ") : "Cursor not installed"
-  });
-}
-var cursorAdapter = {
-  harness: "cursor",
-  displayName: "Cursor",
-  sourceDir: () => cursorDir(),
-  discover: () => discover3(),
-  parse: parse3
-};
-
-// ../core/dist/adapters/pi.js
-var pi_exports = {};
-__export(pi_exports, {
-  DISPLAY_NAME: () => DISPLAY_NAME,
-  default: () => pi_default,
-  discover: () => discover4,
-  doctorLine: () => doctorLine4,
-  exchangeId: () => exchangeId2,
-  parse: () => parse4,
-  piAdapter: () => piAdapter,
-  piDir: () => piDir,
-  sessionIdFromFilename: () => sessionIdFromFilename,
-  sourceDir: () => sourceDir2,
-  unslugifyPi: () => unslugifyPi
-});
-import fs17 from "node:fs";
-import path14 from "node:path";
-import crypto3 from "node:crypto";
-var HANDLED_TYPES2 = /* @__PURE__ */ new Set([
-  "session",
-  "message",
-  "model_change",
-  "thinking_level_change",
-  "session_info",
-  "compaction",
-  "branch_summary",
-  "label",
-  "custom",
-  "custom_message"
-]);
-var HANDLED_ROLES = /* @__PURE__ */ new Set(["user", "assistant", "toolResult"]);
-var DISPLAY_NAME = "pi";
-function sourceDir2(override) {
-  return piSessionsDir(override);
-}
-function doctorLine4(override) {
-  const dir = sourceDir2(override);
-  let sessions = 0;
-  try {
-    sessions = discover4(override).length;
-  } catch {
-    sessions = 0;
-  }
-  const exists = fs17.existsSync(dir);
-  const status3 = exists ? "ready" : "absent";
-  const note = exists ? `${sessions} session${sessions === 1 ? "" : "s"}` : "pi not installed";
-  return formatDoctorLine({ harness: "pi", status: status3, dir, note });
-}
-function discover4(override) {
-  const root = sourceDir2(override);
-  const out = [];
-  let slugs;
-  try {
-    slugs = fs17.readdirSync(root, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const slug of slugs) {
-    if (!slug.isDirectory())
-      continue;
-    const dir = path14.join(root, slug.name);
-    let files;
-    try {
-      files = fs17.readdirSync(dir);
-    } catch {
-      continue;
-    }
-    for (const file of files) {
-      if (!file.endsWith(".jsonl"))
-        continue;
-      const full = path14.join(dir, file);
-      let stat;
-      try {
-        stat = fs17.statSync(full);
-      } catch {
-        continue;
-      }
-      if (!stat.isFile())
-        continue;
-      out.push({
-        sessionId: sessionIdFromFilename(file),
-        harness: "pi",
-        path: full,
-        projectSlug: slug.name,
-        bytes: stat.size,
-        mtimeMs: stat.mtimeMs,
-        isSidechain: false,
-        status: "live"
-      });
-    }
-  }
-  out.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  return out;
-}
-function sessionIdFromFilename(file) {
-  const base2 = path14.basename(file, ".jsonl");
-  const at = base2.lastIndexOf("_");
-  return at === -1 ? base2 : base2.slice(at + 1);
-}
-async function parse4(source, options = {}) {
-  const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path14.resolve(typeof source === "string" ? source : source.path);
-  const unknownTypes = {};
-  let malformedLines = 0;
-  let endOffset = 0;
-  const nodes = [];
-  const byId = /* @__PURE__ */ new Map();
-  let header;
-  let order = 0;
-  for await (const line of readJsonlLines(absolute2)) {
-    if (!line.terminated)
-      break;
-    endOffset = line.end;
-    const parsed = parseJsonLine(line.text);
-    if (parsed === void 0 || !isRecord(parsed)) {
-      if (line.text.trim())
-        malformedLines += 1;
-      continue;
-    }
-    const type = typeof parsed.type === "string" ? parsed.type : "";
-    if (!HANDLED_TYPES2.has(type)) {
-      const key = type || "(no type)";
-      unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
-    } else if (type === "message") {
-      const message2 = parsed.message;
-      const role = isRecord(message2) && typeof message2.role === "string" ? message2.role : "";
-      if (!HANDLED_ROLES.has(role)) {
-        const key = `message:${role || "(no role)"}`;
-        unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
-      }
-    }
-    if (type === "session") {
-      header ??= parsed;
-      continue;
-    }
-    const id = typeof parsed.id === "string" ? parsed.id : "";
-    if (!id) {
-      malformedLines += 1;
-      continue;
-    }
-    const node = {
-      id,
-      parentId: typeof parsed.parentId === "string" ? parsed.parentId : null,
-      type,
-      ts: typeof parsed.timestamp === "string" ? parsed.timestamp : "",
-      order: order++,
-      record: parsed
-    };
-    nodes.push(node);
-    byId.set(id, node);
-  }
-  const sessionId = options.sessionId ?? (header && typeof header.id === "string" && header.id ? header.id : sessionIdFromFilename(absolute2));
-  const mainline = linearise(nodes, byId);
-  const onMainline = new Set(mainline.map((n2) => n2.id));
-  const branches = branchChains(nodes, onMainline);
-  const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
-  const exchanges = [];
-  let seq = 0;
-  seq = buildExchanges(mainline, sessionId, false, seq, exchanges, counts2);
-  for (const chain of branches) {
-    seq = buildExchanges(chain, sessionId, true, seq, exchanges, counts2);
-  }
-  let model;
-  let title;
-  for (const node of mainline) {
-    if (node.type === "model_change" && typeof node.record.modelId === "string") {
-      model = node.record.modelId;
-    }
-    if (node.type === "message") {
-      const message2 = node.record.message;
-      if (isRecord(message2) && message2.role === "assistant" && typeof message2.model === "string") {
-        model = message2.model;
-      }
-    }
-    if (node.type === "session_info" && typeof node.record.name === "string" && node.record.name.trim()) {
-      title = node.record.name;
-    }
-  }
-  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path14.basename(path14.dirname(absolute2));
-  const headerCwd = header && typeof header.cwd === "string" ? header.cwd : void 0;
-  const startedAt = header && typeof header.timestamp === "string" ? header.timestamp : nodes[0]?.ts ?? "";
-  let endedAt = startedAt;
-  for (const node of nodes)
-    if (node.ts > endedAt)
-      endedAt = node.ts;
-  const parentSession = header && typeof header.parentSession === "string" ? header.parentSession : void 0;
-  const session = {
-    id: sessionId,
-    harness: "pi",
-    sourcePath: absolute2,
-    project: headerCwd ?? unslugifyPi(projectSlug),
-    projectSlug,
-    startedAt,
-    endedAt,
-    ...title ? { title } : {},
-    // pi never persists the git branch: `GitBranch` exists only in the live
-    // TUI footer provider. Left undefined rather than guessed.
-    entrypoint: "cli",
-    ...model ? { model } : {},
-    isSidechain: false,
-    ...parentSession ? { parentSessionId: sessionIdFromFilename(parentSession) } : {},
-    counts: {
-      userPrompts: counts2.userPrompts,
-      assistantTurns: counts2.assistantTurns,
-      toolCalls: counts2.toolCalls,
-      bytes: options.bytes ?? src?.bytes ?? statBytes3(absolute2)
-    },
-    status: options.status ?? src?.status ?? "live"
-  };
-  return { session, exchanges, unknownTypes, endOffset, malformedLines };
-}
-function linearise(nodes, byId) {
-  const leaf = nodes[nodes.length - 1];
-  if (!leaf)
-    return [];
-  const chain = [];
-  const seen = /* @__PURE__ */ new Set();
-  let current = leaf;
-  while (current && !seen.has(current.id)) {
-    seen.add(current.id);
-    chain.unshift(current);
-    current = current.parentId === null ? void 0 : byId.get(current.parentId);
-  }
-  return chain;
-}
-function branchChains(nodes, onMainline) {
-  const chains = [];
-  const chainOf = /* @__PURE__ */ new Map();
-  for (const node of nodes) {
-    if (onMainline.has(node.id))
-      continue;
-    const parentChain = node.parentId === null ? void 0 : chainOf.get(node.parentId);
-    if (parentChain === void 0) {
-      chainOf.set(node.id, chains.length);
-      chains.push([node]);
-      continue;
-    }
-    chainOf.set(node.id, parentChain);
-    chains[parentChain].push(node);
-  }
-  return chains;
-}
-function buildExchanges(chain, sessionId, isSidechain, startSeq, out, counts2) {
-  let seq = startSeq;
-  let current = null;
-  const finalize = () => {
-    if (!current)
-      return;
-    const b = current;
-    current = null;
-    if (!b.userText.trim() && b.assistantTexts.length === 0 && b.toolCalls.length === 0)
-      return;
-    out.push({
-      id: exchangeId2(sessionId, b.seq),
-      sessionId,
-      seq: b.seq,
-      ts: b.ts,
-      userText: b.userText,
-      assistantText: b.assistantTexts.join("\n\n"),
-      toolCalls: b.toolCalls,
-      filesTouched: uniq(b.files),
-      isSidechain,
-      ...b.parentUuid ? { parentUuid: b.parentUuid } : {},
-      redacted: false
-    });
-  };
-  const open2 = (ts, parentUuid) => {
-    seq += 1;
-    const b = {
-      seq,
-      ts,
-      userText: "",
-      assistantTexts: [],
-      toolCalls: [],
-      byToolCallId: /* @__PURE__ */ new Map(),
-      files: [],
-      parentUuid
-    };
-    current = b;
-    return b;
-  };
-  for (const node of chain) {
-    if (node.type !== "message")
-      continue;
-    const message2 = node.record.message;
-    if (!isRecord(message2))
-      continue;
-    const role = typeof message2.role === "string" ? message2.role : "";
-    if (!HANDLED_ROLES.has(role))
-      continue;
-    if (role === "user") {
-      finalize();
-      counts2.userPrompts += 1;
-      open2(node.ts, node.parentId).userText = extractTypedText(message2.content);
-      continue;
-    }
-    const b = current ?? open2(node.ts, node.parentId);
-    if (role === "assistant") {
-      counts2.assistantTurns += 1;
-      const text = extractTypedText(message2.content);
-      if (text.trim())
-        b.assistantTexts.push(text);
-      for (const block2 of toolCallBlocks(message2.content)) {
-        const name2 = typeof block2.name === "string" ? block2.name : "unknown";
-        const call = { name: name2, input: stringifyToolInput(block2.arguments) };
-        b.toolCalls.push(call);
-        counts2.toolCalls += 1;
-        if (typeof block2.id === "string")
-          b.byToolCallId.set(block2.id, b.toolCalls.length - 1);
-        for (const f of filesFromToolInput(block2.arguments))
-          b.files.push(f);
-      }
-      continue;
-    }
-    const callId = typeof message2.toolCallId === "string" ? message2.toolCallId : void 0;
-    const at = callId === void 0 ? void 0 : b.byToolCallId.get(callId);
-    const result = stringifyToolOutput(typeof message2.content === "string" ? message2.content : extractTextFromContent(message2.content));
-    if (at !== void 0) {
-      const call = b.toolCalls[at];
-      if (call) {
-        if (result !== void 0)
-          call.result = result;
-        if (message2.isError === true)
-          call.isError = true;
-      }
-      continue;
-    }
-    const name = typeof message2.toolName === "string" ? message2.toolName : "unknown";
-    b.toolCalls.push({
-      name,
-      input: "",
-      ...result !== void 0 ? { result } : {},
-      ...message2.isError === true ? { isError: true } : {}
-    });
-    counts2.toolCalls += 1;
-  }
-  finalize();
-  return seq;
-}
-function toolCallBlocks(content) {
-  if (!Array.isArray(content))
-    return [];
-  return content.filter((b) => isRecord(b) && b.type === "toolCall");
-}
-function unslugifyPi(slug) {
-  const inner = slug.replace(/^--/, "").replace(/--$/, "");
-  return "/" + inner.replace(/-/g, "/");
-}
-function statBytes3(absolute2) {
-  try {
-    return fs17.statSync(absolute2).size;
-  } catch {
-    return 0;
-  }
-}
-function exchangeId2(sessionId, seq) {
-  return crypto3.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
-}
-var piAdapter = {
-  harness: "pi",
-  displayName: DISPLAY_NAME,
-  sourceDir: () => sourceDir2(),
-  discover: () => discover4(),
-  parse: (src, opts) => parse4(src, opts ?? {})
-};
-var pi_default = piAdapter;
-
-// ../core/dist/adapters/gemini.js
-var gemini_exports = {};
-__export(gemini_exports, {
-  CHATS_DIR: () => CHATS_DIR,
-  DISPLAY_NAME: () => DISPLAY_NAME2,
-  GEMINI_DOCTOR_NOTE: () => GEMINI_DOCTOR_NOTE,
-  GEMINI_FORMAT_UNVERIFIED: () => GEMINI_FORMAT_UNVERIFIED,
-  default: () => gemini_default,
-  discover: () => discover5,
-  doctorLine: () => doctorLine5,
-  geminiAdapter: () => geminiAdapter,
-  geminiDir: () => geminiDir,
-  geminiTmpDir: () => geminiTmpDir,
-  isHumanTurn: () => isHumanTurn,
-  parse: () => parse5,
-  projectHashes: () => projectHashes,
-  recoverCwd: () => recoverCwd2,
-  sessionIdFromFilename: () => sessionIdFromFilename2,
-  sourceDir: () => sourceDir3
-});
-import fs18 from "node:fs";
-import path15 from "node:path";
-import crypto4 from "node:crypto";
-var DISPLAY_NAME2 = "Gemini CLI";
-var CHATS_DIR = "chats";
-var GEMINI_FORMAT_UNVERIFIED = true;
-var GEMINI_DOCTOR_NOTE = "gemini: format unverified \u2014 this adapter was written from documentation, not from a real checkpoint, so record coverage is a best guess until someone runs it on one. Checkpoints carry no per-turn timestamps (session times come from file mtime) and the project directory is a hash, so the working directory is only recovered when a path in the transcript hashes to it.";
-var HANDLED_PART_KEYS = /* @__PURE__ */ new Set(["text", "functionCall", "functionResponse"]);
-var HANDLED_ROLES2 = /* @__PURE__ */ new Set(["user", "model", "assistant", "system", "tool"]);
-var HISTORY_KEYS = ["history", "messages", "contents", "turns"];
-function sourceDir3(override) {
-  return geminiTmpDir(override);
-}
-function discover5(override) {
-  const root = sourceDir3(override);
-  const out = [];
-  let hashes;
-  try {
-    hashes = fs18.readdirSync(root, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const hash of hashes) {
-    if (!hash.isDirectory())
-      continue;
-    const dir = path15.join(root, hash.name, CHATS_DIR);
-    let files;
-    try {
-      files = fs18.readdirSync(dir);
-    } catch {
-      continue;
-    }
-    for (const file of files) {
-      if (!file.endsWith(".json"))
-        continue;
-      const full = path15.join(dir, file);
-      let stat;
-      try {
-        stat = fs18.statSync(full);
-      } catch {
-        continue;
-      }
-      if (!stat.isFile())
-        continue;
-      out.push({
-        sessionId: sessionIdFromFilename2(file, hash.name),
-        harness: "gemini",
-        path: full,
-        projectSlug: hash.name,
-        bytes: stat.size,
-        mtimeMs: stat.mtimeMs,
-        isSidechain: false,
-        status: "live"
-      });
-    }
-  }
-  out.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  return out;
-}
-function sessionIdFromFilename2(file, projectHash) {
-  const base2 = path15.basename(file, ".json").replace(/^checkpoint-/, "") || "checkpoint";
-  return `${projectHash.slice(0, 12)}-${base2}`;
-}
-async function parse5(source, options = {}) {
-  const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path15.resolve(typeof source === "string" ? source : source.path);
-  const unknownTypes = {};
-  let malformedLines = 0;
-  let raw = "";
-  try {
-    raw = fs18.readFileSync(absolute2, "utf8");
-  } catch {
-    raw = "";
-  }
-  const endOffset = Buffer.byteLength(raw, "utf8");
-  let doc;
-  try {
-    doc = raw.trim() ? JSON.parse(raw) : void 0;
-  } catch {
-    doc = void 0;
-    if (raw.trim())
-      malformedLines += 1;
-  }
-  const { turns, meta } = unwrap(doc);
-  if (doc !== void 0 && turns.length === 0 && !meta)
-    malformedLines += 1;
-  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path15.basename(path15.dirname(path15.dirname(absolute2)));
-  const sessionId = options.sessionId ?? (meta && typeof meta.sessionId === "string" && meta.sessionId.trim() ? meta.sessionId : sessionIdFromFilename2(absolute2, projectSlug));
-  const mtimeMs = options.mtimeMs ?? src?.mtimeMs ?? statMtime(absolute2);
-  const fileTime = new Date(mtimeMs).toISOString();
-  const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
-  const cwdCandidates = [];
-  const exchanges = buildExchanges2(turns, sessionId, fileTime, counts2, unknownTypes, cwdCandidates);
-  const metaString = (key) => {
-    if (!meta)
-      return void 0;
-    const v = meta[key];
-    return typeof v === "string" && v.trim() ? v : void 0;
-  };
-  const startedAt = metaString("startTime") ?? metaString("startedAt") ?? fileTime;
-  const endedAt = metaString("lastUpdated") ?? metaString("updatedAt") ?? fileTime;
-  const cwd = metaString("cwd") ?? metaString("projectRoot");
-  const title = metaString("title") ?? metaString("name") ?? metaString("tag");
-  const model = metaString("model");
-  const gitBranch = metaString("gitBranch") ?? metaString("branch");
-  const session = {
-    id: sessionId,
-    harness: "gemini",
-    sourcePath: absolute2,
-    project: cwd ?? recoverCwd2(projectSlug, cwdCandidates) ?? "",
-    projectSlug,
-    startedAt,
-    endedAt: endedAt < startedAt ? startedAt : endedAt,
-    ...title ? { title } : {},
-    ...gitBranch ? { gitBranch } : {},
-    entrypoint: "cli",
-    ...model ? { model } : {},
-    isSidechain: false,
-    counts: {
-      userPrompts: counts2.userPrompts,
-      assistantTurns: counts2.assistantTurns,
-      toolCalls: counts2.toolCalls,
-      bytes: options.bytes ?? src?.bytes ?? endOffset
-    },
-    status: options.status ?? src?.status ?? "live"
-  };
-  return { session, exchanges, unknownTypes, endOffset, malformedLines };
-}
-function unwrap(doc) {
-  if (Array.isArray(doc))
-    return { turns: doc };
-  if (!isRecord(doc))
-    return { turns: [] };
-  for (const key of HISTORY_KEYS) {
-    const v = doc[key];
-    if (Array.isArray(v))
-      return { turns: v, meta: doc };
-  }
-  return { turns: [], meta: doc };
-}
-function buildExchanges2(turns, sessionId, fileTime, counts2, unknownTypes, cwdCandidates) {
-  const out = [];
-  let seq = 0;
-  let current = null;
-  const finalize = () => {
-    if (!current)
-      return;
-    const b = current;
-    current = null;
-    if (!b.userTexts.length && !b.assistantTexts.length && !b.toolCalls.length)
-      return;
-    out.push({
-      id: exchangeId(sessionId, b.seq),
-      sessionId,
-      seq: b.seq,
-      ts: fileTime,
-      userText: b.userTexts.join("\n\n"),
-      assistantText: b.assistantTexts.join("\n\n"),
-      toolCalls: b.toolCalls,
-      filesTouched: uniq(b.files),
-      isSidechain: false,
-      redacted: false
-    });
-  };
-  const open2 = () => {
-    seq += 1;
-    current = {
-      seq,
-      userTexts: [],
-      assistantTexts: [],
-      toolCalls: [],
-      byName: /* @__PURE__ */ new Map(),
-      files: []
-    };
-    return current;
-  };
-  for (const turn of turns) {
-    if (!isRecord(turn)) {
-      unknownTypes["(not an object)"] = (unknownTypes["(not an object)"] ?? 0) + 1;
-      continue;
-    }
-    const role = typeof turn.role === "string" ? turn.role : "";
-    if (!HANDLED_ROLES2.has(role)) {
-      const key = `role:${role || "(no role)"}`;
-      unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
-      continue;
-    }
-    const parts = partsOf(turn, unknownTypes);
-    if (isHumanTurn(role, parts)) {
-      finalize();
-      counts2.userPrompts += 1;
-      const b2 = open2();
-      for (const p of parts) {
-        if (typeof p.text === "string" && p.text)
-          b2.userTexts.push(p.text);
-      }
-      continue;
-    }
-    const b = current ?? open2();
-    const isModel = role === "model" || role === "assistant";
-    if (isModel)
-      counts2.assistantTurns += 1;
-    for (const p of parts) {
-      if (typeof p.text === "string" && p.text.trim())
-        b.assistantTexts.push(p.text);
-      const call = p.functionCall;
-      if (isRecord(call)) {
-        const name2 = typeof call.name === "string" ? call.name : "unknown";
-        const args = call.args ?? call.arguments;
-        b.toolCalls.push({ name: name2, input: stringifyToolInput(args) });
-        counts2.toolCalls += 1;
-        b.byName.set(name2, b.toolCalls.length - 1);
-        for (const f of filesFromToolInput(args)) {
-          b.files.push(f);
-          cwdCandidates.push(f);
-        }
-      }
-      const res = p.functionResponse;
-      if (!isRecord(res))
-        continue;
-      const name = typeof res.name === "string" ? res.name : "unknown";
-      const result = stringifyToolOutput(res.response ?? res.output ?? res.content);
-      const isError = isRecord(res.response) && typeof res.response["error"] !== "undefined" ? true : void 0;
-      const at = b.byName.get(name);
-      if (at !== void 0) {
-        const answered = b.toolCalls[at];
-        if (answered) {
-          if (result !== void 0)
-            answered.result = result;
-          if (isError)
-            answered.isError = true;
-        }
-        b.byName.delete(name);
-        continue;
-      }
-      b.toolCalls.push({
-        name,
-        input: "",
-        ...result !== void 0 ? { result } : {},
-        ...isError ? { isError: true } : {}
-      });
-      counts2.toolCalls += 1;
-    }
-  }
-  finalize();
-  return out;
-}
-function partsOf(turn, unknownTypes) {
-  const parts = turn.parts ?? turn.content;
-  if (typeof parts === "string")
-    return [{ text: parts }];
-  if (!Array.isArray(parts))
-    return [];
-  const out = [];
-  for (const p of parts) {
-    if (typeof p === "string") {
-      out.push({ text: p });
-      continue;
-    }
-    if (!isRecord(p))
-      continue;
-    for (const key of Object.keys(p)) {
-      if (HANDLED_PART_KEYS.has(key))
-        continue;
-      const k = `part:${key}`;
-      const counts2 = unknownTypes;
-      counts2[k] = (counts2[k] ?? 0) + 1;
-    }
-    out.push(p);
-  }
-  return out;
-}
-function isHumanTurn(role, parts) {
-  if (role !== "user")
-    return false;
-  if (parts.length === 0)
-    return true;
-  return parts.some((p) => !isRecord(p.functionResponse));
-}
-function projectHashes(cwd) {
-  const sha = (s) => crypto4.createHash("sha256").update(s).digest("hex");
-  const trimmed = cwd.length > 1 ? cwd.replace(/[/\\]+$/, "") : cwd;
-  return uniq([sha(cwd), sha(trimmed), sha(trimmed + path15.sep)]);
-}
-function recoverCwd2(projectHash, candidates) {
-  if (!/^[0-9a-f]{16,}$/i.test(projectHash))
-    return void 0;
-  const seen = /* @__PURE__ */ new Set();
-  const dirs = [];
-  for (const c of candidates) {
-    if (!path15.isAbsolute(c))
-      continue;
-    let dir = path15.dirname(path15.resolve(c));
-    for (let i = 0; i < 40; i += 1) {
-      if (seen.has(dir))
-        break;
-      seen.add(dir);
-      dirs.push(dir);
-      const up = path15.dirname(dir);
-      if (up === dir)
-        break;
-      dir = up;
-    }
-  }
-  dirs.sort((a, b) => b.length - a.length);
-  const want = projectHash.toLowerCase();
-  for (const dir of dirs) {
-    if (projectHashes(dir).some((h) => h === want))
-      return dir;
-  }
-  return void 0;
-}
-function statMtime(absolute2) {
-  try {
-    return fs18.statSync(absolute2).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-function doctorLine5(override) {
-  const tmp = sourceDir3(override);
-  const root = geminiDir(override);
-  let found = [];
-  try {
-    found = discover5(override);
-  } catch {
-    found = [];
-  }
-  const installed = fs18.existsSync(root);
-  const tmpExists = fs18.existsSync(tmp);
-  let status3;
-  let note;
-  if (found.length > 0) {
-    status3 = "ready";
-    note = `${found.length} checkpoint${found.length === 1 ? "" : "s"} \xB7 unverified format`;
-  } else if (installed || tmpExists) {
-    status3 = "empty";
-    note = tmpExists ? "Gemini CLI installed, no saved chats (use /chat save) \xB7 unverified format" : "Gemini CLI installed, no tmp/ yet \u2014 no chats saved \xB7 unverified format";
-  } else {
-    status3 = "absent";
-    note = "Gemini CLI not installed";
-  }
-  return formatDoctorLine({ harness: "gemini", status: status3, dir: tmp, note });
-}
-var geminiAdapter = {
-  harness: "gemini",
-  displayName: DISPLAY_NAME2,
-  sourceDir: () => sourceDir3(),
-  discover: () => discover5(),
-  parse: (src, opts) => parse5(src, opts ?? {})
-};
-var gemini_default = geminiAdapter;
-
-// ../core/dist/adapters/opencode.js
-var opencode_exports = {};
-__export(opencode_exports, {
-  DISPLAY_NAME: () => DISPLAY_NAME3,
-  OPENCODE_DOCTOR_NOTE: () => OPENCODE_DOCTOR_NOTE,
-  OPENCODE_FORMAT_UNVERIFIED: () => OPENCODE_FORMAT_UNVERIFIED,
-  columnsOf: () => columnsOf,
-  default: () => opencode_default,
-  describeStore: () => describeStore,
-  discover: () => discover6,
-  doctorLine: () => doctorLine6,
-  findStores: () => findStores,
-  isoOf: () => isoOf,
-  opencodeAdapter: () => opencodeAdapter,
-  opencodeDir: () => opencodeDir,
-  parse: () => parse6,
-  parseContent: () => parseContent,
-  quoteIdent: () => quoteIdent,
-  sourceDir: () => sourceDir4
-});
-import fs19 from "node:fs";
-import path16 from "node:path";
-var DISPLAY_NAME3 = "opencode";
-var DB_EXTENSIONS = [".db", ".sqlite", ".sqlite3"];
-var MAX_DEPTH = 3;
-var OPENCODE_FORMAT_UNVERIFIED = true;
-var OPENCODE_DOCTOR_NOTE = 'opencode: format unverified \u2014 this adapter was written from documentation, not from a real store, so its schema is discovered at runtime (pragma table_info) rather than assumed, and it degrades to "unsupported version" rather than half-parsing a store it does not recognise. The database is opened read-only.';
-var SESSION_COLUMNS = {
-  id: ["id", "session_id", "sessionid", "sessionID", "uuid"],
-  title: ["title", "name", "summary", "label"],
-  created: ["created_at", "createdat", "created", "time_created", "started_at", "startedat"],
-  updated: ["updated_at", "updatedat", "updated", "time_updated", "ended_at", "endedat"],
-  directory: ["directory", "cwd", "worktree", "root", "project", "path"],
-  parent: ["parent_id", "parentid", "parentID", "parent_session_id", "parent"],
-  model: ["model", "model_id", "modelid"]
-};
-var MESSAGE_COLUMNS = {
-  id: ["id", "message_id", "messageid", "uuid"],
-  session: ["session_id", "sessionid", "sessionID", "session"],
-  role: ["role", "type", "kind", "author"],
-  content: ["content", "parts", "text", "body", "data", "message"],
-  created: ["created_at", "createdat", "created", "time_created", "timestamp", "ts"]
-};
-var USER_ROLES = /* @__PURE__ */ new Set(["user", "human", "prompt"]);
-var ASSISTANT_ROLES = /* @__PURE__ */ new Set(["assistant", "model", "ai", "agent"]);
-function sourceDir4(override) {
-  return opencodeDir(override);
-}
-function tableNames(db) {
-  try {
-    const rows = db.prepare(`select name from sqlite_master where type in ('table','view')`).all();
-    return rows.map((r) => r.name).filter((n2) => !n2.startsWith("sqlite_"));
-  } catch {
-    return [];
-  }
-}
-function columnsOf(db, table2) {
-  try {
-    const rows = db.pragma(`table_info(${quoteIdent(table2)})`);
-    return rows.map((r) => r.name);
-  } catch {
-    return [];
-  }
-}
-function pick(present, candidates) {
-  const lower = new Map(present.map((c) => [c.toLowerCase(), c]));
-  for (const want of candidates) {
-    const hit2 = lower.get(want.toLowerCase());
-    if (hit2)
-      return hit2;
-  }
-  return void 0;
-}
-function describeStore(dbPath2) {
-  let db;
-  try {
-    db = openSqliteReadOnly(dbPath2);
-  } catch (e) {
-    return { ok: false, reason: `cannot open store read-only (${errText(e)})` };
-  }
-  try {
-    const tables2 = tableNames(db);
-    if (tables2.length === 0)
-      return { ok: false, reason: "no tables in store" };
-    const sessionTable = bestTable(tables2, [/^sessions?$/i, /session/i]);
-    if (!sessionTable) {
-      return { ok: false, reason: `unsupported version \u2014 no session table (saw: ${tables2.slice(0, 6).join(", ")})` };
-    }
-    const messageTable = bestTable(tables2.filter((t) => t !== sessionTable), [/^messages?$/i, /message/i, /^parts?$/i, /part/i, /event/i]);
-    if (!messageTable) {
-      return { ok: false, reason: `unsupported version \u2014 no message table (saw: ${tables2.slice(0, 6).join(", ")})` };
-    }
-    const sCols = columnsOf(db, sessionTable);
-    const mCols = columnsOf(db, messageTable);
-    const sessions = {
-      table: sessionTable,
-      columns: Object.fromEntries(Object.entries(SESSION_COLUMNS).map(([k, v]) => [k, pick(sCols, v)]))
-    };
-    const messages = {
-      table: messageTable,
-      columns: Object.fromEntries(Object.entries(MESSAGE_COLUMNS).map(([k, v]) => [k, pick(mCols, v)]))
-    };
-    if (!sessions.columns["id"]) {
-      return { ok: false, reason: `unsupported version \u2014 ${sessionTable} has no id column (saw: ${sCols.join(", ")})` };
-    }
-    if (!messages.columns["session"]) {
-      return { ok: false, reason: `unsupported version \u2014 ${messageTable} has no session column (saw: ${mCols.join(", ")})` };
-    }
-    if (!messages.columns["content"]) {
-      return { ok: false, reason: `unsupported version \u2014 ${messageTable} has no content column (saw: ${mCols.join(", ")})` };
-    }
-    return { ok: true, schema: { dbPath: dbPath2, sessions, messages } };
-  } finally {
-    db.close();
-  }
-}
-function bestTable(tables2, patterns) {
-  for (const re of patterns) {
-    const hit2 = tables2.find((t) => re.test(t));
-    if (hit2)
-      return hit2;
-  }
-  return void 0;
-}
-function quoteIdent(name) {
-  return `"${name.replace(/"/g, '""')}"`;
-}
-function findStores(override) {
-  const root = sourceDir4(override);
-  const out = [];
-  const walk2 = (dir, depth) => {
-    if (depth > MAX_DEPTH)
-      return;
-    let entries;
-    try {
-      entries = fs19.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const full = path16.join(dir, e.name);
-      if (e.isDirectory()) {
-        walk2(full, depth + 1);
-        continue;
-      }
-      if (!e.isFile())
-        continue;
-      if (DB_EXTENSIONS.includes(path16.extname(e.name).toLowerCase()))
-        out.push(full);
-    }
-  };
-  walk2(root, 0);
-  out.sort();
-  return out;
-}
-function discover6(override) {
-  const out = [];
-  for (const dbPath2 of findStores(override)) {
-    const described = describeStore(dbPath2);
-    if (!described.ok)
-      continue;
-    out.push(...discoverIn(described.schema));
-  }
-  out.sort((a, b) => a.path === b.path ? a.sessionId < b.sessionId ? -1 : 1 : a.path < b.path ? -1 : 1);
-  return out;
-}
-function discoverIn(schema) {
-  const out = [];
-  let db;
-  try {
-    db = openSqliteReadOnly(schema.dbPath);
-  } catch {
-    return out;
-  }
-  let mtimeMs = 0;
-  try {
-    mtimeMs = fs19.statSync(schema.dbPath).mtimeMs;
-  } catch {
-    mtimeMs = 0;
-  }
-  try {
-    const c = schema.sessions.columns;
-    const select = [
-      `${quoteIdent(c["id"])} as id`,
-      c["directory"] ? `${quoteIdent(c["directory"])} as directory` : `null as directory`,
-      c["parent"] ? `${quoteIdent(c["parent"])} as parent` : `null as parent`
-    ].join(", ");
-    const rows = db.prepare(`select ${select} from ${quoteIdent(schema.sessions.table)}`).all();
-    const bytes2 = /* @__PURE__ */ new Map();
-    const mc = schema.messages.columns;
-    try {
-      const byteRows = db.prepare(`select ${quoteIdent(mc["session"])} as sid, sum(length(${quoteIdent(mc["content"])})) as n from ${quoteIdent(schema.messages.table)} group by 1`).all();
-      for (const r of byteRows)
-        bytes2.set(String(r.sid), Number(r.n) || 0);
-    } catch {
-    }
-    for (const r of rows) {
-      const id = String(r.id ?? "");
-      if (!id)
-        continue;
-      const directory = typeof r.directory === "string" ? r.directory : "";
-      const parent = typeof r.parent === "string" && r.parent ? r.parent : void 0;
-      out.push({
-        sessionId: id,
-        harness: "opencode",
-        path: schema.dbPath,
-        projectSlug: directory ? path16.basename(directory) : "",
-        bytes: bytes2.get(id) ?? 0,
-        mtimeMs,
-        // opencode's `parent_id` marks a child session — a subagent
-        // transcript in `03 §2`'s sense — so it is a sidechain, and unlike a
-        // pi branch the *session* itself is the sidechain.
-        isSidechain: parent !== void 0,
-        ...parent ? { parentSessionId: parent } : {},
-        status: "live"
-      });
-    }
-  } catch {
-  } finally {
-    db.close();
-  }
-  return out;
-}
-async function parse6(source, options = {}) {
-  const src = typeof source === "string" ? void 0 : source;
-  const dbPath2 = path16.resolve(typeof source === "string" ? source : source.path);
-  const sessionId = options.sessionId ?? src?.sessionId ?? "";
-  const unknownTypes = {};
-  const empty = (reason) => {
-    unknownTypes[reason] = (unknownTypes[reason] ?? 0) + 1;
     return {
-      session: {
-        id: sessionId,
-        harness: "opencode",
-        sourcePath: dbPath2,
-        project: "",
-        projectSlug: src?.projectSlug ?? "",
-        startedAt: "",
-        endedAt: "",
-        entrypoint: "cli",
-        isSidechain: src?.isSidechain ?? false,
-        counts: { userPrompts: 0, assistantTurns: 0, toolCalls: 0, bytes: 0 },
-        status: options.status ?? src?.status ?? "live"
-      },
-      exchanges: [],
-      unknownTypes,
-      endOffset: 0,
-      malformedLines: 0
+      a: existing.a_session_id,
+      b: existing.b_session_id,
+      note: kept,
+      createdAt: existing.created_at,
+      created: false,
+      reversed: existing.a_session_id !== a
     };
-  };
-  const described = describeStore(dbPath2);
-  if (!described.ok)
-    return empty(described.reason);
-  const schema = described.schema;
-  if (!sessionId)
-    return empty("no session id supplied");
-  let db;
-  try {
-    db = openSqliteReadOnly(dbPath2);
-  } catch (e) {
-    return empty(`cannot open store read-only (${errText(e)})`);
   }
-  try {
-    const sc = schema.sessions.columns;
-    const sSelect = [
-      `${quoteIdent(sc["id"])} as id`,
-      col(sc["title"], "title"),
-      col(sc["created"], "created"),
-      col(sc["updated"], "updated"),
-      col(sc["directory"], "directory"),
-      col(sc["parent"], "parent"),
-      col(sc["model"], "model")
-    ].join(", ");
-    const sessionRow = db.prepare(`select ${sSelect} from ${quoteIdent(schema.sessions.table)} where ${quoteIdent(sc["id"])} = ? limit 1`).get(sessionId);
-    const mc = schema.messages.columns;
-    const mSelect = [
-      col(mc["id"], "id"),
-      col(mc["role"], "role"),
-      `${quoteIdent(mc["content"])} as content`,
-      col(mc["created"], "created")
-    ].join(", ");
-    const orderBy = mc["created"] ? `order by ${quoteIdent(mc["created"])} asc, rowid asc` : `order by rowid asc`;
-    let messageRows = [];
-    try {
-      messageRows = db.prepare(`select ${mSelect} from ${quoteIdent(schema.messages.table)} where ${quoteIdent(mc["session"])} = ? ${orderBy}`).all(sessionId);
-    } catch {
-      try {
-        messageRows = db.prepare(`select ${mSelect} from ${quoteIdent(schema.messages.table)} where ${quoteIdent(mc["session"])} = ?`).all(sessionId);
-      } catch {
-        messageRows = [];
-      }
-    }
-    const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
-    let malformedLines = 0;
-    const { exchanges, contentBytes, firstTs, lastTs, model: turnModel } = buildExchanges3(messageRows, sessionId, counts2, unknownTypes, () => {
-      malformedLines += 1;
-    });
-    const str2 = (key) => {
-      const v = sessionRow?.[key];
-      return typeof v === "string" && v.trim() ? v : void 0;
-    };
-    const directory = str2("directory");
-    const parent = str2("parent");
-    const session = {
-      id: sessionId,
-      harness: "opencode",
-      sourcePath: dbPath2,
-      project: directory ?? "",
-      projectSlug: options.projectSlug ?? src?.projectSlug ?? (directory ? path16.basename(directory) : ""),
-      startedAt: isoOf(sessionRow?.["created"]) ?? firstTs ?? "",
-      endedAt: isoOf(sessionRow?.["updated"]) ?? lastTs ?? isoOf(sessionRow?.["created"]) ?? "",
-      ...str2("title") ? { title: str2("title") } : {},
-      entrypoint: "cli",
-      ...str2("model") ?? turnModel ? { model: str2("model") ?? turnModel } : {},
-      isSidechain: parent !== void 0 || (src?.isSidechain ?? false),
-      ...parent ? { parentSessionId: parent } : {},
-      counts: {
-        userPrompts: counts2.userPrompts,
-        assistantTurns: counts2.assistantTurns,
-        toolCalls: counts2.toolCalls,
-        bytes: options.bytes ?? src?.bytes ?? contentBytes
-      },
-      status: options.status ?? src?.status ?? "live"
-    };
-    return { session, exchanges, unknownTypes, endOffset: contentBytes, malformedLines };
-  } finally {
-    db.close();
-  }
+  db.prepare("INSERT INTO links (a_session_id, b_session_id, note, created_at) VALUES (?, ?, ?, ?)").run(a, b, note ?? null, at);
+  return { a, b, note: note ?? null, createdAt: at, created: true, reversed: false };
 }
-function col(name, alias) {
-  return name ? `${quoteIdent(name)} as ${alias}` : `null as ${alias}`;
+function unlinkSessions(db, a, b) {
+  const info = db.prepare(`DELETE FROM links
+        WHERE (a_session_id = ? AND b_session_id = ?) OR (a_session_id = ? AND b_session_id = ?)`).run(a, b, b, a);
+  return info.changes > 0;
 }
-function buildExchanges3(rows, sessionId, counts2, unknownTypes, onMalformed) {
-  const out = [];
-  let seq = 0;
-  let contentBytes = 0;
-  let firstTs;
-  let lastTs;
-  let model;
-  let current = null;
-  const finalize = () => {
-    if (!current)
-      return;
-    const b = current;
-    current = null;
-    if (!b.userTexts.length && !b.assistantTexts.length && !b.toolCalls.length)
-      return;
-    out.push({
-      id: exchangeId(sessionId, b.seq),
-      sessionId,
-      seq: b.seq,
-      ts: b.ts,
-      userText: b.userTexts.join("\n\n"),
-      assistantText: b.assistantTexts.join("\n\n"),
-      toolCalls: b.toolCalls,
-      filesTouched: uniq(b.files),
-      isSidechain: false,
-      redacted: false
-    });
-  };
-  const open2 = (ts) => {
-    seq += 1;
-    current = { seq, ts, userTexts: [], assistantTexts: [], toolCalls: [], files: [] };
-    return current;
-  };
-  for (const row2 of rows) {
-    const raw = row2["content"];
-    const text = raw === null || raw === void 0 ? "" : String(raw);
-    contentBytes += Buffer.byteLength(text, "utf8");
-    const ts = isoOf(row2["created"]) ?? "";
-    if (ts) {
-      firstTs ??= ts;
-      if (!lastTs || ts > lastTs)
-        lastTs = ts;
-    }
-    const role = String(row2["role"] ?? "").toLowerCase();
-    const parsed = parseContent(text, unknownTypes, onMalformed);
-    if (parsed.model)
-      model = parsed.model;
-    if (USER_ROLES.has(role)) {
-      finalize();
-      counts2.userPrompts += 1;
-      const b2 = open2(ts);
-      if (parsed.text)
-        b2.userTexts.push(parsed.text);
-      absorbTools(b2, parsed, counts2);
-      continue;
-    }
-    const b = current ?? open2(ts);
-    if (ASSISTANT_ROLES.has(role)) {
-      counts2.assistantTurns += 1;
-    } else {
-      const key = `role:${role || "(no role)"}`;
-      unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
-    }
-    if (parsed.text)
-      b.assistantTexts.push(parsed.text);
-    absorbTools(b, parsed, counts2);
-  }
-  finalize();
-  return {
-    exchanges: out,
-    contentBytes,
-    ...firstTs ? { firstTs } : {},
-    ...lastTs ? { lastTs } : {},
-    ...model ? { model } : {}
-  };
+function sessionLinks(db, sessionId) {
+  const rows = db.prepare(`SELECT b_session_id AS other, note, created_at, 'out' AS direction FROM links
+         WHERE a_session_id = ?
+       UNION ALL
+       SELECT a_session_id AS other, note, created_at, 'in' AS direction FROM links
+         WHERE b_session_id = ?
+       ORDER BY created_at DESC, other`).all(sessionId, sessionId);
+  return rows.map((r) => ({
+    sessionId: r.other,
+    note: r.note,
+    createdAt: r.created_at,
+    direction: r.direction
+  }));
 }
-function absorbTools(b, parsed, counts2) {
-  for (const call of parsed.toolCalls) {
-    b.toolCalls.push(call.call);
-    counts2.toolCalls += 1;
-    for (const f of call.files)
-      b.files.push(f);
-  }
+function unique(list) {
+  return [...new Set(list)];
 }
-function parseContent(raw, unknownTypes, onMalformed) {
-  const trimmed = raw.trim();
-  const out = { text: raw, toolCalls: [] };
-  if (!trimmed || trimmed[0] !== "[" && trimmed[0] !== "{")
-    return out;
-  const doc = safeParseJson(trimmed);
-  if (typeof doc === "string") {
-    onMalformed();
-    return out;
-  }
-  const parts = Array.isArray(doc) ? doc : isRecord(doc) && Array.isArray(doc["parts"]) ? doc["parts"] : isRecord(doc) && Array.isArray(doc["content"]) ? doc["content"] : [];
-  if (parts.length === 0) {
-    if (isRecord(doc) && typeof doc["text"] === "string") {
-      out.text = doc["text"];
-      if (typeof doc["model"] === "string")
-        out.model = doc["model"];
-      return out;
-    }
-    return out;
-  }
-  const texts = [];
-  if (isRecord(doc) && typeof doc["model"] === "string")
-    out.model = doc["model"];
-  for (const p of parts) {
-    if (typeof p === "string") {
-      texts.push(p);
-      continue;
-    }
-    if (!isRecord(p))
-      continue;
-    const type = String(p["type"] ?? "").toLowerCase();
-    if (type === "text" || !type && typeof p["text"] === "string") {
-      if (typeof p["text"] === "string")
-        texts.push(p["text"]);
-      continue;
-    }
-    if (type === "tool" || type === "tool-invocation" || type === "tool_use" || type === "tool-call") {
-      const state = isRecord(p["state"]) ? p["state"] : {};
-      const name = String(p["tool"] ?? p["name"] ?? state["tool"] ?? "unknown");
-      const input = state["input"] ?? p["input"] ?? p["args"] ?? p["arguments"];
-      const output = state["output"] ?? p["output"] ?? p["result"];
-      const status3 = String(state["status"] ?? p["status"] ?? "").toLowerCase();
-      const result = stringifyToolOutput(output);
-      const call = {
-        name,
-        input: stringifyToolInput(input),
-        ...result !== void 0 ? { result } : {},
-        ...status3 === "error" || status3 === "failed" ? { isError: true } : {}
-      };
-      out.toolCalls.push({ call, files: filesFromToolInput(input) });
-      continue;
-    }
-    const key = `part:${type || "(no type)"}`;
-    unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
-  }
-  out.text = texts.join("\n\n");
-  return out;
-}
-function isoOf(value) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const ms = value < 1e11 ? value * 1e3 : value;
-    const d2 = new Date(ms);
-    return Number.isNaN(d2.getTime()) ? void 0 : d2.toISOString();
-  }
-  if (typeof value !== "string" || !value.trim())
-    return void 0;
-  const n2 = Number(value);
-  if (Number.isFinite(n2) && /^\d+$/.test(value.trim()))
-    return isoOf(n2);
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? void 0 : d.toISOString();
-}
-function errText(e) {
-  return e instanceof Error ? e.message : String(e);
-}
-function doctorLine6(override) {
-  const dir = sourceDir4(override);
-  const installed = fs19.existsSync(dir);
-  if (!installed) {
-    return formatDoctorLine({
-      harness: "opencode",
-      status: "absent",
-      dir,
-      note: "opencode not installed"
-    });
-  }
-  const stores = findStores(override);
-  if (stores.length === 0) {
-    const hasStorage = fs19.existsSync(path16.join(dir, "storage"));
-    return formatDoctorLine({
-      harness: "opencode",
-      status: "empty",
-      dir,
-      note: hasStorage ? "opencode installed, no sqlite store \u2014 this install uses storage/ json, which potsherd does not read yet" : "opencode installed, no sessions yet \xB7 unverified format"
-    });
-  }
-  const failures = [];
-  let sessions = 0;
-  let readable = 0;
-  for (const store of stores) {
-    const described = describeStore(store);
-    if (!described.ok) {
-      failures.push(described.reason);
-      continue;
-    }
-    readable += 1;
-    try {
-      sessions += discoverIn(described.schema).length;
-    } catch {
-    }
-  }
-  if (readable === 0) {
-    return formatDoctorLine({
-      harness: "opencode",
-      status: "unsupported",
-      dir,
-      note: `${failures[0] ?? "unsupported version"} \xB7 unverified format`
-    });
-  }
-  if (sessions === 0) {
-    return formatDoctorLine({
-      harness: "opencode",
-      status: "empty",
-      dir,
-      note: "opencode installed, store readable, no sessions yet \xB7 unverified format"
-    });
-  }
-  const note = [`${sessions} session${sessions === 1 ? "" : "s"}`];
-  if (failures.length)
-    note.push(`${failures.length} store${failures.length === 1 ? "" : "s"} unsupported`);
-  note.push("unverified format");
-  return formatDoctorLine({
-    harness: "opencode",
-    status: "ready",
-    dir,
-    note: note.join(" \xB7 ")
-  });
-}
-var opencodeAdapter = {
-  harness: "opencode",
-  displayName: DISPLAY_NAME3,
-  sourceDir: () => sourceDir4(),
-  discover: () => discover6(),
-  parse: (src, opts) => parse6(src, opts ?? {})
-};
-var opencode_default = opencodeAdapter;
 
-// ../core/dist/adapters/copilot.js
-var copilot_exports = {};
-__export(copilot_exports, {
-  COPILOT_DOCTOR_NOTE: () => COPILOT_DOCTOR_NOTE,
-  COPILOT_FORMAT_UNVERIFIED: () => COPILOT_FORMAT_UNVERIFIED,
-  DISPLAY_NAME: () => DISPLAY_NAME4,
-  copilotAdapter: () => copilotAdapter,
-  copilotDir: () => copilotDir,
-  copilotSessionStateDir: () => copilotSessionStateDir,
-  default: () => copilot_default,
-  discover: () => discover7,
-  doctorLine: () => doctorLine7,
-  isoOf: () => isoOf2,
-  parse: () => parse7,
-  scan: () => scan,
-  sessionIdFromPath: () => sessionIdFromPath2,
-  sourceDir: () => sourceDir5,
-  stateFileIn: () => stateFileIn
-});
-import fs20 from "node:fs";
-import path17 from "node:path";
-var DISPLAY_NAME4 = "Copilot CLI";
-var STATE_FILES = [
-  "state.json",
-  "session.json",
-  "messages.json",
-  "history.json",
-  "state.jsonl",
-  "messages.jsonl"
-];
-var COPILOT_FORMAT_UNVERIFIED = true;
-var COPILOT_DOCTOR_NOTE = "copilot: format unverified \u2014 this adapter was written from documentation, not from a real session, so record coverage is a best guess until someone runs it on one. potsherd reads ~/.copilot only: Copilot's VS Code chats live in workspaceStorage, which is not one of the read-only inputs potsherd is allowed, so IDE sessions are not shown here.";
-var HISTORY_KEYS2 = ["messages", "history", "turns", "events", "state"];
-var USER_ROLES2 = /* @__PURE__ */ new Set(["user", "human", "prompt"]);
-var ASSISTANT_ROLES2 = /* @__PURE__ */ new Set(["assistant", "model", "agent", "copilot"]);
-var TOOL_ROLES = /* @__PURE__ */ new Set(["tool", "function", "tool_result", "toolresult"]);
-function sourceDir5(override) {
-  return copilotSessionStateDir(override);
-}
-function discover7(override) {
-  return scan(override).sources;
-}
-function scan(override) {
-  const root = sourceDir5(override);
-  const sources = [];
-  const unreadable = [];
-  let entries;
-  try {
-    entries = fs20.readdirSync(root, { withFileTypes: true });
-  } catch {
-    return { sources, unreadable };
+// ../core/dist/search/filters.js
+var UNTITLED_SESSION_SQL = `COALESCE(TRIM(s.title), '') = ''
+       AND NOT EXISTS (SELECT 1 FROM cards c
+                        WHERE c.session_id = s.id AND COALESCE(TRIM(c.title), '') <> '')`;
+var UNTITLED_GHOST_SQL = `COALESCE(TRIM(g.title), '') = ''
+       AND NOT EXISTS (SELECT 1 FROM cards c
+                        WHERE c.session_id = g.session_id
+                          AND COALESCE(TRIM(c.title), '') <> '')
+       AND NOT EXISTS (SELECT 1 FROM ghost_prompts p
+                        WHERE p.session_id = g.session_id
+                          AND p.text NOT LIKE '/%' AND length(trim(p.text)) > 3)`;
+function buildExchangeFilters(filters = {}) {
+  const parts = [];
+  const params = [];
+  if (filters.since) {
+    validateISODate(filters.since, "--since");
+    parts.push("e.ts >= ?");
+    params.push(filters.since);
   }
-  for (const entry of entries) {
-    const full = path17.join(root, entry.name);
-    if (entry.isDirectory()) {
-      const state = stateFileIn(full);
-      if (!state) {
-        unreadable.push(full);
-        continue;
-      }
-      const src2 = sourceFor(state, entry.name);
-      if (src2)
-        sources.push(src2);
-      else
-        unreadable.push(full);
-      continue;
-    }
-    if (!entry.isFile())
-      continue;
-    const ext = path17.extname(entry.name).toLowerCase();
-    if (ext !== ".json" && ext !== ".jsonl")
-      continue;
-    const src = sourceFor(full, path17.basename(entry.name, ext));
-    if (src)
-      sources.push(src);
+  if (filters.until) {
+    validateISODate(filters.until, "--until");
+    parts.push("e.ts <= ?");
+    params.push(filters.until);
   }
-  sources.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  unreadable.sort();
-  return { sources, unreadable };
-}
-function stateFileIn(dir) {
-  for (const name of STATE_FILES) {
-    const candidate = path17.join(dir, name);
-    try {
-      if (fs20.statSync(candidate).isFile())
-        return candidate;
-    } catch {
-    }
+  if (filters.project) {
+    parts.push("s.project = ?");
+    params.push(filters.project);
   }
-  return void 0;
-}
-function sourceFor(file, sessionId) {
-  let stat;
-  try {
-    stat = fs20.statSync(file);
-  } catch {
-    return void 0;
+  if (filters.harness) {
+    parts.push("s.harness = ?");
+    params.push(filters.harness);
   }
-  if (!stat.isFile())
-    return void 0;
+  if (filters.status && filters.status !== "ghost") {
+    parts.push("s.status = ?");
+    params.push(filters.status);
+  }
+  if (filters.branch) {
+    parts.push(branchClause(filters.branch, "s.git_branch"));
+    params.push(branchParam(filters.branch));
+  }
+  if (filters.sessionId) {
+    parts.push("e.session_id = ?");
+    params.push(filters.sessionId);
+  }
+  if (filters.file) {
+    parts.push(FILE_TOUCHED_SQL("e.files_touched"));
+    params.push(likePattern(filters.file));
+  }
+  if (filters.tag) {
+    parts.push("EXISTS (SELECT 1 FROM tags t WHERE t.session_id = e.session_id AND t.tag = ?)");
+    params.push(filters.tag);
+  }
+  if (filters.pinned) {
+    parts.push("EXISTS (SELECT 1 FROM pins p WHERE p.session_id = e.session_id)");
+  }
+  if (filters.linkedTo) {
+    parts.push(LINKED_TO_SQL("e.session_id"));
+    params.push(filters.linkedTo, filters.linkedTo);
+  }
+  if (filters.untitled)
+    parts.push(UNTITLED_SESSION_SQL);
+  const sidechains = filters.sidechains ?? "include";
+  if (sidechains === "only")
+    parts.push("e.is_sidechain = 1");
+  else if (sidechains === "exclude")
+    parts.push("e.is_sidechain = 0");
   return {
-    sessionId,
-    harness: "copilot",
-    path: file,
-    // Copilot's session-state directory is flat — it is keyed by session, not
-    // by project — so there is no harness slug to report. Left empty rather
-    // than filled with something that is not one.
-    projectSlug: "",
-    bytes: stat.size,
-    mtimeMs: stat.mtimeMs,
-    isSidechain: false,
-    status: "live"
+    sql: parts.length ? `AND ${parts.join(" AND ")}` : "",
+    params
   };
 }
-async function parse7(source, options = {}) {
-  const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path17.resolve(typeof source === "string" ? source : source.path);
-  const unknownTypes = {};
-  let malformedLines = 0;
-  let raw = "";
-  try {
-    raw = fs20.readFileSync(absolute2, "utf8");
-  } catch {
-    raw = "";
+function buildSessionFilters(filters = {}) {
+  const parts = [];
+  const params = [];
+  if (filters.since) {
+    validateISODate(filters.since, "--since");
+    parts.push("COALESCE(s.ended_at, s.started_at) >= ?");
+    params.push(filters.since);
   }
-  const endOffset = Buffer.byteLength(raw, "utf8");
-  const { turns, meta, malformed } = readDocument(absolute2, raw);
-  malformedLines += malformed;
-  const sessionId = options.sessionId ?? (meta && typeof meta["sessionId"] === "string" && meta["sessionId"].trim() ? meta["sessionId"] : src?.sessionId ?? sessionIdFromPath2(absolute2));
-  const mtimeMs = options.mtimeMs ?? src?.mtimeMs ?? statMtime2(absolute2);
-  const fileTime = mtimeMs ? new Date(mtimeMs).toISOString() : "";
-  const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
-  const built = buildExchanges4(turns, sessionId, fileTime, counts2, unknownTypes);
-  const str2 = (...keys) => {
-    if (!meta)
-      return void 0;
-    for (const key of keys) {
-      const v = meta[key];
-      if (typeof v === "string" && v.trim())
-        return v;
-    }
-    return void 0;
-  };
-  const startedAt = str2("startTime", "startedAt", "createdAt") ?? built.firstTs ?? fileTime;
-  const endedAt = str2("lastUpdated", "updatedAt", "endedAt") ?? built.lastTs ?? fileTime;
-  const cwd = str2("cwd", "workingDirectory", "projectRoot", "directory");
-  const title = str2("title", "name", "summary");
-  const model = str2("model", "modelId") ?? built.model;
-  const gitBranch = str2("gitBranch", "branch");
-  const session = {
-    id: sessionId,
-    harness: "copilot",
-    sourcePath: absolute2,
-    project: cwd ?? "",
-    // `??` is wrong here: `discover()` deliberately sets `projectSlug` to the
-    // empty string because copilot's session-state directory is keyed by
-    // session, not by project — and an empty string is not nullish, so `??`
-    // would let it beat a slug we can actually derive from the cwd.
-    projectSlug: options.projectSlug || src?.projectSlug || (cwd ? path17.basename(cwd) : ""),
-    startedAt,
-    endedAt: endedAt < startedAt ? startedAt : endedAt,
-    ...title ? { title } : {},
-    ...gitBranch ? { gitBranch } : {},
-    entrypoint: "cli",
-    ...model ? { model } : {},
-    isSidechain: false,
-    counts: {
-      userPrompts: counts2.userPrompts,
-      assistantTurns: counts2.assistantTurns,
-      toolCalls: counts2.toolCalls,
-      bytes: options.bytes ?? src?.bytes ?? endOffset
-    },
-    status: options.status ?? src?.status ?? "live"
-  };
-  return { session, exchanges: built.exchanges, unknownTypes, endOffset, malformedLines };
+  if (filters.until) {
+    validateISODate(filters.until, "--until");
+    parts.push("COALESCE(s.started_at, s.ended_at) <= ?");
+    params.push(filters.until);
+  }
+  if (filters.project) {
+    parts.push("s.project = ?");
+    params.push(filters.project);
+  }
+  if (filters.harness) {
+    parts.push("s.harness = ?");
+    params.push(filters.harness);
+  }
+  if (filters.status && filters.status !== "ghost") {
+    parts.push("s.status = ?");
+    params.push(filters.status);
+  }
+  if (filters.branch) {
+    parts.push(branchClause(filters.branch, "s.git_branch"));
+    params.push(branchParam(filters.branch));
+  }
+  if (filters.sessionId) {
+    parts.push("s.id = ?");
+    params.push(filters.sessionId);
+  }
+  if (filters.file) {
+    parts.push(`EXISTS (SELECT 1 FROM exchanges e WHERE e.session_id = s.id
+                 AND ${FILE_TOUCHED_SQL("e.files_touched")})`);
+    params.push(likePattern(filters.file));
+  }
+  if (filters.tag) {
+    parts.push("EXISTS (SELECT 1 FROM tags t WHERE t.session_id = s.id AND t.tag = ?)");
+    params.push(filters.tag);
+  }
+  if (filters.pinned) {
+    parts.push("EXISTS (SELECT 1 FROM pins p WHERE p.session_id = s.id)");
+  }
+  if (filters.linkedTo) {
+    parts.push(LINKED_TO_SQL("s.id"));
+    params.push(filters.linkedTo, filters.linkedTo);
+  }
+  if (filters.untitled)
+    parts.push(UNTITLED_SESSION_SQL);
+  const sidechains = filters.sidechains ?? "include";
+  if (sidechains === "only")
+    parts.push("s.is_sidechain = 1");
+  else if (sidechains === "exclude")
+    parts.push("s.is_sidechain = 0");
+  return { sql: parts.length ? `AND ${parts.join(" AND ")}` : "", params };
 }
-function sessionIdFromPath2(file) {
-  const ext = path17.extname(file);
-  const base2 = path17.basename(file, ext);
-  if (STATE_FILES.includes(path17.basename(file))) {
-    return path17.basename(path17.dirname(file));
+function buildGhostFilters(filters = {}) {
+  const parts = [];
+  const params = [];
+  if (filters.since) {
+    validateISODate(filters.since, "--since");
+    parts.push("COALESCE(g.last_ts, g.first_ts) >= ?");
+    params.push(filters.since);
   }
-  return base2;
+  if (filters.until) {
+    validateISODate(filters.until, "--until");
+    parts.push("COALESCE(g.first_ts, g.last_ts) <= ?");
+    params.push(filters.until);
+  }
+  if (filters.project) {
+    parts.push("g.project = ?");
+    params.push(filters.project);
+  }
+  if (filters.harness) {
+    parts.push("g.harness = ?");
+    params.push(filters.harness);
+  }
+  if (filters.branch) {
+    parts.push(branchClause(filters.branch, "g.git_branch"));
+    params.push(branchParam(filters.branch));
+  }
+  if (filters.sessionId) {
+    parts.push("g.session_id = ?");
+    params.push(filters.sessionId);
+  }
+  if (filters.tag) {
+    parts.push("EXISTS (SELECT 1 FROM tags t WHERE t.session_id = g.session_id AND t.tag = ?)");
+    params.push(filters.tag);
+  }
+  if (filters.pinned) {
+    parts.push("EXISTS (SELECT 1 FROM pins p WHERE p.session_id = g.session_id)");
+  }
+  if (filters.linkedTo) {
+    parts.push(LINKED_TO_SQL("g.session_id"));
+    params.push(filters.linkedTo, filters.linkedTo);
+  }
+  if (filters.untitled)
+    parts.push(UNTITLED_GHOST_SQL);
+  return { sql: parts.length ? `AND ${parts.join(" AND ")}` : "", params };
 }
-function readDocument(file, raw) {
-  if (!raw.trim())
-    return { turns: [], malformed: 0 };
-  if (path17.extname(file).toLowerCase() === ".jsonl") {
-    const turns = [];
-    let meta;
-    let malformed = 0;
-    for (const line of raw.split("\n")) {
-      if (!line.trim())
-        continue;
-      const parsed = safeParseJson(line.trim());
-      if (typeof parsed === "string") {
-        malformed += 1;
-        continue;
-      }
-      if (!isRecord(parsed)) {
-        malformed += 1;
-        continue;
-      }
-      if (parsed["role"] === void 0 && (parsed["sessionId"] || parsed["cwd"] || parsed["model"])) {
-        meta ??= parsed;
-        continue;
-      }
-      turns.push(parsed);
-    }
-    return { turns, ...meta ? { meta } : {}, malformed };
-  }
-  const doc = safeParseJson(raw.trim());
-  if (typeof doc === "string" || doc === void 0)
-    return { turns: [], malformed: 1 };
-  if (Array.isArray(doc))
-    return { turns: doc, malformed: 0 };
-  if (!isRecord(doc))
-    return { turns: [], malformed: 1 };
-  for (const key of HISTORY_KEYS2) {
-    const v = doc[key];
-    if (Array.isArray(v))
-      return { turns: v, meta: doc, malformed: 0 };
-    if (key === "state" && isRecord(v)) {
-      for (const inner of HISTORY_KEYS2) {
-        const iv = v[inner];
-        if (Array.isArray(iv))
-          return { turns: iv, meta: { ...doc, ...v }, malformed: 0 };
-      }
-    }
-  }
-  return { turns: [], meta: doc, malformed: 0 };
+function hasMetadataFilters(filters = {}) {
+  return Boolean(filters.project || filters.harness || filters.status || filters.branch || filters.sessionId || filters.tag || filters.file || filters.pinned || filters.linkedTo || filters.untitled || filters.sidechains && filters.sidechains !== "include");
 }
-function buildExchanges4(turns, sessionId, fileTime, counts2, unknownTypes) {
-  const out = [];
-  let seq = 0;
-  let firstTs;
-  let lastTs;
-  let model;
-  let current = null;
-  const finalize = () => {
-    if (!current)
-      return;
-    const b = current;
-    current = null;
-    if (!b.userTexts.length && !b.assistantTexts.length && !b.toolCalls.length)
-      return;
-    out.push({
-      id: exchangeId(sessionId, b.seq),
-      sessionId,
-      seq: b.seq,
-      ts: b.ts || fileTime,
-      userText: b.userTexts.join("\n\n"),
-      assistantText: b.assistantTexts.join("\n\n"),
-      toolCalls: b.toolCalls,
-      filesTouched: uniq(b.files),
-      isSidechain: false,
-      redacted: false
-    });
-  };
-  const open2 = (ts) => {
-    seq += 1;
-    current = {
-      seq,
-      ts,
-      userTexts: [],
-      assistantTexts: [],
-      toolCalls: [],
-      byId: /* @__PURE__ */ new Map(),
-      files: []
-    };
-    return current;
-  };
-  for (const turn of turns) {
-    if (!isRecord(turn)) {
-      unknownTypes["(not an object)"] = (unknownTypes["(not an object)"] ?? 0) + 1;
-      continue;
-    }
-    const role = String(turn["role"] ?? turn["type"] ?? "").toLowerCase();
-    const ts = isoOf2(turn["timestamp"] ?? turn["time"] ?? turn["createdAt"] ?? turn["ts"]) ?? "";
-    if (ts) {
-      firstTs ??= ts;
-      if (!lastTs || ts > lastTs)
-        lastTs = ts;
-    }
-    if (typeof turn["model"] === "string" && turn["model"])
-      model = turn["model"];
-    const blocks = blocksOf(turn);
-    if (USER_ROLES2.has(role) && !onlyToolResults(blocks)) {
-      finalize();
-      counts2.userPrompts += 1;
-      const b2 = open2(ts);
-      absorb(
-        b2,
-        blocks,
-        counts2,
-        unknownTypes,
-        /* asUser */
-        true
-      );
-      continue;
-    }
-    const b = current ?? open2(ts);
-    if (ASSISTANT_ROLES2.has(role)) {
-      counts2.assistantTurns += 1;
-    } else if (!USER_ROLES2.has(role) && !TOOL_ROLES.has(role)) {
-      const key = `role:${role || "(no role)"}`;
-      unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
-    }
-    absorb(
-      b,
-      blocks,
-      counts2,
-      unknownTypes,
-      /* asUser */
-      false
-    );
-  }
-  finalize();
-  return {
-    exchanges: out,
-    ...firstTs ? { firstTs } : {},
-    ...lastTs ? { lastTs } : {},
-    ...model ? { model } : {}
-  };
+function knnCandidates(limit, filters = {}) {
+  return hasMetadataFilters(filters) ? limit * 3 : limit;
 }
-function absorb(b, blocks, counts2, unknownTypes, asUser) {
-  for (const block2 of blocks) {
-    const type = String(block2["type"] ?? "").toLowerCase();
-    if (type === "text" || !type && typeof block2["text"] === "string") {
-      const text = typeof block2["text"] === "string" ? block2["text"] : "";
-      if (!text)
-        continue;
-      if (asUser)
-        b.userTexts.push(text);
-      else if (text.trim())
-        b.assistantTexts.push(text);
-      continue;
-    }
-    if (type === "tool_call" || type === "tool-call" || type === "function_call" || type === "tool_use") {
-      const fn = isRecord(block2["function"]) ? block2["function"] : {};
-      const name = String(block2["name"] ?? fn["name"] ?? block2["tool"] ?? "unknown");
-      const rawArgs = block2["arguments"] ?? fn["arguments"] ?? block2["input"] ?? block2["args"];
-      const args = typeof rawArgs === "string" ? safeParseJson(rawArgs) : rawArgs;
-      b.toolCalls.push({ name, input: stringifyToolInput(args) });
-      counts2.toolCalls += 1;
-      const id = block2["id"] ?? block2["tool_call_id"] ?? block2["toolCallId"];
-      if (typeof id === "string" && id)
-        b.byId.set(id, b.toolCalls.length - 1);
-      else
-        b.byId.set(`name:${name}`, b.toolCalls.length - 1);
-      for (const f of filesFromToolInput(args))
-        b.files.push(f);
-      continue;
-    }
-    if (type === "tool_result" || type === "tool-result" || type === "function_response" || type === "tool_response") {
-      const name = String(block2["name"] ?? block2["tool"] ?? "unknown");
-      const id = block2["tool_call_id"] ?? block2["toolCallId"] ?? block2["id"];
-      const result = stringifyToolOutput(block2["content"] ?? block2["output"] ?? block2["result"] ?? block2["response"]);
-      const isError = block2["is_error"] === true || block2["isError"] === true || void 0;
-      const key2 = typeof id === "string" && id ? id : `name:${name}`;
-      const at = b.byId.get(key2);
-      if (at !== void 0) {
-        const call = b.toolCalls[at];
-        if (call) {
-          if (result !== void 0)
-            call.result = result;
-          if (isError)
-            call.isError = true;
-        }
-        b.byId.delete(key2);
-        continue;
-      }
-      b.toolCalls.push({
-        name,
-        input: "",
-        ...result !== void 0 ? { result } : {},
-        ...isError ? { isError: true } : {}
-      });
-      counts2.toolCalls += 1;
-      continue;
-    }
-    const key = `block:${type || "(no type)"}`;
-    unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
+function FILE_TOUCHED_SQL(column) {
+  return `EXISTS (SELECT 1 FROM json_each(
+                    CASE WHEN json_valid(${column}) THEN ${column} ELSE '[]' END
+                  ) jf WHERE jf.value LIKE ? ESCAPE '\\')`;
+}
+function likePattern(value) {
+  const hasWildcard = /[%*]/.test(value);
+  const escaped = value.replace(/[\\_]/g, (c) => `\\${c}`);
+  return hasWildcard ? escaped.replace(/\*/g, "%") : `%${escaped}%`;
+}
+function branchClause(value, column) {
+  return /[%*]/.test(value) ? `${column} LIKE ? ESCAPE '\\'` : `${column} = ?`;
+}
+function branchParam(value) {
+  return /[%*]/.test(value) ? value.replace(/[\\_]/g, (c) => `\\${c}`).replace(/\*/g, "%") : value;
+}
+function validateISODate(value, paramName) {
+  if (!/^\d{4}-\d{2}-\d{2}([T ].*)?$/.test(value)) {
+    throw new Error(`invalid ${paramName} date: "${value}". expected YYYY-MM-DD (for example 2026-08-01)`);
+  }
+  if (Number.isNaN(new Date(value).getTime())) {
+    throw new Error(`invalid ${paramName} date: "${value}". not a valid calendar date`);
   }
 }
-function blocksOf(turn) {
-  const content = turn["content"] ?? turn["parts"] ?? turn["blocks"];
-  const out = [];
-  if (typeof content === "string")
-    out.push({ type: "text", text: content });
-  else if (Array.isArray(content)) {
-    for (const c of content) {
-      if (typeof c === "string")
-        out.push({ type: "text", text: c });
-      else if (isRecord(c))
-        out.push(c);
-    }
-  } else if (isRecord(content)) {
-    out.push(content);
-  }
-  const calls = turn["tool_calls"] ?? turn["toolCalls"];
-  if (Array.isArray(calls)) {
-    for (const c of calls)
-      if (isRecord(c))
-        out.push({ type: "tool_call", ...c });
-  }
-  return out;
+
+// ../core/dist/search/similarity.js
+function l2DistanceToCosineSimilarity(distance) {
+  const similarity = 1 - distance * distance / 2;
+  return Math.max(-1, Math.min(1, similarity));
 }
-function onlyToolResults(blocks) {
-  if (blocks.length === 0)
-    return false;
-  return blocks.every((b) => {
-    const t = String(b["type"] ?? "").toLowerCase();
-    return t === "tool_result" || t === "tool-result" || t === "function_response" || t === "tool_response";
-  });
+var RRF_K = 60;
+function rrfScore(rank, k = RRF_K) {
+  return 1 / (k + rank);
 }
-function isoOf2(value) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const d2 = new Date(value < 1e11 ? value * 1e3 : value);
-    return Number.isNaN(d2.getTime()) ? void 0 : d2.toISOString();
-  }
-  if (typeof value !== "string" || !value.trim())
-    return void 0;
-  if (/^\d+$/.test(value.trim()))
-    return isoOf2(Number(value.trim()));
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? void 0 : d.toISOString();
-}
-function statMtime2(absolute2) {
-  try {
-    return fs20.statSync(absolute2).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-function doctorLine7(override) {
-  const dir = sourceDir5(override);
-  const root = copilotDir(override);
-  let found = { sources: [], unreadable: [] };
-  try {
-    found = scan(override);
-  } catch {
-    found = { sources: [], unreadable: [] };
-  }
-  const installed = fs20.existsSync(root);
-  const stateExists = fs20.existsSync(dir);
-  let status3;
-  let note;
-  if (found.sources.length > 0) {
-    const parts = [`${found.sources.length} session${found.sources.length === 1 ? "" : "s"}`];
-    if (found.unreadable.length) {
-      parts.push(`${found.unreadable.length} unreadable`);
-    }
-    parts.push("unverified format");
-    status3 = "ready";
-    note = parts.join(" \xB7 ");
-  } else if (installed || stateExists) {
-    status3 = "empty";
-    note = stateExists ? "Copilot CLI installed, session-state/ holds no sessions \xB7 unverified format" : "Copilot CLI installed, but it has written no session-state/ \xB7 unverified format";
-  } else {
-    status3 = "absent";
-    note = "Copilot CLI not installed";
-  }
-  return formatDoctorLine({ harness: "copilot", status: status3, dir, note });
-}
-var copilotAdapter = {
-  harness: "copilot",
-  displayName: DISPLAY_NAME4,
-  sourceDir: () => sourceDir5(),
-  discover: () => discover7(),
-  parse: (src, opts) => parse7(src, opts ?? {})
-};
-var copilot_default = copilotAdapter;
 
 // ../core/dist/redact.js
 import { createHash } from "node:crypto";
@@ -10228,7 +6522,7 @@ var BASE64_MAGIC = [
 ];
 var B64_RUN = `(?:[A-Za-z0-9+/=]|\\\\/)`;
 var B64_BODY = `${B64_RUN}{40,}(?:[\\r\\n \\t]+${B64_RUN}{40,})*`;
-var DATA_URI2 = new RegExp(`data:([a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+)?(?:;[a-zA-Z0-9.+=-]+)*;base64,${B64_BODY}`, "g");
+var DATA_URI = new RegExp(`data:([a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+)?(?:;[a-zA-Z0-9.+=-]+)*;base64,${B64_BODY}`, "g");
 var CONTENT_BLOCK = new RegExp(`"(?:data|image_data|b64_json|base64)"\\s*:\\s*"(${B64_BODY})"`, "g");
 var MEDIA_HINT = /"(?:media_?type|mime_?type|mimeType)"\s*:\s*"([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+)"|"type"\s*:\s*"base64"/gi;
 var HINT_WINDOW = 200;
@@ -10271,14 +6565,14 @@ function collect(re, text, group, decide, out) {
     out.push({ start, end, mime });
   }
 }
-function elideBinary2(text, tally2 = emptyElisions()) {
+function elideBinary(text, tally2 = emptyElisions()) {
   if (typeof text !== "string" || text.length < MIN_PAYLOAD)
     return text ?? "";
   if (!/[A-Za-z0-9+/]{64}/.test(text))
     return text;
   const spans = [];
   const big = (payload) => payload.length >= MIN_PAYLOAD;
-  collect(DATA_URI2, text, 0, (payload) => {
+  collect(DATA_URI, text, 0, (payload) => {
     if (!big(payload))
       return void 0;
     const m = /^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+)?/.exec(payload);
@@ -10313,7 +6607,7 @@ function elideBinary2(text, tally2 = emptyElisions()) {
 }
 function elideExchange(ex) {
   const elisions = emptyElisions();
-  const one2 = (s) => elideBinary2(s, elisions);
+  const one2 = (s) => elideBinary(s, elisions);
   const userText = one2(ex.userText);
   const assistantText = one2(ex.assistantText);
   const toolCalls = ex.toolCalls.map((tc) => {
@@ -10451,1130 +6745,6 @@ function claim(claimed, s) {
   const end = Math.min(s.end, claimed.length);
   for (let i = Math.max(0, s.start); i < end; i++)
     claimed[i] = 1;
-}
-
-// ../core/dist/ingest.js
-import crypto5 from "node:crypto";
-import fs22 from "node:fs";
-import path19 from "node:path";
-
-// ../core/dist/embeddings.js
-import fs21 from "node:fs";
-import os2 from "node:os";
-import path18 from "node:path";
-import process8 from "node:process";
-var EMBEDDING_VERSION = 1;
-var MODEL_ID = "Xenova/bge-small-en-v1.5";
-var MODEL_DTYPE = "q8";
-var EMBEDDING_DIMENSIONS = 384;
-var MODEL_DOWNLOAD_BYTES = 34014426;
-var BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
-var MAX_INPUT_CHARS = 2e3;
-function embedThreads() {
-  const override = Number(process8.env["POTSHERD_EMBED_THREADS"]);
-  if (Number.isFinite(override) && override >= 1)
-    return Math.floor(override);
-  const logical = os2.availableParallelism?.() ?? os2.cpus().length ?? 2;
-  return Math.max(1, Math.min(4, Math.floor(logical / 2)));
-}
-var pipelinePromise = null;
-function isModelCached(cacheDir = modelsDir()) {
-  const dir = path18.join(cacheDir, ...MODEL_ID.split("/"), "onnx");
-  try {
-    return fs21.readdirSync(dir).some((f) => f.endsWith(".onnx") && fs21.statSync(path18.join(dir, f)).size > 1e6);
-  } catch {
-    return false;
-  }
-}
-async function getPipeline(options = {}) {
-  if (pipelinePromise)
-    return pipelinePromise;
-  pipelinePromise = (async () => {
-    const cacheDir = options.cacheDir ?? modelsDir();
-    fs21.mkdirSync(cacheDir, { recursive: true });
-    const transformers = await import("@huggingface/transformers");
-    const env = transformers.env;
-    env.allowLocalModels = true;
-    env.useBrowserCache = false;
-    env.cacheDir = cacheDir;
-    const onProgress = options.onProgress;
-    const built = await transformers.pipeline("feature-extraction", MODEL_ID, {
-      dtype: MODEL_DTYPE,
-      session_options: { intraOpNumThreads: embedThreads(), interOpNumThreads: 1 },
-      progress_callback: onProgress ? (p) => {
-        if (typeof p !== "object" || p === null)
-          return;
-        const rec = p;
-        if (typeof rec.progress === "number") {
-          onProgress(Math.max(0, Math.min(1, rec.progress / 100)), rec.file ?? "");
-        }
-      } : () => {
-      }
-    });
-    return built;
-  })();
-  try {
-    return await pipelinePromise;
-  } catch (error) {
-    pipelinePromise = null;
-    throw error;
-  }
-}
-async function generateEmbedding(text, options = {}) {
-  const pipe = await getPipeline(options);
-  const output = await pipe(text.substring(0, MAX_INPUT_CHARS), {
-    pooling: "mean",
-    normalize: true
-  });
-  return Array.from(output.data);
-}
-function withQueryPrefix(query) {
-  if (query.startsWith(BGE_QUERY_PREFIX))
-    return query;
-  return BGE_QUERY_PREFIX + query;
-}
-async function generateQueryEmbedding(query, options = {}) {
-  return generateEmbedding(withQueryPrefix(query), options);
-}
-function exchangeText(userText, assistantText, toolNames) {
-  let combined = `User: ${userText}
-
-Assistant: ${assistantText}`;
-  if (toolNames && toolNames.length > 0) {
-    combined += `
-
-Tools: ${toolNames.join(", ")}`;
-  }
-  return combined;
-}
-async function generateExchangeEmbedding(userText, assistantText, toolNames, options = {}) {
-  return generateEmbedding(exchangeText(userText, assistantText, toolNames), options);
-}
-function embeddingToBlob(embedding) {
-  return Buffer.from(new Float32Array(embedding).buffer);
-}
-
-// ../core/dist/ingest.js
-function adapterSpecs(o = {}) {
-  return [
-    {
-      harness: "claude",
-      displayName: "Claude Code",
-      sourceDir: sourceDir(o.claudeDir),
-      discover: () => discover({
-        ...o.claudeDir ? { claudeDir: o.claudeDir } : {},
-        ...o.potsherdDir ? { potsherdDir: o.potsherdDir } : {}
-      }),
-      parse: (source) => parse(source),
-      version: (r) => r.version ?? "unknown",
-      novel: isNovelRecordType
-    },
-    {
-      harness: "codex",
-      displayName: "Codex CLI",
-      sourceDir: codexPaths(codexDir(o.codexHome)).sessions,
-      discover: () => discover2(o.codexHome ? { codexHome: o.codexHome } : {}),
-      parse: (source) => parse2(source, o.codexHome ? { codexHome: o.codexHome } : {}),
-      version: (r) => r.codex?.cliVersion ?? "unknown",
-      novel: () => true
-    },
-    {
-      harness: "cursor",
-      displayName: "Cursor",
-      sourceDir: cursorProjectsDir(o.cursorDir),
-      discover: () => discover3(o.cursorDir),
-      parse: (source) => parse3(source),
-      version: () => "unknown",
-      novel: () => true
-    },
-    {
-      harness: "pi",
-      displayName: "pi",
-      sourceDir: sourceDir2(o.piDir),
-      discover: () => discover4(o.piDir),
-      parse: (source) => parse4(source),
-      version: () => "unknown",
-      novel: () => true
-    },
-    {
-      // Phase 6, T6.1. `unverified — documentation only`: written against
-      // `plans/research/formats.md`, which marks its gemini section
-      // **unmeasured**, and against synthetic fixtures. See the adapter header.
-      harness: "gemini",
-      displayName: DISPLAY_NAME2,
-      sourceDir: sourceDir3(o.geminiDir),
-      discover: () => discover5(o.geminiDir),
-      parse: (source) => parse5(source),
-      version: () => "unknown",
-      novel: () => true
-    },
-    {
-      // Phase 6, T6.1. `unverified — documentation only`, and the only harness
-      // whose store is a database rather than a file: its schema is discovered
-      // at runtime (`03 §10`), never hard-coded, and it degrades to
-      // "unsupported version" rather than half-parsing. See the adapter header.
-      harness: "opencode",
-      displayName: DISPLAY_NAME3,
-      sourceDir: sourceDir4(o.opencodeDir),
-      discover: () => discover6(o.opencodeDir),
-      parse: (source) => parse6(source),
-      version: () => "unknown",
-      novel: () => true
-    },
-    {
-      // Phase 6, T6.1. `unverified — documentation only`. `~/.copilot` exists
-      // on the machine this was written on and the CLI has run there, and it
-      // has written no `session-state/` at all — so there was nothing to
-      // measure. Reads `~/.copilot` only: the VS Code chats live in
-      // `workspaceStorage`, which the cursor ruling (`04-DECISIONS.md`,
-      // 21 aug) keeps out of bounds. See the adapter header.
-      harness: "copilot",
-      displayName: DISPLAY_NAME4,
-      sourceDir: sourceDir5(o.copilotDir),
-      discover: () => discover7(o.copilotDir),
-      parse: (source) => parse7(source),
-      version: () => "unknown",
-      novel: () => true
-    }
-  ];
-}
-function ingestSession(db, parsed, options = {}) {
-  const session = parsed.session;
-  const counts2 = emptyCounts();
-  let redactedExchanges = 0;
-  let toolCallCount = 0;
-  const elisions = emptyElisions();
-  const redacted = [];
-  for (const exchange of parsed.exchanges) {
-    const { exchange: lean, elisions: e } = elideExchange(exchange);
-    const { exchange: clean, hits } = redactExchange(lean);
-    elisions.binaryParts += e.binaryParts;
-    elisions.charsElided += e.charsElided;
-    tally(hits, counts2);
-    if (clean.redacted)
-      redactedExchanges += 1;
-    toolCallCount += clean.toolCalls.length;
-    redacted.push(clean);
-  }
-  const run3 = db.transaction(() => {
-    upsertSession(db, session, parsed, options);
-    clearExchanges(db, session.id);
-    for (const exchange of redacted)
-      insertExchange(db, exchange);
-  });
-  run3();
-  return {
-    sessionId: session.id,
-    exchanges: redacted.length,
-    toolCalls: toolCallCount,
-    redactedExchanges,
-    counts: counts2,
-    elisions
-  };
-}
-function upsertSession(db, s, parsed, o) {
-  db.prepare(`INSERT INTO sessions (
-       id, harness, source_path, project, project_slug, started_at, ended_at, title,
-       git_branch, entrypoint, model, is_sidechain, parent_session_id, agent_name,
-       user_prompts, assistant_turns, tool_calls, bytes, status, archived_path,
-       indexed_at, source_mtime, source_offset)
-     VALUES (
-       @id, @harness, @source_path, @project, @project_slug, @started_at, @ended_at, @title,
-       @git_branch, @entrypoint, @model, @is_sidechain, @parent_session_id, @agent_name,
-       @user_prompts, @assistant_turns, @tool_calls, @bytes, @status, @archived_path,
-       @indexed_at, @source_mtime, @source_offset)
-     ON CONFLICT(id) DO UPDATE SET
-       harness = excluded.harness, source_path = excluded.source_path,
-       project = excluded.project, project_slug = excluded.project_slug,
-       started_at = excluded.started_at, ended_at = excluded.ended_at,
-       title = COALESCE(excluded.title, sessions.title),
-       git_branch = COALESCE(excluded.git_branch, sessions.git_branch),
-       entrypoint = COALESCE(excluded.entrypoint, sessions.entrypoint),
-       model = COALESCE(excluded.model, sessions.model),
-       is_sidechain = excluded.is_sidechain,
-       parent_session_id = COALESCE(excluded.parent_session_id, sessions.parent_session_id),
-       agent_name = COALESCE(excluded.agent_name, sessions.agent_name),
-       user_prompts = excluded.user_prompts, assistant_turns = excluded.assistant_turns,
-       tool_calls = excluded.tool_calls, bytes = excluded.bytes,
-       status = excluded.status, archived_path = excluded.archived_path,
-       indexed_at = excluded.indexed_at, source_mtime = excluded.source_mtime,
-       source_offset = excluded.source_offset`).run({
-    id: s.id,
-    harness: s.harness,
-    source_path: o.originalPath ?? s.sourcePath,
-    project: s.project || null,
-    project_slug: s.projectSlug || null,
-    started_at: s.startedAt || null,
-    ended_at: s.endedAt || null,
-    title: s.title ?? null,
-    git_branch: s.gitBranch ?? null,
-    entrypoint: s.entrypoint ?? null,
-    model: s.model ?? null,
-    is_sidechain: s.isSidechain ? 1 : 0,
-    parent_session_id: s.parentSessionId ?? null,
-    agent_name: s.agentName ?? null,
-    user_prompts: s.counts.userPrompts,
-    assistant_turns: s.counts.assistantTurns,
-    tool_calls: s.counts.toolCalls,
-    bytes: s.counts.bytes,
-    status: s.status,
-    archived_path: o.archivedPath ?? (s.status === "archived" ? s.sourcePath : null),
-    indexed_at: o.indexedAt ?? (/* @__PURE__ */ new Date()).toISOString(),
-    source_mtime: o.sourceMtimeMs !== void 0 ? Math.floor(o.sourceMtimeMs) : null,
-    source_offset: parsed.endOffset
-  });
-}
-function clearExchanges(db, sessionId) {
-  const rows = db.prepare("SELECT rowid, id, user_text, assistant_text FROM exchanges WHERE session_id = ?").all(sessionId);
-  if (rows.length === 0)
-    return;
-  const unindex = db.prepare(`INSERT INTO exchanges_fts (exchanges_fts, rowid, user_text, assistant_text)
-     VALUES ('delete', ?, ?, ?)`);
-  for (const row2 of rows)
-    unindex.run(row2.rowid, row2.user_text, row2.assistant_text);
-  if (vecAvailable(db) && vecTablesExist(db)) {
-    const dropVec = db.prepare("DELETE FROM vec_exchanges WHERE id = ?");
-    for (const row2 of rows)
-      dropVec.run(row2.id);
-  }
-  db.prepare("DELETE FROM exchanges WHERE session_id = ?").run(sessionId);
-}
-function insertExchange(db, e) {
-  const info = db.prepare(`INSERT INTO exchanges (
-         id, session_id, seq, ts, user_text, assistant_text, files_touched,
-         is_sidechain, parent_uuid, redacted, embedding_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`).run(e.id, e.sessionId, e.seq, e.ts || null, e.userText, e.assistantText, JSON.stringify(e.filesTouched), e.isSidechain ? 1 : 0, e.parentUuid ?? null, e.redacted ? 1 : 0);
-  db.prepare("INSERT INTO exchanges_fts (rowid, user_text, assistant_text) VALUES (?, ?, ?)").run(info.lastInsertRowid, e.userText, e.assistantText);
-  if (e.toolCalls.length === 0)
-    return;
-  const insertTool = db.prepare(`INSERT INTO tool_calls (id, exchange_id, name, input, result, is_error, ts)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`);
-  e.toolCalls.forEach((tc, i) => {
-    insertTool.run(`${e.id}:${i}`, e.id, tc.name, tc.input, tc.result ?? null, tc.isError ? 1 : 0, e.ts || null);
-  });
-}
-var GHOST_INDEX_KEY = "index:ghosts";
-function ingestGhosts(db, options = {}) {
-  const fingerprint = ghostFingerprint2(db);
-  if (!options.full) {
-    const seen = readIndexState(db, GHOST_INDEX_KEY);
-    if (seen && seen === fingerprint) {
-      const totals = db.prepare(`SELECT (SELECT COUNT(*) FROM ghosts) AS g,
-                  (SELECT COUNT(*) FROM ghost_prompts) AS p,
-                  (SELECT COUNT(*) FROM ghost_prompts WHERE redacted = 1) AS r`).get();
-      return {
-        ghosts: totals.g,
-        prompts: totals.p,
-        redactedPrompts: totals.r,
-        counts: emptyCounts(),
-        unchanged: true
-      };
-    }
-  }
-  const counts2 = emptyCounts();
-  let redactedPrompts = 0;
-  const ghosts = db.prepare("SELECT rowid, session_id, first_prompt, title FROM ghosts").all();
-  const prompts = db.prepare("SELECT rowid, id, text, redacted FROM ghost_prompts").all();
-  const run3 = db.transaction(() => {
-    db.prepare(`INSERT INTO ghosts_fts (ghosts_fts) VALUES ('delete-all')`).run();
-    db.prepare(`INSERT INTO ghost_prompts_fts (ghost_prompts_fts) VALUES ('delete-all')`).run();
-    const updateGhost = db.prepare("UPDATE ghosts SET first_prompt = ?, title = ? WHERE rowid = ?");
-    const indexGhost = db.prepare("INSERT INTO ghosts_fts (rowid, first_prompt, title) VALUES (?, ?, ?)");
-    for (const g of ghosts) {
-      const first = maskField(g.first_prompt, counts2);
-      const title = maskField(g.title, counts2);
-      if (first !== g.first_prompt || title !== g.title)
-        updateGhost.run(first, title, g.rowid);
-      indexGhost.run(g.rowid, first, title);
-    }
-    const updatePrompt = db.prepare("UPDATE ghost_prompts SET text = ?, redacted = ? WHERE rowid = ?");
-    const indexPrompt = db.prepare("INSERT INTO ghost_prompts_fts (rowid, text) VALUES (?, ?)");
-    for (const p of prompts) {
-      const result = redact(p.text);
-      const fired = result.hits.length > 0 ? 1 : 0;
-      if (fired) {
-        tally(result.hits, counts2);
-        redactedPrompts += 1;
-      }
-      if (result.text !== p.text || p.redacted !== fired)
-        updatePrompt.run(result.text, fired, p.rowid);
-      indexPrompt.run(p.rowid, result.text);
-    }
-    writeIndexState(db, GHOST_INDEX_KEY, ghostFingerprint2(db));
-  });
-  run3();
-  return {
-    ghosts: ghosts.length,
-    prompts: prompts.length,
-    redactedPrompts,
-    counts: counts2,
-    unchanged: false
-  };
-}
-function maskField(value, counts2) {
-  if (!value)
-    return value;
-  const result = redact(value);
-  if (result.hits.length > 0)
-    tally(result.hits, counts2);
-  return result.text;
-}
-function ghostFingerprint2(db) {
-  const row2 = db.prepare(`SELECT (SELECT COUNT(*) FROM ghosts) AS g,
-              (SELECT COALESCE(SUM(LENGTH(COALESCE(first_prompt,'')) + LENGTH(COALESCE(title,''))), 0) FROM ghosts) AS gl,
-              (SELECT COUNT(*) FROM ghost_prompts) AS p,
-              (SELECT COALESCE(SUM(LENGTH(text)), 0) FROM ghost_prompts) AS pl,
-              (SELECT COUNT(*) FROM ghosts_fts) AS gf,
-              (SELECT COUNT(*) FROM ghost_prompts_fts) AS pf`).get();
-  return `${row2.g}:${row2.gl}:${row2.p}:${row2.pl}:${row2.gf}:${row2.pf}`;
-}
-function storedRedactionCounts(db) {
-  const counts2 = emptyCounts();
-  const scan2 = (text) => {
-    if (!text)
-      return;
-    const rx = new RegExp(MASK_RE.source, "g");
-    let m;
-    while ((m = rx.exec(text)) !== null) {
-      const type = m[0].split(":")[1];
-      if (!type)
-        continue;
-      counts2.byType[type] = (counts2.byType[type] ?? 0) + 1;
-      counts2.total += 1;
-    }
-  };
-  for (const row2 of db.prepare("SELECT user_text, assistant_text FROM exchanges WHERE redacted = 1").iterate()) {
-    scan2(row2.user_text);
-    scan2(row2.assistant_text);
-  }
-  for (const row2 of db.prepare(`SELECT t.input, t.result FROM tool_calls t
-       JOIN exchanges e ON e.id = t.exchange_id WHERE e.redacted = 1`).iterate()) {
-    scan2(row2.input);
-    scan2(row2.result);
-  }
-  for (const row2 of db.prepare("SELECT text FROM ghost_prompts WHERE redacted = 1").iterate()) {
-    scan2(row2.text);
-  }
-  for (const row2 of db.prepare("SELECT first_prompt, title FROM ghosts").iterate()) {
-    scan2(row2.first_prompt);
-    scan2(row2.title);
-  }
-  return counts2;
-}
-function readIndexState(db, key) {
-  const row2 = db.prepare("SELECT value FROM sync_state WHERE key = ?").get(key);
-  return row2?.value;
-}
-function writeIndexState(db, key, value) {
-  db.prepare(`INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(key, value, (/* @__PURE__ */ new Date()).toISOString());
-}
-function sourceFingerprint(sources) {
-  const hash = crypto5.createHash("sha256");
-  for (const s of [...sources].sort((a, b) => a.path < b.path ? -1 : 1)) {
-    hash.update(`${s.path}:${s.bytes}:${Math.floor(s.mtimeMs)}
-`);
-  }
-  return `${sources.length}:${hash.digest("hex").slice(0, 32)}`;
-}
-async function indexAll(options = {}) {
-  const started = Date.now();
-  const ranAt = (/* @__PURE__ */ new Date()).toISOString();
-  const root = options.root ?? potsherdDir(options.potsherdDir);
-  const db = options.db ?? open({ root });
-  const ownDb = !options.db;
-  const embed = options.embed !== false;
-  const adapterOptions = { ...options, potsherdDir: options.potsherdDir ?? root };
-  try {
-    const vec = loadVec(db);
-    const wanted = options.harnesses ? new Set(options.harnesses) : null;
-    const specs = adapterSpecs(adapterOptions).filter((s) => !wanted || wanted.has(s.harness));
-    const harnesses = [];
-    const recordTypes = /* @__PURE__ */ new Map();
-    let redaction = emptyCounts();
-    for (const spec of specs) {
-      options.onProgress?.({ phase: "discover", harness: spec.harness });
-      const report = await indexHarness(db, spec, { ...options, ...adapterOptions }, recordTypes);
-      redaction = addCounts(redaction, report.redaction);
-      harnesses.push(report.harness_);
-    }
-    options.onProgress?.({ phase: "ghosts" });
-    const ghosts = ingestGhosts(db, { full: Boolean(options.full) });
-    redaction = addCounts(redaction, ghosts.counts);
-    const embeddings = await embedExchanges(db, { ...options, embed }, vec);
-    const totals = {
-      sessions: sum(harnesses, (h) => h.sessions),
-      exchanges: sum(harnesses, (h) => h.exchanges),
-      toolCalls: sum(harnesses, (h) => h.toolCalls),
-      redactedExchanges: sum(harnesses, (h) => h.redactedExchanges),
-      parsed: sum(harnesses, (h) => h.parsed),
-      skipped: sum(harnesses, (h) => h.skipped),
-      failed: sum(harnesses, (h) => h.failed),
-      bytes: sum(harnesses, (h) => h.bytes)
-    };
-    return {
-      ranAt,
-      full: Boolean(options.full),
-      harnesses,
-      totals,
-      recordTypes: [...recordTypes.values()].sort((a, b) => Number(b.novel) - Number(a.novel) || b.count - a.count || (a.harness < b.harness ? -1 : a.harness > b.harness ? 1 : 0) || (a.type < b.type ? -1 : 1)),
-      redaction,
-      ghosts,
-      embeddings,
-      vec: vecStatus(db),
-      ms: Date.now() - started
-    };
-  } finally {
-    if (ownDb)
-      db.close();
-  }
-}
-async function indexHarness(db, spec, options, recordTypes) {
-  const started = Date.now();
-  const report = {
-    harness: spec.harness,
-    displayName: spec.displayName,
-    sourceDir: spec.sourceDir,
-    present: fs22.existsSync(spec.sourceDir),
-    discovered: 0,
-    parsed: 0,
-    skipped: 0,
-    failed: 0,
-    sessions: 0,
-    sidechains: 0,
-    exchanges: 0,
-    toolCalls: 0,
-    redactedExchanges: 0,
-    malformedLines: 0,
-    bytes: 0,
-    errors: [],
-    unchanged: false,
-    ms: 0
-  };
-  let redaction = emptyCounts();
-  let sources;
-  try {
-    sources = spec.discover();
-  } catch (err) {
-    report.errors.push(`discover: ${err.message}`);
-    report.ms = Date.now() - started;
-    return { harness_: report, redaction };
-  }
-  if (options.sessionId) {
-    sources = sources.filter((s) => s.sessionId === options.sessionId || s.sessionId.endsWith(`:${options.sessionId}`));
-  }
-  report.discovered = sources.length;
-  report.bytes = sources.reduce((a, s) => a + s.bytes, 0);
-  const stateKey = `index:${spec.harness}`;
-  const fingerprint = sourceFingerprint(sources);
-  if (!options.full && !options.sessionId && readIndexState(db, stateKey) === fingerprint) {
-    report.unchanged = true;
-    report.skipped = sources.length;
-    fillStoredCounts(db, report);
-    report.ms = Date.now() - started;
-    return { harness_: report, redaction };
-  }
-  const known = /* @__PURE__ */ new Map();
-  for (const row2 of db.prepare("SELECT id, source_mtime, source_offset FROM sessions WHERE harness = ?").all(spec.harness)) {
-    known.set(row2.id, { mtime: row2.source_mtime, offset: row2.source_offset });
-  }
-  let done = 0;
-  for (const source of sources) {
-    done += 1;
-    options.onProgress?.({
-      phase: "parse",
-      harness: spec.harness,
-      done,
-      total: sources.length,
-      note: path19.basename(source.path)
-    });
-    const seen = known.get(source.sessionId);
-    if (!options.full && seen && seen.mtime !== null && seen.mtime === Math.floor(source.mtimeMs) && seen.offset === source.bytes) {
-      report.skipped += 1;
-      continue;
-    }
-    let parsed;
-    try {
-      parsed = await spec.parse(source);
-    } catch (err) {
-      if (err.code !== "ENOENT") {
-        report.failed += 1;
-        report.errors.push(`${source.path}: ${err.message}`);
-      }
-      continue;
-    }
-    const result = ingestSession(db, parsed, {
-      sourceMtimeMs: source.mtimeMs,
-      ...source.status === "archived" ? { archivedPath: source.path } : {},
-      ...source.originalPath ? { originalPath: source.originalPath } : {}
-    });
-    report.parsed += 1;
-    report.malformedLines += parsed.malformedLines;
-    redaction = addCounts(redaction, result.counts);
-    const version = spec.version(parsed);
-    writeSessionRecordTypes(db, parsed.session.id, spec, version, parsed.unknownTypes);
-    for (const [type, count2] of Object.entries(parsed.unknownTypes)) {
-      const key = `${spec.harness}\0${version}\0${type}`;
-      const row2 = recordTypes.get(key);
-      if (row2) {
-        row2.count += count2;
-        row2.files += 1;
-      } else {
-        recordTypes.set(key, {
-          harness: spec.harness,
-          version,
-          type,
-          count: count2,
-          files: 1,
-          novel: spec.novel(type)
-        });
-      }
-    }
-  }
-  if (!options.sessionId)
-    writeIndexState(db, stateKey, fingerprint);
-  fillStoredCounts(db, report);
-  report.ms = Date.now() - started;
-  return { harness_: report, redaction };
-}
-function fillStoredCounts(db, report) {
-  const s = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(is_sidechain), 0) AS side
-       FROM sessions WHERE harness = ?`).get(report.harness);
-  const e = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(e.redacted), 0) AS red,
-              (SELECT COUNT(*) FROM tool_calls t JOIN exchanges x ON x.id = t.exchange_id
-                 JOIN sessions y ON y.id = x.session_id WHERE y.harness = ?) AS tools
-       FROM exchanges e JOIN sessions s ON s.id = e.session_id WHERE s.harness = ?`).get(report.harness, report.harness);
-  report.sessions = s.n;
-  report.sidechains = s.side;
-  report.exchanges = e.n;
-  report.toolCalls = e.tools;
-  report.redactedExchanges = e.red;
-}
-var EMBED_CHUNK = 32;
-async function embedExchanges(db, options, vec) {
-  const started = Date.now();
-  const report = {
-    enabled: options.embed,
-    available: false,
-    model: MODEL_ID,
-    embedded: 0,
-    upToDate: 0,
-    ghostPrompts: 0,
-    downloaded: false,
-    ms: 0
-  };
-  const upToDate = db.prepare("SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version = ?").get(EMBEDDING_VERSION);
-  report.upToDate = upToDate.n;
-  if (!options.embed) {
-    report.reason = "--no-embed: text search only";
-    report.ms = Date.now() - started;
-    return report;
-  }
-  if (!vec.available) {
-    report.reason = vec.reason ?? "sqlite-vec unavailable";
-    report.ms = Date.now() - started;
-    return report;
-  }
-  report.available = true;
-  const pending = db.prepare(`SELECT id, user_text, assistant_text FROM exchanges
-       WHERE embedding_version IS NULL OR embedding_version != ?
-       ORDER BY rowid`).all(EMBEDDING_VERSION);
-  const ghostsPending = pendingGhostPrompts(db);
-  if (pending.length === 0 && ghostsPending === 0) {
-    report.ms = Date.now() - started;
-    return report;
-  }
-  const cacheDir = modelsDir(options.root ?? potsherdDir(options.potsherdDir));
-  if (!isModelCached(cacheDir)) {
-    report.downloaded = true;
-    options.onModelDownload?.(MODEL_DOWNLOAD_BYTES);
-  }
-  const dropVec = db.prepare("DELETE FROM vec_exchanges WHERE id = ?");
-  const insertVec = db.prepare("INSERT INTO vec_exchanges (id, embedding) VALUES (?, ?)");
-  const stamp = db.prepare("UPDATE exchanges SET embedding_version = ? WHERE id = ?");
-  const embedOptions = {
-    cacheDir,
-    ...options.onProgress ? { onProgress: (fraction) => options.onProgress?.({ phase: "model-download", fraction }) } : {}
-  };
-  for (let i = 0; i < pending.length; i += EMBED_CHUNK) {
-    const chunk = pending.slice(i, i + EMBED_CHUNK);
-    let vectors;
-    try {
-      vectors = [];
-      for (const row2 of chunk) {
-        vectors.push(await generateExchangeEmbedding(row2.user_text, row2.assistant_text, void 0, embedOptions));
-      }
-    } catch (err) {
-      report.available = false;
-      report.reason = `embeddings unavailable: ${firstLine2(err?.message ?? String(err))}`;
-      report.ms = Date.now() - started;
-      return report;
-    }
-    const write = db.transaction(() => {
-      chunk.forEach((row2, n2) => {
-        const vector = vectors[n2];
-        if (!vector)
-          return;
-        dropVec.run(row2.id);
-        insertVec.run(row2.id, embeddingToBlob(vector));
-        stamp.run(EMBEDDING_VERSION, row2.id);
-        report.embedded += 1;
-      });
-    });
-    write();
-    options.onProgress?.({ phase: "embed", done: Math.min(i + EMBED_CHUNK, pending.length), total: pending.length });
-  }
-  report.ghostPrompts = await embedGhostPrompts(db, embedOptions);
-  report.ms = Date.now() - started;
-  return report;
-}
-function ghostVecTable(db) {
-  return db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'vec_ghost_prompts'`).get().n > 0;
-}
-function pendingGhostPrompts(db) {
-  try {
-    if (!ghostVecTable(db))
-      return 0;
-    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM ghost_prompts
-          WHERE (embedding_version IS NULL OR embedding_version != ?)
-            AND length(trim(text)) > 3`).get(EMBEDDING_VERSION);
-    return row2.n;
-  } catch {
-    return 0;
-  }
-}
-async function embedGhostPrompts(db, embedOptions) {
-  if (!ghostVecTable(db))
-    return 0;
-  let pending;
-  try {
-    pending = db.prepare(`SELECT id, text FROM ghost_prompts
-          WHERE (embedding_version IS NULL OR embedding_version != ?)
-            AND length(trim(text)) > 3
-          ORDER BY rowid`).all(EMBEDDING_VERSION);
-  } catch {
-    return 0;
-  }
-  if (pending.length === 0)
-    return 0;
-  const dropVec = db.prepare("DELETE FROM vec_ghost_prompts WHERE id = ?");
-  const insertVec = db.prepare("INSERT INTO vec_ghost_prompts (id, embedding) VALUES (?, ?)");
-  const stamp = db.prepare("UPDATE ghost_prompts SET embedding_version = ? WHERE id = ?");
-  let embedded = 0;
-  for (let i = 0; i < pending.length; i += EMBED_CHUNK) {
-    const chunk = pending.slice(i, i + EMBED_CHUNK);
-    let vectors;
-    try {
-      vectors = [];
-      for (const row2 of chunk) {
-        vectors.push(await generateExchangeEmbedding(row2.text, "", void 0, embedOptions));
-      }
-    } catch {
-      return embedded;
-    }
-    const write = db.transaction(() => {
-      chunk.forEach((row2, n2) => {
-        const vector = vectors[n2];
-        if (!vector)
-          return;
-        dropVec.run(row2.id);
-        insertVec.run(row2.id, embeddingToBlob(vector));
-        stamp.run(EMBEDDING_VERSION, row2.id);
-        embedded += 1;
-      });
-    });
-    write();
-  }
-  return embedded;
-}
-function writeSessionRecordTypes(db, sessionId, spec, version, unknownTypes) {
-  const write = db.transaction(() => {
-    db.prepare("DELETE FROM session_record_types WHERE session_id = ?").run(sessionId);
-    const insert = db.prepare(`INSERT INTO session_record_types (session_id, harness, version, type, count, novel)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(session_id, version, type) DO UPDATE SET count = excluded.count`);
-    for (const [type, count2] of Object.entries(unknownTypes)) {
-      insert.run(sessionId, spec.harness, version, type, count2, spec.novel(type) ? 1 : 0);
-    }
-  });
-  write();
-}
-function storedRecordTypes(db) {
-  try {
-    const rows = db.prepare(`SELECT harness, version, type,
-                SUM(count) AS count, COUNT(*) AS files, MAX(novel) AS novel
-           FROM session_record_types
-          GROUP BY harness, version, type
-          ORDER BY count DESC`).all();
-    return rows.map((r) => ({
-      harness: r.harness,
-      version: r.version,
-      type: r.type,
-      count: r.count,
-      files: r.files,
-      novel: r.novel === 1
-    }));
-  } catch {
-    return [];
-  }
-}
-function firstLine2(s) {
-  return (s.split("\n")[0] ?? s).trim();
-}
-function sum(xs, f) {
-  return xs.reduce((a, x) => a + f(x), 0);
-}
-
-// ../core/dist/tags.js
-var MAX_TAG_LENGTH = 32;
-function normalizeTag(raw) {
-  const trimmed = raw.trim().replace(/^[+-]+/, "");
-  const cleaned = trimmed.toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9./-]+/g, "").replace(/-{2,}/g, "-").replace(/^[-./]+|[-./]+$/g, "");
-  if (!cleaned)
-    return null;
-  return cleaned.slice(0, MAX_TAG_LENGTH).replace(/[-./]+$/, "") || null;
-}
-function parseTagArgs(args) {
-  const add = [];
-  const remove = [];
-  const rejected = [];
-  for (const raw of args) {
-    const arg = raw.trim();
-    if (!arg)
-      continue;
-    const tag = normalizeTag(arg);
-    if (!tag) {
-      rejected.push(arg);
-      continue;
-    }
-    if (arg.startsWith("-"))
-      remove.push(tag);
-    else
-      add.push(tag);
-  }
-  return { add: unique(add), remove: unique(remove), rejected };
-}
-function sessionTags(db, sessionId) {
-  return db.prepare("SELECT tag FROM tags WHERE session_id = ? ORDER BY tag").all(sessionId).map((r) => r.tag);
-}
-function tagsForSessions(db, ids) {
-  const out = /* @__PURE__ */ new Map();
-  if (ids.length === 0)
-    return out;
-  const rows = db.prepare(`SELECT session_id, tag FROM tags WHERE session_id IN (${ids.map(() => "?").join(",")})
-        ORDER BY session_id, tag`).all(...ids);
-  for (const r of rows) {
-    const list = out.get(r.session_id);
-    if (list)
-      list.push(r.tag);
-    else
-      out.set(r.session_id, [r.tag]);
-  }
-  return out;
-}
-function allTags(db) {
-  return db.prepare(`SELECT tag, COUNT(*) AS sessions FROM tags GROUP BY tag
-        ORDER BY sessions DESC, tag`).all();
-}
-function applyTags(db, sessionId, change) {
-  const add = unique((change.add ?? []).map(String));
-  const remove = new Set(unique((change.remove ?? []).map(String)));
-  const before = new Set(sessionTags(db, sessionId));
-  const added = add.filter((t) => !before.has(t) && !remove.has(t));
-  const removed = [...remove].filter((t) => before.has(t));
-  const unchanged = [
-    ...add.filter((t) => before.has(t)),
-    ...[...remove].filter((t) => !before.has(t)).map((t) => `-${t}`)
-  ];
-  if (added.length || removed.length) {
-    const insert = db.prepare("INSERT OR IGNORE INTO tags (session_id, tag) VALUES (?, ?)");
-    const del = db.prepare("DELETE FROM tags WHERE session_id = ? AND tag = ?");
-    db.transaction(() => {
-      for (const t of added)
-        insert.run(sessionId, t);
-      for (const t of removed)
-        del.run(sessionId, t);
-    })();
-  }
-  return { sessionId, tags: sessionTags(db, sessionId), added, removed, unchanged };
-}
-function isPinned(db, sessionId) {
-  const row2 = db.prepare("SELECT pinned_at FROM pins WHERE session_id = ?").get(sessionId);
-  return { pinned: Boolean(row2), pinnedAt: row2?.pinned_at ?? null };
-}
-function pinSession(db, sessionId, at = iso()) {
-  const existing = isPinned(db, sessionId);
-  if (existing.pinned) {
-    return { sessionId, pinned: true, pinnedAt: existing.pinnedAt, changed: false };
-  }
-  db.prepare("INSERT OR REPLACE INTO pins (session_id, pinned_at) VALUES (?, ?)").run(sessionId, at);
-  return { sessionId, pinned: true, pinnedAt: at, changed: true };
-}
-function unpinSession(db, sessionId) {
-  const existing = isPinned(db, sessionId);
-  if (!existing.pinned)
-    return { sessionId, pinned: false, pinnedAt: null, changed: false };
-  db.prepare("DELETE FROM pins WHERE session_id = ?").run(sessionId);
-  return { sessionId, pinned: false, pinnedAt: existing.pinnedAt, changed: true };
-}
-var LINKED_TO_SQL = (column) => `EXISTS (SELECT 1 FROM links l
-             WHERE (l.a_session_id = ${column} AND l.b_session_id = ?)
-                OR (l.b_session_id = ${column} AND l.a_session_id = ?))`;
-function linkSessions(db, a, b, note, at = iso()) {
-  const existing = db.prepare(`SELECT a_session_id, b_session_id, note, created_at FROM links
-        WHERE (a_session_id = ? AND b_session_id = ?) OR (a_session_id = ? AND b_session_id = ?)`).get(a, b, b, a);
-  if (existing) {
-    const kept = note ?? existing.note;
-    if (kept !== existing.note) {
-      db.prepare("UPDATE links SET note = ? WHERE a_session_id = ? AND b_session_id = ?").run(kept, existing.a_session_id, existing.b_session_id);
-    }
-    return {
-      a: existing.a_session_id,
-      b: existing.b_session_id,
-      note: kept,
-      createdAt: existing.created_at,
-      created: false,
-      reversed: existing.a_session_id !== a
-    };
-  }
-  db.prepare("INSERT INTO links (a_session_id, b_session_id, note, created_at) VALUES (?, ?, ?, ?)").run(a, b, note ?? null, at);
-  return { a, b, note: note ?? null, createdAt: at, created: true, reversed: false };
-}
-function unlinkSessions(db, a, b) {
-  const info = db.prepare(`DELETE FROM links
-        WHERE (a_session_id = ? AND b_session_id = ?) OR (a_session_id = ? AND b_session_id = ?)`).run(a, b, b, a);
-  return info.changes > 0;
-}
-function sessionLinks(db, sessionId) {
-  const rows = db.prepare(`SELECT b_session_id AS other, note, created_at, 'out' AS direction FROM links
-         WHERE a_session_id = ?
-       UNION ALL
-       SELECT a_session_id AS other, note, created_at, 'in' AS direction FROM links
-         WHERE b_session_id = ?
-       ORDER BY created_at DESC, other`).all(sessionId, sessionId);
-  return rows.map((r) => ({
-    sessionId: r.other,
-    note: r.note,
-    createdAt: r.created_at,
-    direction: r.direction
-  }));
-}
-function unique(list) {
-  return [...new Set(list)];
-}
-
-// ../core/dist/search/filters.js
-var UNTITLED_SESSION_SQL = `COALESCE(TRIM(s.title), '') = ''
-       AND NOT EXISTS (SELECT 1 FROM cards c
-                        WHERE c.session_id = s.id AND COALESCE(TRIM(c.title), '') <> '')`;
-var UNTITLED_GHOST_SQL = `COALESCE(TRIM(g.title), '') = ''
-       AND NOT EXISTS (SELECT 1 FROM cards c
-                        WHERE c.session_id = g.session_id
-                          AND COALESCE(TRIM(c.title), '') <> '')
-       AND NOT EXISTS (SELECT 1 FROM ghost_prompts p
-                        WHERE p.session_id = g.session_id
-                          AND p.text NOT LIKE '/%' AND length(trim(p.text)) > 3)`;
-function buildExchangeFilters(filters = {}) {
-  const parts = [];
-  const params = [];
-  if (filters.since) {
-    validateISODate(filters.since, "--since");
-    parts.push("e.ts >= ?");
-    params.push(filters.since);
-  }
-  if (filters.until) {
-    validateISODate(filters.until, "--until");
-    parts.push("e.ts <= ?");
-    params.push(filters.until);
-  }
-  if (filters.project) {
-    parts.push("s.project = ?");
-    params.push(filters.project);
-  }
-  if (filters.harness) {
-    parts.push("s.harness = ?");
-    params.push(filters.harness);
-  }
-  if (filters.status && filters.status !== "ghost") {
-    parts.push("s.status = ?");
-    params.push(filters.status);
-  }
-  if (filters.branch) {
-    parts.push(branchClause(filters.branch, "s.git_branch"));
-    params.push(branchParam(filters.branch));
-  }
-  if (filters.sessionId) {
-    parts.push("e.session_id = ?");
-    params.push(filters.sessionId);
-  }
-  if (filters.file) {
-    parts.push(FILE_TOUCHED_SQL("e.files_touched"));
-    params.push(likePattern(filters.file));
-  }
-  if (filters.tag) {
-    parts.push("EXISTS (SELECT 1 FROM tags t WHERE t.session_id = e.session_id AND t.tag = ?)");
-    params.push(filters.tag);
-  }
-  if (filters.pinned) {
-    parts.push("EXISTS (SELECT 1 FROM pins p WHERE p.session_id = e.session_id)");
-  }
-  if (filters.linkedTo) {
-    parts.push(LINKED_TO_SQL("e.session_id"));
-    params.push(filters.linkedTo, filters.linkedTo);
-  }
-  if (filters.untitled)
-    parts.push(UNTITLED_SESSION_SQL);
-  const sidechains = filters.sidechains ?? "include";
-  if (sidechains === "only")
-    parts.push("e.is_sidechain = 1");
-  else if (sidechains === "exclude")
-    parts.push("e.is_sidechain = 0");
-  return {
-    sql: parts.length ? `AND ${parts.join(" AND ")}` : "",
-    params
-  };
-}
-function buildSessionFilters(filters = {}) {
-  const parts = [];
-  const params = [];
-  if (filters.since) {
-    validateISODate(filters.since, "--since");
-    parts.push("COALESCE(s.ended_at, s.started_at) >= ?");
-    params.push(filters.since);
-  }
-  if (filters.until) {
-    validateISODate(filters.until, "--until");
-    parts.push("COALESCE(s.started_at, s.ended_at) <= ?");
-    params.push(filters.until);
-  }
-  if (filters.project) {
-    parts.push("s.project = ?");
-    params.push(filters.project);
-  }
-  if (filters.harness) {
-    parts.push("s.harness = ?");
-    params.push(filters.harness);
-  }
-  if (filters.status && filters.status !== "ghost") {
-    parts.push("s.status = ?");
-    params.push(filters.status);
-  }
-  if (filters.branch) {
-    parts.push(branchClause(filters.branch, "s.git_branch"));
-    params.push(branchParam(filters.branch));
-  }
-  if (filters.sessionId) {
-    parts.push("s.id = ?");
-    params.push(filters.sessionId);
-  }
-  if (filters.file) {
-    parts.push(`EXISTS (SELECT 1 FROM exchanges e WHERE e.session_id = s.id
-                 AND ${FILE_TOUCHED_SQL("e.files_touched")})`);
-    params.push(likePattern(filters.file));
-  }
-  if (filters.tag) {
-    parts.push("EXISTS (SELECT 1 FROM tags t WHERE t.session_id = s.id AND t.tag = ?)");
-    params.push(filters.tag);
-  }
-  if (filters.pinned) {
-    parts.push("EXISTS (SELECT 1 FROM pins p WHERE p.session_id = s.id)");
-  }
-  if (filters.linkedTo) {
-    parts.push(LINKED_TO_SQL("s.id"));
-    params.push(filters.linkedTo, filters.linkedTo);
-  }
-  if (filters.untitled)
-    parts.push(UNTITLED_SESSION_SQL);
-  const sidechains = filters.sidechains ?? "include";
-  if (sidechains === "only")
-    parts.push("s.is_sidechain = 1");
-  else if (sidechains === "exclude")
-    parts.push("s.is_sidechain = 0");
-  return { sql: parts.length ? `AND ${parts.join(" AND ")}` : "", params };
-}
-function buildGhostFilters(filters = {}) {
-  const parts = [];
-  const params = [];
-  if (filters.since) {
-    validateISODate(filters.since, "--since");
-    parts.push("COALESCE(g.last_ts, g.first_ts) >= ?");
-    params.push(filters.since);
-  }
-  if (filters.until) {
-    validateISODate(filters.until, "--until");
-    parts.push("COALESCE(g.first_ts, g.last_ts) <= ?");
-    params.push(filters.until);
-  }
-  if (filters.project) {
-    parts.push("g.project = ?");
-    params.push(filters.project);
-  }
-  if (filters.harness) {
-    parts.push("g.harness = ?");
-    params.push(filters.harness);
-  }
-  if (filters.branch) {
-    parts.push(branchClause(filters.branch, "g.git_branch"));
-    params.push(branchParam(filters.branch));
-  }
-  if (filters.sessionId) {
-    parts.push("g.session_id = ?");
-    params.push(filters.sessionId);
-  }
-  if (filters.tag) {
-    parts.push("EXISTS (SELECT 1 FROM tags t WHERE t.session_id = g.session_id AND t.tag = ?)");
-    params.push(filters.tag);
-  }
-  if (filters.pinned) {
-    parts.push("EXISTS (SELECT 1 FROM pins p WHERE p.session_id = g.session_id)");
-  }
-  if (filters.linkedTo) {
-    parts.push(LINKED_TO_SQL("g.session_id"));
-    params.push(filters.linkedTo, filters.linkedTo);
-  }
-  if (filters.untitled)
-    parts.push(UNTITLED_GHOST_SQL);
-  return { sql: parts.length ? `AND ${parts.join(" AND ")}` : "", params };
-}
-function hasMetadataFilters(filters = {}) {
-  return Boolean(filters.project || filters.harness || filters.status || filters.branch || filters.sessionId || filters.tag || filters.file || filters.pinned || filters.linkedTo || filters.untitled || filters.sidechains && filters.sidechains !== "include");
-}
-function knnCandidates(limit, filters = {}) {
-  return hasMetadataFilters(filters) ? limit * 3 : limit;
-}
-function FILE_TOUCHED_SQL(column) {
-  return `EXISTS (SELECT 1 FROM json_each(
-                    CASE WHEN json_valid(${column}) THEN ${column} ELSE '[]' END
-                  ) jf WHERE jf.value LIKE ? ESCAPE '\\')`;
-}
-function likePattern(value) {
-  const hasWildcard = /[%*]/.test(value);
-  const escaped = value.replace(/[\\_]/g, (c) => `\\${c}`);
-  return hasWildcard ? escaped.replace(/\*/g, "%") : `%${escaped}%`;
-}
-function branchClause(value, column) {
-  return /[%*]/.test(value) ? `${column} LIKE ? ESCAPE '\\'` : `${column} = ?`;
-}
-function branchParam(value) {
-  return /[%*]/.test(value) ? value.replace(/[\\_]/g, (c) => `\\${c}`).replace(/\*/g, "%") : value;
-}
-function validateISODate(value, paramName) {
-  if (!/^\d{4}-\d{2}-\d{2}([T ].*)?$/.test(value)) {
-    throw new Error(`invalid ${paramName} date: "${value}". expected YYYY-MM-DD (for example 2026-08-01)`);
-  }
-  if (Number.isNaN(new Date(value).getTime())) {
-    throw new Error(`invalid ${paramName} date: "${value}". not a valid calendar date`);
-  }
-}
-
-// ../core/dist/search/similarity.js
-function l2DistanceToCosineSimilarity(distance) {
-  const similarity = 1 - distance * distance / 2;
-  return Math.max(-1, Math.min(1, similarity));
-}
-var RRF_K = 60;
-function rrfScore(rank, k = RRF_K) {
-  return 1 / (k + rank);
 }
 
 // ../core/dist/search/snippet.js
@@ -11841,6 +7011,102 @@ function cut(text, start, end, pick3) {
     text: lead + body + tail2,
     match: { start: lead.length + at, end: lead.length + at + word.length }
   };
+}
+
+// ../core/dist/embeddings.js
+import fs10 from "node:fs";
+import os2 from "node:os";
+import path8 from "node:path";
+import process8 from "node:process";
+var EMBEDDING_VERSION = 1;
+var MODEL_ID = "Xenova/bge-small-en-v1.5";
+var MODEL_DTYPE = "q8";
+var EMBEDDING_DIMENSIONS = 384;
+var MODEL_DOWNLOAD_BYTES = 34014426;
+var BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
+var MAX_INPUT_CHARS = 2e3;
+function embedThreads() {
+  const override = Number(process8.env["POTSHERD_EMBED_THREADS"]);
+  if (Number.isFinite(override) && override >= 1)
+    return Math.floor(override);
+  const logical = os2.availableParallelism?.() ?? os2.cpus().length ?? 2;
+  return Math.max(1, Math.min(4, Math.floor(logical / 2)));
+}
+var pipelinePromise = null;
+function isModelCached(cacheDir = modelsDir()) {
+  const dir = path8.join(cacheDir, ...MODEL_ID.split("/"), "onnx");
+  try {
+    return fs10.readdirSync(dir).some((f) => f.endsWith(".onnx") && fs10.statSync(path8.join(dir, f)).size > 1e6);
+  } catch {
+    return false;
+  }
+}
+async function getPipeline(options = {}) {
+  if (pipelinePromise)
+    return pipelinePromise;
+  pipelinePromise = (async () => {
+    const cacheDir = options.cacheDir ?? modelsDir();
+    fs10.mkdirSync(cacheDir, { recursive: true });
+    const transformers = await import("@huggingface/transformers");
+    const env = transformers.env;
+    env.allowLocalModels = true;
+    env.useBrowserCache = false;
+    env.cacheDir = cacheDir;
+    const onProgress = options.onProgress;
+    const built = await transformers.pipeline("feature-extraction", MODEL_ID, {
+      dtype: MODEL_DTYPE,
+      session_options: { intraOpNumThreads: embedThreads(), interOpNumThreads: 1 },
+      progress_callback: onProgress ? (p) => {
+        if (typeof p !== "object" || p === null)
+          return;
+        const rec = p;
+        if (typeof rec.progress === "number") {
+          onProgress(Math.max(0, Math.min(1, rec.progress / 100)), rec.file ?? "");
+        }
+      } : () => {
+      }
+    });
+    return built;
+  })();
+  try {
+    return await pipelinePromise;
+  } catch (error) {
+    pipelinePromise = null;
+    throw error;
+  }
+}
+async function generateEmbedding(text, options = {}) {
+  const pipe = await getPipeline(options);
+  const output = await pipe(text.substring(0, MAX_INPUT_CHARS), {
+    pooling: "mean",
+    normalize: true
+  });
+  return Array.from(output.data);
+}
+function withQueryPrefix(query) {
+  if (query.startsWith(BGE_QUERY_PREFIX))
+    return query;
+  return BGE_QUERY_PREFIX + query;
+}
+async function generateQueryEmbedding(query, options = {}) {
+  return generateEmbedding(withQueryPrefix(query), options);
+}
+function exchangeText(userText, assistantText, toolNames) {
+  let combined = `User: ${userText}
+
+Assistant: ${assistantText}`;
+  if (toolNames && toolNames.length > 0) {
+    combined += `
+
+Tools: ${toolNames.join(", ")}`;
+  }
+  return combined;
+}
+async function generateExchangeEmbedding(userText, assistantText, toolNames, options = {}) {
+  return generateEmbedding(exchangeText(userText, assistantText, toolNames), options);
+}
+function embeddingToBlob(embedding) {
+  return Buffer.from(new Float32Array(embedding).buffer);
 }
 
 // ../core/dist/recall.js
@@ -12525,7 +7791,7 @@ async function recall(db, query, filters = {}, options = {}) {
       vectors.used = used;
     } catch (err) {
       vectors.used = false;
-      vectors.reason = `vectors unavailable: ${firstLine3(err?.message ?? String(err))}`;
+      vectors.reason = `vectors unavailable: ${firstLine2(err?.message ?? String(err))}`;
     }
   }
   const quotable = fts.tokens.filter((t) => !QUOTE_STOPWORDS.has(t));
@@ -12774,8 +8040,4809 @@ function countGhosts(db) {
     return 0;
   }
 }
+function firstLine2(s) {
+  return (s.split("\n")[0] ?? s).trim();
+}
+
+// ../core/dist/rescue.js
+var HARNESS = "claude";
+async function rescue(opts = {}) {
+  const root = opts.root ?? potsherdDir();
+  return withLockAsync("rescue", () => rescueUnlocked(opts, root), { root, wait: 1e4 });
+}
+async function rescueUnlocked(opts, root) {
+  const started = Date.now();
+  const now = opts.now ?? /* @__PURE__ */ new Date();
+  const src = claudeDir(opts.claudeDir);
+  const cp = claudePaths(src);
+  const dest = path9.join(archiveDir(root), HARNESS);
+  const result = {
+    ranAt: now.toISOString(),
+    dryRun: Boolean(opts.dryRun),
+    claudeDir: src,
+    archiveDir: dest,
+    filesConsidered: 0,
+    filesCopied: 0,
+    filesSkipped: 0,
+    filesFailed: [],
+    bytesCopied: 0,
+    bytesArchived: 0,
+    sessionsArchived: 0,
+    sessionsInArchive: 0,
+    sidechainsArchived: 0,
+    memoryFilesArchived: 0,
+    sessionIndexesArchived: 0,
+    historyArchived: false,
+    ghostsBuilt: 0,
+    ghostsUpdated: 0,
+    ghostPrompts: 0,
+    promptsRecovered: 0,
+    ghostsWithTitles: 0,
+    durationMs: 0,
+    warnings: []
+  };
+  const disk = scanClaudeDisk(src, { titles: false, content: false });
+  if (!disk.exists) {
+    result.warnings.push(`no projects directory at ${cp.projects}`);
+  }
+  const db = opts.dryRun ? open({ root, file: ":memory:" }) : open({ root });
+  try {
+    if (!opts.ghostsOnly) {
+      copyPass(db, disk.projectsDir, cp.history, dest, result, opts);
+    }
+    await ghostPass(db, src, disk, result, opts);
+    if (!opts.dryRun) {
+      db.prepare(`INSERT INTO rescue_log (ran_at, harness, sessions_copied, files_copied, files_skipped,
+           ghosts_built, prompts_recovered, bytes, duration_ms, settings_changed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(result.ranAt, HARNESS, result.sessionsArchived, result.filesCopied, result.filesSkipped, result.ghostsBuilt, result.promptsRecovered, result.bytesCopied, Date.now() - started, null);
+    }
+  } finally {
+    db.close();
+  }
+  result.durationMs = Date.now() - started;
+  return result;
+}
+function copyPass(db, projectsDir, historyPath, dest, result, opts) {
+  const files = collectSourceFiles(projectsDir);
+  if (fs11.existsSync(historyPath)) {
+    files.unshift({ abs: historyPath, rel: "history.jsonl", kind: "history" });
+  }
+  if (files.length === 0)
+    return;
+  const known = /* @__PURE__ */ new Map();
+  for (const row2 of db.prepare("SELECT source_path, sha256, bytes, source_mtime FROM archive_files").all()) {
+    known.set(row2.source_path, row2);
+  }
+  const upsert = db.prepare(`INSERT INTO archive_files (source_path, archive_path, sha256, bytes, source_mtime, copied_at, harness)
+     VALUES (@source_path, @archive_path, @sha256, @bytes, @source_mtime, @copied_at, @harness)
+     ON CONFLICT(source_path) DO UPDATE SET
+       archive_path = excluded.archive_path, sha256 = excluded.sha256, bytes = excluded.bytes,
+       source_mtime = excluded.source_mtime, copied_at = excluded.copied_at`);
+  let done = 0;
+  for (const f of files) {
+    result.filesConsidered++;
+    done++;
+    opts.onProgress?.({ phase: "copy", done, total: files.length, label: path9.basename(f.rel) });
+    const target = path9.join(dest, f.rel);
+    let stat;
+    try {
+      stat = fs11.statSync(f.abs);
+    } catch (err) {
+      result.filesFailed.push({ path: f.abs, error: err.message });
+      continue;
+    }
+    result.bytesArchived += stat.size;
+    const prev = known.get(f.abs);
+    if (prev && prev.bytes === stat.size && prev.source_mtime === Math.floor(stat.mtimeMs) && fs11.existsSync(target)) {
+      result.filesSkipped++;
+      countKind(result, f.kind, false);
+      continue;
+    }
+    let sha;
+    try {
+      sha = sha256File(f.abs);
+    } catch (err) {
+      result.filesFailed.push({ path: f.abs, error: err.message });
+      continue;
+    }
+    if (fs11.existsSync(target) && safeSize(target) === stat.size && sha256File(target) === sha) {
+      result.filesSkipped++;
+      countKind(result, f.kind, false);
+      if (!opts.dryRun) {
+        upsert.run({
+          source_path: f.abs,
+          archive_path: target,
+          sha256: sha,
+          bytes: stat.size,
+          source_mtime: Math.floor(stat.mtimeMs),
+          copied_at: result.ranAt,
+          harness: HARNESS
+        });
+      }
+      continue;
+    }
+    if (!opts.dryRun) {
+      try {
+        fs11.mkdirSync(path9.dirname(target), { recursive: true, mode: 448 });
+        const tmp = `${target}.potsherd-tmp`;
+        fs11.copyFileSync(f.abs, tmp);
+        fs11.chmodSync(tmp, 384);
+        fs11.utimesSync(tmp, stat.atime, stat.mtime);
+        fs11.renameSync(tmp, target);
+        upsert.run({
+          source_path: f.abs,
+          archive_path: target,
+          sha256: sha,
+          bytes: stat.size,
+          source_mtime: Math.floor(stat.mtimeMs),
+          copied_at: result.ranAt,
+          harness: HARNESS
+        });
+      } catch (err) {
+        result.filesFailed.push({ path: f.abs, error: err.message });
+        continue;
+      }
+    }
+    result.filesCopied++;
+    result.bytesCopied += stat.size;
+    countKind(result, f.kind, true);
+  }
+}
+function collectSourceFiles(projectsDir) {
+  const out = [];
+  const slugs = readdirSafe2(projectsDir, true);
+  for (const slugEntry of slugs) {
+    if (!slugEntry.isDirectory())
+      continue;
+    const slug = slugEntry.name;
+    const dir = path9.join(projectsDir, slug);
+    for (const e of readdirSafe2(dir, true)) {
+      if (e.isFile()) {
+        if (e.name.endsWith(".jsonl")) {
+          out.push({ abs: path9.join(dir, e.name), rel: path9.join(slug, e.name), kind: "session" });
+        } else if (e.name === "sessions-index.json") {
+          out.push({ abs: path9.join(dir, e.name), rel: path9.join(slug, e.name), kind: "index" });
+        }
+      } else if (e.isDirectory()) {
+        if (e.name === "memory") {
+          for (const m of readdirSafe2(path9.join(dir, "memory"))) {
+            out.push({
+              abs: path9.join(dir, "memory", m),
+              rel: path9.join(slug, "memory", m),
+              kind: "memory"
+            });
+          }
+        } else {
+          const nested = e.name === SIDECHAIN_DIR;
+          const subDir = nested ? path9.join(dir, e.name) : path9.join(dir, e.name, SIDECHAIN_DIR);
+          const relDir = nested ? path9.join(slug, e.name) : path9.join(slug, e.name, SIDECHAIN_DIR);
+          for (const s of readdirSafe2(subDir)) {
+            if (!s.endsWith(".jsonl"))
+              continue;
+            out.push({
+              abs: path9.join(subDir, s),
+              rel: path9.join(relDir, s),
+              kind: "sidechain"
+            });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+function countKind(result, kind, copied) {
+  if (kind === "session")
+    result.sessionsInArchive++;
+  if (!copied)
+    return;
+  if (kind === "session")
+    result.sessionsArchived++;
+  else if (kind === "sidechain")
+    result.sidechainsArchived++;
+  else if (kind === "memory")
+    result.memoryFilesArchived++;
+  else if (kind === "index")
+    result.sessionIndexesArchived++;
+  else if (kind === "history")
+    result.historyArchived = true;
+}
+var TITLE_STOPWORDS = /* @__PURE__ */ new Set([
+  "clear",
+  "continue",
+  "ok",
+  "yes",
+  "hi",
+  "y",
+  "n"
+]);
+var MIN_TITLE_CHARS = 8;
+var GHOST_TITLE_MAX_CHARS = 60;
+function collapse2(text) {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+function cutToCodePoints(text, max2) {
+  const points = Array.from(text);
+  return points.length <= max2 ? text : points.slice(0, max2).join("");
+}
+function isSubstantivePrompt(text) {
+  const clean = collapse2(text);
+  if (!clean)
+    return false;
+  if (clean.startsWith("/"))
+    return false;
+  if (Array.from(clean).length < MIN_TITLE_CHARS)
+    return false;
+  return !TITLE_STOPWORDS.has(clean.toLowerCase());
+}
+function firstSubstantivePrompt(texts) {
+  for (const t of texts)
+    if (isSubstantivePrompt(t))
+      return collapse2(t);
+  return null;
+}
+function ghostTitle(summary3, substantive, project, sessionId) {
+  if (summary3)
+    return summary3;
+  if (substantive)
+    return cutToCodePoints(substantive, GHOST_TITLE_MAX_CHARS);
+  return fallbackTitle(project, sessionId, HARNESS);
+}
+function isWrittenTitle(title, project, sessionId) {
+  const clean = collapse2(title);
+  return clean !== "" && clean !== fallbackTitle(project, sessionId, HARNESS);
+}
+function ghostFingerprint(historyPath, disk) {
+  let hs;
+  try {
+    hs = fs11.statSync(historyPath);
+  } catch {
+    return null;
+  }
+  const parts = [`algo:${String(GHOST_ALGO_VERSION)}`, `history:${hs.size}:${Math.floor(hs.mtimeMs)}`];
+  const ids = disk.sessions.map((s) => s.sessionId).sort();
+  parts.push(`sessions:${ids.length}:${crypto.createHash("sha256").update(ids.join("\n")).digest("hex")}`);
+  for (const proj of (disk.projects ?? []).filter((p) => p.hasSessionsIndex)) {
+    const p = path9.join(proj.dir, "sessions-index.json");
+    try {
+      const st = fs11.statSync(p);
+      parts.push(`index:${p}:${st.size}:${Math.floor(st.mtimeMs)}`);
+    } catch {
+      parts.push(`index:${p}:gone`);
+    }
+  }
+  return crypto.createHash("sha256").update(parts.sort().join("\n")).digest("hex");
+}
+var GHOST_ALGO_VERSION = 2;
+var GHOST_FINGERPRINT_KEY = "claude:ghosts";
+function ghostTotals(db) {
+  const g = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(prompt_count), 0) AS prompts FROM ghosts").get();
+  const rows = db.prepare("SELECT COUNT(*) AS n FROM ghost_prompts").get();
+  const named2 = db.prepare("SELECT session_id, project, title FROM ghosts").all();
+  let titled2 = 0;
+  for (const r of named2) {
+    if (isWrittenTitle(r.title, r.project, r.session_id))
+      titled2++;
+  }
+  return { ghosts: g.n, prompts: g.prompts, promptRows: rows.n, withTitles: titled2 };
+}
+async function ghostPass(db, src, disk, result, opts) {
+  const fingerprint = opts.dryRun ? null : ghostFingerprint(claudePaths(src).history, disk);
+  if (fingerprint) {
+    const seen = db.prepare("SELECT value FROM sync_state WHERE key = ?").get(GHOST_FINGERPRINT_KEY);
+    const totals = ghostTotals(db);
+    if (seen?.value === fingerprint && totals.ghosts > 0) {
+      result.ghostsUpdated = totals.ghosts;
+      result.promptsRecovered = totals.prompts;
+      result.ghostPrompts = totals.promptRows;
+      result.ghostsWithTitles = totals.withTitles;
+      return;
+    }
+  }
+  const history = await readHistory(src, { withPrompts: true });
+  if (!history.exists) {
+    result.warnings.push("no history.jsonl \u2014 nothing to rebuild ghosts from");
+    return;
+  }
+  const index = readSessionsIndexes(src);
+  const onDisk = new Set(disk.sessions.map((s) => s.sessionId));
+  const existing = /* @__PURE__ */ new Map();
+  for (const row2 of db.prepare("SELECT session_id, prompt_count FROM ghosts").all()) {
+    existing.set(row2.session_id, row2.prompt_count);
+  }
+  const upsertGhost = db.prepare(`INSERT INTO ghosts (session_id, harness, project, first_ts, last_ts, prompt_count,
+        first_prompt, title, message_count, git_branch, source)
+     VALUES (@session_id, @harness, @project, @first_ts, @last_ts, @prompt_count,
+        @first_prompt, @title, @message_count, @git_branch, @source)
+     ON CONFLICT(session_id) DO UPDATE SET
+       project = excluded.project, first_ts = excluded.first_ts, last_ts = excluded.last_ts,
+       prompt_count = excluded.prompt_count, first_prompt = excluded.first_prompt,
+       title = excluded.title,
+       message_count = COALESCE(excluded.message_count, ghosts.message_count),
+       git_branch = COALESCE(excluded.git_branch, ghosts.git_branch),
+       source = excluded.source`);
+  const clearPrompts = db.prepare("DELETE FROM ghost_prompts WHERE session_id = ?");
+  const insertPrompt = db.prepare(`INSERT INTO ghost_prompts (id, session_id, seq, ts, text, redacted)
+     VALUES (?, ?, ?, ?, ?, 0)`);
+  const ghosts = [...history.sessions.values()].filter((s) => !onDisk.has(s.sessionId));
+  let done = 0;
+  const run3 = db.transaction(() => {
+    for (const g of ghosts) {
+      done++;
+      if (done % 25 === 0) {
+        opts.onProgress?.({ phase: "ghosts", done, total: ghosts.length });
+      }
+      const idx = index.entries.get(g.sessionId);
+      const source = idx ? "both" : "history";
+      const summary3 = collapse2(idx?.summary) || null;
+      const project = g.project || idx?.projectPath || null;
+      const substantive = firstSubstantivePrompt([
+        ...g.prompts.map((p) => p.text),
+        g.firstPrompt,
+        idx?.firstPrompt
+      ]);
+      const title = ghostTitle(summary3, substantive, project, g.sessionId);
+      const row2 = {
+        session_id: g.sessionId,
+        harness: HARNESS,
+        project,
+        first_ts: g.firstTs ? new Date(g.firstTs).toISOString() : null,
+        last_ts: g.lastTs ? new Date(g.lastTs).toISOString() : null,
+        prompt_count: g.promptCount,
+        // The *substantive* prompt, or nothing. The verbatim prompt stream,
+        // slash commands and all, is `ghost_prompts` — which is what `show`
+        // renders and what `ghost_prompts_fts` searches — so nothing is lost
+        // by keeping the denormalised copy free of `/resume`. Null here means
+        // "this session typed nothing that names it", which is exactly when
+        // `title` is the `<project>-<id8>` fallback.
+        first_prompt: substantive,
+        title,
+        message_count: idx?.messageCount ?? null,
+        git_branch: idx?.gitBranch ?? null,
+        source
+      };
+      const had = existing.has(g.sessionId);
+      if (!opts.dryRun) {
+        upsertGhost.run(row2);
+        clearPrompts.run(g.sessionId);
+        let seq = 0;
+        for (const p of g.prompts) {
+          insertPrompt.run(`${g.sessionId}:${seq}`, g.sessionId, seq, p.ts ? new Date(p.ts).toISOString() : null, p.text);
+          seq++;
+        }
+      }
+      if (had)
+        result.ghostsUpdated++;
+      else
+        result.ghostsBuilt++;
+      if (summary3 || substantive)
+        result.ghostsWithTitles++;
+      result.ghostPrompts += g.prompts.length;
+      result.promptsRecovered += g.promptCount;
+    }
+  });
+  run3();
+  if (!opts.dryRun) {
+    const orphanRun = db.transaction(() => {
+      for (const [id, e] of index.entries) {
+        if (onDisk.has(id) || history.sessions.has(id) || e.isSidechain)
+          continue;
+        const summary3 = collapse2(e.summary) || null;
+        const project = e.projectPath ?? null;
+        const substantive = firstSubstantivePrompt([e.firstPrompt]);
+        upsertGhost.run({
+          session_id: id,
+          harness: HARNESS,
+          project,
+          first_ts: e.created ?? null,
+          last_ts: e.modified ?? null,
+          prompt_count: 0,
+          first_prompt: substantive,
+          title: ghostTitle(summary3, substantive, project, id),
+          message_count: e.messageCount ?? null,
+          git_branch: e.gitBranch ?? null,
+          source: "sessions-index"
+        });
+        if (existing.has(id))
+          result.ghostsUpdated++;
+        else
+          result.ghostsBuilt++;
+        if (summary3 || substantive)
+          result.ghostsWithTitles++;
+      }
+    });
+    orphanRun();
+    if (fingerprint) {
+      db.prepare(`INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(GHOST_FINGERPRINT_KEY, fingerprint, result.ranAt);
+    }
+  }
+}
+function sha256File(p) {
+  const hash = crypto.createHash("sha256");
+  const fd = fs11.openSync(p, "r");
+  try {
+    const buf = Buffer.allocUnsafe(1 << 20);
+    for (; ; ) {
+      const read = fs11.readSync(fd, buf, 0, buf.length, null);
+      if (read <= 0)
+        break;
+      hash.update(buf.subarray(0, read));
+    }
+  } finally {
+    fs11.closeSync(fd);
+  }
+  return hash.digest("hex");
+}
+function safeSize(p) {
+  try {
+    return fs11.statSync(p).size;
+  } catch {
+    return -1;
+  }
+}
+function readdirSafe2(dir, withTypes) {
+  try {
+    return withTypes ? fs11.readdirSync(dir, { withFileTypes: true }) : fs11.readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+// ../core/dist/render/rescue-receipt.js
+function renderRescueReceipt(r, t = new Theme(), extras = { settingsChanged: null }) {
+  const card = new Card(t);
+  const verb = r.dryRun ? "rescue --dry-run" : "rescue";
+  card.heading(verb, tildify(r.archiveDir), date(r.ranAt)).blank();
+  const ghostsTouched = r.ghostsBuilt + r.ghostsUpdated;
+  card.rows([
+    {
+      label: r.dryRun ? "files to copy" : "files copied",
+      value: num(r.filesCopied),
+      note: r.filesCopied ? bytes(r.bytesCopied) : "nothing new since last rescue",
+      tone: r.filesCopied ? "ok" : "none"
+    },
+    {
+      label: "already archived",
+      value: num(r.filesSkipped),
+      note: bytes(r.bytesArchived) + " total on disk"
+    },
+    {
+      // "sessions 0" on a second run reads as "the archive holds no sessions".
+      // Both halves are spelled out instead: newly archived, then the total.
+      label: "sessions archived",
+      value: num(r.sessionsArchived),
+      note: sessionNote(r)
+    },
+    {
+      label: "ghosts rebuilt",
+      value: num(r.ghostsBuilt),
+      note: ghostNote(r)
+    },
+    {
+      label: "prompts recovered",
+      value: num(r.promptsRecovered),
+      note: promptNote(r, ghostsTouched, t),
+      tone: r.promptsRecovered ? "accent" : "none"
+    }
+  ]);
+  card.blank();
+  card.rows([sweepRow(t, extras)]);
+  if (r.filesFailed.length) {
+    card.blank();
+    card.text(t.warn(`${num(r.filesFailed.length)} files could not be read:`));
+    for (const fail2 of r.filesFailed.slice(0, 3)) {
+      card.text(t.dim(`  ${elideMiddle(fail2.path, t.width - 8, t.ellip)} \u2014 ${fail2.error}`));
+    }
+  }
+  for (const w of r.warnings.slice(0, 2))
+    card.text(t.dim(`note: ${w}`));
+  card.blank();
+  if (r.dryRun) {
+    card.fit("nothing was written. run  potsherd rescue  to do it for real.", "nothing was written. run  potsherd rescue  for real.");
+    return card.toString();
+  }
+  card.text(`archive: ${elideMiddle(tildify(r.archiveDir), Math.max(24, t.width - 11), t.ellip)}`);
+  closing2(card, extras);
+  return card.toString();
+}
+function closing2(card, e) {
+  if (e.settingsRefused) {
+    const days = e.settingsTo ?? 3650;
+    card.fit(`potsherd cannot edit settings.json. add  "cleanupPeriodDays": ${days}  by hand.`, `add  "cleanupPeriodDays": ${days}  to settings.json by hand.`, `add  "cleanupPeriodDays": ${days}  by hand.`);
+    return;
+  }
+  const sweepOff = e.settingsChanged === true || (e.settingsEffective ?? 30) >= 365;
+  if (!sweepOff) {
+    card.fix("potsherd rescue --yes", "to stop the sweep deleting any more.", "to stop the sweep.");
+  } else if (!e.guardInstalled) {
+    card.fix("potsherd guard", "to take a copy at every startup, automatically.", "to copy at every startup.");
+  } else {
+    card.fix("potsherd audit", "to confirm nothing is due for deletion.", "to check nothing is due.");
+  }
+}
+function n(count2, one2, many = one2 + "s") {
+  return `${num(count2)} ${plural(count2, one2, many)}`;
+}
+function sessionNote(r) {
+  const bits = [];
+  if (r.sessionsInArchive)
+    bits.push(`${num(r.sessionsInArchive)} in the archive`);
+  if (r.sidechainsArchived)
+    bits.push(n(r.sidechainsArchived, "sidechain"));
+  if (r.memoryFilesArchived)
+    bits.push(n(r.memoryFilesArchived, "memory note"));
+  if (r.sessionIndexesArchived)
+    bits.push(n(r.sessionIndexesArchived, "index", "indexes"));
+  if (r.historyArchived)
+    bits.push("history.jsonl");
+  return bits.join(" \xB7 ");
+}
+function ghostNote(r) {
+  if (!r.ghostsBuilt && !r.ghostsUpdated)
+    return "";
+  if (!r.ghostsBuilt)
+    return `${num(r.ghostsUpdated)} in the archive, none new`;
+  return r.ghostsUpdated ? `${num(r.ghostsUpdated)} refreshed` : "";
+}
+function promptNote(r, ghostsTouched, t) {
+  const bits = [];
+  if (ghostsTouched)
+    bits.push(`from ${n(ghostsTouched, "ghost")}`);
+  if (r.ghostsWithTitles) {
+    bits.push(r.ghostsWithTitles === 1 ? "1 with a title" : `${num(r.ghostsWithTitles)} with titles`);
+  }
+  return bits.join(` ${t.sep} `);
+}
+function sweepRow(t, e) {
+  if (e.settingsChanged === true) {
+    return {
+      label: "the sweep",
+      value: "off",
+      note: `cleanupPeriodDays ${e.settingsFrom ?? "unset"} ${t.arrow} ${e.settingsTo}`,
+      tone: "ok"
+    };
+  }
+  const days = e.settingsEffective ?? e.settingsFrom ?? 30;
+  const off = days >= 365;
+  if (e.settingsChanged === false) {
+    return {
+      label: "the sweep",
+      value: off ? "off" : "on",
+      note: off ? `cleanupPeriodDays ${days}` : `still ${days} days \u2014 rescue again before it runs`,
+      tone: off ? "ok" : "warn"
+    };
+  }
+  return {
+    label: "the sweep",
+    value: off ? "off" : "on",
+    note: off ? `cleanupPeriodDays ${days}` : e.settingsRefused ? "settings.json left untouched" : e.settingsSkippedReason ?? "not asked (--no-settings)",
+    tone: off ? "ok" : "warn"
+  };
+}
+
+// ../core/dist/adapters/types.js
+var HARNESSES = [
+  "claude",
+  "codex",
+  "cursor",
+  "pi",
+  "gemini",
+  "opencode",
+  "copilot"
+];
+
+// ../core/dist/adapters/claude.js
+var claude_exports = {};
+__export(claude_exports, {
+  IGNORED_RECORD_TYPES: () => IGNORED_RECORD_TYPES,
+  archiveSourceDir: () => archiveSourceDir,
+  claudeAdapter: () => claudeAdapter,
+  discover: () => discover,
+  doctorLine: () => doctorLine,
+  isNovelRecordType: () => isNovelRecordType,
+  parse: () => parse,
+  readTranscriptVersion: () => readTranscriptVersion,
+  recordTypeStats: () => recordTypeStats,
+  sourceDir: () => sourceDir
+});
+import fs14 from "node:fs";
+import path11 from "node:path";
+
+// ../core/dist/doctor-line.js
+function formatDoctorLine(o) {
+  return `${o.harness.padEnd(12)}${o.status.padEnd(10)}${tildify(o.dir).padEnd(28)}  ${o.note}`;
+}
+
+// ../core/dist/parser/claude.js
+import fs13 from "node:fs";
+import path10 from "node:path";
+import crypto2 from "node:crypto";
+
+// ../core/dist/parser/jsonl.js
+import fs12 from "node:fs";
+var LF = 10;
+async function* readJsonlLines(filePath, options = {}) {
+  const start = options.start ?? 0;
+  let offset = start;
+  let lineNumber = options.startLine ?? 0;
+  let held = Buffer.alloc(0);
+  const stream = fs12.createReadStream(filePath, { start });
+  for await (const chunk of stream) {
+    held = held.length === 0 ? chunk : Buffer.concat([held, chunk]);
+    let idx = held.indexOf(LF);
+    while (idx !== -1) {
+      const raw = held.subarray(0, idx);
+      const end = offset + idx + 1;
+      lineNumber += 1;
+      yield { text: decode(raw), lineNumber, start: offset, end, terminated: true };
+      offset = end;
+      held = held.subarray(idx + 1);
+      idx = held.indexOf(LF);
+    }
+  }
+  if (held.length > 0) {
+    lineNumber += 1;
+    yield {
+      text: decode(held),
+      lineNumber,
+      start: offset,
+      end: offset + held.length,
+      terminated: false
+    };
+  }
+}
+function decode(raw) {
+  const text = raw.toString("utf8");
+  return text.endsWith("\r") ? text.slice(0, -1) : text;
+}
+function parseJsonLine(text) {
+  if (!text.trim())
+    return void 0;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return void 0;
+  }
+}
+
+// ../core/dist/parser/content.js
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function extractTextFromContent(content) {
+  if (typeof content === "string")
+    return content;
+  if (!Array.isArray(content))
+    return "";
+  return content.filter((block2) => isRecord(block2) && typeof block2.text === "string").map((block2) => block2.text).join("\n");
+}
+function extractTypedText(content, blockType = "text") {
+  if (typeof content === "string")
+    return content;
+  if (!Array.isArray(content))
+    return "";
+  return content.filter((b) => isRecord(b) && b.type === blockType && typeof b.text === "string").map((b) => b.text).join("\n");
+}
+function safeParseJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+function stringifyToolOutput(output) {
+  if (output === void 0 || output === null)
+    return void 0;
+  if (typeof output === "string")
+    return output;
+  const text = extractTextFromContent(output);
+  if (text.trim())
+    return text;
+  try {
+    return JSON.stringify(output);
+  } catch {
+    return void 0;
+  }
+}
+function stringifyToolInput(input) {
+  if (input === void 0 || input === null)
+    return "";
+  if (typeof input === "string")
+    return input;
+  try {
+    return JSON.stringify(input);
+  } catch {
+    return String(input);
+  }
+}
+var FILE_KEYS = ["file_path", "filePath", "notebook_path", "notebookPath", "path"];
+function filesFromToolInput(input) {
+  if (!isRecord(input))
+    return [];
+  const out = [];
+  for (const key of FILE_KEYS) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim())
+      out.push(value);
+  }
+  for (const value of Object.values(input)) {
+    if (!Array.isArray(value))
+      continue;
+    for (const item of value) {
+      for (const f of filesFromToolInput(item))
+        out.push(f);
+    }
+  }
+  return out;
+}
+function uniq(values) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const v of values) {
+    if (seen.has(v))
+      continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+
+// ../core/dist/parser/claude.js
+var SIDECHAIN_DIR2 = "subagents";
+var HANDLED_TYPES = /* @__PURE__ */ new Set([
+  "user",
+  "assistant",
+  "ai-title",
+  "agent-name",
+  "attachment",
+  "summary",
+  "system"
+]);
+async function parseClaudeTranscript(filePath, options = {}) {
+  const absolute2 = path10.resolve(filePath);
+  const fromOffset = options.fromOffset ?? 0;
+  const unknownTypes = {};
+  let malformedLines = 0;
+  let endOffset = fromOffset;
+  const exchanges = [];
+  let current = null;
+  let seq = options.fromSeq ?? 0;
+  let recordSessionId;
+  let cwd;
+  let gitBranch;
+  let entrypoint;
+  let model;
+  let title;
+  let agentName;
+  let sidechainFlag = false;
+  let firstTs;
+  let lastTs;
+  let userPrompts = 0;
+  let assistantTurns = 0;
+  let toolCallCount = 0;
+  const finalize = () => {
+    if (!current)
+      return;
+    const b = current;
+    current = null;
+    if (!b.userText.trim() && b.toolCalls.length === 0)
+      return;
+    exchanges.push({
+      id: exchangeId(sessionIdSoFar(), b.seq),
+      sessionId: sessionIdSoFar(),
+      seq: b.seq,
+      ts: b.ts,
+      userText: b.userText,
+      assistantText: b.assistantTexts.join("\n\n"),
+      toolCalls: b.toolCalls,
+      filesTouched: uniq(b.files),
+      isSidechain: sidechainFlag,
+      ...b.parentUuid ? { parentUuid: b.parentUuid } : {},
+      redacted: false
+    });
+  };
+  const sessionIdSoFar = () => resolveSessionId(absolute2, options, recordSessionId, sidechainFlag);
+  for await (const line of readJsonlLines(absolute2, { start: fromOffset })) {
+    if (!line.terminated)
+      break;
+    endOffset = line.end;
+    const parsed = parseJsonLine(line.text);
+    if (parsed === void 0) {
+      if (line.text.trim())
+        malformedLines += 1;
+      continue;
+    }
+    if (!isRecord(parsed)) {
+      malformedLines += 1;
+      continue;
+    }
+    const type = typeof parsed.type === "string" ? parsed.type : "";
+    if (!HANDLED_TYPES.has(type)) {
+      unknownTypes[type || "(no type)"] = (unknownTypes[type || "(no type)"] ?? 0) + 1;
+    }
+    if (typeof parsed.sessionId === "string")
+      recordSessionId = parsed.sessionId;
+    if (typeof parsed.cwd === "string")
+      cwd = parsed.cwd;
+    if (typeof parsed.gitBranch === "string")
+      gitBranch = parsed.gitBranch;
+    if (typeof parsed.entrypoint === "string")
+      entrypoint = parsed.entrypoint;
+    if (parsed.isSidechain === true)
+      sidechainFlag = true;
+    if (typeof parsed.timestamp === "string") {
+      firstTs ??= parsed.timestamp;
+      lastTs = parsed.timestamp;
+    }
+    if (type === "ai-title") {
+      if (typeof parsed.aiTitle === "string" && parsed.aiTitle.trim())
+        title = parsed.aiTitle;
+      continue;
+    }
+    if (type === "agent-name") {
+      if (typeof parsed.agentName === "string")
+        agentName = parsed.agentName;
+      continue;
+    }
+    if (type !== "user" && type !== "assistant")
+      continue;
+    const message2 = parsed.message;
+    if (!isRecord(message2))
+      continue;
+    const role = message2.role;
+    const content = message2.content;
+    const ts = typeof parsed.timestamp === "string" ? parsed.timestamp : (/* @__PURE__ */ new Date()).toISOString();
+    if (role === "user") {
+      const text2 = extractTypedText(content);
+      const results = toolResultBlocks(content);
+      const isHumanPrompt = typeof parsed.promptId === "string" && parsed.promptId.length > 0 && results.length === 0 && hasTextItem(content);
+      if (isHumanPrompt) {
+        finalize();
+        seq += 1;
+        userPrompts += 1;
+        current = {
+          seq,
+          ts,
+          userText: text2,
+          assistantTexts: [],
+          toolCalls: [],
+          byToolUseId: /* @__PURE__ */ new Map(),
+          files: [],
+          ...typeof parsed.parentUuid === "string" ? { parentUuid: parsed.parentUuid } : {}
+        };
+        continue;
+      }
+      if (current) {
+        for (const block2 of results) {
+          const id = typeof block2.tool_use_id === "string" ? block2.tool_use_id : void 0;
+          if (!id)
+            continue;
+          const at = current.byToolUseId.get(id);
+          if (at === void 0)
+            continue;
+          const call = current.toolCalls[at];
+          if (!call)
+            continue;
+          const out = stringifyToolOutput(block2.content);
+          if (out !== void 0)
+            call.result = out;
+          if (block2.is_error === true)
+            call.isError = true;
+        }
+        if (results.length === 0 && text2.trim()) {
+          current.userText = current.userText ? `${current.userText}
+${text2}` : text2;
+        }
+      }
+      continue;
+    }
+    if (role !== "assistant" || !current)
+      continue;
+    if (typeof message2.model === "string")
+      model = message2.model;
+    const text = extractTypedText(content);
+    if (text.trim()) {
+      current.assistantTexts.push(text);
+      assistantTurns += 1;
+    }
+    for (const block2 of toolUseBlocks(content)) {
+      const name = typeof block2.name === "string" ? block2.name : "unknown";
+      const call = { name, input: stringifyToolInput(block2.input) };
+      current.toolCalls.push(call);
+      toolCallCount += 1;
+      if (typeof block2.id === "string")
+        current.byToolUseId.set(block2.id, current.toolCalls.length - 1);
+      for (const f of filesFromToolInput(block2.input))
+        current.files.push(f);
+    }
+  }
+  finalize();
+  const sessionId = resolveSessionId(absolute2, options, recordSessionId, sidechainFlag);
+  const projectSlug = options.projectSlug ?? deriveProjectSlug(absolute2);
+  const bytes2 = options.bytes ?? statBytes(absolute2);
+  const isSidechain = options.isSidechain ?? sidechainFlag;
+  const session = {
+    id: sessionId,
+    harness: "claude",
+    sourcePath: absolute2,
+    project: cwd ?? unslugify(projectSlug),
+    projectSlug,
+    startedAt: firstTs ?? "",
+    endedAt: lastTs ?? firstTs ?? "",
+    ...title ? { title } : {},
+    ...gitBranch ? { gitBranch } : {},
+    ...entrypoint ? { entrypoint } : {},
+    ...model ? { model } : {},
+    isSidechain,
+    ...isSidechain ? { parentSessionId: options.parentSessionId ?? recordSessionId ?? "" } : {},
+    ...agentName ? { agentName } : {},
+    counts: { userPrompts, assistantTurns, toolCalls: toolCallCount, bytes: bytes2 },
+    status: options.status ?? "live"
+  };
+  return { session, exchanges, unknownTypes, endOffset, malformedLines };
+}
+function resolveSessionId(absolute2, options, recordSessionId, sidechainFlag) {
+  if (options.sessionId)
+    return options.sessionId;
+  const base2 = path10.basename(absolute2, ".jsonl");
+  const isSidechain = options.isSidechain ?? sidechainFlag ?? false;
+  if (isSidechain) {
+    const parent = options.parentSessionId ?? recordSessionId;
+    return parent ? `${parent}:${base2}` : base2;
+  }
+  return recordSessionId ?? base2;
+}
+function deriveProjectSlug(absolute2) {
+  const parts = absolute2.split(path10.sep);
+  for (let i = parts.length - 2; i >= 0; i -= 1) {
+    const part = parts[i];
+    if (!part)
+      continue;
+    if (part === SIDECHAIN_DIR2)
+      continue;
+    if (UUID_DIR.test(part))
+      continue;
+    return part;
+  }
+  return "unknown";
+}
+var UUID_DIR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function statBytes(absolute2) {
+  try {
+    return fs13.statSync(absolute2).size;
+  } catch {
+    return 0;
+  }
+}
+function toolUseBlocks(content) {
+  if (!Array.isArray(content))
+    return [];
+  return content.filter((b) => isRecord(b) && b.type === "tool_use");
+}
+function hasTextItem(content) {
+  if (typeof content === "string")
+    return true;
+  if (!Array.isArray(content))
+    return false;
+  return content.some((b) => isRecord(b) && b.type === "text" && typeof b.text === "string");
+}
+function toolResultBlocks(content) {
+  if (!Array.isArray(content))
+    return [];
+  return content.filter((b) => isRecord(b) && b.type === "tool_result");
+}
+function exchangeId(sessionId, seq) {
+  return crypto2.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
+}
+
+// ../core/dist/adapters/claude.js
+function sourceDir(claudeConfigDir) {
+  return claudePaths(claudeDir(claudeConfigDir)).projects;
+}
+function archiveSourceDir(root) {
+  return path11.join(archiveDir(root ?? potsherdDir()), "claude");
+}
+function discover(options = {}) {
+  const live = walkProjects(sourceDir(options.claudeDir), "live");
+  const byRel = /* @__PURE__ */ new Map();
+  for (const found of live)
+    byRel.set(found.rel, found);
+  if (options.archive !== false) {
+    const archiveRoot = archiveSourceDir(options.potsherdDir);
+    for (const found of walkProjects(archiveRoot, "archived")) {
+      if (byRel.has(found.rel))
+        continue;
+      found.originalPath = path11.join(sourceDir(options.claudeDir), found.rel);
+      byRel.set(found.rel, found);
+    }
+  }
+  return [...byRel.values()].sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
+}
+async function parse(source, options = {}) {
+  const raw = await parseClaudeTranscript(source.path, {
+    ...options,
+    // Only ever assert `true`: a top-level transcript that happens to carry a
+    // record with `isSidechain:true` is still a session, and forcing `false`
+    // would throw away the flag for a subagent file the path did not reveal.
+    ...source.isSidechain ? { isSidechain: true } : {},
+    ...source.parentSessionId ? { parentSessionId: source.parentSessionId } : {},
+    projectSlug: options.projectSlug ?? source.projectSlug,
+    status: source.status ?? "live",
+    bytes: source.bytes || void 0
+  });
+  const folded = foldContinuations(raw.exchanges, options.fromSeq ?? 0);
+  const version = await readTranscriptVersion(source.path);
+  return {
+    ...raw,
+    exchanges: folded.exchanges,
+    ...version ? { version } : {},
+    continuationsFolded: folded.folded,
+    orphanContinuations: folded.orphans
+  };
+}
+function doctorLine(options = {}) {
+  const dir = sourceDir(options.claudeDir);
+  let found = [];
+  try {
+    found = discover(options);
+  } catch {
+    found = [];
+  }
+  const exists = fs14.existsSync(dir);
+  const sidechains = found.filter((f) => f.isSidechain).length;
+  const archived = found.filter((f) => f.status === "archived").length;
+  const sessions = found.length - sidechains;
+  const parts = [`${sessions} session${sessions === 1 ? "" : "s"}`];
+  if (sidechains > 0)
+    parts.push(`${sidechains} sidechains`);
+  if (archived > 0)
+    parts.push(`${archived} from the archive`);
+  return formatDoctorLine({
+    harness: "claude",
+    status: exists || found.length > 0 ? "ready" : "absent",
+    dir,
+    note: exists || found.length > 0 ? parts.join(" \xB7 ") : "Claude Code not installed"
+  });
+}
+var claudeAdapter = {
+  harness: "claude",
+  displayName: "Claude Code",
+  sourceDir: () => sourceDir(),
+  discover: () => discover(),
+  parse: (source, options) => parse(source, options)
+};
+function walkProjects(projectsDir, status3) {
+  const out = [];
+  for (const slugEntry of readdirSafe3(projectsDir, true)) {
+    if (!slugEntry.isDirectory())
+      continue;
+    const slug = slugEntry.name;
+    const dir = path11.join(projectsDir, slug);
+    for (const entry of readdirSafe3(dir, true)) {
+      if (entry.isFile()) {
+        if (!entry.name.endsWith(".jsonl"))
+          continue;
+        push(out, {
+          file: path11.join(dir, entry.name),
+          rel: path11.join(slug, entry.name),
+          slug,
+          sessionId: basename3(entry.name),
+          isSidechain: false,
+          status: status3
+        });
+        continue;
+      }
+      if (!entry.isDirectory())
+        continue;
+      if (entry.name === "memory")
+        continue;
+      const flat = entry.name === SIDECHAIN_DIR;
+      const subDir = flat ? path11.join(dir, entry.name) : path11.join(dir, entry.name, SIDECHAIN_DIR);
+      const relDir = flat ? path11.join(slug, entry.name) : path11.join(slug, entry.name, SIDECHAIN_DIR);
+      for (const name of readdirSafe3(subDir)) {
+        if (!name.endsWith(".jsonl"))
+          continue;
+        push(out, {
+          file: path11.join(subDir, name),
+          rel: path11.join(relDir, name),
+          slug,
+          sessionId: flat ? basename3(name) : `${entry.name}:${basename3(name)}`,
+          isSidechain: true,
+          ...flat ? {} : { parentSessionId: entry.name },
+          status: status3
+        });
+      }
+    }
+  }
+  return out;
+}
+function push(out, spec) {
+  const st = statSafe(spec.file);
+  if (!st)
+    return;
+  out.push({
+    sessionId: spec.sessionId,
+    harness: "claude",
+    path: spec.file,
+    rel: spec.rel,
+    projectSlug: spec.slug,
+    bytes: st.size,
+    mtimeMs: st.mtimeMs,
+    isSidechain: spec.isSidechain,
+    ...spec.parentSessionId ? { parentSessionId: spec.parentSessionId } : {},
+    status: spec.status
+  });
+}
+function foldContinuations(exchanges, fromSeq) {
+  const kept = [];
+  let folded = 0;
+  let orphans = 0;
+  for (const exchange of exchanges) {
+    const previous = kept[kept.length - 1];
+    if (exchange.userText.trim()) {
+      kept.push(exchange);
+      continue;
+    }
+    if (!previous) {
+      orphans += 1;
+      continue;
+    }
+    folded += 1;
+    previous.assistantText = [previous.assistantText, exchange.assistantText].filter((t) => t.trim()).join("\n\n");
+    previous.toolCalls = [...previous.toolCalls, ...exchange.toolCalls];
+    previous.filesTouched = uniq([...previous.filesTouched, ...exchange.filesTouched]);
+  }
+  let seq = fromSeq;
+  for (const exchange of kept) {
+    seq += 1;
+    exchange.seq = seq;
+    exchange.id = exchangeId(exchange.sessionId, seq);
+  }
+  return { exchanges: kept, folded, orphans };
+}
+var VERSION_SCAN_LINES = 200;
+async function readTranscriptVersion(filePath) {
+  let seen = 0;
+  try {
+    for await (const line of readJsonlLines(filePath)) {
+      if (seen >= VERSION_SCAN_LINES)
+        break;
+      seen += 1;
+      const parsed = parseJsonLine(line.text);
+      if (!isRecord(parsed))
+        continue;
+      if (typeof parsed.version === "string" && parsed.version)
+        return parsed.version;
+    }
+  } catch {
+    return void 0;
+  }
+  return void 0;
+}
+var IGNORED_RECORD_TYPES = [
+  "last-prompt",
+  "mode",
+  "permission-mode",
+  "queue-operation",
+  "atis-latch",
+  "file-history-snapshot",
+  "file-history-delta",
+  "frame-link",
+  // Phase 1 found this as the sixteenth Claude Code record type, in no draft of
+  // `formats.md`, and left it OFF this list on purpose: "novel" was the honest
+  // answer until somebody opened one. Nobody did, for six phases, so `index`
+  // has been reporting it as an undocumented format change on every run since.
+  //
+  // Opened in phase 7, over the frozen snapshot: every instance is
+  //   { type, v, sessionId, artifacts: { <uuid>: { state, title, writtenAtMs } } }
+  // -- no `cwd`, no `timestamp`, no `message`, no `parentUuid`. It is the
+  // editor's bookkeeping for published artifacts, and there is nothing in it an
+  // exchange could carry. `tests/adapters/claude.test.ts` pins that shape, so a
+  // build that starts putting conversation into it fails rather than being
+  // silently skipped.
+  "artifact-comment-monitor"
+];
+var IGNORED = new Set(IGNORED_RECORD_TYPES);
+function isNovelRecordType(type) {
+  return !IGNORED.has(type);
+}
+function recordTypeStats(results) {
+  const rows = /* @__PURE__ */ new Map();
+  for (const result of results) {
+    const version = result.version ?? "unknown";
+    for (const [type, count2] of Object.entries(result.unknownTypes)) {
+      const key = `${version}\0${type}`;
+      const row2 = rows.get(key);
+      if (row2) {
+        row2.count += count2;
+        row2.files += 1;
+      } else {
+        rows.set(key, {
+          harness: "claude",
+          version,
+          type,
+          count: count2,
+          files: 1,
+          novel: isNovelRecordType(type)
+        });
+      }
+    }
+  }
+  return [...rows.values()].sort((a, b) => Number(b.novel) - Number(a.novel) || b.count - a.count || (a.version < b.version ? -1 : a.version > b.version ? 1 : 0) || (a.type < b.type ? -1 : 1));
+}
+function basename3(fileName) {
+  return fileName.slice(0, -".jsonl".length);
+}
+function statSafe(file) {
+  try {
+    return fs14.statSync(file);
+  } catch {
+    return null;
+  }
+}
+function readdirSafe3(dir, withFileTypes) {
+  try {
+    return withFileTypes ? fs14.readdirSync(dir, { withFileTypes: true }) : fs14.readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+// ../core/dist/adapters/codex.js
+var codex_exports = {};
+__export(codex_exports, {
+  DEFAULT_MAX_MESSAGE_BYTES: () => DEFAULT_MAX_MESSAGE_BYTES,
+  DEFAULT_MAX_VALUE_BYTES: () => DEFAULT_MAX_VALUE_BYTES,
+  clearSessionIndexCache: () => clearSessionIndexCache,
+  codexAdapter: () => codexAdapter,
+  codexDir: () => codexDir,
+  codexDoctor: () => codexDoctor,
+  codexEntrypoint: () => codexEntrypoint,
+  codexPaths: () => codexPaths,
+  discover: () => discover2,
+  doctorLine: () => doctorLine2,
+  filesFromCodexToolInput: () => filesFromCodexToolInput,
+  parse: () => parse2,
+  readCodexHeader: () => readCodexHeader,
+  readSessionIndex: () => readSessionIndex,
+  renderCodexDoctorLine: () => renderCodexDoctorLine,
+  sessionIdFromRolloutPath: () => sessionIdFromRolloutPath
+});
+import fs16 from "node:fs";
+import path13 from "node:path";
+
+// ../core/dist/parser/codex.js
+import fs15 from "node:fs";
+import path12 from "node:path";
+var TOOL_CALL_TYPES = /* @__PURE__ */ new Set([
+  "function_call",
+  "custom_tool_call",
+  "tool_search_call",
+  "local_shell_call"
+]);
+var TOOL_OUTPUT_TYPES = /* @__PURE__ */ new Set([
+  "function_call_output",
+  "custom_tool_call_output",
+  "tool_search_output",
+  "local_shell_call_output"
+]);
+var HANDLED_ENVELOPES = /* @__PURE__ */ new Set([
+  "session_meta",
+  "turn_context",
+  "response_item",
+  "event_msg",
+  "world_state",
+  "compacted"
+]);
+async function parseCodexTranscript(filePath, options = {}) {
+  const absolute2 = path12.resolve(filePath);
+  const fromOffset = options.fromOffset ?? 0;
+  const humanPrompts = await collectHumanPrompts(absolute2, fromOffset);
+  const unknownTypes = {};
+  let malformedLines = 0;
+  let endOffset = fromOffset;
+  const exchanges = [];
+  let current = null;
+  let seq = options.fromSeq ?? 0;
+  let sessionId = options.sessionId;
+  let cwd;
+  let model;
+  let entrypoint;
+  let firstTs;
+  let lastTs;
+  let userPrompts = 0;
+  let assistantTurns = 0;
+  let toolCallCount = 0;
+  const resolvedId = () => sessionId ?? sessionIdFromPath(absolute2);
+  const finalize = () => {
+    if (!current)
+      return;
+    const b = current;
+    current = null;
+    if (!b.userText.trim() && b.toolCalls.length === 0)
+      return;
+    exchanges.push({
+      id: exchangeId(resolvedId(), b.seq),
+      sessionId: resolvedId(),
+      seq: b.seq,
+      ts: b.ts,
+      userText: b.userText,
+      assistantText: b.assistantTexts.join("\n\n"),
+      toolCalls: b.toolCalls,
+      filesTouched: uniq(b.files),
+      isSidechain: false,
+      redacted: false
+    });
+  };
+  for await (const line of readJsonlLines(absolute2, { start: fromOffset })) {
+    if (!line.terminated)
+      break;
+    endOffset = line.end;
+    const parsed = parseJsonLine(line.text);
+    if (parsed === void 0) {
+      if (line.text.trim())
+        malformedLines += 1;
+      continue;
+    }
+    if (!isRecord(parsed)) {
+      malformedLines += 1;
+      continue;
+    }
+    const envelope = typeof parsed.type === "string" ? parsed.type : "";
+    if (!HANDLED_ENVELOPES.has(envelope)) {
+      unknownTypes[envelope || "(no type)"] = (unknownTypes[envelope || "(no type)"] ?? 0) + 1;
+    }
+    const ts = typeof parsed.timestamp === "string" ? parsed.timestamp : (/* @__PURE__ */ new Date()).toISOString();
+    if (typeof parsed.timestamp === "string") {
+      firstTs ??= parsed.timestamp;
+      lastTs = parsed.timestamp;
+    }
+    const payload = parsed.payload;
+    if (!isRecord(payload))
+      continue;
+    if (envelope === "session_meta") {
+      if (!options.sessionId) {
+        const id2 = payload.session_id ?? payload.id;
+        if (typeof id2 === "string")
+          sessionId = id2;
+      }
+      if (typeof payload.cwd === "string")
+        cwd = payload.cwd;
+      if (typeof payload.originator === "string")
+        entrypoint = payload.originator;
+      else if (typeof payload.source === "string")
+        entrypoint = payload.source;
+      continue;
+    }
+    if (envelope === "turn_context") {
+      if (typeof payload.cwd === "string")
+        cwd = payload.cwd;
+      if (typeof payload.model === "string")
+        model = payload.model;
+      continue;
+    }
+    if (envelope !== "response_item")
+      continue;
+    const kind = typeof payload.type === "string" ? payload.type : "";
+    if (kind === "message") {
+      const text = extractTextFromContent(payload.content);
+      if (!text.trim())
+        continue;
+      if (payload.role === "user") {
+        if (humanPrompts.size > 0 && !humanPrompts.has(normalise(text)))
+          continue;
+        finalize();
+        seq += 1;
+        userPrompts += 1;
+        current = {
+          seq,
+          ts,
+          userText: text,
+          assistantTexts: [],
+          toolCalls: [],
+          byCallId: /* @__PURE__ */ new Map(),
+          files: []
+        };
+      } else if (payload.role === "assistant" && current) {
+        current.assistantTexts.push(text);
+        current.ts = ts;
+        assistantTurns += 1;
+      }
+      continue;
+    }
+    if (TOOL_CALL_TYPES.has(kind) && current) {
+      let input = payload.arguments;
+      if (typeof input === "string")
+        input = safeParseJson(input);
+      else if (payload.input !== void 0)
+        input = payload.input;
+      else if (payload.action !== void 0)
+        input = payload.action;
+      const name = typeof payload.name === "string" && payload.name || typeof payload.namespace === "string" && payload.namespace || kind;
+      const call = { name, input: stringifyToolInput(input) };
+      current.toolCalls.push(call);
+      toolCallCount += 1;
+      if (typeof payload.call_id === "string") {
+        current.byCallId.set(payload.call_id, current.toolCalls.length - 1);
+      }
+      for (const f of filesFromToolInput(input))
+        current.files.push(f);
+      continue;
+    }
+    if (TOOL_OUTPUT_TYPES.has(kind) && current) {
+      const callId = typeof payload.call_id === "string" ? payload.call_id : void 0;
+      if (!callId)
+        continue;
+      const at = current.byCallId.get(callId);
+      if (at === void 0)
+        continue;
+      const call = current.toolCalls[at];
+      if (!call)
+        continue;
+      const out = stringifyToolOutput(payload.output);
+      if (out !== void 0)
+        call.result = out;
+    }
+  }
+  finalize();
+  const id = resolvedId();
+  const projectSlug = options.projectSlug ?? (cwd ? path12.basename(cwd) : "unknown");
+  const bytes2 = options.bytes ?? statBytes2(absolute2);
+  const session = {
+    id,
+    harness: "codex",
+    sourcePath: absolute2,
+    project: cwd ?? projectSlug,
+    projectSlug,
+    startedAt: firstTs ?? "",
+    endedAt: lastTs ?? firstTs ?? "",
+    ...options.title ? { title: options.title } : {},
+    ...options.gitBranch ? { gitBranch: options.gitBranch } : {},
+    ...entrypoint ? { entrypoint } : {},
+    ...model ? { model } : {},
+    isSidechain: false,
+    counts: { userPrompts, assistantTurns, toolCalls: toolCallCount, bytes: bytes2 },
+    status: options.status ?? "live"
+  };
+  return { session, exchanges, unknownTypes, endOffset, malformedLines };
+}
+async function collectHumanPrompts(absolute2, start) {
+  const out = /* @__PURE__ */ new Set();
+  for await (const line of readJsonlLines(absolute2, { start })) {
+    if (!line.terminated)
+      break;
+    const parsed = parseJsonLine(line.text);
+    if (!isRecord(parsed) || parsed.type !== "event_msg")
+      continue;
+    const payload = parsed.payload;
+    if (!isRecord(payload) || payload.type !== "user_message")
+      continue;
+    if (typeof payload.message === "string")
+      out.add(normalise(payload.message));
+  }
+  return out;
+}
+function normalise(text) {
+  return text.trim();
+}
+function sessionIdFromPath(filePath) {
+  const base2 = path12.basename(filePath, ".jsonl");
+  const matches = base2.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
+  const last2 = matches?.[matches.length - 1];
+  return last2 ?? base2;
+}
+function statBytes2(absolute2) {
+  try {
+    return fs15.statSync(absolute2).size;
+  } catch {
+    return 0;
+  }
+}
+
+// ../core/dist/codex/version.js
+var MIN_CODEX_VERSION = "0.130.0";
+function parseCodexCliVersion(output) {
+  return output.match(/\b(\d+\.\d+\.\d+)\b/)?.[1];
+}
+function compareSemver(a, b) {
+  const aParts = a.split(".").map((part) => Number.parseInt(part, 10));
+  const bParts = b.split(".").map((part) => Number.parseInt(part, 10));
+  for (let i = 0; i < 3; i += 1) {
+    const rawA = aParts[i];
+    const rawB = bParts[i];
+    const aPart = typeof rawA === "number" && Number.isFinite(rawA) ? rawA : 0;
+    const bPart = typeof rawB === "number" && Number.isFinite(rawB) ? rawB : 0;
+    if (aPart !== bPart)
+      return aPart - bPart;
+  }
+  return 0;
+}
+function versionMeetsMinimum(version, minimum = MIN_CODEX_VERSION) {
+  return compareSemver(version, minimum) >= 0;
+}
+
+// ../core/dist/adapters/codex.js
+var ROLLOUT_FILE = /^rollout-.*\.jsonl$/i;
+var UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+var MAX_WALK_DEPTH = 8;
+function sessionIdFromRolloutPath(filePath) {
+  const base2 = path13.basename(filePath, ".jsonl");
+  const matches = base2.match(UUID);
+  return matches?.[matches.length - 1] ?? base2;
+}
+function discover2(options = {}) {
+  const paths = codexPaths(codexDir(options.codexHome));
+  const out = [];
+  walk(paths.sessions, "live", 0, out);
+  walk(paths.archived, "archived", 0, out);
+  out.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  return out;
+}
+function walk(dir, status3, depth, out) {
+  if (depth > MAX_WALK_DEPTH)
+    return;
+  let entries;
+  try {
+    entries = fs16.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path13.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walk(full, status3, depth + 1, out);
+      continue;
+    }
+    if (!entry.isFile() && !entry.isSymbolicLink())
+      continue;
+    if (!ROLLOUT_FILE.test(entry.name))
+      continue;
+    let stat;
+    try {
+      stat = fs16.statSync(full);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile())
+      continue;
+    out.push({
+      sessionId: sessionIdFromRolloutPath(full),
+      harness: "codex",
+      path: full,
+      projectSlug: "",
+      bytes: stat.size,
+      mtimeMs: stat.mtimeMs,
+      isSidechain: false,
+      status: status3
+    });
+  }
+}
+function readSessionIndex(options = {}) {
+  const file = codexPaths(codexDir(options.codexHome)).sessionIndex;
+  const out = /* @__PURE__ */ new Map();
+  let text;
+  try {
+    text = fs16.readFileSync(file, "utf8");
+  } catch {
+    return out;
+  }
+  for (const line of text.split("\n")) {
+    if (!line.trim())
+      continue;
+    const parsed = parseJsonLine(line);
+    if (!isRecord(parsed) || typeof parsed["id"] !== "string")
+      continue;
+    const id = parsed["id"];
+    const threadName = parsed["thread_name"];
+    const updatedAt = parsed["updated_at"];
+    out.set(id, {
+      id,
+      ...typeof threadName === "string" && threadName.trim() ? { threadName } : {},
+      ...typeof updatedAt === "string" ? { updatedAt } : {}
+    });
+  }
+  return out;
+}
+var indexCache = /* @__PURE__ */ new Map();
+function sessionIndexCached(codexHome) {
+  const file = codexPaths(codexDir(codexHome)).sessionIndex;
+  let mtimeMs = -1;
+  try {
+    mtimeMs = fs16.statSync(file).mtimeMs;
+  } catch {
+  }
+  const hit2 = indexCache.get(file);
+  if (hit2 && hit2.mtimeMs === mtimeMs)
+    return hit2.entries;
+  const entries = readSessionIndex({ ...codexHome ? { codexHome } : {} });
+  indexCache.set(file, { mtimeMs, entries });
+  return entries;
+}
+function clearSessionIndexCache() {
+  indexCache.clear();
+}
+async function readCodexHeader(filePath) {
+  for await (const line of readJsonlLines(filePath)) {
+    if (!line.terminated)
+      return void 0;
+    const parsed = parseJsonLine(line.text);
+    if (!isRecord(parsed) || parsed["type"] !== "session_meta")
+      return void 0;
+    const payload = parsed["payload"];
+    if (!isRecord(payload))
+      return void 0;
+    const str2 = (key) => typeof payload[key] === "string" ? payload[key] : void 0;
+    const timestamp = typeof parsed["timestamp"] === "string" ? parsed["timestamp"] : void 0;
+    const header = {
+      ...str2("session_id") ?? str2("id") ? { sessionId: str2("session_id") ?? str2("id") } : {},
+      ...str2("cwd") ? { cwd: str2("cwd") } : {},
+      ...str2("originator") ? { originator: str2("originator") } : {},
+      ...str2("source") ? { source: str2("source") } : {},
+      ...str2("cli_version") ? { cliVersion: str2("cli_version") } : {},
+      ...str2("model_provider") ? { modelProvider: str2("model_provider") } : {},
+      ...str2("timestamp") ?? timestamp ? { startedAt: str2("timestamp") ?? timestamp } : {}
+    };
+    return header;
+  }
+  return void 0;
+}
+function codexEntrypoint(header) {
+  for (const raw of [header.originator, header.source]) {
+    if (!raw || !raw.trim())
+      continue;
+    const v = raw.trim().toLowerCase();
+    if (v.includes("desktop"))
+      return "desktop";
+    if (v.includes("vscode") || v.includes("vs code"))
+      return "vscode";
+    if (v.includes("cli"))
+      return "cli";
+    if (v.includes("exec"))
+      return "exec";
+    return v.replace(/\s+/g, "-");
+  }
+  return void 0;
+}
+var DATA_URI2 = /data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+)?(?:;[a-zA-Z0-9.+=-]+)*;base64,[A-Za-z0-9+/=\s]{64,}/g;
+var DEFAULT_MAX_VALUE_BYTES = 32 * 1024;
+var DEFAULT_MAX_MESSAGE_BYTES = 256 * 1024;
+function elideBinary2(text, tally2) {
+  if (!text.includes("base64,"))
+    return text;
+  return text.replace(DATA_URI2, (match, mime) => {
+    tally2.binaryParts += 1;
+    tally2.charsElided += match.length;
+    return `\u2039elided:${mime ?? "application/octet-stream"}:${match.length} bytes\u203A`;
+  });
+}
+function cap(text, max2, tally2) {
+  if (text.length <= max2)
+    return text;
+  const dropped = text.length - max2;
+  tally2.truncatedValues += 1;
+  tally2.charsElided += dropped;
+  return `${text.slice(0, max2)}
+\u2039elided:oversize:${dropped} bytes\u203A`;
+}
+var PATCH_FILE = /\*\*\* (?:Add|Update|Delete) File: ([^\n"\\]+)/g;
+var PATCH_MOVE = /\*\*\* Move to: ([^\n"\\]+)/g;
+function filesFromCodexToolInput(input) {
+  if (!input.includes("*** "))
+    return [];
+  const out = [];
+  for (const re of [PATCH_FILE, PATCH_MOVE]) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(input)) !== null) {
+      const file = m[1]?.trim();
+      if (file)
+        out.push(file);
+    }
+  }
+  return out;
+}
+async function parse2(source, options = {}) {
+  const header = await readCodexHeader(source.path);
+  const id = options.sessionId ?? header?.sessionId ?? source.sessionId;
+  const entries = sessionIndexCached(options.codexHome);
+  const indexed = entries.get(id);
+  const title = options.title ?? indexed?.threadName;
+  const result = await parseCodexTranscript(source.path, {
+    ...options.fromOffset !== void 0 ? { fromOffset: options.fromOffset } : {},
+    ...options.fromSeq !== void 0 ? { fromSeq: options.fromSeq } : {},
+    // The header is the file's own record, so passing it satisfies "parse() is
+    // allowed to correct the id" while still working from a byte offset, where
+    // the parser would never see `session_meta` again.
+    sessionId: id,
+    ...options.projectSlug ?? source.projectSlug ? { projectSlug: options.projectSlug ?? source.projectSlug } : {},
+    ...title ? { title } : {},
+    ...options.gitBranch ? { gitBranch: options.gitBranch } : {},
+    status: source.status ?? "live",
+    bytes: source.bytes
+  });
+  const tally2 = { binaryParts: 0, truncatedValues: 0, charsElided: 0 };
+  const maxValue = options.maxValueBytes ?? DEFAULT_MAX_VALUE_BYTES;
+  const maxMessage = options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES;
+  const exchanges = result.exchanges.map((exchange) => {
+    const toolCalls = exchange.toolCalls.map((call) => {
+      const input = cap(elideBinary2(call.input, tally2), maxValue, tally2);
+      const next = { ...call, input };
+      if (call.result !== void 0) {
+        next.result = cap(elideBinary2(call.result, tally2), maxValue, tally2);
+      }
+      return next;
+    });
+    const extraFiles = exchange.toolCalls.flatMap((call) => filesFromCodexToolInput(call.input));
+    return {
+      ...exchange,
+      userText: cap(elideBinary2(exchange.userText, tally2), maxMessage, tally2),
+      assistantText: cap(elideBinary2(exchange.assistantText, tally2), maxMessage, tally2),
+      toolCalls,
+      filesTouched: uniq([...exchange.filesTouched, ...extraFiles])
+    };
+  });
+  const entrypoint = header ? codexEntrypoint(header) : void 0;
+  const session = {
+    ...result.session,
+    id,
+    ...header?.cwd ? { project: header.cwd, projectSlug: pickSlug(result.session, header.cwd) } : {},
+    ...entrypoint ? { entrypoint } : {},
+    status: source.status ?? result.session.status
+  };
+  if (title)
+    session.title = title;
+  const cliVersion = header?.cliVersion;
+  const semver = cliVersion ? parseCodexCliVersion(cliVersion) : void 0;
+  return {
+    ...result,
+    session,
+    exchanges,
+    codex: {
+      ...cliVersion ? { cliVersion } : {},
+      // Unknown version == not yet proven unsupported; only a version we can
+      // read AND that is below the floor counts as unsupported.
+      versionSupported: semver ? versionMeetsMinimum(semver) : true,
+      headerUnreadable: header === void 0,
+      titled: Boolean(indexed?.threadName),
+      elisions: tally2
+    }
+  };
+}
+function pickSlug(session, cwd) {
+  if (session.projectSlug && session.projectSlug !== "unknown")
+    return session.projectSlug;
+  return path13.basename(cwd) || "unknown";
+}
+var codexAdapter = {
+  harness: "codex",
+  displayName: "Codex CLI",
+  sourceDir: () => codexPaths().sessions,
+  discover: () => discover2(),
+  parse: (source, options) => parse2(source, options ?? {})
+};
+async function codexDoctor(options = {}) {
+  const paths = codexPaths(codexDir(options.codexHome));
+  const sources = discover2(options);
+  const entries = readSessionIndex(options);
+  const versions = {};
+  const unsupported = /* @__PURE__ */ new Set();
+  const unreadable = [];
+  let titled2 = 0;
+  let bytes2 = 0;
+  let archived = 0;
+  for (const source of sources) {
+    bytes2 += source.bytes;
+    if (source.status === "archived")
+      archived += 1;
+    const header = await readCodexHeader(source.path);
+    if (!header) {
+      unreadable.push(source.path);
+      continue;
+    }
+    const id = header.sessionId ?? source.sessionId;
+    if (entries.get(id)?.threadName)
+      titled2 += 1;
+    const raw = header.cliVersion;
+    if (raw) {
+      versions[raw] = (versions[raw] ?? 0) + 1;
+      const semver = parseCodexCliVersion(raw);
+      if (semver && !versionMeetsMinimum(semver))
+        unsupported.add(raw);
+    }
+  }
+  return {
+    harness: "codex",
+    displayName: "Codex CLI",
+    sourceDir: paths.sessions,
+    present: fs16.existsSync(paths.root),
+    sessions: sources.length,
+    archived,
+    bytes: bytes2,
+    titled: titled2,
+    versions,
+    unsupportedVersions: [...unsupported].sort(),
+    unreadable
+  };
+}
+function renderCodexDoctorLine(report) {
+  if (!report.present) {
+    return `codex     not installed        ${tildify(report.sourceDir)}`;
+  }
+  if (report.sessions === 0) {
+    return `codex     0 sessions           ${tildify(report.sourceDir)}`;
+  }
+  const parts = [
+    `${report.sessions} session${report.sessions === 1 ? "" : "s"}`,
+    formatBytes(report.bytes),
+    `${report.titled} titled`
+  ];
+  if (report.archived > 0)
+    parts.push(`${report.archived} archived`);
+  const versions = Object.keys(report.versions).sort();
+  if (versions.length > 0)
+    parts.push(`cli ${versions.join(", ")}`);
+  if (report.unsupportedVersions.length > 0) {
+    parts.push(`${report.unsupportedVersions.join(", ")} < ${MIN_CODEX_VERSION}, unsupported`);
+  }
+  if (report.unreadable.length > 0) {
+    parts.push(`${report.unreadable.length} unreadable header${report.unreadable.length === 1 ? "" : "s"}`);
+  }
+  return `codex     ${parts.join(" \xB7 ")}   ${tildify(report.sourceDir)}`;
+}
+function doctorLine2(report) {
+  if (!report.present) {
+    return formatDoctorLine({
+      harness: "codex",
+      status: "absent",
+      dir: report.sourceDir,
+      note: "Codex CLI not installed"
+    });
+  }
+  const parts = [`${report.sessions} session${report.sessions === 1 ? "" : "s"}`];
+  if (report.sessions > 0)
+    parts.push(formatBytes(report.bytes));
+  if (report.titled > 0)
+    parts.push(`${report.titled} titled`);
+  if (report.archived > 0)
+    parts.push(`${report.archived} archived`);
+  const versions = Object.keys(report.versions).sort();
+  if (versions.length > 0)
+    parts.push(`cli ${versions.join(", ")}`);
+  if (report.unsupportedVersions.length > 0) {
+    parts.push(`${report.unsupportedVersions.join(", ")} < ${MIN_CODEX_VERSION}`);
+  }
+  if (report.unreadable.length > 0)
+    parts.push(`${report.unreadable.length} unreadable`);
+  return formatDoctorLine({
+    harness: "codex",
+    status: "ready",
+    dir: report.sourceDir,
+    note: parts.join(" \xB7 ")
+  });
+}
+function formatBytes(n2) {
+  if (n2 < 1024)
+    return `${n2} B`;
+  if (n2 < 1024 * 1024)
+    return `${(n2 / 1024).toFixed(1)} KB`;
+  return `${(n2 / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ../core/dist/adapters/cursor.js
+var cursor_exports = {};
+__export(cursor_exports, {
+  CURSOR_DOCTOR_NOTE: () => CURSOR_DOCTOR_NOTE,
+  SIDECHAIN_DIR: () => SIDECHAIN_DIR3,
+  TRANSCRIPTS_DIR: () => TRANSCRIPTS_DIR,
+  classifyProjectSlug: () => classifyProjectSlug,
+  cursorAdapter: () => cursorAdapter,
+  cursorDir: () => cursorDir,
+  cursorProjectsDir: () => cursorProjectsDir,
+  cursorSlug: () => cursorSlug,
+  discover: () => discover3,
+  doctorLine: () => doctorLine3,
+  filesFromCursorInput: () => filesFromCursorInput,
+  parse: () => parse3,
+  parseCursorTimestamp: () => parseCursorTimestamp,
+  readPrompt: () => readPrompt,
+  recoverCwd: () => recoverCwd,
+  toolName: () => toolName
+});
+import fs17 from "node:fs";
+import path14 from "node:path";
+var TRANSCRIPTS_DIR = "agent-transcripts";
+var SIDECHAIN_DIR3 = "subagents";
+var CURSOR_DOCTOR_NOTE = "cursor: no timestamps on assistant turns (session times come from file mtime), no tool results recorded at all, and title/model/git-branch are unavailable \u2014 they live in VS Code's workspaceStorage, which potsherd does not read.";
+function cursorSlug(cwd) {
+  return cwd.replace(/^[/\\]+/, "").replace(/[/\\_]/g, "-");
+}
+function classifyProjectSlug(slug) {
+  if (slug === "empty-window")
+    return "empty-window";
+  if (/^\d{10,}$/.test(slug))
+    return "window-id";
+  return "path";
+}
+function discover3(dirOverride) {
+  const root = cursorProjectsDir(dirOverride);
+  const out = [];
+  for (const slug of readdirSafe4(root, "dir")) {
+    const transcripts = path14.join(root, slug, TRANSCRIPTS_DIR);
+    for (const sessionId of readdirSafe4(transcripts, "dir")) {
+      const sessionDir = path14.join(transcripts, sessionId);
+      for (const file of readdirSafe4(sessionDir, "file")) {
+        if (!file.endsWith(".jsonl"))
+          continue;
+        const source = statSource(path14.join(sessionDir, file), slug, {
+          sessionId: basenameId(file),
+          isSidechain: false
+        });
+        if (source)
+          out.push(source);
+      }
+      const sidechains = path14.join(sessionDir, SIDECHAIN_DIR3);
+      for (const file of readdirSafe4(sidechains, "file")) {
+        if (!file.endsWith(".jsonl"))
+          continue;
+        const source = statSource(path14.join(sidechains, file), slug, {
+          sessionId: basenameId(file),
+          isSidechain: true,
+          parentSessionId: sessionId
+        });
+        if (source)
+          out.push(source);
+      }
+    }
+  }
+  return out.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+}
+function basenameId(file) {
+  return file.slice(0, -".jsonl".length);
+}
+function readdirSafe4(dir, want) {
+  let entries;
+  try {
+    entries = fs17.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const names = [];
+  for (const e of entries) {
+    if (e.name.startsWith("."))
+      continue;
+    if (want === "dir" ? e.isDirectory() : e.isFile())
+      names.push(e.name);
+  }
+  return names.sort();
+}
+function statSource(file, projectSlug, rest) {
+  let st;
+  try {
+    st = fs17.statSync(file);
+  } catch {
+    return null;
+  }
+  return {
+    sessionId: rest.sessionId,
+    harness: "cursor",
+    path: file,
+    projectSlug,
+    bytes: st.size,
+    mtimeMs: st.mtimeMs,
+    isSidechain: rest.isSidechain,
+    ...rest.parentSessionId ? { parentSessionId: rest.parentSessionId } : {},
+    status: "live"
+  };
+}
+async function parse3(source, options = {}) {
+  const sessionId = options.sessionId ?? source.sessionId;
+  const projectSlug = options.projectSlug ?? source.projectSlug;
+  const isSidechain = source.isSidechain;
+  const unknownTypes = {};
+  const bump = (key) => {
+    unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
+  };
+  const exchanges = [];
+  const cwdCandidates = [];
+  let malformedLines = 0;
+  let endOffset = options.fromOffset ?? 0;
+  let seq = options.fromSeq ?? 0;
+  let userPrompts = 0;
+  let assistantTurns = 0;
+  let toolCallCount = 0;
+  let firstTs;
+  let lastTs;
+  let open2;
+  const flush = () => {
+    if (!open2)
+      return;
+    exchanges.push({
+      id: exchangeId(sessionId, open2.seq),
+      sessionId,
+      seq: open2.seq,
+      // Every exchange needs a ts. A prompt with no `<timestamp>` (all of the
+      // subagent ones) inherits the last one seen, and if there was none, the
+      // session's mtime-derived start. Never invented, always explained.
+      ts: open2.ts ?? lastTs ?? firstTs ?? isoFromMs(source.mtimeMs),
+      userText: open2.userText,
+      assistantText: open2.assistantTexts.join("\n\n"),
+      toolCalls: open2.toolCalls,
+      filesTouched: uniq(open2.files),
+      isSidechain,
+      // No `parentUuid`: cursor records carry no ids of any kind, so an
+      // exchange cannot name its parent. Left off rather than faked.
+      redacted: false
+      // L2 redacts between here and the index.
+    });
+    open2 = void 0;
+  };
+  const openFor = (ts, userText) => {
+    flush();
+    seq += 1;
+    open2 = { seq, ts, userText, assistantTexts: [], toolCalls: [], files: [] };
+  };
+  for await (const line of readJsonlLines(source.path, { start: options.fromOffset ?? 0 })) {
+    const record = parseJsonLine(line.text);
+    if (!line.terminated) {
+      if (record === void 0) {
+        if (line.text.trim())
+          malformedLines += 1;
+        break;
+      }
+    }
+    endOffset = line.end;
+    if (record === void 0) {
+      if (line.text.trim())
+        malformedLines += 1;
+      continue;
+    }
+    if (!isRecord(record)) {
+      bump("(not an object)");
+      continue;
+    }
+    const role = record.role;
+    const message2 = record.message;
+    const content = isRecord(message2) ? message2.content : void 0;
+    if (typeof role !== "string") {
+      bump("(no role)");
+      continue;
+    }
+    if (!Array.isArray(content)) {
+      bump(`role:${role} (no message.content)`);
+      continue;
+    }
+    if (role === "user") {
+      const text = joinText(content, bump, role);
+      const prompt = readPrompt(text);
+      if (prompt.injected && open2) {
+        bump("user:injected-continuation");
+        continue;
+      }
+      if (prompt.ts) {
+        if (!firstTs)
+          firstTs = prompt.ts;
+        lastTs = prompt.ts;
+      }
+      openFor(prompt.ts, prompt.text);
+      userPrompts += 1;
+      continue;
+    }
+    if (role !== "assistant") {
+      bump(`role:${role}`);
+      continue;
+    }
+    assistantTurns += 1;
+    if (!open2)
+      openFor(lastTs, "");
+    for (const raw of content) {
+      if (!isRecord(raw)) {
+        bump("block:(not an object)");
+        continue;
+      }
+      const block2 = raw;
+      if (block2.type === "text") {
+        if (typeof block2.text === "string" && block2.text)
+          open2.assistantTexts.push(block2.text);
+        continue;
+      }
+      if (block2.type === "tool_use") {
+        toolCallCount += 1;
+        open2.toolCalls.push({
+          name: toolName(block2.name),
+          input: stringifyToolInput(block2.input)
+          // `result` is deliberately absent: cursor persists no tool output.
+          // See CURSOR_DOCTOR_NOTE. `isError` is unknowable for the same reason.
+        });
+        for (const f of filesFromCursorInput(block2.input))
+          open2.files.push(f);
+        for (const p of absolutePaths(block2.input))
+          cwdCandidates.push(p);
+        continue;
+      }
+      bump(`block:${typeof block2.type === "string" ? block2.type : String(block2.type)}`);
+    }
+  }
+  flush();
+  const mtimeIso = isoFromMs(source.mtimeMs);
+  const startedAt = firstTs ?? mtimeIso;
+  const endedAt = mtimeIso >= (lastTs ?? "") ? mtimeIso : lastTs;
+  const session = {
+    id: sessionId,
+    harness: "cursor",
+    sourcePath: source.path,
+    // `project` is a *recovered* cwd: an absolute directory seen in this
+    // session's own tool inputs whose cursorSlug() equals the project
+    // directory name. Empty when nothing corroborates — window-id and
+    // empty-window projects never have a cwd, and neither is invented.
+    project: recoverCwd(projectSlug, cwdCandidates) ?? "",
+    projectSlug,
+    startedAt,
+    endedAt,
+    // title / gitBranch / entrypoint / model / agentName: **not knowable from
+    // ~/.cursor**. Cursor keeps all four in VS Code's workspaceStorage and
+    // globalStorage sqlite, which potsherd does not read. Left undefined.
+    isSidechain,
+    ...source.parentSessionId ? { parentSessionId: source.parentSessionId } : {},
+    counts: {
+      userPrompts,
+      assistantTurns,
+      toolCalls: toolCallCount,
+      bytes: source.bytes
+    },
+    status: source.status ?? "live"
+  };
+  return { session, exchanges, unknownTypes, endOffset, malformedLines };
+}
+var TIMESTAMP_RE = /<timestamp>([^<]*)<\/timestamp>/;
+var OPEN_QUERY = "<user_query>";
+var CLOSE_QUERY = "</user_query>";
+function readPrompt(text) {
+  const open2 = text.indexOf(OPEN_QUERY);
+  const preamble = open2 >= 0 ? text.slice(0, open2) : text;
+  const stamp = preamble.match(TIMESTAMP_RE);
+  const ts = stamp ? parseCursorTimestamp(stamp[1]) : void 0;
+  if (open2 < 0) {
+    return { text: text.replace(TIMESTAMP_RE, "").trim(), injected: false, ...ts ? { ts } : {} };
+  }
+  const bodyStart = open2 + OPEN_QUERY.length;
+  const injected = text[bodyStart] !== "\n";
+  const close = text.lastIndexOf(CLOSE_QUERY);
+  const body = close > bodyStart ? text.slice(bodyStart, close) : text.slice(bodyStart);
+  return { text: body.trim(), injected, ...ts ? { ts } : {} };
+}
+var MONTHS2 = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december"
+];
+var CURSOR_TS_RE = new RegExp("^(?:[A-Za-z]+,\\s*)?([A-Za-z]+)\\s+(\\d{1,2}),\\s*(\\d{4}),\\s*(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*([AaPp])\\.?[Mm]\\.?(?:\\s*\\(\\s*UTC(?:\\s*([+-]\\d{1,2})(?::?(\\d{2}))?)?\\s*\\))?\\s*$");
+function parseCursorTimestamp(raw) {
+  const m = raw.trim().match(CURSOR_TS_RE);
+  if (!m)
+    return void 0;
+  const month = MONTHS2.indexOf(m[1].toLowerCase());
+  if (month < 0)
+    return void 0;
+  const day = Number(m[2]);
+  const year = Number(m[3]);
+  let hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = m[6] ? Number(m[6]) : 0;
+  const meridiem = m[7].toLowerCase();
+  if (hour === 12)
+    hour = 0;
+  if (meridiem === "p")
+    hour += 12;
+  if (day < 1 || day > 31 || minute > 59 || second > 59 || hour > 23)
+    return void 0;
+  const offsetHours = m[8] ? Number(m[8]) : 0;
+  const offsetMinutes = m[9] ? Number(m[9]) : 0;
+  const sign = m[8]?.startsWith("-") ? -1 : 1;
+  const offset = offsetHours * 60 + sign * offsetMinutes;
+  const ms = Date.UTC(year, month, day, hour, minute, second) - offset * 6e4;
+  if (!Number.isFinite(ms))
+    return void 0;
+  return new Date(ms).toISOString();
+}
+function toolName(name) {
+  if (typeof name !== "string")
+    return "unknown";
+  const first = name.split("\n")[0].trim();
+  return first || "unknown";
+}
+var CURSOR_FILE_KEYS = ["target_notebook", "paths"];
+var PATCH_FILE_RE = /^\*\*\* (?:Add|Update|Delete) File:\s*(.+)$/gm;
+function filesFromCursorInput(input) {
+  if (typeof input === "string") {
+    const out2 = [];
+    for (const m of input.matchAll(PATCH_FILE_RE)) {
+      const file = m[1].trim();
+      if (file)
+        out2.push(file);
+    }
+    return uniq(out2);
+  }
+  if (!isRecord(input))
+    return [];
+  const out = filesFromToolInput(input);
+  for (const key of CURSOR_FILE_KEYS) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim())
+      out.push(value);
+    else if (Array.isArray(value)) {
+      for (const item of value)
+        if (typeof item === "string" && item.trim())
+          out.push(item);
+    }
+  }
+  return uniq(out);
+}
+function absolutePaths(input) {
+  const out = [];
+  const visit = (value, depth) => {
+    if (depth > 4)
+      return;
+    if (typeof value === "string") {
+      if (value.startsWith("/") && !value.includes("\n"))
+        out.push(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value)
+        visit(item, depth + 1);
+      return;
+    }
+    if (isRecord(value)) {
+      for (const item of Object.values(value))
+        visit(item, depth + 1);
+    }
+  };
+  if (typeof input === "string") {
+    for (const m of input.matchAll(PATCH_FILE_RE)) {
+      const file = m[1].trim();
+      if (file.startsWith("/"))
+        out.push(file);
+    }
+    return out;
+  }
+  visit(input, 0);
+  return out;
+}
+function recoverCwd(projectSlug, candidates) {
+  if (classifyProjectSlug(projectSlug) !== "path")
+    return void 0;
+  const hits = /* @__PURE__ */ new Map();
+  for (const candidate of candidates) {
+    let dir = candidate;
+    for (let depth = 0; depth < 32 && dir !== "/" && dir !== "."; depth += 1) {
+      if (cursorSlug(dir) === projectSlug) {
+        hits.set(dir, (hits.get(dir) ?? 0) + 1);
+        break;
+      }
+      const parent = path14.dirname(dir);
+      if (parent === dir)
+        break;
+      dir = parent;
+    }
+  }
+  let best;
+  let bestCount = 0;
+  for (const [dir, count2] of [...hits].sort((a, b) => a[0] < b[0] ? -1 : 1)) {
+    if (count2 > bestCount) {
+      best = dir;
+      bestCount = count2;
+    }
+  }
+  return best;
+}
+function joinText(content, bump, role) {
+  const parts = [];
+  for (const raw of content) {
+    if (!isRecord(raw)) {
+      bump("block:(not an object)");
+      continue;
+    }
+    if (raw.type === "text") {
+      if (typeof raw.text === "string")
+        parts.push(raw.text);
+      continue;
+    }
+    bump(`${role}/block:${typeof raw.type === "string" ? raw.type : String(raw.type)}`);
+  }
+  return parts.join("\n");
+}
+function isoFromMs(ms) {
+  return new Date(ms).toISOString();
+}
+function doctorLine3(dirOverride) {
+  const dir = cursorProjectsDir(dirOverride);
+  let found = [];
+  try {
+    found = discover3(dirOverride);
+  } catch {
+    found = [];
+  }
+  const exists = fs17.existsSync(dir);
+  const sidechains = found.filter((f) => f.isSidechain).length;
+  const sessions = found.length - sidechains;
+  const parts = [`${sessions} session${sessions === 1 ? "" : "s"}`];
+  if (sidechains > 0)
+    parts.push(`${sidechains} sidechains`);
+  parts.push("no titles, no tool results");
+  return formatDoctorLine({
+    harness: "cursor",
+    status: exists || found.length > 0 ? "ready" : "absent",
+    dir,
+    note: exists || found.length > 0 ? parts.join(" \xB7 ") : "Cursor not installed"
+  });
+}
+var cursorAdapter = {
+  harness: "cursor",
+  displayName: "Cursor",
+  sourceDir: () => cursorDir(),
+  discover: () => discover3(),
+  parse: parse3
+};
+
+// ../core/dist/adapters/pi.js
+var pi_exports = {};
+__export(pi_exports, {
+  DISPLAY_NAME: () => DISPLAY_NAME,
+  default: () => pi_default,
+  discover: () => discover4,
+  doctorLine: () => doctorLine4,
+  exchangeId: () => exchangeId2,
+  parse: () => parse4,
+  piAdapter: () => piAdapter,
+  piDir: () => piDir,
+  sessionIdFromFilename: () => sessionIdFromFilename,
+  sourceDir: () => sourceDir2,
+  unslugifyPi: () => unslugifyPi
+});
+import fs18 from "node:fs";
+import path15 from "node:path";
+import crypto3 from "node:crypto";
+var HANDLED_TYPES2 = /* @__PURE__ */ new Set([
+  "session",
+  "message",
+  "model_change",
+  "thinking_level_change",
+  "session_info",
+  "compaction",
+  "branch_summary",
+  "label",
+  "custom",
+  "custom_message"
+]);
+var HANDLED_ROLES = /* @__PURE__ */ new Set(["user", "assistant", "toolResult"]);
+var DISPLAY_NAME = "pi";
+function sourceDir2(override) {
+  return piSessionsDir(override);
+}
+function doctorLine4(override) {
+  const dir = sourceDir2(override);
+  let sessions = 0;
+  try {
+    sessions = discover4(override).length;
+  } catch {
+    sessions = 0;
+  }
+  const exists = fs18.existsSync(dir);
+  const status3 = exists ? "ready" : "absent";
+  const note = exists ? `${sessions} session${sessions === 1 ? "" : "s"}` : "pi not installed";
+  return formatDoctorLine({ harness: "pi", status: status3, dir, note });
+}
+function discover4(override) {
+  const root = sourceDir2(override);
+  const out = [];
+  let slugs;
+  try {
+    slugs = fs18.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const slug of slugs) {
+    if (!slug.isDirectory())
+      continue;
+    const dir = path15.join(root, slug.name);
+    let files;
+    try {
+      files = fs18.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".jsonl"))
+        continue;
+      const full = path15.join(dir, file);
+      let stat;
+      try {
+        stat = fs18.statSync(full);
+      } catch {
+        continue;
+      }
+      if (!stat.isFile())
+        continue;
+      out.push({
+        sessionId: sessionIdFromFilename(file),
+        harness: "pi",
+        path: full,
+        projectSlug: slug.name,
+        bytes: stat.size,
+        mtimeMs: stat.mtimeMs,
+        isSidechain: false,
+        status: "live"
+      });
+    }
+  }
+  out.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  return out;
+}
+function sessionIdFromFilename(file) {
+  const base2 = path15.basename(file, ".jsonl");
+  const at = base2.lastIndexOf("_");
+  return at === -1 ? base2 : base2.slice(at + 1);
+}
+async function parse4(source, options = {}) {
+  const src = typeof source === "string" ? void 0 : source;
+  const absolute2 = path15.resolve(typeof source === "string" ? source : source.path);
+  const unknownTypes = {};
+  let malformedLines = 0;
+  let endOffset = 0;
+  const nodes = [];
+  const byId = /* @__PURE__ */ new Map();
+  let header;
+  let order = 0;
+  for await (const line of readJsonlLines(absolute2)) {
+    if (!line.terminated)
+      break;
+    endOffset = line.end;
+    const parsed = parseJsonLine(line.text);
+    if (parsed === void 0 || !isRecord(parsed)) {
+      if (line.text.trim())
+        malformedLines += 1;
+      continue;
+    }
+    const type = typeof parsed.type === "string" ? parsed.type : "";
+    if (!HANDLED_TYPES2.has(type)) {
+      const key = type || "(no type)";
+      unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
+    } else if (type === "message") {
+      const message2 = parsed.message;
+      const role = isRecord(message2) && typeof message2.role === "string" ? message2.role : "";
+      if (!HANDLED_ROLES.has(role)) {
+        const key = `message:${role || "(no role)"}`;
+        unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
+      }
+    }
+    if (type === "session") {
+      header ??= parsed;
+      continue;
+    }
+    const id = typeof parsed.id === "string" ? parsed.id : "";
+    if (!id) {
+      malformedLines += 1;
+      continue;
+    }
+    const node = {
+      id,
+      parentId: typeof parsed.parentId === "string" ? parsed.parentId : null,
+      type,
+      ts: typeof parsed.timestamp === "string" ? parsed.timestamp : "",
+      order: order++,
+      record: parsed
+    };
+    nodes.push(node);
+    byId.set(id, node);
+  }
+  const sessionId = options.sessionId ?? (header && typeof header.id === "string" && header.id ? header.id : sessionIdFromFilename(absolute2));
+  const mainline = linearise(nodes, byId);
+  const onMainline = new Set(mainline.map((n2) => n2.id));
+  const branches = branchChains(nodes, onMainline);
+  const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
+  const exchanges = [];
+  let seq = 0;
+  seq = buildExchanges(mainline, sessionId, false, seq, exchanges, counts2);
+  for (const chain of branches) {
+    seq = buildExchanges(chain, sessionId, true, seq, exchanges, counts2);
+  }
+  let model;
+  let title;
+  for (const node of mainline) {
+    if (node.type === "model_change" && typeof node.record.modelId === "string") {
+      model = node.record.modelId;
+    }
+    if (node.type === "message") {
+      const message2 = node.record.message;
+      if (isRecord(message2) && message2.role === "assistant" && typeof message2.model === "string") {
+        model = message2.model;
+      }
+    }
+    if (node.type === "session_info" && typeof node.record.name === "string" && node.record.name.trim()) {
+      title = node.record.name;
+    }
+  }
+  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path15.basename(path15.dirname(absolute2));
+  const headerCwd = header && typeof header.cwd === "string" ? header.cwd : void 0;
+  const startedAt = header && typeof header.timestamp === "string" ? header.timestamp : nodes[0]?.ts ?? "";
+  let endedAt = startedAt;
+  for (const node of nodes)
+    if (node.ts > endedAt)
+      endedAt = node.ts;
+  const parentSession = header && typeof header.parentSession === "string" ? header.parentSession : void 0;
+  const session = {
+    id: sessionId,
+    harness: "pi",
+    sourcePath: absolute2,
+    project: headerCwd ?? unslugifyPi(projectSlug),
+    projectSlug,
+    startedAt,
+    endedAt,
+    ...title ? { title } : {},
+    // pi never persists the git branch: `GitBranch` exists only in the live
+    // TUI footer provider. Left undefined rather than guessed.
+    entrypoint: "cli",
+    ...model ? { model } : {},
+    isSidechain: false,
+    ...parentSession ? { parentSessionId: sessionIdFromFilename(parentSession) } : {},
+    counts: {
+      userPrompts: counts2.userPrompts,
+      assistantTurns: counts2.assistantTurns,
+      toolCalls: counts2.toolCalls,
+      bytes: options.bytes ?? src?.bytes ?? statBytes3(absolute2)
+    },
+    status: options.status ?? src?.status ?? "live"
+  };
+  return { session, exchanges, unknownTypes, endOffset, malformedLines };
+}
+function linearise(nodes, byId) {
+  const leaf = nodes[nodes.length - 1];
+  if (!leaf)
+    return [];
+  const chain = [];
+  const seen = /* @__PURE__ */ new Set();
+  let current = leaf;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    chain.unshift(current);
+    current = current.parentId === null ? void 0 : byId.get(current.parentId);
+  }
+  return chain;
+}
+function branchChains(nodes, onMainline) {
+  const chains = [];
+  const chainOf = /* @__PURE__ */ new Map();
+  for (const node of nodes) {
+    if (onMainline.has(node.id))
+      continue;
+    const parentChain = node.parentId === null ? void 0 : chainOf.get(node.parentId);
+    if (parentChain === void 0) {
+      chainOf.set(node.id, chains.length);
+      chains.push([node]);
+      continue;
+    }
+    chainOf.set(node.id, parentChain);
+    chains[parentChain].push(node);
+  }
+  return chains;
+}
+function buildExchanges(chain, sessionId, isSidechain, startSeq, out, counts2) {
+  let seq = startSeq;
+  let current = null;
+  const finalize = () => {
+    if (!current)
+      return;
+    const b = current;
+    current = null;
+    if (!b.userText.trim() && b.assistantTexts.length === 0 && b.toolCalls.length === 0)
+      return;
+    out.push({
+      id: exchangeId2(sessionId, b.seq),
+      sessionId,
+      seq: b.seq,
+      ts: b.ts,
+      userText: b.userText,
+      assistantText: b.assistantTexts.join("\n\n"),
+      toolCalls: b.toolCalls,
+      filesTouched: uniq(b.files),
+      isSidechain,
+      ...b.parentUuid ? { parentUuid: b.parentUuid } : {},
+      redacted: false
+    });
+  };
+  const open2 = (ts, parentUuid) => {
+    seq += 1;
+    const b = {
+      seq,
+      ts,
+      userText: "",
+      assistantTexts: [],
+      toolCalls: [],
+      byToolCallId: /* @__PURE__ */ new Map(),
+      files: [],
+      parentUuid
+    };
+    current = b;
+    return b;
+  };
+  for (const node of chain) {
+    if (node.type !== "message")
+      continue;
+    const message2 = node.record.message;
+    if (!isRecord(message2))
+      continue;
+    const role = typeof message2.role === "string" ? message2.role : "";
+    if (!HANDLED_ROLES.has(role))
+      continue;
+    if (role === "user") {
+      finalize();
+      counts2.userPrompts += 1;
+      open2(node.ts, node.parentId).userText = extractTypedText(message2.content);
+      continue;
+    }
+    const b = current ?? open2(node.ts, node.parentId);
+    if (role === "assistant") {
+      counts2.assistantTurns += 1;
+      const text = extractTypedText(message2.content);
+      if (text.trim())
+        b.assistantTexts.push(text);
+      for (const block2 of toolCallBlocks(message2.content)) {
+        const name2 = typeof block2.name === "string" ? block2.name : "unknown";
+        const call = { name: name2, input: stringifyToolInput(block2.arguments) };
+        b.toolCalls.push(call);
+        counts2.toolCalls += 1;
+        if (typeof block2.id === "string")
+          b.byToolCallId.set(block2.id, b.toolCalls.length - 1);
+        for (const f of filesFromToolInput(block2.arguments))
+          b.files.push(f);
+      }
+      continue;
+    }
+    const callId = typeof message2.toolCallId === "string" ? message2.toolCallId : void 0;
+    const at = callId === void 0 ? void 0 : b.byToolCallId.get(callId);
+    const result = stringifyToolOutput(typeof message2.content === "string" ? message2.content : extractTextFromContent(message2.content));
+    if (at !== void 0) {
+      const call = b.toolCalls[at];
+      if (call) {
+        if (result !== void 0)
+          call.result = result;
+        if (message2.isError === true)
+          call.isError = true;
+      }
+      continue;
+    }
+    const name = typeof message2.toolName === "string" ? message2.toolName : "unknown";
+    b.toolCalls.push({
+      name,
+      input: "",
+      ...result !== void 0 ? { result } : {},
+      ...message2.isError === true ? { isError: true } : {}
+    });
+    counts2.toolCalls += 1;
+  }
+  finalize();
+  return seq;
+}
+function toolCallBlocks(content) {
+  if (!Array.isArray(content))
+    return [];
+  return content.filter((b) => isRecord(b) && b.type === "toolCall");
+}
+function unslugifyPi(slug) {
+  const inner = slug.replace(/^--/, "").replace(/--$/, "");
+  return "/" + inner.replace(/-/g, "/");
+}
+function statBytes3(absolute2) {
+  try {
+    return fs18.statSync(absolute2).size;
+  } catch {
+    return 0;
+  }
+}
+function exchangeId2(sessionId, seq) {
+  return crypto3.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
+}
+var piAdapter = {
+  harness: "pi",
+  displayName: DISPLAY_NAME,
+  sourceDir: () => sourceDir2(),
+  discover: () => discover4(),
+  parse: (src, opts) => parse4(src, opts ?? {})
+};
+var pi_default = piAdapter;
+
+// ../core/dist/adapters/gemini.js
+var gemini_exports = {};
+__export(gemini_exports, {
+  CHATS_DIR: () => CHATS_DIR,
+  DISPLAY_NAME: () => DISPLAY_NAME2,
+  GEMINI_DOCTOR_NOTE: () => GEMINI_DOCTOR_NOTE,
+  GEMINI_FORMAT_UNVERIFIED: () => GEMINI_FORMAT_UNVERIFIED,
+  default: () => gemini_default,
+  discover: () => discover5,
+  doctorLine: () => doctorLine5,
+  geminiAdapter: () => geminiAdapter,
+  geminiDir: () => geminiDir,
+  geminiTmpDir: () => geminiTmpDir,
+  isHumanTurn: () => isHumanTurn,
+  parse: () => parse5,
+  projectHashes: () => projectHashes,
+  recoverCwd: () => recoverCwd2,
+  sessionIdFromFilename: () => sessionIdFromFilename2,
+  sourceDir: () => sourceDir3
+});
+import fs19 from "node:fs";
+import path16 from "node:path";
+import crypto4 from "node:crypto";
+var DISPLAY_NAME2 = "Gemini CLI";
+var CHATS_DIR = "chats";
+var GEMINI_FORMAT_UNVERIFIED = true;
+var GEMINI_DOCTOR_NOTE = "gemini: format unverified \u2014 this adapter was written from documentation, not from a real checkpoint, so record coverage is a best guess until someone runs it on one. Checkpoints carry no per-turn timestamps (session times come from file mtime) and the project directory is a hash, so the working directory is only recovered when a path in the transcript hashes to it.";
+var HANDLED_PART_KEYS = /* @__PURE__ */ new Set(["text", "functionCall", "functionResponse"]);
+var HANDLED_ROLES2 = /* @__PURE__ */ new Set(["user", "model", "assistant", "system", "tool"]);
+var HISTORY_KEYS = ["history", "messages", "contents", "turns"];
+function sourceDir3(override) {
+  return geminiTmpDir(override);
+}
+function discover5(override) {
+  const root = sourceDir3(override);
+  const out = [];
+  let hashes;
+  try {
+    hashes = fs19.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const hash of hashes) {
+    if (!hash.isDirectory())
+      continue;
+    const dir = path16.join(root, hash.name, CHATS_DIR);
+    let files;
+    try {
+      files = fs19.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".json"))
+        continue;
+      const full = path16.join(dir, file);
+      let stat;
+      try {
+        stat = fs19.statSync(full);
+      } catch {
+        continue;
+      }
+      if (!stat.isFile())
+        continue;
+      out.push({
+        sessionId: sessionIdFromFilename2(file, hash.name),
+        harness: "gemini",
+        path: full,
+        projectSlug: hash.name,
+        bytes: stat.size,
+        mtimeMs: stat.mtimeMs,
+        isSidechain: false,
+        status: "live"
+      });
+    }
+  }
+  out.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  return out;
+}
+function sessionIdFromFilename2(file, projectHash) {
+  const base2 = path16.basename(file, ".json").replace(/^checkpoint-/, "") || "checkpoint";
+  return `${projectHash.slice(0, 12)}-${base2}`;
+}
+async function parse5(source, options = {}) {
+  const src = typeof source === "string" ? void 0 : source;
+  const absolute2 = path16.resolve(typeof source === "string" ? source : source.path);
+  const unknownTypes = {};
+  let malformedLines = 0;
+  let raw = "";
+  try {
+    raw = fs19.readFileSync(absolute2, "utf8");
+  } catch {
+    raw = "";
+  }
+  const endOffset = Buffer.byteLength(raw, "utf8");
+  let doc;
+  try {
+    doc = raw.trim() ? JSON.parse(raw) : void 0;
+  } catch {
+    doc = void 0;
+    if (raw.trim())
+      malformedLines += 1;
+  }
+  const { turns, meta } = unwrap(doc);
+  if (doc !== void 0 && turns.length === 0 && !meta)
+    malformedLines += 1;
+  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path16.basename(path16.dirname(path16.dirname(absolute2)));
+  const sessionId = options.sessionId ?? (meta && typeof meta.sessionId === "string" && meta.sessionId.trim() ? meta.sessionId : sessionIdFromFilename2(absolute2, projectSlug));
+  const mtimeMs = options.mtimeMs ?? src?.mtimeMs ?? statMtime(absolute2);
+  const fileTime = new Date(mtimeMs).toISOString();
+  const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
+  const cwdCandidates = [];
+  const exchanges = buildExchanges2(turns, sessionId, fileTime, counts2, unknownTypes, cwdCandidates);
+  const metaString = (key) => {
+    if (!meta)
+      return void 0;
+    const v = meta[key];
+    return typeof v === "string" && v.trim() ? v : void 0;
+  };
+  const startedAt = metaString("startTime") ?? metaString("startedAt") ?? fileTime;
+  const endedAt = metaString("lastUpdated") ?? metaString("updatedAt") ?? fileTime;
+  const cwd = metaString("cwd") ?? metaString("projectRoot");
+  const title = metaString("title") ?? metaString("name") ?? metaString("tag");
+  const model = metaString("model");
+  const gitBranch = metaString("gitBranch") ?? metaString("branch");
+  const session = {
+    id: sessionId,
+    harness: "gemini",
+    sourcePath: absolute2,
+    project: cwd ?? recoverCwd2(projectSlug, cwdCandidates) ?? "",
+    projectSlug,
+    startedAt,
+    endedAt: endedAt < startedAt ? startedAt : endedAt,
+    ...title ? { title } : {},
+    ...gitBranch ? { gitBranch } : {},
+    entrypoint: "cli",
+    ...model ? { model } : {},
+    isSidechain: false,
+    counts: {
+      userPrompts: counts2.userPrompts,
+      assistantTurns: counts2.assistantTurns,
+      toolCalls: counts2.toolCalls,
+      bytes: options.bytes ?? src?.bytes ?? endOffset
+    },
+    status: options.status ?? src?.status ?? "live"
+  };
+  return { session, exchanges, unknownTypes, endOffset, malformedLines };
+}
+function unwrap(doc) {
+  if (Array.isArray(doc))
+    return { turns: doc };
+  if (!isRecord(doc))
+    return { turns: [] };
+  for (const key of HISTORY_KEYS) {
+    const v = doc[key];
+    if (Array.isArray(v))
+      return { turns: v, meta: doc };
+  }
+  return { turns: [], meta: doc };
+}
+function buildExchanges2(turns, sessionId, fileTime, counts2, unknownTypes, cwdCandidates) {
+  const out = [];
+  let seq = 0;
+  let current = null;
+  const finalize = () => {
+    if (!current)
+      return;
+    const b = current;
+    current = null;
+    if (!b.userTexts.length && !b.assistantTexts.length && !b.toolCalls.length)
+      return;
+    out.push({
+      id: exchangeId(sessionId, b.seq),
+      sessionId,
+      seq: b.seq,
+      ts: fileTime,
+      userText: b.userTexts.join("\n\n"),
+      assistantText: b.assistantTexts.join("\n\n"),
+      toolCalls: b.toolCalls,
+      filesTouched: uniq(b.files),
+      isSidechain: false,
+      redacted: false
+    });
+  };
+  const open2 = () => {
+    seq += 1;
+    current = {
+      seq,
+      userTexts: [],
+      assistantTexts: [],
+      toolCalls: [],
+      byName: /* @__PURE__ */ new Map(),
+      files: []
+    };
+    return current;
+  };
+  for (const turn of turns) {
+    if (!isRecord(turn)) {
+      unknownTypes["(not an object)"] = (unknownTypes["(not an object)"] ?? 0) + 1;
+      continue;
+    }
+    const role = typeof turn.role === "string" ? turn.role : "";
+    if (!HANDLED_ROLES2.has(role)) {
+      const key = `role:${role || "(no role)"}`;
+      unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
+      continue;
+    }
+    const parts = partsOf(turn, unknownTypes);
+    if (isHumanTurn(role, parts)) {
+      finalize();
+      counts2.userPrompts += 1;
+      const b2 = open2();
+      for (const p of parts) {
+        if (typeof p.text === "string" && p.text)
+          b2.userTexts.push(p.text);
+      }
+      continue;
+    }
+    const b = current ?? open2();
+    const isModel = role === "model" || role === "assistant";
+    if (isModel)
+      counts2.assistantTurns += 1;
+    for (const p of parts) {
+      if (typeof p.text === "string" && p.text.trim())
+        b.assistantTexts.push(p.text);
+      const call = p.functionCall;
+      if (isRecord(call)) {
+        const name2 = typeof call.name === "string" ? call.name : "unknown";
+        const args = call.args ?? call.arguments;
+        b.toolCalls.push({ name: name2, input: stringifyToolInput(args) });
+        counts2.toolCalls += 1;
+        b.byName.set(name2, b.toolCalls.length - 1);
+        for (const f of filesFromToolInput(args)) {
+          b.files.push(f);
+          cwdCandidates.push(f);
+        }
+      }
+      const res = p.functionResponse;
+      if (!isRecord(res))
+        continue;
+      const name = typeof res.name === "string" ? res.name : "unknown";
+      const result = stringifyToolOutput(res.response ?? res.output ?? res.content);
+      const isError = isRecord(res.response) && typeof res.response["error"] !== "undefined" ? true : void 0;
+      const at = b.byName.get(name);
+      if (at !== void 0) {
+        const answered = b.toolCalls[at];
+        if (answered) {
+          if (result !== void 0)
+            answered.result = result;
+          if (isError)
+            answered.isError = true;
+        }
+        b.byName.delete(name);
+        continue;
+      }
+      b.toolCalls.push({
+        name,
+        input: "",
+        ...result !== void 0 ? { result } : {},
+        ...isError ? { isError: true } : {}
+      });
+      counts2.toolCalls += 1;
+    }
+  }
+  finalize();
+  return out;
+}
+function partsOf(turn, unknownTypes) {
+  const parts = turn.parts ?? turn.content;
+  if (typeof parts === "string")
+    return [{ text: parts }];
+  if (!Array.isArray(parts))
+    return [];
+  const out = [];
+  for (const p of parts) {
+    if (typeof p === "string") {
+      out.push({ text: p });
+      continue;
+    }
+    if (!isRecord(p))
+      continue;
+    for (const key of Object.keys(p)) {
+      if (HANDLED_PART_KEYS.has(key))
+        continue;
+      const k = `part:${key}`;
+      const counts2 = unknownTypes;
+      counts2[k] = (counts2[k] ?? 0) + 1;
+    }
+    out.push(p);
+  }
+  return out;
+}
+function isHumanTurn(role, parts) {
+  if (role !== "user")
+    return false;
+  if (parts.length === 0)
+    return true;
+  return parts.some((p) => !isRecord(p.functionResponse));
+}
+function projectHashes(cwd) {
+  const sha = (s) => crypto4.createHash("sha256").update(s).digest("hex");
+  const trimmed = cwd.length > 1 ? cwd.replace(/[/\\]+$/, "") : cwd;
+  return uniq([sha(cwd), sha(trimmed), sha(trimmed + path16.sep)]);
+}
+function recoverCwd2(projectHash, candidates) {
+  if (!/^[0-9a-f]{16,}$/i.test(projectHash))
+    return void 0;
+  const seen = /* @__PURE__ */ new Set();
+  const dirs = [];
+  for (const c of candidates) {
+    if (!path16.isAbsolute(c))
+      continue;
+    let dir = path16.dirname(path16.resolve(c));
+    for (let i = 0; i < 40; i += 1) {
+      if (seen.has(dir))
+        break;
+      seen.add(dir);
+      dirs.push(dir);
+      const up = path16.dirname(dir);
+      if (up === dir)
+        break;
+      dir = up;
+    }
+  }
+  dirs.sort((a, b) => b.length - a.length);
+  const want = projectHash.toLowerCase();
+  for (const dir of dirs) {
+    if (projectHashes(dir).some((h) => h === want))
+      return dir;
+  }
+  return void 0;
+}
+function statMtime(absolute2) {
+  try {
+    return fs19.statSync(absolute2).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+function doctorLine5(override) {
+  const tmp = sourceDir3(override);
+  const root = geminiDir(override);
+  let found = [];
+  try {
+    found = discover5(override);
+  } catch {
+    found = [];
+  }
+  const installed = fs19.existsSync(root);
+  const tmpExists = fs19.existsSync(tmp);
+  let status3;
+  let note;
+  if (found.length > 0) {
+    status3 = "ready";
+    note = `${found.length} checkpoint${found.length === 1 ? "" : "s"} \xB7 unverified format`;
+  } else if (installed || tmpExists) {
+    status3 = "empty";
+    note = tmpExists ? "Gemini CLI installed, no saved chats (use /chat save) \xB7 unverified format" : "Gemini CLI installed, no tmp/ yet \u2014 no chats saved \xB7 unverified format";
+  } else {
+    status3 = "absent";
+    note = "Gemini CLI not installed";
+  }
+  return formatDoctorLine({ harness: "gemini", status: status3, dir: tmp, note });
+}
+var geminiAdapter = {
+  harness: "gemini",
+  displayName: DISPLAY_NAME2,
+  sourceDir: () => sourceDir3(),
+  discover: () => discover5(),
+  parse: (src, opts) => parse5(src, opts ?? {})
+};
+var gemini_default = geminiAdapter;
+
+// ../core/dist/adapters/opencode.js
+var opencode_exports = {};
+__export(opencode_exports, {
+  DISPLAY_NAME: () => DISPLAY_NAME3,
+  OPENCODE_DOCTOR_NOTE: () => OPENCODE_DOCTOR_NOTE,
+  OPENCODE_FORMAT_UNVERIFIED: () => OPENCODE_FORMAT_UNVERIFIED,
+  columnsOf: () => columnsOf,
+  default: () => opencode_default,
+  describeStore: () => describeStore,
+  discover: () => discover6,
+  doctorLine: () => doctorLine6,
+  findStores: () => findStores,
+  isoOf: () => isoOf,
+  opencodeAdapter: () => opencodeAdapter,
+  opencodeDir: () => opencodeDir,
+  parse: () => parse6,
+  parseContent: () => parseContent,
+  quoteIdent: () => quoteIdent,
+  sourceDir: () => sourceDir4
+});
+import fs20 from "node:fs";
+import path17 from "node:path";
+var DISPLAY_NAME3 = "opencode";
+var DB_EXTENSIONS = [".db", ".sqlite", ".sqlite3"];
+var MAX_DEPTH = 3;
+var OPENCODE_FORMAT_UNVERIFIED = true;
+var OPENCODE_DOCTOR_NOTE = 'opencode: format unverified \u2014 this adapter was written from documentation, not from a real store, so its schema is discovered at runtime (pragma table_info) rather than assumed, and it degrades to "unsupported version" rather than half-parsing a store it does not recognise. The database is opened read-only.';
+var SESSION_COLUMNS = {
+  id: ["id", "session_id", "sessionid", "sessionID", "uuid"],
+  title: ["title", "name", "summary", "label"],
+  created: ["created_at", "createdat", "created", "time_created", "started_at", "startedat"],
+  updated: ["updated_at", "updatedat", "updated", "time_updated", "ended_at", "endedat"],
+  directory: ["directory", "cwd", "worktree", "root", "project", "path"],
+  parent: ["parent_id", "parentid", "parentID", "parent_session_id", "parent"],
+  model: ["model", "model_id", "modelid"]
+};
+var MESSAGE_COLUMNS = {
+  id: ["id", "message_id", "messageid", "uuid"],
+  session: ["session_id", "sessionid", "sessionID", "session"],
+  role: ["role", "type", "kind", "author"],
+  content: ["content", "parts", "text", "body", "data", "message"],
+  created: ["created_at", "createdat", "created", "time_created", "timestamp", "ts"]
+};
+var USER_ROLES = /* @__PURE__ */ new Set(["user", "human", "prompt"]);
+var ASSISTANT_ROLES = /* @__PURE__ */ new Set(["assistant", "model", "ai", "agent"]);
+function sourceDir4(override) {
+  return opencodeDir(override);
+}
+function tableNames(db) {
+  try {
+    const rows = db.prepare(`select name from sqlite_master where type in ('table','view')`).all();
+    return rows.map((r) => r.name).filter((n2) => !n2.startsWith("sqlite_"));
+  } catch {
+    return [];
+  }
+}
+function columnsOf(db, table2) {
+  try {
+    const rows = db.pragma(`table_info(${quoteIdent(table2)})`);
+    return rows.map((r) => r.name);
+  } catch {
+    return [];
+  }
+}
+function pick(present, candidates) {
+  const lower = new Map(present.map((c) => [c.toLowerCase(), c]));
+  for (const want of candidates) {
+    const hit2 = lower.get(want.toLowerCase());
+    if (hit2)
+      return hit2;
+  }
+  return void 0;
+}
+function describeStore(dbPath2) {
+  let db;
+  try {
+    db = openSqliteReadOnly(dbPath2);
+  } catch (e) {
+    return { ok: false, reason: `cannot open store read-only (${errText(e)})` };
+  }
+  try {
+    const tables2 = tableNames(db);
+    if (tables2.length === 0)
+      return { ok: false, reason: "no tables in store" };
+    const sessionTable = bestTable(tables2, [/^sessions?$/i, /session/i]);
+    if (!sessionTable) {
+      return { ok: false, reason: `unsupported version \u2014 no session table (saw: ${tables2.slice(0, 6).join(", ")})` };
+    }
+    const messageTable = bestTable(tables2.filter((t) => t !== sessionTable), [/^messages?$/i, /message/i, /^parts?$/i, /part/i, /event/i]);
+    if (!messageTable) {
+      return { ok: false, reason: `unsupported version \u2014 no message table (saw: ${tables2.slice(0, 6).join(", ")})` };
+    }
+    const sCols = columnsOf(db, sessionTable);
+    const mCols = columnsOf(db, messageTable);
+    const sessions = {
+      table: sessionTable,
+      columns: Object.fromEntries(Object.entries(SESSION_COLUMNS).map(([k, v]) => [k, pick(sCols, v)]))
+    };
+    const messages = {
+      table: messageTable,
+      columns: Object.fromEntries(Object.entries(MESSAGE_COLUMNS).map(([k, v]) => [k, pick(mCols, v)]))
+    };
+    if (!sessions.columns["id"]) {
+      return { ok: false, reason: `unsupported version \u2014 ${sessionTable} has no id column (saw: ${sCols.join(", ")})` };
+    }
+    if (!messages.columns["session"]) {
+      return { ok: false, reason: `unsupported version \u2014 ${messageTable} has no session column (saw: ${mCols.join(", ")})` };
+    }
+    if (!messages.columns["content"]) {
+      return { ok: false, reason: `unsupported version \u2014 ${messageTable} has no content column (saw: ${mCols.join(", ")})` };
+    }
+    return { ok: true, schema: { dbPath: dbPath2, sessions, messages } };
+  } finally {
+    db.close();
+  }
+}
+function bestTable(tables2, patterns) {
+  for (const re of patterns) {
+    const hit2 = tables2.find((t) => re.test(t));
+    if (hit2)
+      return hit2;
+  }
+  return void 0;
+}
+function quoteIdent(name) {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+function findStores(override) {
+  const root = sourceDir4(override);
+  const out = [];
+  const walk2 = (dir, depth) => {
+    if (depth > MAX_DEPTH)
+      return;
+    let entries;
+    try {
+      entries = fs20.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path17.join(dir, e.name);
+      if (e.isDirectory()) {
+        walk2(full, depth + 1);
+        continue;
+      }
+      if (!e.isFile())
+        continue;
+      if (DB_EXTENSIONS.includes(path17.extname(e.name).toLowerCase()))
+        out.push(full);
+    }
+  };
+  walk2(root, 0);
+  out.sort();
+  return out;
+}
+function discover6(override) {
+  const out = [];
+  for (const dbPath2 of findStores(override)) {
+    const described = describeStore(dbPath2);
+    if (!described.ok)
+      continue;
+    out.push(...discoverIn(described.schema));
+  }
+  out.sort((a, b) => a.path === b.path ? a.sessionId < b.sessionId ? -1 : 1 : a.path < b.path ? -1 : 1);
+  return out;
+}
+function discoverIn(schema) {
+  const out = [];
+  let db;
+  try {
+    db = openSqliteReadOnly(schema.dbPath);
+  } catch {
+    return out;
+  }
+  let mtimeMs = 0;
+  try {
+    mtimeMs = fs20.statSync(schema.dbPath).mtimeMs;
+  } catch {
+    mtimeMs = 0;
+  }
+  try {
+    const c = schema.sessions.columns;
+    const select = [
+      `${quoteIdent(c["id"])} as id`,
+      c["directory"] ? `${quoteIdent(c["directory"])} as directory` : `null as directory`,
+      c["parent"] ? `${quoteIdent(c["parent"])} as parent` : `null as parent`
+    ].join(", ");
+    const rows = db.prepare(`select ${select} from ${quoteIdent(schema.sessions.table)}`).all();
+    const bytes2 = /* @__PURE__ */ new Map();
+    const mc = schema.messages.columns;
+    try {
+      const byteRows = db.prepare(`select ${quoteIdent(mc["session"])} as sid, sum(length(${quoteIdent(mc["content"])})) as n from ${quoteIdent(schema.messages.table)} group by 1`).all();
+      for (const r of byteRows)
+        bytes2.set(String(r.sid), Number(r.n) || 0);
+    } catch {
+    }
+    for (const r of rows) {
+      const id = String(r.id ?? "");
+      if (!id)
+        continue;
+      const directory = typeof r.directory === "string" ? r.directory : "";
+      const parent = typeof r.parent === "string" && r.parent ? r.parent : void 0;
+      out.push({
+        sessionId: id,
+        harness: "opencode",
+        path: schema.dbPath,
+        projectSlug: directory ? path17.basename(directory) : "",
+        bytes: bytes2.get(id) ?? 0,
+        mtimeMs,
+        // opencode's `parent_id` marks a child session — a subagent
+        // transcript in `03 §2`'s sense — so it is a sidechain, and unlike a
+        // pi branch the *session* itself is the sidechain.
+        isSidechain: parent !== void 0,
+        ...parent ? { parentSessionId: parent } : {},
+        status: "live"
+      });
+    }
+  } catch {
+  } finally {
+    db.close();
+  }
+  return out;
+}
+async function parse6(source, options = {}) {
+  const src = typeof source === "string" ? void 0 : source;
+  const dbPath2 = path17.resolve(typeof source === "string" ? source : source.path);
+  const sessionId = options.sessionId ?? src?.sessionId ?? "";
+  const unknownTypes = {};
+  const empty = (reason) => {
+    unknownTypes[reason] = (unknownTypes[reason] ?? 0) + 1;
+    return {
+      session: {
+        id: sessionId,
+        harness: "opencode",
+        sourcePath: dbPath2,
+        project: "",
+        projectSlug: src?.projectSlug ?? "",
+        startedAt: "",
+        endedAt: "",
+        entrypoint: "cli",
+        isSidechain: src?.isSidechain ?? false,
+        counts: { userPrompts: 0, assistantTurns: 0, toolCalls: 0, bytes: 0 },
+        status: options.status ?? src?.status ?? "live"
+      },
+      exchanges: [],
+      unknownTypes,
+      endOffset: 0,
+      malformedLines: 0
+    };
+  };
+  const described = describeStore(dbPath2);
+  if (!described.ok)
+    return empty(described.reason);
+  const schema = described.schema;
+  if (!sessionId)
+    return empty("no session id supplied");
+  let db;
+  try {
+    db = openSqliteReadOnly(dbPath2);
+  } catch (e) {
+    return empty(`cannot open store read-only (${errText(e)})`);
+  }
+  try {
+    const sc = schema.sessions.columns;
+    const sSelect = [
+      `${quoteIdent(sc["id"])} as id`,
+      col(sc["title"], "title"),
+      col(sc["created"], "created"),
+      col(sc["updated"], "updated"),
+      col(sc["directory"], "directory"),
+      col(sc["parent"], "parent"),
+      col(sc["model"], "model")
+    ].join(", ");
+    const sessionRow = db.prepare(`select ${sSelect} from ${quoteIdent(schema.sessions.table)} where ${quoteIdent(sc["id"])} = ? limit 1`).get(sessionId);
+    const mc = schema.messages.columns;
+    const mSelect = [
+      col(mc["id"], "id"),
+      col(mc["role"], "role"),
+      `${quoteIdent(mc["content"])} as content`,
+      col(mc["created"], "created")
+    ].join(", ");
+    const orderBy = mc["created"] ? `order by ${quoteIdent(mc["created"])} asc, rowid asc` : `order by rowid asc`;
+    let messageRows = [];
+    try {
+      messageRows = db.prepare(`select ${mSelect} from ${quoteIdent(schema.messages.table)} where ${quoteIdent(mc["session"])} = ? ${orderBy}`).all(sessionId);
+    } catch {
+      try {
+        messageRows = db.prepare(`select ${mSelect} from ${quoteIdent(schema.messages.table)} where ${quoteIdent(mc["session"])} = ?`).all(sessionId);
+      } catch {
+        messageRows = [];
+      }
+    }
+    const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
+    let malformedLines = 0;
+    const { exchanges, contentBytes, firstTs, lastTs, model: turnModel } = buildExchanges3(messageRows, sessionId, counts2, unknownTypes, () => {
+      malformedLines += 1;
+    });
+    const str2 = (key) => {
+      const v = sessionRow?.[key];
+      return typeof v === "string" && v.trim() ? v : void 0;
+    };
+    const directory = str2("directory");
+    const parent = str2("parent");
+    const session = {
+      id: sessionId,
+      harness: "opencode",
+      sourcePath: dbPath2,
+      project: directory ?? "",
+      projectSlug: options.projectSlug ?? src?.projectSlug ?? (directory ? path17.basename(directory) : ""),
+      startedAt: isoOf(sessionRow?.["created"]) ?? firstTs ?? "",
+      endedAt: isoOf(sessionRow?.["updated"]) ?? lastTs ?? isoOf(sessionRow?.["created"]) ?? "",
+      ...str2("title") ? { title: str2("title") } : {},
+      entrypoint: "cli",
+      ...str2("model") ?? turnModel ? { model: str2("model") ?? turnModel } : {},
+      isSidechain: parent !== void 0 || (src?.isSidechain ?? false),
+      ...parent ? { parentSessionId: parent } : {},
+      counts: {
+        userPrompts: counts2.userPrompts,
+        assistantTurns: counts2.assistantTurns,
+        toolCalls: counts2.toolCalls,
+        bytes: options.bytes ?? src?.bytes ?? contentBytes
+      },
+      status: options.status ?? src?.status ?? "live"
+    };
+    return { session, exchanges, unknownTypes, endOffset: contentBytes, malformedLines };
+  } finally {
+    db.close();
+  }
+}
+function col(name, alias) {
+  return name ? `${quoteIdent(name)} as ${alias}` : `null as ${alias}`;
+}
+function buildExchanges3(rows, sessionId, counts2, unknownTypes, onMalformed) {
+  const out = [];
+  let seq = 0;
+  let contentBytes = 0;
+  let firstTs;
+  let lastTs;
+  let model;
+  let current = null;
+  const finalize = () => {
+    if (!current)
+      return;
+    const b = current;
+    current = null;
+    if (!b.userTexts.length && !b.assistantTexts.length && !b.toolCalls.length)
+      return;
+    out.push({
+      id: exchangeId(sessionId, b.seq),
+      sessionId,
+      seq: b.seq,
+      ts: b.ts,
+      userText: b.userTexts.join("\n\n"),
+      assistantText: b.assistantTexts.join("\n\n"),
+      toolCalls: b.toolCalls,
+      filesTouched: uniq(b.files),
+      isSidechain: false,
+      redacted: false
+    });
+  };
+  const open2 = (ts) => {
+    seq += 1;
+    current = { seq, ts, userTexts: [], assistantTexts: [], toolCalls: [], files: [] };
+    return current;
+  };
+  for (const row2 of rows) {
+    const raw = row2["content"];
+    const text = raw === null || raw === void 0 ? "" : String(raw);
+    contentBytes += Buffer.byteLength(text, "utf8");
+    const ts = isoOf(row2["created"]) ?? "";
+    if (ts) {
+      firstTs ??= ts;
+      if (!lastTs || ts > lastTs)
+        lastTs = ts;
+    }
+    const role = String(row2["role"] ?? "").toLowerCase();
+    const parsed = parseContent(text, unknownTypes, onMalformed);
+    if (parsed.model)
+      model = parsed.model;
+    if (USER_ROLES.has(role)) {
+      finalize();
+      counts2.userPrompts += 1;
+      const b2 = open2(ts);
+      if (parsed.text)
+        b2.userTexts.push(parsed.text);
+      absorbTools(b2, parsed, counts2);
+      continue;
+    }
+    const b = current ?? open2(ts);
+    if (ASSISTANT_ROLES.has(role)) {
+      counts2.assistantTurns += 1;
+    } else {
+      const key = `role:${role || "(no role)"}`;
+      unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
+    }
+    if (parsed.text)
+      b.assistantTexts.push(parsed.text);
+    absorbTools(b, parsed, counts2);
+  }
+  finalize();
+  return {
+    exchanges: out,
+    contentBytes,
+    ...firstTs ? { firstTs } : {},
+    ...lastTs ? { lastTs } : {},
+    ...model ? { model } : {}
+  };
+}
+function absorbTools(b, parsed, counts2) {
+  for (const call of parsed.toolCalls) {
+    b.toolCalls.push(call.call);
+    counts2.toolCalls += 1;
+    for (const f of call.files)
+      b.files.push(f);
+  }
+}
+function parseContent(raw, unknownTypes, onMalformed) {
+  const trimmed = raw.trim();
+  const out = { text: raw, toolCalls: [] };
+  if (!trimmed || trimmed[0] !== "[" && trimmed[0] !== "{")
+    return out;
+  const doc = safeParseJson(trimmed);
+  if (typeof doc === "string") {
+    onMalformed();
+    return out;
+  }
+  const parts = Array.isArray(doc) ? doc : isRecord(doc) && Array.isArray(doc["parts"]) ? doc["parts"] : isRecord(doc) && Array.isArray(doc["content"]) ? doc["content"] : [];
+  if (parts.length === 0) {
+    if (isRecord(doc) && typeof doc["text"] === "string") {
+      out.text = doc["text"];
+      if (typeof doc["model"] === "string")
+        out.model = doc["model"];
+      return out;
+    }
+    return out;
+  }
+  const texts = [];
+  if (isRecord(doc) && typeof doc["model"] === "string")
+    out.model = doc["model"];
+  for (const p of parts) {
+    if (typeof p === "string") {
+      texts.push(p);
+      continue;
+    }
+    if (!isRecord(p))
+      continue;
+    const type = String(p["type"] ?? "").toLowerCase();
+    if (type === "text" || !type && typeof p["text"] === "string") {
+      if (typeof p["text"] === "string")
+        texts.push(p["text"]);
+      continue;
+    }
+    if (type === "tool" || type === "tool-invocation" || type === "tool_use" || type === "tool-call") {
+      const state = isRecord(p["state"]) ? p["state"] : {};
+      const name = String(p["tool"] ?? p["name"] ?? state["tool"] ?? "unknown");
+      const input = state["input"] ?? p["input"] ?? p["args"] ?? p["arguments"];
+      const output = state["output"] ?? p["output"] ?? p["result"];
+      const status3 = String(state["status"] ?? p["status"] ?? "").toLowerCase();
+      const result = stringifyToolOutput(output);
+      const call = {
+        name,
+        input: stringifyToolInput(input),
+        ...result !== void 0 ? { result } : {},
+        ...status3 === "error" || status3 === "failed" ? { isError: true } : {}
+      };
+      out.toolCalls.push({ call, files: filesFromToolInput(input) });
+      continue;
+    }
+    const key = `part:${type || "(no type)"}`;
+    unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
+  }
+  out.text = texts.join("\n\n");
+  return out;
+}
+function isoOf(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value < 1e11 ? value * 1e3 : value;
+    const d2 = new Date(ms);
+    return Number.isNaN(d2.getTime()) ? void 0 : d2.toISOString();
+  }
+  if (typeof value !== "string" || !value.trim())
+    return void 0;
+  const n2 = Number(value);
+  if (Number.isFinite(n2) && /^\d+$/.test(value.trim()))
+    return isoOf(n2);
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? void 0 : d.toISOString();
+}
+function errText(e) {
+  return e instanceof Error ? e.message : String(e);
+}
+function doctorLine6(override) {
+  const dir = sourceDir4(override);
+  const installed = fs20.existsSync(dir);
+  if (!installed) {
+    return formatDoctorLine({
+      harness: "opencode",
+      status: "absent",
+      dir,
+      note: "opencode not installed"
+    });
+  }
+  const stores = findStores(override);
+  if (stores.length === 0) {
+    const hasStorage = fs20.existsSync(path17.join(dir, "storage"));
+    return formatDoctorLine({
+      harness: "opencode",
+      status: "empty",
+      dir,
+      note: hasStorage ? "opencode installed, no sqlite store \u2014 this install uses storage/ json, which potsherd does not read yet" : "opencode installed, no sessions yet \xB7 unverified format"
+    });
+  }
+  const failures = [];
+  let sessions = 0;
+  let readable = 0;
+  for (const store of stores) {
+    const described = describeStore(store);
+    if (!described.ok) {
+      failures.push(described.reason);
+      continue;
+    }
+    readable += 1;
+    try {
+      sessions += discoverIn(described.schema).length;
+    } catch {
+    }
+  }
+  if (readable === 0) {
+    return formatDoctorLine({
+      harness: "opencode",
+      status: "unsupported",
+      dir,
+      note: `${failures[0] ?? "unsupported version"} \xB7 unverified format`
+    });
+  }
+  if (sessions === 0) {
+    return formatDoctorLine({
+      harness: "opencode",
+      status: "empty",
+      dir,
+      note: "opencode installed, store readable, no sessions yet \xB7 unverified format"
+    });
+  }
+  const note = [`${sessions} session${sessions === 1 ? "" : "s"}`];
+  if (failures.length)
+    note.push(`${failures.length} store${failures.length === 1 ? "" : "s"} unsupported`);
+  note.push("unverified format");
+  return formatDoctorLine({
+    harness: "opencode",
+    status: "ready",
+    dir,
+    note: note.join(" \xB7 ")
+  });
+}
+var opencodeAdapter = {
+  harness: "opencode",
+  displayName: DISPLAY_NAME3,
+  sourceDir: () => sourceDir4(),
+  discover: () => discover6(),
+  parse: (src, opts) => parse6(src, opts ?? {})
+};
+var opencode_default = opencodeAdapter;
+
+// ../core/dist/adapters/copilot.js
+var copilot_exports = {};
+__export(copilot_exports, {
+  COPILOT_DOCTOR_NOTE: () => COPILOT_DOCTOR_NOTE,
+  COPILOT_FORMAT_UNVERIFIED: () => COPILOT_FORMAT_UNVERIFIED,
+  DISPLAY_NAME: () => DISPLAY_NAME4,
+  copilotAdapter: () => copilotAdapter,
+  copilotDir: () => copilotDir,
+  copilotSessionStateDir: () => copilotSessionStateDir,
+  default: () => copilot_default,
+  discover: () => discover7,
+  doctorLine: () => doctorLine7,
+  isoOf: () => isoOf2,
+  parse: () => parse7,
+  scan: () => scan,
+  sessionIdFromPath: () => sessionIdFromPath2,
+  sourceDir: () => sourceDir5,
+  stateFileIn: () => stateFileIn
+});
+import fs21 from "node:fs";
+import path18 from "node:path";
+var DISPLAY_NAME4 = "Copilot CLI";
+var STATE_FILES = [
+  "state.json",
+  "session.json",
+  "messages.json",
+  "history.json",
+  "state.jsonl",
+  "messages.jsonl"
+];
+var COPILOT_FORMAT_UNVERIFIED = true;
+var COPILOT_DOCTOR_NOTE = "copilot: format unverified \u2014 this adapter was written from documentation, not from a real session, so record coverage is a best guess until someone runs it on one. potsherd reads ~/.copilot only: Copilot's VS Code chats live in workspaceStorage, which is not one of the read-only inputs potsherd is allowed, so IDE sessions are not shown here.";
+var HISTORY_KEYS2 = ["messages", "history", "turns", "events", "state"];
+var USER_ROLES2 = /* @__PURE__ */ new Set(["user", "human", "prompt"]);
+var ASSISTANT_ROLES2 = /* @__PURE__ */ new Set(["assistant", "model", "agent", "copilot"]);
+var TOOL_ROLES = /* @__PURE__ */ new Set(["tool", "function", "tool_result", "toolresult"]);
+function sourceDir5(override) {
+  return copilotSessionStateDir(override);
+}
+function discover7(override) {
+  return scan(override).sources;
+}
+function scan(override) {
+  const root = sourceDir5(override);
+  const sources = [];
+  const unreadable = [];
+  let entries;
+  try {
+    entries = fs21.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return { sources, unreadable };
+  }
+  for (const entry of entries) {
+    const full = path18.join(root, entry.name);
+    if (entry.isDirectory()) {
+      const state = stateFileIn(full);
+      if (!state) {
+        unreadable.push(full);
+        continue;
+      }
+      const src2 = sourceFor(state, entry.name);
+      if (src2)
+        sources.push(src2);
+      else
+        unreadable.push(full);
+      continue;
+    }
+    if (!entry.isFile())
+      continue;
+    const ext = path18.extname(entry.name).toLowerCase();
+    if (ext !== ".json" && ext !== ".jsonl")
+      continue;
+    const src = sourceFor(full, path18.basename(entry.name, ext));
+    if (src)
+      sources.push(src);
+  }
+  sources.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  unreadable.sort();
+  return { sources, unreadable };
+}
+function stateFileIn(dir) {
+  for (const name of STATE_FILES) {
+    const candidate = path18.join(dir, name);
+    try {
+      if (fs21.statSync(candidate).isFile())
+        return candidate;
+    } catch {
+    }
+  }
+  return void 0;
+}
+function sourceFor(file, sessionId) {
+  let stat;
+  try {
+    stat = fs21.statSync(file);
+  } catch {
+    return void 0;
+  }
+  if (!stat.isFile())
+    return void 0;
+  return {
+    sessionId,
+    harness: "copilot",
+    path: file,
+    // Copilot's session-state directory is flat — it is keyed by session, not
+    // by project — so there is no harness slug to report. Left empty rather
+    // than filled with something that is not one.
+    projectSlug: "",
+    bytes: stat.size,
+    mtimeMs: stat.mtimeMs,
+    isSidechain: false,
+    status: "live"
+  };
+}
+async function parse7(source, options = {}) {
+  const src = typeof source === "string" ? void 0 : source;
+  const absolute2 = path18.resolve(typeof source === "string" ? source : source.path);
+  const unknownTypes = {};
+  let malformedLines = 0;
+  let raw = "";
+  try {
+    raw = fs21.readFileSync(absolute2, "utf8");
+  } catch {
+    raw = "";
+  }
+  const endOffset = Buffer.byteLength(raw, "utf8");
+  const { turns, meta, malformed } = readDocument(absolute2, raw);
+  malformedLines += malformed;
+  const sessionId = options.sessionId ?? (meta && typeof meta["sessionId"] === "string" && meta["sessionId"].trim() ? meta["sessionId"] : src?.sessionId ?? sessionIdFromPath2(absolute2));
+  const mtimeMs = options.mtimeMs ?? src?.mtimeMs ?? statMtime2(absolute2);
+  const fileTime = mtimeMs ? new Date(mtimeMs).toISOString() : "";
+  const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
+  const built = buildExchanges4(turns, sessionId, fileTime, counts2, unknownTypes);
+  const str2 = (...keys) => {
+    if (!meta)
+      return void 0;
+    for (const key of keys) {
+      const v = meta[key];
+      if (typeof v === "string" && v.trim())
+        return v;
+    }
+    return void 0;
+  };
+  const startedAt = str2("startTime", "startedAt", "createdAt") ?? built.firstTs ?? fileTime;
+  const endedAt = str2("lastUpdated", "updatedAt", "endedAt") ?? built.lastTs ?? fileTime;
+  const cwd = str2("cwd", "workingDirectory", "projectRoot", "directory");
+  const title = str2("title", "name", "summary");
+  const model = str2("model", "modelId") ?? built.model;
+  const gitBranch = str2("gitBranch", "branch");
+  const session = {
+    id: sessionId,
+    harness: "copilot",
+    sourcePath: absolute2,
+    project: cwd ?? "",
+    // `??` is wrong here: `discover()` deliberately sets `projectSlug` to the
+    // empty string because copilot's session-state directory is keyed by
+    // session, not by project — and an empty string is not nullish, so `??`
+    // would let it beat a slug we can actually derive from the cwd.
+    projectSlug: options.projectSlug || src?.projectSlug || (cwd ? path18.basename(cwd) : ""),
+    startedAt,
+    endedAt: endedAt < startedAt ? startedAt : endedAt,
+    ...title ? { title } : {},
+    ...gitBranch ? { gitBranch } : {},
+    entrypoint: "cli",
+    ...model ? { model } : {},
+    isSidechain: false,
+    counts: {
+      userPrompts: counts2.userPrompts,
+      assistantTurns: counts2.assistantTurns,
+      toolCalls: counts2.toolCalls,
+      bytes: options.bytes ?? src?.bytes ?? endOffset
+    },
+    status: options.status ?? src?.status ?? "live"
+  };
+  return { session, exchanges: built.exchanges, unknownTypes, endOffset, malformedLines };
+}
+function sessionIdFromPath2(file) {
+  const ext = path18.extname(file);
+  const base2 = path18.basename(file, ext);
+  if (STATE_FILES.includes(path18.basename(file))) {
+    return path18.basename(path18.dirname(file));
+  }
+  return base2;
+}
+function readDocument(file, raw) {
+  if (!raw.trim())
+    return { turns: [], malformed: 0 };
+  if (path18.extname(file).toLowerCase() === ".jsonl") {
+    const turns = [];
+    let meta;
+    let malformed = 0;
+    for (const line of raw.split("\n")) {
+      if (!line.trim())
+        continue;
+      const parsed = safeParseJson(line.trim());
+      if (typeof parsed === "string") {
+        malformed += 1;
+        continue;
+      }
+      if (!isRecord(parsed)) {
+        malformed += 1;
+        continue;
+      }
+      if (parsed["role"] === void 0 && (parsed["sessionId"] || parsed["cwd"] || parsed["model"])) {
+        meta ??= parsed;
+        continue;
+      }
+      turns.push(parsed);
+    }
+    return { turns, ...meta ? { meta } : {}, malformed };
+  }
+  const doc = safeParseJson(raw.trim());
+  if (typeof doc === "string" || doc === void 0)
+    return { turns: [], malformed: 1 };
+  if (Array.isArray(doc))
+    return { turns: doc, malformed: 0 };
+  if (!isRecord(doc))
+    return { turns: [], malformed: 1 };
+  for (const key of HISTORY_KEYS2) {
+    const v = doc[key];
+    if (Array.isArray(v))
+      return { turns: v, meta: doc, malformed: 0 };
+    if (key === "state" && isRecord(v)) {
+      for (const inner of HISTORY_KEYS2) {
+        const iv = v[inner];
+        if (Array.isArray(iv))
+          return { turns: iv, meta: { ...doc, ...v }, malformed: 0 };
+      }
+    }
+  }
+  return { turns: [], meta: doc, malformed: 0 };
+}
+function buildExchanges4(turns, sessionId, fileTime, counts2, unknownTypes) {
+  const out = [];
+  let seq = 0;
+  let firstTs;
+  let lastTs;
+  let model;
+  let current = null;
+  const finalize = () => {
+    if (!current)
+      return;
+    const b = current;
+    current = null;
+    if (!b.userTexts.length && !b.assistantTexts.length && !b.toolCalls.length)
+      return;
+    out.push({
+      id: exchangeId(sessionId, b.seq),
+      sessionId,
+      seq: b.seq,
+      ts: b.ts || fileTime,
+      userText: b.userTexts.join("\n\n"),
+      assistantText: b.assistantTexts.join("\n\n"),
+      toolCalls: b.toolCalls,
+      filesTouched: uniq(b.files),
+      isSidechain: false,
+      redacted: false
+    });
+  };
+  const open2 = (ts) => {
+    seq += 1;
+    current = {
+      seq,
+      ts,
+      userTexts: [],
+      assistantTexts: [],
+      toolCalls: [],
+      byId: /* @__PURE__ */ new Map(),
+      files: []
+    };
+    return current;
+  };
+  for (const turn of turns) {
+    if (!isRecord(turn)) {
+      unknownTypes["(not an object)"] = (unknownTypes["(not an object)"] ?? 0) + 1;
+      continue;
+    }
+    const role = String(turn["role"] ?? turn["type"] ?? "").toLowerCase();
+    const ts = isoOf2(turn["timestamp"] ?? turn["time"] ?? turn["createdAt"] ?? turn["ts"]) ?? "";
+    if (ts) {
+      firstTs ??= ts;
+      if (!lastTs || ts > lastTs)
+        lastTs = ts;
+    }
+    if (typeof turn["model"] === "string" && turn["model"])
+      model = turn["model"];
+    const blocks = blocksOf(turn);
+    if (USER_ROLES2.has(role) && !onlyToolResults(blocks)) {
+      finalize();
+      counts2.userPrompts += 1;
+      const b2 = open2(ts);
+      absorb(
+        b2,
+        blocks,
+        counts2,
+        unknownTypes,
+        /* asUser */
+        true
+      );
+      continue;
+    }
+    const b = current ?? open2(ts);
+    if (ASSISTANT_ROLES2.has(role)) {
+      counts2.assistantTurns += 1;
+    } else if (!USER_ROLES2.has(role) && !TOOL_ROLES.has(role)) {
+      const key = `role:${role || "(no role)"}`;
+      unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
+    }
+    absorb(
+      b,
+      blocks,
+      counts2,
+      unknownTypes,
+      /* asUser */
+      false
+    );
+  }
+  finalize();
+  return {
+    exchanges: out,
+    ...firstTs ? { firstTs } : {},
+    ...lastTs ? { lastTs } : {},
+    ...model ? { model } : {}
+  };
+}
+function absorb(b, blocks, counts2, unknownTypes, asUser) {
+  for (const block2 of blocks) {
+    const type = String(block2["type"] ?? "").toLowerCase();
+    if (type === "text" || !type && typeof block2["text"] === "string") {
+      const text = typeof block2["text"] === "string" ? block2["text"] : "";
+      if (!text)
+        continue;
+      if (asUser)
+        b.userTexts.push(text);
+      else if (text.trim())
+        b.assistantTexts.push(text);
+      continue;
+    }
+    if (type === "tool_call" || type === "tool-call" || type === "function_call" || type === "tool_use") {
+      const fn = isRecord(block2["function"]) ? block2["function"] : {};
+      const name = String(block2["name"] ?? fn["name"] ?? block2["tool"] ?? "unknown");
+      const rawArgs = block2["arguments"] ?? fn["arguments"] ?? block2["input"] ?? block2["args"];
+      const args = typeof rawArgs === "string" ? safeParseJson(rawArgs) : rawArgs;
+      b.toolCalls.push({ name, input: stringifyToolInput(args) });
+      counts2.toolCalls += 1;
+      const id = block2["id"] ?? block2["tool_call_id"] ?? block2["toolCallId"];
+      if (typeof id === "string" && id)
+        b.byId.set(id, b.toolCalls.length - 1);
+      else
+        b.byId.set(`name:${name}`, b.toolCalls.length - 1);
+      for (const f of filesFromToolInput(args))
+        b.files.push(f);
+      continue;
+    }
+    if (type === "tool_result" || type === "tool-result" || type === "function_response" || type === "tool_response") {
+      const name = String(block2["name"] ?? block2["tool"] ?? "unknown");
+      const id = block2["tool_call_id"] ?? block2["toolCallId"] ?? block2["id"];
+      const result = stringifyToolOutput(block2["content"] ?? block2["output"] ?? block2["result"] ?? block2["response"]);
+      const isError = block2["is_error"] === true || block2["isError"] === true || void 0;
+      const key2 = typeof id === "string" && id ? id : `name:${name}`;
+      const at = b.byId.get(key2);
+      if (at !== void 0) {
+        const call = b.toolCalls[at];
+        if (call) {
+          if (result !== void 0)
+            call.result = result;
+          if (isError)
+            call.isError = true;
+        }
+        b.byId.delete(key2);
+        continue;
+      }
+      b.toolCalls.push({
+        name,
+        input: "",
+        ...result !== void 0 ? { result } : {},
+        ...isError ? { isError: true } : {}
+      });
+      counts2.toolCalls += 1;
+      continue;
+    }
+    const key = `block:${type || "(no type)"}`;
+    unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
+  }
+}
+function blocksOf(turn) {
+  const content = turn["content"] ?? turn["parts"] ?? turn["blocks"];
+  const out = [];
+  if (typeof content === "string")
+    out.push({ type: "text", text: content });
+  else if (Array.isArray(content)) {
+    for (const c of content) {
+      if (typeof c === "string")
+        out.push({ type: "text", text: c });
+      else if (isRecord(c))
+        out.push(c);
+    }
+  } else if (isRecord(content)) {
+    out.push(content);
+  }
+  const calls = turn["tool_calls"] ?? turn["toolCalls"];
+  if (Array.isArray(calls)) {
+    for (const c of calls)
+      if (isRecord(c))
+        out.push({ type: "tool_call", ...c });
+  }
+  return out;
+}
+function onlyToolResults(blocks) {
+  if (blocks.length === 0)
+    return false;
+  return blocks.every((b) => {
+    const t = String(b["type"] ?? "").toLowerCase();
+    return t === "tool_result" || t === "tool-result" || t === "function_response" || t === "tool_response";
+  });
+}
+function isoOf2(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const d2 = new Date(value < 1e11 ? value * 1e3 : value);
+    return Number.isNaN(d2.getTime()) ? void 0 : d2.toISOString();
+  }
+  if (typeof value !== "string" || !value.trim())
+    return void 0;
+  if (/^\d+$/.test(value.trim()))
+    return isoOf2(Number(value.trim()));
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? void 0 : d.toISOString();
+}
+function statMtime2(absolute2) {
+  try {
+    return fs21.statSync(absolute2).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+function doctorLine7(override) {
+  const dir = sourceDir5(override);
+  const root = copilotDir(override);
+  let found = { sources: [], unreadable: [] };
+  try {
+    found = scan(override);
+  } catch {
+    found = { sources: [], unreadable: [] };
+  }
+  const installed = fs21.existsSync(root);
+  const stateExists = fs21.existsSync(dir);
+  let status3;
+  let note;
+  if (found.sources.length > 0) {
+    const parts = [`${found.sources.length} session${found.sources.length === 1 ? "" : "s"}`];
+    if (found.unreadable.length) {
+      parts.push(`${found.unreadable.length} unreadable`);
+    }
+    parts.push("unverified format");
+    status3 = "ready";
+    note = parts.join(" \xB7 ");
+  } else if (installed || stateExists) {
+    status3 = "empty";
+    note = stateExists ? "Copilot CLI installed, session-state/ holds no sessions \xB7 unverified format" : "Copilot CLI installed, but it has written no session-state/ \xB7 unverified format";
+  } else {
+    status3 = "absent";
+    note = "Copilot CLI not installed";
+  }
+  return formatDoctorLine({ harness: "copilot", status: status3, dir, note });
+}
+var copilotAdapter = {
+  harness: "copilot",
+  displayName: DISPLAY_NAME4,
+  sourceDir: () => sourceDir5(),
+  discover: () => discover7(),
+  parse: (src, opts) => parse7(src, opts ?? {})
+};
+var copilot_default = copilotAdapter;
+
+// ../core/dist/ingest.js
+import crypto5 from "node:crypto";
+import fs22 from "node:fs";
+import path19 from "node:path";
+function adapterSpecs(o = {}) {
+  return [
+    {
+      harness: "claude",
+      displayName: "Claude Code",
+      sourceDir: sourceDir(o.claudeDir),
+      discover: () => discover({
+        ...o.claudeDir ? { claudeDir: o.claudeDir } : {},
+        ...o.potsherdDir ? { potsherdDir: o.potsherdDir } : {}
+      }),
+      parse: (source) => parse(source),
+      version: (r) => r.version ?? "unknown",
+      novel: isNovelRecordType
+    },
+    {
+      harness: "codex",
+      displayName: "Codex CLI",
+      sourceDir: codexPaths(codexDir(o.codexHome)).sessions,
+      discover: () => discover2(o.codexHome ? { codexHome: o.codexHome } : {}),
+      parse: (source) => parse2(source, o.codexHome ? { codexHome: o.codexHome } : {}),
+      version: (r) => r.codex?.cliVersion ?? "unknown",
+      novel: () => true
+    },
+    {
+      harness: "cursor",
+      displayName: "Cursor",
+      sourceDir: cursorProjectsDir(o.cursorDir),
+      discover: () => discover3(o.cursorDir),
+      parse: (source) => parse3(source),
+      version: () => "unknown",
+      novel: () => true
+    },
+    {
+      harness: "pi",
+      displayName: "pi",
+      sourceDir: sourceDir2(o.piDir),
+      discover: () => discover4(o.piDir),
+      parse: (source) => parse4(source),
+      version: () => "unknown",
+      novel: () => true
+    },
+    {
+      // Phase 6, T6.1. `unverified — documentation only`: written against
+      // `plans/research/formats.md`, which marks its gemini section
+      // **unmeasured**, and against synthetic fixtures. See the adapter header.
+      harness: "gemini",
+      displayName: DISPLAY_NAME2,
+      sourceDir: sourceDir3(o.geminiDir),
+      discover: () => discover5(o.geminiDir),
+      parse: (source) => parse5(source),
+      version: () => "unknown",
+      novel: () => true
+    },
+    {
+      // Phase 6, T6.1. `unverified — documentation only`, and the only harness
+      // whose store is a database rather than a file: its schema is discovered
+      // at runtime (`03 §10`), never hard-coded, and it degrades to
+      // "unsupported version" rather than half-parsing. See the adapter header.
+      harness: "opencode",
+      displayName: DISPLAY_NAME3,
+      sourceDir: sourceDir4(o.opencodeDir),
+      discover: () => discover6(o.opencodeDir),
+      parse: (source) => parse6(source),
+      version: () => "unknown",
+      novel: () => true
+    },
+    {
+      // Phase 6, T6.1. `unverified — documentation only`. `~/.copilot` exists
+      // on the machine this was written on and the CLI has run there, and it
+      // has written no `session-state/` at all — so there was nothing to
+      // measure. Reads `~/.copilot` only: the VS Code chats live in
+      // `workspaceStorage`, which the cursor ruling (`04-DECISIONS.md`,
+      // 21 aug) keeps out of bounds. See the adapter header.
+      harness: "copilot",
+      displayName: DISPLAY_NAME4,
+      sourceDir: sourceDir5(o.copilotDir),
+      discover: () => discover7(o.copilotDir),
+      parse: (source) => parse7(source),
+      version: () => "unknown",
+      novel: () => true
+    }
+  ];
+}
+function ingestSession(db, parsed, options = {}) {
+  const session = parsed.session;
+  const counts2 = emptyCounts();
+  let redactedExchanges = 0;
+  let toolCallCount = 0;
+  const elisions = emptyElisions();
+  const redacted = [];
+  for (const exchange of parsed.exchanges) {
+    const { exchange: lean, elisions: e } = elideExchange(exchange);
+    const { exchange: clean, hits } = redactExchange(lean);
+    elisions.binaryParts += e.binaryParts;
+    elisions.charsElided += e.charsElided;
+    tally(hits, counts2);
+    if (clean.redacted)
+      redactedExchanges += 1;
+    toolCallCount += clean.toolCalls.length;
+    redacted.push(clean);
+  }
+  const run3 = db.transaction(() => {
+    upsertSession(db, session, parsed, options);
+    clearExchanges(db, session.id);
+    for (const exchange of redacted)
+      insertExchange(db, exchange);
+  });
+  run3();
+  return {
+    sessionId: session.id,
+    exchanges: redacted.length,
+    toolCalls: toolCallCount,
+    redactedExchanges,
+    counts: counts2,
+    elisions
+  };
+}
+function upsertSession(db, s, parsed, o) {
+  db.prepare(`INSERT INTO sessions (
+       id, harness, source_path, project, project_slug, started_at, ended_at, title,
+       git_branch, entrypoint, model, is_sidechain, parent_session_id, agent_name,
+       user_prompts, assistant_turns, tool_calls, bytes, status, archived_path,
+       indexed_at, source_mtime, source_offset)
+     VALUES (
+       @id, @harness, @source_path, @project, @project_slug, @started_at, @ended_at, @title,
+       @git_branch, @entrypoint, @model, @is_sidechain, @parent_session_id, @agent_name,
+       @user_prompts, @assistant_turns, @tool_calls, @bytes, @status, @archived_path,
+       @indexed_at, @source_mtime, @source_offset)
+     ON CONFLICT(id) DO UPDATE SET
+       harness = excluded.harness, source_path = excluded.source_path,
+       project = excluded.project, project_slug = excluded.project_slug,
+       started_at = excluded.started_at, ended_at = excluded.ended_at,
+       title = COALESCE(excluded.title, sessions.title),
+       git_branch = COALESCE(excluded.git_branch, sessions.git_branch),
+       entrypoint = COALESCE(excluded.entrypoint, sessions.entrypoint),
+       model = COALESCE(excluded.model, sessions.model),
+       is_sidechain = excluded.is_sidechain,
+       parent_session_id = COALESCE(excluded.parent_session_id, sessions.parent_session_id),
+       agent_name = COALESCE(excluded.agent_name, sessions.agent_name),
+       user_prompts = excluded.user_prompts, assistant_turns = excluded.assistant_turns,
+       tool_calls = excluded.tool_calls, bytes = excluded.bytes,
+       status = excluded.status, archived_path = excluded.archived_path,
+       indexed_at = excluded.indexed_at, source_mtime = excluded.source_mtime,
+       source_offset = excluded.source_offset`).run({
+    id: s.id,
+    harness: s.harness,
+    source_path: o.originalPath ?? s.sourcePath,
+    project: s.project || null,
+    project_slug: s.projectSlug || null,
+    started_at: s.startedAt || null,
+    ended_at: s.endedAt || null,
+    title: s.title ?? null,
+    git_branch: s.gitBranch ?? null,
+    entrypoint: s.entrypoint ?? null,
+    model: s.model ?? null,
+    is_sidechain: s.isSidechain ? 1 : 0,
+    parent_session_id: s.parentSessionId ?? null,
+    agent_name: s.agentName ?? null,
+    user_prompts: s.counts.userPrompts,
+    assistant_turns: s.counts.assistantTurns,
+    tool_calls: s.counts.toolCalls,
+    bytes: s.counts.bytes,
+    status: s.status,
+    archived_path: o.archivedPath ?? (s.status === "archived" ? s.sourcePath : null),
+    indexed_at: o.indexedAt ?? (/* @__PURE__ */ new Date()).toISOString(),
+    source_mtime: o.sourceMtimeMs !== void 0 ? Math.floor(o.sourceMtimeMs) : null,
+    source_offset: parsed.endOffset
+  });
+}
+function clearExchanges(db, sessionId) {
+  const rows = db.prepare("SELECT rowid, id, user_text, assistant_text FROM exchanges WHERE session_id = ?").all(sessionId);
+  if (rows.length === 0)
+    return;
+  const unindex = db.prepare(`INSERT INTO exchanges_fts (exchanges_fts, rowid, user_text, assistant_text)
+     VALUES ('delete', ?, ?, ?)`);
+  for (const row2 of rows)
+    unindex.run(row2.rowid, row2.user_text, row2.assistant_text);
+  if (vecAvailable(db) && vecTablesExist(db)) {
+    const dropVec = db.prepare("DELETE FROM vec_exchanges WHERE id = ?");
+    for (const row2 of rows)
+      dropVec.run(row2.id);
+  }
+  db.prepare("DELETE FROM exchanges WHERE session_id = ?").run(sessionId);
+}
+function insertExchange(db, e) {
+  const info = db.prepare(`INSERT INTO exchanges (
+         id, session_id, seq, ts, user_text, assistant_text, files_touched,
+         is_sidechain, parent_uuid, redacted, embedding_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`).run(e.id, e.sessionId, e.seq, e.ts || null, e.userText, e.assistantText, JSON.stringify(e.filesTouched), e.isSidechain ? 1 : 0, e.parentUuid ?? null, e.redacted ? 1 : 0);
+  db.prepare("INSERT INTO exchanges_fts (rowid, user_text, assistant_text) VALUES (?, ?, ?)").run(info.lastInsertRowid, e.userText, e.assistantText);
+  if (e.toolCalls.length === 0)
+    return;
+  const insertTool = db.prepare(`INSERT INTO tool_calls (id, exchange_id, name, input, result, is_error, ts)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  e.toolCalls.forEach((tc, i) => {
+    insertTool.run(`${e.id}:${i}`, e.id, tc.name, tc.input, tc.result ?? null, tc.isError ? 1 : 0, e.ts || null);
+  });
+}
+var GHOST_INDEX_KEY = "index:ghosts";
+function ingestGhosts(db, options = {}) {
+  const fingerprint = ghostFingerprint2(db);
+  if (!options.full) {
+    const seen = readIndexState(db, GHOST_INDEX_KEY);
+    if (seen && seen === fingerprint) {
+      const totals = db.prepare(`SELECT (SELECT COUNT(*) FROM ghosts) AS g,
+                  (SELECT COUNT(*) FROM ghost_prompts) AS p,
+                  (SELECT COUNT(*) FROM ghost_prompts WHERE redacted = 1) AS r`).get();
+      return {
+        ghosts: totals.g,
+        prompts: totals.p,
+        redactedPrompts: totals.r,
+        counts: emptyCounts(),
+        unchanged: true
+      };
+    }
+  }
+  const counts2 = emptyCounts();
+  let redactedPrompts = 0;
+  const ghosts = db.prepare("SELECT rowid, session_id, first_prompt, title FROM ghosts").all();
+  const prompts = db.prepare("SELECT rowid, id, text, redacted FROM ghost_prompts").all();
+  const run3 = db.transaction(() => {
+    db.prepare(`INSERT INTO ghosts_fts (ghosts_fts) VALUES ('delete-all')`).run();
+    db.prepare(`INSERT INTO ghost_prompts_fts (ghost_prompts_fts) VALUES ('delete-all')`).run();
+    const updateGhost = db.prepare("UPDATE ghosts SET first_prompt = ?, title = ? WHERE rowid = ?");
+    const indexGhost = db.prepare("INSERT INTO ghosts_fts (rowid, first_prompt, title) VALUES (?, ?, ?)");
+    for (const g of ghosts) {
+      const first = maskField(g.first_prompt, counts2);
+      const title = maskField(g.title, counts2);
+      if (first !== g.first_prompt || title !== g.title)
+        updateGhost.run(first, title, g.rowid);
+      indexGhost.run(g.rowid, first, title);
+    }
+    const updatePrompt = db.prepare("UPDATE ghost_prompts SET text = ?, redacted = ? WHERE rowid = ?");
+    const indexPrompt = db.prepare("INSERT INTO ghost_prompts_fts (rowid, text) VALUES (?, ?)");
+    for (const p of prompts) {
+      const result = redact(p.text);
+      const fired = result.hits.length > 0 ? 1 : 0;
+      if (fired) {
+        tally(result.hits, counts2);
+        redactedPrompts += 1;
+      }
+      if (result.text !== p.text || p.redacted !== fired)
+        updatePrompt.run(result.text, fired, p.rowid);
+      indexPrompt.run(p.rowid, result.text);
+    }
+    writeIndexState(db, GHOST_INDEX_KEY, ghostFingerprint2(db));
+  });
+  run3();
+  return {
+    ghosts: ghosts.length,
+    prompts: prompts.length,
+    redactedPrompts,
+    counts: counts2,
+    unchanged: false
+  };
+}
+function maskField(value, counts2) {
+  if (!value)
+    return value;
+  const result = redact(value);
+  if (result.hits.length > 0)
+    tally(result.hits, counts2);
+  return result.text;
+}
+function ghostFingerprint2(db) {
+  const row2 = db.prepare(`SELECT (SELECT COUNT(*) FROM ghosts) AS g,
+              (SELECT COALESCE(SUM(LENGTH(COALESCE(first_prompt,'')) + LENGTH(COALESCE(title,''))), 0) FROM ghosts) AS gl,
+              (SELECT COUNT(*) FROM ghost_prompts) AS p,
+              (SELECT COALESCE(SUM(LENGTH(text)), 0) FROM ghost_prompts) AS pl,
+              (SELECT COUNT(*) FROM ghosts_fts) AS gf,
+              (SELECT COUNT(*) FROM ghost_prompts_fts) AS pf`).get();
+  return `${row2.g}:${row2.gl}:${row2.p}:${row2.pl}:${row2.gf}:${row2.pf}`;
+}
+function storedRedactionCounts(db) {
+  const counts2 = emptyCounts();
+  const scan2 = (text) => {
+    if (!text)
+      return;
+    const rx = new RegExp(MASK_RE.source, "g");
+    let m;
+    while ((m = rx.exec(text)) !== null) {
+      const type = m[0].split(":")[1];
+      if (!type)
+        continue;
+      counts2.byType[type] = (counts2.byType[type] ?? 0) + 1;
+      counts2.total += 1;
+    }
+  };
+  for (const row2 of db.prepare("SELECT user_text, assistant_text FROM exchanges WHERE redacted = 1").iterate()) {
+    scan2(row2.user_text);
+    scan2(row2.assistant_text);
+  }
+  for (const row2 of db.prepare(`SELECT t.input, t.result FROM tool_calls t
+       JOIN exchanges e ON e.id = t.exchange_id WHERE e.redacted = 1`).iterate()) {
+    scan2(row2.input);
+    scan2(row2.result);
+  }
+  for (const row2 of db.prepare("SELECT text FROM ghost_prompts WHERE redacted = 1").iterate()) {
+    scan2(row2.text);
+  }
+  for (const row2 of db.prepare("SELECT first_prompt, title FROM ghosts").iterate()) {
+    scan2(row2.first_prompt);
+    scan2(row2.title);
+  }
+  return counts2;
+}
+function readIndexState(db, key) {
+  const row2 = db.prepare("SELECT value FROM sync_state WHERE key = ?").get(key);
+  return row2?.value;
+}
+function writeIndexState(db, key, value) {
+  db.prepare(`INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(key, value, (/* @__PURE__ */ new Date()).toISOString());
+}
+function sourceFingerprint(sources) {
+  const hash = crypto5.createHash("sha256");
+  for (const s of [...sources].sort((a, b) => a.path < b.path ? -1 : 1)) {
+    hash.update(`${s.path}:${s.bytes}:${Math.floor(s.mtimeMs)}
+`);
+  }
+  return `${sources.length}:${hash.digest("hex").slice(0, 32)}`;
+}
+async function indexAll(options = {}) {
+  const started = Date.now();
+  const ranAt = (/* @__PURE__ */ new Date()).toISOString();
+  const root = options.root ?? potsherdDir(options.potsherdDir);
+  const db = options.db ?? open({ root });
+  const ownDb = !options.db;
+  const embed = options.embed !== false;
+  const adapterOptions = { ...options, potsherdDir: options.potsherdDir ?? root };
+  try {
+    const vec = loadVec(db);
+    const wanted = options.harnesses ? new Set(options.harnesses) : null;
+    const specs = adapterSpecs(adapterOptions).filter((s) => !wanted || wanted.has(s.harness));
+    const harnesses = [];
+    const recordTypes = /* @__PURE__ */ new Map();
+    let redaction = emptyCounts();
+    for (const spec of specs) {
+      options.onProgress?.({ phase: "discover", harness: spec.harness });
+      const report = await indexHarness(db, spec, { ...options, ...adapterOptions }, recordTypes);
+      redaction = addCounts(redaction, report.redaction);
+      harnesses.push(report.harness_);
+    }
+    options.onProgress?.({ phase: "ghosts" });
+    const ghosts = ingestGhosts(db, { full: Boolean(options.full) });
+    redaction = addCounts(redaction, ghosts.counts);
+    const embeddings = await embedExchanges(db, { ...options, embed }, vec);
+    const totals = {
+      sessions: sum(harnesses, (h) => h.sessions),
+      exchanges: sum(harnesses, (h) => h.exchanges),
+      toolCalls: sum(harnesses, (h) => h.toolCalls),
+      redactedExchanges: sum(harnesses, (h) => h.redactedExchanges),
+      parsed: sum(harnesses, (h) => h.parsed),
+      skipped: sum(harnesses, (h) => h.skipped),
+      failed: sum(harnesses, (h) => h.failed),
+      bytes: sum(harnesses, (h) => h.bytes)
+    };
+    return {
+      ranAt,
+      full: Boolean(options.full),
+      harnesses,
+      totals,
+      recordTypes: [...recordTypes.values()].sort((a, b) => Number(b.novel) - Number(a.novel) || b.count - a.count || (a.harness < b.harness ? -1 : a.harness > b.harness ? 1 : 0) || (a.type < b.type ? -1 : 1)),
+      redaction,
+      ghosts,
+      embeddings,
+      vec: vecStatus(db),
+      ms: Date.now() - started
+    };
+  } finally {
+    if (ownDb)
+      db.close();
+  }
+}
+async function indexHarness(db, spec, options, recordTypes) {
+  const started = Date.now();
+  const report = {
+    harness: spec.harness,
+    displayName: spec.displayName,
+    sourceDir: spec.sourceDir,
+    present: fs22.existsSync(spec.sourceDir),
+    discovered: 0,
+    parsed: 0,
+    skipped: 0,
+    failed: 0,
+    sessions: 0,
+    sidechains: 0,
+    exchanges: 0,
+    toolCalls: 0,
+    redactedExchanges: 0,
+    malformedLines: 0,
+    bytes: 0,
+    errors: [],
+    unchanged: false,
+    ms: 0
+  };
+  let redaction = emptyCounts();
+  let sources;
+  try {
+    sources = spec.discover();
+  } catch (err) {
+    report.errors.push(`discover: ${err.message}`);
+    report.ms = Date.now() - started;
+    return { harness_: report, redaction };
+  }
+  if (options.sessionId) {
+    sources = sources.filter((s) => s.sessionId === options.sessionId || s.sessionId.endsWith(`:${options.sessionId}`));
+  }
+  report.discovered = sources.length;
+  report.bytes = sources.reduce((a, s) => a + s.bytes, 0);
+  const stateKey = `index:${spec.harness}`;
+  const fingerprint = sourceFingerprint(sources);
+  if (!options.full && !options.sessionId && readIndexState(db, stateKey) === fingerprint) {
+    report.unchanged = true;
+    report.skipped = sources.length;
+    fillStoredCounts(db, report);
+    report.ms = Date.now() - started;
+    return { harness_: report, redaction };
+  }
+  const known = /* @__PURE__ */ new Map();
+  for (const row2 of db.prepare("SELECT id, source_mtime, source_offset FROM sessions WHERE harness = ?").all(spec.harness)) {
+    known.set(row2.id, { mtime: row2.source_mtime, offset: row2.source_offset });
+  }
+  let done = 0;
+  for (const source of sources) {
+    done += 1;
+    options.onProgress?.({
+      phase: "parse",
+      harness: spec.harness,
+      done,
+      total: sources.length,
+      note: path19.basename(source.path)
+    });
+    const seen = known.get(source.sessionId);
+    if (!options.full && seen && seen.mtime !== null && seen.mtime === Math.floor(source.mtimeMs) && seen.offset === source.bytes) {
+      report.skipped += 1;
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = await spec.parse(source);
+    } catch (err) {
+      if (err.code !== "ENOENT") {
+        report.failed += 1;
+        report.errors.push(`${source.path}: ${err.message}`);
+      }
+      continue;
+    }
+    const result = ingestSession(db, parsed, {
+      sourceMtimeMs: source.mtimeMs,
+      ...source.status === "archived" ? { archivedPath: source.path } : {},
+      ...source.originalPath ? { originalPath: source.originalPath } : {}
+    });
+    report.parsed += 1;
+    report.malformedLines += parsed.malformedLines;
+    redaction = addCounts(redaction, result.counts);
+    const version = spec.version(parsed);
+    writeSessionRecordTypes(db, parsed.session.id, spec, version, parsed.unknownTypes);
+    for (const [type, count2] of Object.entries(parsed.unknownTypes)) {
+      const key = `${spec.harness}\0${version}\0${type}`;
+      const row2 = recordTypes.get(key);
+      if (row2) {
+        row2.count += count2;
+        row2.files += 1;
+      } else {
+        recordTypes.set(key, {
+          harness: spec.harness,
+          version,
+          type,
+          count: count2,
+          files: 1,
+          novel: spec.novel(type)
+        });
+      }
+    }
+  }
+  if (!options.sessionId)
+    writeIndexState(db, stateKey, fingerprint);
+  fillStoredCounts(db, report);
+  report.ms = Date.now() - started;
+  return { harness_: report, redaction };
+}
+function fillStoredCounts(db, report) {
+  const s = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(is_sidechain), 0) AS side
+       FROM sessions WHERE harness = ?`).get(report.harness);
+  const e = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(e.redacted), 0) AS red,
+              (SELECT COUNT(*) FROM tool_calls t JOIN exchanges x ON x.id = t.exchange_id
+                 JOIN sessions y ON y.id = x.session_id WHERE y.harness = ?) AS tools
+       FROM exchanges e JOIN sessions s ON s.id = e.session_id WHERE s.harness = ?`).get(report.harness, report.harness);
+  report.sessions = s.n;
+  report.sidechains = s.side;
+  report.exchanges = e.n;
+  report.toolCalls = e.tools;
+  report.redactedExchanges = e.red;
+}
+var EMBED_CHUNK = 32;
+async function embedExchanges(db, options, vec) {
+  const started = Date.now();
+  const report = {
+    enabled: options.embed,
+    available: false,
+    model: MODEL_ID,
+    embedded: 0,
+    upToDate: 0,
+    ghostPrompts: 0,
+    downloaded: false,
+    ms: 0
+  };
+  const upToDate = db.prepare("SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version = ?").get(EMBEDDING_VERSION);
+  report.upToDate = upToDate.n;
+  if (!options.embed) {
+    report.reason = "--no-embed: text search only";
+    report.ms = Date.now() - started;
+    return report;
+  }
+  if (!vec.available) {
+    report.reason = vec.reason ?? "sqlite-vec unavailable";
+    report.ms = Date.now() - started;
+    return report;
+  }
+  report.available = true;
+  const pending = db.prepare(`SELECT id, user_text, assistant_text FROM exchanges
+       WHERE embedding_version IS NULL OR embedding_version != ?
+       ORDER BY rowid`).all(EMBEDDING_VERSION);
+  const ghostsPending = pendingGhostPrompts(db);
+  if (pending.length === 0 && ghostsPending === 0) {
+    report.ms = Date.now() - started;
+    return report;
+  }
+  const cacheDir = modelsDir(options.root ?? potsherdDir(options.potsherdDir));
+  if (!isModelCached(cacheDir)) {
+    report.downloaded = true;
+    options.onModelDownload?.(MODEL_DOWNLOAD_BYTES);
+  }
+  const dropVec = db.prepare("DELETE FROM vec_exchanges WHERE id = ?");
+  const insertVec = db.prepare("INSERT INTO vec_exchanges (id, embedding) VALUES (?, ?)");
+  const stamp = db.prepare("UPDATE exchanges SET embedding_version = ? WHERE id = ?");
+  const embedOptions = {
+    cacheDir,
+    ...options.onProgress ? { onProgress: (fraction) => options.onProgress?.({ phase: "model-download", fraction }) } : {}
+  };
+  for (let i = 0; i < pending.length; i += EMBED_CHUNK) {
+    const chunk = pending.slice(i, i + EMBED_CHUNK);
+    let vectors;
+    try {
+      vectors = [];
+      for (const row2 of chunk) {
+        vectors.push(await generateExchangeEmbedding(row2.user_text, row2.assistant_text, void 0, embedOptions));
+      }
+    } catch (err) {
+      report.available = false;
+      report.reason = `embeddings unavailable: ${firstLine3(err?.message ?? String(err))}`;
+      report.ms = Date.now() - started;
+      return report;
+    }
+    const write = db.transaction(() => {
+      chunk.forEach((row2, n2) => {
+        const vector = vectors[n2];
+        if (!vector)
+          return;
+        dropVec.run(row2.id);
+        insertVec.run(row2.id, embeddingToBlob(vector));
+        stamp.run(EMBEDDING_VERSION, row2.id);
+        report.embedded += 1;
+      });
+    });
+    write();
+    options.onProgress?.({ phase: "embed", done: Math.min(i + EMBED_CHUNK, pending.length), total: pending.length });
+  }
+  report.ghostPrompts = await embedGhostPrompts(db, embedOptions);
+  report.ms = Date.now() - started;
+  return report;
+}
+function ghostVecTable(db) {
+  return db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'vec_ghost_prompts'`).get().n > 0;
+}
+function pendingGhostPrompts(db) {
+  try {
+    if (!ghostVecTable(db))
+      return 0;
+    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM ghost_prompts
+          WHERE (embedding_version IS NULL OR embedding_version != ?)
+            AND length(trim(text)) > 3`).get(EMBEDDING_VERSION);
+    return row2.n;
+  } catch {
+    return 0;
+  }
+}
+async function embedGhostPrompts(db, embedOptions) {
+  if (!ghostVecTable(db))
+    return 0;
+  let pending;
+  try {
+    pending = db.prepare(`SELECT id, text FROM ghost_prompts
+          WHERE (embedding_version IS NULL OR embedding_version != ?)
+            AND length(trim(text)) > 3
+          ORDER BY rowid`).all(EMBEDDING_VERSION);
+  } catch {
+    return 0;
+  }
+  if (pending.length === 0)
+    return 0;
+  const dropVec = db.prepare("DELETE FROM vec_ghost_prompts WHERE id = ?");
+  const insertVec = db.prepare("INSERT INTO vec_ghost_prompts (id, embedding) VALUES (?, ?)");
+  const stamp = db.prepare("UPDATE ghost_prompts SET embedding_version = ? WHERE id = ?");
+  let embedded = 0;
+  for (let i = 0; i < pending.length; i += EMBED_CHUNK) {
+    const chunk = pending.slice(i, i + EMBED_CHUNK);
+    let vectors;
+    try {
+      vectors = [];
+      for (const row2 of chunk) {
+        vectors.push(await generateExchangeEmbedding(row2.text, "", void 0, embedOptions));
+      }
+    } catch {
+      return embedded;
+    }
+    const write = db.transaction(() => {
+      chunk.forEach((row2, n2) => {
+        const vector = vectors[n2];
+        if (!vector)
+          return;
+        dropVec.run(row2.id);
+        insertVec.run(row2.id, embeddingToBlob(vector));
+        stamp.run(EMBEDDING_VERSION, row2.id);
+        embedded += 1;
+      });
+    });
+    write();
+  }
+  return embedded;
+}
+function writeSessionRecordTypes(db, sessionId, spec, version, unknownTypes) {
+  const write = db.transaction(() => {
+    db.prepare("DELETE FROM session_record_types WHERE session_id = ?").run(sessionId);
+    const insert = db.prepare(`INSERT INTO session_record_types (session_id, harness, version, type, count, novel)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, version, type) DO UPDATE SET count = excluded.count`);
+    for (const [type, count2] of Object.entries(unknownTypes)) {
+      insert.run(sessionId, spec.harness, version, type, count2, spec.novel(type) ? 1 : 0);
+    }
+  });
+  write();
+}
+function storedRecordTypes(db) {
+  try {
+    const rows = db.prepare(`SELECT harness, version, type,
+                SUM(count) AS count, COUNT(*) AS files, MAX(novel) AS novel
+           FROM session_record_types
+          GROUP BY harness, version, type
+          ORDER BY count DESC`).all();
+    return rows.map((r) => ({
+      harness: r.harness,
+      version: r.version,
+      type: r.type,
+      count: r.count,
+      files: r.files,
+      novel: r.novel === 1
+    }));
+  } catch {
+    return [];
+  }
+}
 function firstLine3(s) {
   return (s.split("\n")[0] ?? s).trim();
+}
+function sum(xs, f) {
+  return xs.reduce((a, x) => a + f(x), 0);
 }
 
 // ../core/dist/cards/write.js
@@ -15825,7 +15892,7 @@ Your previous reply could not be parsed as JSON (${firstError}). Reply again wit
   }
 };
 function redactOutgoing(text) {
-  const out = redact(elideBinary2(text));
+  const out = redact(elideBinary(text));
   return { text: out.text, hits: out.hits.length };
 }
 function parseJsonish(raw) {
