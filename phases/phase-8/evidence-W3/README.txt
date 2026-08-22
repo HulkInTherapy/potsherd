@@ -1,9 +1,9 @@
 T8.C / 8.4 — evidence
 =====================
 
-Every command below ran with the two reserved barrels patched by
-`wire-up.py` (see `phases/phase-8/registration-W3.txt`), and both were
-restored before the commit.
+Every command below ran with `packages/cli/src/index.ts` patched by
+`wire-up.py` (see `phases/phase-8/registration-W3.txt`), which was
+restored before the commit. The core barrel needed no change.
 
 The evidence directories are kept and are NOT in the repo:
 
