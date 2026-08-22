@@ -431,6 +431,33 @@ describe('potsherd cli', () => {
     expect(r.stdout).toContain('--suggest');
   });
 
+  /**
+   * T6.6 D3 — phase 6's WAVE.md: *"Verify a flag exists before documenting it."*
+   *
+   * `docs/memory-stack.md` documented `--brief` in the present tense. It was
+   * the fifth phantom flag this project has published, and the whole repo held
+   * exactly one occurrence of it — copied out of `plans/02`, where it is a
+   * *plan*. A plan is not a flag.
+   *
+   * So: every long flag the docs page mentions must be declared in the CLI.
+   * The check runs against `packages/cli/src/index.ts` — where every option is
+   * registered — rather than against `--help`, so it needs no subprocess and
+   * cannot be fooled by a verb whose help text mentions a flag it does not
+   * have.
+   */
+  it('every flag docs/memory-stack.md mentions is one the cli declares', () => {
+    const docs = fs.readFileSync(path.join(repo, 'docs', 'memory-stack.md'), 'utf-8');
+    const cli = fs.readFileSync(
+      path.join(repo, 'packages', 'cli', 'src', 'index.ts'),
+      'utf-8',
+    );
+    const mentioned = [...new Set([...docs.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]))];
+    // Non-vacuous: the page does talk about flags.
+    expect(mentioned.length).toBeGreaterThanOrEqual(3);
+    const phantom = mentioned.filter((flag) => !cli.includes(`${flag} `) && !cli.includes(`${flag}'`) && !cli.includes(`${flag} <`));
+    expect(phantom).toEqual([]);
+  });
+
   it('an unknown verb points at --help instead of a stack trace', () => {
     const r = run(['excavate']);
     expect(r.code).not.toBe(0);

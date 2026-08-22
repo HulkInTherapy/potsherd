@@ -664,6 +664,30 @@ Being clear about this before you find out yourself:
 - potsherd cannot recover anything the sweep took **before** you install it. It
   can stop the next one. That is the whole point of running `audit` today.
 
+## Where potsherd sits in the memory stack
+
+potsherd is not the only tool reading your transcripts, and it is not trying to
+be all of them. There are four distinct failures in agent memory — the context
+window degrading inside a session, context not carrying between sessions, the
+transcript itself being deleted, and getting the thing you found back into a
+live agent. **potsherd is scoped to the last two.** The first belongs to your
+harness and the second to claude-mem and Claude Code's own auto memory.
+
+[`docs/memory-stack.md`](docs/memory-stack.md) is the long version: the four
+failures, which of eight tools covers which of them, every claim with the URL
+it was read from, and every licence. `potsherd stack` prints the same table
+against what you actually have installed:
+
+```bash
+potsherd stack                    # the table, against what you have installed
+potsherd stack --sources          # every claim, with the url it was read from
+potsherd stack --paths            # why a tool you have installed reads as absent
+potsherd stack --json | jq '.tools[] | select(.present)'
+```
+
+If that table ever shows potsherd winning all four rows, that is a bug in the
+table.
+
 ## Install
 
 > **potsherd is not on npm yet.** `npx potsherd` and `npm i -g potsherd` are
