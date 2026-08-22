@@ -22,6 +22,14 @@ potsherd audit · ~/.claude · 21 aug 2026
   run  potsherd rescue  to archive what is left and rebuild the ghosts.
 ```
 
+![potsherd: audit, rescue, index, find](docs/demo.gif)
+
+Fourteen seconds, unedited, recorded by
+[`scripts/make-cast.sh`](scripts/make-cast.sh) against the demo corpus
+([`docs/demo.cast`](docs/demo.cast)). `ask` has
+[its own recording](docs/demo-ask.gif) because it is fifty seconds of real model
+calls and would not fit inside a minute beside the rest.
+
 Real output from `potsherd audit`
 ([`docs/screens/01-audit.txt`](docs/screens/01-audit.txt)), run against a
 [demo corpus](scripts/make-demo-corpus.mjs) that reproduces, number for number,
@@ -602,7 +610,8 @@ OPEN THREADS
 ```
 
 [`docs/screens/14-ask.txt`](docs/screens/14-ask.txt), a real run against the
-demo corpus.
+demo corpus — and [`docs/demo-ask.gif`](docs/demo-ask.gif) is the same thing
+recorded, all fifty-two seconds of it, including the wait.
 
 Read the last block first. **`ask` reads a shortlist and says how big the
 shortlist was** — six of sixty-five here — because an answer drawn from six

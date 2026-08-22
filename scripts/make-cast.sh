@@ -3,8 +3,22 @@
 # Records docs/demo.cast — `05`'s demo, and `plans/phases/phase-7`'s deliverable
 # 3: audit → rescue → find → ask, at 80×24, under 60 seconds.
 #
-#   bash scripts/make-cast.sh          # record and render
-#   POTSHERD_CAST_NO_MODEL=1 …         # skip the `ask` step (it needs a backend)
+#   bash scripts/make-cast.sh          # record and render both
+#   POTSHERD_CAST_NO_MODEL=1 …         # only the offline one
+#   POTSHERD_CAST_REUSE=1 …            # keep a corpus that is already carded
+#
+# ## why there are two casts and not one
+#
+# `plans/05` and `plans/phases/phase-7` both cap a cast at **60 seconds**, and
+# `ask` alone is 40-50 s of real model calls -- six readers and a synthesizer,
+# measured at 40-183 s across fifteen runs. One cast with all five verbs
+# measured 64.2 s and then 66.6 s, and the only ways to fit 60 were to speed the
+# recording up (which would misrepresent the one number `ask`'s own screen
+# prints) or to widen the budget to match what I had produced.
+#
+# So `demo.cast` is audit -> rescue -> index -> find, offline, about fifteen
+# seconds, and it is the one the readme leads with. `demo-ask.cast` is the ask
+# on its own. Both are real, both are inside the cap, and neither is sped up.
 #
 # ## why this is a script and not a person typing
 #
@@ -39,13 +53,25 @@ cd "$repo"
 command -v asciinema >/dev/null || { echo "asciinema is not installed. brew install asciinema" >&2; exit 1; }
 
 out="$repo/docs/demo.cast"
+askout="$repo/docs/demo-ask.cast"
 demo="$repo/.tmp/cast-home"
+# Kept before HOME is moved: the ask step needs the developer's own login. See
+# `session-ask.sh` below and `scripts/make-screens.sh`'s `shot_model`.
+real_home="$HOME"
 bin="$repo/packages/cli/bin/potsherd.js"
 
 [ -f "$repo/packages/cli/dist/potsherd.js" ] || { echo "not built. run:  pnpm build" >&2; exit 1; }
 
-rm -rf "$demo"
-node "$repo/scripts/make-demo-corpus.mjs" "$demo/.claude" >/dev/null
+# Carding is six minutes and a cast is one, so a retry that re-cards is a retry
+# nobody takes -- which is how a timing budget gets widened instead of met.
+if [ "${POTSHERD_CAST_REUSE:-}" = "1" ] && [ -d "$demo/.potsherd/cards" ]; then
+  echo "  reusing the carded corpus in $demo"
+  SKIP_PREP=1
+else
+  rm -rf "$demo"
+  node "$repo/scripts/make-demo-corpus.mjs" "$demo/.claude" >/dev/null
+  SKIP_PREP=0
+fi
 
 # The inner script, run inside the recorded terminal. It is written to a file
 # rather than passed as a string so that `asciinema rec -c` has one thing to
@@ -78,31 +104,44 @@ run() { type "$1"; eval "${1/#potsherd/$P}"; sleep 1.2; }
 # reads and writes nothing but the synthetic tree, only the harness sees the
 # real home, and the assertions at the end of this script fail the build if a
 # `/Users/` path reaches the recording anyway.
-askrun() {
-  type "$1"
-  env HOME="$REAL_HOME" node "$BIN" ask \
-    "what did we decide about prepared statements behind the pooler?" --no-vec \
-    --potsherd-dir "$DEMO/.potsherd" --claude-dir "$DEMO/.claude"
-  sleep 1.2
-}
 
 sleep 0.8
 run "potsherd audit"
 run "potsherd rescue --yes"
 run "potsherd index --full --no-embed"
 run "potsherd find pgbouncer --limit 2"
-if [ "${POTSHERD_CAST_NO_MODEL:-}" != "1" ]; then
-  askrun "potsherd ask \"what did we decide about prepared statements behind the pooler?\""
-fi
-sleep 1.5
+sleep 1.0
 INNER
 chmod +x "$demo/session.sh"
+
+cat > "$demo/session-ask.sh" <<'INNER'
+#!/usr/bin/env bash
+set -u
+type() {
+  printf '$ '
+  local s="$1"
+  for (( i=0; i<${#s}; i++ )); do printf '%s' "${s:i:1}"; sleep 0.02; done
+  printf '\n'
+  sleep 0.25
+}
+run_ask() {
+  env HOME="$REAL_HOME" node "$BIN" ask \
+    "what did we decide about prepared statements behind the pooler?" --no-vec \
+    --potsherd-dir "$DEMO/.potsherd" --claude-dir "$DEMO/.claude"
+  sleep 1.2
+}
+sleep 0.5
+type 'potsherd ask "what did we decide about prepared statements behind the pooler?"'
+run_ask
+sleep 1.0
+INNER
+chmod +x "$demo/session-ask.sh"
 
 # `ask`'s open threads come out of the CARDS, so the corpus has to be carded
 # before the recording starts — 31 transcripts, about six minutes, ~39 calls.
 # Done outside the recording because six minutes of a progress bar is not the
 # demo, and because a cast must be under 60 seconds.
-if [ "${POTSHERD_CAST_NO_MODEL:-}" != "1" ]; then
+if [ "${POTSHERD_CAST_NO_MODEL:-}" != "1" ] && [ "$SKIP_PREP" = "0" ]; then
   echo "  preparing: rescue, index and card --all (~6 min)"
   env HOME="$HOME" node "$bin" rescue --yes --quiet \
     --potsherd-dir "$demo/.potsherd" --claude-dir "$demo/.claude" >/dev/null
@@ -113,17 +152,23 @@ if [ "${POTSHERD_CAST_NO_MODEL:-}" != "1" ]; then
     || { echo "  card --all failed — recording without a model" >&2; export POTSHERD_CAST_NO_MODEL=1; }
 fi
 
-echo "recording $out"
-rm -f "$out"
-env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR -u XDG_CONFIG_HOME -u NO_COLOR -u FORCE_COLOR \
-  HOME="$demo" REAL_HOME="$HOME" DEMO="$demo" BIN="$bin" \
-  COLUMNS=80 LINES=24 TERM=xterm-256color \
-  POTSHERD_CAST_NO_MODEL="${POTSHERD_CAST_NO_MODEL:-}" \
-  asciinema rec --overwrite --cols 80 --rows 24 \
-    --command "bash $demo/session.sh" "$out"
+record() {
+  echo "recording $1"
+  rm -f "$1"
+  env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR -u XDG_CONFIG_HOME -u NO_COLOR -u FORCE_COLOR \
+    HOME="$demo" REAL_HOME="$real_home" DEMO="$demo" BIN="$bin" \
+    COLUMNS=80 LINES=24 TERM=xterm-256color \
+    asciinema rec --overwrite --cols 80 --rows 24 --command "bash $2" "$1"
+}
+record "$out" "$demo/session.sh"
+rm -f "$askout"
+if [ "${POTSHERD_CAST_NO_MODEL:-}" != "1" ]; then
+  record "$askout" "$demo/session-ask.sh"
+fi
 
 # ---------------------------------------------------------------- assertions
-python3 - "$out" <<'PY'
+for cast_file in "$out" $( [ -f "$askout" ] && echo "$askout" ); do
+python3 - "$cast_file" <<'PY'
 import json, pathlib, sys, re
 cast = pathlib.Path(sys.argv[1])
 lines = cast.read_text(encoding='utf-8').rstrip('\n').split('\n')
@@ -167,24 +212,33 @@ for what, rx in {
     if re.search(rx, text):
         bad.append(f'an unredacted {what} reached the cast')
 # And that it shows what it is for.
-for needed in ['sessions ever started', 'ghosts rebuilt', 'pgbouncer']:
-    if needed not in text:
-        bad.append(f'no {needed!r} — this is not the demo')
+needed = (
+    ['ANSWER', 'EVIDENCE', 'pgbouncer']
+    if cast.name.endswith('ask.cast')
+    else ['sessions ever started', 'ghosts rebuilt', 'pgbouncer']
+)
+for n in needed:
+    if n not in text:
+        bad.append(f'no {n!r} — this is not what {cast.name} is for')
 
 if bad:
     print('\n'.join('  FAIL  ' + b for b in bad))
     sys.exit(1)
-print(f'  ok    {duration:.1f}s, 80x24, {len(events)} events, '
+print(f'  ok    {cast.name}: {duration:.1f}s, 80x24, {len(events)} events, '
       f'{cast.stat().st_size // 1024} KB, no forbidden strings, no credentials')
 PY
+done
 
 # ------------------------------------------------------------------- render
 if command -v agg >/dev/null; then
-  echo "rendering docs/demo.gif"
-  agg --cols 80 --rows 24 --font-size 16 --speed 1 --theme monokai "$out" "$repo/docs/demo.gif"
-  echo "  $(du -h "$repo/docs/demo.gif" | cut -f1)"
+  for cast_file in "$out" $( [ -f "$askout" ] && echo "$askout" ); do
+    gif="${cast_file%.cast}.gif"
+    echo "rendering $(basename "$gif")"
+    agg --cols 80 --rows 24 --font-size 16 --speed 1 --theme monokai "$cast_file" "$gif" 2>/dev/null
+    echo "  $(du -h "$gif" | cut -f1)"
+  done
 else
   echo "agg not installed — skipping the gif. brew install agg" >&2
 fi
 
-echo "done. cast in docs/demo.cast"
+echo "done. casts in docs/"
