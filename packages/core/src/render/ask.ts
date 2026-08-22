@@ -39,9 +39,59 @@ import { ANSWER_MAX_WORDS, STRICT_MIN_EVIDENCE, type AskEvidence, type AskResult
 /** `05`: "evidence quotes truncate at ~90 chars with `…`". */
 export const QUOTE_CHARS = 90;
 
+/**
+ * The height the whole block is built to fit, in rows.
+ *
+ * `05` asks for output "compact enough to screenshot whole" and specifies 80x24
+ * for every screen in `docs/screens/`. `ask` was the one verb that did not
+ * obey: real runs measured **25-33 rows**, because {@link ANSWER_MAX_WORDS} is
+ * a word cap fitted against a *short* EVIDENCE block and no open threads, and
+ * nothing downstream of it knew how many rows those two would take. A 150-word
+ * answer is 11 wrapped lines at 80 columns; add eight evidence lines and one
+ * open thread and the block is a third taller than the screen it was designed
+ * for.
+ *
+ * So the answer is now held to a **row** budget rather than only a word one:
+ * the evidence and the open threads are measured first, and the answer gets
+ * what is left. See {@link fit} for the order things give way in, and why the
+ * answer and the evidence are the last two things to be touched.
+ */
+export const ASK_ROWS = 24;
+
+/**
+ * The answer is never squeezed below this many wrapped lines.
+ *
+ * A budget that can drive the answer to one line has replaced "too long to
+ * screenshot" with "too short to be an answer", and `05`'s honesty contract
+ * already has a real path for having nothing to say (`--strict`). Below this
+ * the block simply runs past 24 rows, and the footer says so.
+ */
+export const ASK_MIN_ANSWER_LINES = 3;
+
 export interface AskRenderOptions {
   /** Shown under the counts when the caller has one. */
   next?: string;
+  /**
+   * Rows to fit the block into. Defaults to {@link ASK_ROWS}; `0` disables
+   * fitting entirely, which is what the JSON path and the tests that assert on
+   * an untrimmed block use.
+   */
+  rows?: number;
+}
+
+/** What {@link fit} decided to leave out, so the footer can say so. */
+interface Budget {
+  sentences: AskResult['sentences'];
+  evidence: AskEvidence[];
+  threads: OpenThread[];
+  /** Sentences the *renderer* removed, on top of `r.trimmed` from `ask.ts`. */
+  trimmedHere: number;
+  /** Open threads not printed. */
+  threadsHeld: number;
+  /** False once the advisory notes have been dropped to make room. */
+  notes: boolean;
+  /** True when the block still does not fit and nothing more may be cut. */
+  over: boolean;
 }
 
 export function renderAsk(
@@ -53,40 +103,154 @@ export function renderAsk(
   const lines: string[] = [];
   const width = t.width - INDENT.length;
 
-  lines.push(t.dim(headline(r, t)));
-  lines.push('');
-
   if (r.refused) {
+    lines.push(t.dim(headline(r, t)));
+    lines.push('');
     lines.push(...refusal(r, t));
-    lines.push(...footer(r, t, opts));
+    lines.push(...footer(r, t, opts, null));
     return lines.join('\n');
   }
 
   if (r.sentences.length === 0) {
+    lines.push(t.dim(headline(r, t)));
+    lines.push('');
     lines.push(...nothing(r, t));
-    lines.push(...footer(r, t, opts));
+    lines.push(...footer(r, t, opts, null));
     return lines.join('\n');
   }
 
+  const b = fit(r, t, now, opts);
+
+  lines.push(t.dim(headline(r, t)));
+  lines.push('');
+
   // ---- ANSWER
   lines.push('ANSWER');
-  for (const line of f.wrap(answerText(r, t), width)) lines.push(INDENT + line);
+  for (const line of f.wrap(answerText(b.sentences, t), width)) lines.push(INDENT + line);
   lines.push('');
 
   // ---- EVIDENCE
   lines.push('EVIDENCE');
-  for (const e of r.evidence) lines.push(...evidenceLine(e, t, now));
+  for (const e of b.evidence) lines.push(...evidenceLine(e, t, now));
   lines.push('');
 
   // ---- OPEN THREADS
-  if (r.openThreads.length > 0) {
+  if (b.threads.length > 0) {
     lines.push('OPEN THREADS');
-    for (const o of r.openThreads) lines.push(...threadLines(o, t, now));
+    for (const o of b.threads) lines.push(...threadLines(o, t, now, b.notes));
     lines.push('');
   }
 
-  lines.push(...footer(r, t, opts));
+  lines.push(...footer(r, t, opts, b));
   return lines.join('\n');
+}
+
+/**
+ * Decide what fits in {@link ASK_ROWS}, and in what order things give way.
+ *
+ * The order is the whole design, so it is stated here rather than distributed
+ * through the code:
+ *
+ *   1. **An open thread's note goes first.** It is the model's advisory prose
+ *      about a claim the block already states, cites and dates on the three
+ *      lines above it — the only text here that is neither the answer nor
+ *      evidence for it. It is clipped to one line ({@link threadLines}).
+ *   2. **Then open threads after the first**, counted in the footer. Phase 4
+ *      measured that only 1-2 of 8 candidates are worth raising, so the second
+ *      and third are the cheapest four rows on the screen. The *first* is not
+ *      touched here: `05` calls that line "the moment people quote", and it is
+ *      the one thing on this screen the user did not ask for and cannot get
+ *      any other way.
+ *   3. **Then trailing sentences of the answer**, by the same rule and for the
+ *      same reasons as {@link trimToWordBudget}: whole sentences, from the
+ *      tail, never the first one, never below {@link ASK_MIN_ANSWER_LINES}.
+ *   4. **Then the last open thread**, once the answer is at its floor. Losing
+ *      a finding is better than printing an answer too short to be one.
+ *   5. **Evidence is never cut to save rows.** It is cut only when the trim in
+ *      (3) leaves an entry that nothing cites any more — at which point
+ *      printing it would be worse than dropping it, because a reader would look
+ *      for the `[n]` that refers to it and not find one.
+ *
+ * The answer's own citations therefore always resolve on screen, which is the
+ * product's central claim and the one thing a row budget is not allowed to buy
+ * rows with. When even (4) is not enough the block runs long and the footer
+ * says which rules bound it; nothing is ever cut silently.
+ */
+function fit(r: AskResult, t: Theme, now: Date, opts: AskRenderOptions): Budget {
+  const rows = opts.rows ?? ASK_ROWS;
+  const width = t.width - INDENT.length;
+
+  let sentences = [...r.sentences];
+  let threads = [...r.openThreads];
+  let trimmedHere = 0;
+  let notes = true;
+
+  const evidenceFor = (kept: typeof sentences): AskEvidence[] => {
+    const cited = new Set(kept.flatMap((s) => s.cites));
+    return r.evidence.filter((e) => cited.has(e.index));
+  };
+
+  const height = (
+    kept: typeof sentences,
+    ev: AskEvidence[],
+    th: OpenThread[],
+    held: number,
+    cut: number,
+    withNotes: boolean,
+  ): number => {
+    let n = 2; // headline + blank
+    n += 1 + f.wrap(answerText(kept, t), width).length + 1; // ANSWER + body + blank
+    n += 1 + ev.reduce((a, e) => a + evidenceLine(e, t, now).length, 0) + 1;
+    if (th.length > 0) n += 1 + th.reduce((a, o) => a + threadLines(o, t, now, withNotes).length, 0) + 1;
+    n += footer(r, t, opts, {
+      sentences: kept,
+      evidence: ev,
+      threads: th,
+      trimmedHere: cut,
+      threadsHeld: held,
+      notes: withNotes,
+      over: false,
+    }).length;
+    return n;
+  };
+
+  const budget = (): Budget => ({
+    sentences,
+    evidence: evidenceFor(sentences),
+    threads,
+    trimmedHere,
+    threadsHeld: r.openThreads.length - threads.length,
+    notes,
+    over: false,
+  });
+
+  if (rows <= 0) return budget();
+
+  const tooTall = (): boolean => {
+    const b = budget();
+    return height(b.sentences, b.evidence, b.threads, b.threadsHeld, b.trimmedHere, b.notes) > rows;
+  };
+
+  // (1b) the advisory notes, whole.
+  if (tooTall()) notes = false;
+
+  // (2) open threads after the first.
+  while (tooTall() && threads.length > 1) threads = threads.slice(0, -1);
+
+  // (3) trailing sentences, never the first, never below the line floor.
+  while (tooTall() && sentences.length > 1) {
+    const candidate = sentences.slice(0, -1);
+    if (f.wrap(answerText(candidate, t), width).length < ASK_MIN_ANSWER_LINES) break;
+    sentences = candidate;
+    trimmedHere += 1;
+  }
+
+  // (4) the last open thread, only now.
+  while (tooTall() && threads.length > 0) threads = threads.slice(0, -1);
+
+  const b = budget();
+  b.over = height(b.sentences, b.evidence, b.threads, b.threadsHeld, b.trimmedHere, b.notes) > rows;
+  return b;
 }
 
 function headline(r: AskResult, t: Theme): string {
@@ -120,8 +284,8 @@ function counts(r: AskResult, t: Theme): string {
  * might contain `[1]` for its own reasons. `r.answer` is the same words; this
  * is the same words with the marks picked out.
  */
-function answerText(r: AskResult, t: Theme): string {
-  return r.sentences
+function answerText(sentences: AskResult['sentences'], t: Theme): string {
+  return sentences
     .map((s) => `${s.text} ${s.cites.map((c) => t.accent(`[${c}]`)).join('')}`)
     .join(' ');
 }
@@ -158,7 +322,7 @@ function evidenceLine(e: AskEvidence, t: Theme, now: Date): string[] {
  * colour so that the one unevidenced line in the block reads as the suggestion
  * it is, and the decision itself still carries its session and its date.
  */
-function threadLines(o: OpenThread, t: Theme, now: Date): string[] {
+function threadLines(o: OpenThread, t: Theme, now: Date, notes = true): string[] {
   const width = t.width - INDENT.length;
   // Both halves of the claim are load-bearing — "decided in A, **not seen in
   // B**" — so B must never be the half that falls off the end. Rendering the
@@ -178,9 +342,13 @@ function threadLines(o: OpenThread, t: Theme, now: Date): string[] {
   const seqs = o.evidenceSeqs.length ? `@${o.evidenceSeqs.join(',')}` : '';
   const src = `${projectName(o.project)}/${o.id8}${seqs}  ${o.ts ? f.shortDateTime(o.ts, now) : t.dash}`;
   out.push(INDENT + '    ' + t.dim(f.clip(src, width - 4, t)));
-  if (o.note.trim()) {
-    for (const line of f.wrap(o.note.trim(), width - 4)) out.push(INDENT + '    ' + t.dim(line));
-  }
+  // The note is the model's advisory prose about a claim the three lines above
+  // already state, cite and date -- the only text in this block that is neither
+  // the answer nor evidence for it. It is the first thing to give way when the
+  // block will not fit 24 rows (see `fit`), so it is held to one line here
+  // rather than wrapped to three. `--json` carries it whole.
+  const note = o.note.trim();
+  if (notes && note) out.push(INDENT + '    ' + t.dim(f.clip(note, width - 4, t)));
   return out;
 }
 
@@ -270,7 +438,12 @@ function nothing(r: AskResult, t: Theme): string[] {
   return out;
 }
 
-function footer(r: AskResult, t: Theme, opts: AskRenderOptions): string[] {
+function footer(
+  r: AskResult,
+  t: Theme,
+  opts: AskRenderOptions,
+  b: Budget | null,
+): string[] {
   const out: string[] = [];
   out.push(counts(r, t));
 
@@ -291,11 +464,23 @@ function footer(r: AskResult, t: Theme, opts: AskRenderOptions): string[] {
   // apart: a dropped sentence could not be stood behind, a trimmed one could
   // and did not fit. Saying so is also the only thing that keeps the cap
   // honest — an answer that quietly stops is an answer pretending it finished.
-  if (r.trimmed.length > 0) {
+  const trimmed = r.trimmed.length + (b?.trimmedHere ?? 0);
+  if (trimmed > 0) {
+    // Which rule bound matters: a word cap and a screen height are different
+    // facts about the answer, and a reader deciding whether to re-run with
+    // `--json` needs to know which one it hit.
+    const rule = b && b.trimmedHere > 0
+      ? `answer held to the ${f.num(opts.rows ?? ASK_ROWS)}-row screen`
+      : `answer held to ${f.num(ANSWER_MAX_WORDS)} words`;
+    out.push(
+      INDENT + t.dim(`${f.num(trimmed)} ${f.plural(trimmed, 'sentence')} trimmed ${t.sep} ${rule}`),
+    );
+  }
+  if (b && b.threadsHeld > 0) {
     out.push(
       INDENT +
         t.dim(
-          `${f.num(r.trimmed.length)} ${f.plural(r.trimmed.length, 'sentence')} trimmed ${t.sep} answer held to ${f.num(ANSWER_MAX_WORDS)} words`,
+          `${f.num(b.threadsHeld)} more open ${f.plural(b.threadsHeld, 'thread')} ${t.sep} --json for all`,
         ),
     );
   }
@@ -305,21 +490,40 @@ function footer(r: AskResult, t: Theme, opts: AskRenderOptions): string[] {
       INDENT + t.dim(`${f.num(failed)} ${f.plural(failed, 'reader')} did not answer ${t.sep} not counted as searched`),
     );
   }
-  // phase-4 risks, verbatim.
+  // phase-4 risks. The k cap is disclosed, but not by restating the counts
+  // line: that read `6 of 65 sessions read` and then, two lines below,
+  // `searched 6 of 65 matching sessions` -- the same two numbers, the same
+  // fact, twice, on a screen built to a row budget. The number a reader does
+  // not already have is how many matches went unread, so that is the one
+  // printed, and the actionable half of the old line survives with it.
   if (r.matching > r.searched) {
+    const unread = r.matching - r.searched;
     out.push(
       INDENT +
         t.dim(
-          `searched ${f.num(r.searched)} of ${f.num(r.matching)} matching sessions; raise --k to widen`,
+          `${f.num(unread)} matching ${f.plural(unread, 'session')} not read ${t.sep} raise --k to widen`,
         ),
     );
   }
 
-  // `05`: every verb ends with the next verb.
+  // `05`: every verb ends with the next verb -- and in the shape the other
+  // twelve screens in `docs/screens/` use, which is `run  <command>  <gloss>`
+  // on the line directly under the counts. `ask` was the only verb that said
+  // `next` instead of `run` and the only one that put a blank line above it,
+  // so it read as a different kind of thing on a page beside the others. It is
+  // also the one verb whose block was too tall to screenshot, and the blank
+  // was a row.
   const next = opts.next ?? (r.evidence[0] ? `potsherd graft ${r.evidence[0].id8}` : null);
   if (next) {
-    out.push('');
-    out.push(INDENT + t.dim('next') + '  ' + next);
+    // The gloss is the first thing to go at a narrow width, not the command:
+    // a reader at 60 columns still needs something they can type.
+    const gloss = opts.next ? '' : '  to carry it into the agent you are in';
+    const line = INDENT + 'run  ' + next + gloss;
+    out.push(
+      Theme.len(line) <= t.width
+        ? INDENT + t.dim('run') + '  ' + next + t.dim(gloss)
+        : INDENT + t.dim('run') + '  ' + f.clip(next, t.width - INDENT.length - 5, t),
+    );
   }
   return out;
 }

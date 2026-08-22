@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   claudeAdapter,
   discover,
+  isNovelRecordType,
   parse,
   recordTypeStats,
   sourceDir,
@@ -183,6 +184,7 @@ describe('doctor coverage', () => {
       [
         { type: 'mode', sessionId: 'aaaa', mode: 'normal' },
         { type: 'artifact-comment-monitor', sessionId: 'aaaa' },
+        { type: 'sky-hook-negotiator', sessionId: 'aaaa' },
         { type: 'user', sessionId: 'aaaa', version: '2.1.240', promptId: 'p', timestamp: '2026-08-01T00:00:00.000Z', message: { role: 'user', content: 'hi' } },
       ]
         .map((r) => JSON.stringify(r))
@@ -200,12 +202,68 @@ describe('doctor coverage', () => {
     expect(stats[0]).toEqual({
       harness: 'claude',
       version: '2.1.240',
-      type: 'artifact-comment-monitor',
+      type: 'sky-hook-negotiator',
       count: 1,
       files: 1,
       novel: true,
     });
     expect(stats.find((s) => s.type === 'mode')?.novel).toBe(false);
+    // Read and understood in phase 7, so it is no longer news. See
+    // IGNORED_RECORD_TYPES for the shape it was read to have.
+    expect(stats.find((s) => s.type === 'artifact-comment-monitor')?.novel).toBe(false);
+  });
+
+  /**
+   * `artifact-comment-monitor` was reported as an undocumented format change on
+   * every `index` run for six phases because nobody had opened one. Phase 7 did,
+   * over the frozen snapshot, and found bookkeeping: an artifact id mapped to a
+   * state, a title and a write time, with no `cwd`, no `timestamp`, no
+   * `parentUuid` and no `message` anywhere in it.
+   *
+   * That measurement is what justifies skipping it, so it is pinned. If a later
+   * Claude Code build starts putting conversation into this record, the skip
+   * becomes data loss and this test is what says so.
+   */
+  it('skips artifact-comment-monitor because it carries no conversation, and pins that', async () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'projects', '-tmp-x', 'bbbb.jsonl');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // The exact shape read off the frozen snapshot, values substituted.
+    const record = {
+      type: 'artifact-comment-monitor',
+      v: 1,
+      sessionId: 'bbbb',
+      artifacts: {
+        '00000000-0000-4000-8000-000000000001': {
+          state: 'published',
+          title: 'a page',
+          writtenAtMs: 1755800000000,
+        },
+      },
+    };
+    fs.writeFileSync(
+      file,
+      [
+        JSON.stringify(record),
+        JSON.stringify({ type: 'user', sessionId: 'bbbb', version: '2.1.240', promptId: 'p', timestamp: '2026-08-01T00:00:00.000Z', message: { role: 'user', content: 'hi' } }),
+      ].join('\n') + '\n',
+    );
+
+    const [result] = await Promise.all(
+      discover({ claudeDir: dir, archive: false }).map((s) => parse(s)),
+    );
+    rmrf(dir);
+
+    // The three fields an exchange is built from are absent from the record, so
+    // skipping it loses nothing. Checked against the object, not the parser, so
+    // this stays true if the parser changes.
+    for (const key of ['cwd', 'timestamp', 'message', 'parentUuid', 'uuid']) {
+      expect(Object.hasOwn(record, key), `${key} appeared in the record`).toBe(false);
+    }
+    expect(Object.keys(record).sort()).toEqual(['artifacts', 'sessionId', 'type', 'v']);
+    expect(isNovelRecordType('artifact-comment-monitor')).toBe(false);
+    // And it is still counted, not swallowed: skipped is not the same as unseen.
+    expect(result?.unknownTypes?.['artifact-comment-monitor']).toBe(1);
   });
 });
 

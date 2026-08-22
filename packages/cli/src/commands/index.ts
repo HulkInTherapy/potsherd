@@ -204,10 +204,19 @@ export function renderIndexReceipt(
     for (const row of novel.slice(0, 5)) {
       // The name is what the reader needs, so it gets the width and the
       // version gives ground — the same rule `doctor` follows.
+      //
+      // Elide and pad to the SAME width. They used to disagree: elided to
+      // `nameW` (58 at an 80-column terminal) and padded to
+      // `Math.min(nameW, 30)`, so every name between 31 and 58 characters
+      // pushed the count and version columns right by however long it was, and
+      // the table stopped being a table on exactly the rows a reader is
+      // squinting at — the long, unfamiliar record-type names are the whole
+      // reason this block prints at all. 4 + nameW + 7 + 3 + 8 is the terminal
+      // width, so one number governs both.
       const nameW = Math.max(20, t.width - 4 - 7 - 3 - 8);
       const name = `${row.harness} ${row.type}`;
       card.raw(
-        `    ${fmt.elide(name, nameW, t).padEnd(Math.min(nameW, 30))}` +
+        `    ${fmt.elide(name, nameW, t).padEnd(nameW)}` +
           `${fmt.num(row.count).padStart(7)}   ${t.dim(fmt.elide(row.version, 8, t))}`,
       );
     }

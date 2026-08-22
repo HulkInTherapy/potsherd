@@ -59,6 +59,11 @@ function writeTranscript(claudeDir: string, id = 'aaaa1111-0000-4000-8000-000000
     { ...base, type: 'assistant', uuid: 'a2', timestamp: '2026-08-19T09:01:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: `It reads: gh auth login --with-token <<< ${GITHUB_TOKEN} — that must move into a repository secret.` }] } },
     { ...base, type: 'queue-operation', uuid: 'q1', timestamp: '2026-08-19T09:01:02.000Z' },
     { ...base, type: 'artifact-comment-monitor', uuid: 'x1', timestamp: '2026-08-19T09:01:03.000Z' },
+    // A type no formats.md draft describes, so the "novel" column has something
+    // to be true about. `artifact-comment-monitor` used to play this part and
+    // stopped in phase 7, when somebody finally opened one and found
+    // bookkeeping — which is exactly the transition this column exists to make.
+    { ...base, type: 'sky-hook-negotiator', uuid: 'x2', timestamp: '2026-08-19T09:01:04.000Z' },
   ];
   fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
   return file;
@@ -233,10 +238,14 @@ describe('index: adapter output into the store', () => {
     await indexAll({ db, root, claudeDir, harnesses: ['claude'], embed: false, full: true });
 
     const rows = storedRecordTypes(db);
-    const novel = rows.find((r) => r.type === 'artifact-comment-monitor');
+    const novel = rows.find((r) => r.type === 'sky-hook-negotiator');
     expect(novel).toMatchObject({ harness: 'claude', version: '2.1.237', count: 1, novel: true });
     // A documented, deliberately-ignored type is counted but not cried wolf over.
     expect(rows.find((r) => r.type === 'queue-operation')).toMatchObject({ novel: false });
+    expect(rows.find((r) => r.type === 'artifact-comment-monitor')).toMatchObject({
+      count: 1,
+      novel: false,
+    });
     db.close();
   });
 

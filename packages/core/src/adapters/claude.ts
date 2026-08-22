@@ -373,6 +373,19 @@ export const IGNORED_RECORD_TYPES: readonly string[] = [
   'file-history-snapshot',
   'file-history-delta',
   'frame-link',
+  // Phase 1 found this as the sixteenth Claude Code record type, in no draft of
+  // `formats.md`, and left it OFF this list on purpose: "novel" was the honest
+  // answer until somebody opened one. Nobody did, for six phases, so `index`
+  // has been reporting it as an undocumented format change on every run since.
+  //
+  // Opened in phase 7, over the frozen snapshot: every instance is
+  //   { type, v, sessionId, artifacts: { <uuid>: { state, title, writtenAtMs } } }
+  // -- no `cwd`, no `timestamp`, no `message`, no `parentUuid`. It is the
+  // editor's bookkeeping for published artifacts, and there is nothing in it an
+  // exchange could carry. `tests/adapters/claude.test.ts` pins that shape, so a
+  // build that starts putting conversation into it fails rather than being
+  // silently skipped.
+  'artifact-comment-monitor',
 ];
 
 const IGNORED = new Set(IGNORED_RECORD_TYPES);

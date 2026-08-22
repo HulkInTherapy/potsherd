@@ -23,9 +23,10 @@ import {
   type EvidenceSource,
   type ProposedEvidence,
   type ProposedSentence,
+  type AskResult,
 } from '../packages/core/src/ask.js';
 import { matchSpan, quotableText } from '../packages/core/src/ask.js';
-import { QUOTE_CHARS, clipQuote, maskSafeCut, renderAsk } from '../packages/core/src/render/ask.js';
+import { ASK_ROWS, QUOTE_CHARS, clipQuote, maskSafeCut, renderAsk } from '../packages/core/src/render/ask.js';
 import {
   OPEN_THREAD_LABEL,
   openThreadCandidates,
@@ -1280,6 +1281,175 @@ function resultFrom(
   };
 }
 
+/**
+ * The row budget (`plans/05`: "compact enough to screenshot whole", every
+ * screen at 80x24).
+ *
+ * `ask` was the one verb that did not obey it. Real runs measured **25-33
+ * rows**, because ANSWER_MAX_WORDS is a *word* cap fitted against a short
+ * EVIDENCE block and no open threads, and nothing downstream knew how many rows
+ * those two would take.
+ *
+ * The second test here is the one that matters. A height budget is easy to hit
+ * by cutting whatever is longest, and the longest thing on this screen is the
+ * evidence — which would leave `[3]` in the answer with no `[3]` under
+ * EVIDENCE, and quietly undo the only claim potsherd makes. So the budget is
+ * checked *and* the citations are checked, over the same matrix of shapes.
+ */
+describe('the ask block is built to fit 80x24', () => {
+  const t80 = new Theme({ color: false, width: 80 });
+  const NOW = new Date('2026-08-22T00:00:00Z');
+
+  const SENTENCES = [
+    'Transaction pooling mode drops session state, so server-side prepared statements do not survive across a transaction boundary.',
+    'The decision was to have the client stop preparing statements by setting statement_cache_size to zero.',
+    'This was verified: the test failed with the old client config, showing a prepared statement already exists error, and passed once the cache was disabled.',
+    'A second run against the staging pooler confirmed the same behaviour under concurrent load.',
+    'The team also considered switching the pooler to session mode and rejected it on memory grounds.',
+    'Nothing in the transcripts suggests the change was reverted afterwards.',
+  ];
+
+  function shape(nSent: number, nEv: number, nThreads: number): AskResult {
+    const sentences = SENTENCES.slice(0, nSent).map((text, i) => ({
+      text,
+      cites: [Math.min(i + 1, nEv)],
+    }));
+    const evidence = Array.from({ length: nEv }, (_, i) => ({
+      index: i + 1,
+      sessionId: `9c4d2f18-0000-4000-8000-00000000000${i}`,
+      id8: '9c4d2f18',
+      project: 'data-pipeline',
+      harness: 'claude' as const,
+      seq: 10 + i,
+      ts: '2026-08-21T09:23:00.000Z',
+      quote:
+        'That will hold, but transaction pooling drops the session state the prepared statement lives in',
+      isGhost: false,
+      isSidechain: false,
+    }));
+    const openThreads = Array.from({ length: nThreads }, (_, i) => ({
+      what: 'Route delivery consumers through connection pooler on port 6432 instead of direct postgres on port 5432',
+      why: 'connection limits',
+      sessionId: `b2181bfe-0000-4000-8000-00000000000${i}`,
+      id8: 'b2181bfe',
+      project: '/home/dev/event-bus',
+      ts: '2026-08-11T11:38:00.000Z',
+      evidenceSeqs: [1, 2] as readonly number[],
+      otherProject: '/home/dev/data-pipeline',
+      otherSessionIds: [],
+      overlap: { files: [] as readonly string[], topics: ['pooling'] as readonly string[] },
+      score: 2.1,
+      confirmed: true,
+      note: "This is a concrete, reusable postgres infra practice (route many concurrent consumers through a pooler to avoid hitting connection limits) that's worth flagging if data-pipeline also connects directly to postgres.",
+    }));
+    return {
+      question: 'what did we decide about prepared statements behind the pooler?',
+      answer: sentences.map((x) => x.text).join(' '),
+      sentences,
+      dropped: [],
+      trimmed: [],
+      evidence,
+      openThreads,
+      searched: 6,
+      matching: 65,
+      readers: Array.from({ length: 6 }, (_, i) => ({
+        sessionId: String(i),
+        found: i === 0,
+        ms: 100,
+      })) as AskResult['readers'],
+      refused: false,
+      refusal: null,
+      strict: false,
+      spend: { calls: 7, inputTokens: 100, outputTokens: 40, usd: 0.127, ms: 900, estimatedInputCalls: 7 },
+      estimated: true,
+      ms: 32_600,
+    } as AskResult;
+  }
+
+  /** Every shape a real run can land in, within the k and evidence caps. */
+  const MATRIX: [number, number, number][] = [];
+  for (const s of [1, 2, 3, 4, 5, 6]) {
+    for (const e of [1, 2, 3, 4, 6, 8]) for (const th of [0, 1, 2, 3]) MATRIX.push([s, e, th]);
+  }
+
+  it('never runs past 24 rows, over every shape a run can land in', () => {
+    for (const [s, e, th] of MATRIX) {
+      const text = stripAnsi(renderAsk(shape(s, e, th), t80, NOW));
+      expect(text.split('\n').length, `sentences=${s} evidence=${e} threads=${th}`)
+        .toBeLessThanOrEqual(ASK_ROWS);
+    }
+  });
+
+  it('never prints a citation whose evidence line it dropped', () => {
+    for (const [s, e, th] of MATRIX) {
+      const text = stripAnsi(renderAsk(shape(s, e, th), t80, NOW));
+      const answer = text.slice(text.indexOf('ANSWER'), text.indexOf('EVIDENCE'));
+      const cited = new Set([...answer.matchAll(/\[(\d+)\]/g)].map((m) => m[1]));
+      const shown = new Set(
+        [...text.slice(text.indexOf('EVIDENCE')).matchAll(/^ {2}\[(\d+)\]/gm)].map((m) => m[1]),
+      );
+      for (const c of cited) {
+        expect(shown.has(c), `[${c}] cited but not shown (s=${s} e=${e} th=${th})`).toBe(true);
+      }
+      expect(cited.size, `nothing cited at s=${s} e=${e} th=${th}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('says so whenever it held something back', () => {
+    for (const [s, e, th] of MATRIX) {
+      const full = stripAnsi(renderAsk(shape(s, e, th), t80, NOW, { rows: 0 }));
+      const fitted = stripAnsi(renderAsk(shape(s, e, th), t80, NOW));
+      const label = `s=${s} e=${e} th=${th}`;
+      const flat = (x: string): string => x.replace(/\s+/g, ' ');
+      const sentencesShown = (x: string): number =>
+        SENTENCES.filter((sent) => flat(x).includes(flat(sent).slice(0, 40))).length;
+      if (sentencesShown(fitted) < sentencesShown(full)) {
+        expect(fitted, `${label}: trimmed silently`).toMatch(/sentences? trimmed/);
+      }
+      const threadsShown = (x: string): number =>
+        [...x.matchAll(new RegExp(OPEN_THREAD_LABEL, 'g'))].length;
+      if (threadsShown(fitted) < threadsShown(full)) {
+        expect(fitted, `${label}: dropped a thread silently`).toMatch(/more open thread/);
+      }
+    }
+  });
+
+  it('keeps the first open thread rather than the tail of the answer', () => {
+    // `05` calls the open-thread line "the moment people quote" — it is the one
+    // thing on this screen the user did not ask for and cannot get any other
+    // way, so it outranks a trailing recap sentence.
+    const text = stripAnsi(renderAsk(shape(6, 6, 3), t80, NOW));
+    expect(text).toContain(OPEN_THREAD_LABEL);
+    expect(text).toMatch(/sentences? trimmed/);
+  });
+
+  it('renders everything when the budget is switched off', () => {
+    const text = stripAnsi(renderAsk(shape(6, 8, 3), t80, NOW, { rows: 0 }));
+    expect(text.split('\n').length).toBeGreaterThan(ASK_ROWS);
+    const flat = text.replace(/\s+/g, ' ');
+    for (const s of SENTENCES) expect(flat).toContain(s.replace(/\s+/g, ' ').slice(0, 40));
+    expect(text).not.toMatch(/sentences? trimmed/);
+  });
+
+  it('does not print the same two numbers twice in its footer', () => {
+    // `6 of 65 sessions read` followed two lines later by `searched 6 of 65
+    // matching sessions` — the same fact, twice, on a screen built to a row
+    // budget. The number a reader does not already have is how many went unread.
+    const text = stripAnsi(renderAsk(shape(2, 2, 0), t80, NOW));
+    expect(text).toContain('6 of 65 sessions read');
+    expect(text).not.toContain('searched 6 of 65');
+    expect(text).toContain('59 matching sessions not read');
+  });
+
+  it('ends with the next verb, in the shape every other screen uses', () => {
+    const text = stripAnsi(renderAsk(shape(2, 2, 0), t80, NOW));
+    const lines = text.split('\n');
+    expect(lines.at(-1)).toMatch(/^ {2}run {2}potsherd graft/);
+    // Directly under the counts block, like ls, audit, stats and show.
+    expect(lines.at(-2)?.trim()).not.toBe('');
+  });
+});
+
 describe('an open thread is checkable in the terminal, not only in --json', () => {
   // The rule pass drops any decision whose evidence_seq does not resolve, so
   // by construction every open thread that reaches the renderer has one. The
@@ -1356,7 +1526,7 @@ describe('renderAsk', () => {
     const t = text();
     expect(t).toContain('ANSWER');
     expect(t).toContain('EVIDENCE');
-    expect(t).toMatch(/next\s+potsherd graft /);
+    expect(t).toMatch(/run\s+potsherd graft /);
   });
 
   it('carries a session id and a timestamp on every evidence line', () => {
@@ -1367,7 +1537,8 @@ describe('renderAsk', () => {
   });
 
   it('prints the k-cap sentence the phase plan specifies', () => {
-    expect(text()).toContain('searched 6 of 41 matching sessions; raise --k to widen');
+    expect(text()).toContain('35 matching sessions not read');
+    expect(text()).toContain('raise --k to widen');
   });
 
   it('fits 80x24 and never wraps past the width, at 80 and at 60', () => {
