@@ -199,6 +199,7 @@ export {
 export { renderFind, snippetLine } from './render/find.js';
 export { renderLs, renderResumeMenu, marker } from './render/ls.js';
 export { renderShow, renderShowMarkdown } from './render/show.js';
+export { renderShowHtml, esc as escapeHtml } from './render/show-html.js';
 export { renderStats } from './render/stats.js';
 
 export * as parser from './parser/index.js';

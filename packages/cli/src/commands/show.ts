@@ -2,10 +2,12 @@ import {
   displayTitleOf,
   format as fmt,
   renderShow,
+  renderShowHtml,
   renderShowMarkdown,
   resolveSession,
   showSession,
   table,
+  VERSION,
 } from '@potsherd/core';
 import { print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 import { openIndex } from '../filters.js';
@@ -15,6 +17,7 @@ export interface ShowCommandOptions extends GlobalOptions {
   from?: unknown;
   to?: unknown;
   md?: boolean;
+  html?: boolean;
 }
 
 /**
@@ -88,8 +91,18 @@ export async function runShow(o: ShowCommandOptions): Promise<number> {
       });
       return 0;
     }
+    if (o.md && o.html) {
+      throw new UserError(
+        'show takes --md or --html, not both',
+        'potsherd show ' + found.id.slice(0, 8) + ' --html > session.html',
+      );
+    }
     if (o.md) {
       print(renderShowMarkdown(result));
+      return 0;
+    }
+    if (o.html) {
+      print(renderShowHtml(result, VERSION));
       return 0;
     }
     print(renderShow(result, themeFrom(o)));

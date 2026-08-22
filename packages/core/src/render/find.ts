@@ -83,8 +83,34 @@ export function renderFind(
   });
 
   lines.push('');
-  lines.push(INDENT + t.dim(footer(result, t)));
+  const notes = footer(result, t);
+  if (notes) lines.push(INDENT + t.dim(notes));
+  lines.push(nextVerb(t));
   return lines.join('\n');
+}
+
+/**
+ * `05`: "every verb ends with the next verb. audit -> rescue -> ls -> find ->
+ * ask -> graft."
+ *
+ * `find` was the only verb on a full page of results that did not. Its footer
+ * printed `run  potsherd show <id8>  to read one whole` **only when it had no
+ * other note to make** -- so the moment a search turned up a ghost or a
+ * subagent hit, which is the interesting case and the one worth screenshotting,
+ * the line teaching the next verb was the thing that got dropped to make room.
+ * `docs/screens/09-find.txt` and `13-find-redacted.txt` both end that way and
+ * are the only two of the fifteen committed screens with no next verb on them.
+ *
+ * So it is its own line now, always printed, and it names both directions: the
+ * one result you want to read, and the verb that answers the question instead
+ * of listing places the answer might be.
+ */
+function nextVerb(t: Theme): string {
+  const long = 'to read one, or  potsherd ask <words>  for one cited answer';
+  const wide = INDENT + t.dim('run') + '  potsherd show <id8>  ' + t.dim(long);
+  return Theme.len(wide) <= t.width
+    ? wide
+    : INDENT + t.dim('run') + '  potsherd show <id8>  ' + t.dim('or  potsherd ask <words>');
 }
 
 function headline(r: RecallResult, t: Theme): string {
@@ -413,7 +439,7 @@ function footer(r: RecallResult, t: Theme): string {
   if (sidechains) parts.push(`${f.num(sidechains)} from subagents`);
   if (!r.vectors.used && r.vectors.reason) parts.push(r.vectors.reason);
   if (r.relaxed) parts.push('relaxed to any-word matching');
-  if (parts.length === 0) parts.push(`run  potsherd show <id8>  to read one whole`);
+  if (parts.length === 0) return '';
   // joinFit, not clip: a footer that ends "(--v…" has lost a whole clause to
   // save two characters. Drop the last note instead of cutting one in half.
   return f.joinFit(parts, t.width - INDENT.length, ` ${t.sep} `, t);

@@ -45,6 +45,15 @@ const GLOBAL_ONLY =
 
 /** Registered on the program *and* on every verb, so position never matters. */
 function addGlobals(cmd: Command): Command {
+  // An error inside a verb should point at that verb's help, not at the list
+  // of twenty verbs: `potsherd setup --nosuch` used to answer "run potsherd
+  // --help for the list of verbs", which is the one page that cannot say what
+  // `--nosuch` should have been. `05` asks every error for the one command
+  // that fixes it, and for a mistyped flag that command names the verb.
+  const name = cmd.name();
+  if (name && name !== 'potsherd') {
+    cmd.showHelpAfterError(`(run  potsherd ${name} --help  for this verb's flags and an example)`);
+  }
   return cmd
     .option('--json', 'machine-readable output, same data as the human view')
     .option('--no-color', 'disable colour (NO_COLOR is honoured too)')
@@ -472,12 +481,14 @@ example:
       .argument('<session>', 'session id, or the first 8 characters of one')
       .addOption(new Option('--from <n>', 'first exchange to print (1-based)').argParser(Number))
       .addOption(new Option('--to <n>', 'last exchange to print').argParser(Number))
-      .option('--md', 'markdown, for pasting into an issue or a note'),
+      .option('--md', 'markdown, for pasting into an issue or a note')
+      .option('--html', 'one self-contained page: no script, no network, no tracking'),
   ).addHelpText('after', `
 example:
   potsherd show 9c4d2f18
   potsherd show 9c4d2f18 --from 12 --to 18
   potsherd show 9c4d2f18 --md > session.md
+  potsherd show 9c4d2f18 --html > session.html   # open it in a browser
   potsherd show 9c4d2f18 --json | jq -r '.exchanges[].userText'`);
   show.action(async (session: string, opts: Record<string, unknown>) => {
     const o = globals(program, show, opts);
@@ -489,6 +500,7 @@ example:
           ...(opts['from'] !== undefined ? { from: opts['from'] } : {}),
           ...(opts['to'] !== undefined ? { to: opts['to'] } : {}),
           md: Boolean(opts['md']),
+          html: Boolean(opts['html']),
         }),
       o,
     );

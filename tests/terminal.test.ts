@@ -173,6 +173,47 @@ describe('--ascii', () => {
   });
 });
 
+/**
+ * `plans/05`, the terminal design system: *"every verb ends with the next verb.
+ * audit -> rescue -> ls -> find -> ask -> graft. the tool teaches itself in the
+ * last line of each output."*
+ *
+ * That rule had no guard, and one verb had quietly stopped obeying it: `find`
+ * printed its next-verb line **only when it had no other footer note**, so the
+ * moment a search turned up a ghost or a subagent hit -- the interesting case,
+ * and the one worth screenshotting -- the teaching line was what got dropped to
+ * make room. Both committed `find` screens end that way, and they were the only
+ * two of fifteen with no next verb on them.
+ *
+ * The exceptions are named rather than pattern-matched, because "this screen is
+ * allowed to end differently" is a decision, and a regex that happens to
+ * tolerate a missing line is not one.
+ */
+describe('every verb ends with the next verb', () => {
+  /** Screens whose last line is deliberately something else, and why. */
+  const EXEMPT: Record<string, string> = {
+    'doctor --privacy': 'ends with the privacy receipt, which is the point of it',
+    'find --explain': 'ends with the ledger it was asked for; the numbers are the output',
+    'find --explain (no match)': 'falls through to the empty-result screen',
+  };
+
+  for (const v of verbs()) {
+    it(`${v.name}${EXEMPT[v.name] ? ' — exempt' : ''}`, () => {
+      const r = invoke(v.args, ['--no-color', '--width', '80']);
+      const lines = r.stdout.split('\n').filter((l) => l.trim() !== '');
+      const last = lines.at(-1) ?? '';
+      if (EXEMPT[v.name]) {
+        expect(lines.length, `${v.name} printed nothing`).toBeGreaterThan(0);
+        return;
+      }
+      // Anchored on `run  potsherd <verb>` rather than the start of the line:
+      // `rescue --dry-run` ends `nothing was written. run  potsherd rescue  to
+      // do it for real.`, which is the rule obeyed with a preamble, not broken.
+      expect(last, `${v.name} last line:\n${r.stdout}`).toMatch(/run\s{2}potsherd \w/);
+    });
+  }
+});
+
 describe('terminal width', () => {
   /**
    * `doctor` overflowed `--width 60` by exactly one character on every `known`
