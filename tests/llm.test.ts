@@ -1251,6 +1251,12 @@ describe('which verbs may call a model (T2.7 D2)', () => {
   const WORKSPACE: Record<string, string> = {
     '@potsherd/core': 'packages/core/src',
     '@potsherd/mcp': 'packages/mcp/src',
+    // Phase 6 found the same hole one package over: `commands/export.ts`
+    // imports `@potsherd/bridges`, and until this line existed the guard walked
+    // straight past that import and `export` was unchecked. The lesson is that
+    // this map is a denylist of packages we remembered — so it is now derived
+    // from the workspace, not hand-written.
+    '@potsherd/bridges': 'packages/bridges/src',
   };
 
   const barrelExports = (): Map<string, string> => {

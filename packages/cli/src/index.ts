@@ -18,6 +18,7 @@ import { runLink } from './commands/link.js';
 import { runAsk } from './commands/ask.js';
 import { runGraft } from './commands/graft.js';
 import { runSetup, SETUP_CLIENTS } from './commands/setup.js';
+import { runExport, EXPORT_TARGETS } from './commands/export.js';
 
 import { VERSION } from '@potsherd/core';
 export { VERSION };
@@ -663,6 +664,37 @@ example:
   // `potsherd` with no arguments is a tour, not a usage dump. It is often the
   // second thing a user runs, so it teaches the next verb rather than listing
   // flags.
+  const exportCmd = addGlobals(
+    program
+      .command('export')
+      .description('write your cards out — to markdown, or into another memory tool')
+      .requiredOption('--to <target>', `where to write: ${EXPORT_TARGETS.join(', ')}`)
+      .argument('[dir]', 'the directory to write into (markdown)')
+      .option('--transcripts', 'also write the full conversations, one file each')
+      .addOption(new Option('--limit <n>', 'cap on transcripts written').argParser(Number))
+      .option('--yes', 'required to write into another tool’s store'),
+  ).addHelpText('after', `
+example:
+  potsherd export --to markdown ./vault
+  potsherd export --to markdown ./vault --transcripts   # cards + full conversations
+  potsherd export --to markdown ./vault --json | jq .cards.files
+  potsherd export --to agentmemory                      # dry run: says what it would push
+  potsherd export --to agentmemory --yes                # actually writes into their store`);
+  exportCmd.action(async (dir: string | undefined, opts: Record<string, unknown>) => {
+    const o = globals(program, exportCmd, opts);
+    await run(
+      () =>
+        runExport({
+          ...o,
+          to: String(opts['to']),
+          ...(dir ? { dir } : {}),
+          transcripts: Boolean(opts['transcripts']),
+          ...(opts['limit'] ? { limit: Number(opts['limit']) } : {}),
+        }),
+      o,
+    );
+  });
+
   if (argv.length <= 2) {
     tour();
     return;

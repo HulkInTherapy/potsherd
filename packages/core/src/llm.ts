@@ -118,6 +118,11 @@ export const OFFLINE_VERBS: readonly string[] = [
   // for the same reason `unpin` does: `doctor --privacy` answers by omission
   // otherwise, and an answer by omission is not one.
   'setup',
+  // `export` writes markdown into a directory the user names, and — only with
+  // an explicit --yes — rows into another memory tool's store. Both are local
+  // writes. It opens no socket except the localhost probes the bridges use to
+  // find a store, and it calls no model.
+  'export',
   'doctor',
 ];
 
