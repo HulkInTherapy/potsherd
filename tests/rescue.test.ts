@@ -123,9 +123,12 @@ describe('rescue', () => {
       const prompts = db
         .prepare('SELECT text FROM ghost_prompts WHERE session_id = ? ORDER BY seq')
         .all(IDS.ghostA) as { text: string }[];
+      // Verbatim, slash command and all: `ghost_prompts` is the record, and
+      // `show` renders it. Phase 8.2 changes what is *derived* from these
+      // lines, never the lines themselves.
       expect(prompts.map((p) => p.text)).toEqual([
+        '/model',
         'scaffold the gamma service',
-        'add the retry policy',
         'why is the retry budget 3?',
       ]);
     } finally {
@@ -136,7 +139,10 @@ describe('rescue', () => {
   it('recovers a deleted session title from sessions-index.json', async () => {
     const { claude, root } = scratch();
     const r = await rescue({ claudeDir: claude, root });
-    expect(r.ghostsWithTitles).toBe(1);
+    // All three: one from the index summary, two from a substantive prompt.
+    // The counter means "a name somebody wrote", so the `<project>-<id8>`
+    // fallback is not counted — see the fallback test below.
+    expect(r.ghostsWithTitles).toBe(3);
 
     const db = store.open({ root, readonly: true });
     try {
@@ -399,7 +405,15 @@ describe('rescue receipt', () => {
 
   it('pluralises everything it counts', async () => {
     const { claude, root } = scratch();
+    // The singular of "with a title" needs a corpus where exactly one ghost
+    // has a name somebody wrote, and the fixture now has three. Rather than
+    // read that state off the fixture, establish it: take the two gamma
+    // ghosts' prompts down to slash commands, which leaves only the alpha
+    // ghost's sessions-index.json summary standing. Prompt counts are
+    // untouched, so every other number on the card is the same.
+    silence(claude, [IDS.ghostA, IDS.ghostB]);
     const r = await rescue({ claudeDir: claude, root });
+    expect(r.ghostsWithTitles).toBe(1);
     const out = renderRescueReceipt(r, new Theme({ color: false, width: 100 }), {
       settingsChanged: false,
       settingsFrom: null,
@@ -414,6 +428,255 @@ describe('rescue receipt', () => {
     expect(out).not.toMatch(/\b1 (ghosts|sidechains|prompts recovered from)\b/);
   });
 });
+
+/**
+ * phase 8.2 — the `ls` screen, which `05 §3` makes the screenshot the product
+ * is shared on.
+ *
+ * On the reference machine 166 of 299 ghosts (56%) rendered as `/resume`,
+ * `/model`, `/mcp` or `clear`, because `rescue` stored the literal first line
+ * of history.jsonl and every surface fell back to it. What is pinned here is
+ * the derivation, end to end through `rescue()`: which prompt becomes the
+ * name, what happens when no prompt can be one, and that re-running cannot
+ * undo either answer.
+ */
+describe('ghost titles', () => {
+  /** The acceptance query from plans/phases/phase-8-hardening.md §8.2. */
+  function slashTitles(root: string): number {
+    const db = store.open({ root, readonly: true });
+    try {
+      return (
+        db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM ghosts
+              WHERE first_prompt LIKE '/%' OR length(first_prompt) < 8`,
+          )
+          .get() as { n: number }
+      ).n;
+    } finally {
+      db.close();
+    }
+  }
+
+  function ghostRow(root: string, id: string): { title: string; first_prompt: string | null } {
+    const db = store.open({ root, readonly: true });
+    try {
+      return db.prepare('SELECT title, first_prompt FROM ghosts WHERE session_id = ?').get(id) as {
+        title: string;
+        first_prompt: string | null;
+      };
+    } finally {
+      db.close();
+    }
+  }
+
+  it('skips the opening lines that name nothing, and keeps them in the record', async () => {
+    const { claude, root } = scratch();
+    // The premise, asserted rather than assumed: each ghost really does open
+    // with a line that cannot be a title, one per rule.
+    const opening = historyOf(claude);
+    expect(opening[IDS.ghostA]![0]).toBe('/model'); // slash command
+    expect(opening[IDS.ghostB]![0]).toBe('continue'); // stoplist, 8 characters
+    expect(opening[IDS.ghostC]![0]).toBe('clear'); // stoplist, and too short
+
+    await rescue({ claudeDir: claude, root });
+
+    expect(ghostRow(root, IDS.ghostA).title).toBe('scaffold the gamma service');
+    expect(ghostRow(root, IDS.ghostB).title).toBe('gamma deploy is failing on the health check');
+    // The harness's own summary outranks any prompt, and ghost C has one.
+    expect(ghostRow(root, IDS.ghostC).title).toBe('Alpha migration runner');
+    // Its only prompt names nothing, so `first_prompt` comes from the last
+    // place a deleted session's opening survives: sessions-index.json.
+    expect(ghostRow(root, IDS.ghostC).first_prompt).toBe('set up the alpha migration runner');
+
+    // …and none of it was achieved by throwing the lines away.
+    const db = store.open({ root, readonly: true });
+    try {
+      const kept = db
+        .prepare('SELECT text FROM ghost_prompts WHERE text = ? OR text = ? OR text = ?')
+        .all('/model', 'continue', 'clear') as { text: string }[];
+      expect(kept.map((k) => k.text).sort()).toEqual(['/model', 'clear', 'continue']);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('leaves no ghost whose stored opening is a slash command or a stub', async () => {
+    const { claude, root } = scratch();
+    // Establish that there is something to find. The query is narrower than
+    // the rule it stands in for: it catches ghost A (`/model`) and ghost C
+    // (`clear`), but not ghost B, whose `continue` is exactly eight characters
+    // and no slash. A count of zero is therefore necessary and not sufficient
+    // — which is why the test above names all three titles.
+    const opening = historyOf(claude);
+    expect(Object.keys(opening).length).toBe(4); // three ghosts and the live one
+    const caught = [IDS.ghostA, IDS.ghostB, IDS.ghostC].filter((id) => {
+      const first = opening[id]![0]!;
+      return first.startsWith('/') || [...first].length < 8;
+    });
+    expect(caught).toEqual([IDS.ghostA, IDS.ghostC]);
+
+    await rescue({ claudeDir: claude, root });
+    expect(slashTitles(root)).toBe(0);
+  });
+
+  it('falls back to <project>-<id8>, never to a slash command', async () => {
+    const { claude, root } = scratch();
+    // A ghost that typed nothing but commands at the harness. It is not in the
+    // committed fixture because adding a fourth ghost would move every count
+    // `audit` is pinned on, so the test writes it.
+    appendHistory(claude, DELTA, '/tmp/potsherd-delta', [
+      ['2026-07-01T08:00:00.000Z', '/resume'],
+      ['2026-07-01T08:01:00.000Z', 'ok'],
+      ['2026-07-01T08:02:00.000Z', '/mcp'],
+    ]);
+    await rescue({ claudeDir: claude, root });
+
+    const row = ghostRow(root, DELTA);
+    expect(row.title).toBe('potsherd-delta-dddddddd');
+    // Null, not `/resume`: nothing this session typed names it, and that is
+    // what the fallback title is saying.
+    expect(row.first_prompt).toBeNull();
+    expect(slashTitles(root)).toBe(0);
+  });
+
+  it('cuts a long prompt at 60 code points, never through a character', async () => {
+    const { claude, root } = scratch();
+    // One ascii character then 80 astral ones, so a UTF-16 cut at 60 lands in
+    // the middle of a surrogate pair — established here, not assumed.
+    const long = `x${'\u{1F9E9}'.repeat(80)}`;
+    expect(/[\uD800-\uDBFF]$/.test(long.slice(0, 60))).toBe(true);
+
+    appendHistory(claude, EPSILON, '/tmp/potsherd-epsilon', [
+      ['2026-07-02T08:00:00.000Z', long],
+    ]);
+    await rescue({ claudeDir: claude, root });
+
+    const row = ghostRow(root, EPSILON);
+    expect([...row.title].length).toBe(60);
+    expect(row.title).toBe([...long].slice(0, 60).join(''));
+    // No half a character survived the cut, in either direction.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(row.title)).toBe(false);
+    expect(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(row.title)).toBe(false);
+    // The title is cut; the searchable prompt is not.
+    expect(row.first_prompt).toBe(long);
+  });
+
+  it('re-derives the title on every rebuild rather than preserving it', async () => {
+    const { claude, root } = scratch();
+    await rescue({ claudeDir: claude, root });
+    const good = ghostRow(root, IDS.ghostA).title;
+
+    // A row as an older build left it: the literal first line as the opening,
+    // and no title at all. Nothing under ~/.claude has changed, so the only
+    // thing that can repair it is the rebuild deciding the answer afresh.
+    const db = store.open({ root });
+    try {
+      db.prepare('UPDATE ghosts SET title = ?, first_prompt = ? WHERE session_id = ?').run(
+        '/model',
+        '/model',
+        IDS.ghostA,
+      );
+      // …and the fingerprint an older build stored, which is a different
+      // string because the derivation is part of what is fingerprinted.
+      db.prepare("UPDATE sync_state SET value = 'written-by-an-older-build' WHERE key = ?").run(
+        'claude:ghosts',
+      );
+    } finally {
+      db.close();
+    }
+    expect(slashTitles(root)).toBe(1);
+
+    await rescue({ claudeDir: claude, root });
+    expect(ghostRow(root, IDS.ghostA).title).toBe(good);
+    expect(slashTitles(root)).toBe(0);
+  });
+
+  it('gives the same answer twice', async () => {
+    const { claude, root } = scratch();
+    await rescue({ claudeDir: claude, root });
+    const before = allTitles(root);
+    await rescue({ claudeDir: claude, root });
+    expect(allTitles(root)).toEqual(before);
+  });
+});
+
+const DELTA = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const EPSILON = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+
+/** Every session in a copied fixture's history.jsonl, prompts in order. */
+function historyOf(claude: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const line of fs.readFileSync(path.join(claude, 'history.jsonl'), 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    let r: { sessionId?: string; display?: string };
+    try {
+      r = JSON.parse(line) as typeof r;
+    } catch {
+      continue;
+    }
+    if (!r.sessionId) continue;
+    (out[r.sessionId] ??= []).push(r.display ?? '');
+  }
+  return out;
+}
+
+/** Add a session to a copied fixture's history.jsonl. Never the real one. */
+function appendHistory(
+  claude: string,
+  sessionId: string,
+  project: string,
+  prompts: [string, string][],
+): void {
+  fs.appendFileSync(
+    path.join(claude, 'history.jsonl'),
+    prompts
+      .map(([ts, text]) =>
+        JSON.stringify({
+          display: text,
+          pastedContents: {},
+          timestamp: Date.parse(ts),
+          project,
+          sessionId,
+        }),
+      )
+      .join('\n') + '\n',
+  );
+}
+
+/** Take the named sessions' prompts down to slash commands, in place. */
+function silence(claude: string, sessionIds: string[]): void {
+  const p = path.join(claude, 'history.jsonl');
+  const wanted = new Set(sessionIds);
+  const out = fs
+    .readFileSync(p, 'utf8')
+    .split('\n')
+    .map((line) => {
+      if (!line.trim()) return line;
+      let r: { sessionId?: string; display?: string };
+      try {
+        r = JSON.parse(line) as typeof r;
+      } catch {
+        return line;
+      }
+      if (!r.sessionId || !wanted.has(r.sessionId)) return line;
+      return JSON.stringify({ ...r, display: '/model' });
+    });
+  fs.writeFileSync(p, out.join('\n'));
+}
+
+function allTitles(root: string): Record<string, string> {
+  const db = store.open({ root, readonly: true });
+  try {
+    const rows = db.prepare('SELECT session_id, title FROM ghosts ORDER BY session_id').all() as {
+      session_id: string;
+      title: string;
+    }[];
+    return Object.fromEntries(rows.map((r) => [r.session_id, r.title]));
+  } finally {
+    db.close();
+  }
+}
 
 /** Path -> (size, mtime, mode), for proving nothing under ~/.claude changed. */
 function snapshot(dir: string): Record<string, string> {

@@ -13,7 +13,9 @@
  *   - two sidechains, one under <session>/subagents/ and one under
  *     <project>/subagents/, because both layouts exist and neither is a session
  *   - one sessions-index.json and one memory/ note
- *   - a history.jsonl holding 3 sessions with no transcript left (the ghosts)
+ *   - a history.jsonl holding 3 sessions with no transcript left (the ghosts),
+ *     each opening with a prompt that names nothing — a slash command, a
+ *     stoplist word, a short word — which is what phase 8.2 is about
  *   - every record type observed in the real corpus, including the ones that
  *     carry no timestamp
  *
@@ -301,15 +303,28 @@ fs.writeFileSync(
 
 // ----------------------------------------------------------------- history
 // Four session ids: the live one, and three whose transcripts are gone.
+//
+// Each of the three ghosts *opens with a line that names nothing*, because on
+// the reference machine 56% of them did and a fixture without that case cannot
+// see phase 8.2's defect at all (`plans/phases/phase-8-hardening.md §8.2`).
+// One per rule, so no rule can be deleted without a test going red:
+//   GHOST_A  `/model`    the slash-command rule
+//   GHOST_B  `continue`  the stoplist, at exactly 8 characters so the
+//                        minimum-length rule cannot be what caught it
+//   GHOST_C  `clear`     short *and* on the stoplist — and its only prompt, so
+//                        its title has to come from sessions-index.json
+// The line *count* is unchanged from the pre-8.2 fixture on purpose: `audit`'s
+// arithmetic (prompts lost, prompts surviving, per-project totals) is pinned by
+// tests elsewhere and this is a change to what the lines say, not how many.
 const history = [
   { session: ALIVE, project: ALPHA, ts: '2026-08-01T09:00:05.000Z', text: 'how do we pin the pgbouncer prepared-statement setting?' },
   { session: ALIVE, project: ALPHA, ts: '2026-08-01T09:05:00.000Z', text: 'ship it' },
-  { session: GHOST_A, project: GAMMA, ts: '2026-05-10T08:00:00.000Z', text: 'scaffold the gamma service' },
-  { session: GHOST_A, project: GAMMA, ts: '2026-05-10T08:30:00.000Z', text: 'add the retry policy' },
+  { session: GHOST_A, project: GAMMA, ts: '2026-05-10T08:00:00.000Z', text: '/model' },
+  { session: GHOST_A, project: GAMMA, ts: '2026-05-10T08:30:00.000Z', text: 'scaffold the gamma service' },
   { session: GHOST_A, project: GAMMA, ts: '2026-05-10T09:00:00.000Z', text: 'why is the retry budget 3?' },
-  { session: GHOST_B, project: GAMMA, ts: '2026-05-11T08:00:00.000Z', text: 'gamma deploy is failing on the health check' },
-  { session: GHOST_B, project: GAMMA, ts: '2026-05-11T08:20:00.000Z', text: 'roll it back' },
-  { session: GHOST_C, project: ALPHA, ts: '2026-06-02T09:00:00.000Z', text: 'set up the alpha migration runner' },
+  { session: GHOST_B, project: GAMMA, ts: '2026-05-11T08:00:00.000Z', text: 'continue' },
+  { session: GHOST_B, project: GAMMA, ts: '2026-05-11T08:20:00.000Z', text: 'gamma deploy is failing on the health check' },
+  { session: GHOST_C, project: ALPHA, ts: '2026-06-02T09:00:00.000Z', text: 'clear' },
 ];
 
 fs.writeFileSync(
