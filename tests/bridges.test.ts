@@ -20,6 +20,7 @@ import {
   exportMarkdown,
   federate,
   federationLine,
+  memoryDir,
   unavailableList,
   unrecognisedStatus,
   notesPaths,
@@ -121,6 +122,43 @@ describe('bridges degrade when the other tool is absent', () => {
     // Nothing was spawned, so this cannot have taken anything like the 5 s
     // ceiling. The assertion is the point: detection precedes the spawn.
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  /**
+   * T6.6 D6 — `presence: 'store'` beside a `path` that is not there.
+   *
+   * `detectNotes` answers `store` when *any* readable file was found, and the
+   * commonest way that happens is a `CLAUDE.md` walked up from the cwd with no
+   * auto-memory directory anywhere. It then reported the auto-memory directory
+   * as `path` — a directory that does not exist. `BridgeStatus.path` is
+   * documented as "the path probed… so `doctor` can show it", and `find --with
+   * notes --json` hands it straight to the caller, who has no way to know it is
+   * a guess.
+   */
+  it('notes never reports a store at a path that does not exist', () => {
+    const home = temp('psh-notes-path-');
+    const project = path.join(home, 'project');
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, 'CLAUDE.md'), '# rules\n\nuse pnpm.\n');
+    const status = detectNotes({ claudeDir: path.join(home, '.claude'), cwd: project });
+    expect(status.presence).toBe('store');
+    expect(fs.existsSync(status.path)).toBe(true);
+    // …and it is the file that was actually read, not a directory nobody made.
+    expect(status.path).toBe(path.join(project, 'CLAUDE.md'));
+  });
+
+  it('notes still reports the memory directory when that is what it read', () => {
+    const home = temp('psh-notes-mem-');
+    const project = path.join(home, 'project');
+    fs.mkdirSync(project, { recursive: true });
+    const claudeDir = path.join(home, '.claude');
+    const memory = memoryDir(path.join(claudeDir, 'projects'), project);
+    fs.mkdirSync(memory, { recursive: true });
+    fs.writeFileSync(path.join(memory, 'notes.md'), '# remembered\n\nthe pooler.\n');
+    const status = detectNotes({ claudeDir, cwd: project });
+    expect(status.presence).toBe('store');
+    expect(status.path).toBe(memory);
+    expect(fs.existsSync(status.path)).toBe(true);
   });
 
   it('notes reports absent when there is no memory dir and no CLAUDE.md', () => {

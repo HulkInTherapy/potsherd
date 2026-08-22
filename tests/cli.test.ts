@@ -517,6 +517,53 @@ describe('potsherd cli', () => {
       expect(d.adapters.find((a) => a.harness === harness)?.supported, harness).toBe(true);
     }
   });
+
+  /**
+   * T6.6 D6 — the unverified label has to reach `--json`, because `--json` is
+   * the documented API.
+   *
+   * The three phase-6 adapters were written from documentation and never run
+   * against a real store. That is stated in the rendered `line` — and the
+   * rendered line is width-dependent and, when the tool is **absent**, does
+   * not carry the word at all. Absent is its state on every machine that does
+   * not have the tool, which is most of them. So a caller reading `--json` got
+   * `supported: true` and no way to learn that the parser has never seen real
+   * input.
+   *
+   * A boolean, beside `supported`, on every entry.
+   */
+  it('doctor --json flags the adapters whose format is unverified', () => {
+    const root = scratchRoot();
+    const r = run(['doctor', '--json', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    expect(r.code).toBe(0);
+    const d = JSON.parse(r.stdout) as {
+      adapters: { harness: string; supported: boolean; unverified: boolean; line: string }[];
+    };
+    // Present on every entry, not only the ones where it is true.
+    for (const a of d.adapters) {
+      expect(typeof a.unverified, a.harness).toBe('boolean');
+    }
+    const flagged = d.adapters.filter((a) => a.unverified).map((a) => a.harness).sort();
+    expect(flagged).toEqual(['copilot', 'gemini', 'opencode']);
+    for (const harness of ['claude', 'codex', 'cursor', 'pi']) {
+      expect(d.adapters.find((a) => a.harness === harness)?.unverified, harness).toBe(false);
+    }
+    // And the reason it matters. The word used to live only inside the
+    // adapter's own sentence, and that sentence is *clipped to the terminal
+    // width* before anyone sees it. At 40 columns the gemini row is
+    // `gemini      empty     ~/.gemini/tmp…` and the label is gone — while
+    // the field is not.
+    const narrow = run([
+      'doctor', '--width', '40', '--no-color', '--claude-dir', FIXTURE_CLAUDE,
+      '--potsherd-dir', root,
+    ]);
+    const row = narrow.stdout
+      .split('\n')
+      .find((l) => l.trimStart().startsWith('gemini ') && l.includes('~/.gemini'))!;
+    expect(row).toBeDefined();
+    expect(row).not.toContain('unverified');
+    expect(d.adapters.find((a) => a.harness === 'gemini')?.unverified).toBe(true);
+  });
 });
 
 /**

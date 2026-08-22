@@ -425,6 +425,20 @@ interface AdapterStatus {
   path: string;
   /** The adapter's own one-liner — every adapter owns the words about itself. */
   line: string;
+  /**
+   * T6.6 D6 — was this parser ever run against a real store?
+   *
+   * `false` for the four adapters written against real transcripts; `true` for
+   * the three written from documentation alone (`<NAME>_FORMAT_UNVERIFIED`).
+   *
+   * It is a field and not a word inside {@link line} because `line` is clipped
+   * to the terminal width and, when the tool is **absent**, does not carry the
+   * word at all — and absent is the state on every machine that does not have
+   * the tool. `doctor --json` is documented as the API, and the API said
+   * `supported: true` with nothing to distinguish a parser that has read a
+   * thousand real sessions from one that has read none.
+   */
+  unverified: boolean;
 }
 
 /**
@@ -445,6 +459,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'claude',
     supported: true,
     phase: 1,
+    unverified: false,
     path: claudeAdapter.sourceDir(o.claudeDir),
     line: claudeAdapter.doctorLine(claudeOptions),
   });
@@ -454,6 +469,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'codex',
     supported: true,
     phase: 1,
+    unverified: false,
     path: codexReport.sourceDir,
     line: codexAdapter.doctorLine(codexReport),
   });
@@ -462,6 +478,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'cursor',
     supported: true,
     phase: 1,
+    unverified: false,
     path: cursorAdapter.cursorProjectsDir(),
     line: cursorAdapter.doctorLine(),
   });
@@ -470,6 +487,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'pi',
     supported: true,
     phase: 1,
+    unverified: false,
     path: piAdapter.sourceDir(),
     line: piAdapter.doctorLine(),
   });
@@ -484,6 +502,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'gemini',
     supported: true,
     phase: 6,
+    unverified: geminiAdapter.GEMINI_FORMAT_UNVERIFIED,
     path: geminiAdapter.sourceDir(),
     line: geminiAdapter.doctorLine(),
   });
@@ -492,6 +511,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'opencode',
     supported: true,
     phase: 6,
+    unverified: opencodeAdapter.OPENCODE_FORMAT_UNVERIFIED,
     path: opencodeAdapter.sourceDir(),
     line: opencodeAdapter.doctorLine(),
   });
@@ -500,6 +520,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'copilot',
     supported: true,
     phase: 6,
+    unverified: copilotAdapter.COPILOT_FORMAT_UNVERIFIED,
     path: copilotAdapter.sourceDir(),
     line: copilotAdapter.doctorLine(),
   });

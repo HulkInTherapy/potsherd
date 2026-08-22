@@ -113,6 +113,18 @@ export const CHATS_DIR = 'chats';
  * The one line `doctor` prints under the gemini row. The first clause is the
  * most important thing a user can learn about this adapter.
  */
+/**
+ * T6.6 D6 — the provenance, as a boolean rather than as prose.
+ *
+ * `GEMINI_DOCTOR_NOTE` says this in a sentence, and `doctorLine()` says it in a
+ * word — but the rendered line is clipped to the terminal's width, and when
+ * the tool is **absent** it does not carry the word at all. Absent is this
+ * adapter's state on every machine that does not have the tool. `doctor
+ * --json` is the documented API, and an API cannot ask a caller to grep a
+ * width-dependent sentence for an adjective. So the fact is a field.
+ */
+export const GEMINI_FORMAT_UNVERIFIED = true;
+
 export const GEMINI_DOCTOR_NOTE =
   'gemini: format unverified — this adapter was written from documentation, not from a real ' +
   'checkpoint, so record coverage is a best guess until someone runs it on one. Checkpoints ' +
