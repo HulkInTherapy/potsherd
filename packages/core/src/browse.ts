@@ -1,6 +1,7 @@
 import type { Db } from './db.js';
 import type { Harness, SessionStatus } from './adapters/types.js';
 import { buildGhostFilters, buildSessionFilters, type SearchFilters } from './search/filters.js';
+import { applyIgnore, type IgnoreReport } from './ignore.js';
 import { tagsForSessions } from './tags.js';
 import { readCard, type StoredCard } from './cards/write.js';
 import {
@@ -58,6 +59,17 @@ export interface ListOptions {
   /** Rows to return. Default 20. */
   limit?: number;
   offset?: number;
+  /**
+   * `ls --all`: show the projects the ignore list hides.
+   *
+   * The list is still read and still reported, so `--all` says "13 rows you
+   * normally do not see" rather than silently becoming a different command.
+   */
+  all?: boolean;
+  /** potsherd root, for `config.json`. Defaults to the database's directory. */
+  root?: string;
+  /** The ignore list, instead of reading it. Tests, and callers that cached it. */
+  ignore?: readonly string[];
 }
 
 export interface ListResult {
@@ -70,6 +82,16 @@ export interface ListResult {
   rolledUp: number;
   /** Sidechains listed as rows of their own. */
   sidechains: number;
+  /**
+   * The ignore list and what it cost this listing.
+   *
+   * `hidden` is the number of rows that matched every other filter and were
+   * dropped for their project alone. `renderLs` prints it, and it is in
+   * `--json`, because a listing that quietly drops a third of the archive is
+   * lying about the archive. 0 with an empty `entries` is the normal case and
+   * prints nothing.
+   */
+  ignored: IgnoreReport;
   filters: SearchFilters;
 }
 
@@ -171,12 +193,24 @@ function sessionsInScope(filters: SearchFilters): boolean {
 /** `potsherd ls` — newest first, titles not uuids, ghosts in line with the rest. */
 export function listSessions(
   db: Db,
-  filters: SearchFilters = {},
+  requested: SearchFilters = {},
   options: ListOptions = {},
 ): ListResult {
   const limit = Math.max(1, options.limit ?? 20);
   const offset = Math.max(0, options.offset ?? 0);
   const want = limit + offset;
+
+  // The ignore list is folded in here rather than by every caller, so `ls`
+  // through the CLI, through the MCP server and through a script all hide the
+  // same rows — and so a caller cannot forget. `--all` arrives as
+  // `options.all` and simply does not apply it.
+  const ignore = applyIgnore(db, requested, {
+    ...(options.all !== undefined ? { all: options.all } : {}),
+    ...(options.root !== undefined ? { root: options.root } : {}),
+    ...(options.ignore !== undefined ? { entries: options.ignore } : {}),
+  });
+  const filters = ignore.filters;
+  let hidden = 0;
 
   const rows: BrowseSession[] = [];
   let total = 0;
@@ -206,6 +240,7 @@ export function listSessions(
       .get(...f.params) as { n: number; sidechains: number };
     total += counted.n;
     sidechains = counted.sidechains;
+    hidden += countHidden(db, filters, ignore.applied, rollup, 'sessions', counted.n);
 
     if (rollup) {
       rolledUp = (
@@ -232,6 +267,7 @@ export function listSessions(
       .get(...f.params) as { n: number };
     total += counted.n;
     ghosts = counted.n;
+    hidden += countHidden(db, filters, ignore.applied, '', 'ghosts', counted.n);
   }
 
   rows.sort((a, b) => when(b).localeCompare(when(a)) || a.id.localeCompare(b.id));
@@ -241,8 +277,37 @@ export function listSessions(
     ghosts,
     rolledUp,
     sidechains,
+    ignored: { entries: ignore.entries, projects: ignore.projects, hidden },
     filters,
   };
+}
+
+/**
+ * How many rows the ignore list cost *this* listing.
+ *
+ * Counted as the difference between the same query with and without the
+ * exclusion, so it is the rows that matched every other filter and were
+ * dropped for their project alone — not the size of the ignored projects,
+ * which under `--since 7d` would be a much larger and quite untrue number.
+ */
+function countHidden(
+  db: Db,
+  filters: SearchFilters,
+  applied: boolean,
+  rollup: string,
+  table: 'sessions' | 'ghosts',
+  shown: number,
+): number {
+  if (!applied) return 0;
+  const open: SearchFilters = { ...filters };
+  delete open.excludeProjects;
+  const f = table === 'sessions' ? buildSessionFilters(open) : buildGhostFilters(open);
+  const sql =
+    table === 'sessions'
+      ? `SELECT COUNT(*) AS n FROM sessions s WHERE 1=1 ${f.sql} ${rollup}`
+      : `SELECT COUNT(*) AS n FROM ghosts g WHERE 1=1 ${f.sql}`;
+  const all = (db.prepare(sql).get(...f.params) as { n: number }).n;
+  return Math.max(0, all - shown);
 }
 
 function when(s: BrowseSession): string {

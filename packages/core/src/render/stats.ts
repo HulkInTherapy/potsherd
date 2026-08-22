@@ -94,6 +94,22 @@ export function renderStats(r: StatsReport, t: Theme = new Theme()): string {
     },
   ]);
 
+  // The one line that stops the totals above from being a claim about the
+  // whole archive when they are a claim about part of it. `stats` is the verb
+  // people run to check that `index` did what it said; a count that silently
+  // left a project out would break exactly that.
+  if (r.ignored.hidden > 0) {
+    const n = r.ignored.hidden;
+    const p = r.ignored.projects.length;
+    const what = `not counting ${f.num(n)} ${f.plural(n, 'session')} in ${f.num(p)} ignored ${f.plural(p, 'project')}`;
+    // Two variants rather than one that elides. `05` gives every line the
+    // command that acts on it, and at 60 columns the long form loses exactly
+    // that half — a caveat whose remedy has been cut off is a caveat.
+    const wide = `${what}  ${t.sep}  potsherd stats --all`;
+    card.blank();
+    card.text(t.dim(Theme.len(INDENT + wide) <= t.width ? wide : `${what}  ${t.sep} --all`));
+  }
+
   card.blank();
   card.fix(
     'potsherd ls',

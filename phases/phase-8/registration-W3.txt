@@ -1,0 +1,161 @@
+T8.C / 8.4 — `potsherd ignore` — REGISTRATION
+branch: p8/w3-ignore
+
+Nothing on this branch touches `packages/core/src/index.ts` or
+`packages/cli/src/index.ts`. The CLI barrel was patched locally to take the
+measurements in `phases/phase-8/evidence-W3/`, then restored before the commit.
+
+`packages/core/src/index.ts` needs NO change and none is proposed. The ignore
+list is re-exported from `packages/core/src/search/index.ts`, which the barrel
+already publishes as the `search` namespace — it is filter vocabulary
+(`SearchFilters.excludeProjects`), and it reaches `doctor` and
+`commands/ignore.ts` as `search.addIgnored`, `search.readIgnoreConfig` and so
+on. Adding a second route through the barrel is not needed; do not.
+
+On a clean checkout of this branch, with nothing pasted:
+    pnpm build      passes
+    pnpm typecheck  passes
+    pnpm test       passes
+The only thing missing is the two verbs themselves: `potsherd ignore` and
+`potsherd unignore` are not registered, and `--all` is not on `ls`, `find` or
+`stats`. Section 2 is what registers them.
+
+Reproduce the measurements with:
+    python3 phases/phase-8/evidence-W3/wire-up.py && pnpm build
+    python3 phases/phase-8/evidence-W3/wire-up.py --revert && pnpm build
+It reads the blocks below out of this file; there is no second copy.
+
+================================================================================
+1. packages/core/src/index.ts   — NO CHANGE
+================================================================================
+Nothing to paste. See the note above.
+
+================================================================================
+2. packages/cli/src/index.ts   — five edits
+================================================================================
+
+2a. the import, immediately after `import { runPin } from './commands/pin.js';`
+>>>BEGIN cli-import
+import { runIgnore } from './commands/ignore.js';
+<<<END cli-import
+
+2b. one option line on `ls`, one on `find`, one on `stats`. NOT in
+    `addFilters()`: `card --all` already means "every session in the index" and
+    `card` shares that registration. The line, identical in all three places:
+>>>BEGIN cli-all-option
+      .option('--all', 'include the projects  potsherd ignore  hides'),
+<<<END cli-all-option
+
+    on `ls`, it goes after the existing `.option('--resume-menu', …)` inside
+    `program.command('ls')`;
+    on `find`, after `.option('--with <tools>', …)`;
+    on `stats`, after `.option('--no-fresh', …)`.
+    (Where the anchor line already ends in `,` the new line is appended after
+    it; where it ends in `),` the comma moves to the new last line.)
+
+2c. `all` in each of the three actions. `ls.action`, `find.action` and
+    `stats.action` each gain one property in the object they pass:
+>>>BEGIN cli-all-arg
+          all: Boolean(opts['all']),
+<<<END cli-all-arg
+
+2d. the two commands, inside `main()`, immediately AFTER the `unpin` block —
+    beside `pin`/`unpin`, which is the pair they are modelled on.
+>>>BEGIN cli-command
+  const ignore = addGlobals(
+    program
+      .command('ignore')
+      .description('keep a project out of ls, find, ask and stats — never out of the index')
+      .argument('[project]', 'a directory name, or a path; none at all prints the list'),
+  ).addHelpText('after', `
+example:
+  potsherd ignore potsherd                           # a directory name
+  potsherd ignore ~/work/scratch                     # or a path
+  potsherd ignore                                    # what is ignored now
+  potsherd unignore potsherd
+  potsherd ls --all                                  # everything, this once
+
+a bare name matches that path segment anywhere:  ignore potsherd  hides
+/you/code/potsherd and every worktree under it. a name with a slash in it
+matches that path and its children, and nothing else.
+
+honoured by  ls, find, ask, stats.  --all overrides it on ls, find and stats;
+ask has no --all, so reach an ignored project with  ask --project <name>  or
+unignore it. --project always wins: naming a project is asking for it.
+
+nothing is ignored by default, and nothing is ever hidden silently — ls, find
+and stats each print how many rows the list cost them, and  potsherd doctor
+prints the list itself. index and rescue are not affected: ignoring is a view,
+not a deletion, and  potsherd show <id>  still shows an ignored session.
+
+stored in  ~/.potsherd/config.json`);
+  ignore.action(async (project: string | undefined, opts: Record<string, unknown>) => {
+    const o = globals(program, ignore, opts);
+    await run(() => runIgnore({ ...o, ...(project ? { project } : {}) }), o);
+  });
+
+  const unignore = addGlobals(
+    program
+      .command('unignore')
+      .description('take a project off the ignore list')
+      .argument('<project>', 'the entry as  potsherd ignore  stored it'),
+  ).addHelpText('after', `
+example:
+  potsherd unignore potsherd
+  potsherd ignore                                    # what is left`);
+  unignore.action(async (project: string, opts: Record<string, unknown>) => {
+    const o = globals(program, unignore, opts);
+    await run(() => runIgnore({ ...o, project, remove: true }), o);
+  });
+<<<END cli-command
+
+2e. the no-args tour. `tests/cli.test.ts` asserts that every registered verb is
+    named on it, so this lands with 2d or that test fails. In `REST`, after the
+    `'what you add to it'` line:
+>>>BEGIN cli-tour
+  [['ignore', 'unignore'], 'projects you would rather not see'],
+<<<END cli-tour
+
+================================================================================
+3. packages/core/src/llm.ts   — `OFFLINE_VERBS`, with section 2 and not before
+================================================================================
+
+`tests/llm.test.ts` asserts that the three privacy lists and the binary's
+registered verbs are the same set, in both directions — so these two names can
+only be added at the moment the verbs are registered. Not on this branch, then.
+In `OFFLINE_VERBS`, after the `'stack'` entry and before `'doctor'`:
+>>>BEGIN llm-offline-verbs
+  // `ignore` / `unignore` read and write one file, `~/.potsherd/config.json`,
+  // and nothing else. They are on this list for the reason `unpin` and `setup`
+  // are: `doctor --privacy` answers by omission otherwise, and a verb missing
+  // from every list on that receipt is a verb the receipt has not accounted
+  // for. The file they write is named in the `writes:` block above.
+  'ignore',
+  'unignore',
+<<<END llm-offline-verbs
+
+================================================================================
+4. THE PUBLISHED PRIVACY RECEIPT CHANGES — read this
+================================================================================
+
+`docs/screens/05-doctor-privacy.txt` is diffed against the live command by CI.
+Two lines of it move, and `docs/screens/` is reserved on this branch and was
+not touched. **`scripts/make-screens.sh` must be re-run and that screen
+re-committed**, or CI fails on the next push.
+
+  1. under `writes:`, after `~/.potsherd/models`:
+
+         ~/.potsherd/config.json
+           your settings: the ignore list, written by potsherd ignore / unignore
+
+     This is in `packages/cli/src/commands/doctor.ts` on this branch and is
+     live now. It is a new **unprompted** write inside `~/.potsherd`. `03` §11
+     promises "~/.potsherd and the four things inside it" and has only ever
+     listed three; this is the fourth, and the path has been resolvable since
+     phase 0 with nothing writing it.
+
+  2. the offline-verbs list becomes
+
+         link, setup, stack, ignore, unignore, doctor
+
+     which lands with section 3 above.

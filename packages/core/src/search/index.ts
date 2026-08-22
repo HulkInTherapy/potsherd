@@ -45,6 +45,36 @@ export {
   WHEN_FORMS,
   type WhenRange,
 } from './when.js';
+/**
+ * The ignore list (phase 8, 8.4). It lives in `core/src/ignore.ts` and is
+ * re-exported here rather than from the barrel because it *is* filter
+ * vocabulary: what it produces is `SearchFilters.excludeProjects`, declared in
+ * `./filters.js` beside `--project` and `--since`, and every verb that honours
+ * the list honours it by carrying that field. A caller reaching for
+ * `applyIgnore` is reaching for the same thing it reaches for
+ * `buildSessionFilters`, and `packages/core/src/index.ts` is reserved.
+ */
+export {
+  IGNORE_KEY,
+  addIgnored,
+  applyIgnore,
+  countIgnoredSessions,
+  emptyIgnoreReport,
+  ignoredProjectsInIndex,
+  isIgnoredProject,
+  matchesIgnoreEntry,
+  normalizeIgnoreEntry,
+  readIgnoreConfig,
+  readIgnoreList,
+  removeIgnored,
+  rootForDb,
+  writeIgnoreList,
+  type IgnoreApplication,
+  type IgnoreChange,
+  type IgnoreConfig,
+  type IgnoreOptions,
+  type IgnoreReport,
+} from '../ignore.js';
 export {
   explain,
   solveWeights,

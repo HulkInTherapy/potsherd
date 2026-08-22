@@ -40,10 +40,14 @@ export type LsArgs = z.infer<z.ZodObject<typeof lsInput>>;
  * hand the user the one command that reopens it.
  */
 export function runLs(ctx: ServerContext, args: LsArgs): Record<string, unknown> {
-  return withIndex(ctx, (db) => {
+  return withIndex(ctx, (db, root) => {
     const filters = parseFilters(db, toFlags(args));
     const limit = parseLimit(args.limit, 15);
-    const result = listSessions(db, filters, { limit });
+    // The ignore list applies here exactly as it does at the CLI: an agent
+    // reading this tool is reading the same archive the user is looking at,
+    // and a filter that held on one surface and not the other would be worse
+    // than no filter. `root` so it is read from the same `--potsherd-dir`.
+    const result = listSessions(db, filters, { limit, root });
 
     return {
       total: result.total,
@@ -51,6 +55,9 @@ export function runLs(ctx: ServerContext, args: LsArgs): Record<string, unknown>
       ghosts: result.ghosts,
       sidechains: result.sidechains,
       rolledUp: result.rolledUp,
+      // `--json` parity: what `ls --json` carries, this carries. A hidden row
+      // an agent cannot know about is the same lie to a model as to a person.
+      ignored: result.ignored,
       filters,
       sessions: result.sessions.map((s) => ({
         id: s.id,

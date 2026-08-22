@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { archiveDir, claudeDir, claudePaths, potsherdDir } from '../paths.js';
+import { archiveDir, claudeDir, claudePaths, potsherdDir, slugify } from '../paths.js';
 import { SIDECHAIN_DIR } from '../claude/scan.js';
 import { formatDoctorLine } from '../doctor-line.js';
 import { parseClaudeTranscript, exchangeId } from '../parser/claude.js';
@@ -11,6 +11,7 @@ import type {
   Exchange,
   ParseOptions,
   ParseResult,
+  SessionRecord,
   SessionSource,
   SessionStatus,
 } from './types.js';
@@ -131,6 +132,7 @@ export async function parse(
 
   return {
     ...raw,
+    session: owningProject(raw.session),
     exchanges: folded.exchanges,
     ...(version ? { version } : {}),
     continuationsFolded: folded.folded,
@@ -183,6 +185,62 @@ export const claudeAdapter: Adapter = {
   discover: () => discover(),
   parse: (source, options) => parse(source, options),
 };
+
+// ------------------------------------------------- claude's own worktrees
+
+/**
+ * `<project>/.claude/worktrees/<name>` is Claude Code's, not yours.
+ *
+ * When Claude Code runs an agent in its own git worktree it creates one under
+ * the project it is working on and runs the agent with that as `cwd`. The
+ * transcript records that cwd, `parser/claude.ts` stores it as the session's
+ * `project`, and `ls` prints the last path segment — so on the reference
+ * machine one row's project reads `agent-a3e88991…`, a directory the user
+ * never made, sitting in the project column beside directories they did.
+ *
+ * That is a **discovery** fact and not a display one, which is why the fix is
+ * here rather than in a renderer. The evidence, from the live tree:
+ *
+ *   ~/.claude/projects/<project-slug>--claude-worktrees-agent-<hash>/
+ *     <uuid>.jsonl   cwd       <project>/.claude/worktrees/agent-<hash>
+ *                    gitBranch worktree-agent-<hash>
+ *
+ * The slug is the cwd with every separator turned into `-`, so the leading dot
+ * of `.claude` became the doubled `--` and the harness-managed directory
+ * became a project. Nothing about that session belongs to a project called
+ * `agent-<hash>`: the work was done on the project that owns the worktree, the
+ * files it edited are that project's files, and a user looking for it will
+ * look under that name.
+ *
+ * So the project — and the slug, which `find --project` and the archive layout
+ * both key on — are collapsed back to the owning directory. `agentName` and
+ * `gitBranch` still carry which worktree it was, so nothing is lost; it stops
+ * being a *project*, which it never was.
+ *
+ * Deliberately narrow: only `.claude/worktrees/` and only when a path segment
+ * follows it. A user's own `~/code/worktrees/feature-x` is a project and is
+ * left alone.
+ */
+const CLAUDE_WORKTREES = /[/\\]\.claude[/\\]worktrees[/\\][^/\\]+(?:[/\\].*)?$/;
+
+/** `/a/b/.claude/worktrees/agent-x` -> `/a/b`; anything else unchanged. */
+export function owningProjectPath(project: string | null | undefined): string | null {
+  if (!project) return project ?? null;
+  const collapsed = project.replace(CLAUDE_WORKTREES, '');
+  return collapsed || project;
+}
+
+/** True when this cwd is one of Claude Code's own agent worktrees. */
+export function isClaudeWorktree(project: string | null | undefined): boolean {
+  return Boolean(project) && CLAUDE_WORKTREES.test(project as string);
+}
+
+function owningProject(session: SessionRecord): SessionRecord {
+  if (!isClaudeWorktree(session.project)) return session;
+  const owner = owningProjectPath(session.project);
+  if (!owner || owner === session.project) return session;
+  return { ...session, project: owner, projectSlug: slugify(owner) };
+}
 
 // --------------------------------------------------------------- discovery
 

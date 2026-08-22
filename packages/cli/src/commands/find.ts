@@ -21,6 +21,20 @@ export interface FindCommandOptions extends GlobalOptions, FilterFlags {
   explain?: boolean;
   /** Comma-separated bridge names from `--with`. */
   with?: string;
+  /**
+   * `--all`: show the projects the ignore list hides.
+   *
+   * Deliberately **not** part of the shared `addFilters` registration, though
+   * every other flag on this verb is. `potsherd card --all` already exists and
+   * means "every session in the index"; a single `--all` registered across the
+   * shared block would have put two meanings on one word. So `ls`, `find` and
+   * `stats` each declare it, with the same description and the same effect,
+   * and nothing else does.
+   *
+   * It overrides the ignore list and only the ignore list: every other filter
+   * still applies.
+   */
+  all?: boolean;
 }
 
 /**
@@ -50,6 +64,10 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
       limit,
       root,
       vectors: vectorMode(o),
+      // `--all` searches the projects the ignore list hides. Same flag, same
+      // meaning as `ls --all` and `stats --all`; `find --project X` also
+      // overrides the list, because naming a project is asking for it.
+      all: Boolean(o.all),
     });
 
     // `--with` federates other memory tools' hits alongside ours. `federate()`
@@ -112,6 +130,7 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
         // ask why a query lost without parsing a terminal layout.
         ...(o.explain ? { explain: searchNs.explain(result) } : {}),
         vectors: result.vectors,
+        ignored: result.ignored,
         lists: result.lists,
         relaxed: result.relaxed,
         ms: result.ms,
