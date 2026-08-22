@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { Command, Option } from 'commander';
 import { Theme, ASK_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
+import { closeAgentMemoryClients } from '@potsherd/bridges';
 import { fail, print, type GlobalOptions } from './output.js';
 import { runAudit } from './commands/audit.js';
 import { runRescue } from './commands/rescue.js';
@@ -734,6 +735,11 @@ async function run(fn: () => Promise<number>, o: GlobalOptions): Promise<void> {
     if (code) process.exitCode = code;
   } catch (err) {
     fail(err, o);
+  } finally {
+    // The warm agentmemory server is cached per process and keeps the event
+    // loop alive; without this, `export --to agentmemory` and `find --with
+    // agentmemory` print their receipt and then never exit.
+    closeAgentMemoryClients();
   }
 }
 
