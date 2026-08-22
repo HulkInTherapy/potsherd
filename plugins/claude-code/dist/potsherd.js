@@ -20076,10 +20076,12 @@ function setupWritePaths(env = process11.env) {
 // ../core/dist/stack.js
 var stack_exports = {};
 __export(stack_exports, {
+  CLAIM_SOURCE: () => CLAIM_SOURCE,
   FAILURES: () => FAILURES,
   POTSHERD: () => POTSHERD,
   TOOLS: () => TOOLS,
   VERIFIED_ON: () => VERIFIED_ON,
+  claimLegend: () => claimLegend,
   coverageGlyph: () => coverageGlyph,
   detectTools: () => detectTools,
   episodicIndexPath: () => episodicIndexPath,
@@ -20098,6 +20100,10 @@ var FAILURES = [
   { n: 4, label: "re-entry", when: "after you found it", solved: false }
 ];
 var VERIFIED_ON = "22 aug 2026";
+var CLAIM_SOURCE = "docs/memory-stack.md";
+function claimLegend(verifiedOn = VERIFIED_ON) {
+  return `claim: potsherd's row was measured by running potsherd on this machine. every other row was read from that project's own documentation on ${verifiedOn} and was never run here. sources and fetch dates: ${CLAIM_SOURCE}`;
+}
 var POTSHERD = {
   id: "potsherd",
   label: "potsherd",
@@ -20339,6 +20345,8 @@ function stackReport(env = process12.env) {
   const detections = detectTools(env);
   return {
     verifiedOn: VERIFIED_ON,
+    claimLegend: claimLegend(),
+    claimSource: CLAIM_SOURCE,
     failures: FAILURES,
     detections,
     overlaps: overlaps(detections),
@@ -25075,6 +25083,8 @@ async function runStack(o) {
   if (o.json) {
     printJson({
       verifiedOn: r.verifiedOn,
+      claimLegend: r.claimLegend,
+      claimSource: r.claimSource,
       installed: r.installed,
       unverified: r.unverified,
       failures: r.failures,
@@ -25124,6 +25134,8 @@ function render(r, t, o = {}) {
     const state = f.solved ? t.dim("solved elsewhere") : t.accent("unsolved");
     L.push(`    ${f.n}  ${pad3(f.label, 16)}${wide ? pad3(f.when, 26) + state : f.when}`);
   }
+  L.push("");
+  for (const line of format_exports.wrap(r.claimLegend, t.width - 4)) L.push(t.dim(`  ${line}`));
   L.push("");
   const labelW = 15;
   const licW = wide ? 13 : 0;
