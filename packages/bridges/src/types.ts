@@ -94,6 +94,19 @@ export interface BridgeStatus {
   available: boolean;
   /** One line, printable, always. */
   detail: string;
+  /**
+   * The headline half of {@link detail}, with the reason stripped off.
+   *
+   * T6.6 D4. `detail` is `"<headline> (<why>)"`, and a renderer with one line
+   * to spend wants the headline and cannot afford the reason. `merge.ts`'s
+   * `federationLine` used to *re-derive* it from `presence` alone and printed
+   * the constant `schema not recognised` over every `unrecognised` bridge —
+   * including an agentmemory whose server was never started, whose schema was
+   * therefore never read, and about whom that sentence is the exact wrong
+   * answer this file's own doc comment warns against. Carrying the string is
+   * the only fix that cannot drift: a presence is not a sentence.
+   */
+  headline: string;
   /** What the runtime probe found. Null when there was nothing to probe. */
   schema: DiscoveredSchema | null;
   /** Rows behind the store, when cheap to count. Null when unknown. */
@@ -185,7 +198,10 @@ export interface BridgeQueryOptions {
 }
 
 /** The sentence a bridge produces when its schema probe came up short. */
-export const SCHEMA_UNAVAILABLE = 'bridge unavailable: schema not recognised';
+/** The headline for a store whose schema really was read and rejected. */
+export const SCHEMA_UNRECOGNISED = 'schema not recognised';
+
+export const SCHEMA_UNAVAILABLE = `bridge unavailable: ${SCHEMA_UNRECOGNISED}`;
 
 /**
  * Build a status for a bridge that is simply not installed.
@@ -200,6 +216,7 @@ export function absentStatus(bridge: BridgeName, path: string, what: string): Br
     path,
     available: false,
     detail: `not installed (${what})`,
+    headline: 'not installed',
     schema: null,
     rows: null,
     worker: null,
@@ -214,6 +231,7 @@ export function emptyStatus(bridge: BridgeName, path: string, why: string): Brid
     path,
     available: false,
     detail: `installed, nothing to search (${why})`,
+    headline: 'installed, nothing to search',
     schema: null,
     rows: null,
     worker: null,
@@ -271,6 +289,10 @@ export function unrecognisedStatus(
     path,
     available: false,
     detail: `${headline} (${why})`,
+    // The default headline is the long form, because `detail` reads
+    // "bridge unavailable: schema not recognised (no text column)". The one
+    // line a footer gets is the short form of the same fact.
+    headline: headline === SCHEMA_UNAVAILABLE ? SCHEMA_UNRECOGNISED : headline,
     schema,
     rows: null,
     worker: null,

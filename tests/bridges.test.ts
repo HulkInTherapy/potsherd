@@ -20,6 +20,8 @@ import {
   exportMarkdown,
   federate,
   federationLine,
+  unavailableList,
+  unrecognisedStatus,
   notesPaths,
   parseHits,
   pickColumn,
@@ -556,6 +558,44 @@ describe('federate', () => {
     expect(federated.order).toHaveLength(local.hits.length + federated.external.length);
   });
 
+  /**
+   * T6.6 D4 — the sentence `types.ts` says must never be printed.
+   *
+   * `unrecognisedStatus`'s own doc: "printing 'schema not recognised' at
+   * someone whose schema was never read would send them to look in the wrong
+   * place." An agentmemory install with no discoverable launch command is
+   * exactly that: presence `unrecognised`, headline `bridge unavailable`, and
+   * no schema was ever read because the server was never started. `--json`
+   * got it right because it carries `unavailable`; `federationLine` discarded
+   * the headline and printed the constant.
+   */
+  it('never says "schema not recognised" about a schema that was never read', () => {
+    const local = fakeRecall();
+    const status = unrecognisedStatus(
+      'agentmemory',
+      '/fake/agentmemory',
+      'launch command not discoverable; set POTSHERD_AGENTMEMORY_COMMAND',
+      null,
+      'bridge unavailable',
+    );
+    const f = federate(local, [unavailableList(status)]);
+    const line = federationLine(f.bridges);
+    expect(line).toBe('agentmemory: bridge unavailable');
+    expect(line).not.toContain('schema not recognised');
+    // …and the `--json` sentence, which was always right, is unchanged.
+    expect(f.bridges[0]!.unavailable).toBe(
+      'bridge unavailable (launch command not discoverable; set POTSHERD_AGENTMEMORY_COMMAND)',
+    );
+  });
+
+  /** A real schema mismatch still says so, or the fix above is a regression. */
+  it('still says "schema not recognised" when a schema really was read and rejected', () => {
+    const local = fakeRecall();
+    const status = unrecognisedStatus('claude-mem', '/fake/claude-mem', 'no text column');
+    const f = federate(local, [unavailableList(status)]);
+    expect(federationLine(f.bridges)).toBe('claude-mem: schema not recognised');
+  });
+
   it('gives every presence its own sentence', () => {
     const local = fakeRecall();
     const f = federate(local, [
@@ -783,6 +823,15 @@ function emptyBridge(
       path: `/fake/${name}`,
       available: false,
       detail: 'not here',
+      // T6.6 D4 — the headline is the bridge's own sentence, and the fixture
+      // has to carry a plausible one per presence or the footer test would be
+      // asserting a string this helper made up.
+      headline:
+        presence === 'absent'
+          ? 'not installed'
+          : presence === 'empty'
+            ? 'installed, nothing to search'
+            : 'schema not recognised',
       schema: null,
       rows: null,
       worker: null,

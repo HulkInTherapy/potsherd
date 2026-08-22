@@ -77,6 +77,16 @@ export interface FederatedList {
   presence: BridgePresence;
   /** One printable line when the bridge could not run; null when it ran. */
   unavailable: string | null;
+  /**
+   * {@link BridgeStatus.headline} — the bridge's own short sentence.
+   *
+   * T6.6 D4: `federationLine` used to derive its wording from `presence`
+   * alone, which cannot distinguish "the schema was read and rejected" from
+   * "the server was never started", and printed the first at people in the
+   * second state. `types.ts` says why that is not a cosmetic bug: it "would
+   * send them to look in the wrong place."
+   */
+  headline: string;
   strategy: BridgeList['strategy'];
   /** What this list was actually worth on this query, after penalties. */
   weight: number;
@@ -145,6 +155,7 @@ export function federate(
       ms: list.ms,
       presence: list.status.presence,
       unavailable: list.unavailable,
+      headline: list.status.headline,
       strategy: list.strategy,
       weight,
       path: list.status.path,
@@ -191,7 +202,12 @@ export function federationLine(bridges: readonly FederatedList[]): string {
     .map((b) => {
       if (b.presence === 'absent') return `${b.list}: not installed`;
       if (b.presence === 'empty') return `${b.list}: installed, nothing to search`;
-      if (b.presence === 'unrecognised') return `${b.list}: schema not recognised`;
+      // T6.6 D4. Not `'schema not recognised'`: the bridge already knows what
+      // went wrong and has said so, and this is the third of the four
+      // presences whose sentence is *not* a function of the presence. A
+      // launch command that could not be found and a text column that was not
+      // there are the same presence and two different things to go and check.
+      if (b.presence === 'unrecognised') return `${b.list}: ${b.headline}`;
       return `${b.list}: ${b.candidates} hit${b.candidates === 1 ? '' : 's'}`;
     })
     .join('  ·  ');

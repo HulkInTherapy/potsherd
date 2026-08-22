@@ -285,6 +285,7 @@ export function detectAgentMemory(opts: AgentMemoryOptions = {}): BridgeStatus {
     path: dir,
     available: true,
     detail: `mcp server via ${launch.via} (${path.basename(launch.command)}), one tool: ${SEARCH_TOOL}`,
+    headline: `mcp server via ${launch.via}`,
     schema: null,
     rows: null,
     worker: null,
@@ -586,7 +587,14 @@ export async function queryAgentMemory(
     const ok = await client.start(timeout, opts.env ?? process.env);
     if (!ok) {
       return unavailableList(
-        { ...status, presence: 'unrecognised', available: false, detail: skipped(client.error) },
+        {
+          ...status,
+          presence: 'unrecognised',
+          available: false,
+          detail: skipped(client.error),
+          // T6.6 D4 — not a schema mismatch: the server never answered.
+          headline: skipped(client.error),
+        },
         Date.now() - started,
       );
     }
@@ -616,7 +624,14 @@ export async function queryAgentMemory(
     const { text, error } = await client.call(SEARCH_TOOL, args, timeout);
     if (error) {
       return unavailableList(
-        { ...status, presence: 'unrecognised', available: false, detail: skipped(error) },
+        {
+          ...status,
+          presence: 'unrecognised',
+          available: false,
+          detail: skipped(error),
+          // T6.6 D4 — not a schema mismatch: the server never answered.
+          headline: skipped(error),
+        },
         Date.now() - started,
       );
     }
@@ -633,7 +648,14 @@ export async function queryAgentMemory(
     };
   } catch (err) {
     return unavailableList(
-      { ...status, presence: 'unrecognised', available: false, detail: skipped(firstLine(err)) },
+      {
+          ...status,
+          presence: 'unrecognised',
+          available: false,
+          detail: skipped(firstLine(err)),
+          // T6.6 D4 — not a schema mismatch: the server never answered.
+          headline: skipped(firstLine(err)),
+        },
       Date.now() - started,
     );
   } finally {

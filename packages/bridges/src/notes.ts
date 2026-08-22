@@ -156,6 +156,7 @@ export function detectNotes(opts: NotesOptions = {}): BridgeStatus {
       path: memory,
       available: true,
       detail: `${files.length} file${files.length === 1 ? '' : 's'}, ${Math.round(bytes / 1024)} KiB (${describe(files)})`,
+      headline: `${files.length} file${files.length === 1 ? '' : 's'}`,
       schema: null,
       rows: files.length,
       worker: null,
@@ -315,7 +316,13 @@ export function queryNotes(query: string, opts: NotesOptions = {}): BridgeList {
     }
   } catch (err) {
     return unavailableList(
-      { ...status, presence: 'unrecognised', available: false, detail: firstLine(err) },
+      {
+        ...status,
+        presence: 'unrecognised',
+        available: false,
+        detail: firstLine(err),
+        headline: firstLine(err),
+      },
       Date.now() - started,
     );
   }
