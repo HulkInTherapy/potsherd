@@ -32,14 +32,15 @@ below follows from it.
 - **Failure 1 is not in its reach.** potsherd is not in your session. Whatever
   your harness does about a degrading context window — compaction, subagents,
   a bigger window — it does without potsherd.
-- **Failure 2 it refuses on purpose.** There is no injection at SessionStart by
-  default. That lane belongs to claude-mem, and Claude Code's own auto memory
-  is free, on by default, and documented to survive the retention sweep. The
-  one opt-in exception is `--brief`, which shows a resume card when you enter a
-  project you have not touched for a week. Pull, not push.
+- **Failure 2 it refuses on purpose.** There is no injection at SessionStart.
+  That lane belongs to claude-mem, and Claude Code's own auto memory is free,
+  on by default, and documented to survive the retention sweep. Pull, not push:
+  the way context gets into a live agent is `potsherd graft <session>`, which
+  you run, and which writes a brief you paste.
 - **No knowledge graph.** hindsight and greplica build graphs. potsherd does
-  sessions, cards, tags and links. If you want a graph, `potsherd export --to
-  hindsight`.
+  sessions, cards, tags and links. `potsherd export --to markdown <dir>` writes
+  every card as a file, which is what a graph tool can be pointed at; a direct
+  `--to hindsight` is **not built** and exits 1 saying so.
 - **No server, no account, no telemetry.** SQLite in `~/.potsherd`, and a
   `--json` flag on every verb as the API.
 
@@ -78,8 +79,13 @@ That is failure 2, done well, for a very large number of people.
 
 Where it stops for failures 3 and 4: its README documents no way to import
 sessions from **before** you installed it. Everything older than your install
-date — which on the reference machine was 93% of all sessions ever started — is
-outside it. Detected at `~/.claude-mem`.
+date is outside it, and how much that is depends entirely on when you
+installed — it is not a measured quantity and this page will not invent one.
+What *was* measured on the reference machine is a different number about a
+different thing: **93% of sessions ever started (299 of 321) had already been
+deleted by the 30-day sweep** (`plans/01` §3). Those 299 are outside claude-mem
+too, because their transcripts no longer exist for any tool to import. Detected
+at `~/.claude-mem`.
 
 **Licence: Apache-2.0.** This project's own research notes had guessed
 "AGPL-ish? check before linking". The GitHub licence API says Apache-2.0, so
@@ -112,9 +118,11 @@ coding agents with `npx @vectorize-io/hindsight-coding-agents install all`.
 Needs PostgreSQL, or its embedded `pg0`.
 
 Where it stops: banks are per-project, and the documentation does not describe
-importing existing Claude Code transcripts. It is potsherd's **export target**
-rather than a competitor — `potsherd export --to hindsight` pushes cards into a
-bank.
+importing existing Claude Code transcripts. It is a natural **export target**
+rather than a competitor — but the direct route is not built: `potsherd export
+--to hindsight` exits 1 with *"it needs @vectorize-io/hindsight-client, and
+potsherd adds no dependency for it (04: postgres and a python runtime are too
+heavy to embed)"*. `export --to markdown <dir>` is the route that exists.
 
 **Licence: MIT.**
 

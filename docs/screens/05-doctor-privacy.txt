@@ -16,6 +16,15 @@ potsherd doctor --privacy · 22 aug 2026
     ~/.gemini/tmp  (absent)
     ~/.local/share/opencode  (absent)
     ~/.copilot/session-state  (absent)
+    …and these, only when you name them with  --with / --to:
+    ~/.claude-mem/claude-mem.db
+      claude-mem, or wherever CLAUDE_MEM_DATA_DIR points. read-only.
+    <agentmemory's app-data dir>
+      ~/Library/Application Support/agentmemory on macOS, $XDG_DATA_HOME
+    <cwd>/CLAUDE.md, and .claude/CLAUDE.md above it
+      the notes bridge, walking up from the directory you run in.
+    ~/.claude/projects/<slug>/memory
+      Claude Code's own auto-memory for this project. read-only.
 
   writes:
     ~/.potsherd
@@ -27,6 +36,11 @@ potsherd doctor --privacy · 22 aug 2026
     <the path you give to  ask --readers-out>
       only when you pass the flag. it holds the same redacted excerpts a
       model would have been sent, and no model was called to write it
+    <the dir you give to  export --to markdown>
+      one markdown file per card, only when you run export
+    <your agentmemory store>  — export --to agentmemory --yes
+      rows into another tool's store. never without --yes, and
+      never at all unless you asked for that target
 
   writes only after an explicit y at a diff:
     ~/.claude/settings.json
@@ -58,8 +72,17 @@ potsherd doctor --privacy · 22 aug 2026
     potsherd graft     one call, to compress one session into a brief
 
   these never do, and open no socket at all:
-    audit, rescue, guard, index, ls, find, show, stats, tag, pin,
-    unpin, link, setup, doctor
+    audit, rescue, guard, index, ls, show, stats, tag, pin, unpin,
+    link, setup, stack, doctor
+
+  these call no model either, but do open a socket on
+  this machine — and only when you ask them to:
+    potsherd find      --with <tool>, to read another tool's store
+    potsherd export    --to <tool>, to write rows into one
+      claude-mem is read over http://127.0.0.1; agentmemory by
+      launching its mcp server, itself a shim over an http
+      backend on localhost. nothing leaves this machine, and
+      without the flag neither opens anything at all.
 
   who receives them:
     your own Claude subscription, via ~/.claude/local/claude

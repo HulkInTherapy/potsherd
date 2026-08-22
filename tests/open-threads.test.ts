@@ -8,21 +8,25 @@ import {
   type Transport,
 } from '../packages/core/src/llm.js';
 import {
-  CONFIRM_BATCH,
   GENERIC_DF,
   MEASURED_NONMATCH_MAX,
   MENTION_COSINE,
   MIN_ANCHOR_TOKENS,
   MIN_PROJECT_OVERLAP,
-  NO_MODEL_NOTE,
   OPEN_THREAD_LABEL,
-  confirmOpenThreads,
   contentTokens,
   openThreadCandidates,
   sameProject,
   tokenCosine,
   type OpenThreadCandidate,
 } from '../packages/core/src/open-threads.js';
+// T6.6 D0b — the model pass lives in its own module so that the rule pass is
+// provably offline; the names are the same ones, one import line over.
+import {
+  CONFIRM_BATCH,
+  NO_MODEL_NOTE,
+  confirmOpenThreads,
+} from '../packages/core/src/open-threads-confirm.js';
 
 /**
  * T4.2 — "decided in A, never seen in B".

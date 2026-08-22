@@ -150,12 +150,27 @@ export function detectNotes(opts: NotesOptions = {}): BridgeStatus {
 
   if (files.length > 0) {
     const bytes = files.reduce((n, f) => n + f.bytes, 0);
+    // T6.6 D6 — the path has to be one that is there.
+    //
+    // This used to be `memory` unconditionally, and `memory` is a *computed*
+    // location, not a found one: `~/.claude/projects/<slug>/memory` for the
+    // cwd, whether or not Claude Code ever made it. The commonest `store`
+    // answer this bridge gives is a `CLAUDE.md` walked up from the cwd with no
+    // auto-memory directory anywhere on the machine — and it reported that
+    // non-existent directory as the store's path, on the human line and in
+    // `find --with notes --json` alike. `BridgeStatus.path` is documented as
+    // "the path probed", and a caller cannot tell a probed path from a guessed
+    // one. So: the memory directory when it is real, and otherwise the nearest
+    // file actually read — `readableFiles` keeps `notesPaths`' order, which is
+    // auto-memory, then upward from the cwd, then global.
+    const found = fs.existsSync(memory) ? memory : (files[0]?.path ?? memory);
     return {
       bridge: 'notes',
       presence: 'store',
-      path: memory,
+      path: found,
       available: true,
       detail: `${files.length} file${files.length === 1 ? '' : 's'}, ${Math.round(bytes / 1024)} KiB (${describe(files)})`,
+      headline: `${files.length} file${files.length === 1 ? '' : 's'}`,
       schema: null,
       rows: files.length,
       worker: null,
@@ -315,7 +330,13 @@ export function queryNotes(query: string, opts: NotesOptions = {}): BridgeList {
     }
   } catch (err) {
     return unavailableList(
-      { ...status, presence: 'unrecognised', available: false, detail: firstLine(err) },
+      {
+        ...status,
+        presence: 'unrecognised',
+        available: false,
+        detail: firstLine(err),
+        headline: firstLine(err),
+      },
       Date.now() - started,
     );
   }

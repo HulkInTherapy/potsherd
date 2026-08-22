@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as store from '../packages/core/src/db.js';
@@ -32,7 +33,7 @@ import {
 } from '../packages/core/src/link-suggest.js';
 import { render as renderStack } from '../packages/cli/src/commands/stack.ts';
 import { linkSessions } from '../packages/core/src/tags.js';
-import { rmrf, tempDir } from './helpers.js';
+import { FIXTURE_CLAUDE, rmrf, tempDir } from './helpers.js';
 
 /**
  * T6.4 — `potsherd stack` and `link --suggest`.
@@ -574,4 +575,123 @@ describe('link --suggest: the measured precision reaches the user', () => {
 // hands out `/var/...` for a directory that is really `/private/var/...`.
 it('the fake home is under the OS temp root', () => {
   expect(fs.realpathSync(home).startsWith(fs.realpathSync(os.tmpdir()))).toBe(true);
+});
+
+// ------------------------------------------------- T6.6 D8 · D9 · D14: width
+
+describe('stack and find are self-consistent, and fit the width they are given', () => {
+  const bin = path.resolve(process.cwd(), 'packages', 'cli', 'bin', 'potsherd.js');
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    while (tmpDirs.length) rmrf(tmpDirs.pop()!);
+  });
+  /** An indexed throwaway store: `find` must get past "nothing indexed yet". */
+  const tempPotsherdDir = (): string => {
+    const d = tempDir('potsherd-width-');
+    tmpDirs.push(d);
+    runCli([
+      'index', '--harness', 'claude', '--no-embed', '--full',
+      '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', d,
+    ]);
+    return d;
+  };
+
+  const runCli = (args: string[]): string => {
+    try {
+      return execFileSync(process.execPath, [bin, ...args], {
+        encoding: 'utf8',
+        env: { ...process.env, NO_COLOR: '1' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (err) {
+      return (err as { stdout?: string }).stdout ?? '';
+    }
+  };
+
+  /**
+   * T6.6 D14 — the header said `7 tools known` over a table of eight rows,
+   * one screen above a footer that said `8 rows`. Same table, two numbers.
+   */
+  it('the heading, the table and the footer agree on how many tools there are', () => {
+    const out = runCli(['stack', '--width', '80']);
+    const report = stackReport();
+    const n = report.detections.length;
+    expect(out).toContain(`${n} tools known`);
+    expect(out).toContain(`of these ${n} rows`);
+    // And the count the header pairs with `installed`, which excludes
+    // potsherd by definition, says which set it is about.
+    expect(out).toContain(`${report.installed} of ${n - 1} others here`);
+  });
+
+  /**
+   * T6.6 D14 — and the prose count in `commands/stack.ts`'s own header, which
+   * said *six* against a table, a footer and a `--json` payload that all said
+   * five. Read out of the comment, so it cannot drift again in silence.
+   */
+  it('the docs only count in the module comment is the one the report computes', () => {
+    const src = fs.readFileSync(
+      path.resolve(process.cwd(), 'packages/cli/src/commands/stack.ts'),
+      'utf-8',
+    );
+    const words: Record<string, number> = {
+      three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+    };
+    // The jsdoc `*` gutter first, so the sentence can be matched as a sentence.
+    const prose = src.replace(/^\s*\*\s?/gm, '');
+    const m = /Every row says how well its claim was checked\.\*\*\s+(\w+) of the (\w+)/.exec(prose);
+    expect(m).not.toBeNull();
+    const report = stackReport();
+    expect(words[m![1]!.toLowerCase()]).toBe(report.unverified);
+    expect(words[m![2]!.toLowerCase()]).toBe(report.detections.length);
+  });
+
+  /**
+   * T6.6 D9 — `--sources` is the flag whose entire job is to print the url a
+   * claim was read from. Every one of them was elided at 80 columns.
+   */
+  it('stack --sources prints whole urls, never elided ones', () => {
+    const out = runCli(['stack', '--sources', '--width', '80']);
+    for (const d of stackReport().detections) {
+      expect(out, d.spec.id).toContain(d.spec.source);
+    }
+    // The ellipsis the old layout produced, on the source lines only.
+    const sources = out.split('\n').filter((l) => l.includes('http') || l.includes('plans/'));
+    expect(sources.length).toBeGreaterThanOrEqual(7);
+    for (const line of sources) expect(line).not.toContain('…');
+  });
+
+  /**
+   * T6.6 D8 — the federation footer came out at 84 characters under
+   * `--width 80`, on a screen where every other line fitted.
+   */
+  it('the find --with footer fits the width, and never breaks a bridge in half', () => {
+    const width = 80;
+    const out = runCli([
+      'find', 'pgbouncer', '--with', 'claude-mem,agentmemory,notes',
+      '--width', String(width), '--potsherd-dir', tempPotsherdDir(),
+    ]);
+    const footer = out
+      .split('\n')
+      .filter((l) => /^\s{2}(claude-mem|agentmemory|notes):/.test(l));
+    expect(footer.length).toBeGreaterThanOrEqual(1);
+    for (const line of footer) expect([...line].length).toBeLessThanOrEqual(width);
+    // Wrapped on the separator: every bridge named is followed by its own
+    // sentence on the same line.
+    for (const bridge of ['claude-mem', 'agentmemory', 'notes']) {
+      expect(footer.join(' ')).toMatch(new RegExp(`${bridge}: \\S`));
+    }
+  });
+
+  it('the find --with footer still fits when the terminal is narrow', () => {
+    const width = 34;
+    const out = runCli([
+      'find', 'pgbouncer', '--with', 'claude-mem,agentmemory,notes',
+      '--width', String(width), '--potsherd-dir', tempPotsherdDir(),
+    ]);
+    const footer = out
+      .split('\n')
+      .filter((l) => /^\s{2}(claude-mem|agentmemory|notes):/.test(l));
+    expect(footer.length).toBe(3);
+    for (const line of footer) expect([...line].length).toBeLessThanOrEqual(width);
+  });
 });

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { db as store, Theme, markers } from '@potsherd/core';
@@ -10,6 +11,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   TIMEOUT_RETRIES,
   MODEL_CALL_VERBS,
+  LOCAL_SOCKET_VERBS,
   OFFLINE_VERBS,
   CARD_MODEL,
   CHARS_PER_TOKEN,
@@ -1248,16 +1250,49 @@ describe('which verbs may call a model (T2.7 D2)', () => {
    * as well, because reaching a model through one more file is not a different
    * thing from reaching it directly.
    */
-  const WORKSPACE: Record<string, string> = {
-    '@potsherd/core': 'packages/core/src',
-    '@potsherd/mcp': 'packages/mcp/src',
-    // Phase 6 found the same hole one package over: `commands/export.ts`
-    // imports `@potsherd/bridges`, and until this line existed the guard walked
-    // straight past that import and `export` was unchecked. The lesson is that
-    // this map is a denylist of packages we remembered — so it is now derived
-    // from the workspace, not hand-written.
-    '@potsherd/bridges': 'packages/bridges/src',
+  /**
+   * T6.6 D11 — this map is **derived**, and the comment that said so before it
+   * was true is the reason it is derived now.
+   *
+   * It was three hand-written entries. Phase 5 added `@potsherd/mcp` after
+   * noticing the guard would miss a `commands/mcp.ts`; phase 6 added
+   * `@potsherd/bridges` after `commands/export.ts` walked straight past it.
+   * The comment then claimed the map "is now derived from the workspace, not
+   * hand-written" — while remaining a hand-written record of three entries, so
+   * the next package would have been the third hole and the comment would
+   * still have said it could not happen.
+   *
+   * So it reads `pnpm-workspace.yaml`'s globs, resolves them, and takes each
+   * package's own `name` from its `package.json`. A fifth package is covered
+   * the moment it exists, with nobody remembering anything.
+   */
+  const workspaceDirs = (): string[] => {
+    const yaml = fs.readFileSync(path.resolve(process.cwd(), 'pnpm-workspace.yaml'), 'utf-8');
+    const globs = [...yaml.matchAll(/^\s*-\s*'?([^'\s#]+)'?\s*$/gm)].map((m) => m[1]!);
+    const dirs: string[] = [];
+    for (const glob of globs) {
+      // The only glob shape this workspace uses, and the only one worth
+      // supporting: `packages/*`. A glob this cannot expand is not silently
+      // dropped — the assertion below counts what came out.
+      const [base, star] = glob.split('/');
+      if (!base || star !== '*') continue;
+      const root = path.resolve(process.cwd(), base);
+      if (!fs.existsSync(root)) continue;
+      for (const entry of fs.readdirSync(root)) {
+        if (fs.existsSync(path.join(root, entry, 'package.json'))) dirs.push(path.join(base, entry));
+      }
+    }
+    return dirs;
   };
+
+  const WORKSPACE: Record<string, string> = Object.fromEntries(
+    workspaceDirs().map((dir) => {
+      const pkg = JSON.parse(
+        fs.readFileSync(path.resolve(process.cwd(), dir, 'package.json'), 'utf-8'),
+      ) as { name: string };
+      return [pkg.name, `${dir}/src`];
+    }),
+  );
 
   const barrelExports = (): Map<string, string> => {
     const map = new Map<string, string>();
@@ -1299,32 +1334,156 @@ describe('which verbs may call a model (T2.7 D2)', () => {
     return false;
   };
 
+  /**
+   * Does this command file reach a model?
+   *
+   * Two routes, and until T6.6 only one of them was walked.
+   *
+   *   1. through a **package specifier** — `import { ask } from
+   *      '@potsherd/core'` — resolved through the barrel to the module that
+   *      defines the name, and then walked from there.
+   *   2. through a **relative path** — `import { ask } from
+   *      '../../../core/src/ask.js'`. `opensBackend` already follows a
+   *      module's own relative imports, but it was never pointed at the
+   *      command file itself, so a command that reached across a package
+   *      boundary by path was invisible to this guard.
+   *
+   * Route 2 is not hypothetical and is not exotic. `commands/stack.ts` shipped
+   * exactly that form for the whole of T6.4, on purpose, while the barrel line
+   * it needed was still pending — and the guard said nothing about it. The
+   * probe test below writes both spellings of the same call and asserts that
+   * both are caught, so the two routes cannot drift apart again.
+   */
+  const commandReachesModel = (file: string, exportsMap: Map<string, string>): boolean => {
+    // Route 2, and the direct case: `opensBackend` reads the file, looks for
+    // `Llm.open(`, and follows every relative import out of it — across a
+    // package boundary just as readily as inside one, because a `../../..` is
+    // not a different kind of edge.
+    if (opensBackend(file)) return true;
+    const src = fs.readFileSync(file, 'utf-8');
+    // Route 1.
+    const pkgs = Object.keys(WORKSPACE).map((p) => p.replace('/', '\\/')).join('|');
+    for (const imp of src.matchAll(
+      new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*'(?:${pkgs})'`, 'g'),
+    )) {
+      for (const raw of imp[1]!.split(',')) {
+        const name = raw.replace(/\btype\b/, '').split(/\s+as\s+/)[0]?.trim();
+        const mod = name ? exportsMap.get(name) : undefined;
+        if (!mod) continue;
+        // An import only counts if the command actually calls it.
+        if (!name || !new RegExp(`\\b${name}\\s*\\(`).test(src)) continue;
+        if (opensBackend(mod)) return true;
+      }
+    }
+    return false;
+  };
+
   it('no command outside MODEL_CALL_VERBS reaches Llm.open, directly or through core', () => {
     const exportsMap = barrelExports();
     const dir = path.resolve(process.cwd(), 'packages/cli/src/commands');
     const found: string[] = [];
     for (const file of fs.readdirSync(dir)) {
       if (!file.endsWith('.ts')) continue;
-      const src = fs.readFileSync(path.join(dir, file), 'utf-8');
-      let reaches = /\bLlm\.open\(/.test(src);
-      if (!reaches) {
-        const pkgs = Object.keys(WORKSPACE).map((p) => p.replace('/', '\\/')).join('|');
-        for (const imp of src.matchAll(
-          new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*'(?:${pkgs})'`, 'g'),
-        )) {
-          for (const raw of imp[1]!.split(',')) {
-            const name = raw.replace(/\btype\b/, '').split(/\s+as\s+/)[0]?.trim();
-            const mod = name ? exportsMap.get(name) : undefined;
-            if (!mod) continue;
-            // An import only counts if the command actually calls it.
-            if (!name || !new RegExp(`\\b${name}\\s*\\(`).test(src)) continue;
-            if (opensBackend(mod)) reaches = true;
-          }
-        }
+      if (commandReachesModel(path.join(dir, file), exportsMap)) {
+        found.push(file.replace(/\.ts$/, ''));
       }
-      if (reaches) found.push(file.replace(/\.ts$/, ''));
     }
     expect(found.sort()).toEqual([...MODEL_CALL_VERBS].sort());
+  });
+
+  /**
+   * T6.6 D11 — the probe, because a guard nobody has watched fail is a guard
+   * nobody knows the shape of.
+   *
+   * Two synthetic command files, written into a throwaway directory, calling
+   * the same model-reaching function two ways: once through the package
+   * specifier and once through the relative path across the package boundary.
+   * Before T6.6 the first was caught and the second was not. Both must be.
+   *
+   * The third file is the control: a command that imports something real and
+   * offline. If it were also flagged the guard would be useless in the other
+   * direction, and the two positives above would prove nothing.
+   */
+  it('the scan catches a model reached by relative path as well as by package name', () => {
+    const exportsMap = barrelExports();
+    const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'potsherd-guard-probe-'));
+    try {
+      const core = path.resolve(process.cwd(), 'packages/core/src');
+      const rel = path.relative(probeDir, core).split(path.sep).join('/');
+
+      const viaPackage = path.join(probeDir, 'via-package.ts');
+      fs.writeFileSync(
+        viaPackage,
+        "import { ask } from '@potsherd/core';\nexport const run = () => ask();\n",
+      );
+
+      const viaRelative = path.join(probeDir, 'via-relative.ts');
+      fs.writeFileSync(
+        viaRelative,
+        `import { ask } from '${rel}/ask.js';\nexport const run = () => ask();\n`,
+      );
+
+      const control = path.join(probeDir, 'control.ts');
+      fs.writeFileSync(
+        control,
+        `import { openThreadCandidates } from '${rel}/open-threads.js';\n` +
+          'export const run = () => openThreadCandidates();\n',
+      );
+
+      expect(commandReachesModel(viaPackage, exportsMap)).toBe(true);
+      expect(commandReachesModel(viaRelative, exportsMap)).toBe(true);
+      expect(commandReachesModel(control, exportsMap)).toBe(false);
+    } finally {
+      fs.rmSync(probeDir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * T6.6 D11 — and the map itself, since the last comment about it was wrong.
+   *
+   * Derived means derived: every directory under `packages/` with a
+   * `package.json` must appear, keyed by the name that `package.json` declares.
+   * A new package is covered without anyone editing this file.
+   */
+  it('the workspace map is derived from pnpm-workspace.yaml, not written out', () => {
+    const dirs = fs
+      .readdirSync(path.resolve(process.cwd(), 'packages'))
+      .filter((d) => fs.existsSync(path.resolve(process.cwd(), 'packages', d, 'package.json')));
+    expect(dirs.length).toBeGreaterThanOrEqual(4);
+    expect(Object.keys(WORKSPACE)).toHaveLength(dirs.length);
+    for (const dir of dirs) {
+      const pkg = JSON.parse(
+        fs.readFileSync(path.resolve(process.cwd(), 'packages', dir, 'package.json'), 'utf-8'),
+      ) as { name: string };
+      expect(WORKSPACE[pkg.name]).toBe(`packages/${dir}/src`);
+    }
+    // The two the map had to be told about, one phase at a time.
+    expect(WORKSPACE['@potsherd/mcp']).toBe('packages/mcp/src');
+    expect(WORKSPACE['@potsherd/bridges']).toBe('packages/bridges/src');
+  });
+
+  /**
+   * T6.6 D0b — the invariant the split bought, stated on its own so that a
+   * later edit that puts a model call back into the rule pass fails *here*,
+   * with a message that says what the rule is, rather than only over in the
+   * verb-level guard where the reader has to work back to the cause.
+   *
+   * `open-threads.ts` is the rule pass. `link --suggest` reads it through
+   * `link-suggest.ts`, and `link` is not a model-calling verb. So the rule
+   * pass must not reach `Llm.open` — not directly, and not through anything it
+   * imports. The model pass lives in `open-threads-confirm.ts`, which may.
+   */
+  it('the open-threads rule pass reaches no model; the confirm pass is where the model lives', () => {
+    const core = path.resolve(process.cwd(), 'packages/core/src');
+    expect(opensBackend(path.join(core, 'open-threads.ts'))).toBe(false);
+    expect(
+      /\bLlm\.open\(/.test(fs.readFileSync(path.join(core, 'open-threads-confirm.ts'), 'utf-8')),
+    ).toBe(true);
+    // One-way only. If the rule pass ever imports the confirm pass back, the
+    // hole reopens and every reader of the rule pass is model-reaching again.
+    expect(fs.readFileSync(path.join(core, 'open-threads.ts'), 'utf-8')).not.toContain(
+      'open-threads-confirm',
+    );
   });
 
   /**
@@ -1344,7 +1503,7 @@ describe('which verbs may call a model (T2.7 D2)', () => {
    * here — at the moment it is registered — rather than shipping into a
    * receipt that quietly skips it.
    */
-  it('every registered command is in one of the two privacy lists', () => {
+  it('every registered command is in one of the three privacy lists', () => {
     const src = fs.readFileSync(
       path.resolve(process.cwd(), 'packages/cli/src/index.ts'),
       'utf-8',
@@ -1357,7 +1516,11 @@ describe('which verbs may call a model (T2.7 D2)', () => {
     expect(registered).toContain('unpin');
     expect(registered).toContain('doctor');
 
-    const disclosed = new Set([...MODEL_CALL_VERBS, ...OFFLINE_VERBS]);
+    const disclosed = new Set([
+      ...MODEL_CALL_VERBS,
+      ...OFFLINE_VERBS,
+      ...LOCAL_SOCKET_VERBS,
+    ]);
     const undisclosed = registered.filter((v) => !disclosed.has(v));
     expect(undisclosed).toEqual([]);
 
@@ -1366,9 +1529,53 @@ describe('which verbs may call a model (T2.7 D2)', () => {
     const known = new Set(registered);
     expect([...disclosed].filter((v) => !known.has(v))).toEqual([]);
 
-    // The two lists are disjoint: a verb cannot both call a model and be
-    // guaranteed to open no socket.
-    const both = MODEL_CALL_VERBS.filter((v) => OFFLINE_VERBS.includes(v));
-    expect(both).toEqual([]);
+    // The lists are pairwise disjoint: a verb cannot both call a model and be
+    // guaranteed to open no socket, and it cannot both open a socket and be
+    // guaranteed not to.
+    expect(MODEL_CALL_VERBS.filter((v) => OFFLINE_VERBS.includes(v))).toEqual([]);
+    expect(MODEL_CALL_VERBS.filter((v) => LOCAL_SOCKET_VERBS.includes(v))).toEqual([]);
+    expect(OFFLINE_VERBS.filter((v) => LOCAL_SOCKET_VERBS.includes(v))).toEqual([]);
+  });
+
+  /**
+   * T6.6 D2/D12 — the direction the CI guard structurally cannot check.
+   *
+   * `.github/workflows/ci.yml` proves *published screen == live output*. It
+   * has never been able to prove *live output == truth*, and all three false
+   * claims this receipt has shipped got through it intact. This is the first
+   * test that reads the claim against the code it is a claim about.
+   *
+   * The rule: a verb that `doctor --privacy` prints under "open no socket at
+   * all" must not reach a bridge. `@potsherd/bridges` is where every socket
+   * in this product that is not a model call lives — `claude-mem.ts` does
+   * `fetch('http://127.0.0.1:…')`, `agentmemory.ts` spawns an MCP server that
+   * is a shim over `localhost:3111` — so importing it *is* the socket, and a
+   * command file that imports it cannot be on the offline list.
+   */
+  it('no verb on the "open no socket at all" list reaches @potsherd/bridges', () => {
+    const dir = path.resolve(process.cwd(), 'packages/cli/src/commands');
+    const federates: string[] = [];
+    for (const file of fs.readdirSync(dir)) {
+      if (!file.endsWith('.ts')) continue;
+      const src = fs.readFileSync(path.join(dir, file), 'utf-8');
+      if (/from\s*'@potsherd\/bridges'/.test(src)) federates.push(file.replace(/\.ts$/, ''));
+    }
+    // Non-vacuous: the scan must actually find the two verbs we know federate.
+    expect(federates.sort()).toEqual([...LOCAL_SOCKET_VERBS].sort());
+    expect(federates.filter((v) => OFFLINE_VERBS.includes(v))).toEqual([]);
+  });
+
+  /**
+   * And the claim itself, read out of the bridge that makes it false. If a
+   * future bridge stops using localhost the sentence can be revisited; while
+   * one does, "open no socket at all" over `find` is a published falsehood.
+   */
+  it('the bridges really do open a localhost socket, which is why the list is split', () => {
+    const bridges = path.resolve(process.cwd(), 'packages/bridges/src');
+    const claudeMem = fs.readFileSync(path.join(bridges, 'claude-mem.ts'), 'utf-8');
+    expect(claudeMem).toMatch(/fetch\(/);
+    expect(claudeMem).toContain('http://127.0.0.1');
+    const agentMemory = fs.readFileSync(path.join(bridges, 'agentmemory.ts'), 'utf-8');
+    expect(agentMemory).toMatch(/\bspawn\(/);
   });
 });

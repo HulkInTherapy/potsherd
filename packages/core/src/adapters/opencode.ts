@@ -103,6 +103,18 @@ const DB_EXTENSIONS = ['.db', '.sqlite', '.sqlite3'];
 /** How deep under the opencode directory `discover()` looks for a store. */
 const MAX_DEPTH = 3;
 
+/**
+ * T6.6 D6 — the provenance, as a boolean rather than as prose.
+ *
+ * `OPENCODE_DOCTOR_NOTE` says this in a sentence, and `doctorLine()` says it in a
+ * word — but the rendered line is clipped to the terminal's width, and when
+ * the tool is **absent** it does not carry the word at all. Absent is this
+ * adapter's state on every machine that does not have the tool. `doctor
+ * --json` is the documented API, and an API cannot ask a caller to grep a
+ * width-dependent sentence for an adjective. So the fact is a field.
+ */
+export const OPENCODE_FORMAT_UNVERIFIED = true;
+
 export const OPENCODE_DOCTOR_NOTE =
   'opencode: format unverified — this adapter was written from documentation, not from a real ' +
   'store, so its schema is discovered at runtime (pragma table_info) rather than assumed, and it ' +

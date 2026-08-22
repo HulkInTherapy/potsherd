@@ -20,6 +20,7 @@ import { runAsk } from './commands/ask.js';
 import { runGraft } from './commands/graft.js';
 import { runSetup, SETUP_CLIENTS } from './commands/setup.js';
 import { runExport, EXPORT_TARGETS } from './commands/export.js';
+import { runStack } from './commands/stack.js';
 
 import { VERSION } from '@potsherd/core';
 export { VERSION };
@@ -428,25 +429,28 @@ example:
     program
       .command('link')
       .description('record that two sessions are the same thread of work')
-      .argument('<a>', 'session id, or the first 8 characters of one')
-      .argument('<b>', 'the other one')
+      .argument('[a]', 'session id, or the first 8 characters of one')
+      .argument('[b]', 'the other one')
       .option('--note <text>', 'why they belong together')
-      .option('--remove', 'delete the link again'),
+      .option('--remove', 'delete the link again')
+      .option('--suggest', 'propose cross-project links to accept by hand; writes nothing'),
   ).addHelpText('after', `
 example:
   potsherd link 4c9339e0 f1665f76 --note "same pgbouncer fix"
   potsherd ls --linked-to 4c9339e0                   # finds it from either end
   potsherd ls --linked-to f1665f76
-  potsherd link 4c9339e0 f1665f76 --remove`);
-  link.action(async (a: string, b: string, opts: Record<string, unknown>) => {
+  potsherd link 4c9339e0 f1665f76 --remove
+  potsherd link --suggest                            # proposals, nothing written`);
+  link.action(async (a: string | undefined, b: string | undefined, opts: Record<string, unknown>) => {
     const o = globals(program, link, opts);
     await run(
       () =>
         runLink({
           ...o,
-          a,
-          b,
+          ...(a ? { a } : {}),
+          ...(b ? { b } : {}),
           remove: Boolean(opts['remove']),
+          suggest: Boolean(opts['suggest']),
           ...(opts['note'] ? { note: String(opts['note']) } : {}),
         }),
       o,
@@ -697,6 +701,35 @@ example:
       o,
     );
   });
+
+  const stackCmd = addGlobals(
+    program
+      .command('stack')
+      .description('which memory tool covers which failure, and what potsherd does not do')
+      .option('--paths', 'print every path detection looked at, including the misses')
+      .option('--sources', 'print the url and fetch date behind every row'),
+  ).addHelpText('after', `
+example:
+  potsherd stack                    # the table, against what you have installed
+  potsherd stack --sources          # every claim, with the url it was read from
+  potsherd stack --paths            # why a tool you have installed reads as absent
+  potsherd stack --json | jq '.tools[] | select(.present)'
+
+every row says how far its claim was checked: read off this machine, read out
+of a real config file, or from that project's own docs on a printed date.`);
+  stackCmd.action(async (opts: Record<string, unknown>) => {
+    const o = globals(program, stackCmd, opts);
+    await run(
+      () =>
+        runStack({
+          ...o,
+          paths: Boolean(opts['paths']),
+          sources: Boolean(opts['sources']),
+        }),
+      o,
+    );
+  });
+
 
   if (argv.length <= 2) {
     tour();

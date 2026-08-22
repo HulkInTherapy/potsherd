@@ -238,6 +238,7 @@ export {
   effectiveConcurrency,
   CALL_PROFILES,
   MODEL_CALL_VERBS,
+  LOCAL_SOCKET_VERBS,
   OFFLINE_VERBS,
   DEFAULT_TIMEOUT_MS,
   TIMEOUT_RETRIES,
@@ -481,12 +482,17 @@ export { renderAsk, clipQuote, maskSafeCut, QUOTE_CHARS, type AskRenderOptions }
 export {
   OPEN_THREAD_LABEL,
   openThreadCandidates,
-  confirmOpenThreads,
   type OpenThreadCandidate,
   type OpenThread,
   type CandidateOptions as OpenThreadCandidateOptions,
-  type ConfirmOptions as OpenThreadConfirmOptions,
 } from './open-threads.js';
+// T6.6 D0b — the model pass moved to its own module so that `open-threads.ts`
+// is provably offline and `link --suggest`, which reads it, is provably out of
+// reach of a model. The names exported here are unchanged.
+export {
+  confirmOpenThreads,
+  type ConfirmOptions as OpenThreadConfirmOptions,
+} from './open-threads-confirm.js';
 
 // ---------------------------------------------------------------- phase 4
 // L7 — `graft`: the token-budgeted re-entry brief (`03` §8, T4.3).
@@ -535,5 +541,22 @@ export { graftJson, renderGraft } from './render/graft.js';
 // (`03` §9, phase-5 T5.5). A namespace, like `consent`, because the whole
 // module is one verb's worth of proposal-and-apply.
 export * as setup from './setup.js';
+
+// ---------------------------------------------------------------- phase 6
+// T6.4 — `stack`: the verb that says which tool owns which of `01 §1`'s four
+// failures, and which two potsherd loses.
+export * as stack from './stack.js';
+// `renderSuggestions` lives beside `MEASURED_PRECISION` on purpose, so there is
+// no wiring that leaves the measured-precision disclosure out.
+export {
+  suggestLinks,
+  renderSuggestions,
+  MEASURED_PRECISION,
+  DEFAULT_LIMIT as SUGGEST_DEFAULT_LIMIT,
+  type LinkSuggestion,
+  type SuggestResult,
+  type SuggestOptions,
+  type Precision,
+} from './link-suggest.js';
 
 export { VERSION } from './version.js';

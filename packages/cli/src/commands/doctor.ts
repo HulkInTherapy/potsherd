@@ -11,6 +11,7 @@ import {
   detectBackend,
   MODEL_CALL_VERBS,
   NoBackendError,
+  LOCAL_SOCKET_VERBS,
   OFFLINE_VERBS,
   db as store,
   paths,
@@ -34,6 +35,7 @@ import {
   type VecStatus,
 } from '@potsherd/core';
 import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
+import { BRIDGE_READ_PATHS, EXPORT_WRITE_PATHS } from '../privacy-paths.js';
 
 export interface DoctorOptions extends GlobalOptions {
   privacy?: boolean;
@@ -112,6 +114,12 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // holds the same redacted excerpts a model would have been sent, and no
     // model was called to write it.
     '<the path you give to  ask --readers-out>',
+    // T6.6 D13 — and `export` is the third. `EXPORT_WRITE_PATHS` was declared
+    // in `commands/export.ts` labelled "Exported for the registration file's
+    // `doctor --privacy` line" and had zero consumers, so the one verb that
+    // writes a directory of files wherever you point it appeared nowhere in
+    // the list of what potsherd writes.
+    ...EXPORT_WRITE_PATHS,
   ];
   const settingsFile = paths.claudePaths(report.claudeDir).settings;
   // `setup` writes one MCP stanza into each agent's own config file. That is
@@ -135,6 +143,9 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     if (o.json) {
       printJson({
         reads,
+        // The same list the human view prints, so a script and a person are
+        // reading one receipt.
+        bridgeReads: BRIDGE_READ_PATHS.map((b) => b.path),
         writes: written,
         writesWithConsent: [...consented, ...backups],
         network,
@@ -153,6 +164,19 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     for (const p of reads) {
       card.raw(`    ${show(p)}${fs.existsSync(p) ? '' : t.dim('  (absent)')}`);
     }
+    // T6.6 D13 — the other tools' stores. `03` §11 says this receipt lists
+    // every path read, and until now it listed none of these: `find --with`
+    // and `export --to` read a claude-mem database, an agentmemory store and
+    // the CLAUDE.md files the notes bridge walks up from the working
+    // directory. Written out rather than computed, because resolving them
+    // would put `@potsherd/bridges` — and its localhost socket — into an
+    // offline verb's import graph; `tests/bridges.test.ts` asserts each one
+    // against the bridge's own path helper so they cannot drift.
+    card.raw(`    ${t.dim('…and these, only when you name them with  --with / --to:')}`);
+    for (const b of BRIDGE_READ_PATHS) {
+      card.raw(`    ${show(b.path)}`);
+      card.raw(`      ${t.dim(b.note)}`);
+    }
     card.blank().text('writes:');
     for (const p of written) {
       card.raw(`    ${show(p)}`);
@@ -164,6 +188,11 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       } else if (p.startsWith('<the path you give')) {
         card.raw(`      ${t.dim('only when you pass the flag. it holds the same redacted excerpts a')}`);
         card.raw(`      ${t.dim('model would have been sent, and no model was called to write it')}`);
+      } else if (p.startsWith('<the dir you give')) {
+        card.raw(`      ${t.dim('one markdown file per card, only when you run export')}`);
+      } else if (p.startsWith('<your agentmemory')) {
+        card.raw(`      ${t.dim('rows into another tool\'s store. never without --yes, and')}`);
+        card.raw(`      ${t.dim('never at all unless you asked for that target')}`);
       }
     }
     card.blank().text('writes only after an explicit y at a diff:');
@@ -193,6 +222,10 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       ask: 'one call, over the shortlist it retrieved',
       graft: 'one call, to compress one session into a brief',
     };
+    const socketNote: Record<string, string> = {
+      find: '--with <tool>, to read another tool\'s store',
+      export: '--to <tool>, to write rows into one',
+    };
     for (const verb of MODEL_CALL_VERBS) {
       const note = verbNote[verb];
       card.raw(`    potsherd ${verb.padEnd(8)}${note ? `  ${note}` : ''}`.trimEnd());
@@ -202,6 +235,23 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // find their verb in it, and `ls…w, stats` is a list with the answer cut
     // out of the middle.
     for (const line of fmt.wrap(OFFLINE_VERBS.join(', '), pathW)) card.raw(`    ${line}`);
+
+    // T6.6 D2/D12. `find` and `export` were in the list above, under the words
+    // "open no socket at all", while both were probing 127.0.0.1 and spawning
+    // another program to talk to. The fix was not to move the word `export`
+    // into a screenshot — it was to stop the receipt saying something false,
+    // and only then regenerate the screen. `LOCAL_SOCKET_VERBS` carries the
+    // whole reasoning.
+    card.blank().text('these call no model either, but do open a socket on');
+    card.raw(`  ${t.dim('this machine — and only when you ask them to:')}`);
+    for (const verb of LOCAL_SOCKET_VERBS) {
+      const note = socketNote[verb];
+      card.raw(`    potsherd ${verb.padEnd(8)}${note ? `  ${note}` : ''}`.trimEnd());
+    }
+    card.raw(`      ${t.dim("claude-mem is read over http://127.0.0.1; agentmemory by")}`);
+    card.raw(`      ${t.dim('launching its mcp server, itself a shim over an http')}`);
+    card.raw(`      ${t.dim('backend on localhost. nothing leaves this machine, and')}`);
+    card.raw(`      ${t.dim('without the flag neither opens anything at all.')}`);
 
     card.blank().text('who receives them:');
     for (const line of fmt.wrap(network.to, pathW)) card.raw(`    ${line}`);
@@ -403,6 +453,20 @@ interface AdapterStatus {
   path: string;
   /** The adapter's own one-liner — every adapter owns the words about itself. */
   line: string;
+  /**
+   * T6.6 D6 — was this parser ever run against a real store?
+   *
+   * `false` for the four adapters written against real transcripts; `true` for
+   * the three written from documentation alone (`<NAME>_FORMAT_UNVERIFIED`).
+   *
+   * It is a field and not a word inside {@link line} because `line` is clipped
+   * to the terminal width and, when the tool is **absent**, does not carry the
+   * word at all — and absent is the state on every machine that does not have
+   * the tool. `doctor --json` is documented as the API, and the API said
+   * `supported: true` with nothing to distinguish a parser that has read a
+   * thousand real sessions from one that has read none.
+   */
+  unverified: boolean;
 }
 
 /**
@@ -423,6 +487,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'claude',
     supported: true,
     phase: 1,
+    unverified: false,
     path: claudeAdapter.sourceDir(o.claudeDir),
     line: claudeAdapter.doctorLine(claudeOptions),
   });
@@ -432,6 +497,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'codex',
     supported: true,
     phase: 1,
+    unverified: false,
     path: codexReport.sourceDir,
     line: codexAdapter.doctorLine(codexReport),
   });
@@ -440,6 +506,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'cursor',
     supported: true,
     phase: 1,
+    unverified: false,
     path: cursorAdapter.cursorProjectsDir(),
     line: cursorAdapter.doctorLine(),
   });
@@ -448,6 +515,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'pi',
     supported: true,
     phase: 1,
+    unverified: false,
     path: piAdapter.sourceDir(),
     line: piAdapter.doctorLine(),
   });
@@ -462,6 +530,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'gemini',
     supported: true,
     phase: 6,
+    unverified: geminiAdapter.GEMINI_FORMAT_UNVERIFIED,
     path: geminiAdapter.sourceDir(),
     line: geminiAdapter.doctorLine(),
   });
@@ -470,6 +539,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'opencode',
     supported: true,
     phase: 6,
+    unverified: opencodeAdapter.OPENCODE_FORMAT_UNVERIFIED,
     path: opencodeAdapter.sourceDir(),
     line: opencodeAdapter.doctorLine(),
   });
@@ -478,6 +548,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     harness: 'copilot',
     supported: true,
     phase: 6,
+    unverified: copilotAdapter.COPILOT_FORMAT_UNVERIFIED,
     path: copilotAdapter.sourceDir(),
     line: copilotAdapter.doctorLine(),
   });

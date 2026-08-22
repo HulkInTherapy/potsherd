@@ -1,11 +1,11 @@
-import { format as fmt, Theme } from '@potsherd/core';
+import { format as fmt, stack, Theme } from '@potsherd/core';
 // `packages/core/src/index.ts` is reserved for the integrator this phase, so
 // the barrel line — `export * as stack from './stack.js';` — is written out in
 // `phases/phase-6/registration-T6.4.txt` rather than added here. Until it
 // lands this import reaches the module directly, so the branch builds,
 // typechecks and tests green; swap it for `stack` in the line above once the
 // barrel carries it.
-import * as stack from '../../../core/src/stack.js';
+
 
 import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
 
@@ -27,11 +27,17 @@ export interface StackOptions extends GlobalOptions {
  *      one tool wins every row is an advert. `01 §1` scopes this product to
  *      failures 3 and 4; the `does not` block spells out that failure 2 is
  *      refused rather than unfinished, and names the tools that own it.
- *   2. **Every row says how well its claim was checked.** Six of the eight are
+ *   2. **Every row says how well its claim was checked.** Five of the eight are
  *      `docs only`: read from that project's current documentation on a date
  *      that is printed, never exercised. Phase 5 shipped this for `setup`'s
  *      seven MCP clients and the verifier confirmed the label reached the
  *      user; this is the same contract on a wider set of claims.
+ *
+ *      The number in that sentence said *six* until T6.6 (D14), against a
+ *      table, a footer and a `--json` payload that all said five. A prose
+ *      count beside a computed one is a count that will drift, so
+ *      `tests/stack.test.ts` now reads it out of this comment and checks it
+ *      against `stackReport()`.
  *   3. **Absence is a line, never an error.** A machine with none of these
  *      installed is the common case and gets a sentence saying so.
  */
@@ -95,10 +101,17 @@ export function render(r: stack.StackReport, t: Theme, o: StackOptions = {}): st
   const wide = t.width >= 72;
 
   L.push('');
+  // T6.6 D14 — the heading counted `detections.length - 1` and called the
+  // answer "tools known", so it said `7 tools known` over a table of eight
+  // rows, one screen above a footer that said `8 rows`. The minus one is not
+  // wrong, it is about a different set: `r.installed` excludes potsherd by
+  // definition, so the number it is paired with has to exclude potsherd too.
+  // The fix is to say which set each number is about, not to pick one of them.
   L.push(
     wide
-      ? `potsherd stack ${t.sep} ${r.detections.length - 1} tools known ${t.sep} ` +
-        `${r.installed} installed here ${t.sep} ${r.verifiedOn}`
+      ? `potsherd stack ${t.sep} ${r.detections.length} tools known ${t.sep} ` +
+        `${r.installed} of ${r.detections.length - 1} others here ` +
+        `${t.sep} ${r.verifiedOn}`
       : `potsherd stack ${t.sep} ${r.installed} of ${r.detections.length - 1} here ` +
         `${t.sep} ${r.verifiedOn}`,
   );
@@ -222,9 +235,17 @@ export function render(r: stack.StackReport, t: Theme, o: StackOptions = {}): st
     'the rest were read off this machine.';
   for (const line of fmt.wrap(honesty, t.width - 4)) L.push(t.dim(`  ${line}`));
   if (o.sources) {
+    // T6.6 D9 — the label and the source used to share a line, and the source
+    // was elided to fit. This is the flag whose entire job is to show the url
+    // a claim was read from: a url with `…` in it is not one, cannot be
+    // pasted, and cannot be checked. So the name goes on its own line and the
+    // source goes under it, indented, unclipped. It is the one place in this
+    // command where a long line is the correct answer — everything above is a
+    // table, and a table that wraps stops being one.
     L.push('');
     for (const d of r.detections) {
-      L.push(t.dim(`    ${pad(d.spec.label, 15)}${fmt.elide(d.spec.source, t.width - 22, t)}`));
+      L.push(t.dim(`    ${d.spec.label}`));
+      L.push(t.dim(`      ${d.spec.source}`));
     }
   } else {
     L.push(t.dim('  potsherd stack --sources  prints the url behind every row.'));

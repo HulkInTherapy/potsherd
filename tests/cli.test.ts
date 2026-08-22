@@ -397,6 +397,67 @@ describe('potsherd cli', () => {
     }
   });
 
+  /**
+   * T6.6 D0(a) — `--suggest` shipped declared on the wrong command. The 45
+   * library tests for `suggestLinks` all passed while the flag was unreachable,
+   * so the only test that can catch this is one that runs the built binary.
+   */
+  it('link --suggest is reachable from the command line', () => {
+    const root = scratchRoot();
+    run(['index', '--harness', 'claude', '--no-embed', '--full', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    const r = run(['link', '--suggest', '--potsherd-dir', root]);
+    expect(r.stderr).not.toContain("unknown option '--suggest'");
+    expect(r.code).toBe(0);
+  });
+
+  it('link --suggest --json is reachable and emits json', () => {
+    const root = scratchRoot();
+    run(['index', '--harness', 'claude', '--no-embed', '--full', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    const r = run(['link', '--suggest', '--json', '--potsherd-dir', root]);
+    expect(r.stderr).not.toContain("unknown option '--suggest'");
+    expect(r.code).toBe(0);
+    expect(() => JSON.parse(r.stdout)).not.toThrow();
+  });
+
+  it('guard carries no --suggest flag: it belongs to link', () => {
+    const r = run(['guard', '--help']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toContain('--suggest');
+  });
+
+  it('link --help documents --suggest', () => {
+    const r = run(['link', '--help']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('--suggest');
+  });
+
+  /**
+   * T6.6 D3 — phase 6's WAVE.md: *"Verify a flag exists before documenting it."*
+   *
+   * `docs/memory-stack.md` documented `--brief` in the present tense. It was
+   * the fifth phantom flag this project has published, and the whole repo held
+   * exactly one occurrence of it — copied out of `plans/02`, where it is a
+   * *plan*. A plan is not a flag.
+   *
+   * So: every long flag the docs page mentions must be declared in the CLI.
+   * The check runs against `packages/cli/src/index.ts` — where every option is
+   * registered — rather than against `--help`, so it needs no subprocess and
+   * cannot be fooled by a verb whose help text mentions a flag it does not
+   * have.
+   */
+  it('every flag docs/memory-stack.md mentions is one the cli declares', () => {
+    const docs = fs.readFileSync(path.join(repo, 'docs', 'memory-stack.md'), 'utf-8');
+    const cli = fs.readFileSync(
+      path.join(repo, 'packages', 'cli', 'src', 'index.ts'),
+      'utf-8',
+    );
+    const mentioned = [...new Set([...docs.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]))];
+    // Non-vacuous: the page does talk about flags.
+    expect(mentioned.length).toBeGreaterThanOrEqual(3);
+    const phantom = mentioned.filter((flag) => !cli.includes(`${flag} `) && !cli.includes(`${flag}'`) && !cli.includes(`${flag} <`));
+    expect(phantom).toEqual([]);
+  });
+
   it('an unknown verb points at --help instead of a stack trace', () => {
     const r = run(['excavate']);
     expect(r.code).not.toBe(0);
@@ -482,6 +543,53 @@ describe('potsherd cli', () => {
     for (const harness of ['claude', 'codex', 'cursor', 'pi']) {
       expect(d.adapters.find((a) => a.harness === harness)?.supported, harness).toBe(true);
     }
+  });
+
+  /**
+   * T6.6 D6 — the unverified label has to reach `--json`, because `--json` is
+   * the documented API.
+   *
+   * The three phase-6 adapters were written from documentation and never run
+   * against a real store. That is stated in the rendered `line` — and the
+   * rendered line is width-dependent and, when the tool is **absent**, does
+   * not carry the word at all. Absent is its state on every machine that does
+   * not have the tool, which is most of them. So a caller reading `--json` got
+   * `supported: true` and no way to learn that the parser has never seen real
+   * input.
+   *
+   * A boolean, beside `supported`, on every entry.
+   */
+  it('doctor --json flags the adapters whose format is unverified', () => {
+    const root = scratchRoot();
+    const r = run(['doctor', '--json', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    expect(r.code).toBe(0);
+    const d = JSON.parse(r.stdout) as {
+      adapters: { harness: string; supported: boolean; unverified: boolean; line: string }[];
+    };
+    // Present on every entry, not only the ones where it is true.
+    for (const a of d.adapters) {
+      expect(typeof a.unverified, a.harness).toBe('boolean');
+    }
+    const flagged = d.adapters.filter((a) => a.unverified).map((a) => a.harness).sort();
+    expect(flagged).toEqual(['copilot', 'gemini', 'opencode']);
+    for (const harness of ['claude', 'codex', 'cursor', 'pi']) {
+      expect(d.adapters.find((a) => a.harness === harness)?.unverified, harness).toBe(false);
+    }
+    // And the reason it matters. The word used to live only inside the
+    // adapter's own sentence, and that sentence is *clipped to the terminal
+    // width* before anyone sees it. At 40 columns the gemini row is
+    // `gemini      empty     ~/.gemini/tmp…` and the label is gone — while
+    // the field is not.
+    const narrow = run([
+      'doctor', '--width', '40', '--no-color', '--claude-dir', FIXTURE_CLAUDE,
+      '--potsherd-dir', root,
+    ]);
+    const row = narrow.stdout
+      .split('\n')
+      .find((l) => l.trimStart().startsWith('gemini ') && l.includes('~/.gemini'))!;
+    expect(row).toBeDefined();
+    expect(row).not.toContain('unverified');
+    expect(d.adapters.find((a) => a.harness === 'gemini')?.unverified).toBe(true);
   });
 });
 

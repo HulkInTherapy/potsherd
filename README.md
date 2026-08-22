@@ -510,6 +510,15 @@ potsherd doctor --privacy · 22 aug 2026
     ~/.gemini/tmp  (absent)
     ~/.local/share/opencode  (absent)
     ~/.copilot/session-state  (absent)
+    …and these, only when you name them with  --with / --to:
+    ~/.claude-mem/claude-mem.db
+      claude-mem, or wherever CLAUDE_MEM_DATA_DIR points. read-only.
+    <agentmemory's app-data dir>
+      ~/Library/Application Support/agentmemory on macOS, $XDG_DATA_HOME
+    <cwd>/CLAUDE.md, and .claude/CLAUDE.md above it
+      the notes bridge, walking up from the directory you run in.
+    ~/.claude/projects/<slug>/memory
+      Claude Code's own auto-memory for this project. read-only.
 
   writes:
     ~/.potsherd
@@ -521,6 +530,11 @@ potsherd doctor --privacy · 22 aug 2026
     <the path you give to  ask --readers-out>
       only when you pass the flag. it holds the same redacted excerpts a
       model would have been sent, and no model was called to write it
+    <the dir you give to  export --to markdown>
+      one markdown file per card, only when you run export
+    <your agentmemory store>  — export --to agentmemory --yes
+      rows into another tool's store. never without --yes, and
+      never at all unless you asked for that target
 
   writes only after an explicit y at a diff:
     ~/.claude/settings.json
@@ -552,8 +566,17 @@ potsherd doctor --privacy · 22 aug 2026
     potsherd graft     one call, to compress one session into a brief
 
   these never do, and open no socket at all:
-    audit, rescue, guard, index, ls, find, show, stats, tag, pin,
-    unpin, link, setup, doctor
+    audit, rescue, guard, index, ls, show, stats, tag, pin, unpin,
+    link, setup, stack, doctor
+
+  these call no model either, but do open a socket on
+  this machine — and only when you ask them to:
+    potsherd find      --with <tool>, to read another tool's store
+    potsherd export    --to <tool>, to write rows into one
+      claude-mem is read over http://127.0.0.1; agentmemory by
+      launching its mcp server, itself a shim over an http
+      backend on localhost. nothing leaves this machine, and
+      without the flag neither opens anything at all.
 
   who receives them:
     your own Claude subscription, via ~/.claude/local/claude
@@ -654,6 +677,30 @@ Being clear about this before you find out yourself:
   them, and `potsherd doctor` says which ones on the adapter's own line.
 - potsherd cannot recover anything the sweep took **before** you install it. It
   can stop the next one. That is the whole point of running `audit` today.
+
+## Where potsherd sits in the memory stack
+
+potsherd is not the only tool reading your transcripts, and it is not trying to
+be all of them. There are four distinct failures in agent memory — the context
+window degrading inside a session, context not carrying between sessions, the
+transcript itself being deleted, and getting the thing you found back into a
+live agent. **potsherd is scoped to the last two.** The first belongs to your
+harness and the second to claude-mem and Claude Code's own auto memory.
+
+[`docs/memory-stack.md`](docs/memory-stack.md) is the long version: the four
+failures, which of eight tools covers which of them, every claim with the URL
+it was read from, and every licence. `potsherd stack` prints the same table
+against what you actually have installed:
+
+```bash
+potsherd stack                    # the table, against what you have installed
+potsherd stack --sources          # every claim, with the url it was read from
+potsherd stack --paths            # why a tool you have installed reads as absent
+potsherd stack --json | jq '.tools[] | select(.present)'
+```
+
+If that table ever shows potsherd winning all four rows, that is a bug in the
+table.
 
 ## Install
 

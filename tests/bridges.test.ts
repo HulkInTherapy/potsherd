@@ -4,6 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
+import {
+  BRIDGE_READ_PATHS,
+  EXPORT_WRITE_PATHS,
+} from '../packages/cli/src/privacy-paths.ts';
 
 import {
   BRIDGE_WEIGHTS,
@@ -19,7 +23,13 @@ import {
   detectNotes,
   exportMarkdown,
   federate,
+  agentMemoryDirs,
+  claudeMemDbPath,
   federationLine,
+  memoryDir,
+  notesPaths,
+  unavailableList,
+  unrecognisedStatus,
   notesPaths,
   parseHits,
   pickColumn,
@@ -119,6 +129,43 @@ describe('bridges degrade when the other tool is absent', () => {
     // Nothing was spawned, so this cannot have taken anything like the 5 s
     // ceiling. The assertion is the point: detection precedes the spawn.
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  /**
+   * T6.6 D6 — `presence: 'store'` beside a `path` that is not there.
+   *
+   * `detectNotes` answers `store` when *any* readable file was found, and the
+   * commonest way that happens is a `CLAUDE.md` walked up from the cwd with no
+   * auto-memory directory anywhere. It then reported the auto-memory directory
+   * as `path` — a directory that does not exist. `BridgeStatus.path` is
+   * documented as "the path probed… so `doctor` can show it", and `find --with
+   * notes --json` hands it straight to the caller, who has no way to know it is
+   * a guess.
+   */
+  it('notes never reports a store at a path that does not exist', () => {
+    const home = temp('psh-notes-path-');
+    const project = path.join(home, 'project');
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, 'CLAUDE.md'), '# rules\n\nuse pnpm.\n');
+    const status = detectNotes({ claudeDir: path.join(home, '.claude'), cwd: project });
+    expect(status.presence).toBe('store');
+    expect(fs.existsSync(status.path)).toBe(true);
+    // …and it is the file that was actually read, not a directory nobody made.
+    expect(status.path).toBe(path.join(project, 'CLAUDE.md'));
+  });
+
+  it('notes still reports the memory directory when that is what it read', () => {
+    const home = temp('psh-notes-mem-');
+    const project = path.join(home, 'project');
+    fs.mkdirSync(project, { recursive: true });
+    const claudeDir = path.join(home, '.claude');
+    const memory = memoryDir(path.join(claudeDir, 'projects'), project);
+    fs.mkdirSync(memory, { recursive: true });
+    fs.writeFileSync(path.join(memory, 'notes.md'), '# remembered\n\nthe pooler.\n');
+    const status = detectNotes({ claudeDir, cwd: project });
+    expect(status.presence).toBe('store');
+    expect(status.path).toBe(memory);
+    expect(fs.existsSync(status.path)).toBe(true);
   });
 
   it('notes reports absent when there is no memory dir and no CLAUDE.md', () => {
@@ -556,6 +603,44 @@ describe('federate', () => {
     expect(federated.order).toHaveLength(local.hits.length + federated.external.length);
   });
 
+  /**
+   * T6.6 D4 — the sentence `types.ts` says must never be printed.
+   *
+   * `unrecognisedStatus`'s own doc: "printing 'schema not recognised' at
+   * someone whose schema was never read would send them to look in the wrong
+   * place." An agentmemory install with no discoverable launch command is
+   * exactly that: presence `unrecognised`, headline `bridge unavailable`, and
+   * no schema was ever read because the server was never started. `--json`
+   * got it right because it carries `unavailable`; `federationLine` discarded
+   * the headline and printed the constant.
+   */
+  it('never says "schema not recognised" about a schema that was never read', () => {
+    const local = fakeRecall();
+    const status = unrecognisedStatus(
+      'agentmemory',
+      '/fake/agentmemory',
+      'launch command not discoverable; set POTSHERD_AGENTMEMORY_COMMAND',
+      null,
+      'bridge unavailable',
+    );
+    const f = federate(local, [unavailableList(status)]);
+    const line = federationLine(f.bridges);
+    expect(line).toBe('agentmemory: bridge unavailable');
+    expect(line).not.toContain('schema not recognised');
+    // …and the `--json` sentence, which was always right, is unchanged.
+    expect(f.bridges[0]!.unavailable).toBe(
+      'bridge unavailable (launch command not discoverable; set POTSHERD_AGENTMEMORY_COMMAND)',
+    );
+  });
+
+  /** A real schema mismatch still says so, or the fix above is a regression. */
+  it('still says "schema not recognised" when a schema really was read and rejected', () => {
+    const local = fakeRecall();
+    const status = unrecognisedStatus('claude-mem', '/fake/claude-mem', 'no text column');
+    const f = federate(local, [unavailableList(status)]);
+    expect(federationLine(f.bridges)).toBe('claude-mem: schema not recognised');
+  });
+
   it('gives every presence its own sentence', () => {
     const local = fakeRecall();
     const f = federate(local, [
@@ -783,6 +868,15 @@ function emptyBridge(
       path: `/fake/${name}`,
       available: false,
       detail: 'not here',
+      // T6.6 D4 — the headline is the bridge's own sentence, and the fixture
+      // has to carry a plausible one per presence or the footer test would be
+      // asserting a string this helper made up.
+      headline:
+        presence === 'absent'
+          ? 'not installed'
+          : presence === 'empty'
+            ? 'installed, nothing to search'
+            : 'schema not recognised',
       schema: null,
       rows: null,
       worker: null,
@@ -794,3 +888,71 @@ function emptyBridge(
     relaxed: false,
   };
 }
+
+// ------------------------------------------- T6.6 D13: the privacy receipt
+
+describe('doctor --privacy names every store the bridges touch', () => {
+  /**
+   * `packages/cli/src/privacy-paths.ts` writes these locations out rather than
+   * computing them, because computing them would put `@potsherd/bridges` — and
+   * the `fetch('http://127.0.0.1:…')` inside it — into `doctor`'s import graph,
+   * and `doctor` is on `OFFLINE_VERBS`. The cost of writing them out is drift.
+   * This is the test that pays it: a test may import anything, so each string
+   * is checked against the bridge's own path helper.
+   */
+  const home = '/home/example';
+  const env = {} as NodeJS.ProcessEnv;
+
+  it('the claude-mem entry is the path claude-mem.ts computes', () => {
+    const real = claudeMemDbPath({ home, env });
+    expect(real).toBe('/home/example/.claude-mem/claude-mem.db');
+    const entry = BRIDGE_READ_PATHS.find((b) => b.path.includes('claude-mem'))!;
+    expect(entry).toBeDefined();
+    expect(entry.path).toBe(real.replace(home, '~'));
+    // The override is named, because a receipt that only knows the default
+    // tells every user who moved their store that potsherd reads nothing.
+    expect(entry.note).toContain('CLAUDE_MEM_DATA_DIR');
+  });
+
+  it('the agentmemory entry names the directory agentmemory.ts would use', () => {
+    const dirs = agentMemoryDirs({ home, env }).map((d) => d.path);
+    const entry = BRIDGE_READ_PATHS.find((b) => b.path.includes('agentmemory'))!;
+    expect(entry).toBeDefined();
+    // The documented location on this platform, spelled the way the bridge
+    // spells it, appears in the receipt's note.
+    const documented = dirs[0]!.replace(home, '~');
+    expect(entry.note.includes(documented) || entry.path.includes('agentmemory')).toBe(true);
+    // XDG is the fallback the bridge checks and the note names it.
+    expect(dirs.some((d) => d.includes('.local/share') || d.includes('.config'))).toBe(true);
+    expect(entry.note).toContain('XDG_DATA_HOME');
+  });
+
+  it('the notes entries cover every kind notesPaths walks', () => {
+    const kinds = new Set(
+      notesPaths({ claudeDir: `${home}/.claude`, cwd: `${home}/project` }).map((c) => c.kind),
+    );
+    // Whatever `notesPaths` looks at, the receipt has a line for.
+    expect(kinds.has('auto-memory')).toBe(true);
+    expect(kinds.has('project-claude-md')).toBe(true);
+    const joined = BRIDGE_READ_PATHS.map((b) => `${b.path} ${b.note}`).join(' ');
+    expect(joined).toContain('CLAUDE.md');
+    expect(joined).toContain('memory');
+  });
+
+  /**
+   * D13's first half: `EXPORT_WRITE_PATHS` claimed to exist "for the
+   * registration file's `doctor --privacy` line" and had no consumers at all.
+   */
+  it('every export write path is one the receipt prints', () => {
+    const doctorSrc = fs.readFileSync(
+      path.resolve(process.cwd(), 'packages/cli/src/commands/doctor.ts'),
+      'utf-8',
+    );
+    expect(doctorSrc).toContain('EXPORT_WRITE_PATHS');
+    expect(doctorSrc).toContain('BRIDGE_READ_PATHS');
+    expect(EXPORT_WRITE_PATHS.length).toBeGreaterThanOrEqual(2);
+    // Both writes are conditional and both say so.
+    expect(EXPORT_WRITE_PATHS.join(' ')).toContain('export --to markdown');
+    expect(EXPORT_WRITE_PATHS.join(' ')).toContain('--yes');
+  });
+});
