@@ -58,6 +58,16 @@ export {
 } from './claude-mem.js';
 
 export {
+  detectNotes,
+  memoryDir,
+  notesPaths,
+  queryNotes,
+  sections,
+  type NoteSection,
+  type NotesOptions,
+} from './notes.js';
+
+export {
   BRIDGE_WEIGHTS,
   UNRANKED_PENALTY,
   federate,

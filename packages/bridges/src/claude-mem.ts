@@ -383,6 +383,10 @@ export async function queryClaudeMem(
         ms: Date.now() - started,
         unavailable: null,
         strategy: 'worker-http',
+        // The worker ran their search, not ours. It relaxes or does not
+        // relax by its own rules and does not tell us which, so claiming
+        // either would be inventing a fact about someone else's ranker.
+        relaxed: false,
       };
     }
     // Fall through to sqlite rather than reporting failure: the worker being
@@ -508,13 +512,35 @@ async function searchSqlite(
       );
     }
 
+    // AND first, OR only if AND came back empty — the same order `recall()`
+    // uses, and reported the same way, so a `--with claude-mem` result can say
+    // that the foreign list had to loosen the query too.
     const fts = ftsQuery(query);
-    const rows = found.ftsTable
-      ? matchRows(db, schema, found.ftsTable, fts.and, limit) ??
-        matchRows(db, schema, found.ftsTable, fts.or, limit)
-      : null;
+    let relaxed = false;
+    let rows: Record<string, unknown>[] | null = null;
+    if (found.ftsTable) {
+      rows = matchRows(db, schema, found.ftsTable, fts.and, limit);
+      if (!rows || rows.length === 0) {
+        const loose = matchRows(db, schema, found.ftsTable, fts.or, limit);
+        if (loose && loose.length > 0) {
+          rows = loose;
+          relaxed = true;
+        }
+      }
+    }
+
     const strategy: 'fts5' | 'like' = rows ? 'fts5' : 'like';
-    const finalRows = rows ?? likeRows(db, schema, fts.tokens, limit);
+    let finalRows = rows;
+    if (!finalRows) {
+      finalRows = likeRows(db, schema, fts.tokens, limit, true);
+      if (finalRows.length === 0) {
+        const loose = likeRows(db, schema, fts.tokens, limit, false);
+        if (loose.length > 0) {
+          finalRows = loose;
+          relaxed = true;
+        }
+      }
+    }
 
     const hits = finalRows.map((row, i) => sqliteHit(row, schema, i + 1, file));
     return {
@@ -524,6 +550,7 @@ async function searchSqlite(
       ms: Date.now() - started,
       unavailable: null,
       strategy,
+      relaxed,
     };
   } catch (err) {
     return unavailableList(
@@ -564,18 +591,27 @@ function matchRows(
   }
 }
 
-/** Substring scan. Not a ranking, and never described as one. */
+/**
+ * Substring scan. Not a ranking, and never described as one.
+ *
+ * `requireAll` joins the terms with `and` (the strict pass) or `or` (the
+ * relaxed one). Both are parameterised; the only thing interpolated is a
+ * column name this connection's own `sqlite_master` handed us, quoted.
+ */
 function likeRows(
   db: ReadOnlyDb,
   schema: DiscoveredSchema,
   tokens: readonly string[],
   limit: number,
+  requireAll: boolean,
 ): Record<string, unknown>[] {
   const text = schema.textColumn;
   if (!text) return [];
   const words = tokens.filter((t) => t.length > 1).slice(0, 6);
   if (words.length === 0) return [];
-  const where = words.map(() => `${q(text)} like ? escape '\\'`).join(' and ');
+  const where = words
+    .map(() => `${q(text)} like ? escape '\\'`)
+    .join(requireAll ? ' and ' : ' or ');
   const order = schema.timeColumn ? `order by ${q(schema.timeColumn)} desc` : 'order by rowid desc';
   try {
     return db

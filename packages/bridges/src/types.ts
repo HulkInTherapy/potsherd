@@ -160,6 +160,19 @@ export interface BridgeList {
    * available because it is the same one the tool gives itself.
    */
   strategy: 'worker-http' | 'fts5' | 'like' | 'files' | 'mcp' | null;
+  /**
+   * True when every query token was required and that found nothing, so the
+   * bridge fell back to any-token matching — the same relaxation `recall()`
+   * performs, reported for the same reason.
+   *
+   * Without it a search for `zzz-does-not-exist` comes back with three hits
+   * for the word `this`, and nothing downstream can tell that they are noise.
+   * `federate()` does not penalise a relaxed bridge list the way `recall()`
+   * penalises a relaxed local one, because a relaxed foreign list is still the
+   * best that tool had to offer; but the flag has to survive to `--json` so a
+   * reader can discount it.
+   */
+  relaxed: boolean;
 }
 
 export interface BridgeQueryOptions {
@@ -222,7 +235,15 @@ export function firstLine(err: unknown): string {
 
 /** A `BridgeList` for a bridge that never got as far as a query. */
 export function unavailableList(status: BridgeStatus, ms = 0): BridgeList {
-  return { list: status.bridge, status, hits: [], ms, unavailable: status.detail, strategy: null };
+  return {
+    list: status.bridge,
+    status,
+    hits: [],
+    ms,
+    unavailable: status.detail,
+    strategy: null,
+    relaxed: false,
+  };
 }
 
 /**
