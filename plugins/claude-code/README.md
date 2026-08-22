@@ -218,8 +218,8 @@ Two things worth knowing before you enable anything:
   cannot — Claude Code discards a `SessionEnd` hook's `systemMessage` by
   design. The pure-shell model check costs about 4 ms and prints nothing once
   the model is cached; the capability probe beside it costs 128–146 ms (above). If you would rather it never happened, disable the `SessionEnd` hook
-  (see below) and index by hand with `--no-embed`; the cost is vector search on
-  new sessions.
+  (see below) and index by hand; `index` no longer fetches a model unless you
+  pass `--embed`, and the cost is vector search on new sessions.
 - Model calls happen only for `card`, `ask` and `graft`. The hooks call a model
   only if you set `cardOnEnd`.
 

@@ -26193,7 +26193,7 @@ function vectorState(db, root) {
       used: false,
       available: false,
       vectors: 0,
-      reason: "no embeddings in the index \u2014 run  potsherd index  without --no-embed"
+      reason: "no embeddings in the index \u2014 run  potsherd index --embed"
     };
   }
   const cache = modelsDir(potsherdDir(root));
@@ -30152,7 +30152,7 @@ async function embedExchanges(db, options, vec) {
   const upToDate = db.prepare("SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version = ?").get(EMBEDDING_VERSION);
   report.upToDate = upToDate.n;
   if (!options.embed) {
-    report.reason = "--no-embed: text search only";
+    report.reason = "text search only \u2014 potsherd index --embed adds vectors";
     report.ms = Date.now() - started;
     return report;
   }

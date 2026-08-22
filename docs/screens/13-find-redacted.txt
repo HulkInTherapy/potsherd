@@ -1,4 +1,4 @@
-potsherd find "redacted aws" · 2 sessions · bm25 · 12ms
+potsherd find "redacted aws" · 2 sessions · bm25 · 11ms
 
   Add a timeout to mock server                                     claude · live
   report-builder · 16 aug · 3 exchanges · feat/retry-budget               0.0098
@@ -11,6 +11,5 @@ potsherd find "redacted aws" · 2 sessions · bm25 · 12ms
     assistant side not recoverable · potsherd show 840f40a5
 
   1 ghost hit · relaxed to any-word matching
-  text search only — no embeddings in the index — run potsherd index without
-  --no-embed
+  text search only — no embeddings in the index — run potsherd index --embed
   run  potsherd show <id8>  to read one, or  potsherd ask <words>

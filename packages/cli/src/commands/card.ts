@@ -176,6 +176,7 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
         root,
         backendNote: backendNote(choice, missing),
         ...(o.maxUsd !== undefined ? { maxUsd: o.maxUsd } : {}),
+        ...(limit > 0 ? { limit } : {}),
         dryRun: o.dryRun !== false,
       }),
     );

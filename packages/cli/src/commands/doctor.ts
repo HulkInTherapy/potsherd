@@ -341,12 +341,18 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       // announcement it does not always make is the same failure as the
       // "no network" line this project shipped once already (`08` rule 1), so
       // the suppressing flags are named and the hook's own warning is stated.
-      .text('no other network, except the one-off embedding-model download.');
+      // 8.6 flipped the default, so the sentence that used to end '`--no-embed`
+      // skips the download entirely' now describes an escape hatch from a thing
+      // that no longer happens by default. It says what does happen instead.
+      .text('no other network, except the one-off embedding-model download,')
+      .text('and only when you ask for it.');
     for (const line of fmt.wrap(
-      '`potsherd index` names it before it starts, but `--quiet` and `--json` ' +
-        "suppress that line, and `--quiet` is how the plugin's SessionEnd hook runs " +
-        'it — so its SessionStart hook warns you first. `--no-embed` skips the ' +
-        'download entirely.',
+      'A plain `potsherd index` fetches nothing: text search is the ' +
+        'default, it needs no model, and it opens no socket at all. `potsherd index ' +
+        '--embed` is what asks for the model, and it names the download before it ' +
+        "starts — but `--quiet` and `--json` suppress that line, and `--quiet` is " +
+        "how the plugin's SessionEnd hook runs it, so its SessionStart hook warns " +
+        'you first.',
       Math.max(20, t.width - 3),
     )) {
       card.raw(`  ${line}`);

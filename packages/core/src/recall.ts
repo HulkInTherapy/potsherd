@@ -1179,7 +1179,7 @@ export function vectorState(db: Db, root?: string): VectorState {
       used: false,
       available: false,
       vectors: 0,
-      reason: 'no embeddings in the index — run  potsherd index  without --no-embed',
+      reason: 'no embeddings in the index — run  potsherd index --embed',
     };
   }
   const cache = modelsDir(potsherdDir(root));

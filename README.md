@@ -394,7 +394,7 @@ potsherd show 9c4d2f18 --json | jq -r '.exchanges[].userText'
 ### `potsherd index`
 
 ```bash
-potsherd index --full --no-embed
+potsherd index --full
 ```
 
 ```
@@ -408,11 +408,12 @@ potsherd index · ~/.potsherd · 21 aug 2026
   exchanges indexed            439   242 tool calls · 2 redacted
   ghosts indexed               299   2,971 prompts, searchable
   secrets masked                 5   aws 1 · gcp 1 · github 1 · stripe 1 · …
-  vectors                        —   skipped (--no-embed) · text search only
+  vectors                        —   text search only · no model, no network
 
   full index                 251ms   228 parsed · 0 unchanged · 545 KB
 
   run  potsherd doctor  for parse coverage and every path read.
+  run  potsherd index --embed  for semantic search (32 MB model, ~6 min, once)
 ```
 
 [`docs/screens/07-index.txt`](docs/screens/07-index.txt). Four harnesses are
@@ -421,7 +422,7 @@ line names the directory it looked in, present or not.
 
 ```bash
 potsherd index                       # incremental; only what changed
-potsherd index --harness claude --no-embed
+potsherd index --embed                # + semantic search, 32 MB model, once
 potsherd index --session 9c4d2f18
 potsherd index --json | jq .totals
 ```
@@ -431,34 +432,34 @@ and one is thirty times the other.
 
 | | reference machine, 328 MB, 1,406 exchanges | demo corpus, 545 KB, 439 exchanges |
 |---|---|---|
-| `index --full --no-embed` | **8.8 s** | under a second — see the screen above |
-| `index --full` (with vectors) | **4 m 42 s**, of which 4 m 32 s is embedding | 3.3 s |
+| `index --full` (the default, text only) | **8.8 s** | under a second — see the screen above |
+| `index --full --embed` (with vectors) | **4 m 42 s**, of which 4 m 32 s is embedding | 3.3 s |
 | `index` (incremental, nothing changed) | **67 ms** | — |
 
 The reference-machine figures were measured by phase 1 and are recorded with
 their method in [phases/phase-1/WAVE.md](phases/phase-1/WAVE.md) (F20). The
 demo-corpus column is the corpus `bash scripts/make-screens.sh` builds; its
-`--no-embed` row is the screen above, and its vector row is what
-`potsherd index --full` printed against that corpus with the model already
+text-only row is the screen above, and its vector row is what
+`potsherd index --full --embed` printed against that corpus with the model already
 cached — 439 one-line exchanges embed a great deal faster than 1,406 real ones,
 which is exactly why the two columns are shown side by side.
 
 The 8.8 s covers parsing, redacting, storing, building fts5 and rebuilding all
 299 ghosts. The 4 m 42 s is the same work plus 1,406 embeddings, and 96% of it
 is the embeddings. Neither is a benchmark: re-running
-`potsherd index --full --no-embed` on that machine while this readme was being
+`potsherd index --full` on that machine while this readme was being
 written — 346 MB, 256 transcripts, all four harnesses, load average 16.7 —
 printed **24.2 s**. "Seconds" is the claim.
 
-So **`--no-embed` is a first-class path, not a degraded one.** It needs no
-model, no download and no network, and `find` works on day one without it —
-every search screen in this readme was taken against a `--no-embed` index.
+So **text only is the default path, not a degraded one.** It needs no model,
+no download and no network, and `find` works on day one without them — every
+search screen in this readme was taken against a text-only index.
 
 Vectors are what let `find "the pooler decision"` match a session that never
 used those words. They cost a one-off model download (`bge-small`, 32.4 MB on
 disk once cached) that `index` announces before it starts, and minutes on the
-first run. You can add them later: `potsherd index` again without `--no-embed`
-fills in what is pending.
+first run, and you ask for them explicitly: `potsherd index --embed` fills in
+what is pending, and prints nothing until you do.
 
 ### `potsherd stats`
 
@@ -485,7 +486,7 @@ potsherd stats · ~/.potsherd · 21 aug 2026
 ```
 
 [`docs/screens/10-stats.txt`](docs/screens/10-stats.txt). `439 pending` is
-`--no-embed`'s honest bookkeeping: the vectors were skipped, and stats says so
+text-only indexing's honest bookkeeping: no vectors were built, and stats says so
 rather than reporting an index that is complete.
 
 `potsherd doctor` ([`04-doctor.txt`](docs/screens/04-doctor.txt)) goes further:
@@ -1013,11 +1014,13 @@ potsherd doctor --privacy · 22 aug 2026
     the call runs with no tools, in an empty scratch directory, and
     its session is never written to ~/.claude/projects.
 
-  no other network, except the one-off embedding-model download.
-  `potsherd index` names it before it starts, but `--quiet` and `--json`
-  suppress that line, and `--quiet` is how the plugin's SessionEnd hook runs it
-  — so its SessionStart hook warns you first. `--no-embed` skips the download
-  entirely.
+  no other network, except the one-off embedding-model download,
+  and only when you ask for it.
+  A plain `potsherd index` fetches nothing: text search is the default, it
+  needs no model, and it opens no socket at all. `potsherd index --embed` is what
+  asks for the model, and it names the download before it starts — but
+  `--quiet` and `--json` suppress that line, and `--quiet` is how the plugin's
+  SessionEnd hook runs it, so its SessionStart hook warns you first.
   no telemetry. no account. potsherd stores no credential of its own.
 ```
 
@@ -1174,7 +1177,7 @@ pnpm install && pnpm build
 
 node packages/cli/bin/potsherd.js audit
 node packages/cli/bin/potsherd.js rescue
-node packages/cli/bin/potsherd.js index --no-embed
+node packages/cli/bin/potsherd.js index
 node packages/cli/bin/potsherd.js find "something you argued about in june"
 ```
 

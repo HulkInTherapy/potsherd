@@ -441,7 +441,13 @@ describe('index: sqlite-vec fails soft', () => {
     const report = await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
     expect(report.embeddings.enabled).toBe(false);
     expect(report.embeddings.embedded).toBe(0);
-    expect(report.embeddings.reason).toContain('--no-embed');
+    // NOT `--no-embed`: since 8.6 flipped the default, `indexAll` sees
+    // `embed: false` whether the user typed the flag or typed nothing, so a
+    // reason naming the flag reports something the library cannot know. It
+    // states the outcome, and names the flag that CHANGES the outcome.
+    expect(report.embeddings.reason).toContain('text search only');
+    expect(report.embeddings.reason).toContain('--embed');
+    expect(report.embeddings.reason).not.toContain('--no-embed');
     const db = openDb(root);
     expect(
       db.prepare('SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version IS NOT NULL').get(),

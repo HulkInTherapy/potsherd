@@ -7829,7 +7829,7 @@ function vectorState(db, root) {
       used: false,
       available: false,
       vectors: 0,
-      reason: "no embeddings in the index \u2014 run  potsherd index  without --no-embed"
+      reason: "no embeddings in the index \u2014 run  potsherd index --embed"
     };
   }
   const cache = modelsDir(potsherdDir(root));
@@ -12909,7 +12909,7 @@ async function embedExchanges(db, options, vec) {
   const upToDate = db.prepare("SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version = ?").get(EMBEDDING_VERSION);
   report.upToDate = upToDate.n;
   if (!options.embed) {
-    report.reason = "--no-embed: text search only";
+    report.reason = "text search only \u2014 potsherd index --embed adds vectors";
     report.ms = Date.now() - started;
     return report;
   }
@@ -16430,6 +16430,7 @@ function planCards(db, options = {}) {
   if ((filters.ghosts ?? "include") !== "only" && filters.status !== "ghost") {
     const f = buildSessionFilters(filters);
     const rows = db.prepare(`SELECT s.id, s.harness, s.title, s.project, s.project_slug, s.is_sidechain, s.source_mtime,
+                COALESCE(s.ended_at, s.started_at) AS ts,
                 (SELECT COUNT(*) FROM exchanges e WHERE e.session_id = s.id) AS exchanges,
                 (SELECT COALESCE(SUM(length(e.user_text) + length(e.assistant_text)), 0)
                    FROM exchanges e WHERE e.session_id = s.id) AS chars,
@@ -16460,13 +16461,15 @@ function planCards(db, options = {}) {
         chars: r.chars + r.exchanges * SEQ_HEADER_CHARS,
         carded: r.carded > 0,
         stale,
-        isSidechain: r.is_sidechain === 1
+        isSidechain: r.is_sidechain === 1,
+        ts: r.ts
       });
     }
   }
   if (ghostsInScope2(filters)) {
     const f = buildGhostFilters(filters);
     const rows = db.prepare(`SELECT g.session_id, g.harness, g.title, g.project,
+                COALESCE(g.last_ts, g.first_ts) AS ts,
                 (SELECT COUNT(*) FROM ghost_prompts p WHERE p.session_id = g.session_id) AS prompts,
                 (SELECT COALESCE(SUM(length(p.text)), 0)
                    FROM ghost_prompts p WHERE p.session_id = g.session_id) AS chars,
@@ -16499,10 +16502,12 @@ function planCards(db, options = {}) {
         chars: r.chars + r.prompts * SEQ_HEADER_CHARS,
         carded: r.carded > 0,
         stale: false,
-        isSidechain: false
+        isSidechain: false,
+        ts: r.ts
       });
     }
   }
+  targets.sort((a, b) => (b.ts ?? "").localeCompare(a.ts ?? "") || a.id.localeCompare(b.id));
   const capped = options.limit !== void 0 ? targets.slice(0, Math.max(0, options.limit)) : targets;
   const sessions = capped.map((t) => ({ id: t.id, chars: t.chars }));
   const model = options.model ?? CARD_MODEL;
@@ -16636,7 +16641,7 @@ function renderEstimate(plan, t = new Theme(), o = {}) {
   } else {
     card.text("nothing was called, and nothing was written.");
     card.blank();
-    card.fix(`potsherd card --all${o.maxUsd !== void 0 ? ` --max-usd ${o.maxUsd}` : ""}`, "to write these cards for real.", "to write them.");
+    card.fix(`potsherd card ${o.limit !== void 0 ? `--limit ${o.limit}` : "--all"}${o.maxUsd !== void 0 ? ` --max-usd ${o.maxUsd}` : ""}`, "to write these cards for real.", "to write them.");
   }
   return card.toString();
 }
@@ -22997,9 +23002,9 @@ async function runDoctor(o) {
     card2.blank().text("who receives them:");
     for (const line of format_exports.wrap(network.to, pathW)) card2.raw(`    ${line}`);
     for (const line of network.detail) note(line, 4);
-    card2.blank().text("no other network, except the one-off embedding-model download.");
+    card2.blank().text("no other network, except the one-off embedding-model download,").text("and only when you ask for it.");
     for (const line of format_exports.wrap(
-      "`potsherd index` names it before it starts, but `--quiet` and `--json` suppress that line, and `--quiet` is how the plugin's SessionEnd hook runs it \u2014 so its SessionStart hook warns you first. `--no-embed` skips the download entirely.",
+      "A plain `potsherd index` fetches nothing: text search is the default, it needs no model, and it opens no socket at all. `potsherd index --embed` is what asks for the model, and it names the download before it starts \u2014 but `--quiet` and `--json` suppress that line, and `--quiet` is how the plugin's SessionEnd hook runs it, so its SessionStart hook warns you first.",
       Math.max(20, t2.width - 3)
     )) {
       card2.raw(`  ${line}`);
@@ -23385,13 +23390,15 @@ async function runIndex(o) {
       ...harnesses ? { harnesses } : {},
       ...o.session ? { sessionId: o.session } : {},
       full: Boolean(o.full),
-      embed: o.embed !== false,
+      // The flip. `undefined` and `false` both mean text-only; only an
+      // explicit `--embed` reaches for the model.
+      embed: o.embed === true,
       onModelDownload: (bytes2) => {
         announced = true;
         bar.done();
         if (o.json || o.quiet) return;
         print(
-          `  first run: fetching the ${format_exports.bytes(bytes2)} embedding model into ${paths_exports.tildify(paths_exports.modelsDir(root))}  ${t.dim("(once; --no-embed skips it)")}`
+          `  first run: fetching the ${format_exports.bytes(bytes2)} embedding model into ${paths_exports.tildify(paths_exports.modelsDir(root))}  ${t.dim("(once)")}`
         );
       },
       onProgress: (p) => {
@@ -23419,7 +23426,7 @@ async function runIndex(o) {
     return report.totals.failed ? 1 : 0;
   }
   if (o.quiet) return report.totals.failed ? 1 : 0;
-  print(renderIndexReceipt(report, t, root));
+  print(renderIndexReceipt(report, t, root, { embed: o.embed }));
   return report.totals.failed ? 1 : 0;
 }
 function parseHarnesses(raw) {
@@ -23441,7 +23448,7 @@ function parseHarnesses(raw) {
   }
   return wanted;
 }
-function renderIndexReceipt(report, t, root) {
+function renderIndexReceipt(report, t, root, o = {}) {
   const card = new Card(t);
   card.heading("index", paths_exports.tildify(root), format_exports.date(new Date(report.ranAt))).blank();
   for (const h of report.harnesses) {
@@ -23466,7 +23473,7 @@ function renderIndexReceipt(report, t, root) {
     // "nothing matched — index holds no secrets" after an incremental run that
     // opened one file, on an index holding three masks. A run reports the run.
     maskedThisRunRow(report, t, card.noteWidth()),
-    embeddingRow(report, t)
+    embeddingRow(report, t, o.embed === false)
   ]);
   card.blank();
   card.rows([
@@ -23499,6 +23506,14 @@ function renderIndexReceipt(report, t, root) {
     "to see parse coverage, redaction counts and every path read.",
     "for parse coverage and every path read."
   );
+  if (o.embed === void 0 && !report.embeddings.enabled && report.totals.exchanges > 0) {
+    card.fix(
+      "potsherd index --embed",
+      "for semantic search (32 MB model, ~6 min, once)",
+      "for semantic search (32 MB, ~6 min)",
+      "for semantic search"
+    );
+  }
   return card.toString();
 }
 function harnessNote(h, sep = " \xB7 ") {
@@ -23514,14 +23529,22 @@ function harnessNote(h, sep = " \xB7 ") {
   if (h.failed > 0) parts.push(`${format_exports.num(h.failed)} failed`);
   return parts.join(sep);
 }
-function embeddingRow(report, t) {
+function embeddingRow(report, t, explicitlyOff) {
   const e = report.embeddings;
   const total = e.embedded + e.upToDate;
   if (!e.enabled) {
+    if (e.upToDate > 0) {
+      return {
+        label: "vectors",
+        value: format_exports.num(e.upToDate),
+        note: `not refreshed this run ${t.mid} potsherd index --embed`,
+        tone: "dim"
+      };
+    }
     return {
       label: "vectors",
       value: t.dash,
-      note: `skipped (--no-embed) ${t.mid} text search only`,
+      note: explicitlyOff ? `skipped (--no-embed) ${t.mid} text search only` : `text search only ${t.mid} no model, no network`,
       tone: "dim"
     };
   }
@@ -24030,19 +24053,23 @@ async function runCard(o) {
   try {
     const filters = parseFilters(db, o);
     if (o.ghostsOnly) filters.ghosts = "only";
+    const limit = parseLimit(o.limit, 0);
     if (o.session) {
       const found = resolveSession(db, o.session);
       if (!found) {
         throw new UserError(`no session matches "${o.session}"`, "potsherd ls");
       }
       filters.sessionId = found.id;
-    } else if (!o.all && !filters.pinned && !filters.project && !filters.tag && !filters.since && // `--ghosts only` and `--status ghost` each name a scope on their own:
+    } else if (!o.all && // `--limit n` names a scope on its own: the n newest. It is the first
+    // card run a stranger should make, and refusing it was the one thing
+    // standing between the dry-run quote and a real card (`08` §8.6).
+    limit === 0 && !filters.pinned && !filters.project && !filters.tag && !filters.since && // `--ghosts only` and `--status ghost` each name a scope on their own:
     // "card everything the sweep took" is a whole request, and on the
     // reference machine it is 299 of the 329 targets.
     filters.ghosts !== "only" && filters.status !== "ghost") {
       throw new UserError(
-        "say which sessions to card",
-        "potsherd card --dry-run --all      # what the whole archive would cost"
+        "say which sessions to card \u2014 a session id, a filter, --limit n, or --all",
+        "potsherd card --limit 5 --dry-run      # the 5 newest, quoted before anything runs"
       );
     }
     let choice = null;
@@ -24056,7 +24083,6 @@ async function runCard(o) {
       if (!(err instanceof NoBackendError)) throw err;
       missing = err;
     }
-    const limit = parseLimit(o.limit, 0);
     const plan = planCards(db, {
       filters,
       force: Boolean(o.force),
@@ -24074,6 +24100,7 @@ async function runCard(o) {
         root,
         backendNote: backendNote(choice, missing),
         ...o.maxUsd !== void 0 ? { maxUsd: o.maxUsd } : {},
+        ...limit > 0 ? { limit } : {},
         dryRun: o.dryRun !== false
       })
     );
@@ -25914,12 +25941,12 @@ example:
     );
   });
   const index = addGlobals(
-    program2.command("index").description("parse, redact and index every transcript on this machine").option("--full", "re-read every transcript, ignoring what has not changed").option("--incremental", "only what changed since the last run (the default)").option("--harness <list>", "only these harnesses: claude,codex,cursor,pi").option("--no-embed", "skip embeddings entirely \u2014 text search only, no model, no network").option("--session <id>", "index one session id and nothing else").option("-q, --quiet", "print nothing on success (for hooks)")
+    program2.command("index").description("parse, redact and index every transcript on this machine").option("--full", "re-read every transcript, ignoring what has not changed").option("--incremental", "only what changed since the last run (the default)").option("--harness <list>", "only these harnesses: claude,codex,cursor,pi").option("--embed", "add semantic search: fetch the 32 MB model once, then embed (~6 min)").option("--no-embed", "text only, and stop offering --embed (text only is the default)").option("--session <id>", "index one session id and nothing else").option("-q, --quiet", "print nothing on success (for hooks)")
   ).addHelpText("after", `
 example:
-  potsherd index
+  potsherd index                                    # text only: no model, no network
+  potsherd index --embed                            # ...and semantic search, once
   potsherd index --full
-  potsherd index --harness claude --no-embed        # offline, fts only
   potsherd index --json | jq .totals`);
   index.action(async (opts) => {
     const o = globals(program2, index, opts);
@@ -25928,7 +25955,12 @@ example:
         ...o,
         full: Boolean(opts["full"]),
         incremental: Boolean(opts["incremental"]),
-        embed: opts["embed"] !== false,
+        // Tri-state, and commander gives all three because both spellings
+        // are declared (T8.E): absent = no flag = text only and offer the
+        // upgrade, true = --embed, false = --no-embed = text only and stop
+        // offering. `!== false` collapsed the first two and made the 32 MB
+        // download the default.
+        ...opts["embed"] === void 0 ? {} : { embed: Boolean(opts["embed"]) },
         ...opts["harness"] ? { harness: String(opts["harness"]) } : {},
         ...opts["session"] ? { session: String(opts["session"]) } : {}
       }),

@@ -2152,4 +2152,50 @@ describe('card --limit is a scope, and it is the n newest (T8.E)', () => {
     // eligibility rule.
     expect(dryRun(root, ['--all', '--force']).targets).toBe(6);
   });
+
+  // ------------------------------------------------------------------------
+  // The orchestrator's own fix at integration, and therefore the code in this
+  // phase with the least review. W5 found the defect and could not reach the
+  // file: `--limit` shipped, and the line the dry-run CLOSES on still said
+  // `potsherd card --all`. On the reference archive that is 123 targets, not
+  // the five just quoted -- so following the screen's own instruction spends
+  // twenty-five times what the screen said it would.
+  //
+  // `plans/08` rule 12: if the documentation prints a command, the test runs
+  // that command as printed. Here the documentation IS the product's output,
+  // so the test reads the printed command back and requires it to name the
+  // same scope the quote above it was for.
+  it('the line a dry-run closes on names the scope it just quoted', () => {
+    const root = scratch();
+    interleaved(root);
+
+    const printed = (extra: string[]): string => {
+      const r = cli(['card', '--dry-run', '--potsherd-dir', root, ...extra], bare());
+      expect(r.code).toBe(0);
+      // The CLOSING line, not the heading -- the heading is also
+      // `potsherd card --dry-run ...` and a naive find() matches it first.
+      // That is how this test first failed, which is the check working.
+      const line = r.stdout
+        .split('\n')
+        .find((l) => /^\s*run\s+potsherd card\b/.test(l));
+      expect(line, `no closing command in:\n${r.stdout}`).toBeDefined();
+      return line!;
+    };
+
+    // The defect, pinned: a quote for three must not close on a command for
+    // everything. Both halves are asserted -- that it names the limit, and
+    // that it does NOT name --all -- because a line containing both would
+    // pass a check for either one alone.
+    const three = printed(['--limit', '3']);
+    expect(three).toContain('potsherd card --limit 3');
+    expect(three).not.toContain('--all');
+
+    // The control: with no cap, --all is the correct scope and must stay.
+    expect(printed(['--all'])).toContain('potsherd card --all');
+
+    // And the scope survives another flag being appended after it.
+    const capped = printed(['--limit', '2', '--max-usd', '5']);
+    expect(capped).toContain('potsherd card --limit 2');
+    expect(capped).toContain('--max-usd 5');
+  });
 });

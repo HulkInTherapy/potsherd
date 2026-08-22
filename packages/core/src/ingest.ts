@@ -1001,7 +1001,10 @@ async function embedExchanges(
   report.upToDate = upToDate.n;
 
   if (!options.embed) {
-    report.reason = '--no-embed: text search only';
+    // Text-only is the DEFAULT since 8.6, so this branch is now the common
+    // path and most runs that reach it passed no flag at all. Naming
+    // `--no-embed` here reported a flag the user had not typed.
+    report.reason = 'text search only — potsherd index --embed adds vectors';
     report.ms = Date.now() - started;
     return report;
   }

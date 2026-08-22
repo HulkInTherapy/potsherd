@@ -46,6 +46,14 @@ export interface EstimateCardOptions {
   ranAt?: Date;
   /** `card --dry-run` ends on a different line than `card` does. */
   dryRun?: boolean;
+  /**
+   * What `--limit` was set to, if anything. The closing line has to name
+   * the scope that was just quoted: after `card --limit 5 --dry-run`,
+   * `potsherd card --all` is 123 targets on the reference archive and not
+   * the five above it. A quote the closing command does not honour is the
+   * defect 8.6 exists for, one layer further out.
+   */
+  limit?: number;
 }
 
 export function renderEstimate(
@@ -167,7 +175,8 @@ export function renderEstimate(
     card.text('nothing was called, and nothing was written.');
     card.blank();
     card.fix(
-      `potsherd card --all${o.maxUsd !== undefined ? ` --max-usd ${o.maxUsd}` : ''}`,
+      `potsherd card ${o.limit !== undefined ? `--limit ${o.limit}` : '--all'}` +
+        `${o.maxUsd !== undefined ? ` --max-usd ${o.maxUsd}` : ''}`,
       'to write these cards for real.',
       'to write them.',
     );
