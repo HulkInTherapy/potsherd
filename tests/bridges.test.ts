@@ -476,7 +476,14 @@ describe('notes', () => {
 describe('agentmemory over the stdio client', () => {
   function store(): { home: string; env: NodeJS.ProcessEnv } {
     const home = temp('psh-am-');
-    const dir = path.join(home, 'Library', 'Application Support', 'agentmemory');
+    // Ask the code which directory it will probe on THIS platform rather than
+    // hard-coding macOS's. `agentMemoryDirs` only offers
+    // `~/Library/Application Support` on darwin, so a hard-coded one is never a
+    // candidate on Linux and every assertion below collapses to "absent" —
+    // which is what happened on CI while this passed on every laptop. A test's
+    // premise must be something the test establishes.
+    const appData = agentMemoryDirs({ home, env: {} }).find((c) => c.kind === 'app-data');
+    const dir = appData?.path ?? path.join(home, '.local', 'share', 'agentmemory');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'state.json'), '{}');
     return {
@@ -532,7 +539,10 @@ describe('agentmemory over the stdio client', () => {
 
   it('never runs a downloader, however the config asks for one', () => {
     const home = temp('psh-am-npx-');
-    const dir = path.join(home, 'Library', 'Application Support', 'agentmemory');
+    // The platform's own app-data path, not macOS's — see the note in `store()`.
+    const dir =
+      agentMemoryDirs({ home, env: {} }).find((c) => c.kind === 'app-data')?.path ??
+      path.join(home, '.local', 'share', 'agentmemory');
     fs.mkdirSync(dir, { recursive: true });
     // Exactly what agentmemory's own plugin/.mcp.json contains.
     fs.writeFileSync(
@@ -752,7 +762,10 @@ describe('export --to agentmemory writes nothing without --yes', () => {
 
   it('plans without --yes, and the plan touches nothing', async () => {
     const home = temp('psh-push-plan-');
-    const dir = path.join(home, 'Library', 'Application Support', 'agentmemory');
+    // The platform's own app-data path, not macOS's — see the note in `store()`.
+    const dir =
+      agentMemoryDirs({ home, env: {} }).find((c) => c.kind === 'app-data')?.path ??
+      path.join(home, '.local', 'share', 'agentmemory');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'state.json'), '{}');
     const env = { ...process.env, POTSHERD_AGENTMEMORY_COMMAND: `${process.execPath} ${STUB}` };
