@@ -730,3 +730,205 @@ own `--help` says it reports what is registered *everywhere*.
 
 **A rule enforced for the cases that broke it is not a rule.** The cheapest thing available at the
 end of a build is to take a check that already exists and point it at everything.
+
+### 13.7 The verifier found seven, and its first verdict was "not releasable"
+
+`12 · 8 · 9 · 7 · 13 · 15 · 14 · 7`. It has still never fallen to zero.
+
+Two of the seven were critical and both were the kind that only an outsider finds, because they are
+failures of a claim rather than of code:
+
+**The honesty contract was broken by the way its own documentation said to run it.**
+`FINAL-REPORT.md` handed a reader:
+
+```
+potsherd audit --claude-dir X --verify --json | jq -r .snippet | sh
+```
+
+and **`sh` does not inherit a flag**. The standalone python read `~/.claude` and answered about a
+different corpus — 340/41 against the audit's 330/31, which reads as potsherd under-reporting by
+ten. The product was right; the artefact whose entire purpose is *"nobody has to trust potsherd to
+check potsherd"* was answering a different question, which is worse than being wrong.
+
+**The test for it is now the pipeline, not the function.** Audit a fixture, take the snippet out of
+`--json`, run it in a shell that was told nothing, require all four numbers to match. Generalise
+that: **if the documentation prints a command, the test runs that command as printed.** Testing the
+function underneath it tests something nobody will ever do.
+
+**The vendored plugin bundle was stale on the release commit.** A commit labelled `docs(T7.7)`
+changed `render/ask.ts` and did not re-vendor, so the bundle every marketplace user gets was missing
+the fix. CI's own drift gate was red on the tag. Two lessons in one: a docs-labelled commit changed
+shipped code, and a generated artefact that is committed goes stale the moment you forget it exists.
+
+### 13.8 How to brief a verifier so its report is worth something
+
+The phase-7 verifier brief is worth copying. What made it work:
+
+1. **It was told what it was NOT allowed to do** — no sub-delegation, no fixes, no commits, no
+   writes to `~/.claude` / `~/.codex` / `~/.cursor` / `~/.pi` / `~/.potsherd`, and every command must
+   pass `--claude-dir` / `--potsherd-dir` at a `mktemp -d`. It obeyed all of it and said so.
+2. **It was told the two documents making the claims are hypotheses, not facts**, by name.
+3. **It was given a priority order** — claims checkable by one command, then the design system, then
+   the README, then the install story, then "anything that looks like a claim nobody checked" — so
+   it spent its budget where defects were likely rather than reading everything.
+4. **It was given this project's own recurring failure modes as a hunting list**: a number that is
+   confidently wrong, a string that has quietly become false, a benchmark that cannot fail, a flag
+   that is documented and does nothing, and a test whose premise is the environment.
+5. **Its output format demanded a command and its output per finding**, a severity, and — this is
+   the part that made the report trustworthy — **two sections called "claims I checked that held"
+   and "what I could not check, and why."**
+
+That last pair is what separates a verification from a list of complaints. Phase 7's verifier
+listed twelve things it had re-measured and found true, and six things it could not check with the
+reason for each (no model, no container, no spare user account, out of budget). An unchecked claim
+reported as checked is the worst outcome available to a verifier, and asking for the section makes
+it cheap to be honest.
+
+**One thing to do differently:** give the verifier the **exact commit SHA** to run against and a
+list of what you have already fixed since. Two of its seven findings were things fixed in commits
+after the one it cloned, and it spent effort on them.
+
+### 13.9 A guard's stated limitation is a real gap, not a formality
+
+`scripts/check-privacy.py` says in its own header: *"No regex recognises prose. Passing this check
+does not mean a file is clean — it means the file carries no leak we have already seen."*
+
+That sentence turned out to be load-bearing. `docs/upstream/PHASE-1-SCOUT.md` has published real
+transcript prose from the reference machine to a **public repository since phase 1** — a real
+assistant `thinking` sentence from `~/.pi` with its ids and timestamp, and a real truncated
+`<user_query>` from `~/.cursor`. Phase 5 found it, scrubbed the ids and the title, assigned the
+prose scrub, and **the prose scrub was never done.** The guard passes the file and always has.
+
+Two things follow. **Read the guard's own caveats and treat each as an open item**, not as
+boilerplate. And **an item marked "assigned" in a handoff is not an item that was done** — check it
+before repeating the claim. This one survived two orchestrators because each read the previous
+handoff's "assigned" and moved on.
+
+### 13.10 Wall time is the budget that binds, so build for the retry
+
+Phase 7's expensive loops, measured:
+
+| | cost |
+|---|---|
+| `card --all` over the demo corpus (31 transcripts, ~39 calls) | **6–7 min** |
+| one `ask` at k=6 | 40–50 s |
+| `bash scripts/make-screens.sh` with the model screens | **~8 min** |
+| `bash scripts/make-cast.sh` from cold | **~8 min** |
+| `pnpm test` | ~78 s |
+| a Docker fresh-machine run | ~3 min |
+
+Nothing in that list is run once. The screens were captured **four times** in phase 7 (a stochastic
+open-thread confirmation, a corrupted script, a SIGPIPE abort, and the real one), and the cast
+three. So:
+
+- **Put a reuse flag on anything that re-does expensive setup.** `POTSHERD_CAST_REUSE=1` keeps a
+  carded corpus. Without it a retry re-cards for six minutes, which is how a timing budget gets
+  widened instead of met.
+- **Stage the output.** See §13.4.
+- **Start the long job in the background and do file-only work while it runs** — but never
+  `pnpm build` while a script that reads `dist/` is running, and never edit a shell script that is
+  executing (§13.3).
+
+### 13.11 When a budget cannot be met, split the artefact — do not widen the budget
+
+`plans/05` and `phase-7` both cap a demo cast at **60 seconds**. One cast containing all five verbs
+measured 64.2 s, then 66.6 s. `ask` alone is 40–50 s of real model calls and is most of what the
+cast exists to show.
+
+Three options and only one was honest:
+
+1. speed the recording up — misrepresents the one number `ask`'s own screen prints;
+2. widen the cap to match what had been produced — rewriting the spec around the result;
+3. **two casts**: `demo.cast` (audit → rescue → index → find, 14.2 s) and `demo-ask.cast` (52.3 s).
+
+This generalises. When a measurement will not meet a target, the choices are: change the thing,
+change the target *with the measurement written down beside it*, or split the artefact so each half
+is honestly inside the target. **Never the fourth option, which is to keep the number and stop
+measuring.**
+
+### 13.12 Four numbers in four documents, four different values
+
+`FINAL-REPORT.md` said 1,426. The handoff said 1,428. The README said 1,426. The suite had 1,427 —
+and `FINAL-REPORT.md` §4 hands a reader `pnpm test  # 1,426` as *the first thing to try*.
+
+The fix is not "be careful". It is a test:
+
+```ts
+// It cannot assert the true count — a suite cannot count itself while running —
+// but it can refuse the failure that actually happened, which is four documents
+// disagreeing. Lines containing `baseline` are excluded: a handoff quoting what
+// the suite held when the phase started is history, not a claim about now.
+```
+
+**Any number that appears in more than one document should have a test that they agree.** The
+version string got one in phase 7 too, after shipping three releases stale — and that test now
+enumerates every manifest in the repository rather than the four somebody remembered.
+
+### 13.13 The small things that cost an hour each
+
+- **Do not edit a shell script while it is running.** Bash reads a script incrementally by byte
+  offset; a mid-run edit shifts the parser. A seven-minute capture printed `card --all failed`
+  *after* it had already recorded the screens.
+- **`set -o pipefail` plus `| head` kills the script.** `head` closes the pipe, the producer takes
+  SIGPIPE and exits 141. Twice, in two scripts, both on a line whose only job was to show the first
+  six of something. Capture into a variable and slice with `sed -n '1,6p'`.
+- **`pnpm test ; git commit && git push` pushes a red suite.** Use `&&` throughout.
+- **`ls -1 */*.jsonl` fails on Claude Code's project directories** because they begin with `-` and
+  the expanded glob is parsed as options. Use `printf '%s\n' */*.jsonl`.
+- **`awk 'length($0)>80'` counts bytes, not characters.** The design system uses `·` `…` `→` `★`,
+  all multi-byte. Every width check must count code points — use python, not awk.
+- **A heredoc body containing its own terminator ends early.** A `python3 - <<'PY'` script that
+  itself writes `<<'PY'` will be truncated. Use a distinct delimiter, or write the script to a file
+  first, which is better anyway because it can be re-run.
+- **An asciinema v3 cast has `term: {cols, rows}` and *delta* timestamps**, not v2's top-level
+  `width`/`height` and absolute times. The v2 parser read a v3 cast as `not 80x24: NonexNone` with a
+  2.7 s duration — a guard printing a verdict while asserting nothing.
+
+---
+
+## 14. Orchestrator checklist, phase 7 edition
+
+`§12` is phases 4–6 and every line of it still holds. These are added, not substituted.
+
+Before starting:
+1. Read `08-STATE-OF-PLAY.md`, then this file's `§7`, `§12` and `§13`, then the previous phase's
+   `HANDOFF.md` and `VERIFICATION.md`.
+2. Run the whole verification block in `MASTER-REPORT.md §9` **before writing anything**. It takes
+   ten minutes and it tells you whether the state you inherited is the state you were told about.
+3. Check every item the previous handoff marked **"assigned"** or **"reported not fixed"**. At least
+   one of them will not have been done (§13.9).
+
+While working:
+4. `git push origin main` before anything that depends on the pushed state, and verify
+   `git rev-parse origin/main` equals `HEAD`.
+5. After changing anything under `packages/`: `pnpm build && pnpm vendor`. The plugin bundles are
+   committed and go stale silently (§13.7).
+6. `python3 scripts/check-privacy.py` after every change, and read its header's caveats as open
+   items rather than as boilerplate.
+7. Chain the suite and the commit with `&&`, never `;`.
+8. Run any command the documentation prints, exactly as printed, before believing the documentation
+   (§13.7).
+9. Read one real output by eye, every phase. It is still the highest-yield hour.
+
+Before a tag:
+10. `pnpm test` **and** `POTSHERD_SQLITE=node pnpm test`.
+11. `python3 scripts/check-privacy.py --selftest && python3 scripts/check-privacy.py`.
+12. `npx tsx evals/ask-selftest.ts`. (`pnpm evals` **fails on purpose** — see `08`.)
+13. `node scripts/vendor-plugin.mjs && git status --short plugins/` — expect no diff.
+14. `bash scripts/make-screens.sh` and, if anything user-visible changed, `bash scripts/make-cast.sh`.
+15. A fresh verifier that authored none of it, briefed the way `§13.8` describes, **given the exact
+    commit SHA** and a list of what you have already fixed since.
+16. Wait for CI green on the **pushed commit**, then tag, then confirm CI green **on the tag**.
+
+## 15. What each orchestrator would say in one sentence
+
+**1:** *"Tests catch regressions. They do not catch a number that is confidently wrong, a string that
+has quietly become false, or a benchmark that cannot fail — only reading the output like a
+suspicious human catches those."*
+
+**2:** *"The code your workers write gets verified. The code you write while integrating does not,
+and three of my worst defects were mine, at integration, and every one shipped green."*
+
+**3:** *"An artefact is only verified in the place it has been run — a bundle that works in the
+checkout is not a bundle that works in a plugin, and four separate defects in one phase appeared the
+moment something moved."*
