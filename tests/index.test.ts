@@ -780,3 +780,154 @@ function report(o: {
     ms: 10_700,
   };
 }
+
+/**
+ * **8.2, the live half.** A session the harness never named is named by its
+ * first substantive prompt instead of by `<project>-<id8>`.
+ *
+ * Everything here builds its own transcript, so the premise of every
+ * assertion — what the harness did and did not write — is established by the
+ * test and not read off a corpus that happens to contain it.
+ *
+ * The rule is `rescue.ts`'s, the one that decides what a recovered ghost is
+ * called; it is not restated in `ingest.ts` and it is not restated here. What
+ * these tests hold is the behaviour §8.2 asked for, so they fail if the rule
+ * drifts away from it: not a slash command, at least eight characters, not one
+ * of seven conversational stopwords, cut to sixty code points, and derived
+ * from the redacted text rather than the raw.
+ */
+describe('a live session the harness never named (8.2)', () => {
+  const NAMELESS = 'aaaa1111-0000-4000-8000-00000000ff01';
+
+  /**
+   * A transcript with **no `ai-title` record**, whose prompts are `prompts` in
+   * order. Nothing else about it matters to these tests.
+   */
+  function writeUntitled(claudeDir: string, prompts: string[], id = NAMELESS): string {
+    const file = path.join(claudeDir, 'projects', '-tmp-potsherd-untitled', `${id}.jsonl`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const base = { sessionId: id, cwd: '/tmp/potsherd-untitled', version: '2.1.237', gitBranch: 'main' };
+    const rows: Record<string, unknown>[] = [];
+    prompts.forEach((text, i) => {
+      rows.push({ ...base, type: 'user', promptId: `p${i}`, uuid: `u${i}`, timestamp: `2026-08-19T09:0${i}:00.000Z`, message: { role: 'user', content: text } });
+      rows.push({ ...base, type: 'assistant', uuid: `a${i}`, timestamp: `2026-08-19T09:0${i}:01.000Z`, message: { role: 'assistant', content: [{ type: 'text', text: 'noted.' }] } });
+    });
+    fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    return file;
+  }
+
+  const titleOf = (root: string, id = NAMELESS): { title: string | null; source: string | null } => {
+    const db = openDb(root);
+    try {
+      const r = db
+        .prepare('SELECT title, title_source FROM sessions WHERE id = ?')
+        .get(id) as { title: string | null; title_source: string | null } | undefined;
+      return { title: r?.title ?? null, source: r?.title_source ?? null };
+    } finally {
+      db.close();
+    }
+  };
+
+  it('takes the first prompt that names it, skipping the ones that do not', async () => {
+    const { claudeDir, root } = scratch();
+    // A slash command, a stopword, something under eight characters, and then
+    // the first thing anybody actually asked. One of each rejected kind, so a
+    // rule that only skipped slash commands would fail here.
+    writeUntitled(claudeDir, ['/model opus', 'ok', 'why?', 'the retry budget is wrong for the payments gateway']);
+    await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+
+    expect(titleOf(root)).toEqual({
+      title: 'the retry budget is wrong for the payments gateway',
+      source: 'prompt',
+    });
+  });
+
+  it('leaves a session with nothing but commands and stubs nameless', async () => {
+    const { claudeDir, root } = scratch();
+    writeUntitled(claudeDir, ['/resume', 'clear', 'y']);
+    await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+
+    // Null, not a slash command: a dozen sessions called `/resume` are less
+    // distinguishable than a dozen uuids, and they also claim to say
+    // something. `ls` renders this one `<project>-<id8>`, as it always did.
+    expect(titleOf(root)).toEqual({ title: null, source: null });
+  });
+
+  it('never overwrites the name the harness wrote', async () => {
+    const { claudeDir, root } = scratch();
+    const file = writeUntitled(claudeDir, ['the retry budget is wrong for the payments gateway']);
+    fs.appendFileSync(
+      file,
+      JSON.stringify({ sessionId: NAMELESS, cwd: '/tmp/potsherd-untitled', type: 'ai-title', uuid: 'ti', timestamp: '2026-08-19T09:09:00.000Z', aiTitle: 'Retry budget for the payments gateway' }) + '\n',
+    );
+    await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+
+    expect(titleOf(root)).toEqual({
+      title: 'Retry budget for the payments gateway',
+      source: null,
+    });
+  });
+
+  it('retires its own name the moment the harness writes one', async () => {
+    const { claudeDir, root } = scratch();
+    const file = writeUntitled(claudeDir, ['the retry budget is wrong for the payments gateway']);
+    await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+    expect(titleOf(root).source).toBe('prompt');
+
+    // The harness titles a session late — it writes the summary once it has
+    // seen enough of the conversation. Without this, `title_source` would stay
+    // `'prompt'` against a harness title and the session would sit in
+    // `ls --untitled` for ever.
+    fs.appendFileSync(
+      file,
+      JSON.stringify({ sessionId: NAMELESS, cwd: '/tmp/potsherd-untitled', type: 'ai-title', uuid: 'ti', timestamp: '2026-08-19T09:09:00.000Z', aiTitle: 'Retry budget for the payments gateway' }) + '\n',
+    );
+    await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+
+    expect(titleOf(root)).toEqual({
+      title: 'Retry budget for the payments gateway',
+      source: null,
+    });
+  });
+
+  it('names it from the redacted text, so a pasted secret cannot become a title', async () => {
+    const { claudeDir, root } = scratch();
+    writeUntitled(claudeDir, [`rotate this key please: ${AWS_KEY} and tell me what else uses it`]);
+    await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+
+    const { title, source } = titleOf(root);
+    expect(source).toBe('prompt');
+    expect(title).not.toContain(AWS_KEY);
+    expect(title).toContain('‹redacted:');
+  });
+
+  it('cuts to sixty code points, and counts code points', async () => {
+    const { claudeDir, root } = scratch();
+    // Sixty astral code points: `String.slice(0, 60)` would cut this at the
+    // thirtieth character and leave half a surrogate pair on the end.
+    const prompt = '🧱'.repeat(80);
+    writeUntitled(claudeDir, [prompt]);
+    await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+
+    const { title } = titleOf(root);
+    expect([...title!].length).toBe(60);
+    expect(title).toBe('🧱'.repeat(60));
+  });
+
+  it('writes the same title twice on a second index, and no second row', async () => {
+    const { claudeDir, root } = scratch();
+    writeUntitled(claudeDir, ['/model opus', 'the retry budget is wrong for the payments gateway']);
+    await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+    const first = titleOf(root);
+
+    await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
+    expect(titleOf(root)).toEqual(first);
+
+    const db = openDb(root);
+    try {
+      expect(store.count(db, 'sessions')).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+});

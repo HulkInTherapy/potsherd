@@ -35,6 +35,7 @@ export async function runAudit(o: AuditOptions): Promise<number> {
       deleted: report.deleted,
       promptsLost: report.promptsLost,
       promptsSurviving: report.promptsSurviving,
+      deletedWithoutSubstantivePrompt: report.deletedWithoutSubstantivePrompt,
       projectsWiped: report.projectsWiped.map((p) => ({
         project: p.project,
         name: p.name,

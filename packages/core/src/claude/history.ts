@@ -33,6 +33,18 @@ export interface HistorySession {
 export interface HistoryScan {
   path: string;
   exists: boolean;
+  /**
+   * Whether this scan was asked for `prompts`, and so whether a caller may
+   * draw a conclusion from them.
+   *
+   * It exists because the alternative is a silent zero. `audit` counts the
+   * deleted sessions whose prompts never named them; a scan taken without
+   * `withPrompts` has an empty `prompts` array on every session, and that
+   * count would come out `0` — a number, on the product's first screen,
+   * meaning "nobody asked". Reported as `null` instead. See
+   * `computeAudit`'s `deletedWithoutSubstantivePrompt`.
+   */
+  withPrompts: boolean;
   lines: number;
   malformed: number;
   /** Lines with no `sessionId` — older Claude Code versions wrote these. */
@@ -53,6 +65,7 @@ export async function readHistory(
   const scan: HistoryScan = {
     path: p,
     exists: fs.existsSync(p),
+    withPrompts: Boolean(opts.withPrompts),
     lines: 0,
     malformed: 0,
     orphanPrompts: 0,

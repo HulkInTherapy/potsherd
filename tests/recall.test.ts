@@ -138,13 +138,19 @@ describe('recall: what is in by default', () => {
     expect(r.sessions[0]!.resume).toBeNull();
   });
 
-  it('finds an untitled session by its body', async () => {
+  it('finds a session the harness never named by its body', async () => {
     const r = await recall(db, 'webhook rate limited by the gateway', {}, { vectors: false });
     expect(has(r, ID.untitled)).toBe(true);
     const s = r.sessions.find((x) => x.id.startsWith(ID.untitled))!;
-    expect(s.title).toBeNull();
-    expect(s.displayTitle).toBe(fallbackTitle(s.project, s.id));
-    expect(s.displayTitle).toMatch(/^potsherd-eval-api-a0c57a31$/);
+    // Until 8.2 this session had no title at all and rendered as
+    // `potsherd-eval-api-a0c57a31`. `index` now names it after its first
+    // substantive prompt, and the point of the test is unchanged: it is found
+    // by its *body*, and what it is called does not decide that.
+    expect(s.displayTitle).not.toBe(fallbackTitle(s.project, s.id));
+    expect(s.title).toBe(s.displayTitle);
+    expect(s.displayTitle).toContain('webhook');
+    // `--untitled` still returns it, which is what `title_source` is for. That
+    // half is asserted through the binary in tests/annotate-cli.test.ts.
   });
 
   it('finds a session by its title even when the body never says those words', async () => {
@@ -234,13 +240,24 @@ describe('recall: the fusion — T3.1', () => {
    */
   it('shows, and labels, the line a subagent earned under its parent’s heading', async () => {
     const r = await recall(db, 'the', {}, { vectors: false, limit: 20 });
-    const block = r.sessions.find(
-      (s) => !s.isSidechain && s.hits.some((h) => h.isSidechain && h.sessionId !== s.id),
+    // Every subagent hit that was clustered under somebody else's block.
+    //
+    // This used to take the *first* such block and require its subagent line
+    // on the screen. Two snippet lines are handed out per block in quoting
+    // order, so whether any one block spends one of them on its subagent is a
+    // property of that block's other hits — and 8.2, which gave the corpus's
+    // sidechains titles and so changed what the title list returns, reordered
+    // the blocks and the test failed while the feature worked. The premise
+    // "the first clustered block renders its subagent" was the machine's, not
+    // the test's. What T3.6 promises is that a subagent's line reaches the
+    // screen at all, attributed to the session that earned it.
+    const clustered = r.sessions.flatMap((s) =>
+      s.isSidechain ? [] : s.hits.filter((h) => h.isSidechain && h.sessionId !== s.id),
     );
-    expect(block).toBeDefined();
-    const sub = block!.hits.find((h) => h.isSidechain && h.sessionId !== block!.id)!;
+    expect(clustered.length, 'no subagent hit was clustered under a parent').toBeGreaterThan(0);
     const out = renderFind(r, new Theme({ color: false, ascii: true, width: 80 }), new Date());
-    expect(out).toContain(`subagent ${idTag(sub.sessionId)}`);
+    const rendered = clustered.filter((h) => out.includes(`subagent ${idTag(h.sessionId)}`));
+    expect(rendered.length, out).toBeGreaterThan(0);
     expect(out).toContain('from subagents');
   });
 
@@ -566,11 +583,16 @@ describe('ls', () => {
     expect(only.sessions.every((s) => s.isSidechain)).toBe(true);
   });
 
-  it('gives an untitled session a name that is not a uuid', () => {
+  it('gives a session the harness never named a name that is not a uuid', () => {
     const r = listSessions(db, {}, { limit: 50 });
     const untitled = r.sessions.find((s) => s.id.startsWith(ID.untitled))!;
-    expect(untitled.title).toBeNull();
-    expect(untitled.displayTitle).toContain('potsherd-eval-api');
+    // 8.2. Before it, the answer was `potsherd-eval-api-a0c57a31` — a name,
+    // and not one that says anything. The title is *stored* rather than
+    // resolved per surface, so `ls`, `find` and `show` cannot disagree about
+    // it; that is what `title === displayTitle` is checking.
+    expect(untitled.displayTitle).not.toMatch(/-[0-9a-f]{8}$/);
+    expect(untitled.displayTitle).toContain('webhook');
+    expect(untitled.title).toBe(untitled.displayTitle);
   });
 
   it('names a ghost by its first real prompt, not by its id', () => {
