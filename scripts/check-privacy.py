@@ -331,29 +331,13 @@ ALLOW: list[tuple[str, str, str]] = [
 # fix, pinned to an exact number so it cannot grow. Unpin by scrubbing the file
 # and deleting the line.
 DEBT: list[tuple[str, str, int, str]] = [
-    # ---- RESERVED by T5.7's brief: `packages/**` may not be edited by that
-    # task. Docstrings and `--help` copy that explain the slug algorithms using
-    # the real directories the algorithms were derived from. Each wants a
-    # synthetic example with the same shape -- an underscore, a literal hyphen,
-    # a nested path -- which is mechanical, but `--help` is user-visible copy
-    # and belongs to whoever owns packages/.
-    ('packages/cli/src/filters.ts', 'project-name', 3, 'RESERVED: --help example'),
-    ('packages/cli/src/index.ts', 'corpus-topic', 1, 'RESERVED: --help example query'),
-    ('packages/cli/src/index.ts', 'project-name', 2, 'RESERVED: --help example'),
-    ('packages/core/src/adapters/cursor.ts', 'home-path', 3, 'RESERVED: slug docstrings'),
-    ('packages/core/src/adapters/cursor.ts', 'project-name', 7, 'RESERVED: slug docstrings'),
-    ('packages/core/src/cards/transcript.ts', 'home-path', 2, 'RESERVED: slug docstring'),
-    ('packages/core/src/cards/transcript.ts', 'project-name', 1, 'RESERVED: slug docstring'),
-    ('packages/core/src/cards/write.ts', 'home-path', 1, 'RESERVED: slug docstring'),
-    ('packages/core/src/cards/write.ts', 'project-name', 1, 'RESERVED: slug docstring'),
-    ('packages/core/src/claude/scan.ts', 'home-path', 1, 'RESERVED: slug docstring'),
-    ('packages/core/src/claude/scan.ts', 'project-name', 1, 'RESERVED: slug docstring'),
-    ('packages/core/src/open-threads.ts', 'home-path', 2, 'RESERVED: docstring example'),
-    ('packages/core/src/paths.ts', 'home-path', 2, 'RESERVED: slug docstring'),
-    ('packages/core/src/paths.ts', 'project-name', 1, 'RESERVED: slug docstring'),
-    ('packages/core/src/recall.ts', 'home-path', 1, 'RESERVED: slug docstring'),
-    ('packages/core/src/recall.ts', 'project-name', 2, 'RESERVED: slug docstring'),
-    ('packages/mcp/src/tools/find.ts', 'project-name', 2, 'RESERVED: tool description'),
+    # ---- Everything RESERVED by T5.7's brief -- eleven pins across seven files
+    # in `packages/**`, docstrings and `--help` copy that explained the slug
+    # algorithms using the real directories the algorithms were derived from --
+    # was cleared in phase 7, which owned `packages/`. Each example keeps the
+    # shape that was measured (an underscore, a literal hyphen, a nested path)
+    # and substitutes the name, and each docstring now says that is what it is,
+    # so no comment claims a measurement against a directory nobody can see.
 
     # ---- T5.9 added the `corpus-title` rule and it found these four. They are
     # not copy: each one records a ranking decision that was MEASURED against
@@ -363,12 +347,10 @@ DEBT: list[tuple[str, str, int, str]] = [
     # -- a measurement, not an edit, and not this task's.
     ('packages/core/src/recall.ts', 'corpus-title', 4,
      'ranking rationale measured against that session; re-derive, do not rename'),
-    ('packages/mcp/src/tools/ls.ts', 'project-name', 1, 'RESERVED: tool description'),
 
     # ---- Asserts the literal text of `find --help`, which lives in
     # packages/cli/src/index.ts above. Scrubbing one side of an equality without
     # the other only makes the test lie; these two unpin together.
-    ('tests/filters.test.ts', 'project-name', 1, 'pairs with packages/cli/src/index.ts'),
 
     # ---- Phase records and pasted evidence from phases 0-4. T5.7 was scoped to
     # docs/, scripts/, ci.yml and phase-5, so it did not edit signed-off phase

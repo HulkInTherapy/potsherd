@@ -425,7 +425,7 @@ function loadCards(db: Db): LoadedCard[] {
 /**
  * Are these two project paths the same project?
  *
- * `/Users/zebra/notes` and `/Users/zebra/notes/docs` are one codebase
+ * `/Users/dev/notes` and `/Users/dev/notes/docs` are one codebase
  * that the harness recorded from two working directories, and reporting a
  * decision as "never applied" to a subdirectory of where it was made is the
  * purest possible false positive. Path containment, not string equality.

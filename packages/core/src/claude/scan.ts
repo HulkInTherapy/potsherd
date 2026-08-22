@@ -272,7 +272,7 @@ function applyRecords(rec: ScannedFile, lines: string[]): void {
 }
 
 /**
- * `-Users-zebra-Ops-Outreach-Engine` is ambiguous: the separator and the
+ * `-Users-dev-Event-Bus-Rewrite` is ambiguous: the separator and the
  * hyphens inside a real directory name are the same character. This is only a
  * display fallback for files whose records carry no `cwd`.
  */

@@ -297,7 +297,7 @@ export function loadGhostTranscript(db: Db, sessionId: string): Transcript | nul
 }
 
 /**
- * `/Users/zebra/Downloads/Protfolio_app` -> `-Users-zebra-Downloads-Protfolio-app`.
+ * `/Users/dev/Downloads/data_pipeline` -> `-Users-dev-Downloads-data-pipeline`.
  *
  * `ghosts` has no `project_slug` column — the transcript that would have
  * carried one is what the sweep deleted — so the slug is re-derived here with

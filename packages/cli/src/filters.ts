@@ -21,7 +21,7 @@ type TriState = search.TriState;
  * The filter flags of `03` §7, parsed once for every verb that takes them.
  *
  * They are shared on purpose: `find`, `ls` and `stats` must agree about what
- * `--project Fulcrum --since 30d --ghosts only` selects, and the only way to
+ * `--project event-bus --since 30d --ghosts only` selects, and the only way to
  * guarantee that is for them to run the same parser over the same words.
  *
  * Two defaults are the product, not a preference:
@@ -181,8 +181,8 @@ export function parseWhen(value: string, flag: string, now = new Date()): string
 }
 
 /**
- * `--project Fulcrum` means the directory called Fulcrum, not the string
- * "Fulcrum". Nobody types an absolute path, so the name is matched against the
+ * `--project event-bus` means the directory called event-bus, not the string
+ * "event-bus". Nobody types an absolute path, so the name is matched against the
  * projects actually in the index — exactly first, then by last path segment,
  * then by substring — and an ambiguous name lists the candidates instead of
  * silently choosing one.

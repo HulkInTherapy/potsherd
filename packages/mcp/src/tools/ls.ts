@@ -13,7 +13,7 @@ export const lsInput = {
   project: z
     .string()
     .optional()
-    .describe('only this project — a directory name like "Fulcrum", not a path'),
+    .describe('only this project — a directory name like "event-bus", not a path'),
   tag: z.string().optional().describe('only sessions carrying this tag'),
   pinned: z.boolean().optional().describe('only sessions the user pinned'),
   ghosts: TRI_STATE.describe(

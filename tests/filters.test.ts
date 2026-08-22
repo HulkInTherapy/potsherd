@@ -505,7 +505,7 @@ describe('the flags on the shipped binary', () => {
       // `--help`, which lives in packages/cli/src/index.ts. Scrubbing one side
       // without the other just makes the test lie. Pinned in
       // scripts/check-privacy.py and assigned in registration-T5.7.txt.
-      '--project Fulcrum',
+      '--project event-bus',
       '--harness claude',
       '--since "last week"',
       '--until 2026-08-15',

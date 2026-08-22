@@ -600,7 +600,7 @@ function withOpenThreadMaterial(db: ReturnType<typeof store.open>): void {
   // the project the decision was "never seen in".
   db.prepare(
     'INSERT INTO sessions (id, harness, project, started_at, status) VALUES (?,?,?,?,?)',
-  ).run(SIBLING_SESSION, 'claude', '/tmp/Meghbrain', '2026-07-01T10:00:00.000Z', 'archived');
+  ).run(SIBLING_SESSION, 'claude', '/tmp/data-pipeline', '2026-07-01T10:00:00.000Z', 'archived');
   db.prepare(
     'INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text) VALUES (?,?,?,?,?,?)',
   ).run(`${SIBLING_SESSION}#2`, SIBLING_SESSION, 2, '2026-07-01T12:00:00.000Z', 'q', 'a');
@@ -931,7 +931,7 @@ describe('ask() open threads', () => {
     expect(t.confirmed).toBe(true);
     expect(t.what).toBe(DECIDED_WHAT);
     expect(t.project).toBe('/tmp/Ledger');
-    expect(t.otherProject).toBe('/tmp/Meghbrain');
+    expect(t.otherProject).toBe('/tmp/data-pipeline');
     // Cited or dropped applies here too: the positive half points at a real
     // exchange of the session `ask` answered from.
     expect(t.evidenceSeqs).toEqual([12]);

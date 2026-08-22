@@ -478,7 +478,7 @@ export function resumeCommand(
   }
 }
 
-/** `/Users/x/Meghavi-Second-Brain` -> `Meghavi-Second-Brain`. */
+/** `/home/dev/infra-terraform` -> `infra-terraform`. */
 export function projectName(project: string | null | undefined): string {
   if (!project) return '—';
   const parts = project.split(/[/\\]/).filter(Boolean);
@@ -505,7 +505,7 @@ export function idTag(id: string): string {
  * What `ls` shows for a session the harness never titled — sdk sessions, and
  * every codex thread before it is named. `03` §7 calls it `<slug>-<id8>`; the
  * slug used is the project's last segment rather than claude's own
- * `-Users-zebra-Fulcrum` form, because the point is a name that fits a column.
+ * `-Users-dev-event-bus` form, because the point is a name that fits a column.
  */
 export function fallbackTitle(
   project: string | null | undefined,

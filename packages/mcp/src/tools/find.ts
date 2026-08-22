@@ -15,7 +15,7 @@ export const findInput = {
   project: z
     .string()
     .optional()
-    .describe('only this project — a directory name like "Fulcrum", not a path'),
+    .describe('only this project — a directory name like "event-bus", not a path'),
   harness: z
     .enum(['claude', 'codex', 'cursor', 'pi', 'gemini', 'opencode', 'copilot'])
     .optional()
@@ -41,7 +41,7 @@ export type FindArgs = z.infer<z.ZodObject<typeof findInput>>;
  * This is `packages/cli/src/commands/find.ts` with `printJson` replaced by a
  * return: the same `parseFilters`, the same `parseLimit`, the same `recall`,
  * the same projection of every field. There is deliberately no second filter
- * parser in this package — `--project Fulcrum` has to select the same sessions
+ * parser in this package — `--project event-bus` has to select the same sessions
  * whether it arrives as a flag or as a JSON field, and the only way to
  * guarantee that is for one function to decide.
  *

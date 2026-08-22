@@ -69,7 +69,7 @@ export function cardPath(root: string, harness: string, slug: string | null, id:
 /**
  * A project slug as a single safe path segment.
  *
- * Claude Code's own slugs are already flat (`-Users-zebra-Fulcrum`), but codex
+ * Claude Code's own slugs are already flat (`-Users-dev-event-bus`), but codex
  * and cursor projects are not guaranteed to be, and a slug containing `..` or
  * a separator would put a card outside `~/.potsherd`. `03` §11 says potsherd
  * writes only under its own directory, so the guard is here rather than in a

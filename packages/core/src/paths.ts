@@ -219,7 +219,7 @@ export function expandTilde(p: string): string {
   return p;
 }
 
-/** `/Users/zebra/Fulcrum` -> `-Users-zebra-Fulcrum` (Claude Code's project slug). */
+/** `/Users/dev/event-bus` -> `-Users-dev-event-bus` (Claude Code's project slug). */
 export function slugify(cwd: string): string {
   return cwd.replace(/[/\\]/g, '-');
 }

@@ -79,9 +79,13 @@ export { cursorDir, cursorProjectsDir } from '../paths.js';
 
 /**
  * Cursor's project-directory slug: leading separators dropped, then every `/`
- * **and `_`** replaced by `-`. Verified both ways on this machine —
- * `/Users/zebra/maths_practice` → `Users-zebra-maths-practice` and
- * `/Users/zebra/Infant-State-Recognition-System` → itself with `/` swapped.
+ * **and `_`** replaced by `-`. Verified both ways against two real Cursor
+ * project directories on the reference machine. The examples below keep the
+ * shape of what was measured and substitute the names, because a directory
+ * name is itself a private fact — `scripts/check-privacy.py` treats it as one:
+ *
+ *   `/Users/dev/data_pipeline` → `Users-dev-data-pipeline`   (the `_` case)
+ *   `/Users/dev/Event-Bus-Rewrite` → itself with `/` swapped  (literal hyphens)
  *
  * The map is **not injective**: `/a/b_c` and `/a/b-c` slug identically, which
  * is why {@link recoverCwd} treats a slug match as corroboration of a path
@@ -96,7 +100,7 @@ export type ProjectSlugKind = 'path' | 'window-id' | 'empty-window';
 
 /**
  * Three shapes live under `projects/`, and only the first is a cwd:
- *   - a lossy path slug (`Users-zebra-maths-practice`);
+ *   - a lossy path slug (`Users-dev-data-pipeline`);
  *   - a **millisecond epoch integer** (`1769488977462`) — a Cursor window that
  *     had no folder open, keyed by when the window was created;
  *   - the literal `empty-window`.
@@ -607,10 +611,11 @@ function absolutePaths(input: unknown): string[] {
  * The project directory name is a lossy slug — `_` and `/` both became `-`, so
  * it cannot be inverted. But the transcript is full of absolute paths, and a
  * candidate directory that *slugs to exactly this project's name* is
- * corroborated by two independent facts. Both real projects resolve:
- * `Users-zebra-maths-practice` → `/Users/zebra/maths_practice` (the underscore
- * case, unreachable by inversion) and
- * `Users-zebra-Infant-State-Recognition-System` → the literal-hyphen case.
+ * corroborated by two independent facts. Both real projects on the reference
+ * machine resolve — names substituted here, shapes kept:
+ * `Users-dev-data-pipeline` → `/Users/dev/data_pipeline` (the underscore case,
+ * unreachable by inversion) and `Users-dev-Event-Bus-Rewrite` → the
+ * literal-hyphen case.
  *
  * This is corroboration, not proof: a sibling `/a/b_c` would satisfy the same
  * slug as `/a/b-c`. It is still strictly better than inventing a path, and it

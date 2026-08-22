@@ -249,12 +249,12 @@ example:
   ).addHelpText('after', `
 example:
   potsherd find "pgbouncer"
-  potsherd find "vedic astrology" --json | jq -r '.sessions[0].resume'
+  potsherd find "rate limiter" --json | jq -r '.sessions[0].resume'
   potsherd find "the pooler decision" --vectors on   # force semantic search
   potsherd find "pgbouncer" --explain                # why this order
 
 filters, one example each — they compose, and all of them are AND:
-  --project Fulcrum          only that project (a directory name is enough)
+  --project event-bus          only that project (a directory name is enough)
   --harness claude           claude, codex, cursor, pi, gemini, opencode
   --since "last week"        2026-08-01 / 2026-08 / 30d / today / in july
   --until 2026-08-15         the same forms; the day itself is included
@@ -370,7 +370,7 @@ exit codes:  0 answered  ·  1 nothing matched  ·  2 --strict refused`);
   ).addHelpText('after', `
 example:
   potsherd ls
-  potsherd ls --project Fulcrum --since 30d
+  potsherd ls --project event-bus --since 30d
   potsherd ls --ghosts only --limit 40               # what the sweep took
   potsherd ls --tag postgres --pinned --since 30d    # filters compose
   potsherd ls --linked-to 4c9339e0                   # both ends of a link
