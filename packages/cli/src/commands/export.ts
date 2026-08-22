@@ -171,12 +171,22 @@ function markdownReceipt(t: Theme, r: MarkdownExport, typed: string): string {
     return lines.join('\n');
   }
   lines.push('');
-  lines.push(
-    fitLine(
-      t,
-      `  ${t.dim('run')}  potsherd export --to markdown ${shellish(typed)} --transcripts  ${t.dim('to add the full conversations')}`,
-    ),
-  );
+  // T6.6 D9 — this line is a **command**, and `fitLine` clips its last variant.
+  // With a long directory the thing that got clipped was the path: the
+  // suggestion turned into `potsherd export --to markdown /private/tmp/cla…`,
+  // which is exactly the failure the comment on `typed` above says this line
+  // exists to avoid. A command that cannot be pasted is worse than a command
+  // that wraps, so the explanation moves to its own line and the command is
+  // never cut.
+  const command = `potsherd export --to markdown ${shellish(typed)} --transcripts`;
+  const hint = 'to add the full conversations';
+  const oneLine = `  ${t.dim('run')}  ${command}  ${t.dim(hint)}`;
+  if (Theme.len(oneLine) <= t.width) {
+    lines.push(t.asciiLine(oneLine));
+  } else {
+    lines.push(t.asciiLine(`  ${t.dim('run')}  ${command}`));
+    lines.push(t.asciiLine(`       ${t.dim(hint)}`));
+  }
   return lines.join('\n');
 }
 

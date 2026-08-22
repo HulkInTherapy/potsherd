@@ -56,20 +56,50 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
     // never mutates the local result — `federated.hits` and `.sessions` are
     // exactly what `recall()` returned — so a caller that ignores the two new
     // fields sees precisely what `find` has always produced. An absent bridge
-    // contributes a line and no hits: it cannot change the local ranking,
-    // cannot throw, and cannot slow `find` past its ceiling.
+    // contributes a line and no hits: it cannot change the local ranking and
+    // cannot throw.
+    //
+    // T6.6 D10 — and it cannot slow the verb past **the slowest bridge asked
+    // for**, which is not what this code did and not what this comment said.
+    //
+    // The three were awaited one after another. Each bridge has its own
+    // ceiling — claude-mem's `WORKER_TIMEOUT_MS` is 1500 ms, agentmemory's
+    // `AGENTMEMORY_TIMEOUT_MS` is 5000 ms — so the old claim ("cannot slow
+    // `find` past its ceiling") was true of each bridge and false of the verb,
+    // which spent the sum. Measured on 2026-08-22 against two endpoints that
+    // are alive and never answer (a TCP server that accepts and writes
+    // nothing on claude-mem's worker port; an MCP server that reads stdin
+    // forever):
+    //
+    //     in series    6,525 ms
+    //     concurrent   5,005 ms
+    //
+    // So: `Promise.all`, and the true worst case is stated rather than
+    // implied. It is the **maximum** of the ceilings of the bridges named in
+    // `--with`, plus the local query — about 5 s if agentmemory is one of
+    // them, about 1.5 s if claude-mem is the slowest, and unchanged from the
+    // local number for `notes`, which reads files synchronously.
+    //
+    // `03` §12's `find p50 < 150 ms` is about the local query. A verb that
+    // federates to a tool that is not answering cannot meet it and is not
+    // asked to; what it can promise is that it costs one bridge's patience
+    // and not three.
     const wanted = (o.with ?? '')
       .split(',')
       .map((x) => x.trim().toLowerCase())
       .filter(Boolean);
-    const lists: BridgeList[] = [];
-    if (wanted.includes('claude-mem')) lists.push(await queryClaudeMem(query, { limit: 20 }));
-    if (wanted.includes('agentmemory')) lists.push(await queryAgentMemory(query, { limit: 20 }));
+    // Started together, collected in the order the footer prints them.
+    const pending: Promise<BridgeList>[] = [];
+    if (wanted.includes('claude-mem')) pending.push(queryClaudeMem(query, { limit: 20 }));
+    if (wanted.includes('agentmemory')) pending.push(queryAgentMemory(query, { limit: 20 }));
     if (wanted.includes('notes')) {
-      lists.push(
-        queryNotes(query, { limit: 20, ...(o.claudeDir ? { claudeDir: o.claudeDir } : {}) }),
+      pending.push(
+        Promise.resolve(
+          queryNotes(query, { limit: 20, ...(o.claudeDir ? { claudeDir: o.claudeDir } : {}) }),
+        ),
       );
     }
+    const lists: BridgeList[] = await Promise.all(pending);
     const federated = lists.length > 0 ? federate(result, lists) : null;
 
     if (o.json) {
@@ -128,7 +158,20 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
 
     const t = themeFrom(o);
     print(renderFind(result, t, new Date(), { explain: Boolean(o.explain) }));
-    if (federated) print(`  ${t.dim(federationLine(federated.bridges))}`);
+    if (federated) {
+      // T6.6 D8 — this line was printed at whatever length it came out, and
+      // came out at 84 characters under `--width 80` while every other line on
+      // the screen fitted. Wrapped rather than clipped, for the reason
+      // `doctor --privacy` wraps its verb list: the whole value of the line is
+      // that a reader finds *their* bridge in it, and a list with the answer
+      // cut off the end is not one.
+      // Wrapped on the separator, not on spaces: `fmt.wrap` collapses the
+      // `  ·  ` between bridges to a single space, and that gap is what keeps
+      // three sentences readable as three answers.
+      for (const line of wrapOnSeparator(federationLine(federated.bridges), Math.max(20, t.width - 2))) {
+        print(`  ${t.dim(line)}`);
+      }
+    }
     // Exit 1 on no match, so `potsherd find x || echo none` works in a script.
     return result.sessions.length ? 0 : 1;
   } finally {
@@ -151,4 +194,35 @@ function vectorMode(o: FindCommandOptions): boolean | 'auto' {
     default:
       return 'auto';
   }
+}
+
+/**
+ * Break the federation footer into terminal-width lines, on the `  ·  ` that
+ * separates one bridge's answer from the next.
+ *
+ * T6.6 D8. The line used to be printed whole, at whatever length it came out —
+ * 84 characters under `--width 80`, on a screen where every other line fitted.
+ * A bridge's own sentence is never broken, so a reader always sees a whole
+ * answer or none of it; a single sentence longer than the width is still
+ * emitted on its own line rather than being cut.
+ */
+export function wrapOnSeparator(line: string, width: number, sep = '  \u00b7  '): string[] {
+  if (!line) return [];
+  const parts = line.split(sep);
+  const out: string[] = [];
+  let current = '';
+  for (const part of parts) {
+    if (!current) {
+      current = part;
+      continue;
+    }
+    if ([...`${current}${sep}${part}`].length <= width) {
+      current = `${current}${sep}${part}`;
+    } else {
+      out.push(current);
+      current = part;
+    }
+  }
+  if (current) out.push(current);
+  return out;
 }
