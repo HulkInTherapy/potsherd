@@ -1247,9 +1247,20 @@ const monthYear = (isoStr) => {
 };
 
 function verify() {
-  const bin = path.join(repo, 'packages', 'cli', 'bin', 'potsherd.js');
-  if (!fs.existsSync(path.join(repo, 'packages', 'cli', 'dist', 'potsherd.js'))) {
-    console.error('potsherd is not built. run:  pnpm build');
+  // The checkout's binary first, then the plugin's vendored bundle. The second
+  // is committed, so a plain `git clone` with no `pnpm install` and no build
+  // has one — which is the machine this generator is most likely to be run on
+  // now that a clone is a complete install. Without it, a clone got "potsherd
+  // is not built" and exit 1 **after the corpus had already been written**,
+  // which is a true sentence that describes the wrong half of what happened.
+  const candidates = [
+    path.join(repo, 'packages', 'cli', 'dist', 'potsherd.js'),
+    path.join(repo, 'plugins', 'claude-code', 'dist', 'potsherd.js'),
+  ];
+  const bin = candidates.find((f) => fs.existsSync(f));
+  if (!bin) {
+    console.error('the corpus is written, but nothing here can verify it.');
+    console.error('run:  pnpm build   (or use a clone, which carries plugins/claude-code/dist)');
     return 1;
   }
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'potsherd-verify-'));

@@ -1132,11 +1132,16 @@ own bundled CLI and MCP server —
 [`plugins/claude-code/dist/`](plugins/claude-code/dist), two committed files —
 and because neither of them needs a `node_modules` to start.
 
-**On Node 22.5 or newer, that includes the database.** `better-sqlite3` is a
-native addon and cannot be vendored into one file, so potsherd falls back to
-`node:sqlite`, which Node ships itself. The whole 1,426-test suite runs green
-under it in CI, on the same matrix as the addon, because a fallback nobody
-exercises is not a fallback. `potsherd doctor` prints which one you are on.
+**That includes the database.** `better-sqlite3` is a native addon and cannot be
+vendored into one file, so potsherd falls back to `node:sqlite`, which Node
+ships itself. The whole 1,426-test suite runs green under it in CI, on the same
+matrix as the addon, because a fallback nobody exercises is not a fallback.
+`potsherd doctor` prints which one you are on.
+
+Measured on a fresh Debian container with no `node_modules` anywhere, on **Node
+22.23.2 and 24.19.0**: clone, then `audit` — **117 ms** — then `rescue`,
+`index` (228 transcripts, 333 ms), `ls`, `find`, `show --html`, `audit
+--verify`, and an MCP server answering `tools/list` with all six tools.
 
 That was not true until v1.0.0. Before it, a marketplace install produced a
 plugin with no CLI and no MCP server: all six tools vanished from the client and
@@ -1181,9 +1186,12 @@ npm install -g sqlite-vec                        # ...and its sqlite half
 
 ### What it needs
 
-Node **22 or newer**. On Node 22 without `better-sqlite3` there is no database
-at all, so `audit`, `rescue`, `guard` and `doctor` work and nothing else does —
-`doctor` says so. On 22.5 and up, Node's own SQLite covers it.
+Node **22 or newer**, and nothing else. If your Node has `node:sqlite`
+unflagged — 22.23.2 and 24.19.0 both do — everything works with no install at
+all. If it does not, and `better-sqlite3` is not there either, then `audit`,
+`rescue`, `guard` and `doctor` work and nothing that reads the index does;
+`potsherd doctor` says which situation you are in rather than leaving you to
+find out one verb at a time.
 
 `CLAUDE_CONFIG_DIR` is honoured; `--claude-dir` overrides it. Every verb takes
 `--json`, `--no-color`, `--ascii` and `--width`.

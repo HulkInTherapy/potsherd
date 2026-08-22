@@ -23,17 +23,25 @@ import type Database from 'better-sqlite3';
  * one that can load `sqlite-vec`, because that is a native extension too, so
  * vector search is a `better-sqlite3` feature by construction.
  *
- * **`node:sqlite`, when it is not.** Node has shipped a SQLite build since
- * 22.5, unflagged from 23.4. Verified on the reference machine (node 24.9,
- * SQLite 3.51.2): **FTS5 compiles, WAL works, named parameters bind, `iterate`
- * exists, integers come back as numbers.** Which is to say every feature
- * potsherd's schema and queries actually use. It has no `transaction()`, so
- * {@link wrap} builds one out of `SAVEPOINT` — nested exactly the way
- * better-sqlite3 nests, because `ingest.ts` relies on that.
+ * **`node:sqlite`, when it is not.** Node ships its own SQLite. Verified on the
+ * reference machine (node 24.9, SQLite 3.51.2): **FTS5 compiles, WAL works,
+ * named parameters bind, `iterate` exists, integers come back as numbers**, and
+ * with `allowExtension` at construction `sqlite-vec` loads into it too. Which
+ * is to say every feature potsherd's schema and queries actually use. It has no
+ * `transaction()`, so {@link wrap} builds one out of `SAVEPOINT` — nested
+ * exactly the way better-sqlite3 nests, because `ingest.ts` relies on that.
  *
- * On a machine with neither — Node 22 without `--experimental-sqlite`, and no
- * addon — `open()` throws `NoSqliteError`, which names one command. The four
- * verbs that never touch a database keep working either way, because the
+ * **Which Node versions have it is not asserted here, it is discovered.** It
+ * arrived behind `--experimental-sqlite` and was unflagged later, and the two
+ * versions this was actually run against — **22.23.2 and 24.19.0, both in a
+ * fresh Debian container with no `node_modules` at all** — both have it
+ * unflagged. Rather than encode a version boundary nobody here has measured,
+ * {@link loadNodeSqlite} tries the import and treats every failure the same
+ * way: this driver is not available on this machine, and `doctor` says so.
+ *
+ * On a machine with neither — an old Node where the module is still flagged,
+ * and no addon — `open()` throws `NoSqliteError`, which names one command. The
+ * four verbs that never touch a database keep working either way, because the
  * driver is loaded on first `open()` and not at import.
  *
  * ## how this is kept honest

@@ -72,15 +72,21 @@ jobs:
       # looks supported, succeeds, and does nothing — and the only evidence
       # worth having is the full suite passing on it.
       #
-      # Node 22 has `node:sqlite` behind `--experimental-sqlite`, so it is
-      # unreachable there and the driver reports itself absent; the step runs on
-      # 24 only. That is also the honest support statement: on Node 22 without
-      # the addon, potsherd rescues and audits and cannot index.
+      # On both matrix versions, not just 24. `node:sqlite` arrived behind
+      # `--experimental-sqlite` and was unflagged later, and the assumption that
+      # "Node 22 does not have it" turned out to be false the moment somebody
+      # ran it: 22.23.2 has it unflagged, measured in a fresh Debian container.
+      # So the fallback is tested wherever it exists, and the runner's own Node
+      # decides whether that is here.
       - name: test again on Node's own sqlite
-        if: matrix.node == '24'
         env:
           POTSHERD_SQLITE: node
-        run: pnpm test
+        run: |
+          if node -e "require('node:sqlite')" 2>/dev/null; then
+            pnpm test
+          else
+            echo "$(node --version) has no unflagged node:sqlite — nothing to test"
+          fi
 
       # `plugins/claude-code/dist/*.js` are generated files that are committed,
       # because a plugin install is a git clone and has no way to build them.
