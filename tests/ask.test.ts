@@ -1431,6 +1431,38 @@ describe('the ask block is built to fit 80x24', () => {
     expect(text).not.toMatch(/sentences? trimmed/);
   });
 
+  it('says a dead backend is a dead backend, not an empty archive', () => {
+    // "Did not answer" and "read it and found nothing" are different facts, and
+    // this line conflated them: a run where every reader errored printed *"the
+    // readers found nothing that answers the question"* — a statement about the
+    // user's archive, made by a verb that never read it, on the screen whose
+    // whole purpose is not making those.
+    //
+    // Found by recording `docs/demo.cast` under a relocated HOME, where
+    // `claude` is on PATH and is not logged in: six readers failed in 3.2 s and
+    // the cast published the wrong sentence.
+    const r = shape(1, 1, 0);
+    const dead: AskResult = {
+      ...r,
+      sentences: [],
+      answer: '',
+      evidence: [],
+      readers: r.readers.map((x) => ({ ...x, found: false, error: 'Not logged in' })),
+    };
+    const text = stripAnsi(renderAsk(dead, t80, NOW));
+    expect(text).toContain('no reader could run');
+    expect(text).toContain('Not logged in');
+    expect(text).not.toContain('found nothing that answers');
+
+    // ...and a run where the readers genuinely answered and found nothing still
+    // says so. The distinction is the point; a message that always blamed the
+    // backend would be the same defect pointing the other way.
+    const empty: AskResult = { ...r, sentences: [], answer: '', evidence: [] };
+    const quiet = stripAnsi(renderAsk(empty, t80, NOW));
+    expect(quiet).toContain('found nothing that answers');
+    expect(quiet).not.toContain('no reader could run');
+  });
+
   it('does not print the same two numbers twice in its footer', () => {
     // `6 of 65 sessions read` followed two lines later by `searched 6 of 65
     // matching sessions` — the same fact, twice, on a screen built to a row

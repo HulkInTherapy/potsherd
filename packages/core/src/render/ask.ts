@@ -426,12 +426,23 @@ function nothing(r: AskResult, t: Theme): string[] {
       ),
   );
   out.push('');
+  // "Did not answer" and "read it and found nothing" are different facts, and
+  // this line conflated them. A run where **every** reader errored — a dead
+  // backend, a harness that is not logged in, a timeout — printed *"the readers
+  // found nothing that answers the question"*, which is a statement about the
+  // user's archive made by a verb that never read it. Found by recording the
+  // demo cast under a relocated HOME, where `claude` is on PATH and not logged
+  // in: six readers failed in 3.2 s and the screen said the archive had nothing.
+  const failed = r.readers.filter((x) => x.error);
+  const allFailed = r.readers.length > 0 && failed.length === r.readers.length;
   out.push(
     INDENT +
       t.dim(
-        r.dropped.length > 0
-          ? `every sentence was dropped for want of a citation that resolves (${f.num(r.dropped.length)}).`
-          : 'the readers found nothing that answers the question.',
+        allFailed
+          ? `no reader could run, so nothing was read: ${f.clip(failed[0]?.error ?? 'the backend did not answer', t.width - 30, t)}`
+          : r.dropped.length > 0
+            ? `every sentence was dropped for want of a citation that resolves (${f.num(r.dropped.length)}).`
+            : 'the readers found nothing that answers the question.',
       ),
   );
   out.push('');
