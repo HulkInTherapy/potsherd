@@ -18,6 +18,24 @@ export interface IndexCommandOptions extends GlobalOptions {
   full?: boolean;
   incremental?: boolean;
   harness?: string;
+  /**
+   * Tri-state, and every state is a different sentence (T8.E):
+   *
+   *   `undefined` — no flag. **Text only.** No model, no download, no network.
+   *                 The receipt ends with one line offering the upgrade.
+   *   `true`      — `--embed`. Fetch the model if it is not here yet and
+   *                 embed. The opt-in, and the only path that touches the
+   *                 network.
+   *   `false`     — `--no-embed`. Text only *and stop offering*: the upgrade
+   *                 line is not printed. Someone who has said no once — in a
+   *                 hook, in CI, on a metered connection — should not be sold
+   *                 to on every run, and that is the whole of what the flag
+   *                 still does now that it names the default. It is kept
+   *                 rather than removed because it is the documented spelling
+   *                 of "offline, and I mean it", and because `08` rule 8 asks
+   *                 a flag to either do something or go — this one does
+   *                 something you can see by diffing two receipts.
+   */
   embed?: boolean;
   session?: string;
 }
@@ -35,12 +53,20 @@ const NOT_YET: readonly string[] = ['gemini', 'opencode', 'copilot'];
  *   1. **It is incremental by default.** A second run that finds nothing
  *      changed does no work and says so in well under a second. `--full`
  *      re-reads everything.
- *   2. **It never stalls silently.** The one-line progress bar names the file
- *      being read, and the ~34 MB first-run model download is announced *before*
- *      it starts, not discovered afterwards.
- *   3. **It never leaves a secret in the index.** Redaction runs before the
+ *   2. **It is offline by default** (T8.E, `08` §8.6). `potsherd index` with
+ *      no flags parses, redacts and indexes — and stops. No model, no 32 MB
+ *      download, no network at all. Measured on the frozen reference archive
+ *      on 2026-08-22: 10.7 s text-only against 343 s (5m 43s) with
+ *      embeddings, of which the download is a few seconds and the rest is
+ *      1,294 exchanges through bge-small. `05` promises a stranger a walk
+ *      that finishes while they are still watching; four hundred times the
+ *      budget is not a default, it is an opt-in, and it is now spelled
+ *      `--embed`. The receipt's last line offers it.
+ *   3. **It never stalls silently.** The one-line progress bar names the file
+ *      being read, and the first-run model download `--embed` triggers is
+ *      announced *before* it starts, not discovered afterwards.
+ *   4. **It never leaves a secret in the index.** Redaction runs before the
  *      first row is written (`03` §5), and the receipt prints what was masked.
- *      `--no-embed` skips the model entirely so this works offline on day one.
  */
 export async function runIndex(o: IndexCommandOptions): Promise<number> {
   const t = themeFrom(o);
@@ -69,17 +95,20 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
         ...(harnesses ? { harnesses } : {}),
         ...(o.session ? { sessionId: o.session } : {}),
         full: Boolean(o.full),
-        embed: o.embed !== false,
+        // The flip. `undefined` and `false` both mean text-only; only an
+        // explicit `--embed` reaches for the model.
+        embed: o.embed === true,
         onModelDownload: (bytes) => {
           announced = true;
           bar.done();
           if (o.json || o.quiet) return;
-          // Said before the download starts, never after a silent stall. This
-          // is the only time potsherd touches the network without being asked
-          // to run a model, and the user is told which directory it lands in.
+          // Said before the download starts, never after a silent stall. It
+          // only happens on the `--embed` path now — nothing potsherd does by
+          // default reaches the network — and the user is told which
+          // directory it lands in.
           print(
             `  first run: fetching the ${fmt.bytes(bytes)} embedding model into ` +
-              `${paths.tildify(paths.modelsDir(root))}  ${t.dim('(once; --no-embed skips it)')}`,
+              `${paths.tildify(paths.modelsDir(root))}  ${t.dim('(once)')}`,
           );
         },
         onProgress: (p) => {
@@ -109,7 +138,7 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
   }
   if (o.quiet) return report.totals.failed ? 1 : 0;
 
-  print(renderIndexReceipt(report, t, root));
+  print(renderIndexReceipt(report, t, root, { embed: o.embed }));
   return report.totals.failed ? 1 : 0;
 }
 
@@ -147,6 +176,7 @@ export function renderIndexReceipt(
   report: IndexReport,
   t: ReturnType<typeof themeFrom>,
   root: string,
+  o: { embed?: boolean } = {},
 ): string {
   const card = new Card(t);
   card.heading('index', paths.tildify(root), fmt.date(new Date(report.ranAt))).blank();
@@ -176,7 +206,7 @@ export function renderIndexReceipt(
     // "nothing matched — index holds no secrets" after an incremental run that
     // opened one file, on an index holding three masks. A run reports the run.
     maskedThisRunRow(report, t, card.noteWidth()),
-    embeddingRow(report, t),
+    embeddingRow(report, t, o.embed === false),
   ]);
 
   card.blank();
@@ -227,6 +257,25 @@ export function renderIndexReceipt(
     'to see parse coverage, redaction counts and every path read.',
     'for parse coverage and every path read.',
   );
+
+  // The one line that offers the upgrade (`08` §8.6). Printed only when this
+  // run did not embed *and* the user has not already said no with
+  // `--no-embed`, and only when there is something to search — offering
+  // semantic search over an empty index is noise, not help.
+  //
+  // The two numbers are measured, not guessed: `fmt.bytes` renders
+  // `MODEL_DOWNLOAD_BYTES` (34,014,426) as 32 MB, and 5m 43s is
+  // `index --embed` on the frozen reference archive (1,294 exchanges) on
+  // 2026-08-22, rounded up. `~` is the estimate marker `05` asks for; a
+  // smaller archive is faster and a larger one is slower, roughly linearly.
+  if (o.embed === undefined && !report.embeddings.enabled && report.totals.exchanges > 0) {
+    card.fix(
+      'potsherd index --embed',
+      'for semantic search (32 MB model, ~6 min, once)',
+      'for semantic search (32 MB, ~6 min)',
+      'for semantic search',
+    );
+  }
   return card.toString();
 }
 
@@ -244,14 +293,39 @@ function harnessNote(h: HarnessReport, sep = ' · '): string {
   return parts.join(sep);
 }
 
-function embeddingRow(report: IndexReport, t: ReturnType<typeof themeFrom>) {
+/**
+ * The `vectors` row.
+ *
+ * Three different facts, and the row says which one it is (T8.E). The one
+ * that did not exist before the default flipped is the third: a user who ran
+ * `index --embed` last week and plain `index` today still has their vectors,
+ * and this run did not refresh them. Printing `—  skipped` over an index
+ * holding 1,294 vectors would be false, and printing the count with no
+ * qualifier would be worse — it would claim the vectors cover what was just
+ * parsed. So the count is shown *and* labelled stale.
+ */
+function embeddingRow(
+  report: IndexReport,
+  t: ReturnType<typeof themeFrom>,
+  explicitlyOff: boolean,
+) {
   const e = report.embeddings;
   const total = e.embedded + e.upToDate;
   if (!e.enabled) {
+    if (e.upToDate > 0) {
+      return {
+        label: 'vectors',
+        value: fmt.num(e.upToDate),
+        note: `not refreshed this run ${t.mid} potsherd index --embed`,
+        tone: 'dim' as const,
+      };
+    }
     return {
       label: 'vectors',
       value: t.dash,
-      note: `skipped (--no-embed) ${t.mid} text search only`,
+      note: explicitlyOff
+        ? `skipped (--no-embed) ${t.mid} text search only`
+        : `text search only ${t.mid} no model, no network`,
       tone: 'dim' as const,
     };
   }
