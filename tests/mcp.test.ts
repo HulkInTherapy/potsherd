@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { indexAll, paths } from '@potsherd/core';
+import { availability, indexAll, paths } from '@potsherd/core';
 
 import { makeContext, resolveGraftCwd } from '../packages/mcp/src/context.js';
 import { TOOLS, WRITE_TOOLS } from '../packages/mcp/src/server.js';
@@ -587,7 +587,25 @@ describe('the two model tools with no backend', () => {
    * A key that cannot work plus a one-millisecond ceiling reaches that path
    * without a usable backend and without a completed request.
    */
-  it('potsherd_ask returns a tool error when it runs past its deadline', async () => {
+  // This one needs a backend that can be *reached and then time out*. On CI
+  // there is no `claude` anywhere and `@anthropic-ai/sdk` is an
+  // optionalDependency that is not installed, so `detectBackend` short-circuits
+  // and the tool errors with "no way to reach a model" instead — which is the
+  // correct product behaviour and is asserted by the test above this one.
+  // Asserting the deadline path unconditionally asserts the machine, not the
+  // code, and it duly passed on every developer laptop and failed on CI.
+  //
+  // The predicate is the product's own answer to "can I reach a model", because
+  // that is exactly the branch being avoided. Note `availability()` finds a
+  // `claude` at a well-known absolute path even with `PATH` emptied, so this
+  // condition CANNOT be exercised on a machine that has Claude Code installed —
+  // CI is the only place it is observable. Convention follows
+  // `describe.skipIf(!hasModel)` in tests/recall.test.ts.
+  const reachable = (): boolean => {
+    const a = availability();
+    return Boolean(a.claude) || Boolean(a.apiKey) || Boolean(a.codex);
+  };
+  it.skipIf(!reachable())('potsherd_ask returns a tool error when it runs past its deadline', async () => {
     const timed = makeContext({
       potsherdDir: root,
       cwd: project,
