@@ -1,11 +1,11 @@
-import { format as fmt, Theme } from '@potsherd/core';
+import { format as fmt, stack, Theme } from '@potsherd/core';
 // `packages/core/src/index.ts` is reserved for the integrator this phase, so
 // the barrel line — `export * as stack from './stack.js';` — is written out in
 // `phases/phase-6/registration-T6.4.txt` rather than added here. Until it
 // lands this import reaches the module directly, so the branch builds,
 // typechecks and tests green; swap it for `stack` in the line above once the
 // barrel carries it.
-import * as stack from '../../../core/src/stack.js';
+
 
 import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
 

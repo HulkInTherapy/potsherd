@@ -123,6 +123,9 @@ export const OFFLINE_VERBS: readonly string[] = [
   // writes. It opens no socket except the localhost probes the bridges use to
   // find a store, and it calls no model.
   'export',
+  // `stack` only detects which memory tools are installed: it stats directories
+  // and reads two of its own files. No model, no socket.
+  'stack',
   'doctor',
 ];
 

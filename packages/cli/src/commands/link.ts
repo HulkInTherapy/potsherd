@@ -5,14 +5,18 @@ import {
   sessionLinks,
   Theme,
   unlinkSessions,
+  renderSuggestions,
+  suggestLinks,
 } from '@potsherd/core';
 import { print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 import { openIndex } from '../filters.js';
 import { mustResolve, type ResolvedRef } from '../session-ref.js';
 
 export interface LinkCommandOptions extends GlobalOptions {
-  a: string;
-  b: string;
+  /** `--suggest` — propose cross-project links; writes nothing. */
+  suggest?: boolean;
+  a?: string;
+  b?: string;
   note?: string;
   remove?: boolean;
 }
@@ -36,6 +40,28 @@ export async function runLink(o: LinkCommandOptions): Promise<number> {
   const verb = o.remove ? 'unlink' : 'link';
   const { db } = openIndex(o);
   try {
+    // `--suggest` resolves no session reference, so it runs before the two
+    // mustResolve calls. It proposes and never writes: phase 4 measured this
+    // rule pass at 1-2 of 8 candidates worth raising, and renderSuggestions
+    // prints that number rather than implying the list is all good.
+    if (o.suggest) {
+      const result = suggestLinks(db, {});
+      if (o.json) {
+        printJson(result);
+        return 0;
+      }
+      for (const line of renderSuggestions(result, themeFrom(o), fmt.wrap)) print(line);
+      return 0;
+    }
+
+    // `a` and `b` became optional so `--suggest` could take neither. A bare
+    // `potsherd link` is now reachable and must say so rather than throw.
+    if (!o.a || !o.b) {
+      throw new UserError(
+        'link needs two sessions',
+        'potsherd link 4c9339e0 85ef9531   (or: potsherd link --suggest)',
+      );
+    }
     const a = mustResolve(db, o.a, verb);
     const b = mustResolve(db, o.b, verb);
 

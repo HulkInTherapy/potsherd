@@ -536,4 +536,21 @@ export { graftJson, renderGraft } from './render/graft.js';
 // module is one verb's worth of proposal-and-apply.
 export * as setup from './setup.js';
 
+// ---------------------------------------------------------------- phase 6
+// T6.4 — `stack`: the verb that says which tool owns which of `01 §1`'s four
+// failures, and which two potsherd loses.
+export * as stack from './stack.js';
+// `renderSuggestions` lives beside `MEASURED_PRECISION` on purpose, so there is
+// no wiring that leaves the measured-precision disclosure out.
+export {
+  suggestLinks,
+  renderSuggestions,
+  MEASURED_PRECISION,
+  DEFAULT_LIMIT as SUGGEST_DEFAULT_LIMIT,
+  type LinkSuggestion,
+  type SuggestResult,
+  type SuggestOptions,
+  type Precision,
+} from './link-suggest.js';
+
 export { VERSION } from './version.js';
