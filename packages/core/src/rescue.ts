@@ -6,6 +6,7 @@ import { scanClaudeDisk, SIDECHAIN_DIR } from './claude/scan.js';
 import { readHistory } from './claude/history.js';
 import { readSessionsIndexes } from './claude/sessions-index.js';
 import { open as openDb, type Db } from './db.js';
+import { fallbackTitle } from './recall.js';
 import { withLockAsync } from './lock.js';
 
 /**
@@ -350,6 +351,127 @@ function countKind(result: RescueResult, kind: SourceKind, copied: boolean): voi
 }
 
 /**
+ * The stopping rule for "does this prompt name the session?".
+ *
+ * 166 of the 299 ghosts on the reference machine — 56% — rendered as
+ * `/resume`, `/model`, `/mcp` or `clear`. The first line `history.jsonl` holds
+ * for a session is very often not a question at all but a command typed *at*
+ * the harness rather than *to* it, and `05 §3` puts `ls` on the screenshot the
+ * whole product is shared on. So this is the rule that decides whether that
+ * screen reads as an archive or as garbage.
+ *
+ * A prompt names its session when it is
+ *   - not a slash command,
+ *   - at least `MIN_TITLE_CHARS` code points long, and
+ *   - not one of the few words that are punctuation for a conversation rather
+ *     than part of one.
+ *
+ * The list is the one `plans/phases/phase-8-hardening.md §8.2` names, and
+ * nothing more. It is a *stopping rule*, not a filter widened until a count
+ * came out at zero: a stoplist tuned to its own measurement is a constant
+ * fitted to its own test. What stopped it is that the phase file wrote it down.
+ */
+const TITLE_STOPWORDS: ReadonlySet<string> = new Set([
+  'clear',
+  'continue',
+  'ok',
+  'yes',
+  'hi',
+  'y',
+  'n',
+]);
+
+const MIN_TITLE_CHARS = 8;
+
+/**
+ * How much of a prompt becomes a title.
+ *
+ * 60 **code points** — never 60 bytes, and never 60 UTF-16 units. The design
+ * system is built out of `·`, `…`, `→` and `★` and the corpus is not ASCII, so
+ * a byte count is the wrong count (`09 §13.13`); `Array.from` is the only cut
+ * in JavaScript that cannot leave half a surrogate pair behind, which
+ * `String.slice` will happily do to an emoji. 60 is also deliberately low
+ * enough that `recall.ts`'s own 120-unit display cut can never re-cut what is
+ * stored here: 60 code points is at most 120 UTF-16 units.
+ */
+export const GHOST_TITLE_MAX_CHARS = 60;
+
+/** Whitespace is not information in a title, and a prompt may be many lines. */
+function collapse(text: string | null | undefined): string {
+  return (text ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/** Cut to `max` code points. Never splits a surrogate pair. */
+export function cutToCodePoints(text: string, max: number): string {
+  const points = Array.from(text);
+  return points.length <= max ? text : points.slice(0, max).join('');
+}
+
+/** Whether this prompt names the session it opened. See `TITLE_STOPWORDS`. */
+export function isSubstantivePrompt(text: string | null | undefined): boolean {
+  const clean = collapse(text);
+  if (!clean) return false;
+  if (clean.startsWith('/')) return false;
+  if (Array.from(clean).length < MIN_TITLE_CHARS) return false;
+  return !TITLE_STOPWORDS.has(clean.toLowerCase());
+}
+
+/** The first prompt in `texts` that names its session, collapsed. Or null. */
+export function firstSubstantivePrompt(
+  texts: Iterable<string | null | undefined>,
+): string | null {
+  for (const t of texts) if (isSubstantivePrompt(t)) return collapse(t);
+  return null;
+}
+
+/**
+ * The name a ghost is listed under, and it is never null.
+ *
+ * Three sources in order of how much they know:
+ *   1. `sessions-index.json`'s `summary` — the harness's own name for the
+ *      session, written from the whole of it. Stored verbatim: it is already a
+ *      title and cutting it would only lose words.
+ *   2. the first substantive prompt, cut to `GHOST_TITLE_MAX_CHARS`. A prompt
+ *      is not a title, which is why this one is cut and the summary is not.
+ *   3. `<project>-<id8>`. A uuid-shaped name is a poor label; a slash command
+ *      is a *wrong* one, because a dozen ghosts called `/model` are less
+ *      distinguishable than a dozen uuids and they also claim to say something.
+ *
+ * Stored in `ghosts.title` rather than resolved per-surface so that `ls`,
+ * `find`, `show` and `graft` cannot disagree — `browse.ts`'s existing
+ * `COALESCE(g.title, g.first_prompt)` then resolves to (1)/(2)/(3) with no
+ * edit of its own.
+ */
+function ghostTitle(
+  summary: string | null,
+  substantive: string | null,
+  project: string | null,
+  sessionId: string,
+): string {
+  if (summary) return summary;
+  if (substantive) return cutToCodePoints(substantive, GHOST_TITLE_MAX_CHARS);
+  return fallbackTitle(project, sessionId, HARNESS);
+}
+
+/**
+ * Whether a stored title is one somebody *wrote*, as opposed to the
+ * `<project>-<id8>` fallback this file synthesised.
+ *
+ * The receipt's "N with titles" has to mean the same thing on both paths, and
+ * the fast path never sees the prompts — so the question is asked of the
+ * stored row instead, by re-deriving the fallback and comparing. That keeps
+ * one definition rather than a column that could drift from it.
+ */
+function isWrittenTitle(
+  title: string | null,
+  project: string | null,
+  sessionId: string,
+): boolean {
+  const clean = collapse(title);
+  return clean !== '' && clean !== fallbackTitle(project, sessionId, HARNESS);
+}
+
+/**
  * A fingerprint of every input the ghost rebuild reads. If it is unchanged
  * since the last rescue, no ghost can have changed either, and the whole pass
  * — streaming history.jsonl and re-writing several thousand ghost_prompts rows
@@ -360,6 +482,14 @@ function countKind(result: RescueResult, kind: SourceKind, copied: boolean): voi
  *   - history.jsonl's size and mtime (its content is the prompts)
  *   - which session ids have a transcript on disk (a deletion makes a ghost)
  *   - every sessions-index.json's size and mtime (they carry ghost titles)
+ *
+ * …and one thing that is not an input at all: `GHOST_ALGO_VERSION`. The
+ * fingerprint's whole job is "would a rebuild produce a different row", and
+ * after phase 8.2 the same three inputs produce a *different* row than they
+ * did at v1.0.0. Without the version an upgraded potsherd would keep serving
+ * the `/resume` titles it already stored, for ever, because nothing under
+ * ~/.claude had changed. Bump it whenever the derivation changes.
+ *
  * Anything that could change a ghost changes this string. A stale fingerprint
  * can therefore only ever cost work, never correctness.
  */
@@ -373,7 +503,7 @@ function ghostFingerprint(
   } catch {
     return null; // no history.jsonl: always take the slow path, and warn.
   }
-  const parts = [`history:${hs.size}:${Math.floor(hs.mtimeMs)}`];
+  const parts = [`algo:${String(GHOST_ALGO_VERSION)}`, `history:${hs.size}:${Math.floor(hs.mtimeMs)}`];
   const ids = disk.sessions.map((s) => s.sessionId).sort();
   parts.push(`sessions:${ids.length}:${crypto.createHash('sha256').update(ids.join('\n')).digest('hex')}`);
   for (const proj of (disk.projects ?? []).filter((p) => p.hasSessionsIndex)) {
@@ -388,6 +518,9 @@ function ghostFingerprint(
   return crypto.createHash('sha256').update(parts.sort().join('\n')).digest('hex');
 }
 
+/** 1 = v1.0.0 (the literal first history.jsonl line); 2 = phase 8.2 titles. */
+const GHOST_ALGO_VERSION = 2;
+
 const GHOST_FINGERPRINT_KEY = 'claude:ghosts';
 
 /** What the ghosts already in the database add up to, without rebuilding them. */
@@ -398,13 +531,21 @@ function ghostTotals(db: Db): {
   withTitles: number;
 } {
   const g = db
-    .prepare(
-      `SELECT COUNT(*) AS n, COALESCE(SUM(prompt_count), 0) AS prompts,
-              COALESCE(SUM(title IS NOT NULL), 0) AS titled FROM ghosts`,
-    )
-    .get() as { n: number; prompts: number; titled: number };
+    .prepare('SELECT COUNT(*) AS n, COALESCE(SUM(prompt_count), 0) AS prompts FROM ghosts')
+    .get() as { n: number; prompts: number };
   const rows = db.prepare('SELECT COUNT(*) AS n FROM ghost_prompts').get() as { n: number };
-  return { ghosts: g.n, prompts: g.prompts, promptRows: rows.n, withTitles: g.titled };
+  // `title` is never null after phase 8.2, so counting non-nulls would count
+  // every ghost. What the receipt means by "with titles" is a name somebody
+  // wrote, so the fallback is subtracted here the same way the slow path
+  // declines to count it.
+  const named = db
+    .prepare('SELECT session_id, project, title FROM ghosts')
+    .all() as { session_id: string; project: string | null; title: string | null }[];
+  let titled = 0;
+  for (const r of named) {
+    if (isWrittenTitle(r.title, r.project, r.session_id)) titled++;
+  }
+  return { ghosts: g.n, prompts: g.prompts, promptRows: rows.n, withTitles: titled };
 }
 
 /** Rebuild every deleted session from the prompts that outlived it. */
@@ -449,6 +590,14 @@ async function ghostPass(
     existing.set(row.session_id, row.prompt_count);
   }
 
+  // `title` and `first_prompt` are *derived*, not accumulated: both are
+  // recomputed from the surviving prompts on every rebuild and written over
+  // whatever was there. That is the whole of the idempotency story — the
+  // derivation is a pure, total function of (summary, prompts, project, id),
+  // so re-running cannot change a good title, and a bad one left by an older
+  // build cannot survive the first run of a newer one. Preserving the old
+  // value instead (`COALESCE(excluded.title, ghosts.title)`, which is what
+  // this did at v1.0.0) would make the 166 `/resume` rows permanent.
   const upsertGhost = db.prepare(
     `INSERT INTO ghosts (session_id, harness, project, first_ts, last_ts, prompt_count,
         first_prompt, title, message_count, git_branch, source)
@@ -457,7 +606,7 @@ async function ghostPass(
      ON CONFLICT(session_id) DO UPDATE SET
        project = excluded.project, first_ts = excluded.first_ts, last_ts = excluded.last_ts,
        prompt_count = excluded.prompt_count, first_prompt = excluded.first_prompt,
-       title = COALESCE(excluded.title, ghosts.title),
+       title = excluded.title,
        message_count = COALESCE(excluded.message_count, ghosts.message_count),
        git_branch = COALESCE(excluded.git_branch, ghosts.git_branch),
        source = excluded.source`,
@@ -479,15 +628,31 @@ async function ghostPass(
       }
       const idx = index.entries.get(g.sessionId);
       const source = idx ? 'both' : 'history';
-      const title = idx?.summary ?? null;
+      const summary = collapse(idx?.summary) || null;
+      const project = g.project || idx?.projectPath || null;
+      // In the order the user typed them, then whatever the index remembered:
+      // sessions-index.json outlives the transcript but not always
+      // history.jsonl, so either one can be the last thing standing.
+      const substantive = firstSubstantivePrompt([
+        ...g.prompts.map((p) => p.text),
+        g.firstPrompt,
+        idx?.firstPrompt,
+      ]);
+      const title = ghostTitle(summary, substantive, project, g.sessionId);
       const row = {
         session_id: g.sessionId,
         harness: HARNESS,
-        project: g.project || idx?.projectPath || null,
+        project,
         first_ts: g.firstTs ? new Date(g.firstTs).toISOString() : null,
         last_ts: g.lastTs ? new Date(g.lastTs).toISOString() : null,
         prompt_count: g.promptCount,
-        first_prompt: g.firstPrompt || idx?.firstPrompt || null,
+        // The *substantive* prompt, or nothing. The verbatim prompt stream,
+        // slash commands and all, is `ghost_prompts` — which is what `show`
+        // renders and what `ghost_prompts_fts` searches — so nothing is lost
+        // by keeping the denormalised copy free of `/resume`. Null here means
+        // "this session typed nothing that names it", which is exactly when
+        // `title` is the `<project>-<id8>` fallback.
+        first_prompt: substantive,
         title,
         message_count: idx?.messageCount ?? null,
         git_branch: idx?.gitBranch ?? null,
@@ -511,7 +676,7 @@ async function ghostPass(
       }
       if (had) result.ghostsUpdated++;
       else result.ghostsBuilt++;
-      if (title) result.ghostsWithTitles++;
+      if (summary || substantive) result.ghostsWithTitles++;
       result.ghostPrompts += g.prompts.length;
       result.promptsRecovered += g.promptCount;
     }
@@ -524,22 +689,25 @@ async function ghostPass(
     const orphanRun = db.transaction(() => {
       for (const [id, e] of index.entries) {
         if (onDisk.has(id) || history.sessions.has(id) || e.isSidechain) continue;
+        const summary = collapse(e.summary) || null;
+        const project = e.projectPath ?? null;
+        const substantive = firstSubstantivePrompt([e.firstPrompt]);
         upsertGhost.run({
           session_id: id,
           harness: HARNESS,
-          project: e.projectPath ?? null,
+          project,
           first_ts: e.created ?? null,
           last_ts: e.modified ?? null,
           prompt_count: 0,
-          first_prompt: e.firstPrompt ?? null,
-          title: e.summary ?? null,
+          first_prompt: substantive,
+          title: ghostTitle(summary, substantive, project, id),
           message_count: e.messageCount ?? null,
           git_branch: e.gitBranch ?? null,
           source: 'sessions-index',
         });
         if (existing.has(id)) result.ghostsUpdated++;
         else result.ghostsBuilt++;
-        if (e.summary) result.ghostsWithTitles++;
+        if (summary || substantive) result.ghostsWithTitles++;
       }
     });
     orphanRun();
