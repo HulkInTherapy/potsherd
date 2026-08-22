@@ -95,34 +95,44 @@ chmod +x "$demo/.claude/local/claude"
 export PATH="$demo/.claude/local:$PATH"
 
 mkdir -p "$screens"
-# Every screen this run is about to write, plus the names earlier drafts used.
-# Removed up front so a stale screen can never survive a rename and go on being
-# linked from the readme, and so a capture that fails leaves a missing file
-# rather than yesterday's output.
+
+# NOTHING IS WRITTEN INTO docs/screens/ UNTIL THE WHOLE RUN HAS PASSED.
 #
-# Named one by one rather than as `*.txt`, which is what it used to be. Two of
-# the fifteen (`ask`, `graft`) need a model, and a `*.txt` here would delete
-# them on a machine with no backend and then fail the assertions for their
-# absence — turning "this developer cannot regenerate two screens" into "this
-# developer cannot run the script at all". Deleting only what the run is about
-# to write keeps both properties: a screen this run captures can never be
-# yesterday's, and a screen it skips is left exactly as committed and is still
-# asserted below.
+# This script used to `rm -f` every screen it was about to capture and then
+# redirect the binary's stdout straight onto the committed path. Both halves
+# were destructive: an interrupted run (^C, a dead backend six minutes into
+# `card --all`, a laptop asleep) left the repository with committed artefacts
+# deleted or half-written, recoverable only from git — and the readme links
+# every one of them. That is open item 30.
+#
+# So every capture lands in a staging directory, the assertions run over
+# *that*, and only a run that captured everything and passed every assertion
+# moves the files into place. An interrupted run now leaves `docs/screens/`
+# exactly as it found it.
+#
+# The two properties the old `rm -f` was there for are kept:
+#   - a screen this run captures can never be yesterday's output, because
+#     staging is emptied first and the move is per-file;
+#   - a screen this run *skips* (the two model ones, on a machine with no
+#     backend) is left exactly as committed — it is copied into staging so the
+#     assertions still hold it, and copied back unchanged.
+staging="$repo/.tmp/screens-new"
+rm -rf "$staging"
+mkdir -p "$staging"
+
 offline_screens=(
   01-audit.txt 02-rescue.txt 03-audit-after.txt 04-doctor.txt
   05-doctor-privacy.txt 06-audit-sweep.txt 07-index.txt 08-ls.txt
   09-find.txt 10-stats.txt 11-show.txt 12-ls-ghosts.txt 13-find-redacted.txt
 )
 model_screens=(14-ask.txt 15-graft.txt)
-for f in "${offline_screens[@]}"; do rm -f "$screens/$f"; done
-rm -f "$screens/00-audit-before-rescue.txt"
 
 # --width 80 --no-color on every capture: the screens are a fixed 80-column
 # artefact, not whatever terminal happened to run this.
 shot() {
   local out="$1"; shift
   echo "  $out  <-  potsherd $*"
-  node "$bin" "$@" --width 80 --no-color >"$screens/$out" 2>/dev/null
+  node "$bin" "$@" --width 80 --no-color >"$staging/$out" 2>/dev/null
 }
 
 # `doctor --privacy` is the one screen whose output depends on the *working
@@ -143,7 +153,7 @@ shot_in_project() {
   local out="$1"; shift
   echo "  $out  <-  potsherd $*  (from ~/work/demo-project)"
   ( cd "$project" && node "$bin" "$@" --width 80 --no-color ) \
-    >"$screens/$out" 2>/dev/null
+    >"$staging/$out" 2>/dev/null
 }
 
 echo "capturing screens against $HOME/.claude"
@@ -223,7 +233,7 @@ shot_model() {
   echo "  $out  <-  potsherd $*  (model call, developer's HOME)"
   env HOME="$real_home" node "$bin" "$@" \
     --potsherd-dir "$demo/.potsherd" --claude-dir "$demo/.claude" \
-    --width 80 --no-color >"$screens/$out" 2>/dev/null
+    --width 80 --no-color >"$staging/$out" 2>/dev/null
 }
 
 # Is there a backend at all? `card --probe` makes one tiny call and stops, which
@@ -242,8 +252,6 @@ else
 fi
 
 if [ "$have_model" = "1" ]; then
-  for f in "${model_screens[@]}"; do rm -f "$screens/$f"; done
-
   # Every surviving session gets a card. The ghosts and the 197 subagents do
   # not: `--all` over the whole corpus is 217 calls and ~35 minutes, which is
   # not a thing a screenshot script may cost, while the 31 transcripts are 39
@@ -280,6 +288,12 @@ if [ "$have_model" = "1" ]; then
   # the other model screen, because the receipt names the file graft wrote in
   # the directory it was run in.
   shot_in_project 15-graft.txt graft 9c4d2f18 --about pgbouncer --no-model
+else
+  # Not regenerated, so they are carried into staging exactly as committed —
+  # asserted with the rest, and moved back byte-identical.
+  for f in "${model_screens[@]}"; do
+    [ -f "$screens/$f" ] && cp "$screens/$f" "$staging/$f"
+  done
 fi
 
 # ---------------------------------------------------------------- assertions
@@ -302,7 +316,7 @@ version="$(node "$bin" --version)"
 schema="$(node -e 'import(process.argv[1]).then((m) => console.log(m.latestSchemaVersion()))' \
   "$repo/packages/core/dist/db.js")"
 
-python3 - "$screens" "$repo/README.md" "$version" "$schema" <<'PY'
+python3 - "$staging" "$repo/README.md" "$version" "$schema" <<'PY'
 import re, sys, pathlib
 
 screens = pathlib.Path(sys.argv[1])
@@ -378,9 +392,12 @@ for name, p in targets:
         if m:
             bad.append(f'{name}: an unredacted {what} reached the page: {m.group(0)[:12]}…')
 
+# `screens` here is the *staging* directory, so this asks whether the run
+# captured exactly the set it meant to — not whether docs/screens/ has stale
+# files in it. The shell removes those by name, out loud, after this passes.
 stray = sorted(p.name for p in screens.glob('*.txt') if p.name not in expected)
 if stray:
-    bad.append('unexpected screens left behind: ' + ', '.join(stray))
+    bad.append('captured something not in the expected set: ' + ', '.join(stray))
 
 # The find screen is the one that carries the whole claim. If it ever stops
 # returning both halves, the readme is quoting a screenshot that no longer
@@ -505,5 +522,20 @@ widest = max(
 print(f'  ok    {len(expected)} screens, widest line {widest} characters, '
       'no forbidden strings, no unredacted credentials, no cut masks')
 PY
+
+# Everything captured, everything asserted. Only now does docs/screens/ change.
+for f in "${offline_screens[@]}" "${model_screens[@]}"; do
+  [ -f "$staging/$f" ] && mv "$staging/$f" "$screens/$f"
+done
+# Names earlier drafts used, and anything else left behind: removed only now,
+# and named out loud rather than swept.
+for p in "$screens"/*.txt; do
+  f="$(basename "$p")"
+  case " ${offline_screens[*]} ${model_screens[*]} " in
+    *" $f "*) ;;
+    *) echo "  removing stale screen $f"; rm -f "$p" ;;
+  esac
+done
+rm -rf "$staging"
 
 echo "done. screens in docs/screens/"

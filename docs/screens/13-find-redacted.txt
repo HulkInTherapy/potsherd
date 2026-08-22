@@ -10,4 +10,7 @@ potsherd find "redacted aws" · 2 sessions · bm25 · 10ms
     …— postgres://ingest:‹redacted:basic-auth:201b2d22›@db.internal:6432/crm…
     assistant side not recoverable · potsherd show 840f40a5
 
-  1 ghost hit · …
+  1 ghost hit · relaxed to any-word matching
+  text search only — no embeddings in the index — run potsherd index without
+  --no-embed
+  run  potsherd show <id8>  to read one, or  potsherd ask <words>

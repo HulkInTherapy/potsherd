@@ -85,6 +85,17 @@ export function renderFind(
   lines.push('');
   const notes = footer(result, t);
   if (notes) lines.push(INDENT + t.dim(notes));
+  // Why there were no vectors is a fact about this machine, not about this
+  // search, so it gets its own line rather than competing with the counts for
+  // room on theirs. It used to be the third item in the same joinFit and it
+  // never once fitted: every committed `find` screen ends `3 ghost hits · 1
+  // from subagents · …`, an ellipsis standing in for the one note on the line
+  // that tells the reader something they can act on.
+  if (!result.vectors.used && result.vectors.reason) {
+    for (const line of f.wrap(`text search only ${t.dash} ${result.vectors.reason}`, t.width - INDENT.length)) {
+      lines.push(INDENT + t.dim(line));
+    }
+  }
   lines.push(nextVerb(t));
   return lines.join('\n');
 }
@@ -106,7 +117,7 @@ export function renderFind(
  * of listing places the answer might be.
  */
 function nextVerb(t: Theme): string {
-  const long = 'to read one, or  potsherd ask <words>  for one cited answer';
+  const long = 'to read one, or  potsherd ask <words>';
   const wide = INDENT + t.dim('run') + '  potsherd show <id8>  ' + t.dim(long);
   return Theme.len(wide) <= t.width
     ? wide
@@ -437,7 +448,6 @@ function footer(r: RecallResult, t: Theme): string {
   ).length;
   if (ghosts) parts.push(`${f.num(ghosts)} ghost ${f.plural(ghosts, 'hit')}`);
   if (sidechains) parts.push(`${f.num(sidechains)} from subagents`);
-  if (!r.vectors.used && r.vectors.reason) parts.push(r.vectors.reason);
   if (r.relaxed) parts.push('relaxed to any-word matching');
   if (parts.length === 0) return '';
   // joinFit, not clip: a footer that ends "(--v…" has lost a whole clause to

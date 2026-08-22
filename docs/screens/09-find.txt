@@ -1,4 +1,4 @@
-potsherd find "pgbouncer" · 4 sessions · bm25 · 10ms
+potsherd find "pgbouncer" · 4 sessions · bm25 · 11ms
 
   Pool the ingest workers through pgbouncer                        claude · live
   data-pipeline · 21 aug · 8 exchanges · main                             0.0275
@@ -23,4 +23,6 @@ potsherd find "pgbouncer" · 4 sessions · bm25 · 10ms
     pgbouncer transaction pooling broke LISTEN/NOTIFY in the runner
     assistant side not recoverable · potsherd show 9f9d323a
 
-  3 ghost hits · 1 from subagents · …
+  3 ghost hits · 1 from subagents
+  text search only — the words matched; --vectors on adds semantic search
+  run  potsherd show <id8>  to read one, or  potsherd ask <words>
