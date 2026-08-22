@@ -106,9 +106,12 @@ jobs:
           repo="$PWD"
           # XDG_CONFIG_HOME is cleared alongside HOME because opencode's config
           # path honours it. T5.5 flagged this as "insurance, not a live failure
-          # on GitHub's runners" — it was live: the runner sets it, so that one
-          # line resolved to /home/runner/.config/... outside the throwaway HOME
-          # and could not be tildified, while every other line could.
+          # on GitHub's runners" — it was live: the runner sets it, so opencode's
+          # line resolved under the runner's own config directory, outside the
+          # throwaway HOME, and could not be tildified while every other line
+          # could. (The literal path is not written here: `check-privacy.py`
+          # flags a `/home/<user>/…` shape wherever it appears, including in a
+          # comment explaining why it appeared — which is the guard working.)
           #
           # `pwd -P` because on macOS /tmp is a symlink to /private/tmp: HOME would
           # be the symlinked path and the working directory the resolved one, and
