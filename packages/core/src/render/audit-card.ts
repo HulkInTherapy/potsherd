@@ -52,6 +52,34 @@ export function renderAuditCard(r: AuditReport, t: Theme = new Theme()): string 
   });
   rows.push({ label: 'prompts lost', value: f.num(r.promptsLost) });
 
+  // The second number beside the first (`plans/09` §13.11).
+  //
+  // `deleted` counts session ids and every one of them is real — the harness
+  // wrote it, with a timestamp, into history.jsonl. But history.jsonl has no
+  // field that separates a session somebody worked in from a resume picker
+  // that was opened and closed, and on the reference machine 92 of the 299
+  // are a single `/resume`. The count does not change and must not: it is
+  // literally true, it is on the readme, and it is what the published
+  // standalone script recomputes. What the screen owes the reader is the part
+  // of it that is thin, so this row says what those sessions *recorded* — not
+  // what they were, which history.jsonl cannot say.
+  //
+  // Conditional, and on `> 0` rather than on `!== null`: a machine where every
+  // deleted session had a real prompt has nothing to disclose, and `null` is
+  // "the scan was not asked", which is not a disclosure either.
+  //
+  // The note anchors the denominator and does nothing else. The note column is
+  // 44 characters at 80 and the definition does not fit in it; a definition
+  // clipped mid-word on the readme's first screen is worse than no definition,
+  // and `audit --verify` and `--json` both carry the whole of it.
+  if ((r.deletedWithoutSubstantivePrompt ?? 0) > 0) {
+    rows.push({
+      label: 'only commands and stubs',
+      value: f.num(r.deletedWithoutSubstantivePrompt!),
+      note: `of the ${f.num(r.deleted)} deleted`,
+    });
+  }
+
   if (r.projectsWiped.length > 0) {
     const width = Math.max(12, noteWidth(t));
     rows.push({

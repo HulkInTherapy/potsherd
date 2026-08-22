@@ -39,6 +39,11 @@ import {
   isModelCached,
 } from './embeddings.js';
 import { loadVec, vecAvailable, vecStatus, vecTablesExist, type VecStatus } from './vec.js';
+import {
+  GHOST_TITLE_MAX_CHARS,
+  cutToCodePoints,
+  firstSubstantivePrompt,
+} from './rescue.js';
 import { modelsDir, potsherdDir } from './paths.js';
 
 /**
@@ -247,10 +252,33 @@ export function ingestSession(
     redacted.push(clean);
   }
 
+  // The name a session with no harness title is listed under (`phase-8` 8.2).
+  //
+  // Derived from `redacted`, never from `parsed.exchanges`: the rule runs
+  // **after** redaction, so a prompt that opened with a pasted credential
+  // contributes its mask and not the secret. The rule itself is `rescue.ts`'s,
+  // imported rather than restated — a ghost and a live session with the same
+  // opening prompt must be listed under the same name, and two copies of a
+  // 60-code-point cut would eventually be two different cuts.
+  const derivedTitle = session.title
+    ? null
+    : firstSubstantivePrompt(redacted.map((e) => e.userText));
+
   const run = db.transaction(() => {
     upsertSession(db, session, parsed, options);
     clearExchanges(db, session.id);
     for (const exchange of redacted) insertExchange(db, exchange);
+    if (derivedTitle) {
+      // The `WHERE` reads the row as it now stands rather than trusting the
+      // parse: a session the harness titled on an earlier pass keeps that
+      // title, and a second `index` run over the same transcript writes
+      // nothing. `title_source` is what lets `--untitled` tell the two apart
+      // (`db.ts` migration 9, `search/filters.ts`).
+      db.prepare(
+        `UPDATE sessions SET title = ?, title_source = 'prompt'
+          WHERE id = ? AND COALESCE(TRIM(title), '') = ''`,
+      ).run(cutToCodePoints(derivedTitle, GHOST_TITLE_MAX_CHARS), session.id);
+    }
   });
   run();
 
@@ -286,6 +314,12 @@ function upsertSession(
        project = excluded.project, project_slug = excluded.project_slug,
        started_at = excluded.started_at, ended_at = excluded.ended_at,
        title = COALESCE(excluded.title, sessions.title),
+       -- The moment the harness names a session, potsherd's derived name is
+       -- gone and so is the mark saying potsherd made it. Without this a
+       -- session that gained a summary on a later pass would keep
+       -- title_source = 'prompt' and sit in --untitled for ever.
+       title_source = CASE WHEN excluded.title IS NOT NULL
+                           THEN NULL ELSE sessions.title_source END,
        git_branch = COALESCE(excluded.git_branch, sessions.git_branch),
        entrypoint = COALESCE(excluded.entrypoint, sessions.entrypoint),
        model = COALESCE(excluded.model, sessions.model),

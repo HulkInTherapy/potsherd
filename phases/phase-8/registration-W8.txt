@@ -1,0 +1,367 @@
+W8 — 8.2 live half + the audit disclosure.        branch p8/w8-titles-audit
+================================================================================
+
+Cut from origin/main = 290494d. origin/main moved to c526a38 during the run
+(readme's copy of the privacy receipt); it touches README.md only and nothing
+on this branch, so there is no conflict to resolve.
+
+
+0. THE TWO ITEMS, IN ONE LINE EACH
+----------------------------------
+
+  ITEM 1  a live session the harness never named is named by its first
+          substantive prompt, and `ls --untitled` keeps meaning what it meant.
+          W2's patch, implemented as written. Migration 9.
+
+  ITEM 2  `audit` prints a fifth row disclosing how many of the deleted
+          sessions recorded nothing that names them. No count changes. The
+          standalone `--verify` snippet recomputes the new number too.
+
+
+1. LINES NEEDED IN A RESERVED FILE
+----------------------------------
+
+  packages/core/src/index.ts   NO CHANGE. `audit`, `collectAudit`,
+                               `computeAudit` and `AuditReport` are already
+                               exported; the new number is a field on the
+                               report and needs no new export. The 8.2 rule is
+                               imported inside core only, exactly as W2 left
+                               it.
+  packages/cli/src/index.ts    NO CHANGE. No new flag, no new verb.
+  package.json                 NO CHANGE.
+  CHANGELOG.md                 the orchestrator's.
+
+  README.md                    TWO EDITS, section "What audit measures, and how
+                               to check it by hand". Both are because the card
+                               and the receipt gained a fifth number, and the
+                               readme says "four" three times. Exact text:
+
+  1a. the sentence above the table, currently
+
+        Four numbers, four definitions:
+
+      becomes
+
+        Four headline numbers, four definitions:
+
+  1b. one row APPENDED to that table, after the `prompts lost` row:
+
+| **only commands and stubs** | of the deleted, the ones with history lines but no prompt that names them: nothing that is not a slash command, is at least 8 characters, and is not one of `clear`, `continue`, `ok`, `yes`, `hi`, `y`, `n` |
+
+  1c. the paragraph that begins "prints a self-contained Python snippet",
+      currently
+
+        prints a self-contained Python snippet — standard library only, no
+        checkout, no potsherd — that recomputes all four numbers from your own
+        files, plus the four definitions it implements. Paste it into a shell,
+        or pipe it into one:
+
+      becomes
+
+        prints a self-contained Python snippet — standard library only, no
+        checkout, no potsherd — that recomputes every number the card prints
+        from your own files, plus the definitions it implements. Paste it into
+        a shell, or pipe it into one:
+
+  1d. OPTIONAL, and recommended, immediately after the table. It is the whole
+      reason the fifth row exists and the readme is the place it belongs:
+
+        The fifth is not a headline; it is the second number beside the first.
+        `history.jsonl` rows carry exactly five fields — `display`,
+        `pastedContents`, `project`, `sessionId`, `timestamp` — and none of
+        them separates a session somebody worked in from a resume picker that
+        was opened and closed. Both are real events, both get a session id, and
+        neither leaves a transcript. So `deleted` stays exactly as measured and
+        the card says what those sessions recorded, which is the part
+        `history.jsonl` can answer. It renders only when the count is above
+        zero.
+
+      The demo corpus's count is 0, so nothing on the readme's first
+      screenshot changes and this paragraph describes a row a reader will not
+      see there. Ship it anyway or drop it; it does not affect any test.
+
+
+2. SCHEMA MIGRATION NUMBER
+--------------------------
+
+  **9**, `session-title-source`. Re-checked at 290494d before writing it: the
+  highest in packages/core/src/db.ts was still 8 (`ghost-vectors-table`), so
+  W2's reading survived W1, W4, W5, W6 and W7 merging.
+
+      ALTER TABLE sessions ADD COLUMN title_source TEXT;
+
+  NULL = the harness named it, or nothing did. 'prompt' = potsherd derived it.
+
+
+3. THE PUBLISHED SCREENS CHANGE — READ THIS
+-------------------------------------------
+
+`scripts/make-screens.sh` must be re-run and four screens re-committed.
+`docs/screens/` is reserved on this branch and was NOT touched: the run was
+made, the diff recorded, and `git checkout -- docs/screens/` put it back.
+
+  01-audit.txt   **UNCHANGED.** The readme's first block is byte-identical
+                 below the heading date. The new row is conditional on
+                 `> 0` and the demo corpus's count is 0 — see section 6.
+
+  04-doctor.txt  `schema v8 of v8` -> `schema v9 of v9`. Migration 9.
+
+  08-ls.txt      four rows. This is 8.2 working, on the screen it was written
+                 for: `report-builder-6fe53b91` becomes
+                 `why does the file uploader allocate…`, and three more like
+                 it. Nothing else on the screen moves.
+
+  10-stats.txt   `21 titled` -> `31 titled`, and see section 5b: the query
+                 was rescoped in the same commit, or it would have read
+                 `225 titled` against `31 sessions`.
+
+  16-before-after.txt  one row, the same one 08 changes.
+
+  09, 07, 13     millisecond jitter only, as they always have.
+
+The two model screens were not regenerated (POTSHERD_SCREENS_NO_MODEL=1) and
+are carried unchanged. `17-ls-cards.txt` may move when they are: a session
+that used to be `<project>-<id8>` before carding is now a prompt.
+
+
+4. WHAT WAS BUILT
+-----------------
+
+ITEM 1, exactly W2's four-part patch:
+
+  db.ts             migration 9, above.
+  ingest.ts         in `ingestSession`'s transaction, after the exchanges are
+                    inserted, when the session has no harness title:
+                      UPDATE sessions SET title = ?, title_source = 'prompt'
+                       WHERE id = ? AND COALESCE(TRIM(title),'') = ''
+                    with `cutToCodePoints(firstSubstantivePrompt(userTexts)!,
+                    GHOST_TITLE_MAX_CHARS)` imported from rescue.ts. Derived
+                    from the REDACTED exchanges, so a masked secret cannot
+                    become a title (tested).
+                    Plus one line W2's sketch did not have and needs: the
+                    upsert's ON CONFLICT clears `title_source` whenever the
+                    harness supplies a title, or a session that gained a
+                    summary on a later pass would keep `'prompt'` and sit in
+                    `--untitled` for ever. Tested both ways round.
+  filters.ts        `UNTITLED_SESSION_SQL` gains the disjunct, parenthesised
+                    against the existing NOT EXISTS on cards:
+                      (COALESCE(TRIM(s.title),'') = '' OR s.title_source = 'prompt')
+                        AND NOT EXISTS (... cards ...)
+  annotate-cli      the two `ls --untitled` tests rewritten (section 5a).
+
+ITEM 2:
+
+  claude/history.ts `HistoryScan.withPrompts`, so "not measured" cannot read
+                    as zero.
+  audit.ts          `collectAudit` asks for prompts; `computeAudit` counts the
+                    deleted sessions with history lines and no substantive
+                    prompt, using rescue.ts's `isSubstantivePrompt` — the same
+                    rule that decides what a ghost is titled, imported and not
+                    restated. `AuditReport.deletedWithoutSubstantivePrompt:
+                    number | null`.
+  render/audit-card one conditional row, `> 0` only:
+                      only commands and stubs      140   of the 299 deleted
+  cli/commands/audit `deletedWithoutSubstantivePrompt` in `--json`.
+  render/verify.ts  `VERIFY_SNIPPET` gains a seven-line `names()` — a
+                    transcription of `isSubstantivePrompt`, standard library
+                    only — and a fifth printed line, itself conditional on
+                    `> 0`. `VERIFY_DEFINITIONS` and `renderVerify`'s
+                    definition rows gain the fifth definition.
+  scripts/verify-audit.py  the same, with `--json` carrying the number.
+
+  Both were run as printed, in a shell told nothing, on all three corpora:
+
+      potsherd audit --verify --json | jq -r .snippet | sh
+
+  and reproduce every number on the screen including the new one. The test
+  that does it is `audit --verify, piped the way the docs pipe it`, extended
+  to compare the snippet's output against the rendered CARD row by row — so a
+  sixth row added later without a sixth snippet line fails there.
+
+
+5. TWO THINGS THIS CHANGE BROKE, AND WHAT WAS DONE
+--------------------------------------------------
+
+5a. FOUR TESTS ASSERTED THE OLD BEHAVIOUR and were rewritten to assert the
+    new one, not relaxed:
+
+      annotate-cli  `ls --untitled` x2. The regex `/-[0-9a-f]{8}$/` stopped
+                    being true of every row. They now read the session
+                    through `show --json` and decide from its PROMPTS, not
+                    from the shape of the title string, whether a row should
+                    be there; and one of them asserts, as a premise the test
+                    establishes, that at least one row was named by its
+                    prompt — without which everything else would pass against
+                    the old behaviour too.
+      recall        two tests that asserted `ID.untitled` has a null title.
+                    Same subject, new contract.
+
+5b. `stats.ts` — a LATENT SCOPE BUG this change exposed.
+
+    `SUM(s.title IS NOT NULL) AS titled` summed over sidechains as well as
+    sessions. That was invisible while no subagent transcript ever carried a
+    title. 8.2 gives every one of them a derived title, and the reference
+    corpus's note went from `31 sessions | 197 subagents | 21 titled` to
+    `225 titled` — a count larger than the number it qualifies. Rescoped to
+    `s.is_sidechain = 0`, which is the rows the `sessions` value counts.
+
+    NOTE for whoever reads the two screens together: `doctor` says
+    `21 titled` and `stats` now says `31 titled` for the same 31 sessions.
+    They are different questions — `doctor` counts what the HARNESS wrote,
+    from the transcript scan; `stats` counts sessions that have a name,
+    whoever wrote it — and both are right in their own row. Nobody has been
+    asked whether they should say so out loud.
+
+
+6. FINDINGS THE ORCHESTRATOR SHOULD RULE ON
+-------------------------------------------
+
+6a. THE DEMO CORPUS DOES NOT REPRODUCE THIS. It claims the reference machine
+    number for number and it does: 330 / 31 / 299 / 2,971, exactly. But its
+    `history.jsonl` contains **zero** slash-command lines in 3,188, so its
+    count of deleted-sessions-that-recorded-nothing-nameable is **0** against
+    the reference machine's **140**. `scripts/make-demo-corpus.mjs` was NOT
+    edited, as instructed, and the row was not forced on: the card, the
+    snippet and `verify-audit.py` all fall silent on a corpus with nothing to
+    disclose, which is why `01-audit.txt` is unchanged.
+
+    The four headline numbers are reproduced; the texture behind them is not.
+    A corpus that matched the texture would have made the disclosure visible
+    on the readme's first screen, which is where it would do the most good.
+
+    Corroborated independently by `rescue`'s own receipt, which was measured
+    before this branch existed and asks a different question:
+
+      frozen archive   2,971 prompts recovered from 299 ghosts | 166 with titles
+      demo corpus      2,971 prompts recovered from 299 ghosts | 299 with titles
+
+    133 real ghosts fall through to the `<project>-<id8>` fallback and none in
+    the demo corpus does. 133 + the 7 whose `sessions-index.json` carried a
+    summary = the 140 counted here, which is why the two agree.
+
+6b. THE STOPPING RULE ADMITS A PASTE PLACEHOLDER, and a title is a more
+    visible place for that than a ghost's was.
+
+    `isSubstantivePrompt` rejects slash commands, stubs under eight
+    characters and seven stopwords. It admits
+    `[Image: source: …/clipboard-….png]`, `Caveat: The messages below were
+    generated…`, and `<local-command-caveat>…`. Measured: 1 of 9 derived
+    titles on the eval fixture and 5 of 205 on the frozen reference archive
+    are what `search/snippet.ts`'s existing `isMostlyBoilerplate` calls
+    machine text. The eval fixture's one is a session whose every prompt is a
+    paste placeholder, planted in T3.4 precisely as the hard case, and
+    `potsherd find` now heads its block with one.
+
+    W2's own argument applies verbatim: "a slash command is a *wrong* label,
+    because a dozen ghosts called `/model` are less distinguishable than a
+    dozen uuids and they also claim to say something." So is a clipboard path.
+
+    THE FIX, and it is deliberately not on this branch: compose the existing
+    `isMostlyBoilerplate` into the CANDIDATE filter — `firstSubstantivePrompt`
+    in rescue.ts — so the ghost path and the live path change together and
+    there is still one rule. It must go on the candidates and not on the
+    chosen title: 108 of the 299 ghost titles are the `<project>-<id8>`
+    fallback, which `isMostlyBoilerplate` also calls machine text, so gating
+    the output would reject the fallback too.
+
+    It is not here because it changes W2's landed ghost titles and the
+    165 -> 0 number, which is not this worker's to change. The guard it
+    breaks — `tests/query-cli.test.ts`, "shows the matched word rather than a
+    pasted-screenshot placeholder" — was narrowed to the SNIPPET lines it was
+    written about, with the whole of this paragraph in a comment above it. It
+    is the one edit on this branch that reads as a weakening and it is
+    flagged as such.
+
+6c. A DERIVED TITLE IS A SEARCH SURFACE. 197 subagents on the reference
+    machine went from untitled to titled, and `sessions.title` feeds one of
+    the five lists `recall` fuses. Nothing regressed — the eval gate passes —
+    but one recall test was picking "the first block with a clustered subagent
+    hit" and the reordering broke it while the feature worked. Its premise was
+    the machine's, not the test's; it now asserts that SOME clustered subagent
+    line reaches the screen, which is what T3.6 promises.
+
+6d. HOME PATHS REACH TITLES. 19 of 205 derived titles on the reference archive
+    contain the developer's home path, because the prompt did. This is not a
+    new class of data — `exchanges.user_text` has held the same strings since
+    phase 1, and `ls` already prints `project` — but it is a new PLACE for
+    them: the name on the row. `isMostlyBoilerplate` catches 5 of the 19; the
+    other 14 are ordinary prose with a path in the middle and no rule
+    proposed here would catch them.
+
+6e. `fallbackTitle` IS NOW UNEXERCISED BY THE EVAL FIXTURE's live sessions —
+    all three of its untitled sessions gained a derived title. It is still
+    exercised by ghosts, and `tests/index.test.ts` now has a session whose
+    only prompts are `/resume`, `clear` and `y` and which keeps its uuid.
+
+
+7. WHAT WAS MEASURED, AND HOW
+-----------------------------
+
+Every measurement relocated HOME to a throwaway directory holding a COPY of
+the corpus, with CLAUDE_CONFIG_DIR, POTSHERD_DIR, XDG_CONFIG_HOME and
+NODE_PATH cleared — not `--claude-dir`, which leaves the other six harnesses
+resolving to the developer's real ones. The read-only inputs were never
+written to.
+
+  `ls --untitled`, before and after, same corpus, same commands:
+
+                        rows            of which <project>-<id8>
+                     before  after       before  after     derived titles
+    eval fixture        3      3           3      0         9  (3 + 6 subagents)
+    frozen archive     10     10          10      2       205  (8 + 197 subagents)
+
+  The ROW SET is identical before and after on both corpora — asserted by
+  session id, not by count. That is the whole point of `title_source`: the
+  flag returns the same sessions and they now have names.
+
+  `rescue` + `index` re-run over the same corpus: a sha256 over every
+  `(id, title, title_source)` and every `(session_id, title)` is unchanged on
+  both corpora. Idempotent.
+
+  The disclosure count:
+
+    frozen archive   140 of 299   (row rendered)
+    demo corpus        0 of 299   (no row)
+    eval fixture       0 of  12   (no row)
+
+  140 sits inside W3's measurement and is not a contradiction of it: W3's 92
+  is the sessions that are exactly one `/resume`, 98 is the sessions that are
+  exactly one slash command of any kind, 122 is the sessions with exactly one
+  entry, and 140 is the sessions with any number of entries and nothing
+  nameable in any of them. Re-measured here: 122 / 98 / 92 all reproduce
+  exactly. W3's "139 with no substantive prompt at all" comes out 140 by this
+  definition and the one-session gap is NOT resolved. Two plausible variants
+  were ruled out: judging on the first history line alone gives 166, and no
+  deleted session has zero non-empty `display` fields, so it is not an
+  empty-prompt edge case. The number brackets cleanly the other way -- 133 of
+  the 299 ghosts are titled by the `<project>-<id8>` fallback and 7 more of
+  the 140 carry a `sessions-index.json` summary, 133 + 7 = 140 -- so 140 is
+  internally consistent with what `rescue` did on the same corpus. Nothing
+  published depends on which of 139 and 140 is right; the card and the receipt
+  compute it the same way, which is the property that matters.
+
+  `audit`'s history pass went from 21ms to 22-23ms on the reference archive
+  (3,590 lines) — the cost of holding the prompt text to ask the question.
+  Total wall time 205ms -> 210ms, median of three, both builds, same machine.
+
+
+8. WHAT WAS NOT DONE
+--------------------
+
+  - No count changed. `sessionsEver`, `deleted` and `promptsLost` are
+    untouched in every file.
+
+    The frozen archive reports 329 / 30 / 299 / 2,971 where every published
+    artefact says 330 / 31 / 299 / 2,971. That is NOT a defect found here and
+    nothing was changed for it: the orchestrator recomputed the snapshot by
+    hand — 321 distinct `sessionId`s in `history.jsonl`, 30 transcripts on
+    disk, 8 of those not in history, union 329 — and the delta is one session
+    the live tree had on 21 aug and the snapshot did not, almost certainly the
+    session doing the capturing. It is consistent: 329 - 30 = 330 - 31 = 299.
+    Every number this branch touches is identical under both readings, and the
+    disclosure is reported `of 299` for exactly that reason: 299 is the
+    denominator that cannot be wrong.
+  - `scripts/make-demo-corpus.mjs` was not edited.
+  - `docs/screens/**`, `README.md`, `CHANGELOG.md`, both barrels, every
+    `package.json` and `scripts/check-privacy.py`: not touched.
+  - 6b's fix. Section 6b says why and where.

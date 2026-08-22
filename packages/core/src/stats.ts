@@ -39,6 +39,11 @@ export interface HarnessStats {
   prompts: number;
   ghostPrompts: number;
   bytes: number;
+  /**
+   * Of `sessions` — subagents excluded — how many carry a title, whoever wrote
+   * it: the harness, or potsherd from the session's first prompt (8.2). It
+   * qualifies the `sessions` number and so it counts the same rows.
+   */
   titled: number;
   live: number;
   archived: number;
@@ -153,7 +158,15 @@ export function stats(db: Db, options: StatsOptions = {}): StatsReport {
               SUM(s.is_sidechain = 1) AS sidechains,
               SUM(s.user_prompts)     AS prompts,
               SUM(s.bytes)            AS bytes,
-              SUM(s.title IS NOT NULL) AS titled,
+              -- Scoped to the sessions the "sessions" value counts.
+              --
+              -- SUM(s.title IS NOT NULL) summed over sidechains too. That was
+              -- invisible while no subagent transcript ever carried a title,
+              -- and 8.2 gave every one of them a title derived from its first
+              -- prompt: the reference corpus's note went from
+              -- "31 sessions - 197 subagents - 21 titled" to "225 titled",
+              -- a count larger than the number it qualifies.
+              SUM(s.is_sidechain = 0 AND s.title IS NOT NULL) AS titled,
               SUM(s.status = 'live')   AS live,
               SUM(s.status = 'archived') AS archived,
               MIN(s.started_at)        AS first_ts,

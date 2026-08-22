@@ -4,6 +4,7 @@ import { readHistory, type HistoryScan } from './claude/history.js';
 import { readSessionsIndexes, type SessionIndexScan } from './claude/sessions-index.js';
 import { readCleanupStatus, CLAUDE_DEFAULT_CLEANUP_DAYS, type CleanupStatus } from './claude/settings.js';
 import { readArchiveState, type ArchiveState } from './archive-state.js';
+import { isSubstantivePrompt } from './rescue.js';
 
 /**
  * `potsherd audit` — the first command, and the only one most people will ever
@@ -22,6 +23,24 @@ import { readArchiveState, type ArchiveState } from './archive-state.js';
  * Using the union rather than history alone matters: SDK-driven sessions
  * (`entrypoint: sdk-ts`) never write to history.jsonl, so a history-only count
  * silently omits them. Both figures are in `--json`.
+ *
+ * **The fifth number**, added in phase 8 and the reason this comment is longer
+ * than it was. `deleted` counts session ids, and `history.jsonl` carries five
+ * fields — `display`, `pastedContents`, `project`, `sessionId`, `timestamp` —
+ * none of which distinguishes a session that was worked in from a resume
+ * picker that was opened and closed. Both are real events, both get a session
+ * id, and neither leaves a transcript. That was measured on the reference
+ * machine and it cannot be resolved from the file: 92 of the 299 deleted
+ * sessions are one `/resume` and nothing else.
+ *
+ * No count changes, because every one of them is literally true. What is added
+ * is a second number beside the first: how many of the deleted recorded
+ * nothing that names them — no prompt that is not a slash command, a stub or
+ * one of `rescue.ts`'s seven stopwords. That is `isSubstantivePrompt`, the
+ * same rule that decides what a ghost is titled, imported rather than
+ * restated. `audit` prints it when it is above zero, `--json` always carries
+ * it, and `--verify`'s standalone snippet recomputes it from `history.jsonl`
+ * with no potsherd in the room, like the other four.
  */
 
 const DAY_MS = 86_400_000;
@@ -53,6 +72,16 @@ export interface AuditReport {
   deleted: number;
   promptsLost: number;
   promptsSurviving: number;
+
+  /**
+   * Of `deleted`, how many recorded at least one history line and not one
+   * prompt that names the session — only slash commands, stubs, and the
+   * stopwords `rescue.ts` lists. `null` when the scan was taken without
+   * `withPrompts` and the question was therefore never asked; never `0` for
+   * that reason. A deleted session with no history line at all recorded
+   * nothing rather than something unnameable, and is not counted.
+   */
+  deletedWithoutSubstantivePrompt: number | null;
 
   /** History-only view, for cross-checking against the published one-liner. */
   historySessions: number;
@@ -122,7 +151,11 @@ export async function collectAudit(
 ): Promise<AuditInput> {
   const root = claudeDir(dir);
   const disk = scanClaudeDisk(root, { titles: true });
-  const history = await readHistory(root);
+  // `withPrompts` so that the fifth number can be computed. It holds
+  // history.jsonl's prompt text in memory for the length of the call —
+  // `rescue` has always done the same on the same file — and it is what makes
+  // `deletedWithoutSubstantivePrompt` a measurement rather than a null.
+  const history = await readHistory(root, { withPrompts: true });
   const index = readSessionsIndexes(root);
   const cleanup = readCleanupStatus(root);
   const archive = readArchiveState(opts.potsherdDir);
@@ -156,9 +189,15 @@ export function computeAudit(input: AuditInput): AuditReport {
 
   let promptsLost = 0;
   let promptsSurviving = 0;
+  // Deleted sessions that recorded something, and nothing in it names them.
+  // A session with no history line at all is not in this loop and is not
+  // counted: it recorded nothing, which is a different fact.
+  let deletedOnlyStubs = 0;
   for (const [id, sess] of history.sessions) {
-    if (deletedIds.has(id)) promptsLost += sess.promptCount;
-    else promptsSurviving += sess.promptCount;
+    if (deletedIds.has(id)) {
+      promptsLost += sess.promptCount;
+      if (!sess.prompts.some((p) => isSubstantivePrompt(p.text))) deletedOnlyStubs += 1;
+    } else promptsSurviving += sess.promptCount;
   }
 
   // A project is "wiped entirely" when every session it ever had is gone.
@@ -235,6 +274,7 @@ export function computeAudit(input: AuditInput): AuditReport {
     deleted: deletedIds.size,
     promptsLost,
     promptsSurviving,
+    deletedWithoutSubstantivePrompt: history.withPrompts ? deletedOnlyStubs : null,
 
     historySessions: history.sessions.size,
     historyOnDisk: [...history.sessions.keys()].filter((id) => onDiskIds.has(id)).length,

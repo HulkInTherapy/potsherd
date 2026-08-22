@@ -84,16 +84,27 @@ export interface SearchFilters {
 }
 
 /**
- * "No card title and no harness title", for a session.
+ * "Nothing a card would not improve", for a session.
  *
- * `cards` is empty until T2.2 writes the first row, so today the second
- * conjunct is always true and this reads as "the harness never named it".
- * It is written against the finished table deliberately: the moment `card`
- * starts writing, `--untitled` has to *stop* listing the sessions that now
- * have one, with no second edit and no chance of the two drifting. A card row
- * whose own title is empty names nothing, so it does not count as a title.
+ * `cards` is empty until T2.2 writes the first row, so at first the second
+ * conjunct is always true. It is written against the finished table
+ * deliberately: the moment `card` starts writing, `--untitled` has to *stop*
+ * listing the sessions that now have one, with no second edit and no chance of
+ * the two drifting. A card row whose own title is empty names nothing, so it
+ * does not count as a title.
+ *
+ * **The `title_source` disjunct** is 8.2's live half. `ingest.ts` now names a
+ * session the harness left unnamed after its first substantive prompt, so
+ * "`s.title` is empty" stopped being the same question as "nobody named it":
+ * measured on the eval fixture, 15 of the 17 untitled sessions gained a
+ * derived title and this filter fell from 9 rows to 2. A first prompt is a
+ * better label than a uuid and a much worse one than a card — it is one line
+ * out of the middle of a conversation, chosen before the conversation
+ * happened — so a session potsherd named itself is still a session `card`
+ * should be pointed at, and `--untitled` still points at it. A session the
+ * *harness* named is not: that summary was written from the whole transcript.
  */
-const UNTITLED_SESSION_SQL = `COALESCE(TRIM(s.title), '') = ''
+const UNTITLED_SESSION_SQL = `(COALESCE(TRIM(s.title), '') = '' OR s.title_source = 'prompt')
        AND NOT EXISTS (SELECT 1 FROM cards c
                         WHERE c.session_id = s.id AND COALESCE(TRIM(c.title), '') <> '')`;
 

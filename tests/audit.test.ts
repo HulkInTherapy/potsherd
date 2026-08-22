@@ -283,6 +283,11 @@ describe('sidechains are not sessions', () => {
     expect(v['deleted']).toBe(r.deleted);
     expect(v['promptsLost']).toBe(r.promptsLost);
     expect(v['promptsSurviving']).toBe(r.promptsSurviving);
+    // The fifth number too. Non-vacuously: the fixture has exactly one deleted
+    // session that recorded nothing but a stub, and a cross-check of 0 === 0
+    // would pass against a script that never learned the rule.
+    expect(r.deletedWithoutSubstantivePrompt).toBeGreaterThan(0);
+    expect(v['deletedWithoutSubstantivePrompt']).toBe(r.deletedWithoutSubstantivePrompt);
     // And it saw the sidechains without counting them.
     expect(v['sidechainFiles']).toBe(r.sidechainFiles);
   });
@@ -369,6 +374,27 @@ describe('audit --verify, piped the way the docs pipe it', () => {
     expect(got['still on disk']).toBe(a['onDisk']);
     expect(got['deleted']).toBe(a['deleted']);
     expect(got['prompts lost']).toBe(a['promptsLost']);
+
+    // Every number the card prints, not four of them. A row the screen shows
+    // and the receipt cannot recompute makes the receipt answer a smaller
+    // question than the screen asks, while looking like it answered all of it.
+    expect(a['deletedWithoutSubstantivePrompt']).toBeGreaterThan(0);
+    expect(got['only commands and stubs']).toBe(a['deletedWithoutSubstantivePrompt']);
+
+    // The screen and the pipeline, side by side. What is asserted is that
+    // every number the card renders appears in the snippet's output, so a
+    // sixth row added later without a sixth line here fails this test.
+    const card = stripAnsi(
+      execFileSync(process.execPath, [bin, 'audit', '--claude-dir', FIXTURE_CLAUDE, '--width', '80'], {
+        encoding: 'utf8',
+        env: { ...process.env, NO_COLOR: '1' },
+      }),
+    );
+    for (const [label, n] of Object.entries(got)) {
+      const row = card.split('\n').find((l) => l.trim().startsWith(label));
+      expect(row, `no "${label}" row on the audit card`).toBeDefined();
+      expect(row!.replace(/,/g, ''), row).toContain(String(n));
+    }
   });
 
   it('leaves the default form alone, so a pasted snippet names no machine path', () => {
@@ -421,5 +447,123 @@ describe('audit --verify', () => {
     expect(got['still on disk']).toBe(r.onDisk);
     expect(got['deleted']).toBe(r.deleted);
     expect(got['prompts lost']).toBe(r.promptsLost);
+    expect(got['only commands and stubs']).toBe(r.deletedWithoutSubstantivePrompt);
+  });
+});
+
+/**
+ * **The second number beside the first** (`plans/09` §13.11).
+ *
+ * `deleted` is literally true and thinner than it looks. `history.jsonl` rows
+ * carry exactly five fields — `display`, `pastedContents`, `project`,
+ * `sessionId`, `timestamp` — and none of them separates a session somebody
+ * worked in from a resume picker that was opened and closed. On the reference
+ * machine 92 of the 299 deleted sessions are one `/resume` and nothing else,
+ * and 0 of those 92 ever had a transcript. The signature is behavioural, not
+ * structural: it cannot be read off the file, so no count changes.
+ *
+ * What is added is a measurement written beside the claim: of the deleted, how
+ * many recorded something and nothing in it names them. The rule is
+ * `rescue.ts`'s `isSubstantivePrompt`, the same one that decides what a ghost
+ * is titled — not a second rule.
+ *
+ * The fixture is what makes these tests non-vacuous, and it establishes each
+ * boundary of the definition rather than a single number:
+ *   ghostA  `/model`  then a real question   → named, not counted
+ *   ghostB  `continue` then a real question  → named, not counted
+ *   ghostC  `clear` and nothing else         → counted
+ */
+describe('audit discloses what the deleted sessions recorded', () => {
+  it('counts a deleted session that recorded only a stub, and only that one', async () => {
+    const r = await audit(FIXTURE_CLAUDE, NOW);
+    expect(r.deleted).toBe(3);
+    // Not "some": exactly the one whose every history line fails the rule. A
+    // rule that rejected any session containing a slash command would say 2
+    // here, and one that rejected nothing would say 0.
+    expect(r.deletedWithoutSubstantivePrompt).toBe(1);
+  });
+
+  it('moves by exactly the number of stub-only sessions added', async () => {
+    const claude = copyFixtureClaude();
+    try {
+      const before = await audit(claude, NOW);
+      // Two more deleted sessions — no transcript is written for either, which
+      // is what makes them deleted. One recorded a single `/resume` and
+      // nothing else; the other opened the same way and then asked something.
+      // Only the first is the thing being counted.
+      const STUB = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+      const REAL = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+      const line = (sessionId: string, display: string, timestamp: number) =>
+        JSON.stringify({ display, pastedContents: {}, timestamp, project: '/tmp/potsherd-gamma', sessionId });
+      fs.appendFileSync(
+        path.join(claude, 'history.jsonl'),
+        [
+          line(STUB, '/resume ', 1778500000000),
+          line(REAL, '/resume ', 1778500100000),
+          line(REAL, 'the deploy is failing on the health check again', 1778500200000),
+        ].join('\n') + '\n',
+      );
+
+      const after = await audit(claude, NOW);
+      expect(after.deleted).toBe(before.deleted + 2);
+      expect(after.deletedWithoutSubstantivePrompt).toBe(
+        (before.deletedWithoutSubstantivePrompt ?? -1) + 1,
+      );
+    } finally {
+      rmrf(path.dirname(claude));
+    }
+  });
+
+  it('does not count a deleted session that recorded nothing at all', async () => {
+    const claude = copyFixtureClaude();
+    try {
+      const before = await audit(claude, NOW);
+      // A session named only by a sessions-index: no transcript, no history
+      // line. It recorded nothing, which is a different fact from recording
+      // something that names nothing, and the disclosure line says the second.
+      const idx = path.join(claude, 'projects', '-tmp-potsherd-alpha', 'sessions-index.json');
+      const data = JSON.parse(fs.readFileSync(idx, 'utf8')) as { entries: unknown[] };
+      data.entries.push({ sessionId: 'ffffffff-ffff-4fff-8fff-ffffffffffff', isSidechain: false });
+      fs.writeFileSync(idx, JSON.stringify(data));
+
+      const after = await audit(claude, NOW);
+      expect(after.deleted).toBe(before.deleted + 1);
+      expect(after.deletedWithoutSubstantivePrompt).toBe(before.deletedWithoutSubstantivePrompt);
+    } finally {
+      rmrf(path.dirname(claude));
+    }
+  });
+
+  it('reports null, never zero, when the scan was never asked the question', async () => {
+    const { collectAudit, computeAudit } = await import('@potsherd/core');
+    const input = await collectAudit(FIXTURE_CLAUDE, NOW);
+    expect(computeAudit(input).deletedWithoutSubstantivePrompt).toBe(1);
+
+    // A `HistoryScan` taken without `withPrompts` has an empty `prompts` array
+    // on every session, so the same arithmetic would come out `0` — a number,
+    // on the product's first screen, meaning "nobody asked".
+    const blind = { ...input, history: { ...input.history, withPrompts: false } };
+    expect(computeAudit(blind).deletedWithoutSubstantivePrompt).toBeNull();
+  });
+
+  it('puts the row on the card only when there is something to disclose', async () => {
+    const r = await audit(FIXTURE_CLAUDE, NOW);
+    const t = new Theme({ color: false, width: 80 });
+
+    const shown = stripAnsi(renderAuditCard(r, t));
+    expect(shown).toContain('only commands and stubs');
+    // Anchored to the denominator it is a fraction of, and not editorialised:
+    // it says what was recorded, not what the sessions were.
+    expect(shown).toMatch(/only commands and stubs\s+1\s+of the 3 deleted/);
+    for (const line of shown.split('\n')) expect([...line].length).toBeLessThanOrEqual(80);
+
+    // Nothing to disclose, and nothing said. Both the "every deleted session
+    // had a real prompt" case and the "not measured" case.
+    for (const value of [0, null]) {
+      const quiet = stripAnsi(
+        renderAuditCard({ ...r, deletedWithoutSubstantivePrompt: value }, t),
+      );
+      expect(quiet, String(value)).not.toContain('only commands and stubs');
+    }
   });
 });

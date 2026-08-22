@@ -106,6 +106,39 @@ interface LsJson {
 
 const ids = (j: LsJson): string[] => j.sessions.map((s) => s.id);
 
+/**
+ * The first user prompt of a session, read back through the shipped binary.
+ *
+ * `--untitled`'s new definition is about where a title came from, and a test
+ * that decided that from the *shape* of the string would be asserting the
+ * regex it was written against. This reads the session.
+ */
+function firstUserPrompt(id: string): string | null {
+  const j = json<{ exchanges?: { userText?: string | null }[] }>(['show', id.slice(0, 8)]);
+  for (const e of j.exchanges ?? []) {
+    const t = (e.userText ?? '').trim();
+    if (t) return t;
+  }
+  return null;
+}
+
+/**
+ * `rescue.ts`'s stopping rule, restated here on purpose.
+ *
+ * A test that imported the rule would pass whatever the rule became; this file
+ * asserts the *behaviour* the rule is supposed to produce, so it spells out
+ * what `phase-8-hardening.md` §8.2 asked for — not a slash command, at least
+ * eight characters, and not one of seven conversational stopwords — and will
+ * fail if the shipped rule drifts away from it.
+ */
+function isNotSubstantive(text: string): boolean {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  const stop = new Set(['clear', 'continue', 'ok', 'yes', 'hi', 'y', 'n']);
+  return (
+    clean === '' || clean.startsWith('/') || [...clean].length < 8 || stop.has(clean.toLowerCase())
+  );
+}
+
 beforeAll(async () => {
   execFileSync('node', ['build.mjs'], { cwd: path.join(repo, 'packages', 'cli'), stdio: 'pipe' });
   root = tempDir('potsherd-annotate-');
@@ -331,24 +364,70 @@ describe('link', () => {
   });
 });
 
+/**
+ * `--untitled` after 8.2, which is the flag's whole reason to keep existing.
+ *
+ * Until phase 8 the filter was "no card title and no `s.title`", and every row
+ * it returned rendered as `<project-slug>-<id8>` — so `/-[0-9a-f]{8}$/` was a
+ * complete description of the answer. `index` now names a session the harness
+ * left unnamed after its first substantive prompt, and that regex stops being
+ * true of anything.
+ *
+ * The flag did not therefore stop meaning something. `title_source` records
+ * who wrote the title, and `--untitled` means **"nothing a card would not
+ * improve"**: the sessions with no title at all, plus the ones potsherd named
+ * itself. What it must never contain is a session somebody *else* named — the
+ * harness, from the whole transcript, or a card.
+ *
+ * These tests establish that from both ends: every returned row is one of the
+ * two admissible kinds, and every session with a harness title is absent.
+ */
 describe('ls --untitled', () => {
-  it('lists exactly the sessions with nothing but an id to call them by', () => {
+  it('lists the sessions nothing but potsherd has named, and no others', () => {
     const j = json<LsJson>(['ls', '--untitled', '--limit', '50']);
     expect(j.sessions.length).toBeGreaterThan(0);
+
+    // The premise this file needs and does not get to assume: the derivation
+    // ran on this corpus. Without a row whose title is a prompt rather than a
+    // uuid, everything below would pass against the old behaviour too.
+    const derived = j.sessions.filter((s) => !/-[0-9a-f]{8}$/.test(s.displayTitle));
+    expect(derived.length, 'no session was named by its prompt').toBeGreaterThan(0);
+
     for (const s of j.sessions) {
-      // `<project-slug>-<id8>` is what `ls` falls back to when nothing named it.
-      expect(s.displayTitle, s.displayTitle).toMatch(/-[0-9a-f]{8}$/);
-      expect(s.cardTitle).toBeNull();
+      // A card is the one title `--untitled` is asking for and never has.
+      expect(s.cardTitle, s.displayTitle).toBeNull();
+      // Every row is either still nameless — the uuid fallback — or carries a
+      // title potsherd derived. `show --json` says which, from the session's
+      // own prompts rather than from the shape of the string.
+      if (/-[0-9a-f]{8}$/.test(s.displayTitle)) {
+        const first = firstUserPrompt(s.id);
+        expect(
+          first === null || isNotSubstantive(first),
+          `${s.displayTitle} kept its uuid but opens with: ${first}`,
+        ).toBe(true);
+      } else {
+        const first = firstUserPrompt(s.id);
+        expect(first, s.displayTitle).not.toBeNull();
+        // The stored title is the opening of that prompt, cut — not a summary
+        // of it, and not some other exchange's words.
+        expect(first!.replace(/\s+/g, ' ').startsWith(s.displayTitle)).toBe(true);
+      }
     }
   });
 
   it('excludes the sessions the harness did name', () => {
     const untitled = new Set(ids(json<LsJson>(['ls', '--untitled', '--limit', '50'])));
-    const named = json<LsJson>(['ls', '--limit', '50']).sessions.filter(
-      (s) => !/-[0-9a-f]{8}$/.test(s.displayTitle),
-    );
-    expect(named.length).toBeGreaterThan(0);
-    for (const s of named) expect(untitled.has(s.id)).toBe(false);
+    // "Named by the harness" cannot be read off `displayTitle` any more — a
+    // derived title looks like prose too. It is read off the session: a
+    // harness title is one no prompt in the transcript begins with.
+    const all = json<LsJson>(['ls', '--limit', '50']).sessions;
+    const harnessNamed = all.filter((s) => {
+      if (/-[0-9a-f]{8}$/.test(s.displayTitle)) return false;
+      const first = firstUserPrompt(s.id);
+      return first === null || !first.replace(/\s+/g, ' ').startsWith(s.displayTitle);
+    });
+    expect(harnessNamed.length).toBeGreaterThan(0);
+    for (const s of harnessNamed) expect(untitled.has(s.id), s.displayTitle).toBe(false);
   });
 
   it('does not list a ghost that its recovered prompts already name', () => {

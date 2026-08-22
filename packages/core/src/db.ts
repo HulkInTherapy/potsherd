@@ -349,6 +349,24 @@ CREATE INDEX IF NOT EXISTS card_runs_backend ON card_runs(backend, ran_at);
     // the column with it.
     run: createGhostVecTable,
   },
+  {
+    version: 9,
+    name: 'session-title-source',
+    // Who named this session.
+    //
+    // NULL is the whole history of the column: the harness wrote the title, or
+    // there is no title at all. `'prompt'` means potsherd derived one from the
+    // session's first substantive prompt (`ingest.ts`, `rescue.ts`'s rule), and
+    // it exists so that `--untitled` can keep meaning what it has always meant.
+    //
+    // Without it, deriving a title empties `ls --untitled`: its SQL is "no card
+    // title and no `s.title`", so the moment potsherd writes a title of its own
+    // the flag stops finding the sessions it exists to find. A flag that
+    // silently stops meaning anything is worse than one that was never added,
+    // so the derivation and this column land together and `--untitled` reads
+    // "nothing a card would not improve" instead.
+    up: `ALTER TABLE sessions ADD COLUMN title_source TEXT;`,
+  },
 ];
 
 export function open(opts: OpenOptions = {}): Db {
