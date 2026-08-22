@@ -22297,8 +22297,12 @@ async function runGuard(o) {
       print("  and exits in well under a second when nothing has changed.");
       if (resolution.via === "absolute") {
         print("");
-        print(t.dim("  potsherd is not on your PATH, so the hook pins this install by path."));
-        print(t.dim("  once a  potsherd  is on your PATH, re-run  potsherd guard  for the portable form."));
+        for (const l of format_exports.wrap(
+          "potsherd is not on your PATH, so the hook pins this install by path. once a  potsherd  is on your PATH, re-run  potsherd guard  for the portable form.",
+          Math.max(20, t.width - 3)
+        )) {
+          print(t.dim(`  ${l}`));
+        }
       }
     }
     print("");

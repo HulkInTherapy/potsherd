@@ -72,8 +72,20 @@ export async function runGuard(o: GuardOptions): Promise<number> {
       print('  and exits in well under a second when nothing has changed.');
       if (resolution.via === 'absolute') {
         print('');
-        print(t.dim('  potsherd is not on your PATH, so the hook pins this install by path.'));
-        print(t.dim('  once a  potsherd  is on your PATH, re-run  potsherd guard  for the portable form.'));
+        // Wrapped, and this pair is worth a note. They print **only** when
+        // `potsherd` is not on PATH — which is not true on the machine this
+        // was written on (a stale 0.1.0 lives there) and is true on every CI
+        // runner. So the width check went green locally and red on all four
+        // legs: the *product's* output, not a test's, whose presence depends on
+        // the environment. `09 §7.2` from the other direction.
+        for (const l of fmt.wrap(
+          'potsherd is not on your PATH, so the hook pins this install by path. ' +
+            'once a  potsherd  is on your PATH, re-run  potsherd guard  for the ' +
+            'portable form.',
+          Math.max(20, t.width - 3),
+        )) {
+          print(t.dim(`  ${l}`));
+        }
       }
     }
     print('');
