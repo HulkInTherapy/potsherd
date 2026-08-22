@@ -104,6 +104,12 @@ jobs:
         run: |
           set -euo pipefail
           repo="$PWD"
+          # XDG_CONFIG_HOME is cleared alongside HOME because opencode's config
+          # path honours it. T5.5 flagged this as "insurance, not a live failure
+          # on GitHub's runners" — it was live: the runner sets it, so that one
+          # line resolved to /home/runner/.config/... outside the throwaway HOME
+          # and could not be tildified, while every other line could.
+          #
           # `pwd -P` because on macOS /tmp is a symlink to /private/tmp: HOME would
           # be the symlinked path and the working directory the resolved one, and
           # `tildify` would then fail to fold the graft path back to `~`.
@@ -126,19 +132,18 @@ jobs:
           # The capture order from make-screens.sh, in miniature: `rescue`
           # first, because it is what creates ~/.claude/settings.json, and the
           # receipt reports whether that file is present.
-          ( cd "$home" && env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR HOME="$home" \
+          ( cd "$home" && env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR -u XDG_CONFIG_HOME HOME="$home" \
               node "$repo/packages/cli/bin/potsherd.js" rescue --yes >/dev/null )
 
           # From a project directory inside the demo HOME, because the graft
           # line is relative to the working directory and a capture run from
           # the checkout would print the runner's own path.
           ( cd "$home/work/demo-project" \
-            && env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR -u NO_COLOR -u FORCE_COLOR \
+            && env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR -u XDG_CONFIG_HOME -u NO_COLOR -u FORCE_COLOR \
                  HOME="$home" PATH="$home/.claude/local:$PATH" \
                  node "$repo/packages/cli/bin/potsherd.js" \
                  doctor --privacy --width 80 --no-color ) > "$home/live.txt"
 
-          # Everything in the receipt is fixed by the corpus except the date in
           # Two things in this receipt are real output that legitimately differ
           # between one capture and the next, so both are normalised rather than
           # pinned — the same reasoning, applied twice.
