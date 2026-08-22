@@ -319,6 +319,8 @@ ALLOW: list[tuple[str, str, str]] = [
     # These three name every forbidden string in order to forbid it.
     ('scripts/check-privacy.py', '*', 'the guard itself; it must name what it bans'),
     ('scripts/make-screens.sh', 'project-name', 'the screens forbidden-string list'),
+    ('scripts/make-cast.sh', 'project-name', 'the cast forbidden-string list — the same list, and'
+     ' for the same reason: a guard has to name what it bans'),
     ('tests/adapters/cursor.test.ts', 'project-name',
      'asserts tests/fixtures/cursor contains none of these; it has to spell them'),
     # Not text we wrote.

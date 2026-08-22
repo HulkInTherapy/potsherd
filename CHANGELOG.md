@@ -66,8 +66,9 @@ model SDKs and the embedding runtime are optional peers now — npm installs
 
 ### removed
 
-- `Fulcrum` and `meghbrain` — the repository owner's own projects — from
-  `--help`, two MCP tool descriptions, four core docstrings and two fixtures.
+- The repository owner's own two project names, which had been the worked
+  example in `find --help`, in two MCP tool descriptions, in four core
+  docstrings and in two fixtures since phase 4.
   **34 pinned privacy violations → 14.**
 
 ### still open

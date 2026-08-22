@@ -1,167 +1,191 @@
 # the prompt to paste into the new session
 
-Copy everything below the line. Nothing else is needed — the files it names are on disk.
+Copy everything below the line. Nothing else is needed — every file it names is on disk.
 
 ---
 
-You are continuing a build already in progress. This is not a fresh start; you are picking up a
-session that ran out of context mid-project, and you have everything it knew written down.
+You are continuing a build already in progress. **This is not a fresh start.** You are the third
+orchestrator on this project; the first ran phases 0–3, the second ran 4, 5 and 6, and both wrote
+down everything they learned so that you would not have to learn it again. Read them and you are
+effectively a continuation of that session, not a newcomer to it.
 
-**The project:** potsherd — a local-first TypeScript CLI + Claude Code plugin + MCP server that
-rescues, indexes, searches, interrogates (`ask`) and re-enters (`graft`) every coding-agent session
-on a machine. The plan folder is `/Users/zebra/randomness/plans/`. The repo is
-`/Users/zebra/randomness/potsherd/` and is public at https://github.com/HulkInTherapy/potsherd.
+**Your job is phase 7 — polish and release, to `v1.0.0`. It is the last phase.**
 
-**Where it stands: phases 0–3 are shipped and tagged.** `v0.1.0` rescue · `v0.2.0` foundation ·
-`v0.3.0` cards · `v0.4.0` recall. 844 tests green, CI green on macOS + Ubuntu × Node 22 + 24.
-Thirteen verbs ship: `audit rescue guard index ls find show card tag pin link stats doctor`.
-**Your job is phases 4, 5, 6 and 7, to v1.0.0, without stopping for approval between phases.**
+---
 
-## read these first, in this order
+## 1. what potsherd is, in one paragraph
 
-1. `plans/08-STATE-OF-PLAY.md` — where the build is, every open item in one table, the five rules
-   the last session learned the hard way. **Read this before anything else.**
-2. `plans/09-RUNNING-WORKERS.md` — how subagents actually behaved across ~25 workers and 4 phases:
-   what they were excellent at, every way it went wrong, and corrected brief templates. **This is
-   the most valuable file in the folder. It is the difference between repeating the last session's
-   mistakes and not.**
-3. `plans/07-ORCHESTRATION.md` — the orchestrator/worker model. Binding.
-4. `plans/00-README.md` — ground rules. Binding.
-5. `plans/03-ARCHITECTURE.md` — the build contract. Binding. Note it has been corrected several
-   times from measurement; the corrections are marked inline.
-6. `plans/04-DECISIONS.md` — read the decision log from the bottom up. ~25 entries, each a fact the
-   plan got wrong and how it was corrected.
-7. `plans/05-SHAREABLE-EXPERIENCE.md` and `plans/06-QUALITY-AND-EVALS.md` — the design system and
-   the definition-of-done standard.
-8. Then `plans/phases/phase-4-ask-and-graft.md` and, in the repo,
-   `phases/phase-3/HANDOFF.md` and `phases/phase-3/VERIFICATION.md`.
+A **local-first TypeScript CLI + Claude Code plugin + MCP server** that rescues, indexes, searches,
+interrogates (`ask`) and re-enters (`graft`) every coding-agent session on a machine. It exists
+because Claude Code deletes transcripts after 30 days: on the reference machine **299 of 330
+sessions were already gone, taking 2,971 prompts and 33 whole projects with them**. potsherd
+archives what survives, reconstructs "ghosts" of what did not from `history.jsonl`, and makes the
+whole thing searchable and quotable.
 
-Read `plans/01`, `02` and `research/` only if a phase file sends you there. `research/formats.md`
-was rewritten from 122 to 509 lines against the real files — trust it over your instincts about
-transcript formats.
+**The claim is not "a search tool". The claim is that potsherd's output can be checked.** Every card
+decision cites the exchanges that support it and is dropped if they do not resolve. Every number
+printed is measured or labelled `est.` `audit --verify` prints standalone Python that recomputes its
+own headline numbers, so nobody has to trust potsherd to check potsherd. **That is the product.**
+Protect it above features.
 
-## how to work
+## 2. where everything is
 
-You are an **orchestrator**. You read the plan, write task briefs, spawn workers, verify their
-output, write the handoff, commit, tag, and move on. **You do not write product code yourself.**
-That is what lets one session span multiple phases: your context holds the plan, the briefs and
-short reports — never source files, never tool output.
+```
+/Users/zebra/randomness/
+├── plans/            ← THE PLAN FOLDER. Not in the repo. Use ABSOLUTE paths in worker briefs.
+│   ├── 00-README.md              ground rules. binding. read fully.
+│   ├── 01-PROBLEM-AND-EVIDENCE.md the corrected facts; every number sourced
+│   ├── 02-STRATEGY-AND-VIRALITY.md positioning, the bets, WHAT WE REFUSE TO BUILD
+│   ├── 03-ARCHITECTURE.md        the build contract. corrected inline ~10 times; note §9/§11 stale
+│   ├── 04-DECISIONS.md           ~60 entries. READ FROM THE BOTTOM UP. each is a fact
+│   │                             the plan got wrong and how it was corrected.
+│   ├── 05-SHAREABLE-EXPERIENCE.md the five shareable moments + terminal design system
+│   ├── 06-QUALITY-AND-EVALS.md   the definition-of-done standard
+│   ├── 07-ORCHESTRATION.md       orchestrator/worker model. binding.
+│   ├── 08-STATE-OF-PLAY.md       ← START HERE. status, every open item, the ten rules
+│   ├── 09-RUNNING-WORKERS.md     ← THEN HERE. how ~45 workers actually behaved across
+│   │                             7 phases, every way it failed, corrected brief templates.
+│   │                             THE MOST VALUABLE FILE IN THE FOLDER.
+│   ├── RESUME-PROMPT.md          this file
+│   ├── research/                 competitors.md · memory-research.md · formats.md · sources.md
+│   │                             (formats.md is 509 lines and trustworthy for claude/codex/
+│   │                              cursor/pi ONLY — gemini/opencode/copilot are 5 lines each,
+│   │                              headed "unmeasured")
+│   └── phases/phase-0…7-*.md     one file per phase. phase-7 is yours.
+├── potsherd/         ← THE REPO (public, MIT, github.com/HulkInTherapy/potsherd)
+│   ├── packages/core/            adapters, parser, store, index, redact, cards, recall,
+│   │                             ask, graft, open-threads, stack, link-suggest, setup, llm
+│   ├── packages/cli/             the `potsherd` binary — 20 verbs
+│   ├── packages/mcp/             stdio MCP server, exactly 6 tools
+│   ├── packages/bridges/         claude-mem · agentmemory · notes · markdown export
+│   ├── plugins/claude-code/      2 skills, 1 agent, 3 hooks, bin shim, marketplace manifest
+│   ├── plugins/codex/            manifest + hooks (INFERRED from docs, never loaded by codex)
+│   ├── evals/                    queries.jsonl (25) · ask.jsonl (10 gold + 3 decoys) · run.ts
+│   ├── docs/screens/             15 committed screens, all from the SYNTHETIC demo corpus
+│   ├── docs/memory-stack.md      the `stack` docs page
+│   ├── scripts/                  make-screens.sh · make-demo-corpus.mjs · check-privacy.py
+│   ├── tests/                    1,354 tests, 33 files
+│   └── phases/phase-N/           HANDOFF.md + VERIFICATION.md + WAVE.md + registration-*.txt
+│                                 + evidence-* per phase. READ phase-6/HANDOFF.md FIRST.
+└── potsherd-*/       kept evidence directories from real runs, beside the repo on purpose
+                      (they hold real-corpus prose that must never enter the public repo)
+```
 
-Per phase: read the phase file and the previous `HANDOFF.md` → write `phases/phase-N/WAVE.md`
-before starting → serial prerequisite if any → parallel wave in **git worktrees with disjoint
-deliverables** → integration → **a fresh verifier that authored none of it** → fix what it finds →
-write `HANDOFF.md` and `VERIFICATION.md` → wait for CI → tag `v0.N+1.0` → next phase.
+## 3. read these first, in this order
 
-**Use `plans/09-RUNNING-WORKERS.md`'s corrected brief templates verbatim.** In particular:
-`isolation: worktree` on *every* worker without exception; reserve the barrel files
-(`packages/core/src/index.ts`, `packages/cli/src/index.ts`) and have workers report the export line
-instead of editing them; verifiers must not sub-delegate and every finding must carry its command
-output; every real run keeps its `--potsherd-dir` and reports the path.
+1. **`plans/08-STATE-OF-PLAY.md`** — status, every open item in three tables, the ten rules.
+2. **`plans/09-RUNNING-WORKERS.md`** — sections 1–6 are session 1's; **sections 7–12 are session
+   2's and are the ones that will save you the most.** §7 is the three failures that cost the last
+   session most, and all three were the orchestrator's own.
+3. `potsherd/phases/phase-6/HANDOFF.md`, then `phase-5/` and `phase-4/`'s.
+4. `plans/00-README.md`, `plans/07-ORCHESTRATION.md`, `plans/06-QUALITY-AND-EVALS.md` — binding.
+5. `plans/phases/phase-7-polish-and-release.md` — your phase.
+6. `plans/04-DECISIONS.md` from the bottom up. Skim `03`, `05`, `02`.
 
-## what this project is actually about
+## 4. how to work
 
-Not "a search tool". The claim is that **potsherd's output can be checked**. Every card decision
-cites the exchanges that support it and is dropped if they do not. Every number printed is measured
-or labelled `est.`. `audit --verify` prints the standalone Python that recomputes its own headline
-numbers so nobody has to trust potsherd to check potsherd.
+You are an **orchestrator**. You read the plan, write briefs, spawn workers, verify their output,
+integrate, write the handoff, commit, tag. **You do not write product code yourself** — that is what
+lets one session span phases: your context holds the plan, the briefs and short reports, never
+source files.
 
-That is why the last session's worst bugs mattered so much, and **every one of them passed a green
-test suite**: an estimator that promised 7m26s before a 55-minute run; `doctor --privacy` still
-saying "no network" after the product started sending transcript text to a model; `index` printing
-"index holds no secrets" while the index held masks; ghost vectors that were never backfilled, so
-every upgrading user would have had an empty vector table forever; an eval set that scored 10/10
-because every query quoted its own answer.
+Per phase: read the phase file and the previous `HANDOFF.md` → write `phases/phase-N/WAVE.md` →
+parallel wave in **git worktrees with disjoint deliverables** → integration → **a fresh verifier
+that authored none of it** → fix what it finds → `HANDOFF.md` + `VERIFICATION.md` → wait for CI →
+tag. Use `09`'s corrected brief templates verbatim.
 
-**Tests catch regressions. They do not catch a number that is confidently wrong, a string that has
-quietly become false, or a benchmark that cannot fail. Only reading the output like a suspicious
-human catches those — so read one real output per phase yourself, by eye.**
+**The checklist that would have prevented most of last session's damage is `09 §12`. Use it.**
 
-## the ground rules, unchanged
+Non-negotiables, all learned the hard way:
+- **`git push origin main` before spawning a wave**, and verify `origin/main` == `HEAD`. Worktrees
+  are cut from `origin/main`, not your local commit.
+- **`isolation: worktree` on every worker**, no exceptions. **Absolute plan paths in briefs.**
+- **Reserve the barrels** (`packages/core/src/index.ts`, `packages/cli/src/index.ts`) and
+  `package.json`; workers write a `registration-*.txt` and you apply it.
+- **After applying a registration file: run the verb, run `python3 scripts/check-privacy.py`, run
+  the suite.** Registration files are worker prose — they have named the wrong command, carried a
+  live-corpus session id, and over-captured 34 lines of explanatory text into `index.ts`.
+- **Verifiers do not sub-delegate**, and every finding carries its command output.
+- **Never tag before CI is green on the pushed commit.** Six CI-only failures last session, none
+  reproducible locally.
+
+## 5. the ground rules, unchanged
 
 - `~/.claude`, `~/.codex`, `~/.cursor`, `~/.pi`, `~/.gemini` are **read-only inputs**. potsherd
-  writes only to `~/.potsherd/` and, through the consent flow, one key plus one hook in
-  `~/.claude/settings.json`.
-- Exact counts come from the frozen snapshot `~/.potsherd/archive-manual-2026-08-21`. The live
-  `~/.claude` **grows while agents work** — it supports floors only.
-- No network by default. Model calls only for `card`, `ask`, `graft`, only through `core/src/llm.ts`,
-  only after a dry-run estimate. `llm.ts` redacts every outgoing string itself; no caller can
-  bypass it. There is no `--no-redact` flag and you must not add one.
-- **Cited or dropped.** No synthesised claim about the user's history without a session id and a
-  timestamp.
+  writes only to `~/.potsherd/`, to `./.potsherd/graft-*.md` in the cwd, to a `--readers-out` path,
+  and — through the consent flow — to other agents' MCP config files. **Every one of those is
+  disclosed by `doctor --privacy`, and CI fails if the published receipt drifts from the live one.**
+- Exact counts come from the frozen snapshot `~/.potsherd/archive-manual-2026-08-21`. Live
+  `~/.claude` grows while agents work; it supports floors only.
+- No network by default. Model calls only for `card`, `ask`, `graft`, only through
+  `core/src/llm.ts`, which redacts every outgoing string itself. **There is no `--no-redact` flag
+  and you must not add one.**
+- **Cited or dropped.** No synthesised claim without a session id and a timestamp.
 - **No number in any README, doc or screenshot that was not produced by a command whose output is
   in a `HANDOFF.md`.** If unsure, measure. If you cannot measure, do not state it.
 - **You never post, comment, submit or message anyone. No telemetry. No accounts.** A prepared
-  upstream PR sits unsubmitted in `docs/upstream/` and stays there. (Note: upstream
-  `obra/episodic-memory#128` is already open and overlaps it — read that before anyone submits.)
-- Secrets review before any screenshot: the corpus contains real client work, which is why every
-  committed screen is generated from a synthetic demo corpus that reproduces the real headline
-  numbers with neutral project names (`scripts/make-demo-corpus.mjs`, `scripts/make-screens.sh`).
-- When the plan is wrong about a fact, **fix the plan file and log it in `04-DECISIONS.md`.** The
-  folder is maintained, not frozen. That has happened ~25 times and is expected.
+  upstream PR sits unsubmitted in `docs/upstream/` and stays there (and `obra/episodic-memory#128`
+  is already open and overlaps it — read that before anyone submits).
+- **This repo is public and the reference corpus contains a named third party's business plans and
+  a personal tweet.** Every committed artefact comes from the synthetic demo corpus. Real-corpus
+  runs are cited by their kept `--potsherd-dir` and their numbers; their prose stays out.
+  `scripts/check-privacy.py` enforces this and runs first in CI — **run it after every change.**
+- When the plan is wrong about a fact, **fix the plan file and log it in `04-DECISIONS.md`.** That
+  has happened ~60 times and is expected.
 
-## the environment
+## 6. the environment
 
 Working dir `/Users/zebra/randomness`. node v24.9.0, pnpm 10.18.0, `gh` authenticated as
 HulkInTherapy, `claude` on PATH with an active subscription (model calls cost the user nothing
-extra; wall time is the budget that binds). `codex`, `cursor` and `asciinema` are **not installed**,
-but `~/.codex`, `~/.cursor` and `~/.pi` transcripts exist and are the real test data. Install
-asciinema via brew when phase 7 needs it.
+extra; **wall time is the budget that binds** — one haiku call through the agent SDK is 60–160 s).
+`codex`, `cursor` and `asciinema` are **not installed**, but `~/.codex`, `~/.cursor` and `~/.pi`
+transcripts exist and are real test data. Install asciinema via brew when phase 7 needs it.
 
-`potsherd` on PATH is a **stale phase-0 build** — use `node packages/cli/bin/potsherd.js` after
-`pnpm build`, or reinstall from `packages/cli` with `npm pack && npm i -g ./potsherd-*.tgz`.
+`potsherd` on PATH is a **stale phase-0 build (0.1.0)** — use `node packages/cli/bin/potsherd.js`
+after `pnpm build`. This has bitten the build twice; the plugin hooks now check for it explicitly.
 
-## phase 4 is next, and it is the differentiator
+**`claude -p --plugin-dir plugins/claude-code --output-format stream-json --verbose` is how you test
+the plugin.** `plans/07` says those tests need an interactive session; they do not, and print mode
+leaves a machine-readable record of every tool the model chose.
 
-`ask` and `graft` — the two verbs nobody else has. Read
-`plans/phases/phase-4-ask-and-graft.md`. Phase 3 handed them exactly what they need:
-`recall()` now returns `k`, effective per-list weights, `relaxedLists` and `from[].contribution`,
-and `find --json` carries `sessionId` and `isSidechain` per hit so the reader fan-out can tell which
-session actually matched inside a clustered block.
+## 7. phase 7 — and what "done" means
 
-Two things phase 4 must get right, and they are both about honesty rather than capability:
+Read `plans/phases/phase-7-polish-and-release.md`. The three items that matter most are at the top
+of `08-STATE-OF-PLAY.md`'s open-items table:
 
-1. **Sentences without a citation are dropped by code, not by prompt.** `03 §8` is explicit. The
-   ask evals require **100% of citations to resolve or the build fails**, and `--strict` must refuse
-   rather than infer on the three decoy questions. Build the eval harness so it computes its
-   verdict and **exits non-zero on failure**, the way `pnpm evals` does now — a score nobody checks
-   is worse than no score.
-2. **Build the eval set before the thing it measures, with a different worker.** This was the single
-   best decision of the last session. In phase 1 the same worker wrote the queries and the ranker
-   and produced a meaningless 10/10; a verifier caught that every query quoted its own answer. In
-   phase 3 a separate worker built a 25-query set with a real distractor pool and an anti-gaming
-   overlap check — and it failed the ranker four times before the ranker genuinely improved. Do the
-   same for `ask`'s ten gold questions and three decoys.
+- **A — a marketplace install does not produce a working plugin.** `dist/` is gitignored, so a clone
+  has neither the CLI bundle nor the MCP server; all six tools vanish and the archaeologist agent is
+  left with `Read`. `npm view potsherd version` is a **404**. **This is the install story for every
+  user who is not us, and it is the single biggest item in the phase.**
+- **B — the README is stale by three phases.** `plans/05` makes it the only landing page.
+- **C — `03 §9` and `03 §11` are stale in the plan** (the product is correct and CI-guarded).
 
-## one live issue you inherit
+Then the long tail in that same table: the fusion gate that still fails honestly, `ask`'s p50 and
+its 25–33 rows against a 24-row target, the screens that do not exist yet, `show --html`, the
+user's own project names as examples in shipped `--help`, and `make-screens.sh` destroying committed
+screens if interrupted.
 
-**Phase 3's fusion gate FAILS, honestly and on purpose.** `pnpm evals` exits non-zero and prints:
+**The user's standard for this phase, in their words:** *"the final output should be the complete
+perfected thing… it should look and feel good, the UX should be amazing, no tiny hiccups and
+mismatches, everything should be perfect by then."* Take that literally. Phase 7 is where the
+polish items stop being deferred, and **a "known open item" is only acceptable if you can say why it
+is not fixable now.**
 
-```
-hybrid (auto)  22/25  ✓ beats bm25  ✗ beats vectors  ✓ ≥ 22/25   FAIL
-```
+**Done means:** `v1.0.0` tagged; a `HANDOFF.md` for every phase; every DoD box checked or explicitly
+open with a reason; a fresh `$HOME` on this Mac **and** an Ubuntu Docker container both able to run
+the install path from the README alone; the five shareable screenshots and the demo cast in `docs/`;
+and `FINAL-REPORT.md` at the repo root — what exists, how to test each shareable moment in under
+five minutes, every open item across all phases, and the exact commands for a fresh-machine install.
 
-Hybrid doubled bm25 (9/25 → 22/25) and clears the 22/25 bar, but **ties vec-only rather than beating
-it**, so `06`'s gate is not met. The ranker was kept anyway — the gate exists to stop a fusion
-*worse* than its parts, and reverting would hand users 9/25 to honour the letter of a rule written
-to prevent exactly that. It is recorded as an open item for phase 7, not hidden. **Do not "fix" this
-by weakening the eval.** If you improve it, improve the ranker.
+## 8. what the last two sessions would tell you if they could say one thing each
 
-`plans/08-STATE-OF-PLAY.md` has the full open-items table — 16 entries across all phases, nothing
-hidden. Most are phase-7 polish. Three worth knowing now: `scripts/make-screens.sh` currently fails
-its own assertion (the `find` snippet elides mid-mask); the card estimator is still ~2× optimistic
-even after being re-fitted; and the `plans/05` screenshot test on `find --explain` was never
-actually performed and is recorded OPEN rather than passed.
+**Session 1:** *"Tests catch regressions. They do not catch a number that is confidently wrong, a
+string that has quietly become false, or a benchmark that cannot fail. Only reading the output like
+a suspicious human catches those."*
 
-## when you are done
+**Session 2:** *"The code your workers write gets verified. The code you write while integrating
+does not — and three of my worst defects were mine, at integration, and every one shipped green.
+Run the verb after you wire it."*
 
-After phase 7: write `FINAL-REPORT.md` at the repo root — what exists, how to test each shareable
-moment in under five minutes, every open item across all phases, and the exact commands for a
-fresh-machine install. Then stop and report.
-
-Done means: `v1.0.0` tagged; a `HANDOFF.md` for every phase; every definition-of-done box checked
-or explicitly listed as open with a reason; a fresh `$HOME` on this Mac and an Ubuntu Docker
-container both able to run `npx potsherd audit` from the README alone; the five shareable
-screenshots and the demo cast in `docs/`.
-
-Start by reading `plans/08-STATE-OF-PLAY.md` and `plans/09-RUNNING-WORKERS.md`, then open
-`plans/phases/phase-4-ask-and-graft.md` and go. You do not need to ask permission to begin.
+Start with `plans/08-STATE-OF-PLAY.md` and `plans/09-RUNNING-WORKERS.md` §§7–12, then open
+`plans/phases/phase-7-polish-and-release.md` and go. You do not need to ask permission to begin.

@@ -115,6 +115,115 @@ and if the session had ended one message earlier I would have acted on invented 
 3. **Never act on a conclusion you have not seen output for**, especially one you were hoping for.
    I re-confirmed both load-bearing findings in source myself before dispatching the fix.
 
+### 2.6b A worktree is cut from `origin/main`, not from your local HEAD
+
+Found in phase 4, and it silently undoes the most valuable thing an orchestrator can do.
+
+Before the phase-4 wave I committed the pinned interface contract (`open-threads.ts` types,
+`phases/phase-4/WAVE.md` with the `AskResult` shape) so that four workers in four worktrees would
+compile against one contract. I committed it, *then* spawned. Every worktree still came up at
+`2ef63e2` — the commit `origin/main` pointed at — and **not one of them contained the contract**:
+
+```
+$ git worktree list
+/Users/zebra/randomness/potsherd                 0a035cd [main]          <- the contract
+.claude/worktrees/agent-a0efcd8bf1cc1a957        0368300 [task/T4.2…]    <- parent 2ef63e2
+.claude/worktrees/agent-a69ecdd23424bc348        2ef63e2 [task/T4.1…]
+$ git show task/T4.2-open-threads:phases/phase-4/WAVE.md >/dev/null 2>&1 && echo YES || echo NO
+NO
+```
+
+Two workers recovered anyway, because the worktrees are nested *inside* the main checkout
+(`.claude/worktrees/…`) and their briefs named absolute paths, so they could read the contract out
+of the parent working tree. That is luck, not design: the two workers whose briefs did not need
+the file never saw it, and both workers that did recover then **re-created the file and re-applied
+the barrel edit I had already made**, which turns a clean fast-forward into a merge conflict on a
+RESERVED file.
+
+**Fix: `git push origin main` before spawning any wave**, and check `git rev-parse origin/main`
+matches local `HEAD`. Anything the wave must share has to be on the remote, not merely committed.
+Say in every brief which commit the worker should expect to be standing on, so a worker that finds
+itself somewhere else says so instead of improvising.
+
+### 2.6c The plan folder is not in the repo, so a worker in a worktree cannot read it
+
+Every brief in this project names `plans/00-README.md`, `plans/03-ARCHITECTURE.md` and so on. But
+`plans/` lives at `/Users/zebra/randomness/plans`, **beside the repo, not inside it** — so from a
+worker's worktree those paths do not resolve at all. T4.5 said so plainly:
+
+> *"`plans/00-README.md`, `plans/08-STATE-OF-PLAY.md` and `plans/03 §8` are not in the repo or the
+> worktree. `docs/` holds only `08` and `09`. I read them from `/Users/zebra/randomness/plans/`,
+> which has the full set. Not a defect, but the brief's paths don't resolve from a fresh worktree."*
+
+Every worker so far has silently recovered by guessing the absolute path. That is luck, and it is
+the same shape as `2.6b`: the orchestrator believes it has handed the worker a document and it has
+not. **Fix: write plan paths absolutely in briefs** (`/Users/zebra/randomness/plans/03-ARCHITECTURE.md`),
+or mirror the folder into the repo. Until one of those is done, assume a worker read the plan only
+if its report quotes something from it.
+
+### 2.6d A worker that dies mid-task loses everything it has not committed
+
+Both phase-4 fix workers died within minutes of each other — one to a stall watchdog at 600 s, one
+because **the machine went to sleep mid-response**. Neither had committed anything. `T4.7a` had
+finished two defects and was starting a third; `T4.7b` had finished three and was starting the one
+that mattered most. Both branches still pointed at the base commit, and all of that work existed
+only as uncommitted files in a worktree that a cleanup could have removed.
+
+Nothing was lost, because worktrees survive the agent and **both agents were resumable with their
+context intact** — `SendMessage` to the dead agent's id restarts it where it stopped. That is the
+recovery, and it is much cheaper than respawning: a respawned worker re-reads everything and
+re-derives the diagnosis you already paid for.
+
+**Two fixes:**
+1. **Put "commit after every defect, before moving to the next" in every fix-worker brief.** The
+   default instinct is to commit once at the end, which is exactly wrong for a long task.
+2. **Resume, do not respawn.** Send the dead worker its own last line back, tell it to commit what
+   it has *first*, and re-state what changed while it was down. Check its worktree with
+   `git -C <worktree> status --short` before you decide — the answer to "how much was lost" is
+   usually "none of it, if you act now".
+
+A third thing worth knowing: when a worker resumes into a tree it half-modified, **its uncommitted
+diff may be wider than its brief**. `T4.7b` came back with six `docs/screens/*.txt` modified when
+its task named one. Tell it to check each diff before committing rather than trusting its own
+earlier intent.
+
+### 2.6e A test that measures its environment will eventually assert the opposite of what it means
+
+Four instances in two phases, each found only when the environment changed under it:
+
+| test | premise it silently relied on | what broke it |
+|---|---|---|
+| `setup` "refuses a server that is not built" | `packages/mcp` did not exist | T5.1 built it |
+| `graft` "never writes into the process cwd" | no `./.potsherd` in the checkout | the orchestrator's own interactive graft test left one |
+| redaction throughput < 10 s | an idle machine | four concurrent workers |
+| MCP "runs past its deadline" | a `claude` binary being reachable | CI, which has none |
+| bridges `agentmemory` ×3 | `~/Library/Application Support` being probed | Linux, where it is not — the code only offers it on darwin |
+
+The last one is the instructive one. It **cannot be made to fail on a developer laptop**:
+`availability()` finds a `claude` at a well-known absolute path *even with `PATH` emptied*, so the
+branch is unreachable wherever Claude Code is installed. Three attempts to reproduce it locally —
+stripping `PATH`, clearing `HOME`, `env -i` — all passed. CI was the only observer.
+
+**Five now, in three phases.** The newest is the clearest statement of the rule: three bridge
+tests built `~/Library/Application Support/agentmemory` by hand, and the code only offers that
+path on darwin — so on Linux it was never a candidate and every assertion collapsed to "absent".
+Green on every laptop, red on CI. The fix is one line: **ask the code which directory it probes.**
+
+**The rule:** a test's premise must be something the test establishes, not something the working
+directory or the machine happens to provide. Where the premise genuinely is the environment, the
+predicate should be **the product's own answer to that question** (`availability()`, not
+`onPath()`), and the comment should say the condition is not observable locally — otherwise the
+next person will "fix" it by deleting the skip.
+
+**And the same applies to CI's own guards.** Phase 5's privacy-receipt step isolated `HOME` but not
+`XDG_CONFIG_HOME`, which opencode's config path honours, so one line of the receipt resolved outside
+the throwaway home and could not be tildified. A guard that isolates the environment but not the
+variables that override paths *inside* it is only mostly isolating. Worth noting: T5.5 had flagged
+that exact gap and called it *"insurance, not a live failure on GitHub's runners."* It was live.
+**When a worker flags a hazard and then downgrades it in its own summary, believe the flag, not the
+downgrade** — this happened twice in phase 5, the other being the marketplace-install problem, which
+the verifier found was worse than reported.
+
 ### 2.7 Reports blow the orchestrator's context
 
 Briefs said "≤ 300 words". Reports ran 300–1,500. The good ones were long because they had a lot of
@@ -277,3 +386,347 @@ volume cost more than the concurrency saves. Sequence anything touching the same
    meaningless 10/10.
 8. **Add one standing instruction to every brief:** *"If a number you are about to report was
    produced by an assumption rather than a measurement, say so and label it `est.`"*
+
+---
+
+# SESSION 2 — phases 4, 5 and 6, written 22 aug 2026
+
+Everything above was written by the orchestrator that ran phases 0–3. This half is written by the
+one that ran **4, 5 and 6** — `ask`/`graft`, the surfaces, the ecosystem — across ~20 workers and
+three tags. **Every rule above held.** What follows is what the first session had no way to learn,
+because it had not yet built anything that touched another program.
+
+**The verifier count is now 12 · 8 · 9 · 7 · 13 · 15 · 14.** It has not fallen. Do not expect it to.
+
+---
+
+## 7. The three failures that cost this session the most
+
+### 7.1 The orchestrator's own integration is the least-tested code in the build
+
+**Three of the worst defects across phases 4–6 were mine, at integration, and every one shipped
+green.**
+
+| what I did | what it caused | why no test caught it |
+|---|---|---|
+| pasted T5.6's two forwarding lines into `find.action` instead of `ask.action` | `ask --readers-out` made **four real model calls** under a flag whose privacy receipt says *"no model was called to write it"* | every T5.6 test calls the helpers directly; **nothing in 1,137 tests went through commander** |
+| applied T6.2's registration file and never applied T6.4's | `stack` and `link --suggest` shipped as **45 tests and a 589-line module unreachable from the CLI** | `tests/stack.test.ts` calls `render()` directly, and *"every verb has `--help`"* passed **precisely because `stack` was not a verb** |
+| pasted a registration file's example hint into `commands/link.ts` | a **live-corpus session id** in a public repo; `check-privacy.py` was already red on my branch | I ran the guard *before* applying the file, not after |
+
+**Fixes, all cheap:**
+- **After applying any registration file, run the verb.** Not the tests — the verb. `node packages/cli/bin/potsherd.js <verb> --help` and one real invocation. A registration file is worker prose; it can name the wrong command, carry a stale example, or over-capture into the next section's explanatory text (this happened twice — 34 lines of prose landed inside `index.ts` once).
+- **After applying any registration file, run `python3 scripts/check-privacy.py`.** Registration files quote real examples.
+- **Keep a checklist of registration files per phase and tick them off.** I lost `registration-T6.4.txt` simply by not writing down that it existed.
+
+### 7.2 A test whose premise is the environment will eventually assert the opposite of what it means
+
+**Five instances in three phases.** This is now the most common single defect class in the build.
+
+| test | premise it silently relied on | what broke it |
+|---|---|---|
+| `setup` "refuses a server that is not built" | `packages/mcp` did not exist | T5.1 built it |
+| `graft` "never writes into the process cwd" | no `./.potsherd` in the checkout | my own interactive graft test left one |
+| redaction throughput < 10 s | an idle machine | four concurrent workers |
+| MCP "runs past its deadline" | a `claude` binary being reachable | CI, which has none |
+| bridges `agentmemory` ×3 | `~/Library/Application Support` being probed | Linux, where it is not |
+
+**Two of these cannot be reproduced on a developer laptop at all.** `availability()` finds a
+`claude` at a well-known absolute path *even with `PATH` emptied*; three attempts to reproduce the
+deadline failure locally all passed. CI was the only possible observer.
+
+**The rule: a test's premise must be something the test establishes.** Where the premise genuinely
+is the environment, the predicate must be **the product's own answer to that question**
+(`availability()`, not `onPath()`; `agentMemoryDirs()`, not a hard-coded macOS path), and the
+comment must say the condition is not observable locally — otherwise the next person "fixes" it by
+deleting the skip.
+
+### 7.3 CI is not a formality; it is the only machine that is not yours
+
+**Six CI-only failures across three phases, none reproducible locally.** Beyond the two above:
+`managed-settings.json` lives at a different path on Linux than macOS, so a guard comparing a
+captured screen to live output could only ever pass on the OS that captured it. `XDG_CONFIG_HOME`
+was not cleared alongside `HOME`, so one line of a receipt resolved outside a throwaway home. A
+detached hook was still writing while the recursive cleanup walked its sandbox (`ENOTEMPTY`, Linux
+only). **Never tag before CI is green, and never assume a local pass means anything about the
+matrix.**
+
+---
+
+## 8. What workers did better than asked, and how to get it again
+
+The best work this session came from three brief patterns. All three are cheap.
+
+**Name a specific doubt and ask them to resolve it with evidence.** T4.0 was told to build an eval
+set that *could fail*; it built twelve hand-built `AskResult` objects, eleven of which must fail, and
+then **split two cases that tripped two gates at once, on the grounds that a case failing two gates
+proves neither.** Nobody asked for that.
+
+**Ask a question the honest answer to which is "no".** T5.2 was asked, plainly, whether a SKILL.md
+can supply `readerFn`. The answer was no — so the plugin's `ask` loses `filterAnswer`, the product's
+central claim. It **said so on the skill's own last line** rather than claiming the guarantee, then
+specified the fix (`--readers-out`/`--readers-in`), which T5.6 built with **zero edits to
+`ask.ts`**. A brief that only permits success gets a worker that reports success.
+
+**Make them measure the thing that damages their own feature.** T4.2 measured its open-thread rule
+pass and reported **8/8 candidates genuinely absent from project B, but only 1–2 of 8 worth
+raising** — leading with the number that hurts. T6.4 did the same for `link --suggest` (5 raised, 2
+worth accepting) and put the disclosure in the terminal. T4.8, asked directly whether its demo
+corpus was easier than the real world, answered: *"yes, materially"*, and showed the unmodified
+corpus producing **0 confirmed** open threads.
+
+**Two workers found bugs they had introduced themselves, by measuring on the real corpus rather than
+trusting a unit test** — an empty bullet with a citation on it, and an aliased array that silently
+produced an empty `ANSWER` on three real runs. Ask for a real run and you get a real check.
+
+---
+
+## 9. New failure modes seen in workers
+
+### 9.1 A worker flags a hazard, then downgrades it in its own summary — believe the flag
+
+Twice. T5.5 flagged the `XDG_CONFIG_HOME` gap and called it *"insurance, not a live failure on
+GitHub's runners."* **It was live.** T5.3 flagged the marketplace-binary problem; the verifier found
+it was **worse** than reported (`dist/` is gitignored, so the MCP server vanishes too, leaving the
+archaeologist agent with `Read` and nothing else).
+
+**Read the "what I could not do" section as a defect list, not a disclaimer.** When a worker
+predicts something and rates it low, re-rate it yourself.
+
+### 9.2 A worker corrects the orchestrator, and is usually right
+
+Three times, and all three were mine:
+- **T6.1** corrected my brief: `research/formats.md` was *not* "509 lines against real files" for
+  gemini/opencode/copilot — those sections are **five lines each and headed `unmeasured`**.
+- **T5.1** declined to add a `potsherd mcp` verb partly because **the model-reach guard would not
+  have caught it** — found by reasoning, before it could bite.
+- **T5.2** corrected two plan facts I had assumed wrong and **checked before "fixing"** them.
+
+**Put "if the brief is wrong about a fact, report it — do not work around it silently" in every
+brief.** It pays.
+
+### 9.3 Two workers died mid-task; both were recoverable
+
+One to a stall watchdog at 600 s, one because **the machine went to sleep**. Neither had committed.
+Both worktrees survived and **both agents were resumable with their context intact** — `SendMessage`
+to the dead agent's id restarts it where it stopped.
+
+**Fixes:** put *"commit after every defect, before moving to the next"* in every fix-worker brief —
+the default instinct is one commit at the end, which is exactly wrong for a long task. And
+**resume, do not respawn**: check `git -C <worktree> status --short` first; the answer to "how much
+was lost" is usually "none of it, if you act now". Note that a resumed worker's uncommitted diff
+**may be wider than its brief** — one came back with six screens modified when its task named one.
+
+### 9.4 A worktree is cut from `origin/main`, not local `HEAD`
+
+I committed a pinned interface contract *before* spawning four workers so they would compile against
+one shape. **Not one worktree contained it.** Two recovered only because worktrees are nested inside
+the main checkout and their briefs used absolute paths — and both then re-created the file *and*
+re-applied a barrel edit I had already made.
+
+**`git push origin main` before spawning any wave, and verify `git rev-parse origin/main` equals
+`HEAD`.**
+
+### 9.5 The plan folder is not in the repo, and **must not be mirrored into it**
+
+Every brief names `plans/…`, but `plans/` lives **beside** the repo. From a worker's worktree those
+paths do not resolve. Every worker silently recovered by guessing the absolute path. **Write plan
+paths absolutely in briefs**: `/Users/zebra/randomness/plans/03-ARCHITECTURE.md`.
+
+**Do not "fix" this by copying the folder into the repo.** I tried, at the end of session 2, and
+`check-privacy.py` refused the commit within seconds: `01`, `02`, `04`, `05` and `06` carry **real
+project names, real session ids and a real session title** — the plan folder was kept outside a
+public repository for exactly that reason, and I had forgotten why. The guard remembered.
+
+That is worth keeping as its own lesson: **when a guard refuses something you are certain about,
+the guard is the one with the evidence.** Absolute paths in briefs is the whole fix.
+
+---
+
+## 10. What phases 4–6 proved about the product's own rules
+
+### 10.1 "Verify a flag exists before documenting it" — six plan claims about other software were false
+
+`rescue --background`, `index --card`, a `brief` verb, `codex features enable plugin_hooks`,
+`~/.agentmemory`, and claude-mem's `observations_fts`. **None existed.**
+
+The worst shape is the fourth: `plugin_hooks` is `Stage::Removed` but **still registered**, so the
+command validates, writes `features.plugin_hooks = true` into the user's config, prints success —
+and the loader discards it. That is worse than a flag that fails loudly, and both the phase file and
+`research/memory-research.md` instructed documenting it.
+
+**Any claim in the plan about software we did not write is a lead, not a fact.**
+
+### 10.2 The privacy receipt has now published something false three times
+
+*"no network"* after the product began calling a model (phase 2). Omitting the `graft` write path
+and still saying *"later phases add ask and graft"* (phase 4, in the **published** copy while the
+live command was correct). *"open no socket at all"* for `export` and `find`, which federate
+(phase 6).
+
+There is now a CI step that diffs the published receipt against the live command — **and its limit
+matters**: it proves *screen == live output*, never *live output == truth*. When it goes red, the
+question is always **which of the two is wrong**. In phase 6 it was the live output, and pasting the
+diff into the screen would have published a claim already shown false.
+
+### 10.3 A guard that can be walked around is a guard that will be
+
+The model-reach guard grew a hole **once per phase**:
+- phase 4: it grepped CLI command files, so `ask` — which opens its backend one import away in core
+  — read as offline.
+- phase 5: it followed `@potsherd/core` only, so a command importing `@potsherd/mcp` was unchecked.
+- phase 6: it followed package specifiers but not **relative cross-package imports**, the exact form
+  `commands/stack.ts` used; and its workspace map was hand-written, so it was a list of packages
+  somebody remembered.
+
+It is now derived from `pnpm-workspace.yaml` and walks relative imports. **Every time it flagged
+something, it was right** — including flagging `link`, which was fixed by *splitting the
+model-calling half of `open-threads.ts` into its own module* so `link` stops being flagged **because
+it genuinely cannot reach a model**. Never make a guard coarser to fit the code.
+
+### 10.4 Read one real output by eye, every phase — it is still the highest-yield hour
+
+Caught by eye and by nothing else this session:
+- a **ghost** brief reading `· 241 exchanges ·` three lines under *"prompts only, the assistant side
+  is gone"* — and `03 §8` specified that wording, so the **spec** was what made it contradict itself
+- an open-thread line reading `decided in /home/dev/event-bus, not seen in /home/dev/da…` — **project
+  B, the half that carries the entire claim, truncated off the end**
+- a real client's name, a third party's business plans and a personal tweet about to be published to
+  a public repo in an evidence directory
+
+---
+
+## 11. The two interactive lessons
+
+**`plans/07` says the in-Claude-Code tests need an interactive session. They do not.**
+`claude -p --plugin-dir … --output-format stream-json --verbose` exercises the same path and leaves
+a **machine-readable record of every tool the model chose** — which turns "I tried it and it seemed
+to work" into something checkable. That closed three DoD boxes with real evidence.
+
+**Always run a control.** The positive result is only half of it:
+- the skill fired unprompted on *"what did we decide about X last month?"* — and used **no tools at
+  all** on *"what does a connection pooler do, in general?"*
+- the grafted session answered in **1 turn, 5.9 s, zero tools, correct and cited**; the same question
+  without the brief took **16 turns, 88 s, 15 tool calls** and produced a **confidently wrong**
+  answer about a different event, **citing a real commit hash**
+
+That last control is the best single piece of evidence in the build. **The failure mode potsherd
+addresses is not silence — it is a plausible answer assembled from whatever is nearest to hand.**
+
+---
+
+## 12. Orchestrator checklist, phases 4–6 edition
+
+Before a wave:
+1. `git push origin main`; verify `git rev-parse origin/main` == `HEAD`.
+2. Pin any shared interface **in a committed file** and name it in every brief.
+3. Absolute plan paths in briefs. Name the other live workers' files.
+4. Write down every registration file you will owe yourself.
+
+After each worker:
+5. Merge, then **apply its registration file, run the verb, run the guard, run the suite.**
+6. Re-confirm every load-bearing claim yourself — revert the fix and watch the test go red.
+7. Read one real output by eye.
+
+Before a tag:
+8. `pnpm test`, `python3 scripts/check-privacy.py`, `bash scripts/make-screens.sh`.
+9. **Wait for CI green on the pushed commit** — not the local run.
+10. Tag, push the tag, and confirm CI green **on the tag** too.
+
+---
+
+## 13. Phase 7, run solo — what changed and what did not
+
+Phase 7 was run by the orchestrator alone rather than as a worker wave. The reason is worth stating
+because it is a departure from `07-ORCHESTRATION.md`: the worker model exists to keep an
+orchestrator's context clear of source files across a seven-phase build, and by phase 7 there was
+one phase left and a 1M-token context. The constraint that justified the model no longer bound.
+
+**Everything from `09 §12` that finds defects was kept, and every one of them paid.** Run the verb
+after wiring it. Run the privacy guard after every change. Read one real output by eye. Push before
+anything that depends on the pushed state. And a fresh verifier at the end who authored none of it.
+
+### 13.1 Four defects that only appeared when something moved
+
+None of these was findable by reading. Each appeared the moment an artefact was used somewhere it
+had not been used before.
+
+| what moved | what broke |
+|---|---|
+| the MCP bundle, vendored as `dist/mcp.js` | it decided it was the entry point **by filename** (`/index.js`, `/potsherd-mcp.js`, `/index.ts`), matched none of them, and **started, did nothing, and exited 0.** No output, no error. An MCP server that fails to start is invisible by design; this one had found a way to do it while looking clean |
+| ...and the path check that replaced it | `import.meta.url` is resolved through symlinks by the ESM loader and `process.argv[1]` is not, so `/var/folders/…` ≠ `/private/var/folders/…` — **every temp directory on macOS**, and therefore every test of a marketplace install |
+| `commander` out of the runtime deps | correct for the published package, wrong for the build: esbuild needs it *present* to bundle it. Every test that shells out to the binary failed |
+| the demo cast, recorded under a relocated `HOME` | `claude` is on PATH and not logged in there, so six readers failed in 3.2 s and `ask` printed **"the readers found nothing that answers the question"** — a claim about the user's archive from a verb that never read it |
+
+**The lesson is the same one four times: an artefact is only verified in the place it has been
+run.** A bundle that works in the checkout is not a bundle that works in a plugin. A test that
+passes in the workspace is not a test that passes from an install.
+
+### 13.2 A test of mine reported that a fallback worked while never once loading it
+
+The new SQLite fallback needed proof that the shipped bundle runs with no `node_modules`. The first
+version of that test copied the bundle into `os.tmpdir()`, ran it, and watched it resolve
+`better-sqlite3` anyway — because **vitest sets `NODE_PATH`** to three directories inside the
+repository's own `node_modules`, and a child process inherits it.
+
+It would have gone green forever, testing nothing.
+
+This is `§7.2` in its purest form and it is now seven instances across four phases. **The premise
+was "no `better-sqlite3` is reachable", so the test has to make that true**: `NODE_PATH` is deleted
+from the child environment, and a separate assertion spawns a child with that same environment and
+requires the resolution to *fail* before anything else runs.
+
+A second one in the same file: `POTSHERD_SQLITE_WARN=1` was asserted to restore a Node warning, and
+CI went red on all four legs — because the runner's Node had **stopped emitting that warning**.
+Whether there is a warning to restore is a fact about somebody else's software, not about ours, so
+the test asks that Node directly and skips loudly when the answer is no.
+
+### 13.3 Three shell mistakes, each of which cost a run
+
+1. **Do not edit a shell script while it is running.** Bash reads a script incrementally by byte
+   offset. A mid-run edit shifted the parser and a seven-minute screen capture printed `card --all
+   failed` *after* it had already recorded the screens.
+2. **`set -o pipefail` plus `| head` kills the script.** `head` closes the pipe, the producer takes
+   SIGPIPE and exits 141, and the pipeline fails. Twice, in two different scripts, both times on a
+   line whose only job was to show the first six of something.
+3. **`pnpm test ; git commit && git push` pushes a red suite.** `&&`. CI caught it, which is what CI
+   is for, but it should not have had to.
+
+### 13.4 Making a script stage its output is worth an hour
+
+`scripts/make-screens.sh` used to `rm -f` each screen and redirect the binary's stdout onto the
+committed path. An interrupted run — and a seven-minute run that makes model calls gets interrupted
+— left the repository with artefacts the README links either deleted or half-written.
+
+It stages now: captures land in `.tmp/`, the assertions run over that, and only a run that captured
+everything and passed everything moves files into place. **It paid for itself twice on the same
+day**, once when the model confirmed no open thread (so the assertions correctly refused a screen
+that was not a screenshot of the feature) and once when the mid-run edit above corrupted the script.
+
+### 13.5 The guard caught something in the commit that created it
+
+Vendoring the plugin bundles publishes them — and esbuild keeps comments, so `recall.ts` became a
+committed artefact twice over, including four comments citing a real session title as ranking
+evidence that had been pinned as DEBT since phase 5 with the note *"re-derive, do not rename"*.
+`check-privacy.py` went red in the same commit that added the bundles.
+
+Two of the four are now measured on the **committed eval corpus** — `potsherd find "timezone
+drift"` returns one session on the strength of its title alone, because that session's body contains
+neither word, and anybody can re-run it. The other two needed a 155-exchange session and every
+session in the eval corpus is one to three, so they keep the finding, drop the identity, and say
+so.
+
+**34 pinned violations → 14.** Every one confirmed by the guard itself as *"pinned at N, now
+clean"* before its DEBT line was deleted, because the pin list is a ratchet and deleting a line
+without that confirmation is how a ratchet becomes a wish.
+
+### 13.6 Widening a check by eight cases found three defects in one run
+
+`tests/terminal.test.ts` had run its `--ascii` sweep over a hand-written list of fifteen verb
+invocations since phase 1, and the *width* rule was enforced for exactly two of them — the two that
+had once been caught overflowing. Widening the list to twenty-three and applying the width rule to
+all of them found `doctor --privacy` overflowing 60 columns on **fourteen lines**, `setup --status`
+on one, and `guard --status` on one, and found `setup --status` demanding a client for a mode whose
+own `--help` says it reports what is registered *everywhere*.
+
+**A rule enforced for the cases that broke it is not a rule.** The cheapest thing available at the
+end of a build is to take a check that already exists and point it at everything.
