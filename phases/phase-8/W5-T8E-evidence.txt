@@ -7,7 +7,7 @@ both are printed.
 1. HOW THE WALK WAS RUN
 ================================================================================
 script: walk.sh (kept at
-  /private/tmp/claude-501/-Users-zebra-randomness/32309a4f-f394-479d-adb9-1777faa9867a/scratchpad/walk.sh)
+  <the orchestrator session's scratchpad>/walk.sh)
 
 Each verb is one process:
 

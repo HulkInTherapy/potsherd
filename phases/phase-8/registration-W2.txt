@@ -80,4 +80,19 @@ THE COMPLETE PATCH, for whoever owns filters.ts (4 files, ~6 lines):
 
 4. EVIDENCE (outside the repo, kept)
 ------------------------------------
-/private/tmp/claude-501/-Users-zebra-randomness/32309a4f-f394-479d-adb9-1777faa9867a/scratchpad/w2-evidence
+<the orchestrator session's scratchpad>/w2-evidence
+
+--------------------------------------------------------------------------------
+NOTE added by the orchestrator, 2026-08-22
+--------------------------------------------------------------------------------
+The evidence path above was written out in full and contained the running
+agent session's own uuid. `scripts/check-privacy.py`'s new `corpus-id-inventory`
+rule (T8.H) flagged it the moment that rule landed, in this file and in
+`W5-T8E-evidence.txt`, and it was right twice over: a session uuid is family (2)
+by the guard's own definition whether it belongs to the reference corpus or to
+the agent that was doing the work, and neither of those directories survives the
+session that made them, so the path was not reproducible evidence either.
+
+The directory itself is deliberately outside the repository: it holds output
+taken against the real corpus, which never enters a public tree. What is kept
+here is the method and the numbers.
