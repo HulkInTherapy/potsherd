@@ -8,6 +8,7 @@ import * as codexAdapterModule from './adapters/codex.js';
 import * as cursorAdapterModule from './adapters/cursor.js';
 import * as piAdapterModule from './adapters/pi.js';
 import * as geminiAdapterModule from './adapters/gemini.js';
+import * as opencodeAdapterModule from './adapters/opencode.js';
 import type {
   Exchange,
   Harness,
@@ -149,6 +150,19 @@ export function adapterSpecs(o: AdapterOptions = {}): AdapterSpec[] {
       sourceDir: geminiAdapterModule.sourceDir(o.geminiDir),
       discover: () => geminiAdapterModule.discover(o.geminiDir),
       parse: (source) => geminiAdapterModule.parse(source),
+      version: () => 'unknown',
+      novel: () => true,
+    },
+    {
+      // Phase 6, T6.1. `unverified — documentation only`, and the only harness
+      // whose store is a database rather than a file: its schema is discovered
+      // at runtime (`03 §10`), never hard-coded, and it degrades to
+      // "unsupported version" rather than half-parsing. See the adapter header.
+      harness: 'opencode',
+      displayName: opencodeAdapterModule.DISPLAY_NAME,
+      sourceDir: opencodeAdapterModule.sourceDir(o.opencodeDir),
+      discover: () => opencodeAdapterModule.discover(o.opencodeDir),
+      parse: (source) => opencodeAdapterModule.parse(source),
       version: () => 'unknown',
       novel: () => true,
     },
