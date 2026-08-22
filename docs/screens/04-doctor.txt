@@ -1,4 +1,4 @@
-potsherd doctor · potsherd 1.0.0 · node v24.9.0
+potsherd doctor · potsherd 1.1.0 · node v24.9.0
 
   claude dir                         ~/.claude
   potsherd dir                       ~/.potsherd

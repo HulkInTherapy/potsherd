@@ -1,7 +1,7 @@
 {
   "name": "potsherd",
   "displayName": "potsherd",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Rescue, index, search, interrogate and re-enter every coding-agent session on your machine. Takes a copy before Claude Code's 30-day sweep can delete one.",
   "author": {
     "name": "HulkInTherapy",

@@ -3,6 +3,120 @@
 Every entry is a tag. Numbers in this file were produced by a command whose
 output is in the matching `phases/phase-N/HANDOFF.md`.
 
+## v1.1.0 — 22 August 2026 · hardening before the public moment
+
+**Nothing on the first screen reads as broken any more, and the guard that
+checks this repository stopped being a list of leaks it had already seen.**
+
+### the archive looks like your work again
+
+- **8.2 ghost titles.** 165 of 299 recovered sessions displayed as `/resume`,
+  `/model`, `/mcp` or `clear` — the first line of `history.jsonl`, whatever it
+  was. They take the first **substantive** prompt now, preferring the harness's
+  own summary where one exists, and falling back to `<project>-<id8>` rather
+  than to a slash command ever. **165 → 0.** Live sessions with no harness
+  title get the same treatment: **204 gained a name**, and `ls --untitled`
+  keeps meaning *"nothing a card would not improve"* because a new
+  `title_source` column says who did the naming.
+- A title is the **words**, not the furniture around them. A pasted screenshot
+  arrives as `[Image: source: …/clipboard-….png]` on the line above what the
+  person typed, and cutting a title from the raw string produced 60 characters
+  of placeholder — and half a home directory — with the real words pushed off
+  the end. **Derived titles carrying a home path: 19 → 0.**
+- **8.4 `potsherd ignore <project>` / `unignore`.** On a machine that builds
+  agents, 14 of the top 15 `ls` rows were potsherd's own worker sessions.
+  Honoured by `ls`, `find`, `ask` and `stats`; `--all` overrides; **nothing is
+  ignored by default and nothing is ever hidden silently** — each surface says
+  how many rows the list cost it, and `doctor` prints the list. A subagent
+  worktree rendered as a project slug was a discovery bug and is fixed there.
+
+### the first run is offline again
+
+- **8.6 `index` is text-only by default.** It used to fetch a 32 MB model and
+  take **6m 44s**; the same index without embeddings is **9.6 s**. Semantic
+  search is an explicit `potsherd index --embed`, offered in one line at the
+  end of every run. A fresh-`$HOME` walk of `audit → rescue → index → ls →
+  find`, with the network denied by sandbox and proven denied, completes in
+  **14.5 s** on an idle machine against a 30 s target. Under load the same walk
+  has measured 24.6–65.0 s; the target is met, and that is the honest range.
+- `card --limit N` errored without `--all`. It is a scope now: `--limit` implies
+  `--all`, newest first, and the dry-run's quote and the run agree.
+
+### you can watch `ask` work, and it says what it costs
+
+- **8.7** prints one line per reader as it returns —
+  `reader 3/6 · 9c4d2f18 · found · 12.1s · $0.031 est.` — on **stderr**, so
+  `--json` stays parseable.
+- **`ask --cheap`**: k 3, a haiku-class synthesizer, and a session's card in
+  place of a long slice. It was called `--fast` until it was measured against a
+  control over ten runs each of five questions: **p50 50.5 s against the
+  default's 45.0 s**, **$0.065 a run against $0.139**, answered 7/10 against
+  10/10, citations 100% on both. About half the cost, and **not faster** — the
+  unit of latency is a model call rather than a token. It ships under the name
+  that is true, and its own screen says so on every run.
+
+### the honesty surfaces
+
+- **8.5 the fusion gate is closed.** `pnpm evals` had exited 1 since phase 3.
+  Amended by the author of the original: hybrid must be **≥** both singles at
+  recall@5 **and strictly above both** at recall@1. Weights untouched at the
+  phase-3 stopping rule of 1.5. Measured: recall@5 12/22/22, recall@1 10/6/11 —
+  **exit 0**, and `pnpm evals -- --vector-weight 0` still exits 1 on two
+  independent clauses. The margin at recall@1 is **one**.
+- **`audit` discloses what the deleted sessions contained.** No count changed:
+  330 ever, 299 deleted, 2,971 prompts lost are all still exactly what they
+  were. But `history.jsonl` records no field distinguishing a session from a
+  resume-picker invocation, and **140 of the 299 recorded nothing but a slash
+  command or a stub** — so a conditional row says so, and **the standalone
+  python that `audit --verify` prints recomputes that number too**.
+- **8.8** `stack` states its claim asymmetry in a legend above the table rather
+  than only per row; the README's synthetic-corpus caption sits above the block
+  it qualifies, where a screenshot crop cannot lose it.
+
+### the privacy guard
+
+- **14 pinned violations → 0.** The phase-0..4 evidence pastes were re-run
+  against the synthetic demo corpus and replaced; the phase prose had its
+  identity substituted and its findings kept, each with a visible note.
+- **A new `transcript-record` rule** flags a JSON transcript sample in `docs/**`
+  whose prose payload runs past 100 characters unless something nearby declares
+  the samples synthetic — the shape of the leak that survived six phases while
+  every automated check passed it.
+- **The id rule is an inventory, not a blocklist.** It used to hold hashes of
+  ids somebody had happened to notice, so an id nobody had noticed was
+  invisible — and `phases/phase-2/VERIFICATION.md` had published ten real
+  session ids since phase 2. Every id-shaped token in tracked text and tracked
+  file names is now accounted for against a source this repository can
+  **derive**, and the residue is pinned twice over: per file, and as a
+  repository-wide ceiling that a substitution cannot walk around. **Real ids in
+  the tree: 25 → 11**, and the remaining 29 unaccounted tokens are an open item
+  in `phases/phase-8/HANDOFF.md`, not a clean bill.
+- **25 probes** in `--selftest`, each with a control. An unknown flag is a usage
+  error: `check-privacy.py --list-pins` used to be read as a file name and
+  reported every pin as *"now clean — delete the DEBT line"*, exiting non-zero
+  with confident, wrong advice.
+
+### fixed after the verifier said so
+
+Its verdict was *not releasable as described*, and the worst of its fifteen
+findings was this: **`audit` printed 143 where its own standalone receipt
+printed 140** on a real archive, on the row this release added. The whole point
+of that receipt is that nobody has to trust potsherd to check potsherd. All
+three implementations of the rule agree now, and a test builds the case the demo
+corpus cannot produce — a deleted session whose only prompt is a pasted
+screenshot — and requires the card, the snippet **run as printed**, and the
+standalone script to return the same number.
+
+Also from that report: both plugin `SessionStart` hooks announced a model
+download that this release made impossible, and the test suite was **pinning the
+false sentence**; `docs/demo.gif` was a recording of the previous release; the
+documented verb count was `20` against a build of 21 with a list of 19; and the
+published test count was wrong in five places. All fixed, and the counts are now
+checked against commander's own registry rather than against prose.
+
+**1,532 tests, 38 files**, green on macOS and Ubuntu × Node 22 and 24, and green
+again under `POTSHERD_SQLITE=node`.
+
 ## v1.0.0 — 22 August 2026 · polish and release
 
 **A marketplace install now produces a working plugin.** It did not, for three
