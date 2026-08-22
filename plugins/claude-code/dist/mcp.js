@@ -30806,6 +30806,7 @@ function utcRange(startMs, endExclusiveMs, label) {
 var POTSHERD_CARD_MARKER = "<INSTRUCTIONS-TO-POTSHERD>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-POTSHERD>";
 
 // ../core/dist/llm.js
+import { createRequire as createRequire3 } from "node:module";
 import { spawn } from "node:child_process";
 import fs15 from "node:fs";
 import os3 from "node:os";
@@ -31022,24 +31023,57 @@ var ReentrancyError = class extends Error {
     super(`refusing to call a model from inside one (${REENTRANCY_ENV}=1). potsherd spawned this process; it must not spawn another.`);
   }
 };
-var NoBackendError = class extends Error {
-  availability;
+var NoBackendError = class _NoBackendError extends Error {
   name = "NoBackendError";
-  fix = "https://claude.com/product/claude-code  \u2014 or  export ANTHROPIC_API_KEY=\u2026";
+  fix;
+  availability;
   constructor(availability2) {
-    super("no way to reach a model: no `claude` binary on PATH, no `codex`, and ANTHROPIC_API_KEY is not set.\n        potsherd cards run on your Claude Code subscription (install Claude Code), or on an Anthropic API key as a fallback.");
+    super(_NoBackendError.message(availability2));
     this.availability = availability2;
+    this.fix = _NoBackendError.fixFor(availability2);
+  }
+  /** True when the *signal* is there and the module that does the talking is not. */
+  static halfInstalled(a) {
+    if (a.claude !== null && !a.agentSdk)
+      return "@anthropic-ai/claude-agent-sdk";
+    if (a.apiKey && !a.apiSdk)
+      return "@anthropic-ai/sdk";
+    return null;
+  }
+  static message(a) {
+    const missing = _NoBackendError.halfInstalled(a);
+    if (missing) {
+      return `this potsherd cannot reach a model: ${missing} is not installed.
+        It is an optional dependency: it and the embedding runtime are 677 MB of an
+        install that is 17 MB without them.`;
+    }
+    return "no way to reach a model: no `claude` binary on PATH, no `codex`, and ANTHROPIC_API_KEY is not set.\n        potsherd cards run on your Claude Code subscription (install Claude Code), or on an Anthropic API key as a fallback.";
+  }
+  static fixFor(a) {
+    const missing = _NoBackendError.halfInstalled(a);
+    return missing ? `npm install -g ${missing}` : "https://claude.com/product/claude-code  \u2014 or  export ANTHROPIC_API_KEY=\u2026";
   }
 };
+function resolvable(specifier) {
+  try {
+    createRequire3(import.meta.url).resolve(specifier);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function availability(o = {}) {
   const env = o.env ?? process8.env;
   const which = o.which ?? ((n) => onPath(n, env));
   const key = env["ANTHROPIC_API_KEY"];
+  const canResolve = o.resolvable ?? resolvable;
   return {
     claude: which("claude"),
     codex: which("codex"),
     apiKey: typeof key === "string" && key.trim().length > 0,
-    codexHarness: env["POTSHERD_HARNESS"] === "codex" || Boolean(env["CODEX_HOME"]) || Boolean(env["CODEX_SANDBOX"])
+    codexHarness: env["POTSHERD_HARNESS"] === "codex" || Boolean(env["CODEX_HOME"]) || Boolean(env["CODEX_SANDBOX"]),
+    agentSdk: canResolve("@anthropic-ai/claude-agent-sdk"),
+    apiSdk: canResolve("@anthropic-ai/sdk")
   };
 }
 function detectBackend(o = {}) {
@@ -31065,13 +31099,13 @@ function detectBackend(o = {}) {
       return choose("api", "forced");
     throw new NoBackendError(avail);
   }
-  if (avail.claude) {
+  if (avail.claude && avail.agentSdk) {
     return choose("agent-sdk", `claude on PATH (${avail.claude})`, avail.claude);
   }
   if (avail.codexHarness && avail.codex) {
     return choose("codex", `codex is the harness and there is no claude`, avail.codex);
   }
-  if (avail.apiKey) {
+  if (avail.apiKey && avail.apiSdk) {
     return choose("api", "no claude binary; ANTHROPIC_API_KEY is set");
   }
   if (avail.codex) {

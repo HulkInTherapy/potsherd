@@ -1,0 +1,23 @@
+what Claude Code leaves you  —  ls ~/.claude/projects/*
+
+  -home-dev-auth-gateway/0e3ad88f-24f6-4cca-a6da-b0de6660898d.jsonl
+  -home-dev-auth-gateway/81163900-c7dd-449a-b86d-f60fed82857c.jsonl
+  -home-dev-billing-web/1045b6e3-c486-4d7e-b7bb-659c74bdb205.jsonl
+  -home-dev-billing-web/aa9690f6-a5c2-4fad-bdb5-f8c9fb809865.jsonl
+  -home-dev-billing-web/aafd81ae-8f2f-48de-8695-b5814d5ce5a9.jsonl
+  ... 31 files, named by uuid, in 16 directories.
+  the 299 sessions the sweep already took are not here at all.
+
+what potsherd leaves you  —  potsherd ls
+
+  potsherd ls · 5 of 330
+  
+      when  harness  project         title                              status
+    21 aug  claude   data-pipeline   Pool the ingest workers through…   live
+    19 aug  claude   auth-gateway    Rewrite rss parser to stream  ↳6   live
+    17 aug  claude   auth-gateway    Untangle token refresh error han…  live
+    16 aug  claude   report-builder  Add a timeout to mock server       live
+    15 aug  claude   report-builder  report-builder-6fe53b91  ↳9        live
+  
+    31 sessions · 197 subagents inside them · 299 ghosts, prompts only
+    run  potsherd show <id8>  to read one, or  potsherd find <words>

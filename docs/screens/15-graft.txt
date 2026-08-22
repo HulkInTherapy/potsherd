@@ -1,9 +1,9 @@
 potsherd graft · claude 9c4d2f18 · 2026-08-21
 
-  Add pgbouncer transaction pooling for connection limits
+  Pool ingest workers through pgbouncer
   about  pgbouncer
 
-  tokens                       486   of 1200 budget  ·  est. (chars/3.6)
+  tokens                       520   of 1200 budget  ·  est. (chars/3.6)
   citations                    8/8   distinct, and all resolve
   exchanges                      8   data-pipeline
   wrote, unsummarised                ~/work/demo-project/.potsherd/graft-9c4d2f…
@@ -11,17 +11,17 @@ potsherd graft · claude 9c4d2f18 · 2026-08-21
 
 ────────────────────────────────────────────────────────────────────────
 
-# Add pgbouncer transaction pooling for connection limits
+# Pool ingest workers through pgbouncer
 
 Brief from a past session, about **pgbouncer**. Written by potsherd; every claim carries `[9c4d2f18@seq]`, the exchange it came from.
 
 > **unsummarised.** No model call was made — no model was used. What follows is the stored card and transcript verbatim, not a summary.
 
 **decided**
-- Use pgbouncer in transaction pooling mode — To resolve hitting max_connections limit (412 slots requested vs 400 limit) [9c4d2f18@1] [9c4d2f18@2]
-- Set statement_cache_size to 0 on the database client — Transaction pooling drops server-side prepared statements across transaction boundaries; client must disable statement caching [9c4d2f18@3] [9c4d2f18@4]
-- Implement idempotent batch writer using source file digest key — When pgbouncer restarts, clients see closed connections and replay partially applied batches; idempotency prevents double inserts [9c4d2f18@6]
-- Document pooling configuration in README — Prevent re-learning the same solution; prior experience in payments-api [9c4d2f18@7]
+- Deploy pgbouncer in transaction pooling mode with pool_size=24 — Resolve max_connections exhaustion (412 slots requested vs 400 limit) in ingest workers [9c4d2f18@1] [9c4d2f18@2] [9c4d2f18@7]
+- Disable statement caching (statement_cache_size=0) — Transaction pooling mode doesn't preserve server-side prepared statements; disabling cache prevents 'prepared statement already exists' errors [9c4d2f18@3] [9c4d2f18@4]
+- Make batch writer idempotent, keyed on source file sha256 plus row offset — pgbouncer restart closes connections without rollback, causing retries to replay partially applied batches; idempotency prevents double-inserts [9c4d2f18@6]
+- Document connection pooling configuration in readme — Similar prepared statement issue encountered before in payments-api; documentation prevents relearning the same lesson [9c4d2f18@7]
 
 **from the transcript**
 - you: put pgbouncer in front of it in transaction pooling mode agent: That will hold, but transaction pooling drops session state: SET, LISTEN/NOTIFY and server-side prepared statements stop surviving a transaction [9c4d2f18@2]

@@ -288,7 +288,7 @@ export function renderSuggestions(
   if (r.cards === 0) {
     L.push('  no cards in the index, so there is nothing to compare.');
     L.push('');
-    L.push(`  next  ${t.bold('potsherd card')}   ${t.dim('build cards, then ask again')}`);
+    L.push(`  ${t.dim('run')}  ${t.bold('potsherd card')}   ${t.dim('build cards, then ask again')}`);
     L.push('');
     return L;
   }
@@ -301,7 +301,7 @@ export function renderSuggestions(
       L.push(t.dim(`  ${r.alreadyLinked} candidate(s) were pairs you have already linked.`));
     }
     L.push('');
-    L.push(`  next  ${t.bold('potsherd ask')}   ${t.dim('the same overlap, as an answer')}`);
+    L.push(`  ${t.dim('run')}  ${t.bold('potsherd ask')}   ${t.dim('the same overlap, as an answer')}`);
     L.push('');
     return L;
   }
@@ -339,7 +339,7 @@ export function renderSuggestions(
     `${worth} of ${p.raised} were worth raising. expect most of these to be wrong.`;
   for (const l of wrap(measured, t.width - 4)) L.push(t.warn(`  ${l}`));
   L.push('');
-  L.push(`  next  ${t.bold('potsherd show <id8>')}   ${t.dim('read one before you accept it')}`);
+  L.push(`  ${t.dim('run')}  ${t.bold('potsherd show <id8>')}   ${t.dim('read one before you accept it')}`);
   L.push('');
   return L;
 }

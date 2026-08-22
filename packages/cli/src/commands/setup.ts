@@ -264,6 +264,7 @@ function status(o: SetupOptions, wanted: setup.ClientId[]): number {
 
   let broken = 0;
   let docsOnly = 0;
+  const anyRegistered = rows.some((d) => d.registered);
   print('');
   for (const d of rows) {
     const runnable = setup.commandRunnable(d.registeredCommand);
@@ -296,7 +297,16 @@ function status(o: SetupOptions, wanted: setup.ClientId[]): number {
     }
   }
   print('');
-  print(`  ${t.dim('registered means the stanza is in that file, not that the client has read it.')}`);
+  // Wrapped like the sentence below it. Printed straight, it is 79 characters
+  // and overflowed every terminal narrower than 80 — found by widening the
+  // "every verb fits the width it was given" check to the nine verbs it had
+  // never covered.
+  for (const l of fmt.wrap(
+    'registered means the stanza is in that file, not that the client has read it.',
+    Math.max(24, t.width - 2),
+  )) {
+    print(`  ${t.dim(l)}`);
+  }
   if (docsOnly) {
     // Wrapped, not clipped: `05` gives every line of this screen 80 columns,
     // and this sentence is longer than one of them.
@@ -307,6 +317,20 @@ function status(o: SetupOptions, wanted: setup.ClientId[]): number {
     for (const l of fmt.wrap(note, Math.max(24, t.width - 2))) print(`  ${t.dim(l)}`);
   }
   print('');
+  // `05`: every verb ends with the next verb. `--status` is a report, so the
+  // next verb is the one that acts on it — registering one client if none is
+  // registered, and looking at what a change would be if some already are.
+  // Two spellings, because the gloss does not fit 60 columns and `05` says a
+  // line never wraps past the width it was given.
+  const [cmd, gloss] = anyRegistered
+    ? ['potsherd setup --all --dry-run', 'to see what would change']
+    : ['potsherd setup --claude', 'to register one, after a diff and a y'];
+  const wide = `  run  ${cmd}  ${gloss}`;
+  print(
+    wide.length <= t.width
+      ? `  ${t.dim('run')}  ${cmd}  ${t.dim(gloss)}`
+      : `  ${t.dim('run')}  ${cmd}`,
+  );
   return broken ? 1 : 0;
 }
 
@@ -388,6 +412,12 @@ function chosen(o: SetupOptions): setup.ClientId[] {
   if (o.all) return [...setup.CLIENT_IDS];
   const picked = o.clients ?? [];
   if (picked.length) return setup.CLIENT_IDS.filter((id) => picked.includes(id));
+  // `--status` is the one mode that has an obvious answer for "which agent":
+  // all of them. Its own `--help` line says *"report what is registered
+  // where"* — a question about the machine, not about one client — and making
+  // it demand `--all` to answer that was the flag disagreeing with its
+  // description. It changes nothing, so there is nothing to be careful about.
+  if (o.status) return [...setup.CLIENT_IDS];
   throw new UserError(
     'setup needs to know which agent to configure',
     `potsherd setup --cursor      (or ${setup.CLIENT_IDS.map((c) => '--' + c).join(' ')} / --all)`,

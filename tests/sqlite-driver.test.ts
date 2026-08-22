@@ -159,7 +159,30 @@ describe('the shipped bundle, with no node_modules anywhere', () => {
     const root = path.join(sandbox, 'pd-find');
     const r = run(['ls', '--potsherd-dir', root]);
     expect(r.stderr).toBe('');
-    // ...and the escape hatch is not a flag that does nothing.
+  });
+
+  it('puts the warning back when asked — if this Node emits one at all', () => {
+    // The escape hatch must not be a flag that does nothing (`10.1`: six plan
+    // claims about other software proved false, and the worst *succeeds* and
+    // does nothing). But whether there is a warning to put back is a fact
+    // about the Node running this, not about potsherd: it was experimental in
+    // 22.5 and unflagged later, and the runner's Node had already stopped
+    // printing it when this test first went to CI — four red legs asserting
+    // that somebody else's warning still existed.
+    //
+    // So the premise is established rather than assumed (`09 §7.2`): ask this
+    // Node directly, and skip loudly if the answer is no.
+    const probe = spawnSync(process.execPath, ['-e', "require('node:sqlite')"], {
+      encoding: 'utf8',
+    });
+    if (!probe.stderr.includes('ExperimentalWarning')) {
+      console.log(
+        `  skipped: ${process.version} does not warn about node:sqlite, so there is ` +
+          'nothing for POTSHERD_SQLITE_WARN to put back',
+      );
+      return;
+    }
+    const root = path.join(sandbox, 'pd-find');
     const loud = run(['ls', '--potsherd-dir', root], { POTSHERD_SQLITE_WARN: '1' });
     expect(loud.stderr).toContain('ExperimentalWarning');
   });

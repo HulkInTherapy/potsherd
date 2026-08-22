@@ -41,18 +41,31 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
-    "commander": "^12.1.0"
+    "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
     "@potsherd/bridges": "workspace:*",
     "@potsherd/core": "workspace:*",
     "@types/better-sqlite3": "^7.6.13"
   },
-  "optionalDependencies": {
+  "peerDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.238",
     "@anthropic-ai/sdk": "^0.120.0",
     "@huggingface/transformers": "^4.2.0",
     "sqlite-vec": "^0.1.9"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/claude-agent-sdk": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@huggingface/transformers": {
+      "optional": true
+    },
+    "sqlite-vec": {
+      "optional": true
+    }
   }
 }

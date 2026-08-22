@@ -1,0 +1,18 @@
+potsherd ls · 12 of 330
+
+    when  harness  project          title                                 status
+  21 aug  claude   data-pipeline    Pool ingest workers through pgbounc…  live
+  19 aug  claude   auth-gateway     Rapid debugging and refactoring acr…  live
+  17 aug  claude   auth-gateway     Backend component refactoring and d…  live
+  16 aug  claude   report-builder   Fixed nightly deploy bucket auth mi…  live
+  15 aug  claude   report-builder   Nine technical questions with misma…  live
+  14 aug  claude   docs-site        Code changes and fixture loader bug…  live
+  13 aug  claude   docs-site        Refactor core services with build f…  live
+  12 aug  claude   event-bus        Multiple technical issues during de…  live
+  11 aug  claude   event-bus        Connection pooling for delivery con…  live
+  10 aug  claude   event-bus        Multiple requests for code and work…  live
+   9 aug  claude   infra-terraform  Code review and refactoring across…   live
+   8 aug  claude   infra-terraform  Development session with PR and rev…  live
+
+  31 sessions · 197 subagents inside them · 299 ghosts, prompts only
+  run  potsherd show <id8>  to read one, or  potsherd find <words>

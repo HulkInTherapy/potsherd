@@ -251,7 +251,7 @@ export function render(r: stack.StackReport, t: Theme, o: StackOptions = {}): st
     L.push(t.dim('  potsherd stack --sources  prints the url behind every row.'));
   }
   L.push('');
-  L.push(`  next  ${t.bold('potsherd audit')}   ${t.dim('what the 30-day sweep already took')}`);
+  L.push(`  ${t.dim('run')}  ${t.bold('potsherd audit')}   ${t.dim('what the 30-day sweep already took')}`);
   L.push('');
 
   return L;

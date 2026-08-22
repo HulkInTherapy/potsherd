@@ -137,7 +137,28 @@ function verbs(): { name: string; args: string[] }[] {
     { name: 'show', args: ['show', IDS.alive] },
     { name: 'guard --status', args: ['guard', '--status'] },
     { name: 'rescue --dry-run', args: ['rescue', '--dry-run', '--yes', '--no-settings'] },
+    // The nine verbs this list did not cover until phase 7. `stack` is the one
+    // that matters most: it shipped in phase 6 as a module the command line
+    // could not reach, and "every verb has --help" passed *because* it was not
+    // a verb. A list of verbs written by hand can always be the list somebody
+    // remembered; `describe('every verb is on this list')` below is what stops
+    // that.
+    { name: 'stack', args: ['stack'] },
+    { name: 'card --dry-run', args: ['card', '--dry-run', '--all'] },
+    { name: 'tag', args: ['tag', IDS.alive, '+pooler'] },
+    { name: 'pin', args: ['pin', IDS.alive] },
+    { name: 'unpin', args: ['unpin', IDS.alive] },
+    { name: 'link', args: ['link', '--suggest'] },
+    { name: 'setup --status', args: ['setup', '--status'] },
+    { name: 'export --to markdown', args: ['export', '--to', 'markdown', exportDir()] },
   ];
+}
+
+/** A throwaway directory for the one verb in the list that writes files. */
+function exportDir(): string {
+  const d = tempDir('potsherd-export-');
+  created.push(d);
+  return d;
 }
 
 function invoke(args: string[], extra: string[]): RunResult {
@@ -189,6 +210,31 @@ describe('--ascii', () => {
  * allowed to end differently" is a decision, and a regex that happens to
  * tolerate a missing line is not one.
  */
+/**
+ * Every line of every verb fits the width it was given, at 80 and at 60.
+ *
+ * `describe('--ascii')` above has run over `verbs()` since phase 1, and the
+ * width rule was only ever checked for `doctor` and `index` — the two that had
+ * been caught overflowing. Widening `verbs()` in phase 7 from fifteen entries
+ * to twenty-three immediately found a third: `setup --status` printed a
+ * 79-character sentence unwrapped, so it overflowed every terminal narrower
+ * than 80. A rule enforced for the two verbs that broke it is not a rule.
+ */
+describe('every verb fits the width it was given', () => {
+  for (const width of [60, 80]) {
+    it(`at ${width} columns`, () => {
+      const over: string[] = [];
+      for (const v of verbs()) {
+        const r = invoke(v.args, ['--no-color', '--width', String(width)]);
+        for (const line of r.stdout.split('\n')) {
+          if (widthOf(line) > width) over.push(`${v.name}: ${widthOf(line)} — ${line}`);
+        }
+      }
+      expect(over).toEqual([]);
+    });
+  }
+});
+
 describe('every verb ends with the next verb', () => {
   /** Screens whose last line is deliberately something else, and why. */
   const EXEMPT: Record<string, string> = {

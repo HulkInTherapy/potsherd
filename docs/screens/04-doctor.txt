@@ -3,6 +3,7 @@ potsherd doctor · potsherd 1.0.0 · node v24.9.0
   claude dir                         ~/.claude
   potsherd dir                       ~/.potsherd
   database                           schema v8 of v8
+  sqlite                             better-sqlite3 (native addon)
 
   sessions on disk              31   21 titled · 3 sdk · 546 KB
   sidechains on disk           197   subagent transcripts

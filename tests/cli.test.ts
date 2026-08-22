@@ -324,7 +324,11 @@ describe('potsherd cli', () => {
   it('doctor --privacy discloses the model calls, not just the paths', () => {
     const root = scratchRoot();
     const r = run(['doctor', '--privacy', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root, '--width', '100']);
-    const out = r.stdout;
+    // Whitespace-normalised. The receipt's prose is wrapped to the terminal
+    // width now rather than hand-split at ~72 characters (it overflowed on
+    // fourteen lines at `--width 60`), so which words share a line is a
+    // function of the width and is not what any of these assertions is about.
+    const out = r.stdout.replace(/\s+/g, ' ');
 
     // what leaves the machine, and that it is redacted first
     expect(out).toContain('leaves this machine');
@@ -345,7 +349,7 @@ describe('potsherd cli', () => {
     }
 
     // the sentence that used to be false must not have survived anywhere
-    expect(out).not.toMatch(/^\s*no network[,.]/m);
+    expect(out).not.toMatch(/\bno network[,.]/);
   });
 
   /**

@@ -14910,6 +14910,7 @@ function utcRange(startMs, endExclusiveMs, label3) {
 var POTSHERD_CARD_MARKER = "<INSTRUCTIONS-TO-POTSHERD>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-POTSHERD>";
 
 // ../core/dist/llm.js
+import { createRequire as createRequire3 } from "node:module";
 import { spawn } from "node:child_process";
 import fs26 from "node:fs";
 import os3 from "node:os";
@@ -15230,24 +15231,57 @@ var ReentrancyError = class extends Error {
     super(`refusing to call a model from inside one (${REENTRANCY_ENV}=1). potsherd spawned this process; it must not spawn another.`);
   }
 };
-var NoBackendError = class extends Error {
-  availability;
+var NoBackendError = class _NoBackendError extends Error {
   name = "NoBackendError";
-  fix = "https://claude.com/product/claude-code  \u2014 or  export ANTHROPIC_API_KEY=\u2026";
+  fix;
+  availability;
   constructor(availability2) {
-    super("no way to reach a model: no `claude` binary on PATH, no `codex`, and ANTHROPIC_API_KEY is not set.\n        potsherd cards run on your Claude Code subscription (install Claude Code), or on an Anthropic API key as a fallback.");
+    super(_NoBackendError.message(availability2));
     this.availability = availability2;
+    this.fix = _NoBackendError.fixFor(availability2);
+  }
+  /** True when the *signal* is there and the module that does the talking is not. */
+  static halfInstalled(a) {
+    if (a.claude !== null && !a.agentSdk)
+      return "@anthropic-ai/claude-agent-sdk";
+    if (a.apiKey && !a.apiSdk)
+      return "@anthropic-ai/sdk";
+    return null;
+  }
+  static message(a) {
+    const missing = _NoBackendError.halfInstalled(a);
+    if (missing) {
+      return `this potsherd cannot reach a model: ${missing} is not installed.
+        It is an optional dependency: it and the embedding runtime are 677 MB of an
+        install that is 17 MB without them.`;
+    }
+    return "no way to reach a model: no `claude` binary on PATH, no `codex`, and ANTHROPIC_API_KEY is not set.\n        potsherd cards run on your Claude Code subscription (install Claude Code), or on an Anthropic API key as a fallback.";
+  }
+  static fixFor(a) {
+    const missing = _NoBackendError.halfInstalled(a);
+    return missing ? `npm install -g ${missing}` : "https://claude.com/product/claude-code  \u2014 or  export ANTHROPIC_API_KEY=\u2026";
   }
 };
+function resolvable(specifier) {
+  try {
+    createRequire3(import.meta.url).resolve(specifier);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function availability(o = {}) {
   const env = o.env ?? process8.env;
   const which2 = o.which ?? ((n2) => onPath(n2, env));
   const key = env["ANTHROPIC_API_KEY"];
+  const canResolve = o.resolvable ?? resolvable;
   return {
     claude: which2("claude"),
     codex: which2("codex"),
     apiKey: typeof key === "string" && key.trim().length > 0,
-    codexHarness: env["POTSHERD_HARNESS"] === "codex" || Boolean(env["CODEX_HOME"]) || Boolean(env["CODEX_SANDBOX"])
+    codexHarness: env["POTSHERD_HARNESS"] === "codex" || Boolean(env["CODEX_HOME"]) || Boolean(env["CODEX_SANDBOX"]),
+    agentSdk: canResolve("@anthropic-ai/claude-agent-sdk"),
+    apiSdk: canResolve("@anthropic-ai/sdk")
   };
 }
 function detectBackend(o = {}) {
@@ -15273,13 +15307,13 @@ function detectBackend(o = {}) {
       return choose("api", "forced");
     throw new NoBackendError(avail);
   }
-  if (avail.claude) {
+  if (avail.claude && avail.agentSdk) {
     return choose("agent-sdk", `claude on PATH (${avail.claude})`, avail.claude);
   }
   if (avail.codexHarness && avail.codex) {
     return choose("codex", `codex is the harness and there is no claude`, avail.codex);
   }
-  if (avail.apiKey) {
+  if (avail.apiKey && avail.apiSdk) {
     return choose("api", "no claude binary; ANTHROPIC_API_KEY is set");
   }
   if (avail.codex) {
@@ -20407,7 +20441,7 @@ function renderSuggestions(r, t, wrap3) {
   if (r.cards === 0) {
     L.push("  no cards in the index, so there is nothing to compare.");
     L.push("");
-    L.push(`  next  ${t.bold("potsherd card")}   ${t.dim("build cards, then ask again")}`);
+    L.push(`  ${t.dim("run")}  ${t.bold("potsherd card")}   ${t.dim("build cards, then ask again")}`);
     L.push("");
     return L;
   }
@@ -20419,7 +20453,7 @@ function renderSuggestions(r, t, wrap3) {
       L.push(t.dim(`  ${r.alreadyLinked} candidate(s) were pairs you have already linked.`));
     }
     L.push("");
-    L.push(`  next  ${t.bold("potsherd ask")}   ${t.dim("the same overlap, as an answer")}`);
+    L.push(`  ${t.dim("run")}  ${t.bold("potsherd ask")}   ${t.dim("the same overlap, as an answer")}`);
     L.push("");
     return L;
   }
@@ -20444,7 +20478,7 @@ function renderSuggestions(r, t, wrap3) {
   for (const l of wrap3(measured, t.width - 4))
     L.push(t.warn(`  ${l}`));
   L.push("");
-  L.push(`  next  ${t.bold("potsherd show <id8>")}   ${t.dim("read one before you accept it")}`);
+  L.push(`  ${t.dim("run")}  ${t.bold("potsherd show <id8>")}   ${t.dim("read one before you accept it")}`);
   L.push("");
   return L;
 }
@@ -22298,16 +22332,37 @@ function status(o, t, installed, resolution) {
     });
     return runnable === false ? 1 : 0;
   }
+  const cmdLine = (cmd) => {
+    print(`      ${format_exports.elideMiddle(cmd, t.width - 6, t.ellip)}`);
+  };
+  const oneLine3 = (lead, gloss, cmd) => {
+    const whole = `  ${lead}  ${gloss}  ${cmd}`;
+    if (Theme.len(whole) > t.width) return false;
+    print(`  ${lead}  ${t.dim(gloss)}  ${cmd}`);
+    return true;
+  };
   if (installed === null) {
     print("  guard not installed.");
-    print(`  run  potsherd guard  to add a SessionStart hook that runs  ${resolution.command}`);
+    const lead = "run  potsherd guard";
+    if (!oneLine3(lead, "to add a SessionStart hook that runs", resolution.command)) {
+      print(`  ${t.dim("it would install a SessionStart hook that runs:")}`);
+      cmdLine(resolution.command);
+      print(`  ${lead}  ${t.dim("to add it")}`);
+    }
     return 0;
   }
   if (runnable) {
-    print(`  ${t.ok("guard installed")}  SessionStart runs: ${installed}`);
+    if (!oneLine3(t.ok("guard installed"), "SessionStart runs:", installed)) {
+      print(`  ${t.ok("guard installed")}  ${t.dim("SessionStart runs:")}`);
+      cmdLine(installed);
+    }
+    print(`  ${t.dim("run")}  potsherd ls  ${t.dim("to read what has been archived so far")}`);
     return 0;
   }
-  print(`  ${t.warn("guard installed but broken")}  SessionStart runs: ${installed}`);
+  if (!oneLine3(t.warn("guard installed but broken"), "SessionStart runs:", installed)) {
+    print(`  ${t.warn("guard installed but broken")}  ${t.dim("SessionStart runs:")}`);
+    cmdLine(installed);
+  }
   print("  that command is not runnable from here, so no copy is being taken.");
   print("  run  potsherd guard --remove  then  potsherd guard  to repair it.");
   return 1;
@@ -22428,46 +22483,61 @@ async function runDoctor(o) {
     card2.heading("doctor --privacy", format_exports.date(/* @__PURE__ */ new Date())).blank();
     const pathW = Math.max(24, t2.width - 16);
     const show = (p) => format_exports.elideMiddle(paths_exports.tildify(p), pathW, t2);
+    const note = (text, indent = 6) => {
+      const pad4 = " ".repeat(indent);
+      for (const line of format_exports.wrap(text, Math.max(20, t2.width - indent - 1))) {
+        card2.raw(`${pad4}${t2.dim(line)}`);
+      }
+    };
     card2.text("reads (never modified):");
     for (const p of reads) {
       card2.raw(`    ${show(p)}${fs36.existsSync(p) ? "" : t2.dim("  (absent)")}`);
     }
-    card2.raw(`    ${t2.dim("\u2026and these, only when you name them with  --with / --to:")}`);
+    note("\u2026and these, only when you name them with  --with / --to:", 4);
     for (const b of BRIDGE_READ_PATHS) {
       card2.raw(`    ${show(b.path)}`);
-      card2.raw(`      ${t2.dim(b.note)}`);
+      note(b.note);
     }
     card2.blank().text("writes:");
     for (const p of written) {
       card2.raw(`    ${show(p)}`);
       if (p.endsWith("graft-<id8>.md")) {
-        card2.raw(`      ${t2.dim("only when you run graft, in the directory you run it in")}`);
+        note("only when you run graft, in the directory you run it in");
       } else if (p.startsWith("<the path you give")) {
-        card2.raw(`      ${t2.dim("only when you pass the flag. it holds the same redacted excerpts a")}`);
-        card2.raw(`      ${t2.dim("model would have been sent, and no model was called to write it")}`);
+        note(
+          "only when you pass the flag. it holds the same redacted excerpts a model would have been sent, and no model was called to write it"
+        );
       } else if (p.startsWith("<the dir you give")) {
-        card2.raw(`      ${t2.dim("one markdown file per card, only when you run export")}`);
+        note("one markdown file per card, only when you run export");
       } else if (p.startsWith("<your agentmemory")) {
-        card2.raw(`      ${t2.dim("rows into another tool's store. never without --yes, and")}`);
-        card2.raw(`      ${t2.dim("never at all unless you asked for that target")}`);
+        note(
+          "rows into another tool's store. never without --yes, and never at all unless you asked for that target"
+        );
       }
     }
     card2.blank().text("writes only after an explicit y at a diff:");
     card2.raw(`    ${show(settingsFile)}`);
-    card2.raw(`      ${t2.dim("cleanupPeriodDays, and one SessionStart hook entry")}`);
+    note("cleanupPeriodDays, and one SessionStart hook entry");
     for (const p of mcpConfigs) card2.raw(`    ${show(p)}`);
-    card2.raw(`      ${t2.dim('one "potsherd" MCP server entry each, from potsherd setup.')}`);
-    card2.raw(`      ${t2.dim("every other server in those files is preserved.")}`);
-    card2.raw(`    ${t2.dim("\u2026and beside each of those")} ${String(consented.length)}${t2.dim(":")}  <that file>.potsherd-bak-<UTC>`);
-    card2.raw(`      ${t2.dim("a copy of the file as it was, taken before potsherd changes it.")}`);
-    card2.raw(`      ${t2.dim("one per write. potsherd never reads them back and never removes")}`);
-    card2.raw(`      ${t2.dim("them; delete them yourself once you are happy with the change.")}`);
+    note(
+      'one "potsherd" MCP server entry each, from potsherd setup. every other server in those files is preserved.'
+    );
+    note(
+      `\u2026and beside each of those ${String(consented.length)}:  <that file>.potsherd-bak-<UTC>`,
+      4
+    );
+    note(
+      "a copy of the file as it was, taken before potsherd changes it. one per write. potsherd never reads them back and never removes them; delete them yourself once you are happy with the change."
+    );
     card2.blank().text("leaves this machine:");
-    card2.raw(`    ${t2.accent("redacted slices of your transcripts")}, sent to a model as the`);
-    card2.raw("    text of one prompt. redaction runs first, in one place, on");
-    card2.raw("    every outgoing string \u2014 there is no --no-redact flag.");
-    card2.raw("    nothing else is ever sent: no file is uploaded, no path, no");
-    card2.raw("    index, no counts, no identifiers.");
+    {
+      const lead = "redacted slices of your transcripts";
+      const body = `${lead}, sent to a model as the text of one prompt. redaction runs first, in one place, on every outgoing string \u2014 there is no --no-redact flag. nothing else is ever sent: no file is uploaded, no path, no index, no counts, no identifiers.`;
+      const lines = format_exports.wrap(body, Math.max(20, t2.width - 5));
+      lines.forEach((line, i) => {
+        card2.raw(`    ${i === 0 && line.startsWith(lead) ? t2.accent(lead) + line.slice(lead.length) : line}`);
+      });
+    }
     card2.blank().text("only these verbs call a model:");
     const verbNote = {
       card: "writes the cards; one call per slice",
@@ -22478,26 +22548,38 @@ async function runDoctor(o) {
       find: "--with <tool>, to read another tool's store",
       export: "--to <tool>, to write rows into one"
     };
-    for (const verb of MODEL_CALL_VERBS) {
-      const note = verbNote[verb];
-      card2.raw(`    potsherd ${verb.padEnd(8)}${note ? `  ${note}` : ""}`.trimEnd());
-    }
+    const verbRow = (verb, gloss) => {
+      const head = `    potsherd ${verb.padEnd(8)}`;
+      const room = t2.width - head.length - 2;
+      card2.raw(
+        (gloss && room >= 12 ? `${head}  ${format_exports.elide(gloss, room, t2)}` : head).trimEnd()
+      );
+    };
+    for (const verb of MODEL_CALL_VERBS) verbRow(verb, verbNote[verb]);
     card2.blank().text("these never do, and open no socket at all:");
     for (const line of format_exports.wrap(OFFLINE_VERBS.join(", "), pathW)) card2.raw(`    ${line}`);
     card2.blank().text("these call no model either, but do open a socket on");
-    card2.raw(`  ${t2.dim("this machine \u2014 and only when you ask them to:")}`);
-    for (const verb of LOCAL_SOCKET_VERBS) {
-      const note = socketNote[verb];
-      card2.raw(`    potsherd ${verb.padEnd(8)}${note ? `  ${note}` : ""}`.trimEnd());
-    }
-    card2.raw(`      ${t2.dim("claude-mem is read over http://127.0.0.1; agentmemory by")}`);
-    card2.raw(`      ${t2.dim("launching its mcp server, itself a shim over an http")}`);
-    card2.raw(`      ${t2.dim("backend on localhost. nothing leaves this machine, and")}`);
-    card2.raw(`      ${t2.dim("without the flag neither opens anything at all.")}`);
+    note("this machine \u2014 and only when you ask them to:", 2);
+    for (const verb of LOCAL_SOCKET_VERBS) verbRow(verb, socketNote[verb]);
+    note(
+      "claude-mem is read over http://127.0.0.1; agentmemory by launching its mcp server, itself a shim over an http backend on localhost. nothing leaves this machine, and without the flag neither opens anything at all."
+    );
     card2.blank().text("who receives them:");
     for (const line of format_exports.wrap(network.to, pathW)) card2.raw(`    ${line}`);
-    for (const line of network.detail) card2.raw(`    ${t2.dim(line)}`);
-    card2.blank().text("no other network, except the one-off embedding-model download.").text("`potsherd index` names it before it starts, but `--quiet` and").text("`--json` suppress that line, and `--quiet` is how the plugin's").text("SessionEnd hook runs it \u2014 so its SessionStart hook warns you first.").text("`--no-embed` skips the download entirely.").text("no telemetry. no account. potsherd stores no credential of its own.");
+    for (const line of network.detail) note(line, 4);
+    card2.blank().text("no other network, except the one-off embedding-model download.");
+    for (const line of format_exports.wrap(
+      "`potsherd index` names it before it starts, but `--quiet` and `--json` suppress that line, and `--quiet` is how the plugin's SessionEnd hook runs it \u2014 so its SessionStart hook warns you first. `--no-embed` skips the download entirely.",
+      Math.max(20, t2.width - 3)
+    )) {
+      card2.raw(`  ${line}`);
+    }
+    for (const line of format_exports.wrap(
+      "no telemetry. no account. potsherd stores no credential of its own.",
+      Math.max(20, t2.width - 3)
+    )) {
+      card2.raw(`  ${line}`);
+    }
     print(card2.toString());
     return 0;
   }
@@ -24676,6 +24758,7 @@ function status2(o, wanted) {
   }
   let broken = 0;
   let docsOnly = 0;
+  const anyRegistered = rows.some((d) => d.registered);
   print("");
   for (const d of rows) {
     const runnable = setup_exports.commandRunnable(d.registeredCommand);
@@ -24695,12 +24778,22 @@ function status2(o, wanted) {
     }
   }
   print("");
-  print(`  ${t.dim("registered means the stanza is in that file, not that the client has read it.")}`);
+  for (const l of format_exports.wrap(
+    "registered means the stanza is in that file, not that the client has read it.",
+    Math.max(24, t.width - 2)
+  )) {
+    print(`  ${t.dim(l)}`);
+  }
   if (docsOnly) {
     const note = `schema unverified means potsherd has never read a real config for ${docsOnly === 1 ? "that client" : "those clients"}; the stanza follows the published documentation and nothing more.`;
     for (const l of format_exports.wrap(note, Math.max(24, t.width - 2))) print(`  ${t.dim(l)}`);
   }
   print("");
+  const [cmd, gloss] = anyRegistered ? ["potsherd setup --all --dry-run", "to see what would change"] : ["potsherd setup --claude", "to register one, after a diff and a y"];
+  const wide = `  run  ${cmd}  ${gloss}`;
+  print(
+    wide.length <= t.width ? `  ${t.dim("run")}  ${cmd}  ${t.dim(gloss)}` : `  ${t.dim("run")}  ${cmd}`
+  );
   return broken ? 1 : 0;
 }
 function nextStep(o, t, s) {
@@ -24763,6 +24856,7 @@ function chosen(o) {
   if (o.all) return [...setup_exports.CLIENT_IDS];
   const picked = o.clients ?? [];
   if (picked.length) return setup_exports.CLIENT_IDS.filter((id) => picked.includes(id));
+  if (o.status) return [...setup_exports.CLIENT_IDS];
   throw new UserError(
     "setup needs to know which agent to configure",
     `potsherd setup --cursor      (or ${setup_exports.CLIENT_IDS.map((c) => "--" + c).join(" ")} / --all)`
@@ -25091,7 +25185,7 @@ function render(r, t, o = {}) {
     L.push(t.dim("  potsherd stack --sources  prints the url behind every row."));
   }
   L.push("");
-  L.push(`  next  ${t.bold("potsherd audit")}   ${t.dim("what the 30-day sweep already took")}`);
+  L.push(`  ${t.dim("run")}  ${t.bold("potsherd audit")}   ${t.dim("what the 30-day sweep already took")}`);
   L.push("");
   return L;
 }

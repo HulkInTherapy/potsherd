@@ -7,6 +7,24 @@ disable-model-invocation: true
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/potsherd *), Read, Write
 ---
 
+<!--
+`allowed-tools` does not list the Agent tool, and the `ask` route below tells
+you to dispatch six of them. That is deliberate, and it is worth a sentence
+because it looks like an omission (it was reported as one — open item 24).
+
+`allowed-tools` **pre-approves**; it does not restrict. Everything not listed
+still works and simply asks the user first. `Bash(${CLAUDE_PLUGIN_ROOT}/bin/
+potsherd *)` is there because every verb of this skill runs that one binary and
+prompting once per verb would make the skill unusable. `Read` and `Write` are
+there for the `--readers-out` / `--readers-in` round trip and nothing else.
+
+The Agent dispatch is not listed because a skill cannot pre-approve it — the
+same finding `skills/remembering-sessions/SKILL.md` records in its own
+frontmatter. So dispatching six readers prompts, once, on a route that is about
+to spend a minute of the user's time anyway. An invented entry would be dead
+weight in a field whose whole job is to be exact.
+-->
+
 # /potsherd
 
 The user typed `/potsherd $verb $rest`.

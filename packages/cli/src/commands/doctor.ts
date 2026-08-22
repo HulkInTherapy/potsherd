@@ -160,6 +160,32 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     const pathW = Math.max(24, t.width - 16);
     const show = (p: string) => fmt.elideMiddle(paths.tildify(p), pathW, t);
 
+    /**
+     * A note under a path, wrapped to whatever width this terminal is.
+     *
+     * These used to be hand-split string literals, broken at roughly 72
+     * characters — which is a screen designed for exactly one width. `05` asks
+     * for 80 degrading to 60, and at 60 this receipt overflowed on **fourteen
+     * lines**, found by widening the width check from the two verbs that had
+     * once been caught to all twenty-three.
+     *
+     * Written as whole sentences and wrapped here, so the receipt is right at
+     * any width and there is no second copy of the prose to keep in step.
+     */
+    const note = (text: string, indent = 6): void => {
+      const pad = ' '.repeat(indent);
+      // Verbatim when it fits. `fmt.wrap` collapses runs of spaces, and the
+      // double space in `with  --with / --to` is the design system's, not an
+      // accident — so a line that never needed wrapping does not get it.
+      if (Theme.len(pad + text) <= t.width) {
+        card.raw(`${pad}${t.dim(text)}`);
+        return;
+      }
+      for (const line of fmt.wrap(text, Math.max(20, t.width - indent - 1))) {
+        card.raw(`${pad}${t.dim(line)}`);
+      }
+    };
+
     card.text('reads (never modified):');
     for (const p of reads) {
       card.raw(`    ${show(p)}${fs.existsSync(p) ? '' : t.dim('  (absent)')}`);
@@ -172,10 +198,10 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // would put `@potsherd/bridges` — and its localhost socket — into an
     // offline verb's import graph; `tests/bridges.test.ts` asserts each one
     // against the bridge's own path helper so they cannot drift.
-    card.raw(`    ${t.dim('…and these, only when you name them with  --with / --to:')}`);
+    note('…and these, only when you name them with  --with / --to:', 4);
     for (const b of BRIDGE_READ_PATHS) {
       card.raw(`    ${show(b.path)}`);
-      card.raw(`      ${t.dim(b.note)}`);
+      note(b.note);
     }
     card.blank().text('writes:');
     for (const p of written) {
@@ -184,37 +210,58 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       // conditional now, and a single trailing sentence could only describe one
       // of them truthfully.
       if (p.endsWith('graft-<id8>.md')) {
-        card.raw(`      ${t.dim('only when you run graft, in the directory you run it in')}`);
+        note('only when you run graft, in the directory you run it in');
       } else if (p.startsWith('<the path you give')) {
-        card.raw(`      ${t.dim('only when you pass the flag. it holds the same redacted excerpts a')}`);
-        card.raw(`      ${t.dim('model would have been sent, and no model was called to write it')}`);
+        note(
+          'only when you pass the flag. it holds the same redacted excerpts a model ' +
+            'would have been sent, and no model was called to write it',
+        );
       } else if (p.startsWith('<the dir you give')) {
-        card.raw(`      ${t.dim('one markdown file per card, only when you run export')}`);
+        note('one markdown file per card, only when you run export');
       } else if (p.startsWith('<your agentmemory')) {
-        card.raw(`      ${t.dim('rows into another tool\'s store. never without --yes, and')}`);
-        card.raw(`      ${t.dim('never at all unless you asked for that target')}`);
+        note(
+          "rows into another tool's store. never without --yes, and never at all " +
+            'unless you asked for that target',
+        );
       }
     }
     card.blank().text('writes only after an explicit y at a diff:');
     card.raw(`    ${show(settingsFile)}`);
-    card.raw(`      ${t.dim('cleanupPeriodDays, and one SessionStart hook entry')}`);
+    note('cleanupPeriodDays, and one SessionStart hook entry');
     for (const p of mcpConfigs) card.raw(`    ${show(p)}`);
-    card.raw(`      ${t.dim('one "potsherd" MCP server entry each, from potsherd setup.')}`);
-    card.raw(`      ${t.dim('every other server in those files is preserved.')}`);
-    card.raw(`    ${t.dim('…and beside each of those')} ${String(consented.length)}${t.dim(':')}  <that file>.potsherd-bak-<UTC>`);
-    card.raw(`      ${t.dim('a copy of the file as it was, taken before potsherd changes it.')}`);
-    card.raw(`      ${t.dim('one per write. potsherd never reads them back and never removes')}`);
-    card.raw(`      ${t.dim('them; delete them yourself once you are happy with the change.')}`);
+    note(
+      'one "potsherd" MCP server entry each, from potsherd setup. every other ' +
+        'server in those files is preserved.',
+    );
+    note(
+      `…and beside each of those ${String(consented.length)}:  <that file>.potsherd-bak-<UTC>`,
+      4,
+    );
+    note(
+      'a copy of the file as it was, taken before potsherd changes it. one per ' +
+        'write. potsherd never reads them back and never removes them; delete them ' +
+        'yourself once you are happy with the change.',
+    );
     // The largest privacy-relevant thing potsherd does is no longer "reads
     // your files": from phase 2 on it *sends* some of them. A receipt that
     // still said "no network" would be the worst class of bug this project
     // has, so what leaves the machine is stated before what does not.
     card.blank().text('leaves this machine:');
-    card.raw(`    ${t.accent('redacted slices of your transcripts')}, sent to a model as the`);
-    card.raw('    text of one prompt. redaction runs first, in one place, on');
-    card.raw('    every outgoing string — there is no --no-redact flag.');
-    card.raw('    nothing else is ever sent: no file is uploaded, no path, no');
-    card.raw('    index, no counts, no identifiers.');
+    {
+      // The accent belongs on the first phrase, so the wrap is computed over
+      // the plain sentence and the phrase is coloured back in afterwards. It
+      // is the one accent on this screen (`05`: one per card).
+      const lead = 'redacted slices of your transcripts';
+      const body =
+        `${lead}, sent to a model as the text of one prompt. redaction runs ` +
+        'first, in one place, on every outgoing string — there is no --no-redact ' +
+        'flag. nothing else is ever sent: no file is uploaded, no path, no index, ' +
+        'no counts, no identifiers.';
+      const lines = fmt.wrap(body, Math.max(20, t.width - 5));
+      lines.forEach((line, i) => {
+        card.raw(`    ${i === 0 && line.startsWith(lead) ? t.accent(lead) + line.slice(lead.length) : line}`);
+      });
+    }
 
     card.blank().text('only these verbs call a model:');
     const verbNote: Record<string, string> = {
@@ -226,10 +273,15 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       find: '--with <tool>, to read another tool\'s store',
       export: '--to <tool>, to write rows into one',
     };
-    for (const verb of MODEL_CALL_VERBS) {
-      const note = verbNote[verb];
-      card.raw(`    potsherd ${verb.padEnd(8)}${note ? `  ${note}` : ''}`.trimEnd());
-    }
+    const verbRow = (verb: string, gloss?: string): void => {
+      const head = `    potsherd ${verb.padEnd(8)}`;
+      // The verb is the thing a reader is looking for, so the gloss elides.
+      const room = t.width - head.length - 2;
+      card.raw(
+        (gloss && room >= 12 ? `${head}  ${fmt.elide(gloss, room, t)}` : head).trimEnd(),
+      );
+    };
+    for (const verb of MODEL_CALL_VERBS) verbRow(verb, verbNote[verb]);
     card.blank().text('these never do, and open no socket at all:');
     // Wrapped, not elided: the whole value of this line is that a reader can
     // find their verb in it, and `ls…w, stats` is a list with the answer cut
@@ -243,19 +295,17 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // and only then regenerate the screen. `LOCAL_SOCKET_VERBS` carries the
     // whole reasoning.
     card.blank().text('these call no model either, but do open a socket on');
-    card.raw(`  ${t.dim('this machine — and only when you ask them to:')}`);
-    for (const verb of LOCAL_SOCKET_VERBS) {
-      const note = socketNote[verb];
-      card.raw(`    potsherd ${verb.padEnd(8)}${note ? `  ${note}` : ''}`.trimEnd());
-    }
-    card.raw(`      ${t.dim("claude-mem is read over http://127.0.0.1; agentmemory by")}`);
-    card.raw(`      ${t.dim('launching its mcp server, itself a shim over an http')}`);
-    card.raw(`      ${t.dim('backend on localhost. nothing leaves this machine, and')}`);
-    card.raw(`      ${t.dim('without the flag neither opens anything at all.')}`);
+    note('this machine — and only when you ask them to:', 2);
+    for (const verb of LOCAL_SOCKET_VERBS) verbRow(verb, socketNote[verb]);
+    note(
+      'claude-mem is read over http://127.0.0.1; agentmemory by launching its mcp ' +
+        'server, itself a shim over an http backend on localhost. nothing leaves ' +
+        'this machine, and without the flag neither opens anything at all.',
+    );
 
     card.blank().text('who receives them:');
     for (const line of fmt.wrap(network.to, pathW)) card.raw(`    ${line}`);
-    for (const line of network.detail) card.raw(`    ${t.dim(line)}`);
+    for (const line of network.detail) note(line, 4);
 
     card
       .blank()
@@ -267,12 +317,22 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       // announcement it does not always make is the same failure as the
       // "no network" line this project shipped once already (`08` rule 1), so
       // the suppressing flags are named and the hook's own warning is stated.
-      .text('no other network, except the one-off embedding-model download.')
-      .text('`potsherd index` names it before it starts, but `--quiet` and')
-      .text('`--json` suppress that line, and `--quiet` is how the plugin\'s')
-      .text('SessionEnd hook runs it — so its SessionStart hook warns you first.')
-      .text('`--no-embed` skips the download entirely.')
-      .text('no telemetry. no account. potsherd stores no credential of its own.');
+      .text('no other network, except the one-off embedding-model download.');
+    for (const line of fmt.wrap(
+      '`potsherd index` names it before it starts, but `--quiet` and `--json` ' +
+        "suppress that line, and `--quiet` is how the plugin's SessionEnd hook runs " +
+        'it — so its SessionStart hook warns you first. `--no-embed` skips the ' +
+        'download entirely.',
+      Math.max(20, t.width - 3),
+    )) {
+      card.raw(`  ${line}`);
+    }
+    for (const line of fmt.wrap(
+      'no telemetry. no account. potsherd stores no credential of its own.',
+      Math.max(20, t.width - 3),
+    )) {
+      card.raw(`  ${line}`);
+    }
     print(card.toString());
     return 0;
   }

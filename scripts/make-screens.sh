@@ -124,8 +124,9 @@ offline_screens=(
   01-audit.txt 02-rescue.txt 03-audit-after.txt 04-doctor.txt
   05-doctor-privacy.txt 06-audit-sweep.txt 07-index.txt 08-ls.txt
   09-find.txt 10-stats.txt 11-show.txt 12-ls-ghosts.txt 13-find-redacted.txt
+  16-before-after.txt
 )
-model_screens=(14-ask.txt 15-graft.txt)
+model_screens=(14-ask.txt 15-graft.txt 17-ls-cards.txt)
 
 # --width 80 --no-color on every capture: the screens are a fixed 80-column
 # artefact, not whatever terminal happened to run this.
@@ -170,6 +171,40 @@ shot 07-index.txt        index --full --no-embed
 
 # Everything below reads the index 07 just built.
 shot 08-ls.txt           ls
+
+# `05` moment 3, and the one screen that is not a single command: the
+# before/after people actually post. On the left is what Claude Code leaves you
+# — a directory of uuids, one per session, with the deleted ones simply absent.
+# On the right is the same archive after `rescue` and `index`. Both halves are
+# real output; the left half is `ls`, the shell one.
+#
+# Written by a here-doc rather than by `shot` because it is two commands, and
+# the frame around them is what makes the comparison legible. Everything inside
+# the frame is verbatim.
+echo "  16-before-after.txt  <-  ls ~/.claude/projects  vs  potsherd ls"
+# Two things went wrong here the first two times, and both are worth the
+# comment.
+#
+#   `ls -1 */*.jsonl` -- Claude Code's project directories start with a HYPHEN
+#   (`-home-dev-auth-gateway`), so the expanded glob is parsed by `ls` as an
+#   option and the whole thing fails with `unrecognized option`. The left half
+#   of this screen read "0 files" while 228 sat on disk. `printf` with the
+#   glob, and no `ls` at all.
+#
+#   `| head -6` -- under `set -o pipefail` a `head` that closes the pipe makes
+#   the producer exit 141 and takes the script down. Sliced with `sed` over a
+#   captured variable instead.
+raw_ls=$( cd "$HOME/.claude/projects" && printf '%s\n' */*.jsonl 2>/dev/null )
+raw_n=$( printf '%s\n' "$raw_ls" | grep -c . || true )
+{
+  printf '%s\n\n' 'what Claude Code leaves you  —  ls ~/.claude/projects/*'
+  printf '%s\n' "$raw_ls" | sed -n '1,5p' | sed 's/^/  /'
+  printf '  %s\n' "... $raw_n files, named by uuid, in $(cd "$HOME/.claude/projects" && printf '%s\n' */ | grep -c .) directories."
+  printf '  %s\n' "the 299 sessions the sweep already took are not here at all."
+  printf '\n%s\n\n' 'what potsherd leaves you  —  potsherd ls'
+  node "$bin" ls --limit 5 --width 76 --no-color | sed 's/^/  /'
+} > "$staging/16-before-after.txt"
+
 shot 12-ls-ghosts.txt    ls --ghosts only
 # "pgbouncer" is the thread scripts/make-demo-corpus.mjs plants through the
 # corpus: one live session, three sessions the sweep deleted, and one subagent.
@@ -288,6 +323,13 @@ if [ "$have_model" = "1" ]; then
   # the other model screen, because the receipt names the file graft wrote in
   # the directory it was run in.
   shot_in_project 15-graft.txt graft 9c4d2f18 --about pgbouncer --no-model
+
+  # `ls` again, now that every surviving session has a card. It is the same
+  # verb as 08 and a different screen: 08 shows what a harness gave you, and
+  # this shows what a card gave you — the sessions Claude Code never titled are
+  # no longer `potsherd-eval-data-47d9e281`. That difference is the whole point
+  # of `card`, and until phase 7 it had no screenshot (open item 10).
+  shot 17-ls-cards.txt     ls --limit 12
 else
   # Not regenerated, so they are carried into staging exactly as committed —
   # asserted with the rest, and moved back byte-identical.
@@ -328,7 +370,7 @@ expected = [
     '04-doctor.txt', '05-doctor-privacy.txt', '06-audit-sweep.txt',
     '07-index.txt', '08-ls.txt', '09-find.txt', '10-stats.txt',
     '11-show.txt', '12-ls-ghosts.txt', '13-find-redacted.txt',
-    '14-ask.txt', '15-graft.txt',
+    '14-ask.txt', '15-graft.txt', '16-before-after.txt', '17-ls-cards.txt',
 ]
 # Names, paths and client work from the machine the numbers were measured on.
 # None of them may ever reach a published screen or the readme.

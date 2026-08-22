@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import process from 'node:process';
-import { consent, onPath, paths } from '@potsherd/core';
+import { consent, format as fmt, onPath, paths, Theme } from '@potsherd/core';
 import { confirm, print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 
 export interface GuardOptions extends GlobalOptions {
@@ -128,16 +128,50 @@ function status(
     return runnable === false ? 1 : 0;
   }
 
+  // The resolved command is an absolute path to this checkout's `potsherd.js`,
+  // so these lines are as long as somebody's home directory is deep — 104
+  // characters on the machine this was written on, against `05`'s 80. The
+  // command is the half that must survive whole (it is what gets written into
+  // settings.json), so it goes on its own line when it does not fit, and the
+  // *gloss* is what gives way.
+  //
+  // The wrapped command goes ABOVE the `run` line, not below it: `05` also
+  // says the last line of every screen names the next verb, and a continuation
+  // line underneath would have made the last line an absolute path.
+  const cmdLine = (cmd: string): void => {
+    print(`      ${fmt.elideMiddle(cmd, t.width - 6, t.ellip)}`);
+  };
+  const oneLine = (lead: string, gloss: string, cmd: string): boolean => {
+    const whole = `  ${lead}  ${gloss}  ${cmd}`;
+    if (Theme.len(whole) > t.width) return false;
+    print(`  ${lead}  ${t.dim(gloss)}  ${cmd}`);
+    return true;
+  };
+
   if (installed === null) {
     print('  guard not installed.');
-    print(`  run  potsherd guard  to add a SessionStart hook that runs  ${resolution.command}`);
+    const lead = 'run  potsherd guard';
+    if (!oneLine(lead, 'to add a SessionStart hook that runs', resolution.command)) {
+      print(`  ${t.dim('it would install a SessionStart hook that runs:')}`);
+      cmdLine(resolution.command);
+      print(`  ${lead}  ${t.dim('to add it')}`);
+    }
     return 0;
   }
   if (runnable) {
-    print(`  ${t.ok('guard installed')}  SessionStart runs: ${installed}`);
+    if (!oneLine(t.ok('guard installed'), 'SessionStart runs:', installed)) {
+      print(`  ${t.ok('guard installed')}  ${t.dim('SessionStart runs:')}`);
+      cmdLine(installed);
+    }
+    // Once the guard is in, the next thing worth doing is looking at what it
+    // has already saved.
+    print(`  ${t.dim('run')}  potsherd ls  ${t.dim('to read what has been archived so far')}`);
     return 0;
   }
-  print(`  ${t.warn('guard installed but broken')}  SessionStart runs: ${installed}`);
+  if (!oneLine(t.warn('guard installed but broken'), 'SessionStart runs:', installed)) {
+    print(`  ${t.warn('guard installed but broken')}  ${t.dim('SessionStart runs:')}`);
+    cmdLine(installed);
+  }
   print('  that command is not runnable from here, so no copy is being taken.');
   print('  run  potsherd guard --remove  then  potsherd guard  to repair it.');
   return 1;

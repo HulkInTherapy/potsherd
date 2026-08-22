@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -957,6 +958,26 @@ export interface Availability {
   apiKey: boolean;
   /** The process looks like it is running under codex. */
   codexHarness: boolean;
+  /**
+   * Whether the npm package each backend needs can be resolved from here.
+   *
+   * A `claude` binary on PATH is a *signal* that this user has Claude Code set
+   * up; it is not what gets run. What gets run is
+   * `@anthropic-ai/claude-agent-sdk`, and that is an **optional peer** — a
+   * plain `npm i -g potsherd` does not install it, because it and the API SDK
+   * and the embedding runtime together are 677 MB of the 764 MB that install
+   * used to be, against 17 MB without them.
+   *
+   * Until phase 7 nothing checked. On a machine with `claude` on PATH and no
+   * SDK installed, `detectBackend` happily chose `agent-sdk`, every reader
+   * rejected at call time, and `ask` printed **"the readers found nothing that
+   * answers the question"** — a false statement about the user's archive,
+   * printed by the verb whose entire purpose is not making those. `card` and
+   * `graft` had the same hole.
+   */
+  agentSdk: boolean;
+  /** `@anthropic-ai/sdk`, for the API-key path. */
+  apiSdk: boolean;
 }
 
 export interface DetectOptions {
@@ -966,6 +987,8 @@ export interface DetectOptions {
   env?: NodeJS.ProcessEnv;
   /** Test seam: replaces the PATH lookup. */
   which?: (name: string) => string | null;
+  /** Test seam: replaces the module-resolution check. */
+  resolvable?: (specifier: string) => boolean;
 }
 
 export interface BackendChoice {
@@ -989,13 +1012,67 @@ export interface BackendChoice {
  */
 export class NoBackendError extends Error {
   readonly name = 'NoBackendError';
-  readonly fix = 'https://claude.com/product/claude-code  — or  export ANTHROPIC_API_KEY=…';
-  constructor(readonly availability: Availability) {
-    super(
+  readonly fix: string;
+  readonly availability: Availability;
+
+  constructor(availability: Availability) {
+    // Two different situations, and telling them apart is the whole value of
+    // this message. "You have no way to reach a model" and "you have Claude
+    // Code but not the npm package potsherd talks to it through" want
+    // completely different next commands, and the second is exactly what a
+    // plain `npm i -g potsherd` produces, on purpose — the two model SDKs and
+    // the embedding runtime are 677 MB of an install that is 17 MB without
+    // them.
+    //
+    // Written with a static helper and one unconditional `super()` rather than
+    // a `super()` in each branch: with a parameter property, TypeScript emits
+    // `this.availability = …` at the top of the constructor, which is before a
+    // branched `super()` — and the whole class then throws "Must call super
+    // constructor in derived class before accessing 'this'". Four tests caught
+    // it; the message a user would have seen was that sentence.
+    super(NoBackendError.message(availability));
+    this.availability = availability;
+    this.fix = NoBackendError.fixFor(availability);
+  }
+
+  /** True when the *signal* is there and the module that does the talking is not. */
+  private static halfInstalled(a: Availability): string | null {
+    if (a.claude !== null && !a.agentSdk) return '@anthropic-ai/claude-agent-sdk';
+    if (a.apiKey && !a.apiSdk) return '@anthropic-ai/sdk';
+    return null;
+  }
+
+  private static message(a: Availability): string {
+    const missing = NoBackendError.halfInstalled(a);
+    if (missing) {
+      return (
+        `this potsherd cannot reach a model: ${missing} is not installed.\n` +
+        '        It is an optional dependency: it and the embedding runtime are 677 MB of an\n' +
+        '        install that is 17 MB without them.'
+      );
+    }
+    return (
       'no way to reach a model: no `claude` binary on PATH, no `codex`, and ANTHROPIC_API_KEY is not set.\n' +
-        '        potsherd cards run on your Claude Code subscription (install Claude Code), ' +
-        'or on an Anthropic API key as a fallback.',
+      '        potsherd cards run on your Claude Code subscription (install Claude Code), ' +
+      'or on an Anthropic API key as a fallback.'
     );
+  }
+
+  private static fixFor(a: Availability): string {
+    const missing = NoBackendError.halfInstalled(a);
+    return missing
+      ? `npm install -g ${missing}`
+      : 'https://claude.com/product/claude-code  — or  export ANTHROPIC_API_KEY=…';
+  }
+}
+
+/** Can this specifier be resolved from here? Never throws. */
+function resolvable(specifier: string): boolean {
+  try {
+    createRequire(import.meta.url).resolve(specifier);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -1005,6 +1082,7 @@ export function availability(o: DetectOptions = {}): Availability {
   // hook running with a trimmed environment — sees what it configured.
   const which = o.which ?? ((n: string) => onPath(n, env));
   const key = env['ANTHROPIC_API_KEY'];
+  const canResolve = o.resolvable ?? resolvable;
   return {
     claude: which('claude'),
     codex: which('codex'),
@@ -1013,6 +1091,8 @@ export function availability(o: DetectOptions = {}): Availability {
       env['POTSHERD_HARNESS'] === 'codex' ||
       Boolean(env['CODEX_HOME']) ||
       Boolean(env['CODEX_SANDBOX']),
+    agentSdk: canResolve('@anthropic-ai/claude-agent-sdk'),
+    apiSdk: canResolve('@anthropic-ai/sdk'),
   };
 }
 
@@ -1057,13 +1137,16 @@ export function detectBackend(o: DetectOptions = {}): BackendChoice {
     throw new NoBackendError(avail);
   }
 
-  if (avail.claude) {
+  // Each arm needs BOTH halves: the signal that this user has that thing set
+  // up, and the module that actually does the talking. `codex` is the
+  // exception — it is spawned as a subprocess and needs no npm package.
+  if (avail.claude && avail.agentSdk) {
     return choose('agent-sdk', `claude on PATH (${avail.claude})`, avail.claude);
   }
   if (avail.codexHarness && avail.codex) {
     return choose('codex', `codex is the harness and there is no claude`, avail.codex);
   }
-  if (avail.apiKey) {
+  if (avail.apiKey && avail.apiSdk) {
     return choose('api', 'no claude binary; ANTHROPIC_API_KEY is set');
   }
   if (avail.codex) {
