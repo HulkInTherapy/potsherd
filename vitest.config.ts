@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@potsherd/core': path.resolve(__dirname, 'packages/core/src/index.ts'),
+      '@potsherd/bridges': path.resolve(__dirname, 'packages/bridges/src/index.ts'),
     },
   },
   test: {

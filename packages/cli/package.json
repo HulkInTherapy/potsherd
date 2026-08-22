@@ -45,6 +45,7 @@
     "commander": "^12.1.0"
   },
   "devDependencies": {
+    "@potsherd/bridges": "workspace:*",
     "@potsherd/core": "workspace:*",
     "@types/better-sqlite3": "^7.6.13"
   },
