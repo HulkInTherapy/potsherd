@@ -9,6 +9,7 @@ import * as cursorAdapterModule from './adapters/cursor.js';
 import * as piAdapterModule from './adapters/pi.js';
 import * as geminiAdapterModule from './adapters/gemini.js';
 import * as opencodeAdapterModule from './adapters/opencode.js';
+import * as copilotAdapterModule from './adapters/copilot.js';
 import type {
   Exchange,
   Harness,
@@ -93,7 +94,7 @@ export interface AdapterOptions {
 }
 
 /**
- * The five adapters, bound to whatever directory overrides this run was given.
+ * All seven adapters, bound to whatever directory overrides this run was given.
  * One list, in `doctor`'s order — `index`, `doctor` and (phase 2) `stats` all
  * walk it, so a harness can never be supported by one verb and invisible to
  * another.
@@ -163,6 +164,21 @@ export function adapterSpecs(o: AdapterOptions = {}): AdapterSpec[] {
       sourceDir: opencodeAdapterModule.sourceDir(o.opencodeDir),
       discover: () => opencodeAdapterModule.discover(o.opencodeDir),
       parse: (source) => opencodeAdapterModule.parse(source),
+      version: () => 'unknown',
+      novel: () => true,
+    },
+    {
+      // Phase 6, T6.1. `unverified — documentation only`. `~/.copilot` exists
+      // on the machine this was written on and the CLI has run there, and it
+      // has written no `session-state/` at all — so there was nothing to
+      // measure. Reads `~/.copilot` only: the VS Code chats live in
+      // `workspaceStorage`, which the cursor ruling (`04-DECISIONS.md`,
+      // 21 aug) keeps out of bounds. See the adapter header.
+      harness: 'copilot',
+      displayName: copilotAdapterModule.DISPLAY_NAME,
+      sourceDir: copilotAdapterModule.sourceDir(o.copilotDir),
+      discover: () => copilotAdapterModule.discover(o.copilotDir),
+      parse: (source) => copilotAdapterModule.parse(source),
       version: () => 'unknown',
       novel: () => true,
     },

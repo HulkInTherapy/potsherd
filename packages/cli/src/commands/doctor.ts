@@ -17,6 +17,7 @@ import {
   pi as piAdapter,
   gemini as geminiAdapter,
   opencode as opencodeAdapter,
+  copilot as copilotAdapter,
   format as fmt,
   Card,
   consent,
@@ -367,6 +368,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   card.text(t.dim(fmt.clip(cursorAdapter.CURSOR_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
   card.text(t.dim(fmt.clip(geminiAdapter.GEMINI_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
   card.text(t.dim(fmt.clip(opencodeAdapter.OPENCODE_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+  card.text(t.dim(fmt.clip(copilotAdapter.COPILOT_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
 
   const fatal = report.warnings.filter((w) => w.startsWith('unreadable transcript'));
   card.blank();
@@ -470,6 +472,14 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     phase: 6,
     path: opencodeAdapter.sourceDir(),
     line: opencodeAdapter.doctorLine(),
+  });
+
+  out.push({
+    harness: 'copilot',
+    supported: true,
+    phase: 6,
+    path: copilotAdapter.sourceDir(),
+    line: copilotAdapter.doctorLine(),
   });
 
   return out;
