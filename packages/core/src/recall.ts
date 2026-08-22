@@ -271,9 +271,20 @@ export const PER_SESSION = 3;
  *
  * At 0.12 the rule reads the way the docstring above always claimed it did:
  * the strongest single piece of evidence decides, and repetition breaks ties
- * *within* that — it can no longer overturn a strictly better match. The
- * "Build Instagram chat-only client" case that motivated the cap is unaffected,
- * because that one is fixed by the `titles` weight, not by this.
+ * *within* that — it can no longer overturn a strictly better match.
+ *
+ * The other case that motivated the cap — a long session repeating a query
+ * word outranking the short session actually **named** after it — is
+ * unaffected, because that one is fixed by the `titles` weight and not by
+ * this. Both were measured on the reference corpus, whose sessions run to a
+ * hundred and fifty exchanges. **Neither reproduces on the committed eval
+ * corpus**, whose sessions are one to three exchanges each: at that size no
+ * session has enough hits for corroboration to move an order, and re-scoring
+ * every eval query at 0.12 and at 0.5 gives the identical ranking. So this
+ * constant's evidence is a run over a corpus that is not in this repository,
+ * cited by shape rather than by content (`scripts/check-privacy.py`), and the
+ * thing that holds it in place here is `tests/recall.test.ts`, not the eval
+ * set.
  */
 export const CORROBORATION = 0.12;
 
@@ -332,9 +343,17 @@ interface TitleList {
 export const WEIGHTS: Record<ListName, number> = {
   // A title is a statement about the *whole* session — Claude Code's own
   // `ai-title`, or codex's thread name. One paragraph out of four hundred
-  // mentioning "instagram" and a session called "Build Instagram chat-only
-  // client" are not the same evidence, and rank alone cannot say so. Scaled
-  // by coverage at fusion time; see {@link TitleList}.
+  // mentioning a word, and a session *named* after that word, are not the same
+  // evidence, and rank alone cannot say so.
+  //
+  // Measurable on the committed eval corpus: `potsherd find "timezone drift"`
+  // returns session `9a4e7c26`, "Timezone drift in the daily rollup", and
+  // nothing else — `exchanges_fts` contributes zero, because that session's
+  // body does not contain either word. The whole 0.0246 it scores is
+  // `titles r1 title match x1.50`. Drop this weight to 1.0 and the answer is
+  // still first; drop the list and there is no answer at all.
+  //
+  // Scaled by coverage at fusion time; see {@link TitleList}.
   titles: 1.5,
   // A card is a statement about the whole session, like a title, but unlike a
   // title it has been checked against the transcript (`cards/verify.ts`) and
@@ -682,8 +701,12 @@ function titleMatches(
   // matching one word out of four is not an answer to it.
   const bestMatched = Math.max(...scored.map((x) => x.matched));
   const strongest = scored.filter((x) => x.matched === bestMatched);
-  // Among equals, the title that says least else: "Build Instagram chat-only
-  // client" over a sentence that mentions Instagram in passing.
+  // Among equals, the title that says least else. Two titles that match the
+  // same query words are not equally good answers if one of them is six words
+  // long and the other is a sentence that happens to contain them: the short
+  // one is *about* the thing, the long one mentions it on the way past. Length
+  // is the only signal available at this point that separates them, and it is
+  // a tie-break, not a ranking — everything here already matched equally well.
   strongest.sort((a, b) => a.len - b.len);
   return {
     coverage: bestMatched / tokens.length,
@@ -1738,9 +1761,12 @@ function firstPromptTitle(text: string | null | undefined): string | null {
  * Neither extreme survives contact with a real corpus. Taking the **max**
  * ignores corroboration — a session that answers the question in five places
  * ranks level with one that mentions it once. Taking the **sum** rewards
- * volume — on the reference corpus a 155-exchange session that says
- * "instagram" three times outranks the session actually titled "Build
- * Instagram chat-only client", which is the wrong answer by any human reading.
+ * volume: measured on the reference corpus, a 155-exchange session that
+ * mentions a query word three times in passing outranked the two-exchange
+ * session *named* after that word, which is the wrong answer by any human
+ * reading. The corpus is not in this repository and the session is not
+ * nameable here, so what is recorded is the shape and the two numbers; the
+ * behaviour itself is pinned by `tests/recall.test.ts`.
  *
  * Halving the tail, and capping it at half the best hit, is the smallest thing
  * that says both: the strongest single piece of evidence decides, and

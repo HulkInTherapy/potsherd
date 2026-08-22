@@ -61,6 +61,43 @@ jobs:
       - name: test
         run: pnpm test
 
+      # The second SQLite driver, exercised by the whole suite rather than by a
+      # test written about it.
+      #
+      # `better-sqlite3` is a native addon, and a Claude Code plugin install is
+      # a git clone: no `pnpm install`, no build, no `node_modules`. So potsherd
+      # falls back to `node:sqlite`, which is what makes a marketplace install
+      # work at all (open item A). A fallback nobody exercises is the
+      # phantom-flag failure this project has recorded six times — a path that
+      # looks supported, succeeds, and does nothing — and the only evidence
+      # worth having is the full suite passing on it.
+      #
+      # Node 22 has `node:sqlite` behind `--experimental-sqlite`, so it is
+      # unreachable there and the driver reports itself absent; the step runs on
+      # 24 only. That is also the honest support statement: on Node 22 without
+      # the addon, potsherd rescues and audits and cannot index.
+      - name: test again on Node's own sqlite
+        if: matrix.node == '24'
+        env:
+          POTSHERD_SQLITE: node
+        run: pnpm test
+
+      # `plugins/claude-code/dist/*.js` are generated files that are committed,
+      # because a plugin install is a git clone and has no way to build them.
+      # A stale one is a plugin that ships last release's behaviour under this
+      # release's version number, so the build output has to match byte for
+      # byte on every push — not only at a tag.
+      - name: the vendored plugin bundles are the ones this build produces
+        shell: bash
+        run: |
+          node scripts/vendor-plugin.mjs
+          if ! git diff --exit-code -- plugins/; then
+            echo
+            echo "The bundles committed under plugins/*/dist/ are not what this"
+            echo "source builds. Regenerate with:  pnpm build && pnpm vendor"
+            exit 1
+          fi
+
       # The fixture is committed; if regenerating it produces a different tree,
       # the generator and the fixture have drifted apart.
       - name: fixtures are reproducible

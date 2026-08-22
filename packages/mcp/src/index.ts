@@ -1,4 +1,7 @@
+import fs from 'node:fs';
 import process from 'node:process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { VERSION } from '@potsherd/core';
@@ -147,11 +150,45 @@ function flagValue(argv: readonly string[], flag: string): string | undefined {
   return inline ? inline.slice(flag.length + 1) : undefined;
 }
 
+/**
+ * Is this module the program, rather than something a test imported?
+ *
+ * It used to be a list of **filenames** — `/index.js`, `/potsherd-mcp.js`,
+ * `/index.ts` — and phase 7 broke it by copying the bundle into the plugin as
+ * `dist/mcp.js`. The name did not match, `main()` never ran, and the process
+ * started, did nothing, and exited **0**: no output, no error, no clue. An MCP
+ * server that fails to start is invisible by design, and this one had found a
+ * way to fail to start silently while looking like a clean exit.
+ *
+ * Compared by path now, which is what the question actually asks — through
+ * `realpath`, which is not a detail. `import.meta.url` is resolved through
+ * symlinks by the ESM loader and `process.argv[1]` is not, so on macOS, where
+ * `/var` is a symlink to `/private/var`, the same file compares as
+ * `/var/folders/…/mcp.js` against `/private/var/folders/…/mcp.js` and the
+ * check says no. Every temp directory on that platform is under `/var`, which
+ * is to say: every test of a marketplace install, and every plugin installed
+ * somewhere a symlink points at.
+ *
+ * The `bin/` shim `import()`s this module, so `argv[1]` is the shim rather
+ * than this file — hence the second arm, matched on the shim's own name and
+ * not on this module's.
+ */
+function samePath(a: string, b: string): boolean {
+  const real = (p: string): string => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
+}
+
+const entry = process.argv[1] ? path.resolve(process.argv[1]) : '';
 const invokedDirectly =
-  process.argv[1] !== undefined &&
-  (process.argv[1].endsWith('/index.js') ||
-    process.argv[1].endsWith('/potsherd-mcp.js') ||
-    process.argv[1].endsWith('/index.ts'));
+  entry !== '' &&
+  (samePath(entry, fileURLToPath(import.meta.url)) ||
+    path.basename(entry) === 'potsherd-mcp.js');
 
 if (invokedDirectly) {
   main().then(

@@ -6,21 +6,21 @@ import path from 'node:path';
 const here = path.dirname(fileURLToPath(import.meta.url));
 mkdirSync(path.join(here, 'dist'), { recursive: true });
 
-// Same shape as `packages/cli/build.mjs`, and for the same reason: `@potsherd/
-// core` is bundled in so that the plugin ships one file it can point a client
-// at, and the native and heavy dependencies stay external because they cannot
-// be bundled and are declared in package.json.
+// `@potsherd/core` is bundled in so that the plugin ships one file it can
+// point a client at.
+//
+// Same rule as `packages/cli/build.mjs`: external only if it cannot be
+// bundled. `@modelcontextprotocol/sdk`, `zod` and `commander` are all pure
+// JavaScript and all needed by every start of this server, and leaving them
+// out is what made a marketplace install produce a server that died with a
+// module-not-found before it ever spoke MCP — taking all six tools with it,
+// silently, because a server that fails to start is invisible by design.
 const external = [
   'better-sqlite3',
   'sqlite-vec',
   '@huggingface/transformers',
   '@anthropic-ai/claude-agent-sdk',
   '@anthropic-ai/sdk',
-  '@modelcontextprotocol/sdk',
-  'zod',
-  // `commander` is reached only through `packages/cli/src/output.js`'s module
-  // graph; nothing in this server parses argv with it.
-  'commander',
 ];
 
 await build({

@@ -7,11 +7,30 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 mkdirSync(path.join(here, 'dist'), { recursive: true });
 
 // @potsherd/core is bundled in rather than published separately: one npm
-// package means `npx potsherd audit` resolves one thing. Native and heavy
-// optional dependencies stay external and are declared in package.json.
+// package means `npx potsherd audit` resolves one thing.
+//
+// What stays external, and why it is a shorter list than it was.
+//
+// The rule is now **"external only if it cannot be bundled"**, not "external if
+// it is a dependency". `commander` is pure JavaScript and is needed by every
+// single invocation, so leaving it out bought nothing and cost the one thing
+// that mattered: a bundle that cannot run beside an empty `node_modules`. A
+// marketplace install of the plugin is exactly that situation — `dist/` is
+// gitignored and nothing installs dependencies for a git clone — and the whole
+// of open item A comes from it.
+//
+// What remains is genuinely unbundlable:
+//   better-sqlite3, sqlite-vec        native addons
+//   @huggingface/transformers         native (onnxruntime), and 300 MB of it
+//   @anthropic-ai/claude-agent-sdk    resolves its own vendored cli.js by path
+//   @anthropic-ai/sdk                 optional; only the API-key path uses it
+//   @modelcontextprotocol/sdk, zod    not reachable from the CLI at all
+//
+// Every one of the first four is loaded lazily and degrades to a sentence, so a
+// bundle with none of them present still runs `audit`, `rescue`, `guard` and
+// `doctor` — the rescue path, which is what the product is named for.
 const external = [
   'better-sqlite3',
-  'commander',
   'sqlite-vec',
   '@huggingface/transformers',
   '@anthropic-ai/claude-agent-sdk',

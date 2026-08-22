@@ -22,6 +22,18 @@ if [ -f "$ROOT/dist/mcp.js" ]; then
   exec node "$ROOT/dist/mcp.js" "$@"
 fi
 
+# 1b. the Claude Code plugin's vendored copy, next door.
+#
+# Only `plugins/claude-code/dist/` carries the built bundles: they are 2.4 MB
+# of identical bytes, and this plugin is INFERRED FROM DOCUMENTATION and has
+# never been loaded by codex (codex is not installed on the machine it was
+# written on). Doubling what every clone downloads for a surface nobody has
+# confirmed works is not a trade worth making. The two plugins ship in one
+# repository and land in one clone, so next door is a real place.
+if [ -f "$ROOT/../claude-code/dist/mcp.js" ]; then
+  exec node "$ROOT/../claude-code/dist/mcp.js" "$@"
+fi
+
 # 2. the surrounding checkout
 if [ -f "$ROOT/../../packages/mcp/dist/index.js" ]; then
   exec node "$ROOT/../../packages/mcp/dist/index.js" "$@"

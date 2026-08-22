@@ -48,7 +48,7 @@ interface Machine {
  * which has no `index` verb — and optionally the current checkout beside the
  * plugin, which is how a developer's machine actually looks.
  */
-function machine(opts: { withCheckout: boolean }): Machine {
+function machine(opts: { withCheckout: boolean; vendored?: boolean }): Machine {
   const sb = tempDir('potsherd-hook-');
   sandboxes.push(sb);
 
@@ -65,6 +65,12 @@ function machine(opts: { withCheckout: boolean }): Machine {
   fs.mkdirSync(path.join(tree, 'plugins'), { recursive: true });
   for (const p of PLUGINS) {
     fs.cpSync(path.join(repo, 'plugins', p), path.join(tree, 'plugins', p), { recursive: true });
+    // `plugins/claude-code/dist/` is COMMITTED since phase 7 — that is what
+    // makes a marketplace install work at all. Tests about what happens when
+    // there is nothing to run therefore have to take it away, or they are
+    // asserting against a machine that no longer exists. (`09 §7.2`: a test's
+    // premise must be something the test establishes.)
+    if (opts.vendored === false) rmrf(path.join(tree, 'plugins', p, 'dist'));
   }
   if (opts.withCheckout) {
     // The bundle is not self-contained: it resolves better-sqlite3 and
@@ -188,7 +194,7 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
       // resort IS the stale build and `index` genuinely cannot run. Phase 0's
       // ruling: a hook that looks installed and does nothing is worse than no
       // hook. It may fail. It may not fail quietly.
-      const m = machine({ withCheckout: false });
+      const m = machine({ withCheckout: false, vendored: false });
       fs.cpSync(copyFixtureClaude(), path.join(m.home, '.claude'), { recursive: true });
 
       runHook(m, plugin, 'SessionEnd', JSON.stringify({ session_id: IDS.alive }));
@@ -259,9 +265,13 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
     expect(fs.existsSync(shim)).toBe(true);
 
     // With nothing to launch it must exit non-zero and name what is missing.
+    // `dist/` has to be taken away for that to be the situation: it is
+    // committed since phase 7, which is precisely what stopped this being the
+    // situation a real user is in.
     const sb = tempDir('potsherd-mcpshim-');
     sandboxes.push(sb);
     fs.cpSync(pluginDir, path.join(sb, 'plugin'), { recursive: true });
+    rmrf(path.join(sb, 'plugin', 'dist'));
     const r = spawnSync('sh', [path.join(sb, 'plugin', 'bin', 'potsherd-mcp')], {
       encoding: 'utf8',
       env: { PATH: '/usr/bin:/bin' },
@@ -270,6 +280,117 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
     expect(r.stderr).toMatch(/NO potsherd tools/);
     expect(r.stderr).toMatch(/pnpm install && pnpm build/);
     expect(r.stderr).not.toMatch(/npm i -g potsherd\b/);
+  });
+
+  /**
+   * The marketplace install, which is what open item A was about.
+   *
+   * A plugin install is a git clone: no `pnpm install`, no build, no
+   * `node_modules`. For seven phases that produced a plugin with no CLI and no
+   * MCP server — all six tools absent, `session-archaeologist` holding `Read`,
+   * and the `bin/potsherd` shim falling through to whatever `potsherd` was on
+   * PATH, which on the reference machine was a stale 0.1.0.
+   *
+   * These two tests are the ones that would have caught it. Both copy the
+   * plugin **exactly as a clone gets it** — no checkout beside it, no
+   * `node_modules` reachable, and `NODE_PATH` stripped, because vitest sets it
+   * to three directories inside this repository's own `node_modules` and a
+   * child would resolve `better-sqlite3` through it and prove nothing.
+   */
+  describe('a plugin installed the way the marketplace installs it', () => {
+    /**
+     * The plugins as a clone gets them, in a temp dir with nothing reachable
+     * from it.
+     *
+     * Both plugin directories, keeping them siblings, because that is the
+     * shape a marketplace source has: it names `./plugins/<name>` inside one
+     * repository. Only `claude-code` carries the vendored bundles — 2.4 MB of
+     * identical bytes is not worth doubling for a plugin that is inferred from
+     * documentation and has never been loaded by codex — so `plugins/codex`'s
+     * shims look next door, and this is the test that says next door is a real
+     * place.
+     */
+    const cloned = (): string => {
+      const sb = tempDir('potsherd-market-');
+      sandboxes.push(sb);
+      for (const p of PLUGINS) {
+        fs.cpSync(path.join(repo, 'plugins', p), path.join(sb, 'plugins', p), { recursive: true });
+      }
+      return path.join(sb, 'plugins', plugin);
+    };
+
+    const bare = (): NodeJS.ProcessEnv => {
+      const env: Record<string, string | undefined> = { ...process.env };
+      delete env['NODE_PATH'];
+      delete env['POTSHERD_SQLITE'];
+      env['PATH'] = `${path.dirname(process.execPath)}:/usr/bin:/bin`;
+      return env as NodeJS.ProcessEnv;
+    };
+
+    it('carries a CLI it can actually run', () => {
+      const dir = cloned();
+      const r = spawnSync('sh', [path.join(dir, 'bin', 'potsherd'), '--version'], {
+        encoding: 'utf8',
+        env: bare(),
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+
+      // And it does the thing the product is named for, with no database
+      // driver installed anywhere on the machine.
+      const home = fs.mkdtempSync(path.join(dir, '..', 'home-'));
+      const audit = spawnSync(
+        'sh',
+        [
+          path.join(dir, 'bin', 'potsherd'),
+          'audit',
+          '--json',
+          '--claude-dir',
+          copyFixtureClaude(),
+          '--potsherd-dir',
+          path.join(home, '.potsherd'),
+        ],
+        { encoding: 'utf8', env: bare() },
+      );
+      expect(audit.status, audit.stderr).toBe(0);
+      expect((JSON.parse(audit.stdout) as { deleted: number }).deleted).toBe(3);
+    });
+
+    it('carries an MCP server that starts and lists its six tools', () => {
+      const dir = cloned();
+      // One `tools/list` over stdio. A server that fails to start is invisible
+      // by design, so the only honest check is to speak the protocol to it.
+      const req = (id: number, method: string, params: unknown): string =>
+        JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n';
+      const input =
+        req(1, 'initialize', {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'potsherd-test', version: '0' },
+        }) +
+        JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n' +
+        req(2, 'tools/list', {});
+      const r = spawnSync('sh', [path.join(dir, 'bin', 'potsherd-mcp')], {
+        input,
+        encoding: 'utf8',
+        timeout: 30_000,
+        env: bare(),
+      });
+      const tools = r.stdout
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as { id?: number; result?: { tools?: { name: string }[] } })
+        .find((m) => m.id === 2)?.result?.tools;
+      expect(tools, `no tools/list reply. stderr:\n${r.stderr}`).toBeDefined();
+      expect((tools ?? []).map((t) => t.name).sort()).toEqual([
+        'potsherd_ask',
+        'potsherd_find',
+        'potsherd_graft',
+        'potsherd_ls',
+        'potsherd_read',
+        'potsherd_tag',
+      ]);
+    });
   });
 
   it('quotes the model download at the size the CLI prints', () => {

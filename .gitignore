@@ -1,5 +1,10 @@
 node_modules/
 dist/
+# ...except the bundles a plugin install has no way to build for itself.
+# See scripts/vendor-plugin.mjs for why a generated file is committed here.
+!plugins/*/dist/
+!plugins/*/dist/*.js
+!plugins/*/dist/README.md
 *.tsbuildinfo
 .DS_Store
 *.tgz

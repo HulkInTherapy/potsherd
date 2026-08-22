@@ -475,7 +475,18 @@ describe('calibration from the machine own runs', () => {
 
   it('has a card_runs table from migration 6', () => {
     const db = store.open({ file: ':memory:' });
-    expect(store.schemaVersion(db)).toBeGreaterThanOrEqual(6);
+    // Migration 6 is recorded as applied, not `schemaVersion() >= 6`.
+    // `schemaVersion()` deliberately returns the highest *contiguous* version,
+    // and migration 4 is the `sqlite-vec` one, which is allowed to decline on a
+    // machine without the extension — so on such a machine the contiguous
+    // answer is 3 while `card_runs` is perfectly present. That made this
+    // assertion a statement about the environment rather than about migration
+    // 6 (`09 §7.2`), and it was the only thing in 1,393 tests that failed when
+    // the suite was first run against `node:sqlite`.
+    const applied = (
+      db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]
+    ).map((r) => r.version);
+    expect(applied).toContain(6);
     expect(cardRuns(db)).toEqual([]);
     db.close();
   });

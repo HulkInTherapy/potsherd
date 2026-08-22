@@ -339,14 +339,28 @@ DEBT: list[tuple[str, str, int, str]] = [
     # and substitutes the name, and each docstring now says that is what it is,
     # so no comment claims a measurement against a directory nobody can see.
 
-    # ---- T5.9 added the `corpus-title` rule and it found these four. They are
-    # not copy: each one records a ranking decision that was MEASURED against
-    # that session, and renaming the example would leave a comment that cites
-    # evidence nobody ever gathered. The honest fix is to re-derive the same
-    # four rules against the demo corpus and rewrite the comments from that run
-    # -- a measurement, not an edit, and not this task's.
-    ('packages/core/src/recall.ts', 'corpus-title', 4,
-     'ranking rationale measured against that session; re-derive, do not rename'),
+    # ---- T5.9's four `corpus-title` hits in `recall.ts` were cleared in phase
+    # 7, the way the note here asked: by re-deriving rather than renaming.
+    #
+    # Two of them (the `titles` weight, and the tie-break among equally
+    # matching titles) are now measured on the **committed eval corpus** --
+    # `potsherd find "timezone drift"` returns one session, on the strength of
+    # its title alone, because that session's body contains neither word.
+    # Anyone can re-run it.
+    #
+    # The other two (the corroboration cap, and `sessionScore`'s shape) cannot
+    # be: they needed a 155-exchange session, and every session in the eval
+    # corpus is one to three exchanges, so re-scoring every eval query at 0.12
+    # and at 0.5 gives the identical ranking. Those two keep the finding and
+    # drop the identity -- the shape and the numbers, with the comment saying
+    # out loud that the corpus is not in this repository and that the behaviour
+    # is pinned by `tests/recall.test.ts` rather than by the eval set. That is
+    # this file's own rule: replace the content, keep the structure.
+    #
+    # The vendored plugin bundles are why it had to be done now rather than
+    # later: `plugins/claude-code/dist/*.js` are esbuild output with the
+    # comments intact, so a comment in `recall.ts` is a committed artefact
+    # twice over. The guard caught it in the same commit that added them.
 
     # ---- Asserts the literal text of `find --help`, which lives in
     # packages/cli/src/index.ts above. Scrubbing one side of an equality without

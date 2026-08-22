@@ -285,7 +285,17 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       claudeDir: report.claudeDir,
       claudeDirExists: report.claudeDirExists,
       potsherdDir: root,
-      db: { path: dbFile, exists: dbExists, schemaVersion: schema, latest: store.latestSchemaVersion(), counts },
+      db: {
+        path: dbFile,
+        exists: dbExists,
+        schemaVersion: schema,
+        latest: store.latestSchemaVersion(),
+        // Which SQLite is answering. Two can, and which one changes what the
+        // product can do — a machine-readable consumer needs it as much as the
+        // human view does.
+        driver: store.sqliteDriverName(),
+        counts,
+      },
       corpus: {
         sessions: report.onDiskFiles,
         sidechains: report.sidechainFiles,
@@ -325,7 +335,14 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   card.rows([
     { label: 'claude dir', value: '', note: paths.tildify(report.claudeDir) + (report.claudeDirExists ? '' : '  (not found)') },
     { label: 'potsherd dir', value: '', note: paths.tildify(root) },
-    { label: 'database', value: '', note: dbExists ? `schema v${schema} of v${store.latestSchemaVersion()}` : 'not created yet — run potsherd rescue' },
+    {
+      label: 'database',
+      value: '',
+      note: dbExists
+        ? `schema v${schema} of v${store.latestSchemaVersion()}${schemaNote(schema, vec)}`
+        : 'not created yet — run potsherd rescue',
+    },
+    { label: 'sqlite', value: '', note: sqliteNote() },
   ]);
   card.blank();
   card.rows([
@@ -685,4 +702,42 @@ export function networkDisclosure(): { backend: string | null; to: string; detai
       ],
     };
   }
+}
+
+
+/**
+ * Which SQLite is answering.
+ *
+ * Two can, and which one is running changes what the product can do, so it is
+ * on the screen rather than inferable. `better-sqlite3` is the native addon and
+ * the only one that has ever had vector search; `node:sqlite` is Node's own,
+ * needs no install at all, and is what a plugin installed from the marketplace
+ * runs on — the whole reason a marketplace install works now.
+ */
+function sqliteNote(): string {
+  const kind = store.sqliteDriverName();
+  if (kind === 'better-sqlite3') return 'better-sqlite3 (native addon)';
+  if (kind === 'node:sqlite') return "node:sqlite — Node's own, no install needed";
+  return 'none — nothing that reads the index can run';
+}
+
+/**
+ * Why the schema number can legitimately be lower than the latest.
+ *
+ * `schemaVersion()` reports the highest *contiguous* migration, and migrations
+ * 4 and 8 are the `sqlite-vec` ones, which are allowed to decline on a machine
+ * without the extension. So `schema v3 of v8` on a working install is not a
+ * failed migration; it is vector search being absent, and saying which is the
+ * difference between a number that alarms and a number that informs.
+ */
+function schemaNote(schema: number, vec: VecStatus): string {
+  if (schema >= store.latestSchemaVersion()) return '';
+  // Migrations 4 and 8 create the `vec0` tables and are allowed to decline on a
+  // machine without `sqlite-vec` — `schemaVersion()` reports the highest
+  // *contiguous* version, so one declining migration holds the number down
+  // even though everything after it applied. `schema v3 of v8` on a perfectly
+  // working install therefore alarms for no reason unless the line says which
+  // it is. A declining migration is not recorded, so the next writable open
+  // retries it, and `index` is the verb that does one.
+  return vec.available ? '  · run potsherd index' : '  · the rest needs sqlite-vec';
 }

@@ -69,7 +69,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { openSqliteReadOnly, type Db } from '../db.js';
 
 import type {
   Adapter,
@@ -172,7 +172,7 @@ export type StoreDescription =
   | { ok: false; reason: string };
 
 /** Every table name in the database, from `sqlite_master`. */
-function tableNames(db: Database.Database): string[] {
+function tableNames(db: Db): string[] {
   try {
     const rows = db
       .prepare(`select name from sqlite_master where type in ('table','view')`)
@@ -184,7 +184,7 @@ function tableNames(db: Database.Database): string[] {
 }
 
 /** Column names of one table, from `pragma table_info` — never hard-coded. */
-export function columnsOf(db: Database.Database, table: string): string[] {
+export function columnsOf(db: Db, table: string): string[] {
   try {
     const rows = db.pragma(`table_info(${quoteIdent(table)})`) as { name: string }[];
     return rows.map((r) => r.name);
@@ -213,9 +213,9 @@ function pick(present: readonly string[], candidates: readonly string[]): string
  * version with the reason, which is strictly more useful than a stack trace.
  */
 export function describeStore(dbPath: string): StoreDescription {
-  let db: Database.Database;
+  let db: Db;
   try {
-    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    db = openSqliteReadOnly(dbPath);
   } catch (e) {
     return { ok: false, reason: `cannot open store read-only (${errText(e)})` };
   }
@@ -330,9 +330,9 @@ export function discover(override?: string): SessionSource[] {
 
 function discoverIn(schema: StoreSchema): SessionSource[] {
   const out: SessionSource[] = [];
-  let db: Database.Database;
+  let db: Db;
   try {
-    db = new Database(schema.dbPath, { readonly: true, fileMustExist: true });
+    db = openSqliteReadOnly(schema.dbPath);
   } catch {
     return out;
   }
@@ -444,9 +444,9 @@ export async function parse(
   const schema = described.schema;
   if (!sessionId) return empty('no session id supplied');
 
-  let db: Database.Database;
+  let db: Db;
   try {
-    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    db = openSqliteReadOnly(dbPath);
   } catch (e) {
     return empty(`cannot open store read-only (${errText(e)})`);
   }

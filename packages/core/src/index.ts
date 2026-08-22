@@ -1,6 +1,10 @@
 export * as paths from './paths.js';
 export * as format from './format.js';
 export * as db from './db.js';
+// Named as well as namespaced: a caller that needs to know whether this build
+// can open a database at all should not have to reach through the `db`
+// namespace to ask.
+export { NoSqliteError, sqliteAvailable } from './db.js';
 export * as lock from './lock.js';
 export * as consent from './consent.js';
 export { onPath, resolveHookCommand, type BinResolution } from './resolve-bin.js';

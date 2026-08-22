@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import { dbPath, potsherdDir } from './paths.js';
+import { openDatabase, type Db } from './sqlite-driver.js';
 import { createGhostVecTable, createVecTables } from './vec.js';
 
 /**
@@ -23,7 +23,14 @@ export interface OpenOptions {
   readonly?: boolean;
 }
 
-export type Db = Database.Database;
+export type { Db } from './sqlite-driver.js';
+export {
+  NoSqliteError,
+  sqliteAvailable,
+  sqliteDriverName,
+  resetDriverCache,
+  type DriverKind,
+} from './sqlite-driver.js';
 
 interface Migration {
   version: number;
@@ -350,7 +357,7 @@ export function open(opts: OpenOptions = {}): Db {
   if (file !== ':memory:') {
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   }
-  const db = new Database(file, { readonly: opts.readonly ?? false });
+  const db = openDatabase(file, { readonly: opts.readonly ?? false });
   if (!opts.readonly) {
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
@@ -366,6 +373,17 @@ export function open(opts: OpenOptions = {}): Db {
   db.pragma('busy_timeout = 5000');
   if (!opts.readonly) migrate(db);
   return db;
+}
+
+/**
+ * Another tool's sqlite file, read-only — the opencode adapter's opener.
+ *
+ * Here rather than in the adapter so that `better-sqlite3` is reached through
+ * one lazy loader in the whole of core, and a machine without the addon gets
+ * the same sentence from every direction.
+ */
+export function openSqliteReadOnly(file: string): Db {
+  return openDatabase(file, { readonly: true, fileMustExist: true });
 }
 
 export function migrate(db: Db): number {

@@ -11,8 +11,15 @@
 #
 # An MCP server that fails to start is invisible by design, so the least this
 # can do is put a sentence a human can act on into the server log instead of a
-# stack trace. Same three places as `bin/potsherd`, same order, same reasons —
-# see that file's header.
+# stack trace. Same three places as `bin/potsherd`, same order, same reasons --
+# see that file's header, which also explains what phase 7 changed.
+#
+# Since phase 7 place 1 is committed: `dist/mcp.js` is vendored (`scripts/
+# vendor-plugin.mjs`), and the MCP SDK and `zod` are bundled into it rather than
+# left external, so the server starts with an empty `node_modules`. Its six
+# tools all read the index, so on a machine with no `better-sqlite3` each one
+# answers with a sentence naming the fix -- which is a working server reporting
+# a missing dependency, not a client silently missing six tools.
 set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -41,17 +48,15 @@ Looked in three places:
   2. $ROOT/../../packages/mcp/dist/index.js       (the surrounding checkout)
   3. potsherd-mcp on PATH                         (a global install)
 
-All six tools — potsherd_find, potsherd_read, potsherd_ask, potsherd_graft,
-potsherd_ls, potsherd_tag — are therefore absent, and the
+All six tools -- potsherd_find, potsherd_read, potsherd_ask, potsherd_graft,
+potsherd_ls, potsherd_tag -- are therefore absent, and the
 session-archaeologist agent is left with no tools but Read.
 
-potsherd is not published to npm yet, so there is no install command.
-Build it from a checkout:
+Place 1 is committed to this repository, so a normal install has it. If it is
+missing, this plugin directory was copied without it. Reinstall the plugin, or
+build from a checkout:
 
   git clone https://github.com/HulkInTherapy/potsherd
-  cd potsherd && pnpm install && pnpm build
-
-then install this plugin from that checkout, so that step 2 finds the
-bundle beside it.
+  cd potsherd && pnpm install && pnpm build && pnpm vendor
 EOF
 exit 127
