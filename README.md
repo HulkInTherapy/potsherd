@@ -956,6 +956,8 @@ potsherd doctor --privacy · 22 aug 2026
     ~/.potsherd/archive
     ~/.potsherd/potsherd.db
     ~/.potsherd/models
+    ~/.potsherd/config.json
+      your settings: the ignore list, written by potsherd ignore / unignore
     ~/work/demo-project/.potsherd/graft-<id8>.md
       only when you run graft, in the directory you run it in
     <the path you give to  ask --readers-out>
@@ -997,7 +999,7 @@ potsherd doctor --privacy · 22 aug 2026
 
   these never do, and open no socket at all:
     audit, rescue, guard, index, ls, show, stats, tag, pin, unpin,
-    link, setup, stack, doctor
+    link, setup, stack, ignore, unignore, doctor
 
   these call no model either, but do open a socket on
   this machine — and only when you ask them to:
@@ -1017,8 +1019,8 @@ potsherd doctor --privacy · 22 aug 2026
   no other network, except the one-off embedding-model download,
   and only when you ask for it.
   A plain `potsherd index` fetches nothing: text search is the default, it
-  needs no model, and it opens no socket at all. `potsherd index --embed` is what
-  asks for the model, and it names the download before it starts — but
+  needs no model, and it opens no socket at all. `potsherd index --embed` is
+  what asks for the model, and it names the download before it starts — but
   `--quiet` and `--json` suppress that line, and `--quiet` is how the plugin's
   SessionEnd hook runs it, so its SessionStart hook warns you first.
   no telemetry. no account. potsherd stores no credential of its own.
