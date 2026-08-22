@@ -31,6 +31,8 @@ potsherd doctor --privacy · 22 aug 2026
     ~/.potsherd/archive
     ~/.potsherd/potsherd.db
     ~/.potsherd/models
+    ~/.potsherd/config.json
+      your settings: the ignore list, written by potsherd ignore / unignore
     ~/work/demo-project/.potsherd/graft-<id8>.md
       only when you run graft, in the directory you run it in
     <the path you give to  ask --readers-out>
@@ -72,7 +74,7 @@ potsherd doctor --privacy · 22 aug 2026
 
   these never do, and open no socket at all:
     audit, rescue, guard, index, ls, show, stats, tag, pin, unpin,
-    link, setup, stack, doctor
+    link, setup, stack, ignore, unignore, doctor
 
   these call no model either, but do open a socket on
   this machine — and only when you ask them to:

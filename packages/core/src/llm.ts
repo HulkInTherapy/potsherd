@@ -139,6 +139,13 @@ export const OFFLINE_VERBS: readonly string[] = [
   // `stack` only detects which memory tools are installed: it stats directories
   // and reads two of its own files. No model, no socket.
   'stack',
+  // `ignore` / `unignore` read and write one file, `~/.potsherd/config.json`,
+  // and nothing else. They are on this list for the reason `unpin` and `setup`
+  // are: `doctor --privacy` answers by omission otherwise, and a verb missing
+  // from every list on that receipt is a verb the receipt has not accounted
+  // for. The file they write is named in the `writes:` block above.
+  'ignore',
+  'unignore',
   'doctor',
 ];
 

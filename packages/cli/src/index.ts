@@ -15,6 +15,7 @@ import { runStats } from './commands/stats.js';
 import { runCard } from './commands/card.js';
 import { runTag, splitTagOperands } from './commands/tag.js';
 import { runPin } from './commands/pin.js';
+import { runIgnore } from './commands/ignore.js';
 import { runLink } from './commands/link.js';
 import { runAsk } from './commands/ask.js';
 import { runGraft } from './commands/graft.js';
@@ -256,7 +257,8 @@ example:
       )
       .option('--no-vec', 'text search only — the same as --vectors off')
       .option('--explain', 'show the per-list ranks and scores behind the order')
-      .option('--with <tools>', 'also search other memory tools: claude-mem, agentmemory, notes'),
+      .option('--with <tools>', 'also search other memory tools: claude-mem, agentmemory, notes')
+      .option('--all', 'include the projects  potsherd ignore  hides'),
   ).addHelpText('after', `
 example:
   potsherd find "pgbouncer"
@@ -288,6 +290,7 @@ filters, one example each — they compose, and all of them are AND:
           query,
           vec: opts['vec'] !== false,
           explain: Boolean(opts['explain']),
+          all: Boolean(opts['all']),
           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
           ...(opts['with'] ? { with: String(opts['with']) } : {}),
         }),
@@ -376,7 +379,8 @@ exit codes:  0 answered  ·  1 nothing matched  ·  2 --strict refused`);
         .option(
           '--resume-menu',
           'print  claude --resume <id>  # <title>  lines to paste into your shell',
-        ),
+        )
+      .option('--all', 'include the projects  potsherd ignore  hides'),
     ),
   ).addHelpText('after', `
 example:
@@ -392,7 +396,10 @@ example:
 --resume-menu: potsherd does not write into another tool's directory.`);
   ls.action(async (opts: Record<string, unknown>) => {
     const o = globals(program, ls, opts);
-    await run(() => runLs({ ...o, ...filterFlags(opts), resumeMenu: Boolean(opts['resumeMenu']) }), o);
+    await run(
+      () => runLs({ ...o, ...filterFlags(opts), resumeMenu: Boolean(opts['resumeMenu']), all: Boolean(opts['all']) }),
+      o,
+    );
   });
 
   const tag = addGlobals(
@@ -442,6 +449,52 @@ example:
   unpin.action(async (session: string, opts: Record<string, unknown>) => {
     const o = globals(program, unpin, opts);
     await run(() => runPin({ ...o, session, remove: true }), o);
+  });
+
+  const ignore = addGlobals(
+    program
+      .command('ignore')
+      .description('keep a project out of ls, find, ask and stats — never out of the index')
+      .argument('[project]', 'a directory name, or a path; none at all prints the list'),
+  ).addHelpText('after', `
+example:
+  potsherd ignore potsherd                           # a directory name
+  potsherd ignore ~/work/scratch                     # or a path
+  potsherd ignore                                    # what is ignored now
+  potsherd unignore potsherd
+  potsherd ls --all                                  # everything, this once
+
+a bare name matches that path segment anywhere:  ignore potsherd  hides
+/you/code/potsherd and every worktree under it. a name with a slash in it
+matches that path and its children, and nothing else.
+
+honoured by  ls, find, ask, stats.  --all overrides it on ls, find and stats;
+ask has no --all, so reach an ignored project with  ask --project <name>  or
+unignore it. --project always wins: naming a project is asking for it.
+
+nothing is ignored by default, and nothing is ever hidden silently — ls, find
+and stats each print how many rows the list cost them, and  potsherd doctor
+prints the list itself. index and rescue are not affected: ignoring is a view,
+not a deletion, and  potsherd show <id>  still shows an ignored session.
+
+stored in  ~/.potsherd/config.json`);
+  ignore.action(async (project: string | undefined, opts: Record<string, unknown>) => {
+    const o = globals(program, ignore, opts);
+    await run(() => runIgnore({ ...o, ...(project ? { project } : {}) }), o);
+  });
+
+  const unignore = addGlobals(
+    program
+      .command('unignore')
+      .description('take a project off the ignore list')
+      .argument('<project>', 'the entry as  potsherd ignore  stored it'),
+  ).addHelpText('after', `
+example:
+  potsherd unignore potsherd
+  potsherd ignore                                    # what is left`);
+  unignore.action(async (project: string, opts: Record<string, unknown>) => {
+    const o = globals(program, unignore, opts);
+    await run(() => runIgnore({ ...o, project, remove: true }), o);
   });
 
   const link = addGlobals(
@@ -562,14 +615,15 @@ the stored card verbatim, labelled unsummarised. --no-model asks for that path.`
     program
       .command('stats')
       .description('what is in the index: per-harness counts, redaction, freshness')
-      .option('--no-fresh', 'skip the per-file staleness check'),
+      .option('--no-fresh', 'skip the per-file staleness check')
+      .option('--all', 'include the projects  potsherd ignore  hides'),
   ).addHelpText('after', `
 example:
   potsherd stats
   potsherd stats --json | jq '.harnesses[] | {harness, sessions, ghosts}'`);
   stats.action(async (opts: Record<string, unknown>) => {
     const o = globals(program, stats, opts);
-    await run(() => runStats({ ...o, fresh: opts['fresh'] !== false }), o);
+    await run(() => runStats({ ...o, fresh: opts['fresh'] !== false, all: Boolean(opts['all']) }), o);
   });
 
   const card = addFilters(
@@ -855,6 +909,7 @@ const PATH6: [string, string, string][] = [
 const REST: [string[], string][] = [
   [['index', 'show', 'stats', 'doctor'], 'the archive, and what is in it'],
   [['card', 'tag', 'pin', 'unpin', 'link', 'guard'], 'what you add to it'],
+  [['ignore', 'unignore'], 'projects you would rather not see'],
   [['setup', 'export', 'stack'], 'reaching your other tools'],
 ];
 
