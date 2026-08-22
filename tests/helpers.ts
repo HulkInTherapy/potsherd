@@ -62,7 +62,15 @@ export function copyFixtureClaude(): string {
 }
 
 export function rmrf(p: string): void {
-  fs.rmSync(p, { recursive: true, force: true });
+  // `maxRetries`, because phase 5's hook tests are the first in this suite to
+  // exercise something that is *designed* to outlive the process that started
+  // it: both plugins' hooks detach their real work so a session start is never
+  // blocked. A detached `rescue` still writing into the sandbox while the
+  // recursive remove walks it is `ENOTEMPTY` on Linux — seen on CI, not on
+  // macOS. The answer is a more patient cleanup, not a less detached hook;
+  // making the hook synchronous to suit the test would delete the property
+  // the test exists to check.
+  fs.rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
 
 export function readJson<T = unknown>(p: string): T {
