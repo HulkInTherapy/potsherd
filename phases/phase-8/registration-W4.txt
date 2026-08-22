@@ -1,0 +1,98 @@
+W4 (honesty) — registration lines for the orchestrator
+======================================================
+branch: p8/w4-honesty
+items:  8.5 (the fusion gate) · 8.8 (the honesty surfaces)
+
+
+1. README.md — THE FIRST-SCREEN CAPTION (8.8, reserved file, orchestrator's edit)
+--------------------------------------------------------------------------------
+Today the 330 / 31 / 91% block is the second fenced block in README.md and its
+disclaimer is TWO PARAGRAPHS BELOW it, under the demo gif ("Real output from
+`potsherd audit` ... run against a demo corpus that reproduces, number for
+number ..."). A reader who screenshots the first screen crops the disclaimer.
+Phase 8.8 asks for the caption ABOVE the block.
+
+INSERT the following, verbatim, immediately BEFORE the fence that opens
+
+    ```
+    potsherd audit · ~/.claude · 21 aug 2026
+
+i.e. between the `npx potsherd audit` snippet and the audit output block:
+
+--- begin exact wording -------------------------------------------------------
+**These numbers are a synthetic reproduction, not one person's archive.** The
+block below is `potsherd audit` run against a
+[demo corpus](scripts/make-demo-corpus.mjs) that reproduces, number for number,
+what was measured on one real machine on 21 August 2026 — 330 sessions ever, 31
+still on disk, 91% deleted. The transcripts behind those counts are their
+owner's client work and are not this repository's to publish, so every code
+block in this readme and every file in [`docs/screens/`](docs/screens) is
+generated from the synthetic corpus instead. Yours will be different from both.
+--- end exact wording ---------------------------------------------------------
+
+AND THEN, to stop the same fact being stated twice, replace the existing
+paragraph that begins
+
+    Real output from `potsherd audit`
+    ([`docs/screens/01-audit.txt`](docs/screens/01-audit.txt)), run against a
+    [demo corpus](scripts/make-demo-corpus.mjs) that reproduces, number for
+    number, what was measured on one real machine on 21 August 2026.
+
+with this shorter pointer (the caption above now carries the claim):
+
+--- begin exact wording -------------------------------------------------------
+The audit block above is real output, captured to
+[`docs/screens/01-audit.txt`](docs/screens/01-audit.txt) by
+[`scripts/make-screens.sh`](scripts/make-screens.sh); no number in this readme
+is typed in by hand.
+--- end exact wording ---------------------------------------------------------
+
+The paragraph after it ("Those measurements are that machine's; ...") can stay
+as it is — it explains WHY the corpus is synthetic, which is a different point
+from WHAT the numbers are, and it now sits under a caption that already said the
+what.
+
+
+2. packages/core/src/index.ts — NOTHING TO REGISTER
+---------------------------------------------------
+`export * as stack from './stack.js';` (line 554) is a namespace re-export, so
+the two new exports in `packages/core/src/stack.ts` —
+
+    export const CLAIM_SOURCE: string
+    export function claimLegend(verifiedOn?: string): string
+
+— and the two new fields on `StackReport` (`claimLegend`, `claimSource`) reach
+`@potsherd/core` with no change to the barrel. Confirmed by `pnpm typecheck`
+and by `packages/cli/src/commands/stack.ts` compiling against them.
+
+
+3. package.json — NOTHING TO REGISTER
+--------------------------------------
+`pnpm evals` (`tsx evals/run.ts`) is unchanged. The regression probe is a flag
+on the same script and needs no new npm script:
+
+    pnpm evals                        -> exit 0   (the release gate)
+    pnpm evals -- --vector-weight 0   -> exit 1   (the deliberate regression)
+
+`pnpm test` now also pins both of those end to end (tests/evals-gate.test.ts),
+where the embedding model is already cached; it adds ~24 s to the suite.
+
+
+4. plans/04-DECISIONS.md — LOG LINE FOR 8.5 (plans/ is reserved; orchestrator's)
+--------------------------------------------------------------------------------
+Phase 8.5 says "log in `04`". Suggested entry:
+
+--- begin exact wording -------------------------------------------------------
+**22 aug 2026 — the fusion gate, amended and closed.** `pnpm evals` had exited 1
+since phase 3 against `06`'s gate (hybrid strictly above both singles at
+recall@5). The master amended its own gate in `phases/phase-8-hardening.md`
+§8.5: hybrid must be **≥** both singles at recall@5 and **strictly >** both at
+recall@1. Implemented in `evals/gate.ts` (the rule, pure, testable) and
+`evals/run.ts` (the run). Measured on the amended gate, 25 queries, vector
+weight unchanged at the phase-3 stopping rule of 1.5:
+recall@5 bm25 11 · vectors 22 · hybrid 22 → exit 0;
+recall@1 bm25  9 · vectors  6 · hybrid 11.
+The gate is still a gate: `pnpm evals -- --vector-weight 0` measures hybrid 11
+and 9, ties bm25 at recall@1, and exits 1. `tests/evals-gate.test.ts` pins six
+shapes of result that must be refused, including that tie.
+--- end exact wording ---------------------------------------------------------

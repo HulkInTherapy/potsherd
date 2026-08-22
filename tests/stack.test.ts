@@ -10,10 +10,12 @@ import type { Db } from '../packages/core/src/db.js';
 import { Theme } from '../packages/core/src/theme.js';
 import { wrap } from '../packages/core/src/format.js';
 import {
+  CLAIM_SOURCE,
   FAILURES,
   POTSHERD,
   TOOLS,
   VERIFIED_ON,
+  claimLegend,
   coverageGlyph,
   detectTools,
   episodicIndexPath,
@@ -345,6 +347,94 @@ describe('stack: the page a user actually sees', () => {
     expect(out).toContain('no knowledge graph');
     expect(out).toContain('no server, no account, no telemetry');
     expect(out.indexOf('what potsherd does not do')).toBeLessThan(out.indexOf('recommended'));
+  });
+
+  /**
+   * T8.8 — the asymmetry legend, and it has to name **both** halves.
+   *
+   * `stack` grades potsherd by exercise and every competitor by documentation.
+   * That difference runs in potsherd's favour, which is exactly why it is the
+   * sentence most likely to be quietly lost in a later layout refactor: it
+   * costs a line, it says something unflattering, and the table reads fine
+   * without it. So it is asserted three ways — that it is there, that it says
+   * *both* things rather than only the flattering half, and that it appears
+   * **above** the first row of the table rather than under it.
+   *
+   * Half of this legend is a boast. `expect(out).toContain('measured')` alone
+   * would pass on a legend that said only "potsherd's row was measured", which
+   * is the failure mode this test exists to catch, so the competitor half is
+   * asserted separately and by its own words.
+   */
+  it('states the claim asymmetry above the table, in both halves', () => {
+    const r = stackReport();
+    const lines = renderStack(r, theme(80), {});
+    const out = plain(lines);
+
+    // Half one: potsherd was run.
+    expect(out).toContain("potsherd's row was measured by running potsherd");
+    // Half two: everyone else was read, on a date, and was never run.
+    expect(out).toContain("read from that project's own documentation");
+    expect(out).toContain(VERIFIED_ON);
+    expect(out).toContain('never run here');
+    // And the fetch date points at the document that holds the urls.
+    expect(out).toContain(CLAIM_SOURCE);
+
+    // Above the table: the legend's first word comes before the header row and
+    // before any tool is named.
+    const legendAt = out.indexOf('claim: ');
+    const headerAt = out.indexOf('licence');
+    // `potsherd` itself appears in the page title, so the first *competitor*
+    // row is what "before any tool is named" has to mean here.
+    const firstCompetitorAt = out.indexOf('claude-mem');
+    expect(legendAt).toBeGreaterThan(-1);
+    expect(legendAt).toBeLessThan(headerAt);
+    expect(legendAt).toBeLessThan(firstCompetitorAt);
+    // …and after potsherd's own row is a failure, not a pass: the legend
+    // explains the column the table is about to print.
+    expect(out.indexOf(POTSHERD.label, legendAt)).toBeGreaterThan(legendAt);
+
+    // The report carries it too, so `--json` and the terminal cannot drift.
+    expect(r.claimLegend).toBe(claimLegend());
+    expect(r.claimSource).toBe(CLAIM_SOURCE);
+  });
+
+  /**
+   * At 60 columns the `claim` column is dropped from the table entirely, which
+   * makes the legend the *only* disclosure left on the screen. It must survive
+   * that width, and it must survive `--ascii`, where the design system's `·`
+   * `…` `→` are folded away.
+   */
+  it('keeps the legend at 60 columns and under --ascii', () => {
+    for (const t of [
+      theme(60),
+      new Theme({ color: false, width: 80, ascii: true }),
+      new Theme({ color: false, width: 60, ascii: true }),
+    ]) {
+      const lines = renderStack(stackReport(), t, {});
+      const out = plain(lines);
+      // Wrapped across lines at 60, so the assertion is over the joined text
+      // with newlines flattened — the words have to be there, not the layout.
+      const flat = out.replace(/\s+/g, ' ');
+      expect(flat).toContain("potsherd's row was measured by running potsherd");
+      expect(flat).toContain("read from that project's own documentation");
+      expect(flat).toContain('never run here');
+      expect(flat).toContain(CLAIM_SOURCE);
+      // Width is counted in code points; `String.length` is utf-16 units, and
+      // every glyph the design system uses is in the BMP, so they agree here.
+      for (const line of lines) expect([...line].length, line).toBeLessThanOrEqual(t.width);
+    }
+  });
+
+  /** The same disclosure, above the same table, in the docs page. */
+  it('docs/memory-stack.md carries the disclosure above its table', () => {
+    const page = fs.readFileSync(path.join(__dirname, '..', 'docs', 'memory-stack.md'), 'utf8');
+    const disclosure = page.indexOf('measured by running potsherd');
+    const table = page.indexOf('| tool | licence |');
+    expect(disclosure).toBeGreaterThan(-1);
+    expect(table).toBeGreaterThan(-1);
+    expect(disclosure).toBeLessThan(table);
+    expect(page).toContain('was never');
+    expect(page).toContain("read from that project's own");
   });
 
   it('prints the legend for the four failures every time', () => {

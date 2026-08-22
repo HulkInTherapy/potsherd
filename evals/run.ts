@@ -17,11 +17,13 @@ import {
   rescue,
   table,
   vectorState,
+  WEIGHTS,
   writeCard,
   type ListName,
   type RecallResult,
 } from '../packages/core/src/index.js';
 import type { Db } from '../packages/core/src/db.js';
+import { PHASE_1_GATE, PHASE_3_GATE, judge, ruleLine, type Gate } from './gate.js';
 
 /**
  * T1.6 / T1.7b / T3.4 — the recall eval. `pnpm evals`.
@@ -30,7 +32,10 @@ import type { Db } from '../packages/core/src/db.js';
  * corpus was written to have them. It prints recall@5 *and* recall@1 for four
  * retrieval modes separately, because the interesting number is not any one of
  * them but the gap between them — and then it says out loud whether that gap
- * clears `plans/06`'s phase-3 gate.
+ * clears `plans/06`'s phase-3 gate **as amended by phase 8.5**: hybrid ≥ both
+ * singles at recall@5, and strictly above both at recall@1. The rule, why it
+ * was amended after five phases of exiting 1, and the test that proves it can
+ * still fail are all in `evals/gate.ts`.
  *
  * ## The three ways this file has been wrong, and what stops each now
  *
@@ -94,10 +99,11 @@ import type { Db } from '../packages/core/src/db.js';
 // always measures the checkout rather than whatever is in `dist/`.
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-/** `plans/06`: phase 1's gate is ≥ 8/10 on bm25 alone. */
-export const PHASE_1_GATE = 0.8;
-/** `plans/06`: phase 3's gate is ≥ 22/25 hybrid, and hybrid above both singles. */
-export const PHASE_3_GATE = 22 / 25;
+// The gate itself lives in `evals/gate.ts` — a pure function over counts — so
+// that `tests/evals-gate.test.ts` can prove it still fails without building an
+// index or owning an embedding model. Re-exported here because that is where
+// five phases of notes point.
+export { PHASE_1_GATE, PHASE_3_GATE };
 
 /**
  * The overlap a query is allowed to share with its own answer.
@@ -161,9 +167,10 @@ interface Mode {
  * `hybrid` is what `potsherd find` actually runs: `vectors: 'auto'`, which
  * pays for the 350 ms forward pass only when the text index had to relax. It
  * is the number a user experiences. `always` forces the vector list on every
- * query, which is the form `plans/06`'s phase-3 gate — *hybrid must beat
- * bm25-only and vec-only on the same set* — is really about. Reporting both
- * makes it visible when `auto` is carrying the score and the fusion is not.
+ * query, which is the form the phase-3 gate — *hybrid must be ≥ both singles at
+ * recall@5 and strictly above both at recall@1* — is really about. Reporting
+ * both makes it visible when `auto` is carrying the score and the fusion is
+ * not.
  */
 const MODES: Record<ModeKey, Mode> = {
   bm25: { key: 'bm25', label: 'bm25 only', lists: LISTS, vectors: false, needsVectors: false },
@@ -206,7 +213,35 @@ interface Options {
   overlap: number;
   json: boolean;
   keep: boolean;
+  /**
+   * `--vector-weight <n>`: override {@link WEIGHTS} for all three vector
+   * lists, for this run only.
+   *
+   * This exists for one purpose and it is not tuning. `plans/08` rule 3 — *a
+   * constant encoding a measured trade-off needs a test that fails when it
+   * moves* — and rule 4 — *a benchmark that cannot fail is worse than no
+   * benchmark* — together demand a way to prove the gate is still a gate.
+   * `--vector-weight 0` is that proof: it removes the semantic half of the
+   * fusion, collapsing hybrid back onto bm25, and the gate must go red.
+   *
+   * `null` means the shipped weights, which are the phase-3 stopping rule of
+   * 1.5 and are what the release gate is judged on. Any override is printed on
+   * the run's own header and carried in `--json`, so a screenshot of a doctored
+   * run cannot be mistaken for a screenshot of the release run.
+   */
+  vectorWeight: number | null;
 }
+
+/** The three lists `--vector-weight` moves: the whole semantic half. */
+const VECTOR_LISTS = ['vec_exchanges', 'vec_ghost_prompts', 'vec_cards'] as const;
+
+/**
+ * The weight the build ships, read out of {@link WEIGHTS} rather than typed
+ * here, so this file cannot drift from the value the product actually uses.
+ * `1.5` is `plans/03`'s phase-3 **stopping rule**, not an argmax over this
+ * query set, and §8.5's amendment left it alone on purpose.
+ */
+const DEFAULT_VECTOR_WEIGHT = WEIGHTS.vec_exchanges;
 
 function parseArgs(argv: string[]): Options {
   const o: Options = {
@@ -219,6 +254,7 @@ function parseArgs(argv: string[]): Options {
     overlap: OVERLAP_FLAG,
     json: false,
     keep: false,
+    vectorWeight: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -226,6 +262,7 @@ function parseArgs(argv: string[]): Options {
     else if (a === '--potsherd-dir') o.potsherdDir = String(argv[++i]);
     else if (a === '--k') o.k = Number(argv[++i]);
     else if (a === '--overlap') o.overlap = Number(argv[++i]);
+    else if (a === '--vector-weight') o.vectorWeight = Number(argv[++i]);
     else if (a === '--no-cards') o.noCards = true;
     else if (a === '--modes') {
       o.modes = String(argv[++i])
@@ -262,6 +299,12 @@ potsherd evals — recall@1 and recall@5 over a known-answer query set
   --modes a,b,c         any of bm25, vectors, hybrid, always (default: all four)
   --vectors auto|on|off legacy single-mode switch
   --keep                do not delete the temporary fixture index, and print it
+  --vector-weight <n>   override the weight of vec_exchanges, vec_ghost_prompts
+                        and vec_cards for this run. NOT a tuning knob: the
+                        release gate is judged at the shipped 1.5, which is the
+                        phase-3 stopping rule. It is here so the gate can be
+                        shown to still fail —
+                          pnpm evals -- --vector-weight 0    must exit 1
   --json                machine-readable
 
 The vector modes need the 34 MB bge-small model on disk. It is looked for in
@@ -469,6 +512,7 @@ async function runMode(
   queries: EvalQuery[],
   mode: Mode,
   k: number,
+  weights: Partial<Record<ListName, number>> | null,
 ): Promise<Outcome[]> {
   const db = store.open({ root });
   const outcomes: Outcome[] = [];
@@ -479,7 +523,13 @@ async function runMode(
         db,
         q.query,
         {},
-        { limit: Math.max(k, DEPTH), root, lists: mode.lists, vectors: mode.vectors },
+        {
+          limit: Math.max(k, DEPTH),
+          root,
+          lists: mode.lists,
+          vectors: mode.vectors,
+          ...(weights ? { weights } : {}),
+        },
       );
       const ms = Date.now() - t0;
       // `expected_sidechain` asks whether the *subagent transcript* is what
@@ -605,22 +655,14 @@ function overlaps(root: string, queries: EvalQuery[], threshold: number): Overla
 
 // ------------------------------------------------------------- the phase gate
 
-interface Gate {
-  mode: ModeKey;
-  hits: number;
-  beatsBm25: boolean;
-  beatsVectors: boolean;
-  clearsBar: boolean;
-  pass: boolean;
-}
-
 /**
- * `plans/06`: *phase 3 ≥ 22/25 hybrid and hybrid must beat bm25-only and
- * vec-only on the same set, or the fusion is not merged.*
+ * The **amended** gate of `plans/phases/phase-8-hardening.md` §8.5: *hybrid
+ * must be ≥ both singles at recall@k, and strictly above both at recall@1.*
  *
- * Both conditions, computed here rather than left for a human to do with two
+ * Every condition is computed here rather than left for a human to do with two
  * screenshots — the fusion has now been measured losing three separate times,
- * and every one of those took somebody comparing numbers by hand.
+ * and every one of those took somebody comparing numbers by hand. The rule
+ * itself is in `evals/gate.ts`, which is where its rationale and its test are.
  */
 function gateFor(
   runs: { mode: Mode; outcomes: Outcome[] }[],
@@ -632,11 +674,16 @@ function gateFor(
   const bm25 = runs.find((r) => r.mode.key === 'bm25');
   const vec = runs.find((r) => r.mode.key === 'vectors');
   if (!hybrid || !bm25 || !vec) return null;
-  const hits = scoreAt(hybrid.outcomes, k);
-  const beatsBm25 = hits > scoreAt(bm25.outcomes, k);
-  const beatsVectors = hits > scoreAt(vec.outcomes, k);
-  const clearsBar = total > 0 && hits / total >= PHASE_3_GATE;
-  return { mode: key, hits, beatsBm25, beatsVectors, clearsBar, pass: beatsBm25 && beatsVectors && clearsBar };
+  const score = (o: Outcome[]): { at1: number; atK: number } => ({
+    at1: scoreAt(o, 1),
+    atK: scoreAt(o, k),
+  });
+  return judge(
+    key,
+    { bm25: score(bm25.outcomes), vectors: score(vec.outcomes), hybrid: score(hybrid.outcomes) },
+    total,
+    k,
+  );
 }
 
 async function main(): Promise<void> {
@@ -655,6 +702,13 @@ async function main(): Promise<void> {
         : o.vectors === 'auto'
           ? ['hybrid']
           : [...ORDER]);
+
+  // The weight override, resolved once. `null` is "the shipped weights", and
+  // the shipped weights are what the release gate is judged on.
+  const weights: Partial<Record<ListName, number>> | null =
+    o.vectorWeight === null || Number.isNaN(o.vectorWeight)
+      ? null
+      : Object.fromEntries(VECTOR_LISTS.map((l) => [l, o.vectorWeight!]));
 
   const needVectors = wanted.some((m) => MODES[m].needsVectors);
   const built = o.potsherdDir ? null : await buildFixtureIndex(o.keep, needVectors);
@@ -677,7 +731,7 @@ async function main(): Promise<void> {
             lists: MODES[key].lists.filter((l) => l !== 'cards_fts' && l !== 'vec_cards'),
           }
         : MODES[key];
-      runs.push({ mode, outcomes: await runMode(root, queries, mode, o.k) });
+      runs.push({ mode, outcomes: await runMode(root, queries, mode, o.k, weights) });
     }
     overlap = overlaps(root, queries, o.overlap);
   } finally {
@@ -705,7 +759,26 @@ async function main(): Promise<void> {
           k: o.k,
           queries: total,
           coverage: coverage(queries),
-          gates: { phase1Bar: PHASE_1_GATE, phase3Bar: PHASE_3_GATE, phase1Met: phase1, phase3: gates },
+          // Both halves of the amended gate, separately, per judged mode —
+          // `wide` (recall@k, `>=`) and `tight` (recall@1, `>`) — so a pass is
+          // machine-checkable condition by condition and not a rendered
+          // string somebody has to read. `rule` is the same sentence the
+          // terminal prints.
+          gates: {
+            rule: ruleLine(o.k, total),
+            phase1Bar: PHASE_1_GATE,
+            phase3Bar: PHASE_3_GATE,
+            phase1Met: phase1,
+            phase3: gates,
+          },
+          // The run's own configuration, so a `--json` blob can never be read
+          // as the release run when it was not one.
+          weights: {
+            vectorWeight: o.vectorWeight ?? DEFAULT_VECTOR_WEIGHT,
+            shipped: DEFAULT_VECTOR_WEIGHT,
+            overridden: weights !== null,
+            lists: VECTOR_LISTS,
+          },
           pass: ok,
           index: built
             ? {
@@ -773,6 +846,18 @@ async function main(): Promise<void> {
         `${t.sep} ${cov.sidechain} sidechain ${t.sep} ${cov.ghost} ghost ${t.sep} ${cov.card} card ` +
         `${t.sep} ${built ? `${fmt.num(built.cards)} cards, ${fmt.num(built.vectors)} vectors` : 'existing index'}`,
     ),
+  );
+  // The weight is on the screen of *every* run, not only an overridden one: a
+  // number that appears when it is unusual is a number nobody learns to read.
+  out.push(
+    weights
+      ? t.warn(
+          `  vector weight ${o.vectorWeight} ${t.sep} OVERRIDDEN (shipped: ${DEFAULT_VECTOR_WEIGHT}) ` +
+            `${t.sep} this is a probe, not the release gate`,
+        )
+      : t.dim(
+          `  vector weight ${DEFAULT_VECTOR_WEIGHT} ${t.sep} the phase-3 stopping rule, unchanged by the §8.5 amendment`,
+        ),
   );
   out.push('');
 
@@ -849,13 +934,15 @@ async function main(): Promise<void> {
   }
 
   // --------------------------------------------------------------- the gate
-  out.push(
-    INDENT +
-      t.dim(
-        `phase-3 gate ${t.sep} hybrid ≥ ${Math.round(PHASE_3_GATE * total)}/${total} at recall@${o.k}, ` +
-          `and above bm25-only and vec-only on the same set`,
-      ),
-  );
+  //
+  // The rule is spelled out in words, with both comparison operators named,
+  // because this block is the thing that ends up in a screenshot and the
+  // original one-line version — "above bm25-only and vec-only" — was ambiguous
+  // enough about `>` versus `>=` to cost this project five phases of argument.
+  out.push(INDENT + t.dim(`phase-3 gate ${t.sep} amended 22 aug 2026 (phase 8.5), by the author of the original`));
+  for (const line of fmt.wrap(ruleLine(o.k, total), t.width - 4)) {
+    out.push(INDENT + t.dim(line));
+  }
   if (gates.length === 0) {
     out.push(
       INDENT +
@@ -873,23 +960,34 @@ async function main(): Promise<void> {
     );
   } else {
     for (const g of gates) {
+      const label = MODES[g.mode as ModeKey].label;
+      // Two lines per mode, one per half of the rule, each condition its own
+      // ✓/✗ with the number it was compared against in brackets. One line
+      // would fit; it would also hide which of the four conditions went red.
       out.push(
         INDENT +
-          `${MODES[g.mode].label.padEnd(16)}${String(g.hits).padStart(3)}/${total}  ` +
-          mark(t, g.beatsBm25, 'beats bm25') +
+          `${label.padEnd(18)}recall@${g.k} ${String(g.wide.hybrid).padStart(3)}/${total}   ` +
+          mark(t, g.wide.beatsBm25, `≥ bm25 (${g.wide.bm25})`.padEnd(15)) +
           '  ' +
-          mark(t, g.beatsVectors, 'beats vectors') +
+          mark(t, g.wide.beatsVectors, `≥ vectors (${g.wide.vectors})`.padEnd(17)) +
           '  ' +
-          mark(t, g.clearsBar, `≥ ${Math.round(PHASE_3_GATE * total)}/${total}`) +
-          '   ' +
+          mark(t, g.clearsBar, `≥ ${g.bar}/${total}`),
+      );
+      out.push(
+        INDENT +
+          `${' '.repeat(18)}recall@1 ${String(g.tight.hybrid).padStart(3)}/${total}   ` +
+          mark(t, g.tight.beatsBm25, `> bm25 (${g.tight.bm25})`.padEnd(15)) +
+          '  ' +
+          mark(t, g.tight.beatsVectors, `> vectors (${g.tight.vectors})`.padEnd(17)) +
+          '  ' +
           (g.pass ? t.ok('PASS') : t.warn('FAIL')),
       );
     }
     out.push(
       INDENT +
         (verdict?.pass
-          ? t.ok('PASS') + t.dim(' — plans/06 phase 3 would merge this fusion')
-          : t.warn('FAIL') + t.dim(' — plans/06 phase 3 would not merge this fusion')),
+          ? t.ok('PASS') + t.dim(' — the amended phase-3 gate would merge this fusion')
+          : t.warn('FAIL') + t.dim(' — the amended phase-3 gate would not merge this fusion')),
     );
   }
   if (o.keep && built) out.push(INDENT + t.dim(`index kept at ${built.root}`));

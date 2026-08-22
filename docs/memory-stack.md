@@ -51,6 +51,21 @@ that is a bug in the table.
 
 ## the tools
 
+> **How each row was checked — read this before the table.**
+> **potsherd's row was measured by running potsherd on the machine this page
+> was written on. Every other row was read from that project's own
+> documentation on [22 aug 2026](#sources-and-what-was-fetched) and was never
+> run here.** That is not an even comparison and it runs in potsherd's favour,
+> so it is said here, above the table, rather than only in the `claim checked`
+> column beside each row. potsherd does not have these tools installed and does
+> not claim to have exercised them. `potsherd stack` prints the same sentence
+> above the same table in your terminal.
+>
+> The honest repair is not to grade potsherd by its docs too — it is the one
+> tool here that was actually run — it is to say so where nobody can miss it.
+> If the table ever shows potsherd winning all four rows, that is a bug in the
+> table.
+
 Coverage: **✓** covers it · **~** partly, with a caveat · **·** does not.
 
 | tool | licence | 1 | 2 | 3 | 4 | claim checked |
@@ -64,11 +79,8 @@ Coverage: **✓** covers it · **~** partly, with a caveat · **·** does not.
 | superbrain | MIT | · | ✓ | · | · | docs only |
 | CLAUDE.md / auto memory | built into Claude Code | · | ✓ | · | · | files read here, behaviour from the docs |
 
-**"docs only" means exactly that**: the row was read from that project's own
-current documentation on the date in [sources](#sources-and-what-was-fetched),
-and was **not** exercised. potsherd does not have these installed, so it does
-not claim to have run them. `potsherd stack` prints the same label in your
-terminal, not just here.
+**"docs only" means exactly that** — see the note above the table. Every url
+and every fetch date is in [sources](#sources-and-what-was-fetched).
 
 ### claude-mem — `thedotmack/claude-mem`
 
