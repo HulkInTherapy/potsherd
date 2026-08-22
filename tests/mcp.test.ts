@@ -169,11 +169,26 @@ describe('the tool list', () => {
     const wide = at(400);
     const narrow = at(60);
     expect(narrow).toHaveLength(wide.length);
+    // `wide` and `narrow` are two SEPARATE runs, so anything the run measures
+    // about itself differs between them. Comparing raw lengths therefore says
+    // "this line got shorter" when all that happened is that the second run was
+    // faster: CI caught `  26 checks, all passed  ·  215ms` against a wide run's
+    // `649ms` and demanded an ellipsis for a line nothing had clipped.
+    //
+    // That is this build's most common defect class — a test whose premise is
+    // the environment — so the premise is established instead: the volatile
+    // spans are replaced by fixed tokens in BOTH runs, and only then is length
+    // taken to mean width.
+    const stable = (line: string): string =>
+      line
+        .replace(/\b\d+(?:\.\d+)?\s?(?:ms|s)\b/g, '<t>')
+        .replace(/\b\d[\d,]*\b/g, '<n>')
+        .replace(/\/(?:private\/)?(?:var|tmp)\/[^\s]*/g, '<p>');
+
     let shortened = 0;
     narrow.forEach((line, i) => {
       const full = wide[i]!;
-      // Timings and temp paths differ between runs; only length is compared.
-      if ([...line].length >= [...full].length) return;
+      if ([...stable(line)].length >= [...stable(full)].length) return;
       shortened++;
       expect(line, `cut without an ellipsis: ${line}`).toContain('…');
     });
