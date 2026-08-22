@@ -262,7 +262,11 @@ const readerFn: AskReaderFn = async (input) => {
   // input.sessionId   the session this excerpt came from — the PER-HIT session,
   //                   so a subagent is read as itself and not as its parent
   // input.id8         the eight characters that name it on screen
-  // input.project     last path segment, e.g. "Fulcrum"
+  // input.project     last path segment, e.g. "data-pipeline"
+  //                   (substituted 2026-08-22: the example named a real
+  //                   project directory off the reference machine. It is
+  //                   an example of a shape -- one path segment -- and the
+  //                   demo corpus's own project name shows it just as well)
   // input.harness     'claude' | 'codex' | 'cursor' | 'pi' | …
   // input.isSidechain a subagent transcript
   // input.isGhost     PROMPTS ONLY — the assistant side was swept and is not

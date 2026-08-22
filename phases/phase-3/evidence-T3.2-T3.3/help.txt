@@ -1,3 +1,18 @@
+# reproduced against the synthetic demo corpus on 2026-08-22; the original was
+# captured against the live corpus in phase 3 and its headline numbers are
+# preserved below. this file is a paste of `find --help`, so it has no numbers
+# of its own beyond the flag list; what it lost in the original capture were two
+# example lines that named a real project directory and a real corpus topic.
+# those examples were removed from `packages/cli/src/index.ts` itself in phase 7,
+# so this is simply the current help text, verbatim and unedited.
+#
+#   node packages/cli/bin/potsherd.js find --help
+#     --claude-dir   <demo>/.claude      built by scripts/make-demo-corpus.mjs
+#     --potsherd-dir <demo>/.potsherd
+#   binary: v1.0.0 (the phase-3 capture was from task/T3.2; the flag list has
+#   grown since, which is why this paste is longer than the one it replaces)
+#   kept evidence dir: /tmp/w1-guard-evidence.yduKmU
+
 $ potsherd find --help
 Usage: potsherd find [options] <query>
 
@@ -21,6 +36,8 @@ Options:
                          "off", default: "auto")
   --no-vec               text search only — the same as --vectors off
   --explain              show the per-list ranks and scores behind the order
+  --with <tools>         also search other memory tools: claude-mem,
+                         agentmemory, notes
   --project <name>       only this project (a directory name is enough)
   --harness <name>       claude, codex, cursor or pi
   --since <when>         on or after this date, or a span like 30d / 6w
@@ -43,12 +60,12 @@ Options:
 
 example:
   potsherd find "pgbouncer"
-  potsherd find "vedic astrology" --json | jq -r '.sessions[0].resume'
+  potsherd find "rate limiter" --json | jq -r '.sessions[0].resume'
   potsherd find "the pooler decision" --vectors on   # force semantic search
   potsherd find "pgbouncer" --explain                # why this order
 
 filters, one example each — they compose, and all of them are AND:
-  --project Fulcrum          only that project (a directory name is enough)
+  --project event-bus          only that project (a directory name is enough)
   --harness claude           claude, codex, cursor, pi, gemini, opencode
   --since "last week"        2026-08-01 / 2026-08 / 30d / today / in july
   --until 2026-08-15         the same forms; the day itself is included

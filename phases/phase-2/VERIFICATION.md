@@ -64,9 +64,15 @@ on the then-HEAD. A constant that encodes a measured trade-off needs a test that
 overstep. **No card asserts what the assistant said, and 62 of 62 have `outcome: unknown`.**
 
 The asked-vs-decided rule was checked both ways. Kept, because the prompt states it: *"Just have
-three videos, not six"* → decision "Limit Thoughts on AI section to three videos". Dropped, because
-the prompt only asks: *"At what route… Should I do Meghavi.me/application/ld-projection or
+three panels, not six"* → decision "Limit the summary row to three panels". Dropped, because
+the prompt only asks: *"At what route… Should I put it at `/app/forecast/projection` or
 something?"* → `decisions = []`.
+
+**Substitution, 2026-08-22.** Neither quote above is the prompt's own words. A prompt is
+transcript prose (`check-privacy.py`, family 1) and the second one also named a live client
+domain. Both keep the shape that decided the case: an imperative with a number in it, which the
+rule KEEPS, against a question ending "or something?", which it DROPS. The finding —
+`decisions = []` when the prompt only asks — is the measured one and is unchanged.
 
 ## what it could not verify, and why that matters
 

@@ -1,0 +1,22 @@
+  ok    a live-corpus session uuid  [corpus-id]
+  ok    the same id in short form  [corpus-id]
+  ok    a live-corpus session title  [corpus-title]
+  ok    a title wrapped across a comment  [corpus-title]
+  ok    a Linux home path  [home-path]
+  ok    a Linux project slug  [home-path]
+  ok    a traversal out of the own-tree exemption  [home-path]
+  ok    CONTROL this repository's own checkout path
+  ok    CONTROL a demo-corpus id
+  ok    CONTROL a git sha
+  ok    CONTROL placeholder home directories
+  ok    the historical leak's shape: an undeclared pi assistant thinking record  [transcript-record]
+  ok    an undeclared cursor <user_query> sample  [transcript-record]
+  ok    CONTROL the same record, declared synthetic in the line above it
+  ok    CONTROL the same record shape with a payload under the threshold
+  ok    CONTROL an undeclared record outside docs/
+  ok    an unknown flag is a usage error, not a file list  [exit 2]
+  ok    a flag-shaped argument after a real path is still a usage error  [exit 2]
+  ok    CONTROL an explicit path list is still accepted  [exit 0]
+  ok    a partial sweep does not judge the pins it did not look at  [exit 0]
+
+  20 probes, all as expected.

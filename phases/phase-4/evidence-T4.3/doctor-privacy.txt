@@ -1,14 +1,37 @@
-potsherd doctor --privacy · 21 aug 2026
+# reproduced against the synthetic demo corpus on 2026-08-22; the original was
+# captured against the live corpus in phase 4 and its headline numbers are
+# preserved below. the original paste listed four real `~/.claude/projects/<slug>`
+# directories off the reference machine — a project directory name is the private
+# fact, so the paste, not the finding, is what had to go. the finding it carried
+# is unchanged and is visible here: `doctor --privacy` enumerates every path
+# potsherd reads, every path it writes, what leaves the machine, and which verbs
+# call a model. the original's own headline shape, for comparison:
+#
+#   reads 15 paths (4 of them per-project sessions-index.json) · writes 5
+#   · writes-after-consent 1 · model verbs 2 (card, graft; ask was landing)
+#
+# reproduced with:
+#   node packages/cli/bin/potsherd.js doctor --privacy \
+#     --claude-dir   <demo>/.claude    built by scripts/make-demo-corpus.mjs
+#     --potsherd-dir <demo>/.potsherd
+#   binary: v1.0.0. this is why the reproduction is longer than the original: the
+#   bridges (`find --with`, `export --to`), `setup`'s eight consent files, the
+#   `.potsherd-bak-<UTC>` copies and `ask` all landed in phases 4-6 and each one
+#   added a path this screen has to name. the numbers above are the phase-4
+#   screen's; the ones below are v1.0.0's, measured, not adjusted.
+#   kept evidence dir: /tmp/w1-guard-evidence.yduKmU
+
+potsherd doctor --privacy · 22 aug 2026
 
   reads (never modified):
-    ~/.claude/projects
-    ~/.claude/history.jsonl
-    ~/.claude/projects/-Users-zebra…y-Crimes-cog/sessions-index.json
-    ~/.claude/projects/-Users-zebra…entic-claude/sessions-index.json
-    ~/.claude/projects/-Users-zebra…cts-anilearn/sessions-index.json
-    ~/.claude/projects/-Users-zebra-hive/sessions-index.json
-    ~/.claude/settings.json
-    ~/.claude/settings.local.json  (absent)
+    /tmp/w1-guard-evidence.yduKmU/.claude/projects
+    /tmp/w1-guard-evidence.yduKmU/.claude/history.jsonl
+    /tmp/w1-guard-evidence.yduKmU/.…agent-runner/sessions-index.json
+    /tmp/w1-guard-evidence.yduKmU/.…v-crm-ingest/sessions-index.json
+    /tmp/w1-guard-evidence.yduKmU/.…ev-notes-api/sessions-index.json
+    /tmp/w1-guard-evidence.yduKmU/.…payments-api/sessions-index.json
+    /tmp/w1-guard-evidence.yduKmU/.claude/settings.json  (absent)
+    /tmp/w1-guard-evidence.yduKmU/.claude/settings.local.json  (absent)
     /Library/Application Support/ClaudeCode/managed-settings.json  (absent)
     ~/.codex/sessions
     ~/.cursor/projects
@@ -16,34 +39,71 @@ potsherd doctor --privacy · 21 aug 2026
     ~/.gemini/tmp  (absent)
     ~/.local/share/opencode  (absent)
     ~/.copilot/session-state  (absent)
+    …and these, only when you name them with  --with / --to:
+    ~/.claude-mem/claude-mem.db
+      claude-mem, or wherever CLAUDE_MEM_DATA_DIR points. read-only.
+    <agentmemory's app-data dir>
+      ~/Library/Application Support/agentmemory on macOS, $XDG_DATA_HOME
+    <cwd>/CLAUDE.md, and .claude/CLAUDE.md above it
+      the notes bridge, walking up from the directory you run in.
+    ~/.claude/projects/<slug>/memory
+      Claude Code's own auto-memory for this project. read-only.
 
   writes:
-    /private/tmp/claude-501/-Users-…217f6bd/scratchpad/refindex-T4.3
-    /private/tmp/claude-501/-Users-…scratchpad/refindex-T4.3/archive
-    /private/tmp/claude-501/-Users-…tchpad/refindex-T4.3/potsherd.db
-    /private/tmp/claude-501/-Users-…/scratchpad/refindex-T4.3/models
-    ~/randomness/potsherd/.claude/w…5299a63/.potsherd/graft-<id8>.md
-      the graft path only when you run graft, in the directory you run it in
+    /tmp/w1-guard-evidence.yduKmU/.potsherd
+    /tmp/w1-guard-evidence.yduKmU/.potsherd/archive
+    /tmp/w1-guard-evidence.yduKmU/.potsherd/potsherd.db
+    /tmp/w1-guard-evidence.yduKmU/.potsherd/models
+    ~/randomness/wt/w1-guard/.potsherd/graft-<id8>.md
+      only when you run graft, in the directory you run it in
+    <the path you give to  ask --readers-out>
+      only when you pass the flag. it holds the same redacted excerpts a model
+      would have been sent, and no model was called to write it
+    <the dir you give to  export --to markdown>
+      one markdown file per card, only when you run export
+    <your agentmemory store>  — export --to agentmemory --yes
+      rows into another tool's store. never without --yes, and never at all
+      unless you asked for that target
 
   writes only after an explicit y at a diff:
-    ~/.claude/settings.json
+    /tmp/w1-guard-evidence.yduKmU/.claude/settings.json
       cleanupPeriodDays, and one SessionStart hook entry
+    ~/.claude.json
+    ~/.codex/config.toml
+    ~/.cursor/mcp.json
+    ~/.gemini/settings.json
+    ~/.config/opencode/opencode.json
+    ~/.copilot/mcp-config.json
+    ~/.pi/agent/settings.json
+      one "potsherd" MCP server entry each, from potsherd setup. every other
+      server in those files is preserved.
+    …and beside each of those 8:  <that file>.potsherd-bak-<UTC>
+      a copy of the file as it was, taken before potsherd changes it. one per
+      write. potsherd never reads them back and never removes them; delete them
+      yourself once you are happy with the change.
 
   leaves this machine:
-    redacted slices of your transcripts, sent to a model as the
-    text of one prompt. redaction runs first, in one place, on
-    every outgoing string — there is no --no-redact flag.
-    nothing else is ever sent: no file is uploaded, no path, no
-    index, no counts, no identifiers.
+    redacted slices of your transcripts, sent to a model as the text of one
+    prompt. redaction runs first, in one place, on every outgoing string —
+    there is no --no-redact flag. nothing else is ever sent: no file is
+    uploaded, no path, no index, no counts, no identifiers.
 
   only these verbs call a model:
     potsherd card      writes the cards; one call per slice
+    potsherd ask       one call, over the shortlist it retrieved
     potsherd graft     one call, to compress one session into a brief
-    phase 4 adds ask, which sends the same slices.
 
   these never do, and open no socket at all:
-    audit, rescue, guard, index, ls, find, show, stats, tag, pin,
-    link, doctor
+    audit, rescue, guard, index, ls, show, stats, tag, pin, unpin,
+    link, setup, stack, doctor
+
+  these call no model either, but do open a socket on
+  this machine — and only when you ask them to:
+    potsherd find      --with <tool>, to read another tool's store
+    potsherd export    --to <tool>, to write rows into one
+      claude-mem is read over http://127.0.0.1; agentmemory by launching its
+      mcp server, itself a shim over an http backend on localhost. nothing
+      leaves this machine, and without the flag neither opens anything at all.
 
   who receives them:
     your own Claude subscription, via
@@ -53,6 +113,9 @@ potsherd doctor --privacy · 21 aug 2026
     the call runs with no tools, in an empty scratch directory, and
     its session is never written to ~/.claude/projects.
 
-  no other network, except the one-off embedding-model download that
-  `potsherd index` announces before it starts and `--no-embed` skips.
+  no other network, except the one-off embedding-model download.
+  `potsherd index` names it before it starts, but `--quiet` and `--json`
+  suppress that line, and `--quiet` is how the plugin's SessionEnd hook runs it
+  — so its SessionStart hook warns you first. `--no-embed` skips the download
+  entirely.
   no telemetry. no account. potsherd stores no credential of its own.

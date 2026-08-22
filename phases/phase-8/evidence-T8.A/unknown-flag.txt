@@ -1,0 +1,12 @@
+check-privacy.py: unknown option: --list-pins
+
+usage: check-privacy.py [--selftest | PATH ...]
+
+  no arguments   sweep every tracked text file (what CI runs)
+  PATH ...       sweep only these paths, relative to the repo root
+  --selftest     run the rule probes and the argument probes, sweep nothing
+
+Anything else is an error. It used to be a FILE NAME: `--list-pins` was swept as
+a path, found to be missing, and reported every pinned violation as "now clean
+-- delete the DEBT line". Being confidently wrong is the one thing a guard may
+not do.

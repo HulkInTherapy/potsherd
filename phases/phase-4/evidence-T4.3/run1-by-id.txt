@@ -1,28 +1,56 @@
-potsherd graft · claude 3ec2f5ca · 2026-08-13
+# reproduced against the synthetic demo corpus on 2026-08-22; the original was
+# captured against the live corpus in phase 4 and its headline numbers are
+# preserved below. the original could not print its brief at all — the body was
+# a named third party's business plans — so what this file used to hold was a
+# header block and the words "[the brief body that printed here is withheld]".
+# run against the demo corpus the whole artefact can be shown, which is the
+# point of having a demo corpus.
+#
+#   the original run, phase 4, 21 aug 2026, live corpus (session id withheld — it indexes a real transcript):
+#     tokens 262 of 1,200 (est., chars/3.6) · citations 3/3 · exchanges 9
+#     model 1m 14s · 1 call · $0.045
+#     kept unredacted beside the repo; its path is in README.txt in this folder
+#
+# reproduced with:
+#   node packages/cli/bin/potsherd.js graft 9c4d2f18 --budget 1200 \
+#     --claude-dir   <demo>/.claude    built by scripts/make-demo-corpus.mjs
+#     --potsherd-dir <demo>/.potsherd
+#   backend: agent-sdk (subscription). tokens are still `est.` (chars/3.6) for
+#   the same reason the original's were — the subscription transport exposes no
+#   count_tokens endpoint. binary v1.0.0.
+#   kept evidence dir: /tmp/w1-guard-evidence.yduKmU
+#
+# THIS IS A SUBSTITUTION. the shape is the original's; the session, the project
+# and every word of the brief are synthetic.
 
-  [session title withheld — real client work]
+potsherd graft · claude 9c4d2f18 · 2026-08-21
 
-  tokens                       262   of 1200 budget  ·  est. (chars/3.6)
-  citations                    3/3   distinct, and all resolve
-  exchanges                      9   Fulcrum
-  wrote                              /private/tmp/claude-501/-Users-zebra-rando…
-  model                     1m 14s   1 call  ·  $0.045
+  Pool the ingest workers through pgbouncer
 
-────────────────────────────────────────────────────────────
+  tokens                       383   of 1200 budget  ·  est. (chars/3.6)
+  citations                    8/8   distinct, and all resolve
+  exchanges                      8   data-pipeline
+  wrote                              /private/tmp/w1-guard-evidence.yduKmU/graf…
+  model                      27.2s   1 call  ·  $0.019 est.
 
-  [the brief body that printed here is withheld]
+────────────────────────────────────────────────────────────────────────
 
-  WITHHELD FROM THE PUBLIC REPO — this artefact reproduces the *content* of real
-  sessions from the reference corpus, which includes a named third party's
-  business plans and a personal tweet. `00-README.md`'s secrets rule already
-  says committed artefacts use the synthetic demo corpus, not the live one;
-  phase 4 extends that from screenshots to every committed artefact.
+# Pool the ingest workers through pgbouncer
 
-  The file itself is kept, unredacted and re-examinable, beside the repo at:
+Brief from a past session. Written by potsherd; every claim carries `[9c4d2f18@seq]`, the exchange it came from.
 
-      /Users/zebra/randomness/potsherd-p4-evidence/T4.3/run1-by-id.txt
+- Ingest workers opened one connection per task, hitting 412 concurrent slots against 400 max_connections limit [9c4d2f18@1]
+- Chose pgbouncer in transaction pooling mode to multiplex connections [9c4d2f18@2]
+- Transaction pooling limitation: session state (SET, LISTEN/NOTIFY, server-side prepared statements) doesn't survive transaction boundary [9c4d2f18@2]
+- Fixed prepared statement issue with client setting statement_cache_size=0 to disable caching [9c4d2f18@3]
+- Added test validating two transactions over single server connection; fails with caching enabled, passes disabled [9c4d2f18@4]
+- Identified risk: pgbouncer restart closes connection mid-batch, requiring idempotent writer to avoid partial batch replays [9c4d2f18@5]
+- Implemented idempotency by keying batch writer on sha256(source_file + row_offset), making replays no-ops [9c4d2f18@6]
+- Updated README with "connection pooling" section: transaction mode, pool_size 24, and statement_cache_size=0 documented as hard requirement not tuning knob [9c4d2f18@7]
+- All 214 tests passing; committed as "ingest: pool through pgbouncer in transaction mode" [9c4d2f18@8]
 
-  Evidence that cannot be re-examined is not evidence (`08` rule 5) — but
-  re-examinable does not mean published. The numbers this run produced are in
-  `README.txt` and in `phases/phase-4/HANDOFF.md`; only the transcript-derived
-  prose is held back.
+---
+
+source: claude 9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43 · 8 exchanges · 2026-08-21
+
+  run  potsherd show 9c4d2f18  read the session this came from, end to end

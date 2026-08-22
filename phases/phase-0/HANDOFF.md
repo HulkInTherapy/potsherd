@@ -32,9 +32,15 @@ sessions ever started   330      nov 2025 → aug 2026
 still on disk            31
 deleted                 299      91%
 prompts lost          2,971
-projects wiped           33      lexaiLMS · Veyu-Outreach-Engine · …
+projects wiped           33      payments-api · crm-ingest · …
 audit wall time        0.23 s    on 329 MB
 ```
+
+**substitution, 2026-08-22:** the two project names on the `projects wiped` line are
+**not** the ones this run printed — the real ones name a paying client's work and a
+directory name is the private fact (`scripts/check-privacy.py`, family 3). Two names
+off the synthetic demo corpus stand in their place. Every number on the block is the
+measured one, unchanged; only the two words are substituted.
 
 `potsherd rescue` on the frozen safety copy: **277 files, 327 MB archived, 299 ghosts rebuilt,
 2,971 prompts recovered, 19 ghosts with recovered titles.** On the live corpus: 278 files
