@@ -6,6 +6,15 @@ Claude Code deletes your session transcripts after 30 days. It does not tell you
 npx potsherd audit          # once published — see Install; today it is a git clone
 ```
 
+**These numbers are a synthetic reproduction, not one person's archive.** The
+block below is `potsherd audit` run against a
+[demo corpus](scripts/make-demo-corpus.mjs) that reproduces, number for number,
+what was measured on one real machine on 21 August 2026 — 330 sessions ever, 31
+still on disk, 91% deleted. The transcripts behind those counts are their
+owner's client work and are not this repository's to publish, so every code
+block in this readme and every file in [`docs/screens/`](docs/screens) is
+generated from the synthetic corpus instead.
+
 ```
 potsherd audit · ~/.claude · 21 aug 2026
 
@@ -30,10 +39,10 @@ Fourteen seconds, unedited, recorded by
 [its own recording](docs/demo-ask.gif) because it is fifty seconds of real model
 calls and would not fit inside a minute beside the rest.
 
-Real output from `potsherd audit`
-([`docs/screens/01-audit.txt`](docs/screens/01-audit.txt)), run against a
-[demo corpus](scripts/make-demo-corpus.mjs) that reproduces, number for number,
-what was measured on one real machine on 21 August 2026.
+The audit block above is real output, captured to
+[`docs/screens/01-audit.txt`](docs/screens/01-audit.txt) by
+[`scripts/make-screens.sh`](scripts/make-screens.sh); no number in this readme
+is typed in by hand.
 
 Those measurements are that machine's; the project names, prompts and paths
 behind them are its owner's client work and are not this repository's to
