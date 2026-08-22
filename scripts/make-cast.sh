@@ -161,9 +161,22 @@ record() {
     asciinema rec --overwrite --cols 80 --rows 24 --command "bash $2" "$1"
 }
 record "$out" "$demo/session.sh"
-rm -f "$askout"
+
+# The ask cast is only re-recorded when a model can actually be reached, and it
+# is NOT deleted otherwise.
+#
+# This used to be an unconditional `rm -f "$askout"` above the `if`, so
+# POTSHERD_CAST_NO_MODEL=1 -- the documented way to run this script offline --
+# removed a committed artefact the readme links to and then could not replace
+# it. Exactly the failure scripts/make-screens.sh was taught out of in phase 7:
+# an interrupted or reduced run must never leave the repository worse than it
+# found it. make-screens.sh keeps the committed model screens and says so on
+# stdout; this does the same.
 if [ "${POTSHERD_CAST_NO_MODEL:-}" != "1" ]; then
+  rm -f "$askout"
   record "$askout" "$demo/session-ask.sh"
+else
+  echo "  POTSHERD_CAST_NO_MODEL=1 — keeping the committed docs/demo-ask.cast"
 fi
 
 # ---------------------------------------------------------------- assertions

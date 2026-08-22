@@ -11,8 +11,9 @@ potsherd index · ~/.potsherd · 22 aug 2026
   exchanges indexed            439   242 tool calls · 2 redacted
   ghosts indexed               299   2,971 prompts, searchable
   masked this run                5   aws 1 · gcp 1 · github 1 · stripe 1 · …
-  vectors                        —   skipped (--no-embed) · text search only
+  vectors                        —   text search only · no model, no network
 
-  full index                 333ms   228 parsed · 0 unchanged · 546 KB
+  full index                 294ms   228 parsed · 0 unchanged · 546 KB
 
   run  potsherd doctor  for parse coverage and every path read.
+  run  potsherd index --embed  for semantic search (32 MB model, ~6 min, once)

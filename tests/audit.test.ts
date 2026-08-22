@@ -397,6 +397,76 @@ describe('audit --verify, piped the way the docs pipe it', () => {
     }
   });
 
+  // ------------------------------------------------------------------------
+  // The case the demo corpus cannot produce, and therefore the case that broke.
+  //
+  // Phase 8 composed `stripBoilerplate` into `isSubstantivePrompt`, so a prompt
+  // that is nothing but `[Image: source: …/clipboard-….png]` stopped naming its
+  // session. The published receipt in `render/verify.ts` and the standalone
+  // `scripts/verify-audit.py` still did the plain `" ".join(text.split())`, so
+  // on a real archive the card printed 143 and the receipt printed 140 — the
+  // product's own answer to "nobody has to trust potsherd to check potsherd",
+  // disagreeing with potsherd, on the number that same commit had added.
+  //
+  // Every committed fixture and the whole demo corpus have zero such prompts,
+  // which is exactly why nothing caught it. This builds one.
+  it('the receipt strips the same furniture the product does', () => {
+    const home = tempDir('potsherd-boilerplate-');
+    const claude = path.join(home, '.claude');
+    fs.mkdirSync(path.join(claude, 'projects', '-tmp-p'), { recursive: true });
+    fs.writeFileSync(
+      path.join(claude, 'history.jsonl'),
+      [
+        // Deleted, and named by nothing but a pasted screenshot: a stub.
+        JSON.stringify({
+          sessionId: 'aaaaaaaa-1111-4111-8111-111111111111',
+          display: '[Image: source: /Users/dev/Downloads/clipboard-2026-06-20.png]',
+          project: '/tmp/p',
+          timestamp: 1_755_000_000_000,
+        }),
+        // Deleted, and genuinely named: not a stub.
+        JSON.stringify({
+          sessionId: 'bbbbbbbb-2222-4222-8222-222222222222',
+          display: 'why does the uploader allocate so much',
+          project: '/tmp/p',
+          timestamp: 1_755_000_001_000,
+        }),
+      ].join('\n') + '\n',
+    );
+
+    const card = JSON.parse(
+      execFileSync(process.execPath, [bin, 'audit', '--claude-dir', claude, '--json'], {
+        encoding: 'utf8',
+      }),
+    ) as Record<string, number>;
+    // One of the two, established by the fixture rather than assumed: if this
+    // is 0 or 2 the fixture stopped exercising the case and the rest is noise.
+    expect(card['deletedWithoutSubstantivePrompt']).toBe(1);
+
+    // The snippet, run AS PRINTED in a shell told nothing — `sh` inherits no
+    // flag, which is how this contract broke once before.
+    const { snippet } = JSON.parse(
+      execFileSync(process.execPath, [bin, 'audit', '--claude-dir', claude, '--verify', '--json'], {
+        encoding: 'utf8',
+      }),
+    ) as { snippet: string };
+    const out = execFileSync('sh', ['-c', snippet], { encoding: 'utf8' });
+    const stubs = /only commands and stubs\s+(\d+)/.exec(out);
+    expect(stubs, `the receipt printed no stub row:\n${out}`).not.toBeNull();
+    expect(Number(stubs![1])).toBe(card['deletedWithoutSubstantivePrompt']);
+
+    // And the standalone script that ships in the repo, which is a third
+    // implementation of the same rule and drifted independently.
+    const py = execFileSync(
+      'python3',
+      [path.join(repoRoot, 'scripts', 'verify-audit.py'), '--claude-dir', claude],
+      { encoding: 'utf8' },
+    );
+    const pyStubs = /only commands and stubs\s+(\d+)/.exec(py);
+    expect(pyStubs, `verify-audit.py printed no stub row:\n${py}`).not.toBeNull();
+    expect(Number(pyStubs![1])).toBe(card['deletedWithoutSubstantivePrompt']);
+  });
+
   it('leaves the default form alone, so a pasted snippet names no machine path', () => {
     // With no `--claude-dir` the environment variable is the honest answer, and
     // baking in a resolved home would put a machine path into something people
@@ -413,7 +483,12 @@ describe('audit --verify', () => {
     const { VERIFY_SNIPPET, renderVerify } = await import('@potsherd/core');
     // Nothing outside the standard library, and nothing from potsherd.
     expect(VERIFY_SNIPPET).not.toContain('potsherd');
-    expect(VERIFY_SNIPPET.match(/^import .*/gm)).toEqual(['import glob, json, os']);
+    // `re` joined them in phase 8: the receipt has to strip the same paste
+    // placeholders and tool envelopes the product strips before deciding a
+    // prompt named its session. All four are standard library, which is what
+    // this assertion is really about — it is pinned as an exact list so that
+    // a third-party import cannot arrive unnoticed.
+    expect(VERIFY_SNIPPET.match(/^import .*/gm)).toEqual(['import glob, json, os, re']);
     expect(VERIFY_SNIPPET).toContain('subagents');
 
     const out = renderVerify('~/.claude', new Theme({ color: false, width: 80 }));

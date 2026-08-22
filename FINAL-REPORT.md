@@ -27,8 +27,8 @@ own headline numbers, so nobody has to trust potsherd to check potsherd.
 
 ## 2. what exists
 
-**20 verbs:** `audit rescue guard index ls find show card tag pin unpin link
-stats ask graft setup export stack doctor` (+ `help`).
+**21 verbs:** `audit rescue guard index ls find show card tag pin unpin link
+stats ask graft setup export stack ignore unignore doctor` (+ `help`).
 
 | surface | what it is |
 |---|---|
@@ -38,7 +38,7 @@ stats ask graft setup export stack doctor` (+ `help`).
 | bridges | claude-mem, agentmemory and `CLAUDE.md`, read-only, federated into `find --with` |
 | adapters | Claude Code, Codex, Cursor, pi — verified. Gemini, opencode, Copilot — **documentation only** |
 
-**1,434 tests, 35 files.** Green on macOS and Ubuntu × Node 22 and 24, and green
+**1,532 tests, 38 files.** Green on macOS and Ubuntu × Node 22 and 24, and green
 again with `POTSHERD_SQLITE=node` — the whole suite on Node's own SQLite, which
 is what makes a plugin install work with nothing else on the machine.
 
@@ -120,7 +120,7 @@ And without a corpus at all:
 
 ```bash
 python3 scripts/check-privacy.py --selftest    # the guard proving it can fail
-pnpm test                                       # 1,434
+pnpm test                                       # 1,532
 POTSHERD_SQLITE=node pnpm test                  # the same, on Node's own sqlite
 ```
 

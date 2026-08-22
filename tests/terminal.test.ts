@@ -242,7 +242,17 @@ describe('--ascii', () => {
  */
 describe('the test count the documents quote', () => {
   it('is the same number in every file that quotes one', () => {
-    const files = ['README.md', 'FINAL-REPORT.md', 'CHANGELOG.md', 'phases/phase-7/HANDOFF.md'];
+    // Documents that describe the build AS IT IS. A signed-off phase record is
+    // deliberately not here: `phases/phase-7/HANDOFF.md` says the suite held
+    // 1,434 at `v1.0.0` and that remains true of `v1.0.0` forever. It was in
+    // this list while every document happened to agree, which made the list
+    // look right for the wrong reason — the moment phase 8 moved the live
+    // count, a correct historical record became a "disagreement".
+    //
+    // The rule this encodes: a number in a phase handoff is a measurement with
+    // a date on it; a number in the README is a claim about the current build.
+    // Only the second kind has to agree with the first kind of anything else.
+    const files = ['README.md', 'FINAL-REPORT.md', 'CHANGELOG.md', 'docs/08-STATE-OF-PLAY.md'];
     const found = new Map<string, Set<string>>();
     for (const f of files) {
       // A line that says `baseline` is quoting history — the handoff records

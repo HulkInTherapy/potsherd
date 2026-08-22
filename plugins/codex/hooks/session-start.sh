@@ -59,12 +59,20 @@ elif [ "$RC" -ne 0 ]; then
   exit 0
 fi
 
-# 3. The one-off model download. 32.4 MB is fmt.bytes(MODEL_DOWNLOAD_BYTES),
-#    the same string `potsherd index` prints; tests/hooks.test.ts pins them.
-MD="$PD/models"
-if [ -z "$(find "$MD/Xenova/bge-small-en-v1.5/onnx" -name '*.onnx' -size +1000k 2>/dev/null | head -1)" ]; then
-  say "potsherd: no embedding model on this machine yet. When this thread ends, the SessionEnd hook runs index --quiet, which downloads one: 32.4 MB, Xenova/bge-small-en-v1.5, into $MD. Once, detached, in the background. index --quiet prints nothing on its own, and SessionEnd cannot show you anything, which is why you are told now instead. To skip it: delete the SessionEnd entry from hooks.json and index by hand with --no-embed."
-fi
+# 3. There is no model download to announce, and there has not been since 8.6.
+#    This block used to warn that SessionEnd would fetch 32.4 MB, and offered
+#    "disable the SessionEnd hook" as the way out. Both halves were false the
+#    moment `index` stopped embedding by default: session-end.sh runs
+#    `index --session <id> --quiet` with no `--embed`, which downloads nothing,
+#    so the warning described a non-event and its remedy was to switch off the
+#    only thing the plugin does. Verified rather than reasoned about: running
+#    that command against an empty ~/.potsherd creates no models directory.
+#
+#    Nothing replaces it. A hook that announces "we are not downloading
+#    anything" every session is noise, and the place a reader actually needs
+#    the upgrade is where it becomes relevant -- `potsherd index` ends with
+#    `run potsherd index --embed for semantic search`, and `find`'s footer
+#    says the same on a text-only index. The plugin README carries it too.
 
 emit
 exit 0

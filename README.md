@@ -60,9 +60,9 @@ in this readme is typed in by hand. The demo corpus reproduces the counts, not
 the size — it holds about half a megabyte — so wherever a block below prints
 bytes, the bytes are the demo corpus's own and not the reference machine's.
 
-> **Status: v1.0.0. All eight phases shipped.** 20 verbs, a Claude Code plugin,
+> **Status: v1.0.0. All eight phases shipped.** 21 verbs, a Claude Code plugin,
 > an MCP server with six tools, adapters for seven coding agents, and bridges
-> into three other memory tools. 1,434 tests, green on macOS and Ubuntu across
+> into three other memory tools. 1,532 tests, green on macOS and Ubuntu across
 > Node 22 and 24 — and green again on Node's own SQLite, which is what makes a
 > plugin install work with nothing else on the machine.
 
@@ -261,6 +261,7 @@ potsherd find pgbouncer --ghosts only        # only what the sweep took
 potsherd find pgbouncer --sidechains only    # only what the subagents did
 potsherd find pgbouncer --harness codex      # claude, codex, cursor or pi
 potsherd find pgbouncer --file db/pool.ts    # sessions that touched a path
+potsherd index --embed                       # once; --vectors needs vectors
 potsherd find "the pooler decision" --vectors on
 potsherd find pgbouncer --json | jq -r '.sessions[0].resume'
 ```
@@ -398,27 +399,33 @@ potsherd index --full
 ```
 
 ```
-potsherd index · ~/.potsherd · 21 aug 2026
+potsherd index · ~/.potsherd · 22 aug 2026
 
   claude                       228   31 sessions · 197 sidechains · 439 exchang…
   codex                          0   not installed — ~/.codex/sessions
   cursor                         0   not installed — ~/.cursor/projects
   pi                             0   not installed — ~/.pi/agent/sessions
+  gemini                         0   not installed — ~/.gemini/tmp
+  opencode                       0   not installed — ~/.local/share/opencode
+  copilot                        0   not installed — ~/.copilot/session-state
 
   exchanges indexed            439   242 tool calls · 2 redacted
   ghosts indexed               299   2,971 prompts, searchable
-  secrets masked                 5   aws 1 · gcp 1 · github 1 · stripe 1 · …
+  masked this run                5   aws 1 · gcp 1 · github 1 · stripe 1 · …
   vectors                        —   text search only · no model, no network
 
-  full index                 251ms   228 parsed · 0 unchanged · 545 KB
+  full index                 300ms   228 parsed · 0 unchanged · 546 KB
 
   run  potsherd doctor  for parse coverage and every path read.
   run  potsherd index --embed  for semantic search (32 MB model, ~6 min, once)
 ```
 
-[`docs/screens/07-index.txt`](docs/screens/07-index.txt). Four harnesses are
-parsed — Claude Code including its sidechains, Codex, Cursor and pi — and each
-line names the directory it looked in, present or not.
+[`docs/screens/07-index.txt`](docs/screens/07-index.txt), captured with no
+flags, which since v1.1.0 means text only: no model, no download, no socket.
+**Seven** harnesses are read — Claude Code including its sidechains, Codex,
+Cursor, pi, Gemini, opencode and Copilot — and each line names the directory it
+looked in, present or not. The last line is the whole of the semantic-search
+upgrade; `potsherd index --embed` is the only thing that fetches a model.
 
 ```bash
 potsherd index                       # incremental; only what changed
@@ -624,9 +631,24 @@ demo corpus — and [`docs/demo-ask.gif`](docs/demo-ask.gif) is the same thing
 recorded, all fifty-two seconds of it, including the wait.
 
 Read the last block first. **`ask` reads a shortlist and says how big the
-shortlist was** — six of sixty-five here — because an answer drawn from six
+shortlist was** — six of sixty-one here — because an answer drawn from six
 sessions is not an answer about your whole archive, and a tool that hid that
 would be inviting you to over-trust it. `--k` widens it, at a model call each.
+
+**`--cheap` narrows it**: `k` 3, a haiku-class synthesizer, and a session's card
+in place of a long slice wherever a card exists. Measured over ten runs each of
+five questions on a real archive, against the default as a control:
+
+| | p50 | cost/run | answered | citations |
+|---|---|---|---|---|
+| default | 45.0 s | $0.139 | 10/10 | 45/45, 0 faults |
+| `--cheap` | 50.5 s | $0.065 | 7/10 | 19/19, 0 faults |
+
+So it is about **half the cost, and it is not faster** — it was called `--fast`
+until it was measured. The unit of latency here is a model call rather than a
+token: every reader is a separate process, so three readers finish in the wall
+time six do, and shrinking what each one reads moves nothing. It reads less, so
+it misses more, and the screen says so on every run that uses it.
 
 What happens between the question and the screen:
 
@@ -1157,7 +1179,7 @@ and because neither of them needs a `node_modules` to start.
 
 **That includes the database.** `better-sqlite3` is a native addon and cannot be
 vendored into one file, so potsherd falls back to `node:sqlite`, which Node
-ships itself. The whole 1,434-test suite runs green under it in CI, on the same
+ships itself. The whole 1,532-test suite runs green under it in CI, on the same
 matrix as the addon, because a fallback nobody exercises is not a fallback.
 `potsherd doctor` prints which one you are on.
 

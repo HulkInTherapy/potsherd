@@ -36,8 +36,19 @@ import { PHASE_3_GATE, judge, ruleLine, type GateInput } from '../evals/gate.js'
  * 25 queries):
  *
  * ```
- * pnpm evals                        -> exit 0   @5 bm25 11 vec 22 hyb 22 · @1 bm25 9 vec 6 hyb 11
- * pnpm evals -- --vector-weight 0   -> exit 1   @5 bm25 11 vec  5 hyb 11 · @1 bm25 9 vec 4 hyb  9
+ * pnpm evals                        -> exit 0   @5 bm25 12 vec 22 hyb 22 · @1 bm25 10 vec 6 hyb 11
+ * pnpm evals -- --vector-weight 0   -> exit 1   @5 bm25 12 vec  5 hyb 12 · @1 bm25 10 vec 4 hyb 10
+ *
+ * bm25 moved 11 -> 12 at recall@5 and 9 -> 10 at recall@1 late in phase 8,
+ * when titles stopped being pasted-screenshot placeholders and started being
+ * the words after them. These numbers are a RECORD of a run, not an input to
+ * one: the assertions below are written against numbers this file states
+ * itself, so that a shift in the corpus cannot quietly satisfy them. But a
+ * comment that describes a run nobody can reproduce is the failure this
+ * project keeps finding, so when they move, move them.
+ *
+ * NOTE the margin at recall@1 is now ONE: hybrid 11 against bm25 10. A single
+ * query flipping turns the release red, which is what a gate is for.
  * ```
  */
 

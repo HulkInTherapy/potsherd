@@ -796,6 +796,42 @@ describe('the tour', () => {
     }
   });
 
+  // The same argument, one level out. `stack` shipped unreachable because a
+  // hand-written list said it existed; then "20 verbs" survived into five
+  // published documents while the binary registered 21 and the list beside the
+  // number named 19 — off by one before phase 8 added `ignore` and `unignore`,
+  // and off by two after. Nothing enforced it, because the count lived only in
+  // prose. It is checked against commander's registry now, like the tour.
+  it('the verb count and list in the published documents match the registry', () => {
+    const registered = verbs();
+    // The premise, established rather than assumed: if this ever reads 0 the
+    // regex above stopped matching and every assertion below is vacuous.
+    expect(registered.length).toBeGreaterThan(15);
+
+    for (const doc of ['README.md', 'FINAL-REPORT.md', 'docs/08-STATE-OF-PLAY.md']) {
+      const text = fs.readFileSync(path.join(repo, doc), 'utf8');
+      // Any spelling: the README says `21 verbs,` in a status line and the
+      // others say `**21 verbs:**`. What matters is the number, wherever it
+      // is written, so the assertion does not depend on the markdown.
+      const claim = /(\d+) verbs/.exec(text);
+      expect(claim, `${doc} states no verb count`).not.toBeNull();
+      expect(Number(claim![1]), `${doc} says ${claim![1]} verbs`).toBe(registered.length);
+    }
+
+    // And the list itself, where one is spelled out: every registered verb has
+    // to appear in it. A count that agrees while the list omits two names is
+    // the defect this had.
+    for (const doc of ['FINAL-REPORT.md', 'docs/08-STATE-OF-PLAY.md']) {
+      const text = fs.readFileSync(path.join(repo, doc), 'utf8');
+      const listed = /\d+ verbs[^`]*`([^`]+)`/.exec(text);
+      expect(listed, `${doc} spells out no verb list`).not.toBeNull();
+      const names = new Set(listed![1]!.split(/\s+/).filter(Boolean));
+      for (const v of registered) {
+        expect(names.has(v), `${doc}'s verb list omits ${v}`).toBe(true);
+      }
+    }
+  });
+
   it('names every verb the binary actually registers', () => {
     const out = run([]).stdout;
     const missing = verbs().filter((v) => !new RegExp(`\\b${v}\\b`).test(out));

@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import re
 import os
 import sys
 
@@ -55,6 +56,37 @@ TITLE_STOPWORDS = {"clear", "continue", "ok", "yes", "hi", "y", "n"}
 MIN_TITLE_CHARS = 8
 
 
+# The same furniture `packages/core/src/search/snippet.ts` strips, restated
+# here rather than imported — this script exists so that nobody has to trust
+# potsherd to check potsherd, and a script that imported the rule would agree
+# with the product by construction instead of by measurement.
+#
+# It has to be restated *correctly*, though. It drifted once, in the very
+# commit that introduced the strip: on the reference archive potsherd printed
+# `only commands and stubs 143` and this script printed `140`, on the number
+# that commit had just added. `tests/audit.test.ts` now pins the two against a
+# fixture containing a prompt that is nothing but a pasted screenshot, which is
+# the case the demo corpus cannot produce and so could never have caught.
+BOILERPLATE = [
+    r"\[Image:[^\]]*\]?",
+    r"\[Pasted text[^\]]*\]?",
+    r"\[Request interrupted[^\]]*\]?",
+    r"</?(?:system-reminder|local-command-stdout|local-command-stderr|command-name"
+    r"|command-message|command-args|tool_use_error|user-prompt-submit-hook)>",
+    r"Caveat: The messages below were generated[^\n]*",
+    r"\bdata:[a-z/+.-]+;base64,[A-Za-z0-9+/=]+",
+    r"(?:[A-Za-z]:)?(?:/[\w.@+-]+){2,}/?",
+    r"\b[0-9a-f]{16,}\b",
+]
+
+
+def strip_furniture(text: str) -> str:
+    out = text
+    for pat in BOILERPLATE:
+        out = re.sub(pat, " ", out, flags=re.I)
+    return out
+
+
 def names_session(text: object) -> bool:
     """Whether this prompt names the session it opened.
 
@@ -63,7 +95,7 @@ def names_session(text: object) -> bool:
     """
     if not isinstance(text, str):
         return False
-    clean = " ".join(text.split())
+    clean = " ".join(strip_furniture(text).split())
     if not clean or clean.startswith("/"):
         return False
     if len(clean) < MIN_TITLE_CHARS:

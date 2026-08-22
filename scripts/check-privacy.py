@@ -857,6 +857,12 @@ DEBT: list[tuple[str, str, int, str]] = [
 #       MEASURED and rejected: 2.3% of the 3,013 real session ids in the
 #       reference archive are all digits (about 70 of them), so that fix trades
 #       two false positives for a seventy-id blind spot. `plans/08` rule 9.
+# The repository-wide ceiling on DISTINCT unaccounted id-shaped tokens. A
+# ratchet, like the pins below and like DEBT: lower it when it falls, never
+# raise it. It exists because the per-file pins are counts, and a count cannot
+# tell one unaccounted id from another -- see `unaccounted_total`.
+ID_INVENTORY_CEILING = 29
+
 ID_INVENTORY_PINS: list[tuple[str, int, str]] = [
     ('docs/upstream/PHASE-1-SCOUT.md', 14,
      '(s) codex/cursor/pi uuid stand-ins hand-written by the 8.1 rewrite. Their'
@@ -1227,8 +1233,23 @@ def inventory_line(inventory: dict[str, str | None], partial: bool) -> str:
     pinned_hits = sum(c for _p, c, _w in ID_INVENTORY_PINS)
     return (f'id inventory: {len(inventory)} distinct id-shaped tokens in tracked text; '
             f'{len(inventory) - un} accounted for ({breakdown}); '
-            f'{un} unaccounted, pinned at {pinned_hits} occurrences across '
-            f'{pinned_files} files.')
+            f'{un} unaccounted (ceiling {ID_INVENTORY_CEILING}), pinned at '
+            f'{pinned_hits} occurrences across {pinned_files} files.')
+
+
+def unaccounted_total(inventory: dict[str, str | None]) -> int:
+    """How many DISTINCT id-shaped tokens no derivable source explains.
+
+    Gated separately from ID_INVENTORY_PINS, because those pin a COUNT per
+    file and a count cannot see a substitution: swapping one unaccounted id
+    for a brand-new one inside an already-pinned file leaves every per-file
+    count identical, and the repository-wide figure was printed and never
+    checked. Measured that way, the total went 29 -> 30 and the guard still
+    exited 0.
+
+    So the total is a ratchet too. Lower it when it falls; it may never rise.
+    """
+    return sum(1 for source in inventory.values() if source is None)
 
 
 def main(argv: list[str]) -> int:
@@ -1316,10 +1337,15 @@ def main(argv: list[str]) -> int:
             stale.append(f'  {path}  [{rule}]  pinned at {expected}, now clean '
                          f'-- delete the DEBT line')
 
-    if not new and not stale:
+    # The repository-wide ceiling, checked only on a full sweep: a partial one
+    # has not looked at enough of the tree to say anything about a total.
+    over_ceiling = (not partial) and unaccounted_total(inventory) > ID_INVENTORY_CEILING
+
+    if not new and not stale and not over_ceiling:
         pins = (f'{len(DEBT)} pinned known violations all at their expected counts'
                 if DEBT else 'no pinned known violations left to carry')
-        print(f'privacy: {swept} tracked text files swept, no real-corpus content, {pins}.')
+        noun = 'file' if swept == 1 else 'files'
+        print(f'privacy: {swept} tracked text {noun} swept, no real-corpus content, {pins}.')
         print(inventory_line(inventory, partial))
         return 0
 
@@ -1333,6 +1359,17 @@ def main(argv: list[str]) -> int:
         print('\nPINNED COUNTS THAT NO LONGER MATCH '
               '(somebody scrubbed a file and left the pin behind):\n')
         print('\n'.join(stale))
+    if over_ceiling:
+        print(f'''
+MORE UNACCOUNTED ID-SHAPED TOKENS THAN THE CEILING ALLOWS:
+
+  {unaccounted_total(inventory)} distinct, ceiling {ID_INVENTORY_CEILING}.
+
+The per-file pins are COUNTS, so they cannot see a substitution: swap one
+unaccounted id for a new one inside a pinned file and every count still
+matches. This total is the ratchet that does see it. Either account for the
+new token -- add its source to ID_SOURCES if the repository can derive it --
+or repair the file. Lower the ceiling when it falls; never raise it.''')
     print()
     print(inventory_line(inventory, partial))
     print(f"""

@@ -269,7 +269,8 @@ example:
 example:
   potsherd find "pgbouncer"
   potsherd find "rate limiter" --json | jq -r '.sessions[0].resume'
-  potsherd find "the pooler decision" --vectors on   # force semantic search
+  potsherd index --embed                             # once, for semantic search
+  potsherd find "the pooler decision" --vectors on   # force it, once vectors exist
   potsherd find "pgbouncer" --explain                # why this order
 
 filters, one example each — they compose, and all of them are AND:

@@ -393,12 +393,38 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
     });
   });
 
-  it('quotes the model download at the size the CLI prints', () => {
-    // D13: the hooks said "33 MB" and `potsherd index` said "32.4 MB". One
-    // number cannot have two values, and neither copy may drift again.
-    const size = format.bytes(embeddings.MODEL_DOWNLOAD_BYTES);
-    const script = fs.readFileSync(path.join(pluginDir, 'hooks', 'session-start.sh'), 'utf8');
-    expect(script).toContain(`${size}, Xenova/bge-small-en-v1.5`);
-    expect(script).not.toMatch(/\b33 MB\b/);
+  it('promises no model download, because SessionEnd no longer causes one', () => {
+    // This assertion is the exact inverse of the one it replaces, and the
+    // inversion is the point.
+    //
+    // Phase 7 (D13) made the hooks quote the download at the same size the CLI
+    // prints, because "33 MB" and "32.4 MB" cannot both be right. Phase 8.6
+    // then flipped `index` to text-only, and `session-end.sh` runs
+    // `index --session <id> --quiet` with NO `--embed` — so the download the
+    // hooks announced stopped happening, while the test kept the sentence
+    // alive by pinning it. A test that pins a string can hold a false claim in
+    // place after the code beneath it has moved.
+    //
+    // What is asserted now: SessionStart makes no download promise at all, and
+    // SessionEnd really does index without embedding. The second half is what
+    // makes the first half true, so it is checked here rather than assumed.
+    // Comments may still explain the history; only what the hook SAYS counts.
+    const start = path.join(pluginDir, 'hooks', 'session-start.sh');
+    const speech = fs
+      .readFileSync(start, 'utf8')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('#'))
+      .join('\n');
+    expect(speech, start).not.toMatch(/downloads? one|no embedding model/i);
+    expect(speech, start).not.toContain(format.bytes(embeddings.MODEL_DOWNLOAD_BYTES));
+
+    // The half that makes the half above true: SessionEnd indexes without
+    // embedding, so there is no download for SessionStart to have promised.
+    const endPath = path.join(pluginDir, 'hooks', 'session-end.sh');
+    if (fs.existsSync(endPath)) {
+      const end = fs.readFileSync(endPath, 'utf8');
+      expect(end).toMatch(/index --session .*--quiet/);
+      expect(end).not.toContain('--embed');
+    }
   });
 });

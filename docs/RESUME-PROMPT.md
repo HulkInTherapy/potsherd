@@ -79,7 +79,7 @@ Protect it above features.
 │   ├── packages/core/            adapters, parser, store, index, redact, cards, recall,
 │   │                             ask, graft, open-threads, stack, link-suggest, setup, llm,
 │   │                             sqlite-driver (the two-driver abstraction, new in 7)
-│   ├── packages/cli/             the `potsherd` binary — 20 verbs
+│   ├── packages/cli/             the `potsherd` binary — 21 verbs
 │   ├── packages/mcp/             stdio MCP server, exactly 6 tools
 │   ├── packages/bridges/         claude-mem · agentmemory · notes · markdown export
 │   ├── plugins/claude-code/      2 skills, 1 agent, 3 hooks, bin shims, marketplace manifest,
@@ -93,7 +93,7 @@ Protect it above features.
 │   ├── docs/upstream/            PORT-LOG · PR-sidechain-flag · PHASE-1-SCOUT ← HAS A LEAK
 │   ├── scripts/                  make-screens.sh · make-cast.sh · make-demo-corpus.mjs ·
 │   │                             vendor-plugin.mjs · check-privacy.py · verify-audit.py
-│   ├── tests/                    1,434 tests, 35 files
+│   ├── tests/                    1,532 tests, 38 files
 │   └── phases/phase-N/           HANDOFF.md + VERIFICATION.md + WAVE.md per phase, 0–7
 └── potsherd-*/       12 kept evidence directories from real runs, beside the repo on purpose
                       (they hold real-corpus prose that must never enter the public repo)

@@ -163,11 +163,17 @@ shot 06-audit-sweep.txt  audit --sweep
 shot 02-rescue.txt       rescue --yes
 shot 03-audit-after.txt  audit
 
-# --no-embed on the index screen is deliberate and is what the readme claims:
-# it is the offline, no-model, seconds-not-minutes path, and it is the one a
-# reproducible capture can use — the embedding model is a download, and a
-# vectorised run would put a several-minute wall time on a committed screen.
-shot 07-index.txt        index --full --no-embed
+# No flag on the index screen, which is the change 8.6 made: text-only IS the
+# default now, and it is the offline, no-model, seconds-not-minutes path that a
+# reproducible capture can use — a vectorised run would put a download and
+# several minutes of wall time on a committed screen.
+#
+# It used to pass --no-embed, so the published screen said `skipped
+# (--no-embed)` and carried no upgrade line, and demonstrated a FLAG where the
+# readme's prose described the DEFAULT. --no-embed also suppresses the
+# `index --embed` offer, on purpose, so the screen was missing the one line
+# that tells a reader semantic search exists.
+shot 07-index.txt        index --full
 
 # Everything below reads the index 07 just built.
 shot 08-ls.txt           ls

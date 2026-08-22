@@ -12,12 +12,14 @@ Orchestrator 2 tried mirroring the folder in and the privacy guard refused withi
 `origin/main` agree. **The history was rewritten after the tag** to purge a prose leak, so any SHA
 older than that in an older document will not resolve — `git log --oneline` is the authority. Note that `v1.0.0`–`v1.4.2` **also** exist locally as
 `upstream-v*`: they are obra/episodic-memory's, pulled in with the fork, and were never on origin.
-**tests:** 1,434 green, 35 files · CI green on macos + ubuntu × node 22 + 24, **and again under
+**tests:** 1,532 green, 38 files · CI green on macos + ubuntu × node 22 + 24, **and again under
 `POTSHERD_SQLITE=node`** — the whole suite on Node's own SQLite
-**privacy guard:** `python3 scripts/check-privacy.py` — 505 files swept, **0 pinned** (34 at the
+**privacy guard:** `python3 scripts/check-privacy.py` — 506 files swept, **0 pinned** (34 at the
 start of phase 7, 14 at the start of phase 8), ratchet only shrinks. 25 probes in `--selftest`,
-including the transcript-record shape the `PHASE-1-SCOUT` leak had and an id inventory that
-accounts for every id-shaped token in the tree rather than blocklisting the ones already seen
+including the transcript-record shape the `PHASE-1-SCOUT` leak had. Its id rule is an **inventory**
+rather than a blocklist: 177 id-shaped tokens, **148 accounted for against a source the repo can
+derive, 29 not accounted for and pinned** at 130 occurrences across 35 files. Those 29 are an open
+item, not a clean bill — see `phases/phase-8/HANDOFF.md` §8
 
 ---
 
@@ -48,8 +50,8 @@ orchestrators and is a live privacy leak in a public repo.
 | 7 polish & release | the install story, the readme, 17 screens, 2 casts, `show --html`, `docs/release/`, `FINAL-REPORT.md` | **shipped v1.0.0** (7 defects) |
 | **8+** | **does not exist yet.** The master decides whether there is one, from `MASTER-REPORT.md` and `10-MASTER-VERIFICATION.md` | |
 
-**20 verbs ship today:** `audit rescue guard index ls find show card tag pin unpin link stats ask
-graft setup export stack doctor` (+ `help`).
+**21 verbs ship today:** `audit rescue guard index ls find show card tag pin unpin link stats ask
+graft setup export stack ignore unignore doctor` (+ `help`).
 
 ### what it does on the reference machine, measured
 

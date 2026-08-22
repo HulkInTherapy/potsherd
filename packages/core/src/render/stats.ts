@@ -79,8 +79,16 @@ export function renderStats(r: StatsReport, t: Theme = new Theme()): string {
     {
       label: 'vectors',
       value: fr.vecAvailable ? f.num(fr.vectors) : '—',
+      // `vecAvailable` says sqlite-vec LOADED, not that anything is embedded.
+      // Before 8.6 the two were nearly the same, because `index` embedded by
+      // default; after it, a fresh install loads the extension and has zero
+      // vectors, and this line said `hybrid search on` while the `find` beside
+      // it in the same docs/screens/ directory said `text search only`. Two
+      // committed screens of one corpus contradicting each other.
       note: fr.vecAvailable
-        ? `bge-small ${t.sep} ${f.num(fr.vectorsPending)} pending ${t.sep} hybrid search on`
+        ? fr.vectors > 0
+          ? `bge-small ${t.sep} ${f.num(fr.vectorsPending)} pending ${t.sep} hybrid search on`
+          : `bge-small ${t.sep} ${f.num(fr.vectorsPending)} pending ${t.sep} index --embed to build them`
         : f.clip(`${fr.vecReason ?? 'unavailable'} ${t.sep} text search only`, card.noteWidth()),
       tone: fr.vecAvailable ? 'ok' : 'dim',
     },

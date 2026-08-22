@@ -8634,7 +8634,7 @@ import process8 from "node:process";
 var VERIFY_SCRIPT_PATH = "scripts/verify-audit.py";
 var VERIFY_SCRIPT_URL = "https://github.com/HulkInTherapy/potsherd/blob/main/scripts/verify-audit.py";
 var VERIFY_SNIPPET = `python3 - <<'PY'
-import glob, json, os
+import glob, json, os, re
 root = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
 proj = os.path.join(root, "projects")
 
@@ -8646,9 +8646,39 @@ on_disk = {os.path.basename(p)[:-6] for p in glob.glob(os.path.join(proj, "*", "
 
 STOP = {"clear", "continue", "ok", "yes", "hi", "y", "n"}
 
+# Pasted screenshots, tool-result envelopes, bare absolute paths and content
+# hashes are real text in a prompt and name nothing, so they are taken off
+# before a prompt is judged to have named its session.
+#
+# This list is a deliberate duplicate of the tool's own: the whole point of
+# this script is that it shares no code with the thing it checks, so it has to
+# restate the rule rather than import it. It has to restate it CORRECTLY --
+# it drifted once, in the very commit that introduced the strip, and the two
+# disagreed by three on a real archive, on the number that commit had just
+# added. A test pins them together against a session whose only prompt is a
+# pasted screenshot, which is the case a tidy demo corpus can never produce.
+BOILERPLATE = [
+    r"\\[Image:[^\\]]*\\]?",
+    r"\\[Pasted text[^\\]]*\\]?",
+    r"\\[Request interrupted[^\\]]*\\]?",
+    r"</?(?:system-reminder|local-command-stdout|local-command-stderr"
+    r"|command-name|command-message|command-args|tool_use_error"
+    r"|user-prompt-submit-hook)>",
+    r"Caveat: The messages below were generated[^\\n]*",
+    r"\\bdata:[a-z/+.-]+;base64,[A-Za-z0-9+/=]+",
+    r"(?:[A-Za-z]:)?(?:/[\\w.@+-]+){2,}/?",
+    r"\\b[0-9a-f]{16,}\\b",
+]
+
+def strip_furniture(text):
+    out = text or ""
+    for pat in BOILERPLATE:
+        out = re.sub(pat, " ", out, flags=re.I)
+    return out
+
 def names(text):
     "does this prompt name the session it opened?"
-    c = " ".join((text or "").split())
+    c = " ".join(strip_furniture(text).split())
     return bool(c) and not c.startswith("/") and len(c) >= 8 and c.lower() not in STOP
 
 prompts, named = {}, set()
@@ -15043,7 +15073,13 @@ function renderStats(r, t = new Theme()) {
     {
       label: "vectors",
       value: fr.vecAvailable ? num(fr.vectors) : "\u2014",
-      note: fr.vecAvailable ? `bge-small ${t.sep} ${num(fr.vectorsPending)} pending ${t.sep} hybrid search on` : clip(`${fr.vecReason ?? "unavailable"} ${t.sep} text search only`, card.noteWidth()),
+      // `vecAvailable` says sqlite-vec LOADED, not that anything is embedded.
+      // Before 8.6 the two were nearly the same, because `index` embedded by
+      // default; after it, a fresh install loads the extension and has zero
+      // vectors, and this line said `hybrid search on` while the `find` beside
+      // it in the same docs/screens/ directory said `text search only`. Two
+      // committed screens of one corpus contradicting each other.
+      note: fr.vecAvailable ? fr.vectors > 0 ? `bge-small ${t.sep} ${num(fr.vectorsPending)} pending ${t.sep} hybrid search on` : `bge-small ${t.sep} ${num(fr.vectorsPending)} pending ${t.sep} index --embed to build them` : clip(`${fr.vecReason ?? "unavailable"} ${t.sep} text search only`, card.noteWidth()),
       tone: fr.vecAvailable ? "ok" : "dim"
     },
     {
@@ -26189,7 +26225,8 @@ example:
 example:
   potsherd find "pgbouncer"
   potsherd find "rate limiter" --json | jq -r '.sessions[0].resume'
-  potsherd find "the pooler decision" --vectors on   # force semantic search
+  potsherd index --embed                             # once, for semantic search
+  potsherd find "the pooler decision" --vectors on   # force it, once vectors exist
   potsherd find "pgbouncer" --explain                # why this order
 
 filters, one example each \u2014 they compose, and all of them are AND:

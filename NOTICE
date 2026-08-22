@@ -49,3 +49,16 @@ Generic fixes made here are prepared as upstream pull requests under
 
 Third-party dependencies retain their own licenses; see the `licenses`
 section of each package's `package.json` and `node_modules`.
+
+History rewrite, 22 August 2026
+-------------------------------
+`docs/upstream/PHASE-1-SCOUT.md` published real transcript prose — an assistant
+`thinking` block and a truncated `<user_query>`, both from one machine's private
+sessions — from phase 1 until 22 August 2026. The samples are synthetic now, and
+that path was removed from every commit with `git filter-repo` and force-pushed,
+so the leaked blob is not reachable from any commit on `origin/main`.
+
+The root commit after the rewrite is `6697ca9`, and the `v1.0.0` tag now points at
+`548b5b5`, whose tree no longer contains the file.
+**A clone taken before 22 August 2026 still holds the original blob.** Re-clone
+rather than pull if you have one.
