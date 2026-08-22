@@ -5,7 +5,13 @@ import { MASK_RE } from '../redact.js';
 import { ELISION_RE } from '../redact-elide.js';
 import { OPEN_THREAD_LABEL, type OpenThread } from '../open-threads.js';
 import { projectName } from '../recall.js';
-import { ANSWER_MAX_WORDS, STRICT_MIN_EVIDENCE, type AskEvidence, type AskResult } from '../ask.js';
+import {
+  ANSWER_MAX_WORDS,
+  STRICT_MIN_EVIDENCE,
+  type AskEvidence,
+  type AskReaderReport,
+  type AskResult,
+} from '../ask.js';
 
 /**
  * `potsherd ask` — moment 4 of `plans/05`: ANSWER / EVIDENCE / OPEN THREADS,
@@ -38,6 +44,120 @@ import { ANSWER_MAX_WORDS, STRICT_MIN_EVIDENCE, type AskEvidence, type AskResult
 
 /** `05`: "evidence quotes truncate at ~90 chars with `…`". */
 export const QUOTE_CHARS = 90;
+
+// -------------------------------------------------------- reader progress
+
+/**
+ * One reader, as it returns: `reader 3/6 · a498837d · found · 12.1s`.
+ *
+ * 8.7. `ask` is 44 to 180 seconds of one spinner, and a spinner is a claim
+ * that something is happening rather than evidence that it is. The defect is
+ * not the wall time — one agent-SDK call is 60 to 160 seconds and `03` §12
+ * records that as structural — it is that the wait carries no information. Six
+ * lines arriving over two minutes, each naming a session and saying whether it
+ * had anything, turn the wait into the fan-out actually being watched.
+ *
+ * Four rules the shape obeys, and each one is a way it could have gone wrong:
+ *
+ *   - **It fits.** 42 columns of grid, plus a running-cost column that is
+ *     dropped rather than clipped when the terminal cannot hold it, so the
+ *     line survives 80, 60, and a phone screenshot of a terminal. Nothing
+ *     here elides, because nothing here is long enough to need to.
+ *   - **It is a line, not a redraw.** No `\r`, no cursor movement, no
+ *     dependence on `isTTY`: piped, redirected or captured by CI it is the
+ *     same six lines in arrival order. A progress *bar* has to be erased and
+ *     an erase that does not happen is corruption; this cannot corrupt
+ *     anything because it never goes back.
+ *   - **The verdict is a word, not a colour.** `found` / `nothing` / `failed`
+ *     read identically with `NO_COLOR`, on a monochrome terminal and in a
+ *     screenshot. The colour is redundant with the word, which is the only
+ *     safe way to use one.
+ *   - **`failed` is its own word.** A reader that never answered and a reader
+ *     that read the session and found nothing are different facts about the
+ *     archive, and `render/ask.ts`'s {@link nothing} already carries the scar
+ *     from conflating them once.
+ *
+ * The caller decides *where* this goes. It must never be stdout — see
+ * `packages/cli/src/commands/ask.ts` — but that is a stream question, not a
+ * rendering one, and this function does not know about streams.
+ */
+export function readerLine(
+  r: AskReaderReport,
+  done: number,
+  total: number,
+  t: Theme = new Theme(),
+  spend?: { usd: number; estimated: boolean },
+): string {
+  // Four columns on one monospace grid (`05`): counter, session, verdict,
+  // elapsed. Padded rather than joined, because six of these arrive one under
+  // another over two or three minutes and a ragged column is the difference
+  // between a table and a log. The widths are the widest each field can be:
+  // `nothing` is 7, an id8 is 8 — except on the harnesses whose ids carry a
+  // `:` suffix, where `idTag` legitimately returns two characters, and an
+  // unpadded line then reads as corrupt output rather than as a short id.
+  const verdict = (r.error ? 'failed' : r.found ? 'found' : 'nothing').padEnd(7);
+  const counter = `${String(done).padStart(String(total).length)}/${total}`;
+  const sep = ` ${t.sep} `;
+  // The plain line is built first and measured first. `f.clip` counts
+  // characters, and an ANSI escape is characters — clipping the coloured
+  // string would cut a 39-column line at 39 *bytes of escape codes* and leave
+  // a dangling reset. So width is decided on the text, and colour is applied
+  // only to a line that was going to fit anyway.
+  const id = r.id8.padEnd(8);
+  const took = f.duration(r.ms).padStart(6);
+  // `03` §8 asks `ask` for a "cost cap and live cost display", and the bar
+  // this replaced carried the running spend in its note. It is a fifth column
+  // rather than a fifth line, and it is **dropped rather than clipped** when
+  // the terminal is too narrow for it: the four columns above are the receipt
+  // and the total is on the footer either way, so a 60-column terminal loses
+  // the running figure instead of losing the end of the grid.
+  const cost = spend ? `${f.money(spend.usd)}${spend.estimated ? ' est.' : ''}` : '';
+  const head = `reader ${counter}${sep}${id}${sep}${verdict}${sep}${took}`;
+  const room = t.width - INDENT.length;
+  const withCost = cost && head.length + sep.length + cost.length <= room;
+  const plain = withCost ? `${head}${sep}${cost}` : head;
+  if (plain.length > room) return t.asciiLine(INDENT + f.clip(plain, room, t));
+  const paint = r.error ? t.warn : r.found ? t.ok : t.dim;
+  const coloured =
+    t.dim(`reader ${counter}`) +
+    t.dim(sep) +
+    id +
+    t.dim(sep) +
+    paint.call(t, verdict) +
+    t.dim(sep) +
+    t.dim(took) +
+    (withCost ? t.dim(sep) + t.dim(cost) : '');
+  return t.asciiLine(INDENT + coloured);
+}
+
+/**
+ * 8.7: the one line `--fast` owes the user, on every screen, every time.
+ *
+ * `--fast` reads three sessions instead of six and hands a reader a card in
+ * place of most of a transcript. Both are real reductions in what was looked
+ * at, so both can turn an answer into a miss — and a miss on this verb does
+ * not look like a miss. It looks like an archive that had nothing, which is a
+ * false statement about the user's own history, printed by the one verb whose
+ * entire purpose is not making those.
+ *
+ * So the disclosure is not in `--help`, where it would be read once by people
+ * who did not need it. It is in the footer of every `--fast` render including
+ * the refusals, it leads with the consequence rather than the mechanism, and
+ * the consequence is the half that survives a clip to 60 columns.
+ */
+export function fastNote(r: AskResult, t: Theme): string {
+  const read = `${f.num(r.searched || r.matching)} ${f.plural(r.searched || r.matching, 'session')}`;
+  return (
+    INDENT +
+    t.dim(
+      f.clip(
+        `--fast ${t.sep} reads less and can miss ${t.sep} ${read}, cards over transcripts`,
+        t.width - INDENT.length,
+        t,
+      ),
+    )
+  );
+}
 
 /**
  * The height the whole block is built to fit, in rows.
@@ -457,6 +577,11 @@ function footer(
 ): string[] {
   const out: string[] = [];
   out.push(counts(r, t));
+
+  // Directly under the counts, so the number of sessions read and the reason
+  // it is that number are one glance apart. Before the drop/trim notes,
+  // because it qualifies every line below it as well as the counts above it.
+  if (r.fast) out.push(fastNote(r, t));
 
   // Dropped sentences are printed as a count and never as text: `dropped`
   // exists so a person can audit the filter, and reprinting the prose it
