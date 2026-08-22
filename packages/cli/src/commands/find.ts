@@ -1,4 +1,12 @@
 import { recall, renderFind, search as searchNs } from '@potsherd/core';
+import {
+  federate,
+  federationLine,
+  queryAgentMemory,
+  queryClaudeMem,
+  queryNotes,
+  type BridgeList,
+} from '@potsherd/bridges';
 import { print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 import { openIndex, parseFilters, parseLimit, type FilterFlags } from '../filters.js';
 
@@ -11,6 +19,8 @@ export interface FindCommandOptions extends GlobalOptions, FilterFlags {
   vectors?: string;
   /** `--explain` — print the fusion arithmetic instead of the snippets. */
   explain?: boolean;
+  /** Comma-separated bridge names from `--with`. */
+  with?: string;
 }
 
 /**
@@ -42,10 +52,31 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
       vectors: vectorMode(o),
     });
 
+    // `--with` federates other memory tools' hits alongside ours. `federate()`
+    // never mutates the local result — `federated.hits` and `.sessions` are
+    // exactly what `recall()` returned — so a caller that ignores the two new
+    // fields sees precisely what `find` has always produced. An absent bridge
+    // contributes a line and no hits: it cannot change the local ranking,
+    // cannot throw, and cannot slow `find` past its ceiling.
+    const wanted = (o.with ?? '')
+      .split(',')
+      .map((x) => x.trim().toLowerCase())
+      .filter(Boolean);
+    const lists: BridgeList[] = [];
+    if (wanted.includes('claude-mem')) lists.push(await queryClaudeMem(query, { limit: 20 }));
+    if (wanted.includes('agentmemory')) lists.push(await queryAgentMemory(query, { limit: 20 }));
+    if (wanted.includes('notes')) {
+      lists.push(
+        queryNotes(query, { limit: 20, ...(o.claudeDir ? { claudeDir: o.claudeDir } : {}) }),
+      );
+    }
+    const federated = lists.length > 0 ? federate(result, lists) : null;
+
     if (o.json) {
       printJson({
         query: result.query,
         filters,
+        ...(federated ? { bridges: federated.bridges, external: federated.external } : {}),
         // The same ledger the human view prints, so a script and a person are
         // reading one number. `--explain --json` is how the eval harness will
         // ask why a query lost without parsing a terminal layout.
@@ -95,7 +126,9 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
       return result.sessions.length ? 0 : 1;
     }
 
-    print(renderFind(result, themeFrom(o), new Date(), { explain: Boolean(o.explain) }));
+    const t = themeFrom(o);
+    print(renderFind(result, t, new Date(), { explain: Boolean(o.explain) }));
+    if (federated) print(`  ${t.dim(federationLine(federated.bridges))}`);
     // Exit 1 on no match, so `potsherd find x || echo none` works in a script.
     return result.sessions.length ? 0 : 1;
   } finally {

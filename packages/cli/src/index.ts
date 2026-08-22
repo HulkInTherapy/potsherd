@@ -234,7 +234,8 @@ example:
           .default('auto'),
       )
       .option('--no-vec', 'text search only — the same as --vectors off')
-      .option('--explain', 'show the per-list ranks and scores behind the order'),
+      .option('--explain', 'show the per-list ranks and scores behind the order')
+      .option('--with <tools>', 'also search other memory tools: claude-mem, agentmemory, notes'),
   ).addHelpText('after', `
 example:
   potsherd find "pgbouncer"
@@ -267,6 +268,7 @@ filters, one example each — they compose, and all of them are AND:
           vec: opts['vec'] !== false,
           explain: Boolean(opts['explain']),
           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
+          ...(opts['with'] ? { with: String(opts['with']) } : {}),
         }),
       o,
     );
