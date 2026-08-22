@@ -1,0 +1,217 @@
+T8.H — real-corpus session ids, and a guard that can now see them
+W7, 22 aug 2026, branch p8/w7-ids
+================================================================================
+
+WHAT THIS TASK FOUND
+--------------------
+
+The brief named two locations. A repository-wide inventory, cross-checked by
+hand against the READ-ONLY reference archive and the four live harness
+directories, found **25 distinct real session ids in 39 tracked files** — not
+two files, and not ten ids.
+
+  method, so the number can be re-derived rather than believed:
+    - every id-shaped token (a uuid, or an 8-hex run standing alone) in every
+      tracked text file AND in every tracked file NAME:   175 distinct id8s
+    - every session/thread uuid under ~/.potsherd/archive-manual-2026-08-21,
+      ~/.claude, ~/.codex, ~/.cursor, ~/.pi:               3,013 distinct id8s
+    - the intersection, matching full uuids in full and 8-hex tokens on the
+      id8 (which IS the identity potsherd resolves by):    25 ids, 39 files
+  collision risk on the 8-hex half: 3,013 x 175 / 2^32 = 1.2e-4 expected false
+  matches, and every match was read in context before it was acted on.
+
+The single worst one is not in `phases/**` at all. **One real session id from a
+paying developer's machine is the canonical eight-hex example for every verb**
+— `tag`, `pin`, `unpin`, `link`, `ls --linked-to`, `graft`, `card`, and the
+"needs a session id" error message — across `packages/cli`, `packages/core`,
+`packages/mcp`, seven test files, the vendored plugin bundles and one plugin
+skill. A second real id is the other end of the `link` example. Both are
+printed by `--help` on every user's terminal.
+
+It survived T5.9's family-(2) sweep, which replaced ONE such id with the demo
+corpus's `9c4d2f18` and left this one, and it survived every run of
+`check-privacy.py` since, because that rule was an enumerated blocklist.
+
+
+LINES NEEDED IN RESERVED FILES
+------------------------------
+
+These are mechanical substitutions. **No real id is written in this file** (the
+brief forbids it and so does the thing itself); each edit is given as a
+transformation of the token already at that line, which is unambiguous because
+each of these files contains exactly one such token family.
+
+The two replacement values are already blessed by `check-privacy.py`'s header
+and by `scripts/make-demo-corpus.mjs`:
+
+    TOKEN A  ->  9c4d2f18   (the demo corpus HERO session; the substitute the
+                             guard's header names, and the id already published
+                             in docs/screens/11-show.txt)
+    TOKEN B  ->  b2181bfe   (the demo corpus's open-thread session; the natural
+                             other end of a `link` example, and the pair the
+                             README already uses at README.md:565)
+
+TOKEN A is the 8-hex id that appears, in short and/or uuid form, at:
+
+    packages/cli/src/index.ts                387 406 407 408 410 426 428 441
+                                             458 459 461 532 534 608
+    packages/cli/src/session-ref.ts          19 20 34
+    packages/cli/src/filters.ts              100
+    packages/cli/src/commands/card.ts        76
+    packages/cli/src/commands/graft.ts       28 59 67 68
+    packages/cli/src/commands/link.ts        62
+    packages/cli/src/commands/tag.ts         30
+    packages/core/src/graft.ts               166 169 170 177 189 553 584 585
+                                             744 745 752
+    packages/core/src/browse.ts              280
+    packages/core/src/tags.ts                102
+    packages/mcp/src/tools/graft.ts          62 63
+    tests/open-threads.test.ts               659 660
+    tests/recall.test.ts                     543 544
+    tests/redact.test.ts                     193 533
+    tests/fixtures/secrets/agent-transcript.txt   40
+
+TOKEN B is the second 8-hex id in the `link` examples, at:
+
+    packages/cli/src/index.ts                458 459 461
+    packages/cli/src/commands/link.ts        62
+
+  ANCHOR, exact, in packages/cli/src/index.ts (line 458 today):
+      potsherd link <A> <B> --note "same pgbouncer fix"
+  becomes
+      potsherd link 9c4d2f18 b2181bfe --note "same pgbouncer fix"
+  and the two lines under it follow the same rule. Everything else on every
+  line is unchanged: only the token moves.
+
+  ANCHOR, exact, in packages/cli/src/commands/link.ts (line 62 today):
+      'potsherd link <A> <B>   (or: potsherd link --suggest)',
+  becomes
+      'potsherd link 9c4d2f18 b2181bfe   (or: potsherd link --suggest)',
+
+  `tests/redact.test.ts` and `tests/fixtures/secrets/agent-transcript.txt` hold
+  TOKEN A inside `exec-<A>-<the rest of that uuid>`. Substitute the whole
+  uuid, not the first eight characters: use
+      exec-9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43
+  which is the demo HERO's real uuid, so the fixture stays internally
+  consistent. `tests/fixtures/secrets/agent-transcript.txt` ALSO carries two
+  MORE real ids on its lines 38 and 41 (a `session <uuid> resumed from ...`
+  line and a `snapshot-<uuid>` line); both need the same treatment, and any
+  synthetic uuid will do because nothing asserts their values.
+
+FOUR SMALLER ONES, each one file:
+
+    packages/core/src/ask.ts             857  a real session cited in a
+                                              docstring as "the case this bug
+                                              was measured on". Replace the id
+                                              with `<a real session, id
+                                              withheld>` — the finding is the
+                                              behaviour, not the session.
+    packages/core/src/adapters/pi.ts     89   a real ~/.pi DAG record id.
+                                         222  a real ~/.pi session id in a
+                                              filename docstring. The docs/
+                                              half of this same pair was
+                                              repaired here; use the same
+                                              substitutes,
+                                              `2026-05-13T08-09-45-791Z_01a00001-1000-7000-8000-000000000001.jsonl`
+                                              and record id `aa000011`.
+    tests/adapters/pi.test.ts            65-66 the same real ~/.pi session id,
+                                              in a `sessionIdFromFilename`
+                                              assertion. Both sides move
+                                              together or the test lies.
+    tests/adapters/codex.test.ts         419  a real ~/.codex rollout id,
+    tests/parser.test.ts                 275 278 331  labelled in codex.test.ts
+                                              as "the one rollout on this
+                                              machine". Substitute a uuidv7 of
+                                              the same shape, e.g.
+                                              `01900000-0000-7000-8000-000000000001`,
+                                              in all four places at once.
+                                              (NOT `019f...`: the guard flagged
+                                              that draft of this very line —
+                                              `019f` is four distinct hex
+                                              digits and the entropy test stops
+                                              at three. `plans/09 §13.5`, again,
+                                              in the commit that wrote the rule.)
+    tests/graft.test.ts                  554  a real ghost session id in a
+                                              comment recording where a bug was
+                                              found. Withhold the id; the
+                                              comment's point is the bug.
+
+AND THEN, LAST:
+
+    pnpm build && node scripts/vendor-plugin.mjs
+      `plugins/claude-code/dist/{potsherd,mcp}.js` are esbuild output with the
+      comments intact, so they carry whatever `packages/` says. They are pinned
+      at 23 and 3 and they clear by re-vendoring AFTER packages/ is fixed, not
+      before. `plans/09 §13.5` is the precedent: the guard went red in the same
+      commit that added these bundles, for this exact reason.
+
+CHECK, without printing anything:
+      python3 scripts/check-privacy.py
+    every file above should disappear from ID_INVENTORY_PINS. Delete its line
+    only after the run says `pinned at N, found only 0` for it — the list is a
+    ratchet and deleting a line without that confirmation is how a ratchet
+    becomes a wish (`plans/09 §13.5`).
+
+
+WHAT W7 REPAIRED (16 files, no reserved file touched)
+-----------------------------------------------------
+
+  phases/phase-2/VERIFICATION.md      ten real ghost ids removed; the finding
+                                      (5 prompt-side / 1 borderline / 4
+                                      overstep, no card asserting the assistant
+                                      side, 62 of 62 `outcome: unknown`) is a
+                                      rate over ten cards and never depended on
+                                      which ten. Visible substitution note.
+  phases/phase-2/HANDOFF.md           the id of the worst-overstepping ghost.
+  phases/phase-4/evidence-T4.3/
+    run3-about-clip.txt               RE-RUN against the demo corpus.
+    run4-ghost.txt                    RE-RUN. The demo ghost has 241 prompts,
+                                      the same count the original had.
+    run5-no-model-json.txt            RE-RUN. It was a withheld stub with no
+                                      output at all; it now shows the whole
+                                      artefact. (It carried no id: that item on
+                                      the brief's list was a FALSE ALARM, and
+                                      it is recorded as one.)
+    run7-tight-budget-trim.txt        RE-RUN. Reproduces the finding line for
+                                      line: 8 body lines dropped, the banner
+                                      never trimmed, under the ceiling.
+    README.txt                        four real ids removed from the run table
+                                      and the narrative; every count, budget,
+                                      citation ratio and wall time is the
+                                      original measurement.
+    help.txt                          SUBSTITUTION, not a re-run: `graft
+                                      --help` still prints the real id, because
+                                      packages/ is reserved. Said on its face.
+  phases/phase-4/registration-T4.3.txt  the same id in the registered --help.
+  phases/phase-5/registration-T5.3.txt  a live agent-session id8 printed as an
+                                      `ls` row identity. Truncating a session
+                                      id to 8 characters does not de-identify
+                                      it: 8 characters IS the id.
+  phases/phase-5/registration-T5.4.txt  a real ~/.codex rollout id on a
+                                      `harness/id:` line.
+  phases/phase-5/registration-T5.7.txt  two real ~/.pi DAG ids, plus an
+                                      AMENDMENT to that file's ruling that they
+                                      were harmless because "no guard can tell
+                                      them from synthetic ones".
+  phases/phase-5/evidence-orchestrator/graft-changes-the-answer.md
+                                      a live agent-session id on a `session
+                                      <id8>` trailer.
+  docs/upstream/PHASE-1-SCOUT.md      SEVEN real ~/.pi DAG record ids — four in
+                                      the leaf-id table, three in the parallel-
+                                      call chain example. Same file as the
+                                      6-phase prose leak, one level down the
+                                      record tree, and nothing had looked.
+  plugins/claude-code/skills/remembering-sessions/SKILL.md
+                                      the canonical example id, in the skill
+                                      text a model reads.
+  scripts/check-privacy.py            THE GUARD ITSELF was publishing a real
+                                      id: its `--selftest` fixture spelled out,
+                                      in full, the id whose hash is the first
+                                      entry of REAL_CORPUS_ID_HASHES — four
+                                      hundred lines below the comment
+                                      explaining that ids are hashed so the
+                                      guard never carries one.
+
+Every phase record keeps its structure and its numbers and carries a visible
+note saying what was done and when. Nothing was deleted; nothing was moved into
+DEBT, which stays at zero.

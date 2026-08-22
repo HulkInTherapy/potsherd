@@ -42,7 +42,7 @@ training — it exists only in that fixture.
 
 TOOL: Bash | ${CLAUDE_PLUGIN_ROOT}/bin/potsherd graft 3a72e9c5 --potsherd-dir … --no-model --budget 900
 TOOL: Bash | ls …/.potsherd/graft-3a72*.md && cat …/.potsherd/graft-3a72*.md
-                                       3 turns · success · session df88d40b
+                                       3 turns · success · session <id8 withheld>
 ```
 
 The second call is the one that matters and it was not asked for in the prompt: `03 §9` says *"in
@@ -113,3 +113,11 @@ here by accident.
   (`04-DECISIONS.md`, 22 aug: `claude -p` answers `Not logged in` under a relocated `HOME`).
 - A **marketplace** install remains non-functional (`dist/` is gitignored, the npm package is
   unpublished). This used `--plugin-dir` against a built checkout.
+
+---
+
+_T8.H, 22 aug 2026 — SUBSTITUTION: the trailing `session <id8>` above was the live Claude Code
+session id of the agent that ran this transcript, printed in the clear. A session uuid is family (2)
+corpus identity in `scripts/check-privacy.py`'s terms, and it is one of the build's own sessions
+rather than a user's, which changes who it exposes and not whether it is exposed. The id is
+withheld; the turn count, the verdict and every tool line are the captured ones._

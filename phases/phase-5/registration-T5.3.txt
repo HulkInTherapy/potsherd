@@ -374,7 +374,13 @@ packages/ was touched, so the CI privacy guard has nothing to catch.
       `potsherd ls --since 1h`. After one hook firing:
 
           t+0s  ls --since 1h total=1
-          [ { "id": "169ced20", "status": "live", "prompts": 22 } ]
+          [ { "id": "<id8 withheld>", "status": "live", "prompts": 22 } ]
+
+      (T8.H, 22 aug 2026: the id8 above was the LIVE session of the worker that
+      ran this task, printed in the clear. Truncating a session id to 8
+      characters does not de-identify it — 8 characters IS the id potsherd
+      resolves by. It is withheld; the shape of the row, the status and the
+      prompt count are the measured ones.)
 
       (id truncated to 8 chars; no title, project name or transcript prose from
       the reference corpus appears in any committed file.)

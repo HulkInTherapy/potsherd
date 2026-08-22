@@ -346,7 +346,7 @@ THE HOOKS THEMSELVES, extracted from `plugins/codex/hooks/hooks.json` and run:
         "reason":"other","transcript_path":null}
        -> returned 0 immediately, and the detached index landed the thread:
           sessions in the throwaway index: 1
-          harness/id: codex 019f84ff
+          harness/id: codex <id8 withheld>   (T8.H: a real ~/.codex rollout id)
 
   So the SessionEnd hook is verified END TO END against real codex data, on
   everything except codex itself firing it.

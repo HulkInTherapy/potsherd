@@ -106,7 +106,7 @@ were fixed in T2.7, one was fixed by the verifier itself, and one is a plan corr
 | **the recall fusion loses to bm25 alone** — measured three times now | open, well-diagnosed | phase 3, whose gate is exactly this |
 | **the estimator is still ~2× optimistic** even after the re-fit: it quoted 2m 52s / $0.473 for a 10-ghost run that took 5m 5s / $0.957. Inside the 2× acceptance bar, but the bias is one-directional | open | the self-correction should close it as runs accumulate; re-check in phase 7 |
 | **`scripts/make-screens.sh` fails its own assertion** — `13-find-redacted.txt` comes back with no mask because the `find` snippet now elides mid-mask; `09-find.txt` also reshuffles where bm25 scores tie | open | phase 7 owns the screens; fix the elision so a mask is never cut |
-| **one ghost summary still oversteps** (`17a0f2e0`, a journaling session whose prompts narrate the person's own life; the summary repeats them as completed facts). 9 of 10 are clean | open, small | phase 7 polish |
+| **one ghost summary still oversteps** (id withheld — T8.H, 22 aug 2026: a session id is family (2) corpus identity and this repo is public; the ghost is the one `phases/phase-2/VERIFICATION.md` reports as the worst of its ten. It is a personal-journal session whose prompts narrate the person's own life, and the summary repeats them as completed facts). 9 of 10 are clean | open, small | phase 7 polish |
 | `03 §12`'s numbers were estimator output, not measurement | **corrected in the plan** | — |
 | `docs/screens/` has no `ls`-with-cards or before/after shot | open | phase 7 |
 | `card --all` at full scale is ~1h 25m and ~$22 equivalent ($0 charged) | recorded miss vs the 15 min / $2 target | phase 7 records it in the README |

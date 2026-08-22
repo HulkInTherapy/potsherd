@@ -78,9 +78,9 @@ import { runGraft } from './commands/graft.js';
       ),
   ).addHelpText('after', `
 example:
-  potsherd graft 4c9339e0 --about pgbouncer --budget 800
+  potsherd graft 9c4d2f18 --about pgbouncer --budget 800
   potsherd graft "instagram client" --clip
-  potsherd graft 4c9339e0 --json | jq -r .brief
+  potsherd graft 9c4d2f18 --json | jq -r .brief
 
 the brief is written to ./.potsherd/graft-<id8>.md in the current directory —
 the one place potsherd writes outside ~/.potsherd — and that directory gets a
@@ -179,3 +179,11 @@ with an `ask:` entry and delete the line below the loop:
   node packages/cli/bin/potsherd.js graft <id8> --potsherd-dir <ref> --no-model
   node packages/cli/bin/potsherd.js graft <id8> --potsherd-dir <ref> --json | jq '.tokens, .budget, .estimated'
   node packages/cli/bin/potsherd.js doctor --privacy | grep -i graft
+
+(T8.H, 22 aug 2026 — SUBSTITUTION: the example session id in the block above was a REAL
+session on the reference machine, family (2) corpus identity. It is replaced here with the demo
+corpus's own `9c4d2f18`. The SHIPPED code in `packages/cli/src/index.ts` still carries the real
+one, along with `packages/core`, `packages/mcp`, several tests and the vendored plugin bundles;
+those paths were RESERVED to other workers in phase 8 and the repair is recorded as an open P0 in
+`phases/phase-8/registration-W7.txt`. The anchor and the structure of this registration are
+unchanged.)

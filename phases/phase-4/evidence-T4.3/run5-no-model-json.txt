@@ -1,16 +1,99 @@
-run5-no-model-json.txt
+# reproduced against the synthetic demo corpus on 2026-08-22 (T8.H); the
+# original was captured against the live corpus in phase 4 and its headline
+# numbers are preserved below. what this file used to hold was a WITHHELD
+# stub — no output at all, just the reason the output could not be published.
+# run against the demo corpus the whole artefact can be shown, which is the
+# point of having a demo corpus.
+#
+# (a check worth recording: this file was on T8.H's suspect list, and on
+# inspection it carried NO session id — the withheld stub named none. The
+# false alarm is disproved. It is re-run anyway, because a stub is not
+# evidence.)
+#
+#   the original run, phase 4, 21 aug 2026, live corpus (session id withheld —
+#   it indexes a real transcript):
+#     tokens 368 of 1,200 (est., chars/3.6) · citations 3/3 · exchanges 9
+#     NO MODEL CALL, <1 s
+#     kept unredacted beside the repo; its path is in README.txt in this folder
+#
+# reproduced with:
+#   node packages/cli/bin/potsherd.js card  9c4d2f18   (to have a card to read)
+#   node packages/cli/bin/potsherd.js graft 9c4d2f18 --no-model --json \
+#     --claude-dir   <demo>/.claude    built by scripts/make-demo-corpus.mjs
+#     --potsherd-dir <demo>/.potsherd
+#   binary v1.0.0.  kept evidence dir: /tmp/w7-ids-evidence.1yC9gR
+#
+# THE FINDING IS UNCHANGED and is visible on the face of the JSON below:
+# `--no-model` makes NO model call — `spend.calls` is 0, `spend.usd` is 0,
+# `ms` is 11 — and the brief is labelled `**unsummarised.**` so no reader can
+# mistake the card verbatim for a summary. Every citation still resolves.
+#
+# THIS IS A RE-RUN, NOT AN EDITED PASTE. the session, the project, the title
+# and every word of the brief are synthetic.
 
-  WITHHELD FROM THE PUBLIC REPO — this artefact reproduces the *content* of real
-  sessions from the reference corpus, which includes a named third party's
-  business plans and a personal tweet. `00-README.md`'s secrets rule already
-  says committed artefacts use the synthetic demo corpus, not the live one;
-  phase 4 extends that from screenshots to every committed artefact.
-
-  The file itself is kept, unredacted and re-examinable, beside the repo at:
-
-      /Users/zebra/randomness/potsherd-p4-evidence/T4.3/run5-no-model-json.txt
-
-  Evidence that cannot be re-examined is not evidence (`08` rule 5) — but
-  re-examinable does not mean published. The numbers this run produced are in
-  `README.txt` and in `phases/phase-4/HANDOFF.md`; only the transcript-derived
-  prose is held back.
+{
+  "sessionId": "9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43",
+  "id8": "9c4d2f18",
+  "project": "data-pipeline",
+  "harness": "claude",
+  "about": null,
+  "exchanges": 8,
+  "date": "2026-08-21",
+  "budget": 1200,
+  "tokens": 559,
+  "estimated": true,
+  "brief": "# Pool the ingest workers through pgbouncer\n\nBrief from a past session. Written by potsherd; every claim carries `[9c4d2f18@seq]`, the exchange it came from.\n\n> **unsummarised.** No model call was made — no model was used. What follows is the stored card and transcript verbatim, not a summary.\n\n- you: the ingest workers open one postgres connection per task and we are hitting max_connections again agent: Confirmed from the pool metrics: 412 slots requested against a 400 limit at peak, so the [9c4d2f18@1]\n- you: put pgbouncer in front of it in transaction pooling mode agent: That will hold, but transaction pooling drops session state: SET, LISTEN/NOTIFY and server-side prepared statements stop surviving [9c4d2f18@2]\n- you: we hit the prepared statement problem before, in payments-api. what did we land on? agent: Nothing about it is in this repository. The change here is one line either way: the client has to stop [9c4d2f18@3]\n- you: set statement_cache_size to 0 and add a test that runs two transactions over one server connection agent: Done. The test fails against the old client config with \"prepared statement already [9c4d2f18@4]\n- you: what happens to an in-flight batch when pgbouncer restarts? agent: The client sees a closed connection rather than a rollback, so a retry replays a partially applied batch unless the writer is [9c4d2f18@5]\n- you: make the batch writer idempotent then — key it on the source digest agent: Keyed on the sha256 of the source file plus the row offset, so a replay is a no-op instead of a double insert. [9c4d2f18@6]\n- you: write the pooling decision down in the readme so nobody relearns it a third time agent: Added a \"connection pooling\" section: transaction mode, pool_size 24, and statement_cache_size=0 called out [9c4d2f18@7]\n- you: run the suite and commit agent: All green: 214 passed. Committed as \"ingest: pool through pgbouncer in transaction mode\". [9c4d2f18@8]\n\n---\n\nsource: claude 9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43 · 8 exchanges · 2026-08-21\n",
+  "path": "/private/tmp/w7-ids-evidence.1yC9gR/cwd/.potsherd/graft-9c4d2f18.md",
+  "clipped": false,
+  "citations": [
+    {
+      "id8": "9c4d2f18",
+      "seq": 1,
+      "resolves": true
+    },
+    {
+      "id8": "9c4d2f18",
+      "seq": 2,
+      "resolves": true
+    },
+    {
+      "id8": "9c4d2f18",
+      "seq": 3,
+      "resolves": true
+    },
+    {
+      "id8": "9c4d2f18",
+      "seq": 4,
+      "resolves": true
+    },
+    {
+      "id8": "9c4d2f18",
+      "seq": 5,
+      "resolves": true
+    },
+    {
+      "id8": "9c4d2f18",
+      "seq": 6,
+      "resolves": true
+    },
+    {
+      "id8": "9c4d2f18",
+      "seq": 7,
+      "resolves": true
+    },
+    {
+      "id8": "9c4d2f18",
+      "seq": 8,
+      "resolves": true
+    }
+  ],
+  "spend": {
+    "calls": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "usd": 0,
+    "ms": 0,
+    "estimatedInputCalls": 0
+  },
+  "ms": 11
+}
