@@ -155,11 +155,8 @@ export function render(r: stack.StackReport, t: Theme, o: StackOptions = {}): st
       "refused on purpose. no injection at SessionStart; that is claude-mem's " +
         'lane, and CLAUDE.md is free and already on.',
     ],
-    [
-      'also',
-      'no knowledge graph (hindsight and greplica do that), no server, ' +
-        'no account, no telemetry.',
-    ],
+    ['also', 'no knowledge graph. hindsight and greplica do that.'],
+    ['', 'no server, no account, no telemetry. sqlite in ~/.potsherd.'],
   ];
   for (const [label, text] of notDone) L.push(...hang(label, 16, text, 4, t.width));
   L.push('');

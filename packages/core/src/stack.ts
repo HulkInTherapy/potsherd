@@ -538,7 +538,7 @@ export function recommend(detections: readonly Detection[]): Recommendation {
   const over = overlaps(detections);
   const inject = over.find((o) => o.kind === 'double-inject');
   if (inject) actions.push(`pick one of ${inject.tools.join(', ')} to inject at start; turn the others off.`);
-  if (!present.has('potsherd')) actions.push('potsherd rescue — before the next 30-day sweep runs.');
+  if (!present.has('potsherd')) actions.push('run potsherd rescue before the next 30-day sweep does.');
   if (present.has('agentmemory')) {
     actions.push('agentmemory import-jsonl only sees what the sweep left. run potsherd audit for the rest.');
   }
