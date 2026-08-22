@@ -1,30 +1,58 @@
-potsherd graft · claude 3ec2f5ca · 2026-08-13
+# reproduced against the synthetic demo corpus on 2026-08-22; the original was
+# captured against the live corpus in phase 4 and its headline numbers are
+# preserved below. this run is the no-clipboard-tool path: `--clip` with no
+# pbcopy, wl-copy, xclip or xsel on PATH, and `--no-model` so the card prints
+# verbatim. no model was called for it then and none was called for it now, so
+# this one reproduces exactly, mechanism for mechanism.
+#
+#   the original run, phase 4, 21 aug 2026, live corpus (session id withheld — it indexes a real transcript):
+#     tokens 368 of 1,200 (est., chars/3.6) · citations 3/3 · exchanges 9
+#     no model call · <1s
+#
+# reproduced with:
+#   env PATH=<node's dir only> node packages/cli/bin/potsherd.js \
+#     graft 9c4d2f18 --clip --no-model \
+#     --claude-dir   <demo>/.claude    built by scripts/make-demo-corpus.mjs
+#     --potsherd-dir <demo>/.potsherd
+#   PATH is stripped to node's own directory so that the clipboard probe finds
+#   nothing — on this machine pbcopy exists, and the branch under test is the
+#   one where it does not. binary v1.0.0.
+#   kept evidence dir: /tmp/w1-guard-evidence.yduKmU
+#
+# THIS IS A SUBSTITUTION. the shape is the original's; the session, the project
+# and every word of the brief are synthetic.
 
-  [session title withheld — real client work]
+potsherd graft · claude 9c4d2f18 · 2026-08-21
 
-  tokens                       368   of 1200 budget  ·  est. (chars/3.6)
-  citations                    3/3   distinct, and all resolve
-  exchanges                      9   Fulcrum
-  wrote, unsummarised                /private/tmp/claude-501/-Users-zebra-rando…
+  Pool the ingest workers through pgbouncer
+
+  tokens                       559   of 1200 budget  ·  est. (chars/3.6)
+  citations                    8/8   distinct, and all resolve
+  exchanges                      8   data-pipeline
+  wrote, unsummarised                /private/tmp/w1-guard-evidence.yduKmU/graf…
   no model call — no model was used
 
   no clipboard tool found (pbcopy, wl-copy, xclip, xsel) — the brief is on disk
 
-────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────
 
-  [the brief body that printed here is withheld]
+# Pool the ingest workers through pgbouncer
 
-  WITHHELD FROM THE PUBLIC REPO — this artefact reproduces the *content* of real
-  sessions from the reference corpus, which includes a named third party's
-  business plans and a personal tweet. `00-README.md`'s secrets rule already
-  says committed artefacts use the synthetic demo corpus, not the live one;
-  phase 4 extends that from screenshots to every committed artefact.
+Brief from a past session. Written by potsherd; every claim carries `[9c4d2f18@seq]`, the exchange it came from.
 
-  The file itself is kept, unredacted and re-examinable, beside the repo at:
+> **unsummarised.** No model call was made — no model was used. What follows is the stored card and transcript verbatim, not a summary.
 
-      /Users/zebra/randomness/potsherd-p4-evidence/T4.3/run6-clip-no-tool.txt
+- you: the ingest workers open one postgres connection per task and we are hitting max_connections again agent: Confirmed from the pool metrics: 412 slots requested against a 400 limit at peak, so the [9c4d2f18@1]
+- you: put pgbouncer in front of it in transaction pooling mode agent: That will hold, but transaction pooling drops session state: SET, LISTEN/NOTIFY and server-side prepared statements stop surviving [9c4d2f18@2]
+- you: we hit the prepared statement problem before, in payments-api. what did we land on? agent: Nothing about it is in this repository. The change here is one line either way: the client has to stop [9c4d2f18@3]
+- you: set statement_cache_size to 0 and add a test that runs two transactions over one server connection agent: Done. The test fails against the old client config with "prepared statement already [9c4d2f18@4]
+- you: what happens to an in-flight batch when pgbouncer restarts? agent: The client sees a closed connection rather than a rollback, so a retry replays a partially applied batch unless the writer is [9c4d2f18@5]
+- you: make the batch writer idempotent then — key it on the source digest agent: Keyed on the sha256 of the source file plus the row offset, so a replay is a no-op instead of a double insert. [9c4d2f18@6]
+- you: write the pooling decision down in the readme so nobody relearns it a third time agent: Added a "connection pooling" section: transaction mode, pool_size 24, and statement_cache_size=0 called out [9c4d2f18@7]
+- you: run the suite and commit agent: All green: 214 passed. Committed as "ingest: pool through pgbouncer in transaction mode". [9c4d2f18@8]
 
-  Evidence that cannot be re-examined is not evidence (`08` rule 5) — but
-  re-examinable does not mean published. The numbers this run produced are in
-  `README.txt` and in `phases/phase-4/HANDOFF.md`; only the transcript-derived
-  prose is held back.
+---
+
+source: claude 9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43 · 8 exchanges · 2026-08-21
+
+  run  potsherd show 9c4d2f18  read the session this came from, end to end

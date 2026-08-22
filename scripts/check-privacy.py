@@ -95,6 +95,39 @@ Rule by rule, what it catches and what it does not:
                    between family (1) and the repository, and family (1) is
                    free-form prose. Treat it as a reminder, not a filter.
 
+  transcript-record
+                   the one shape of family (1) that a regex CAN see, added in
+                   phase 8 after `docs/upstream/PHASE-1-SCOUT.md` published a
+                   real `~/.pi` assistant `thinking` block for six phases and
+                   every rule above passed it every time. A transcript record
+                   is a one-line JSON object -- `"thinking":"`, `"role":
+                   "assistant"`, `"parentId":` or `<user_query>` -- pasted into
+                   `docs/**` as a format sample. When one carries a prose
+                   payload over 100 characters and nothing within 60 lines
+                   declares the samples synthetic, this fires.
+                   It does not judge whether the prose is real; nothing here
+                   can. It enforces a POLICY: say what a sample is, next to it.
+                   STILL OPEN: the declaration is an assertion by whoever
+                   committed the file, so typing the word walks around it. That
+                   is a real limit and, per this file's own history, worth
+                   having anyway -- the six-phase leak was nobody being asked
+                   the question, not somebody answering it falsely. Also open:
+                   a payload UNDER 100 characters is invisible, and a record
+                   split across several lines by a formatter is not matched.
+
+
+THE COMMAND
+===========
+
+  check-privacy.py              sweep every tracked text file. This is CI.
+  check-privacy.py PATH ...     sweep only these paths.
+  check-privacy.py --selftest   run the probes; sweep nothing.
+
+Anything else exits 2 with a usage message. It used to be read as a FILE NAME:
+`--list-pins` was swept as a path, found missing, and every pinned violation was
+reported as "now clean -- delete the DEBT line". A guard that is confidently
+wrong is worse than no guard, because its advice was to break the ratchet.
+
 
 ALLOW vs DEBT
 =============
@@ -105,7 +138,9 @@ justified in place and is expected to stay forever.
 DEBT pins a known violation that a specific task was not allowed to fix, by
 exact count. Both directions fail: a count that GREW is a new leak, a count that
 SHRANK means somebody scrubbed it and forgot to unpin it. That makes the list a
-ratchet rather than a place to hide things.
+ratchet rather than a place to hide things. It ran 34 -> 14 -> 0 across phases
+7 and 8 and is EMPTY as of 22 aug 2026; an empty DEBT means every violation this
+script can see has been repaired, and nothing more than that.
 """
 
 from __future__ import annotations
@@ -278,6 +313,109 @@ def find_corpus_title(line: str, nxt: str = '') -> list[str]:
     return hits
 
 
+# ------------------------------------------ family (1): a transcript RECORD
+#
+# WHY THIS RULE EXISTS. `docs/upstream/PHASE-1-SCOUT.md` published a real
+# assistant `thinking` block from `~/.pi` -- with its `id`, its `parentId` and
+# its timestamp -- and a real truncated `<user_query>` from `~/.cursor`, to a
+# public repository, from phase 1 until 22 aug 2026. Phase 5 found it, scrubbed
+# the ids and the title, assigned the prose scrub, and the prose scrub was never
+# done. Every rule above passed the file every time, for the reason this file's
+# own header gives: no regex recognises prose.
+#
+# A regex still cannot read prose. But the leak was not loose prose -- it was a
+# TRANSCRIPT RECORD: a one-line JSON object, pasted into a fenced block as a
+# format sample, carrying somebody's words in a `thinking` or `text` field. That
+# shape a regex can see.
+#
+# WHAT IT ACTUALLY ENFORCES, said plainly. Not "is this prose real?", which is
+# undecidable here, but: **a transcript record sample carrying a substantial
+# prose payload must be declared synthetic near where it appears.** That is a
+# policy, and the declaration is an assertion by whoever committed it, so yes,
+# it can be walked around by typing the word (`09 §10.3`). It is still worth
+# having: the six-phase leak was not somebody defeating a check, it was nobody
+# being asked the question. This rule asks it, in CI, every time.
+#
+# It is deliberately scoped to `docs/**`. That is where format research lives
+# and where every sample of this kind has ever been committed; `tests/fixtures`
+# and `evals/fixture` are generated or hand-written and already ALLOWed.
+
+# The record shapes the real leak had, plus the two that index it. `parentId` is
+# the thread pointer pi and Claude Code both carry; `<user_query>` is cursor's
+# wrapper around what a human typed.
+TRANSCRIPT_MARKERS = re.compile(
+    r'"thinking"\s*:\s*"'
+    r'|"role"\s*:\s*"assistant"'
+    r'|"parentId"\s*:'
+    r'|<user_query>'
+)
+
+# The fields inside such a record that hold WORDS rather than structure. A
+# `parentId`, a model name and a token count are not what leaked.
+TRANSCRIPT_PAYLOAD = re.compile(r'"(?:text|thinking|content|summary|title)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+TRANSCRIPT_QUERY = re.compile(r'<user_query>(.*?)</user_query>', re.S)
+
+# THE THRESHOLD, and why this number. The `thinking` block that leaked ran to
+# **128 characters** -- not a guess: `PHASE-1-SCOUT.md`'s own
+# `original \`thinking\` 128 chars` annotation records the length of what was
+# elided, and that annotation survived the purge that removed the text. So the
+# threshold has to sit below 128 or it does not catch the thing it was written
+# for. 100 characters is about a sentence and a half of English -- long enough
+# that a matched string is somebody's words and not a field name, a `<redacted>`
+# marker, a model id or a two-word test prompt, and 28 characters of headroom
+# under the one real measurement available. Lower would be safe too; the cost of
+# lower is only that more samples must carry the declaration, which is not a
+# cost worth optimising away.
+TRANSCRIPT_PAYLOAD_CHARS = 100
+
+# What counts as declaring a block synthetic: the word AND the thing it is said
+# about, on one line.
+#
+# The word alone was not enough, and this is not hypothetical -- it was measured
+# while writing the rule. `PHASE-1-SCOUT.md` line 1492 says a harness "injects a
+# synthetic summary", about the harness's own behaviour and about nothing in
+# this repository, and that one incidental sentence exempted a record 50 lines
+# below it. Requiring `record` / `example` / `sample` on the same line kills
+# that: all three declarations in `docs/` today say "every record in this block
+# is synthetic" or "every example above is ... synthetic", and prose about a
+# harness's synthetic summaries does not.
+TRANSCRIPT_DECLARED = re.compile(r'\bsynthetic\b|\binvented\b', re.I)
+TRANSCRIPT_DECLARED_ABOUT = re.compile(r'\brecords?\b|\bexamples?\b|\bsamples?\b', re.I)
+
+# How far from the record that declaration may sit. MEASURED, not chosen: in
+# `docs/upstream/PHASE-1-SCOUT.md` the declaration leads its block and the block
+# runs 45 lines past it; in `docs/formats/cursor.md` the declaration is a
+# TRAILING note after six samples, 39 lines below the first of them. 60 is the
+# widest real gap plus half again. A wider window is a WEAKER rule -- it lets a
+# declaration on one block cover an undeclared sample further down -- so this
+# number should shrink if it ever can, never grow to fit a new file.
+TRANSCRIPT_WINDOW = 60
+
+
+def find_transcript_records(path: str, lines: list[str]) -> list[tuple[int, str]]:
+    """A whole-file rule: it needs the path (docs/ only) and the neighbouring lines."""
+    if not path.startswith('docs/'):
+        return []
+    hits: list[tuple[int, str]] = []
+    for i, line in enumerate(lines):
+        if not TRANSCRIPT_MARKERS.search(line):
+            continue
+        payloads = [m.group(1) for m in TRANSCRIPT_PAYLOAD.finditer(line)]
+        payloads += TRANSCRIPT_QUERY.findall(line)
+        longest = max((len(v) for v in payloads), default=0)
+        if longest <= TRANSCRIPT_PAYLOAD_CHARS:
+            continue
+        lo = max(0, i - TRANSCRIPT_WINDOW)
+        hi = min(len(lines), i + TRANSCRIPT_WINDOW + 1)
+        if any(TRANSCRIPT_DECLARED.search(l) and TRANSCRIPT_DECLARED_ABOUT.search(l)
+               for l in lines[lo:hi]):
+            continue
+        hits.append((i + 1,
+                     f'a transcript record whose longest prose payload is {longest} characters, '
+                     f'with nothing within {TRANSCRIPT_WINDOW} lines calling it synthetic'))
+    return hits
+
+
 RULES: dict[str, dict] = {
     'home-path': {
         'why': 'an absolute home path or project slug naming a directory that is not this repo',
@@ -300,6 +438,14 @@ RULES: dict[str, dict] = {
     'corpus-topic': {
         'why': 'subject matter that is here only because it was in a live corpus',
         'find': lambda line: [t for t in CORPUS_TOPICS if t.lower() in line.lower()],
+    },
+    'transcript-record': {
+        'why': 'a transcript record sample in docs/** carrying a long prose payload that '
+               'nothing nearby declares synthetic',
+        # `file` instead of `find`: this rule reads the path and the whole file,
+        # because "is there a declaration near this line" is not a per-line
+        # question. It returns (line number, message) pairs directly.
+        'file': find_transcript_records,
     },
 }
 
@@ -368,30 +514,35 @@ DEBT: list[tuple[str, str, int, str]] = [
     # packages/cli/src/index.ts above. Scrubbing one side of an equality without
     # the other only makes the test lie; these two unpin together.
 
-    # ---- Phase records and pasted evidence from phases 0-4. T5.7 was scoped to
-    # docs/, scripts/, ci.yml and phase-5, so it did not edit signed-off phase
-    # history. The two highest-value items -- ref-queries.txt and
-    # evals-reference-set.txt, which held QUERIES TYPED AGAINST THE LIVE CORPUS --
-    # were cleared at integration on 22 aug 2026; the ratchet asked for their DEBT
-    # lines to be deleted and they were. What remains is `packages/**` help copy and
-    # phase-0..4 evidence, which
-    # is family (1) prose, not just a path. Re-running the evidence is the
-    # honest fix for the pasted runs; the prose ones can be edited in place with
-    # a note, the way this file's header describes.
-    ('phases/phase-0/HANDOFF.md', 'project-name', 2, 'audit output naming wiped projects'),
-    ('phases/phase-1/WAVE.md', 'home-path', 1, 'finding F15 cites the real slug it resolved'),
-    ('phases/phase-1/WAVE.md', 'project-name', 2, 'finding F15 cites the real slug it resolved'),
-    ('phases/phase-2/VERIFICATION.md', 'project-name', 1, 'quotes a real prompt from the corpus'),
-    ('phases/phase-3/evidence-T3.2-T3.3/help.txt', 'corpus-topic', 1, 'pasted --help, pairs with packages/cli'),
-    ('phases/phase-3/evidence-T3.2-T3.3/help.txt', 'project-name', 1, 'pasted --help, pairs with packages/cli'),
-    ('phases/phase-4/HANDOFF.md', 'project-name', 2, 'the line that recorded this debt in the first place'),
-    ('phases/phase-4/evidence-T4.1/patch-tests.py', 'project-name', 2, 'a patch script against the pre-rename tests'),
-    ('phases/phase-4/evidence-T4.3/doctor-privacy.txt', 'home-path', 1, 'pasted `doctor --privacy` over the live corpus'),
-    ('phases/phase-4/evidence-T4.3/doctor-privacy.txt', 'project-name', 2, 'pasted `doctor --privacy` over the live corpus'),
-    ('phases/phase-4/evidence-T4.3/run1-by-id.txt', 'project-name', 1, 'pasted `ask` run over the live corpus'),
-    ('phases/phase-4/evidence-T4.3/run2-by-query.txt', 'project-name', 1, 'pasted `ask` run over the live corpus'),
-    ('phases/phase-4/evidence-T4.3/run6-clip-no-tool.txt', 'project-name', 1, 'pasted `ask` run over the live corpus'),
-    ('phases/phase-4/registration-T4.1.txt', 'project-name', 1, 'comment on an `ask` input shape'),
+    # ---- Phase records and pasted evidence from phases 0-4 -- fourteen pins
+    # across nine files -- were cleared in phase 8 (T8.A), which leaves this list
+    # EMPTY. 34 -> 14 -> 0. Every one of the fourteen was confirmed by this
+    # script itself as "pinned at N, now clean" before its line was deleted,
+    # because the list is a ratchet and deleting a line without that
+    # confirmation is how a ratchet becomes a wish.
+    #
+    # Two techniques, both named in this file's header:
+    #
+    #   RE-RUN, for the five pasted command outputs (phase-3's `find --help`,
+    #   phase-4's `doctor --privacy` and three `graft` runs). The command was
+    #   run again against the synthetic demo corpus built by
+    #   scripts/make-demo-corpus.mjs, with --claude-dir and --potsherd-dir
+    #   inside a mktemp -d, and the paste replaced. Each file carries a header
+    #   saying so and recording the original run's headline numbers, which are
+    #   not private.
+    #
+    #   SUBSTITUTE, for the four prose records and two code/registration files
+    #   that only cited a slug, a title or a project name. The identity is
+    #   replaced and the structure and the finding are kept, and each carries a
+    #   visible note saying it is a substitution so no future reader mistakes it
+    #   for the original capture.
+    #
+    # An empty DEBT is not the same as a clean repository. This list only ever
+    # held what this script can SEE, and the header is honest about how little
+    # that is: `docs/upstream/PHASE-1-SCOUT.md` carried a real assistant
+    # `thinking` block for six phases and no rule here fired once. The
+    # `transcript-record` rule added in phase 8 is one shape recovered from that
+    # failure, not a general answer to it.
 ]
 
 # --------------------------------------------------------------------- engine
@@ -423,7 +574,12 @@ def allowed(path: str, rule: str) -> str | None:
 # nobody has watched. Every one of these was NOT CAUGHT before T5.9; the four
 # CONTROL rows are the things the header promises are not leaks, and a rule that
 # starts catching one of them has become useless in a different direction.
-SELFTEST: list[tuple[str, str, tuple[str, ...]]] = [
+#
+# A row may carry a FOURTH element, the pseudo-path the text is pretended to
+# live at. Only `transcript-record` reads it, because only that rule is scoped
+# to a directory. Rows without one are checked at a path outside `docs/`, which
+# is where all eleven original probes have always effectively been.
+SELFTEST: list[tuple] = [
     ('a live-corpus session uuid',
      'see session 85ef9531-1c4a-4f2b-9d3e-7a6b5c4d3e2f', ('corpus-id',)),
     ('the same id in short form',
@@ -447,35 +603,184 @@ SELFTEST: list[tuple[str, str, tuple[str, ...]]] = [
      'commit b86bf59aa1c2d3e4f5061728394a5b6c7d8e9f01', ()),
     ('CONTROL placeholder home directories',
      'HOME=/home/dev/.claude and /Users/example/work', ()),
+
+    # ---- transcript-record. THE HISTORICAL LEAK, RECONSTRUCTED.
+    #
+    # `git log --all -- docs/upstream/PHASE-1-SCOUT.md` no longer contains the
+    # pre-purge blob -- the whole point of the purge -- so the leak cannot be
+    # replayed from history. What CAN be replayed is its SHAPE, which the file
+    # still documents: a pi `message` record, `role:"assistant"`, a `thinking`
+    # block of 128 characters, carrying `id`, `parentId` and a timestamp, pasted
+    # as a one-line JSON sample into a fenced block in `docs/`. The fixture below
+    # is that record with synthetic words in it, and its `thinking` string is
+    # exactly 128 characters long -- the one measurement of the real thing that
+    # survives, taken from the file's own `original `thinking` 128 chars`
+    # annotation. Only the length is real. If this rule had existed in phase 1,
+    # this is the line it would have printed.
+    ('the historical leak\'s shape: an undeclared pi assistant thinking record',
+     '{"type":"message","id":"aa000004","parentId":"aa000003",'
+     '"timestamp":"2026-05-13T08:21:03.196Z","message":{"role":"assistant",'
+     '"content":[{"type":"thinking","thinking":"'
+     'They want the retry budget raised, but the queue is the thing that is actually '
+     'saturated, so I should go measure that one first.'
+     '"},{"type":"text","text":"Let me look at the queue depth before changing the '
+     'retry budget."}]}}',
+     ('transcript-record',), 'docs/formats/pi.md'),
+
+    ('an undeclared cursor <user_query> sample',
+     '{"role":"user","message":{"content":[{"type":"text","text":'
+     '"<timestamp>Friday, May 8, 2026, 6:05 AM (UTC+5:30)</timestamp>\\n'
+     '<user_query>\\nthe importer keeps stalling on the third batch and I cannot '
+     'tell whether it is the pool or the writer, can you look\\n</user_query>"}]}}',
+     ('transcript-record',), 'docs/formats/cursor.md'),
+
+    # The control that makes the two probes above mean something. Same record,
+    # same length, same directory -- and one line saying what it is. This is the
+    # shape every sample in `docs/upstream/PHASE-1-SCOUT.md` and
+    # `docs/formats/cursor.md` carries today, which is why the sweep is clean.
+    ('CONTROL the same record, declared synthetic in the line above it',
+     '> every record in this block is **synthetic**: the shape was measured, the words are invented.\n'
+     '{"type":"message","id":"aa000004","parentId":"aa000003",'
+     '"timestamp":"2026-05-13T08:21:03.196Z","message":{"role":"assistant",'
+     '"content":[{"type":"thinking","thinking":"'
+     'They want the retry budget raised, but the queue is the thing that is actually '
+     'saturated, so I should go measure that one first.'
+     '"}]}}',
+     (), 'docs/formats/pi.md'),
+
+    # Two more controls, each isolating one half of the rule.
+    ('CONTROL the same record shape with a payload under the threshold',
+     '{"type":"message","id":"aa000004","parentId":"aa000003","message":{"role":"assistant",'
+     '"content":[{"type":"thinking","thinking":"list the directory first"}]}}',
+     (), 'docs/formats/pi.md'),
+
+    ('CONTROL an undeclared record outside docs/',
+     '{"type":"message","id":"aa000004","parentId":"aa000003","message":{"role":"assistant",'
+     '"content":[{"type":"thinking","thinking":"'
+     'They want the retry budget raised, but the queue is the thing that is actually '
+     'saturated, so I should go measure that one first.'
+     '"}]}}',
+     (), 'tests/fixtures/pi/session.jsonl'),
 ]
+
+
+# (label, argv after the script name, expected exit code). These probe the
+# COMMAND, not a rule.
+#
+# WHY. `main()` was `files = argv[1:] or tracked_files()`, so an argument that
+# was not `--selftest` became a file list -- including one that started with a
+# dash. `python3 scripts/check-privacy.py --list-pins` therefore swept one
+# nonexistent path, found nothing in it, concluded that all fourteen pinned
+# violations were "now clean -- delete the DEBT line", and exited 1 with a
+# confident and entirely wrong failure. A guard whose failure output can be
+# wrong is worse than no guard, because somebody will act on it: the advice it
+# gave was to delete a ratchet.
+#
+# Each probe runs the real command in a subprocess, as a person would type it,
+# rather than calling the parser underneath it (`09` rule 12).
+ARG_PROBES: list[tuple[str, list[str], int]] = [
+    ('an unknown flag is a usage error, not a file list', ['--list-pins'], 2),
+    ('a flag-shaped argument after a real path is still a usage error',
+     ['scripts/check-privacy.py', '--pins'], 2),
+    ('CONTROL an explicit path list is still accepted', ['scripts/check-privacy.py'], 0),
+    # The same failure one layer down: a partial sweep used to report every
+    # DEBT entry it had not looked at as "now clean -- delete the DEBT line".
+    # It judges only the paths it was given now. This probe is worth keeping
+    # even while DEBT is empty, because it is what will catch the regression on
+    # the day somebody adds a pin back.
+    ('a partial sweep does not judge the pins it did not look at',
+     ['scripts/check-privacy.py', 'NOTICE'], 0),
+]
+
+
+def _probe_rules(path: str, text: str) -> set[str]:
+    """Every rule that fires on one probe's text, at one pseudo-path."""
+    lines = text.split('\n')
+    got = set()
+    for rule, spec in RULES.items():
+        if spec.get('file'):
+            if spec['file'](path, lines):
+                got.add(rule)
+            continue
+        for n, line in enumerate(lines):
+            nxt = lines[n + 1] if n + 1 < len(lines) else ''
+            hits = spec['find'](line, nxt) if spec.get('lookahead') else spec['find'](line)
+            if hits:
+                got.add(rule)
+    return got
 
 
 def selftest() -> int:
     bad = []
-    for label, text, expect in SELFTEST:
-        lines = text.split('\n')
-        got = set()
-        for rule, spec in RULES.items():
-            for n, line in enumerate(lines):
-                nxt = lines[n + 1] if n + 1 < len(lines) else ''
-                hits = spec['find'](line, nxt) if spec.get('lookahead') else spec['find'](line)
-                if hits:
-                    got.add(rule)
+    for row in SELFTEST:
+        label, text, expect = row[0], row[1], row[2]
+        # Rows with no pseudo-path are checked outside docs/, which is where all
+        # eleven of the original probes have always effectively lived.
+        path = row[3] if len(row) > 3 else 'scripts/probe.txt'
+        got = _probe_rules(path, text)
         if got != set(expect):
             bad.append(f'  {label}\n      expected {sorted(expect)}, got {sorted(got)}')
         print(f"  {'ok  ' if got == set(expect) else 'FAIL'}  {label}"
               f"{'  [' + ', '.join(sorted(got)) + ']' if got else ''}")
+
+    for label, args, want in ARG_PROBES:
+        proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), *args],
+                              cwd=REPO, capture_output=True, text=True)
+        ok = proc.returncode == want
+        if not ok:
+            bad.append(f'  {label}\n      expected exit {want}, got {proc.returncode}')
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label}  [exit {proc.returncode}]")
+
     if bad:
         print('\nSELFTEST FAILED:\n' + '\n'.join(bad))
         return 1
-    print(f'\n  {len(SELFTEST)} probes, all as expected.')
+    print(f'\n  {len(SELFTEST) + len(ARG_PROBES)} probes, all as expected.')
     return 0
 
 
+USAGE = """usage: check-privacy.py [--selftest | PATH ...]
+
+  no arguments   sweep every tracked text file (what CI runs)
+  PATH ...       sweep only these paths, relative to the repo root
+  --selftest     run the rule probes and the argument probes, sweep nothing
+
+Anything else is an error. It used to be a FILE NAME: `--list-pins` was swept as
+a path, found to be missing, and reported every pinned violation as "now clean
+-- delete the DEBT line". Being confidently wrong is the one thing a guard may
+not do."""
+
+
+def parse_args(args: list[str]) -> tuple[list[str] | None, str | None]:
+    """(files, error). `files == []` means sweep everything tracked.
+
+    Kept separate from main() so the failure has one place to live, and so the
+    error text is the same whether the bad flag came first or last.
+    """
+    if '--selftest' in args:
+        if len(args) > 1:
+            return None, '--selftest takes no other arguments'
+        return None, None
+    unknown = [a for a in args if a.startswith('-')]
+    if unknown:
+        return None, f"unknown option: {' '.join(unknown)}"
+    return args, None
+
+
 def main(argv: list[str]) -> int:
-    if '--selftest' in argv[1:]:
+    files, err = parse_args(argv[1:])
+    if err:
+        print(f'check-privacy.py: {err}\n', file=sys.stderr)
+        print(USAGE, file=sys.stderr)
+        return 2
+    if files is None:
         return selftest()
-    files = argv[1:] or tracked_files()
+    # A partial sweep must not report the pins it did not look at. Same failure
+    # as the unknown-flag one above, one layer down: given an explicit path
+    # list, every DEBT entry for a path NOT in that list is trivially "not
+    # found", and the run would advise deleting all of them. So a partial sweep
+    # judges only the paths it was given.
+    partial = bool(files)
+    files = files or tracked_files()
     found: dict[tuple[str, str], list[tuple[int, str]]] = {}
     swept = 0
 
@@ -492,6 +797,12 @@ def main(argv: list[str]) -> int:
             if allowed(path, rule):
                 continue
             lines = text.splitlines()
+            if spec.get('file'):
+                # A whole-file rule: it gets the path and every line, and hands
+                # back the (line number, message) pairs itself.
+                for n, hit in spec['file'](path, lines):
+                    found.setdefault((path, rule), []).append((n, hit))
+                continue
             for n, line in enumerate(lines, 1):
                 # `find` takes the next line too when it declares a second
                 # parameter, so a rule can span a wrapped comment.
@@ -519,14 +830,18 @@ def main(argv: list[str]) -> int:
             shown += f'\n      ... and {len(hits) - 8} more'
         new.append(f"  {path}  [{rule}]  {RULES[rule]['why']}\n{shown}")
 
+    swept_paths = set(files)
     for (path, rule), (expected, _why) in sorted(pinned.items()):
+        if partial and path not in swept_paths:
+            continue
         if (path, rule) not in found:
             stale.append(f'  {path}  [{rule}]  pinned at {expected}, now clean '
                          f'-- delete the DEBT line')
 
     if not new and not stale:
-        print(f'privacy: {swept} tracked text files swept, no real-corpus content, '
-              f'{len(DEBT)} pinned known violations all at their expected counts.')
+        pins = (f'{len(DEBT)} pinned known violations all at their expected counts'
+                if DEBT else 'no pinned known violations left to carry')
+        print(f'privacy: {swept} tracked text files swept, no real-corpus content, {pins}.')
         return 0
 
     print('=' * 78)

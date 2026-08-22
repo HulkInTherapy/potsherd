@@ -1,5 +1,13 @@
 """Adds the byte-exact-quote block to tests/ask.test.ts.
 
+SUBSTITUTED 2026-08-22: the two `project:` fields in the block below named one
+of the user's own project directories when this script was run in phase 4 --
+the private fact that family (3) of `scripts/check-privacy.py` is about, so the
+name is not repeated here. They read `Ledger` now, which is what phase 7
+substituted into `tests/ask.test.ts` itself, so this script's replace-and-insert
+still matches the file it patches. Nothing else changed: the field is a label on
+a fixture and no assertion reads it.
+
 Kept as evidence rather than as a throwaway: the block it inserts is the one
 that locks the contract the ask evals score against — a quote that matches
 "only after case folding" is a fault there, so the emitted quote has to be the
@@ -43,7 +51,7 @@ BLOCK = r'''describe("the emitted quote is the transcript's bytes, not the model
       {
         sessionId: POOLER,
         id8: 'sess-poo',
-        project: 'Fulcrum',
+        project: 'Ledger',
         harness: 'claude',
         isSidechain: false,
         isGhost: false,
@@ -96,7 +104,7 @@ BLOCK = r'''describe("the emitted quote is the transcript's bytes, not the model
       {
         sessionId: POOLER,
         id8: 'sess-poo',
-        project: 'Fulcrum',
+        project: 'Ledger',
         harness: 'claude',
         isSidechain: false,
         isGhost: false,

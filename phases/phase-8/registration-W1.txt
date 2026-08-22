@@ -1,0 +1,106 @@
+T8.A — the privacy guard: the 8.1 probe and the 8.3 pins — REGISTRATION
+branch: p8/w1-guard
+
+Nothing in this branch touches a reserved file. Five lines in four reserved
+files now state a number that this task changed, and one of them is the source
+of a wrong number in the phase-8 plan itself. Each is given below as EXACT FILE,
+EXACT LINE, EXACT REPLACEMENT TEXT.
+
+Measured after this branch:
+  python3 scripts/check-privacy.py
+    -> privacy: 483 tracked text files swept, no real-corpus content, no pinned
+       known violations left to carry.
+  python3 scripts/check-privacy.py --selftest
+    -> 19 probes, all as expected.
+
+
+1. docs/08-STATE-OF-PLAY.md, lines 17-18
+------------------------------------------------------------------------------
+REPLACE:
+**privacy guard:** `python3 scripts/check-privacy.py` — 483 files swept, **14 pinned** (was 34 at
+the start of phase 7), ratchet only shrinks
+
+WITH:
+**privacy guard:** `python3 scripts/check-privacy.py` — 483 files swept, **0 pinned** (34 at the
+start of phase 7, 14 at the start of phase 8), ratchet only shrinks. 19 probes in `--selftest`,
+including one for the transcript-record shape that the `PHASE-1-SCOUT` leak had
+
+
+2. docs/08-STATE-OF-PLAY.md, line 178 (open item 21)
+------------------------------------------------------------------------------
+REPLACE:
+| 21 | **14 privacy pins remain**, all phase-0..4 evidence pastes — `doctor --privacy` and `ask` runs captured over the live corpus, plus handoff prose quoting a real slug. The honest repair is re-running the evidence against the demo corpus, not editing the paste |
+
+WITH:
+| 21 | **CLOSED in phase 8 (T8.A).** All fourteen were cleared: the five pasted command outputs were re-run against the demo corpus and the pastes replaced; the four prose records and two code/registration files had the identity substituted and the structure and the finding kept, each with a visible note. Every one was confirmed by the guard itself as *"pinned at N, now clean"* before its DEBT line was deleted. `DEBT` is now empty — which means only that every violation the guard can SEE is repaired |
+
+
+3. docs/RESUME-PROMPT.md, lines 212-213
+------------------------------------------------------------------------------
+REPLACE:
+4. **The eleven evidence pastes still pinned in the privacy guard.** The honest repair is re-running
+   the evidence against the demo corpus, not editing the paste.
+
+WITH:
+4. **Done in phase 8 (T8.A):** the evidence pastes pinned in the privacy guard were re-run against
+   the demo corpus and the pastes replaced; `DEBT` is empty. What remains open is what the guard
+   still cannot see — see its header's "STILL OPEN" notes, one per rule.
+
+
+4. FINAL-REPORT.md, lines 45-47
+------------------------------------------------------------------------------
+REPLACE:
+**The privacy guard** (`python3 scripts/check-privacy.py`) sweeps 475 tracked
+files and is a ratchet that only shrinks: **34 pinned known violations at the
+start of phase 7, 14 now.**
+
+WITH:
+**The privacy guard** (`python3 scripts/check-privacy.py`) sweeps 483 tracked
+files and is a ratchet that only shrinks: **34 pinned known violations at the
+start of phase 7, 14 at the start of phase 8, 0 now.**
+
+
+5. FINAL-REPORT.md, line 181 (open item 11) — THIS ONE IS ALSO A CORRECTION
+------------------------------------------------------------------------------
+The existing line reads:
+
+  | 11 | fourteen privacy pins remain — eleven phase-0..4 evidence pastes plus
+  three forbidden-string lists that a guard has to name in order to ban; the
+  honest repair for the first eleven is re-running the evidence, not editing the
+  paste |
+
+That split is wrong, and phase 8's own acceptance criterion inherited the error:
+`phases/phase-8-hardening.md` §8.3 says "check-privacy.py reports 3 pins (the
+three forbidden-string lists), not 14". There were never any forbidden-string-
+list entries in `DEBT`. The three forbidden-string lists — `scripts/
+make-screens.sh`, `scripts/make-cast.sh` and `tests/adapters/cursor.test.ts` —
+are and always were **ALLOW** entries, which is the whole distinction the guard's
+header draws: ALLOW is for a file that is exempt by construction, DEBT is for a
+known violation pinned by count. Verified against the tree:
+`git show 9834155:scripts/check-privacy.py` has fourteen DEBT entries and every
+one of them is under `phases/`. So the true target for 8.3 was 0, not 3.
+
+REPLACE line 181 WITH:
+| 11 | **closed in phase 8 (T8.A).** All fourteen pins were phase-0..4 evidence and prose, across nine files; none was a forbidden-string list (those three are ALLOW entries, not DEBT — an earlier version of this row said otherwise and phase 8's acceptance criterion inherited the mistake). Five pasted command outputs were re-run against the demo corpus; six prose and code records had the identity substituted with a visible note. `DEBT` is empty. The guard also gained a `transcript-record` rule and an argument-parsing fix; 19 probes in `--selftest` |
+
+
+6. CHANGELOG.md, line 72
+------------------------------------------------------------------------------
+REPLACE:
+  **34 pinned privacy violations → 14.**
+
+WITH (unchanged — it is a v1.0.0 entry and was true then). Add to the v1.1.0
+section instead, under a "hardening" heading:
+
+- **The privacy guard closed its debt and grew a rule it did not have.**
+  `check-privacy.py` went **14 pinned violations → 0**: the phase-0..4 evidence
+  pastes were re-run against the synthetic demo corpus and replaced, and the
+  phase prose had its identity substituted and its findings kept. Every pin was
+  confirmed *"pinned at N, now clean"* by the guard before its line was deleted.
+  A new `transcript-record` rule flags a JSON transcript sample in `docs/**`
+  whose prose payload runs past 100 characters unless something within sixty
+  lines declares the samples synthetic — the shape of the leak that survived six
+  phases in `docs/upstream/PHASE-1-SCOUT.md`, which no rule could see. And an
+  unknown flag is now a usage error: `check-privacy.py --list-pins` used to be
+  read as a file name and reported every pin as "now clean -- delete the DEBT
+  line", exiting non-zero with confident, wrong advice.

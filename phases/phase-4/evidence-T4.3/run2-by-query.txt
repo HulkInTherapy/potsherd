@@ -1,28 +1,51 @@
-potsherd graft · claude 3ec2f5ca · 2026-08-13
+# reproduced against the synthetic demo corpus on 2026-08-22; the original was
+# captured against the live corpus in phase 4 and its headline numbers are
+# preserved below. this is the same run as run1, reached by a QUERY rather than
+# by an id — that is the whole point of the pair, and it survives the
+# substitution: the query below resolves to one session and grafts it.
+#
+#   the original run, phase 4, 21 aug 2026, live corpus (session id withheld), reached by a query that is itself withheld (a query typed against a live
+#   corpus is transcript prose):
+#     tokens 244 of 800 (est., chars/3.6) · citations 3/3 · exchanges 9
+#     model 1m 58s · 1 call · $0.044
+#
+# reproduced with:
+#   node packages/cli/bin/potsherd.js graft "the pooler decision" --budget 800 \
+#     --claude-dir   <demo>/.claude    built by scripts/make-demo-corpus.mjs
+#     --potsherd-dir <demo>/.potsherd
+#   backend: agent-sdk (subscription); tokens `est.` (chars/3.6). binary v1.0.0.
+#   note the query resolves to a DIFFERENT session than run1's id does
+#   (b2181bfe, the open-thread session), which is the honest result of asking by
+#   words instead of by id and is left as it fell.
+#   kept evidence dir: /tmp/w1-guard-evidence.yduKmU
+#
+# THIS IS A SUBSTITUTION. the shape is the original's; the query, the session,
+# the project and every word of the brief are synthetic.
 
-  [session title withheld — real client work]
+potsherd graft · claude b2181bfe · 2026-08-11
 
-  tokens                       244   of 800 budget  ·  est. (chars/3.6)
-  citations                    3/3   all resolve
-  exchanges                      9   Fulcrum
-  wrote                              /private/tmp/claude-501/-Users-zebra-rando…
-  model                     1m 58s   1 call  ·  $0.044
+  Move the event-bus consumers behind the pooler
 
-────────────────────────────────────────────────────────────
+  tokens                       243   of 800 budget  ·  est. (chars/3.6)
+  citations                    5/5   distinct, and all resolve
+  exchanges                      5   event-bus
+  wrote                              /private/tmp/w1-guard-evidence.yduKmU/graf…
+  model                      18.6s   1 call  ·  $0.016 est.
 
-  [the brief body that printed here is withheld]
+────────────────────────────────────────────────────────────────────────
 
-  WITHHELD FROM THE PUBLIC REPO — this artefact reproduces the *content* of real
-  sessions from the reference corpus, which includes a named third party's
-  business plans and a personal tweet. `00-README.md`'s secrets rule already
-  says committed artefacts use the synthetic demo corpus, not the live one;
-  phase 4 extends that from screenshots to every committed artefact.
+# Move the event-bus consumers behind the pooler
 
-  The file itself is kept, unredacted and re-examinable, beside the repo at:
+Brief from a past session. Written by potsherd; every claim carries `[b2181bfe@seq]`, the exchange it came from.
 
-      /Users/zebra/randomness/potsherd-p4-evidence/T4.3/run2-by-query.txt
+- Original issue: 60 in-flight consumers each holding postgres connections exceeded database's 40-connection limit [b2181bfe@1]
+- Solution: routed consumers through pooler on 6432 in transaction pooling mode instead of direct postgres 5432 [b2181bfe@2]
+- Pooler configured with pool_size 24 + reserve pool 4 to carry 60 concurrent consumers without queue wait [b2181bfe@3]
+- Consumers set to fail-fast on 5-second acquire timeout; timeouts nack delivery for broker redelivery [b2181bfe@4]
+- Load test verified: 60 consumers × 4,000 deliveries → p99 acquire 41ms, zero timeouts, database connections steady at 24 [b2181bfe@5]
 
-  Evidence that cannot be re-examined is not evidence (`08` rule 5) — but
-  re-examinable does not mean published. The numbers this run produced are in
-  `README.txt` and in `phases/phase-4/HANDOFF.md`; only the transcript-derived
-  prose is held back.
+---
+
+source: claude b2181bfe-835f-4bfa-a9b5-1a18ebdcd810 · 5 exchanges · 2026-08-11
+
+  run  potsherd show b2181bfe  read the session this came from, end to end

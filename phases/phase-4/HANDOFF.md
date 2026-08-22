@@ -200,5 +200,5 @@ an array and silently produced an **empty ANSWER** on three real runs.
 | open-thread precision measured at **n = 8**; too small to generalise, and the cosine's positive side is n = 0 | 7 |
 | `evals/ask-selftest.ts` still has no case for `quote-empty` or `answer-missing` | 7 |
 | the README is stale by three phases (status line and roadmap corrected; the rest is phase 7's rewrite) | 7 |
-| `Fulcrum` / `meghbrain` — the user's own project names — remain as examples in `--help` and fixtures | 7 |
+| **two of the user's own project directory names remain as examples in `--help` and fixtures.** The names are withheld here — a directory name is the private fact and this row is the reason the debt existed, not a place to restate it. Phase 7 cleared them out of `packages/**` (`Ledger` and `brainstore` stand in the fixtures now); phase 8 cleared the last of them out of the phase records. *(substituted 2026-08-22; the finding and its phase number are unchanged)* | 7 |
 | the fusion gate still fails: hybrid 22/25 ties vec-only (inherited from phase 3) | 7 |
