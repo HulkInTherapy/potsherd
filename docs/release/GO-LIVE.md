@@ -1,5 +1,16 @@
 # GO-LIVE — potsherd v1.1.0
 
+**EXECUTED 22 August 2026 from `32ad48f`, tag `v1.1.0`, CI green on the tag.**
+Outcomes are in [`../../phases/phase-9/POST-PUBLISH.md`](../../phases/phase-9/POST-PUBLISH.md);
+what follows is the script as written beforehand, kept unedited so the two can be compared.
+
+**The one deviation:** step 2 returned `E403 — two-factor authentication or granular access token
+with bypass 2fa enabled is required`, with `npm whoami` succeeding and account 2FA *disabled* — so
+it was npm's publish policy, not the failure this runbook anticipated. It stopped and asked, as
+written. meghavi supplied a granular token; it was used through a `--userconfig` in a `mktemp -d`
+and deleted in the same command, and no credential was created by the agent or written into the
+tree.
+
 **Written before it was run.** Every step is a command with an expected output.
 Each step's *actual* output is pasted underneath it as it happens, so this file
 becomes the record of what was done rather than a plan of what was intended.
