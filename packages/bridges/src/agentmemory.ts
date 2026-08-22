@@ -42,10 +42,10 @@
  * the bridge reports `launch command not discoverable` and returns nothing:
  *
  *   1. `POTSHERD_AGENTMEMORY_COMMAND` — an explicit escape hatch.
- *   2. an `agentmemory` server entry in `~/.agentmemory/.mcp.json` or
- *      `mcp.json`, minus any `npx -y` form, for the same reason.
+ *   2. an `agentmemory` server entry in `<store>/.mcp.json` or `mcp.json`,
+ *      minus any `npx -y` form, for the same reason.
  *   3. `agentmemory-mcp` on `PATH` — the bin name `@agentmemory/mcp` installs.
- *   4. a local install under `~/.agentmemory/node_modules/.bin/`.
+ *   4. a local install under `<store>/node_modules/.bin/`.
  *
  * ## what was and was not verified
  *
@@ -105,8 +105,65 @@ export interface LaunchCommand {
   via: 'env' | 'mcp.json' | 'PATH' | 'node_modules';
 }
 
+/**
+ * Every directory agentmemory might keep its state in, best first.
+ *
+ * **The brief and `03` §10 both said `~/.agentmemory`, and both are wrong.**
+ * agentmemory's README puts its state in the platform's application-data
+ * directory — `~/Library/Application Support/agentmemory` on macOS, the XDG
+ * data directory on Linux, `%APPDATA%` on Windows. This is the fourth thing in
+ * two phases that the plan asserted about another tool and that turned out not
+ * to exist (`rescue --background`, `index --card` and
+ * `codex features enable plugin_hooks` were the others), which is the reason
+ * every path in this package is probed rather than assumed.
+ *
+ * The dotdir is still checked, last: it costs one `existsSync`, and if any
+ * version or fork ever used it, a user with real memories there gets them
+ * federated instead of being told they have no agentmemory. What is *reported*
+ * when nothing is found is the documented location, because that is where the
+ * answer to "why does potsherd not see it" lives.
+ */
+export function agentMemoryDirs(
+  opts: AgentMemoryOptions = {},
+): { path: string; kind: 'app-data' | 'dotdir' }[] {
+  const env = opts.env ?? process.env;
+  const home = opts.home ?? os.homedir();
+  const out: { path: string; kind: 'app-data' | 'dotdir' }[] = [];
+  const push = (p: string, kind: 'app-data' | 'dotdir'): void => {
+    if (p && !out.some((e) => e.path === p)) out.push({ path: p, kind });
+  };
+
+  if (process.platform === 'darwin') {
+    push(path.join(home, 'Library', 'Application Support', 'agentmemory'), 'app-data');
+  } else if (process.platform === 'win32') {
+    const appData = env['APPDATA'];
+    if (appData) push(path.join(appData, 'agentmemory'), 'app-data');
+  }
+
+  // XDG, which Linux uses and which some tools honour on macOS too.
+  const xdgData = env['XDG_DATA_HOME'];
+  push(path.join(xdgData || path.join(home, '.local', 'share'), 'agentmemory'), 'app-data');
+  const xdgConfig = env['XDG_CONFIG_HOME'];
+  push(path.join(xdgConfig || path.join(home, '.config'), 'agentmemory'), 'app-data');
+
+  push(path.join(home, '.agentmemory'), 'dotdir');
+  return out;
+}
+
+/**
+ * The directory to use: the first that exists, or the documented one.
+ *
+ * "Or the documented one" matters for the receipt. A `doctor` line that names
+ * `~/.agentmemory` when nothing is installed sends the reader to check a path
+ * agentmemory would never have written, and they conclude potsherd is broken
+ * rather than that the tool is absent.
+ */
 export function agentMemoryDir(opts: AgentMemoryOptions = {}): string {
-  return path.join(opts.home ?? os.homedir(), '.agentmemory');
+  const candidates = agentMemoryDirs(opts);
+  for (const c of candidates) {
+    if (fs.existsSync(c.path)) return c.path;
+  }
+  return candidates[0]?.path ?? path.join(opts.home ?? os.homedir(), '.agentmemory');
 }
 
 // ---------------------------------------------------------------- discovery
@@ -203,7 +260,11 @@ function isExecutable(file: string): boolean {
 export function detectAgentMemory(opts: AgentMemoryOptions = {}): BridgeStatus {
   const dir = agentMemoryDir(opts);
   if (!fs.existsSync(dir)) {
-    return absentStatus('agentmemory', dir, `no ${tilde(dir)}`);
+    // Every probed path, not just the one reported. "not installed (no ~/.x)"
+    // invites the reply "but it is installed, look in ~/.y"; naming all of
+    // them closes that off.
+    const probed = agentMemoryDirs(opts).map((c) => tilde(c.path));
+    return absentStatus('agentmemory', dir, `none of ${probed.join(', ')}`);
   }
   const launch = discoverLaunch(opts);
   if (!launch) {

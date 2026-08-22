@@ -61,6 +61,7 @@ export {
   AGENTMEMORY_TIMEOUT_MS,
   SEARCH_TOOL,
   agentMemoryDir,
+  agentMemoryDirs,
   closeAgentMemoryClients,
   detectAgentMemory,
   discoverLaunch,
