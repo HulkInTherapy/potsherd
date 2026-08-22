@@ -7,6 +7,7 @@ import * as claudeAdapterModule from './adapters/claude.js';
 import * as codexAdapterModule from './adapters/codex.js';
 import * as cursorAdapterModule from './adapters/cursor.js';
 import * as piAdapterModule from './adapters/pi.js';
+import * as geminiAdapterModule from './adapters/gemini.js';
 import type {
   Exchange,
   Harness,
@@ -85,6 +86,9 @@ export interface AdapterOptions {
   codexHome?: string;
   cursorDir?: string;
   piDir?: string;
+  geminiDir?: string;
+  opencodeDir?: string;
+  copilotDir?: string;
 }
 
 /**
@@ -133,6 +137,18 @@ export function adapterSpecs(o: AdapterOptions = {}): AdapterSpec[] {
       sourceDir: piAdapterModule.sourceDir(o.piDir),
       discover: () => piAdapterModule.discover(o.piDir),
       parse: (source) => piAdapterModule.parse(source),
+      version: () => 'unknown',
+      novel: () => true,
+    },
+    {
+      // Phase 6, T6.1. `unverified — documentation only`: written against
+      // `plans/research/formats.md`, which marks its gemini section
+      // **unmeasured**, and against synthetic fixtures. See the adapter header.
+      harness: 'gemini',
+      displayName: geminiAdapterModule.DISPLAY_NAME,
+      sourceDir: geminiAdapterModule.sourceDir(o.geminiDir),
+      discover: () => geminiAdapterModule.discover(o.geminiDir),
+      parse: (source) => geminiAdapterModule.parse(source),
       version: () => 'unknown',
       novel: () => true,
     },

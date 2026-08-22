@@ -128,15 +128,53 @@ export function piSessionsDir(override?: string): string {
   return piPaths(piDir(override)).sessions;
 }
 
-/** Harnesses potsherd knows of but cannot parse yet — `doctor` names the path. */
-export function geminiDir(): string {
+/**
+ * The phase-6 harnesses (`03 §2`: gemini, opencode, copilot). Each takes an
+ * override for the same reason cursor and pi do — tests must never read the
+ * developer's real directory — and each is a **read-only input**
+ * (`00-README.md` ground rules): potsherd never writes a byte under them.
+ */
+
+/** `~/.gemini`, overridable by `POTSHERD_GEMINI_DIR`. */
+export function geminiDir(override?: string): string {
+  if (override) return path.resolve(expandTilde(override));
+  const env = process.env['POTSHERD_GEMINI_DIR'];
+  if (env && env.trim()) return path.resolve(expandTilde(env.trim()));
   return path.join(home(), '.gemini');
 }
-export function opencodeDir(): string {
+
+export function geminiPaths(dir = geminiDir()) {
+  return { root: dir, tmp: path.join(dir, 'tmp') };
+}
+
+/** Where gemini cli keeps its per-project checkpoint directories. */
+export function geminiTmpDir(override?: string): string {
+  return geminiPaths(geminiDir(override)).tmp;
+}
+
+/** `~/.local/share/opencode`, overridable by `POTSHERD_OPENCODE_DIR`. */
+export function opencodeDir(override?: string): string {
+  if (override) return path.resolve(expandTilde(override));
+  const env = process.env['POTSHERD_OPENCODE_DIR'];
+  if (env && env.trim()) return path.resolve(expandTilde(env.trim()));
   return path.join(home(), '.local', 'share', 'opencode');
 }
-export function copilotDir(): string {
+
+/** `~/.copilot`, overridable by `POTSHERD_COPILOT_DIR`. */
+export function copilotDir(override?: string): string {
+  if (override) return path.resolve(expandTilde(override));
+  const env = process.env['POTSHERD_COPILOT_DIR'];
+  if (env && env.trim()) return path.resolve(expandTilde(env.trim()));
   return path.join(home(), '.copilot');
+}
+
+export function copilotPaths(dir = copilotDir()) {
+  return { root: dir, sessionState: path.join(dir, 'session-state') };
+}
+
+/** Where copilot cli keeps its session state directories. */
+export function copilotSessionStateDir(override?: string): string {
+  return copilotPaths(copilotDir(override)).sessionState;
 }
 
 export interface HarnessSourceDir {
@@ -158,9 +196,9 @@ export function harnessSourceDirs(overrides: { claudeDir?: string } = {}): Harne
     { harness: 'codex', dir: codexPaths().sessions, env: 'CODEX_HOME' },
     { harness: 'cursor', dir: cursorProjectsDir(), env: 'POTSHERD_CURSOR_DIR' },
     { harness: 'pi', dir: piSessionsDir(), env: 'POTSHERD_PI_DIR' },
-    { harness: 'gemini', dir: path.join(geminiDir(), 'tmp') },
-    { harness: 'opencode', dir: opencodeDir() },
-    { harness: 'copilot', dir: path.join(copilotDir(), 'session-state') },
+    { harness: 'gemini', dir: geminiTmpDir(), env: 'POTSHERD_GEMINI_DIR' },
+    { harness: 'opencode', dir: opencodeDir(), env: 'POTSHERD_OPENCODE_DIR' },
+    { harness: 'copilot', dir: copilotSessionStateDir(), env: 'POTSHERD_COPILOT_DIR' },
   ];
 }
 
