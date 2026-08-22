@@ -14,8 +14,10 @@ older than that in an older document will not resolve — `git log --oneline` is
 `upstream-v*`: they are obra/episodic-memory's, pulled in with the fork, and were never on origin.
 **tests:** 1,434 green, 35 files · CI green on macos + ubuntu × node 22 + 24, **and again under
 `POTSHERD_SQLITE=node`** — the whole suite on Node's own SQLite
-**privacy guard:** `python3 scripts/check-privacy.py` — 483 files swept, **14 pinned** (was 34 at
-the start of phase 7), ratchet only shrinks
+**privacy guard:** `python3 scripts/check-privacy.py` — 505 files swept, **0 pinned** (34 at the
+start of phase 7, 14 at the start of phase 8), ratchet only shrinks. 25 probes in `--selftest`,
+including the transcript-record shape the `PHASE-1-SCOUT` leak had and an id inventory that
+accounts for every id-shaped token in the tree rather than blocklisting the ones already seen
 
 ---
 
@@ -175,7 +177,7 @@ done.**
 
 | # | item |
 |---|---|
-| 21 | **14 privacy pins remain**, all phase-0..4 evidence pastes — `doctor --privacy` and `ask` runs captured over the live corpus, plus handoff prose quoting a real slug. The honest repair is re-running the evidence against the demo corpus, not editing the paste |
+| 21 | **CLOSED in phase 8 (T8.A).** All fourteen cleared: five pasted command outputs re-run against the demo corpus, six prose and code records with the identity substituted and the finding kept, each with a visible note. Every pin confirmed *"pinned at N, now clean"* by the guard before its line was deleted. `DEBT` is empty — which means only that every violation the guard **can see** is repaired, and phase 8 also widened what it can see |
 | 22 | one ghost summary of ten oversteps. Read by hand by the phase-2 verifier; 9 of 10 clean |
 | 23 | `evals/ask-selftest.ts` has no case for `quote-empty` or `answer-missing` |
 

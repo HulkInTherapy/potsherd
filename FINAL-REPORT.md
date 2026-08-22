@@ -42,9 +42,14 @@ stats ask graft setup export stack doctor` (+ `help`).
 again with `POTSHERD_SQLITE=node` — the whole suite on Node's own SQLite, which
 is what makes a plugin install work with nothing else on the machine.
 
-**The privacy guard** (`python3 scripts/check-privacy.py`) sweeps 475 tracked
+**The privacy guard** (`python3 scripts/check-privacy.py`) sweeps 505 tracked
 files and is a ratchet that only shrinks: **34 pinned known violations at the
-start of phase 7, 14 now.**
+start of phase 7, 14 at the start of phase 8, 0 now.** Phase 8 also inverted its
+id rule from a blocklist of ids somebody had noticed into an **inventory**: every
+id-shaped token in tracked text and tracked file names is accounted for against a
+source this repository can derive, and anything left over is a finding, pinned so
+it can only shrink. 177 tokens, 148 accounted for, 29 unaccounted and pinned.
+25 probes in `--selftest`.
 
 ## 3. install, on a machine that has never seen this
 
@@ -178,7 +183,7 @@ the number look better.
 |---|---|
 | 9 | `npm publish` and the marketplace submission — a person's job; commands in `docs/release/` |
 | 10 | the upstream PR to obra/episodic-memory — prepared, unsubmitted, and **`#128` is already open and overlaps it** |
-| 11 | fourteen privacy pins remain — eleven phase-0..4 evidence pastes plus three forbidden-string lists that a guard has to name in order to ban; the honest repair for the first eleven is re-running the evidence, not editing the paste |
+| 11 | **closed in phase 8 (T8.A).** All fourteen were phase-0..4 evidence and prose across nine files; **none was a forbidden-string list** — those three are `ALLOW` entries, not `DEBT`, and an earlier version of this row said otherwise, which is where phase 8's own acceptance criterion got its wrong "3 pins". Five pasted command outputs were re-run against the demo corpus; six prose and code records had the identity substituted with a visible note. Every one was confirmed by the guard as *"pinned at N, now clean"* before its line was deleted. `DEBT` is empty |
 | 12 | `evals/ask-selftest.ts` has no case for `quote-empty` or `answer-missing` |
 | 13 | full index with embeddings is 4m 11s; `--no-embed` at 8.7 s is the shippable path |
 | 14 | a real macOS *user account* was never created — a clean `$HOME` with every override cleared was, and `doctor --privacy` was grepped to prove it |
