@@ -17,10 +17,11 @@ import {
   type Spend,
 } from './llm.js';
 import {
-  confirmOpenThreads,
   openThreadCandidates,
   type OpenThread,
 } from './open-threads.js';
+// T6.6 D0b — the model pass is its own module now (see `open-threads-confirm.ts`).
+import { confirmOpenThreads } from './open-threads-confirm.js';
 import { idTag, projectName, recall, type RecallSession } from './recall.js';
 import type { SearchFilters } from './search/filters.js';
 

@@ -27,10 +27,12 @@ import {
 import { matchSpan, quotableText } from '../packages/core/src/ask.js';
 import { QUOTE_CHARS, clipQuote, maskSafeCut, renderAsk } from '../packages/core/src/render/ask.js';
 import {
-  NO_MODEL_NOTE,
   OPEN_THREAD_LABEL,
   openThreadCandidates,
 } from '../packages/core/src/open-threads.js';
+// T6.6 D0b — the model pass, and the note it writes when there is no model,
+// live in their own module now.
+import { NO_MODEL_NOTE } from '../packages/core/src/open-threads-confirm.js';
 import { Theme, stripAnsi } from '../packages/core/src/theme.js';
 import { Llm, redactOutgoing, type Backend, type SendRequest, type SendResult, type Transport } from '../packages/core/src/llm.js';
 import {

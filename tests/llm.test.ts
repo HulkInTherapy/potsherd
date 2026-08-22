@@ -1328,6 +1328,30 @@ describe('which verbs may call a model (T2.7 D2)', () => {
   });
 
   /**
+   * T6.6 D0b — the invariant the split bought, stated on its own so that a
+   * later edit that puts a model call back into the rule pass fails *here*,
+   * with a message that says what the rule is, rather than only over in the
+   * verb-level guard where the reader has to work back to the cause.
+   *
+   * `open-threads.ts` is the rule pass. `link --suggest` reads it through
+   * `link-suggest.ts`, and `link` is not a model-calling verb. So the rule
+   * pass must not reach `Llm.open` — not directly, and not through anything it
+   * imports. The model pass lives in `open-threads-confirm.ts`, which may.
+   */
+  it('the open-threads rule pass reaches no model; the confirm pass is where the model lives', () => {
+    const core = path.resolve(process.cwd(), 'packages/core/src');
+    expect(opensBackend(path.join(core, 'open-threads.ts'))).toBe(false);
+    expect(
+      /\bLlm\.open\(/.test(fs.readFileSync(path.join(core, 'open-threads-confirm.ts'), 'utf-8')),
+    ).toBe(true);
+    // One-way only. If the rule pass ever imports the confirm pass back, the
+    // hole reopens and every reader of the rule pass is model-reaching again.
+    expect(fs.readFileSync(path.join(core, 'open-threads.ts'), 'utf-8')).not.toContain(
+      'open-threads-confirm',
+    );
+  });
+
+  /**
    * The other direction, which nothing checked.
    *
    * The test above asks "does any verb outside the list call a model?" — the

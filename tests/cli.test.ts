@@ -397,6 +397,40 @@ describe('potsherd cli', () => {
     }
   });
 
+  /**
+   * T6.6 D0(a) — `--suggest` shipped declared on the wrong command. The 45
+   * library tests for `suggestLinks` all passed while the flag was unreachable,
+   * so the only test that can catch this is one that runs the built binary.
+   */
+  it('link --suggest is reachable from the command line', () => {
+    const root = scratchRoot();
+    run(['index', '--harness', 'claude', '--no-embed', '--full', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    const r = run(['link', '--suggest', '--potsherd-dir', root]);
+    expect(r.stderr).not.toContain("unknown option '--suggest'");
+    expect(r.code).toBe(0);
+  });
+
+  it('link --suggest --json is reachable and emits json', () => {
+    const root = scratchRoot();
+    run(['index', '--harness', 'claude', '--no-embed', '--full', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    const r = run(['link', '--suggest', '--json', '--potsherd-dir', root]);
+    expect(r.stderr).not.toContain("unknown option '--suggest'");
+    expect(r.code).toBe(0);
+    expect(() => JSON.parse(r.stdout)).not.toThrow();
+  });
+
+  it('guard carries no --suggest flag: it belongs to link', () => {
+    const r = run(['guard', '--help']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toContain('--suggest');
+  });
+
+  it('link --help documents --suggest', () => {
+    const r = run(['link', '--help']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('--suggest');
+  });
+
   it('an unknown verb points at --help instead of a stack trace', () => {
     const r = run(['excavate']);
     expect(r.code).not.toBe(0);

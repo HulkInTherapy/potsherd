@@ -481,12 +481,17 @@ export { renderAsk, clipQuote, maskSafeCut, QUOTE_CHARS, type AskRenderOptions }
 export {
   OPEN_THREAD_LABEL,
   openThreadCandidates,
-  confirmOpenThreads,
   type OpenThreadCandidate,
   type OpenThread,
   type CandidateOptions as OpenThreadCandidateOptions,
-  type ConfirmOptions as OpenThreadConfirmOptions,
 } from './open-threads.js';
+// T6.6 D0b — the model pass moved to its own module so that `open-threads.ts`
+// is provably offline and `link --suggest`, which reads it, is provably out of
+// reach of a model. The names exported here are unchanged.
+export {
+  confirmOpenThreads,
+  type ConfirmOptions as OpenThreadConfirmOptions,
+} from './open-threads-confirm.js';
 
 // ---------------------------------------------------------------- phase 4
 // L7 — `graft`: the token-budgeted re-entry brief (`03` §8, T4.3).

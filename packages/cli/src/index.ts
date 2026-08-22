@@ -173,7 +173,6 @@ example:
       .command('guard')
       .description('install a SessionStart hook so a copy is taken before any future sweep')
       .option('--remove', 'remove the hook again')
-      .option('--suggest', 'propose cross-project links to accept by hand; writes nothing')
       .option('--status', 'report whether the hook is installed; change nothing')
       .option('-y, --yes', 'accept the settings change without asking')
       .option('-q, --quiet', 'print nothing on success'),
@@ -433,13 +432,15 @@ example:
       .argument('[a]', 'session id, or the first 8 characters of one')
       .argument('[b]', 'the other one')
       .option('--note <text>', 'why they belong together')
-      .option('--remove', 'delete the link again'),
+      .option('--remove', 'delete the link again')
+      .option('--suggest', 'propose cross-project links to accept by hand; writes nothing'),
   ).addHelpText('after', `
 example:
   potsherd link 4c9339e0 f1665f76 --note "same pgbouncer fix"
   potsherd ls --linked-to 4c9339e0                   # finds it from either end
   potsherd ls --linked-to f1665f76
-  potsherd link 4c9339e0 f1665f76 --remove`);
+  potsherd link 4c9339e0 f1665f76 --remove
+  potsherd link --suggest                            # proposals, nothing written`);
   link.action(async (a: string | undefined, b: string | undefined, opts: Record<string, unknown>) => {
     const o = globals(program, link, opts);
     await run(
