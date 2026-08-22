@@ -308,7 +308,7 @@ function isEmptyDir(dir: string): boolean {
  * what one search needs, and every method resolves rather than rejects on
  * failure so that no caller has to wrap it.
  */
-class StdioClient {
+export class StdioClient {
   // stdio is ['pipe','pipe','ignore'], so stderr is typed `null` — the exact
   // shape is spelled out rather than widened, because the narrowing below
   // (`this.child.stdout`) depends on it.
@@ -386,6 +386,29 @@ class StdioClient {
       return { properties };
     }
     return null;
+  }
+
+  /**
+   * Every tool the server declares, with its argument names.
+   *
+   * The whole list, once, rather than a probe per candidate name: `tools/list`
+   * on a sixty-tool server is one round trip either way, and the write-tool
+   * discovery in `export/agentmemory.ts` has to scan it.
+   */
+  async listTools(timeoutMs: number): Promise<{ name: string; properties: string[] }[]> {
+    const res = await this.request('tools/list', {}, timeoutMs);
+    if (!res || res.error) return [];
+    const tools = (res.result as { tools?: unknown })?.tools;
+    if (!Array.isArray(tools)) return [];
+    return tools
+      .map((raw) => {
+        const t = raw as { name?: unknown; inputSchema?: { properties?: Record<string, unknown> } };
+        return {
+          name: typeof t?.name === 'string' ? t.name : '',
+          properties: Object.keys(t?.inputSchema?.properties ?? {}),
+        };
+      })
+      .filter((t) => t.name.length > 0);
   }
 
   async call(

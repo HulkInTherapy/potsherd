@@ -1,0 +1,318 @@
+registration-T6.2.txt — bridges and exports
+============================================
+
+Every line below is a change to a file T6.2 did not own. Nothing here has been
+applied to the branch except where a section says APPLIED. Apply in the order
+given; each section says which file and where.
+
+The artifact in the report (`potsherd export --to markdown <dir>`) was captured
+by applying section 3 temporarily, running the command, and reverting it, so
+these lines are known to work rather than merely believed to.
+
+
+0. WHAT IS ALREADY APPLIED
+--------------------------
+
+APPLIED  packages/bridges/**                  — the new package, T6.2's own.
+APPLIED  packages/cli/src/commands/export.ts  — the verb's implementation.
+APPLIED  packages/cli/package.json            — one line:
+             "@potsherd/bridges": "workspace:*"   (devDependencies, beside
+             "@potsherd/core", which is declared the same way and for the same
+             reason: esbuild bundles both into dist/potsherd.js.)
+APPLIED  vitest.config.ts                     — one alias line:
+             '@potsherd/bridges': path.resolve(__dirname, 'packages/bridges/src/index.ts'),
+             Without it vitest resolves the package to packages/bridges/dist,
+             which means `pnpm test` on a clean checkout tests the last build
+             rather than the source. Same reason @potsherd/core has one.
+APPLIED  tests/bridges.test.ts                — T6.2's own.
+
+`packages/bridges` has NO runtime dependency and adds none to the root
+package.json. better-sqlite3 is reached through a computed dynamic import that
+neither tsc nor esbuild can bind, so it resolves from whichever host already
+loaded it.
+
+
+1. tests/llm.test.ts — ONE LINE, and it matters
+-----------------------------------------------
+
+The guard at `no command outside MODEL_CALL_VERBS reaches Llm.open` follows a
+command's imports through every workspace package, using this map:
+
+    const WORKSPACE: Record<string, string> = {
+      '@potsherd/core': 'packages/core/src',
+      '@potsherd/mcp': 'packages/mcp/src',
+    };
+
+ADD:
+      '@potsherd/bridges': 'packages/bridges/src',
+
+`commands/export.ts` imports from '@potsherd/bridges'. Until that line is
+there, the guard walks past the import and `export` is unchecked — the exact
+hole phase 5 found for '@potsherd/mcp' and closed by widening this map. T6.2
+deliberately did not edit this file (it is shared); the line is one addition
+inside an object literal and cannot conflict semantically.
+
+Nothing in packages/bridges calls a model, and none should ever: the whole
+package is read-only federation and file copying.
+
+
+2. packages/core/src/llm.ts — OFFLINE_VERBS
+--------------------------------------------
+
+`tests/llm.test.ts` also asserts that MODEL_CALL_VERBS ∪ OFFLINE_VERBS covers
+every command the CLI registers. Registering `export` (section 3) without this
+fails that test — which is the point of it.
+
+In OFFLINE_VERBS, after 'doctor':
+
+  // `export` writes markdown into a directory the user names, and — only with
+  // an explicit --yes — rows into another memory tool's store. Both are local
+  // writes. It opens no socket except the localhost probes the bridges use to
+  // find a store, and it calls no model.
+  'export',
+
+
+3. packages/cli/src/index.ts — the commander block
+---------------------------------------------------
+
+3a. beside the other command imports (after `import { runSetup, … }`):
+
+import { runExport, EXPORT_TARGETS } from './commands/export.js';
+
+3b. the block itself. Place it after the `doctor` block, before the
+    `if (argv.length <= 2)` tour:
+
+  const exportCmd = addGlobals(
+    program
+      .command('export')
+      .description('write your cards out — to markdown, or into another memory tool')
+      .requiredOption('--to <target>', `where to write: ${EXPORT_TARGETS.join(', ')}`)
+      .argument('[dir]', 'the directory to write into (markdown)')
+      .option('--transcripts', 'also write the full conversations, one file each')
+      .addOption(new Option('--limit <n>', 'cap on transcripts written').argParser(Number))
+      .option('--yes', 'required to write into another tool’s store'),
+  ).addHelpText('after', `
+example:
+  potsherd export --to markdown ./vault
+  potsherd export --to markdown ./vault --transcripts   # cards + full conversations
+  potsherd export --to markdown ./vault --json | jq .cards.files
+  potsherd export --to agentmemory                      # dry run: says what it would push
+  potsherd export --to agentmemory --yes                # actually writes into their store`);
+  exportCmd.action(async (dir: string | undefined, opts: Record<string, unknown>) => {
+    const o = globals(program, exportCmd, opts);
+    await run(
+      () =>
+        runExport({
+          ...o,
+          to: String(opts['to']),
+          ...(dir ? { dir } : {}),
+          transcripts: Boolean(opts['transcripts']),
+          ...(opts['limit'] ? { limit: Number(opts['limit']) } : {}),
+        }),
+      o,
+    );
+  });
+
+  Note: `--yes` is read by `globals()`, which already picks up `local['yes']`.
+  It is declared on the command so that `--help` shows it and commander does
+  not reject it; no extra plumbing is needed.
+
+  Note: the local is named `exportCmd`, not `export`, because `export` is a
+  reserved word.
+
+3c. the tour table, after the `doctor` row:
+
+    ['export', 'write your cards out to markdown, or into another memory tool'],
+
+
+4. packages/cli/src/commands/find.ts + index.ts — `--with`
+-----------------------------------------------------------
+
+RESERVED. T6.2 did not touch either file. These are the exact lines.
+
+4a. index.ts, on the `find` command, beside its other options:
+
+      .option('--with <tools>', 'also search other memory tools: claude-mem, agentmemory, notes')
+
+    and in the find action's options object:
+
+      ...(opts['with'] ? { with: String(opts['with']) } : {}),
+
+4b. commands/find.ts — the import:
+
+import {
+  federate,
+  federationLine,
+  queryAgentMemory,
+  queryClaudeMem,
+  queryNotes,
+  type BridgeList,
+} from '@potsherd/bridges';
+
+4c. commands/find.ts — in FindCommandOptions:
+
+  /** Comma-separated bridge names from `--with`. */
+  with?: string;
+
+4d. commands/find.ts — after `recall()` returns its result, before rendering.
+    `result` is whatever the existing recall call is assigned to:
+
+  const wanted = (o.with ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const lists: BridgeList[] = [];
+  if (wanted.includes('claude-mem')) lists.push(await queryClaudeMem(query, { limit: 20 }));
+  if (wanted.includes('agentmemory')) lists.push(await queryAgentMemory(query, { limit: 20 }));
+  if (wanted.includes('notes')) {
+    lists.push(queryNotes(query, { limit: 20, ...(o.claudeDir ? { claudeDir: o.claudeDir } : {}) }));
+  }
+  const federated = lists.length > 0 ? federate(result, lists) : null;
+
+4e. commands/find.ts — `--json`. Add to the object already printed:
+
+        ...(federated
+          ? {
+              bridges: federated.bridges,   // presence, strategy, weight, path, ms
+              external: federated.external, // their hits, scored on potsherd's scale
+            }
+          : {}),
+
+4f. commands/find.ts — the human view. One line under the results:
+
+        if (federated) print(`  ${t.dim(federationLine(federated.bridges))}`);
+
+    which renders, on a machine with none of them installed:
+
+      claude-mem: not installed  ·  agentmemory: not installed  ·  notes: 4 hits
+
+    Every one of the four presences has its own wording. `federate()` never
+    mutates the local result: `federated.hits` and `federated.sessions` are
+    exactly what `recall()` returned, and the foreign hits live only in
+    `federated.external`, so a caller that ignores both fields sees precisely
+    what `find` has always produced. `federated.order` interleaves the two by
+    score for a renderer that wants one page.
+
+    A bridge that is absent contributes a line and no hits. It cannot change
+    the local ranking, cannot throw, and cannot slow `find` past its ceiling
+    (claude-mem's localhost probe is 1.5 s, agentmemory's whole call is 5 s).
+
+
+5. packages/cli/src/commands/doctor.ts — the bridge lines
+----------------------------------------------------------
+
+5a. the import:
+
+import { detectAgentMemory, detectClaudeMem, detectNotes } from '@potsherd/bridges';
+
+5b. beside `adapterStatus()`, a bridge section. All three detectors return the
+    same BridgeStatus and never throw:
+
+  const bridges = [
+    await detectClaudeMem(),
+    detectAgentMemory(),
+    detectNotes(o.claudeDir ? { claudeDir: o.claudeDir } : {}),
+  ];
+
+5c. `--json`: add to the object doctor already prints:
+
+    bridges: bridges.map((b) => ({
+      bridge: b.bridge,
+      // FOUR values, not a boolean: absent | empty | store | unrecognised.
+      // Phase 5's verifier found `setup`'s equivalent label on three surfaces
+      // and missing from --status. This is the surface it must not miss.
+      presence: b.presence,
+      path: b.path,
+      available: b.available,
+      detail: b.detail,
+      schema: b.schema,   // what pragma table_info actually found, or null
+      rows: b.rows,
+      worker: b.worker,   // claude-mem's localhost probe, or null
+    })),
+
+5d. the human card, one line each:
+
+    card.blank().text('memory tools beside potsherd:');
+    for (const b of bridges) {
+      card.raw(`    ${b.bridge.padEnd(12)}${b.detail}`);
+      card.raw(`      ${t.dim(fmt.elideMiddle(paths.tildify(b.path), pathW, t))}`);
+    }
+
+    On this machine that prints:
+
+      claude-mem  not installed (no ~/.claude-mem)
+        ~/.claude-mem/claude-mem.db
+      agentmemory not installed (none of ~/Library/Application Support/agentmemory, …)
+        ~/Library/Application Support/agentmemory
+      notes       1 file, 2 KiB (1 global-claude-md)
+        ~/.claude/projects/<slug>/memory
+
+
+6. doctor --privacy — the lines the export path needs
+-------------------------------------------------------
+
+6a. READS. `--privacy` lists every path potsherd reads. The bridges add four
+    kinds, and all four are read-only — no bridge ever opens another tool's
+    file for writing. Append to `reads` in runDoctor:
+
+  import { claudeMemDbPath, agentMemoryDirs, notesPaths } from '@potsherd/bridges';
+
+  const bridgeReads = [
+    claudeMemDbPath(),
+    ...agentMemoryDirs().map((c) => c.path),
+    ...notesPaths(o.claudeDir ? { claudeDir: o.claudeDir } : {}).map((c) => c.path),
+  ];
+  const reads = dedupe([...report.pathsRead, ...harnessReads, ...bridgeReads]);
+
+    `notesPaths()` is exported precisely so this list cannot drift from what
+    the code opens — it is the same function the bridge itself walks.
+
+    The existing `(absent)` suffix already handles the common case: on a
+    machine without claude-mem the receipt shows the path and marks it absent,
+    which is the honest answer and better than omitting it.
+
+6b. WRITES. `export --to markdown` writes into a directory the user names. It
+    is not another tool's store and needs no consent gate, but `03` §11 says
+    this receipt lists every path written, and it has under-reported once
+    before. Add to `written`:
+
+    // `export --to markdown <dir>` writes the cards mirror, and with
+    // --transcripts the full conversations, into a directory the user names
+    // on the command line. Files are 0600, like everything else potsherd
+    // writes. Nothing is written anywhere else by this verb.
+    '<the dir you give to  export --to markdown>',
+
+6c. WRITES ONLY AFTER CONSENT. `export --to agentmemory --yes` is the only
+    write in packages/bridges and the only place potsherd puts rows in another
+    memory tool. It belongs beside the settings.json / MCP-config block, not in
+    `written`, because without --yes it writes nothing at all:
+
+    card.raw(`    ${t.dim('agentmemory’s own store, via its MCP server')}`);
+    card.raw(`      ${t.dim('only with  potsherd export --to agentmemory --yes.')}`);
+    card.raw(`      ${t.dim('one memory per card, through the write tool its own')}`);
+    card.raw(`      ${t.dim('tools/list declares. without --yes it prints what it')}`);
+    card.raw(`      ${t.dim('would push and writes nothing.')}`);
+
+    and in the `--privacy --json` object, add to `writesWithConsent`:
+
+      'agentmemory: one memory per card, only with export --to agentmemory --yes',
+
+6d. NETWORK. `doctor --privacy` says what leaves the machine. The bridges add
+    localhost only, and the existing "no network" wording stays true, but it is
+    worth one line under `leaves this machine:`:
+
+    card.raw('    the bridges open one localhost socket each to find a');
+    card.raw('    running memory tool — claude-mem’s worker on 37700+uid%100,');
+    card.raw('    agentmemory’s mcp server over a pipe. no packet leaves the');
+    card.raw('    machine and no bridge ever downloads anything: the');
+    card.raw('    agentmemory launch command is discovered, and the `npx -y`');
+    card.raw('    form their own config uses is deliberately rejected.');
+
+
+7. THE ONE THING THAT IS NOT HERE
+----------------------------------
+
+`potsherd stack` belongs to T6.4 and is not registered by this file. The three
+detectors it needs are `detectClaudeMem`, `detectAgentMemory` and `detectNotes`,
+all on the `@potsherd/bridges` barrel, all returning the same four-valued
+BridgeStatus, and none of them throwing.

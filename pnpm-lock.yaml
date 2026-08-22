@@ -39,6 +39,9 @@ importers:
         specifier: ^12.1.0
         version: 12.1.0
     devDependencies:
+      '@potsherd/bridges':
+        specifier: workspace:*
+        version: link:../bridges
       '@potsherd/core':
         specifier: workspace:*
         version: link:../core
