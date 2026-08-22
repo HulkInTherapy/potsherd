@@ -59,9 +59,17 @@ on the then-HEAD. A constant that encodes a measured trade-off needs a test that
 
 ## the ten ghost cards it read
 
-`014f75ba, 0f7fbef1, 11f1edea, 12d09694, 15ef7972, 168adbfb, 17a0f2e0, 17a8bc15, 181ee4a5,
-18a667be`. Five are strictly prompt-side ("User requested…", "Asked for…"), one borderline, four
-overstep. **No card asserts what the assistant said, and 62 of 62 have `outcome: unknown`.**
+Ten ghost cards, taken in id order from the head of the ghost list — **their ids are withheld.**
+Five are strictly prompt-side ("User requested…", "Asked for…"), one borderline, four overstep.
+**No card asserts what the assistant said, and 62 of 62 have `outcome: unknown`.**
+
+**Substitution, 2026-08-22 (T8.H).** This paragraph used to open with the ten ghosts' real
+eight-character session ids, listed in the clear, on the reference machine. A session id is
+family (2) corpus identity in `scripts/check-privacy.py`'s own terms and this repository is
+public. The ids are removed; **the finding is untouched** — 5 prompt-side / 1 borderline / 4
+overstep, no card asserting the assistant side, 62 of 62 `outcome: unknown` — because the finding
+is a *rate over ten cards* and never depended on which ten. The one that oversteps worst is
+carried forward in `phases/phase-2/HANDOFF.md`, also without its id.
 
 The asked-vs-decided rule was checked both ways. Kept, because the prompt states it: *"Just have
 three panels, not six"* → decision "Limit the summary row to three panels". Dropped, because

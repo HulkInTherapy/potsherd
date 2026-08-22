@@ -80,10 +80,37 @@ Rule by rule, what it catches and what it does not:
 
   corpus-id ...... hashed, so the guard can ban an id without publishing it.
                    Catches the ids we know about, in short and uuid form.
-                   STILL OPEN: an id nobody has told this file about looks
-                   exactly like a synthetic one, because it is 8 hex
-                   characters. There is no test that distinguishes them. If you
-                   paste a real id, this will not save you.
+                   CLOSED, mostly, by the rule below: for eight phases this was
+                   an enumerated blocklist holding three hashes while 25 real
+                   ids sat in 39 tracked files, and the note that used to be
+                   here -- "an id nobody has told this file about looks exactly
+                   like a synthetic one" -- was the whole of why.
+
+  corpus-id-inventory
+                   the inversion of the rule above, added in phase 8 (T8.H)
+                   after the blocklist's stated limitation turned out to be a
+                   25-id backlog (`plans/08` rule 13). Instead of listing what
+                   is forbidden it enumerates every id-shaped token in tracked
+                   text and asks which source in this repository accounts for
+                   it: the generated corpus trees, the corpus generators, git's
+                   own shas, `pnpm-lock.yaml`, and a measured entropy test for
+                   hand-typed literals. Anything nothing accounts for is
+                   reported, and the residue is ratcheted by ID_INVENTORY_PINS.
+                   It cannot tell a real id from an invented one -- nothing here
+                   can, and no copy of the reference corpus is or will be in
+                   this repo. What it can do is refuse an UNEXPLAINED id, which
+                   makes the by-hand check cheap and bounded.
+                   STILL OPEN, and each of these is a live gap, not a caveat:
+                   (1) an id that also appears in a source tree is accounted for
+                   BY that tree, so a source that is not clean launders
+                   everything it touches -- which had already happened, see
+                   ID_SOURCE_EXCLUDE; (2) the entropy test at 3 distinct hex
+                   digits misses 1 real id in 3,013 and, if it were raised to 4
+                   to quieten `docs/`, would miss 43; (3) an eight-DIGIT decimal
+                   integer is the same shape as an all-digit id and there is no
+                   fix that does not create a 2.3% blind spot; (4) 30 tokens are
+                   pinned rather than repaired, 19 files' worth of them because
+                   phase 8's worker map reserved those files to somebody else.
 
   corpus-title ... hashed word n-grams, scanned across one line break so a
                    wrapped comment is still one title.
@@ -141,6 +168,14 @@ SHRANK means somebody scrubbed it and forgot to unpin it. That makes the list a
 ratchet rather than a place to hide things. It ran 34 -> 14 -> 0 across phases
 7 and 8 and is EMPTY as of 22 aug 2026; an empty DEBT means every violation this
 script can see has been repaired, and nothing more than that.
+
+ID_INVENTORY_PINS is a THIRD list and the `corpus-id-inventory` rule's own
+ratchet, kept apart from DEBT so that DEBT reaching zero stays a fact. It was
+born non-empty, at 30 tokens across 35 files, because the rule was switched on
+and found a backlog -- which is what a new rule is for and is the honest number,
+not a target that was negotiated down. It ratchets the same way in both
+directions. Nineteen of its files are RESERVED to other workers; the rest are
+four categories the rule cannot derive and each line says which.
 """
 
 from __future__ import annotations
@@ -262,6 +297,13 @@ REAL_CORPUS_ID_HASHES = {
     '1f658710d374',  # plans/06, the session whose title is pinned below
     '74818f5256a7',  # plans/06, cited beside it
     '0bcfa8fe5899',  # the same short id padded into a uuid, as a test used it
+    # NOT a real id. A selftest fixture, added by T8.H so that the probe for
+    # this rule stops publishing a real one. Until 22 aug 2026 the SELFTEST row
+    # below read `see session <the id whose hash is the first entry above>` --
+    # this guard banned an id by hash, in order not to carry it, and then
+    # carried it in the clear four hundred lines down. The hash of the real id
+    # stays where it is; only the probe's copy of it is gone.
+    '5da1954d1db7',
 }
 
 # Any hex run long enough to be an id. Checked by hash, both whole and by its
@@ -277,6 +319,222 @@ def find_corpus_id(line: str) -> list[str]:
             if _h(form) in REAL_CORPUS_ID_HASHES:
                 hits.append(f'{form[:4]}… (a live-corpus session id)')
                 break
+    return hits
+
+
+# ------------------------------- family (2), part two: the id INVENTORY
+#
+# WHY A SECOND ID RULE. `REAL_CORPUS_ID_HASHES` above is an ENUMERATED
+# BLOCKLIST: it holds the hashes of ids somebody happened to notice. An id that
+# is not on the list is invisible to it, and the header has said so since it
+# was written -- "an id nobody has told this file about looks exactly like a
+# synthetic one". That sentence was load-bearing. Measured on `a28bfc5`, in a
+# public repository, the blocklist was carrying three hashes while **25
+# distinct real reference-corpus session ids were committed across 39 tracked
+# files**, including the eight-hex id used as the canonical `--help` example
+# across `packages/cli`, `packages/core`, `packages/mcp`, the vendored plugin
+# bundles and a redaction fixture. This is the same structural failure that let
+# a real `~/.pi` `thinking` block live in `docs/` for six phases -- the guard
+# can only refuse what it has already been shown -- in the shape family (2)
+# takes.
+#
+# SO INVERT IT. Instead of listing what is forbidden, enumerate every id-shaped
+# token in every tracked text file and ask, of each one, **which source in this
+# repository accounts for it**. Anything nothing accounts for is a finding. The
+# sources are ones the repo can DERIVE, not a list somebody typed:
+#
+#   S1  the generated corpora -- every id-shaped token in the *names* and the
+#       *contents* of the trees ALLOW already exempts as synthetic by
+#       construction (`evals/fixture/`, `tests/fixtures/`, `docs/screens/`).
+#       The eval corpus keeps its session ids in FILE NAMES and cites them from
+#       `evals/queries.jsonl`, so reading contents alone accounts for 97 of
+#       them and reading names as well accounts for 162. Measured.
+#   S2  the corpus generators' own literals (`scripts/make-*-corpus.mjs`) --
+#       the demo corpus's HERO id is a literal there and its other ids come
+#       from a seeded PRNG at run time, which is why S1 has to do the rest.
+#   S3  `git rev-list --all` -- an abbreviated commit sha is eight hex
+#       characters and gets pasted into evidence constantly.
+#   S4  `pnpm-lock.yaml`. MEASURED AT ZERO: npm integrity strings are base64
+#       `sha512-...`, and base64 puts an alphanumeric next to every hex run, so
+#       the shapes below never match one. The source is kept because it costs
+#       nothing and because "we checked, it contributes none" is worth more
+#       than silence -- but do not expect it to grow.
+#   S5  a hand-typed literal: `aaaaaaaa`, `00000000`, `ffffffff`, `aa000004`,
+#       `5a5a5a5a`. THE THRESHOLD IS MEASURED, not chosen -- <= 3 distinct hex
+#       digits in the first eight characters accounts for all 27 such tokens in
+#       the repo and for none of the 25 real ids, whose first eight characters
+#       hold 6, 7 or 8 distinct digits. Three literals in tests are legible as
+#       placeholders to a human and not to that test (`deadbeef`, `12345678`,
+#       `a1b2c3d4`); they are named in PLACEHOLDER_IDS below, and that list is
+#       three entries long on purpose. If it starts growing, the entropy test
+#       is the thing to fix, not the list.
+#
+# WHAT THIS RULE STILL CANNOT DO, said plainly. It cannot tell a real id from a
+# convincing invented one -- nothing here can, and the repo holds no copy of
+# the reference corpus to check against. What it CAN do is refuse to let an
+# unexplained id sit in a public file without somebody having answered the
+# question. That is a policy, like `transcript-record`'s, and it is the whole
+# of what is on offer: the 25 real ids were found by cross-checking the
+# inventory against the read-only reference archive BY HAND, and the archive is
+# not in this repository and never will be. The rule's job is to make the
+# hand-check cheap and to make the residue a number that can only shrink.
+#
+# THE SHAPES. A full uuid, and a bare eight-hex run -- `id8` is what potsherd
+# prints, what `show`/`graft`/`tag` resolve by, and what actually gets pasted.
+# Longer hex runs (a full 40-char sha, a sha256, a base64 blob) are deliberately
+# NOT matched: the lookarounds require the eight characters to stand alone, so
+# `b86bf59aa1c2...` yields no token at all.
+# S3b. A 40-character sha written out IN FULL anywhere in tracked text accounts
+# for its own abbreviation. `NOTICE` names the upstream episodic-memory commit
+# at full length and `phases/phase-1/HANDOFF.md` cites the first eight of it;
+# without this the citation is an unexplained id and the thing that explains it
+# is sitting in the repository. Derivable, which is the whole test. It is also
+# the narrowest hole in this rule -- forty invented hex characters would launder
+# eight -- and it is worth it only because the alternative is a permanent pin on
+# a sha that anybody can check against `NOTICE` in five seconds.
+FULL_SHA = re.compile(r'(?<![0-9A-Za-z])[0-9a-f]{40}(?![0-9A-Za-z])')
+
+ID_UUID = re.compile(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b')
+ID_SHORT = re.compile(r'(?<![0-9A-Za-z_-])[0-9a-f]{8}(?![0-9A-Za-z_-])')
+
+# The trees ALLOW exempts as synthetic by construction. Named again here rather
+# than read out of ALLOW, because ALLOW is a list of (glob, rule, why) and this
+# needs the prefixes; if you add a tree to one, add it to the other.
+SYNTHETIC_TREES = ('evals/fixture/', 'tests/fixtures/', 'docs/screens/')
+
+# ...MINUS this, and here is why it matters more than the rest of the rule.
+#
+# ALLOW calls `tests/fixtures/**` "hand-written adapter fixtures, no live data".
+# For one file that is FALSE: `tests/fixtures/secrets/agent-transcript.txt` is a
+# redaction fixture built from a real agent transcript's harness bookkeeping and
+# it carries THREE real reference-corpus ids, one of which is the eight-hex id
+# used as the canonical example by every verb's --help across `packages/cli`,
+# `packages/core`, `packages/mcp` and the vendored plugin bundles.
+#
+# So a rule that treats every synthetic tree as ground truth LAUNDERS that id:
+# the fixture "accounts for" it, and twenty-one files go quiet. That is this
+# rule's own version of the blocklist's blind spot, discovered while writing it,
+# and it is a warning about the shape: AN INVENTORY IS ONLY AS GOOD AS THE
+# CLAIM THAT ITS SOURCES ARE CLEAN. Excluding the file from the SOURCES (not
+# from ALLOW, which governs the other rules and is unchanged) makes the guard
+# say the true thing about all twenty-one.
+#
+# Checked the other way too, so the exclusion is a measurement and not a hunch:
+# no id in `evals/fixture/`, `docs/screens/` or the rest of `tests/fixtures/`
+# appears anywhere in the reference archive or in the four live harness
+# directories. This one file is the only source that was not clean.
+ID_SOURCE_EXCLUDE = ('tests/fixtures/secrets/',)
+ID_GENERATORS = ('scripts/make-demo-corpus.mjs', 'scripts/make-eval-corpus.mjs')
+ID_LOCKFILES = ('pnpm-lock.yaml',)
+
+# See S5. Both numbers are measurements against the repo, not preferences.
+LOW_ENTROPY_MAX_DISTINCT = 3
+PLACEHOLDER_IDS = {
+    'deadbeef',  # tests/cli.test.ts, tests/graft.test.ts
+    '12345678',  # packages/core/src/graft.ts -- an eight-digit @seq, in a docstring
+    'a1b2c3d4',  # tests/redact.test.ts
+}
+
+_ID_SOURCES: dict[str, str] | None = None
+
+
+def id_tokens(text: str) -> list[str]:
+    """Every id-shaped token in a string, uuids first so a uuid is not also read
+    as its own short form."""
+    out = ID_UUID.findall(text)
+    out += [m for m in ID_SHORT.findall(text)]
+    return out
+
+
+def id_sources() -> dict[str, str]:
+    """id8 -> the name of the source that accounts for it. Built once, from the
+    repository, by running the four derivations above. An id8 is the key for
+    every source because an id8 IS the identity everything here resolves by:
+    a uuid and its own first eight characters are the same session."""
+    global _ID_SOURCES
+    if _ID_SOURCES is not None:
+        return _ID_SOURCES
+    src: dict[str, str] = {}
+
+    def add(tok: str, label: str) -> None:
+        src.setdefault(tok[:8], label)
+
+    for path in tracked_files():                                        # S1
+        if not path.startswith(SYNTHETIC_TREES):
+            continue
+        if path.startswith(ID_SOURCE_EXCLUDE):
+            continue
+        for tok in id_tokens(path):
+            add(tok, 'a generated corpus tree')
+        f = REPO / path
+        if f.suffix.lower() in SKIP_SUFFIXES or not f.is_file():
+            continue
+        try:
+            for tok in id_tokens(f.read_text(encoding='utf-8')):
+                add(tok, 'a generated corpus tree')
+        except (UnicodeDecodeError, OSError):
+            continue
+
+    for path in ID_GENERATORS:                                          # S2
+        f = REPO / path
+        if f.is_file():
+            for tok in id_tokens(f.read_text(encoding='utf-8')):
+                add(tok, 'a corpus generator literal')
+
+    try:                                                                # S3
+        out = subprocess.run(['git', 'rev-list', '--all'], cwd=REPO,
+                             capture_output=True, text=True, check=True)
+        for sha in out.stdout.split():
+            add(sha, 'a git commit sha')
+    except (subprocess.CalledProcessError, OSError):
+        pass
+
+    for path in tracked_files():                                        # S3b
+        f = REPO / path
+        if f.suffix.lower() in SKIP_SUFFIXES or not f.is_file():
+            continue
+        try:
+            for sha in FULL_SHA.findall(f.read_text(encoding='utf-8')):
+                add(sha, "a sha this repository writes out in full")
+        except (UnicodeDecodeError, OSError):
+            continue
+
+    for path in ID_LOCKFILES:                                           # S4
+        f = REPO / path
+        if f.is_file():
+            for tok in id_tokens(f.read_text(encoding='utf-8')):
+                add(tok, 'a lockfile hash')
+
+    _ID_SOURCES = src
+    return src
+
+
+def classify_id(tok: str) -> str | None:
+    """The source that accounts for this token, or None -- which is a finding."""
+    key = tok[:8]
+    known = id_sources().get(key)
+    if known:
+        return known
+    if key in PLACEHOLDER_IDS:
+        return 'a documented placeholder literal'
+    if len(set(key)) <= LOW_ENTROPY_MAX_DISTINCT:                       # S5
+        return f'a hand-typed literal ({len(set(key))} distinct hex digits)'
+    return None
+
+
+def find_unaccounted_ids(path: str, lines: list[str]) -> list[tuple[int, str]]:
+    """A whole-file rule: it needs the path, to skip the sources themselves.
+
+    A source file cannot be a finding against itself -- `evals/fixture/**` IS
+    the demo corpus, and `git rev-list` IS the sha list."""
+    if path.startswith(SYNTHETIC_TREES) or path in ID_GENERATORS or path in ID_LOCKFILES:
+        return []
+    hits: list[tuple[int, str]] = []
+    for i, line in enumerate(lines, 1):
+        for tok in id_tokens(line):
+            if classify_id(tok) is None:
+                hits.append((i, f'{tok[:4]}… (an id-shaped token that no source '
+                                f'in this repository accounts for)'))
     return hits
 
 
@@ -430,6 +688,12 @@ RULES: dict[str, dict] = {
         'why': 'a session/thread id that indexes a live transcript',
         'find': find_corpus_id,
     },
+    'corpus-id-inventory': {
+        'why': 'an id-shaped token that no derivable source in this repository accounts for',
+        # `file` instead of `find`: the rule has to know the path, so that a
+        # source tree is not a finding against itself.
+        'file': find_unaccounted_ids,
+    },
     'corpus-title': {
         'why': 'a live-corpus session title',
         'find': find_corpus_title,
@@ -545,6 +809,143 @@ DEBT: list[tuple[str, str, int, str]] = [
     # failure, not a general answer to it.
 ]
 
+# ------------------------------------------------- the id inventory's ratchet
+
+# (path, count, why). The `corpus-id-inventory` rule's OWN pin list, kept apart
+# from DEBT on purpose.
+#
+# DEBT means "a violation one of the older rules can see, which a task was not
+# allowed to fix", and it reached ZERO on 22 aug 2026 for the first time in the
+# build's history. The inventory rule is new; it was switched on and it found a
+# backlog, which is what a new rule is for. Folding that backlog into DEBT would
+# erase the fact that DEBT is clear, so it lives here, with the same two-way
+# ratchet: a count that GREW is a new leak, a count that SHRANK means somebody
+# scrubbed a file and forgot to unpin it, and a path not listed here may carry
+# no unaccounted id at all.
+#
+# Every line below is one of two things and says which:
+#
+#   (b) A KEPT `--potsherd-dir` CITED AS EVIDENCE. `00-README.md`'s ground rules
+#       REQUIRE a real-corpus run to be cited by its kept directory, and this
+#       file's own exemption (b) blesses that path. Those directories live under
+#       `$TMPDIR/claude-501/<agent session uuid>/scratchpad/...`, so the uuid of
+#       the BUILD's own agent session is part of the mandated citation. It is
+#       still a session uuid, so the rule still flags it, and it is pinned
+#       rather than laundered: widening "accounted for" to swallow it would make
+#       the guard coarser to fit the repo (`plans/08` rule 9), and the tension
+#       between the ground rule and family (2) is a real one that should stay
+#       visible. What was NOT left standing is the same uuid printed as a
+#       session identity rather than as a path -- `ls` output, a `session <id8>`
+#       trailer, a `harness/id:` line -- which exemption (b) does not cover at
+#       all. T8.H removed every one of those.
+#
+#   (r) RESERVED. A real reference-corpus id in a file this phase's worker map
+#       assigned to somebody else. NOT repairable here and NOT wished away:
+#       each one is named in `phases/phase-8/registration-W7.txt` with the exact
+#       edit it needs. These are the ones to clear first; when they go, so do
+#       the two `plugins/claude-code/dist/*.js` lines, which are esbuild output
+#       and carry whatever `packages/` says.
+#   (s) A SYNTHETIC STAND-IN that is not derivable. Somebody hand-wrote it, so
+#       no generator produced it and no tree holds it. Verified by hand against
+#       the reference archive as not real. These clear by being rewritten in a
+#       shape the entropy test can see, and until somebody does that they are
+#       the price of the test staying tight.
+#
+#   (n) NOT AN ID AT ALL. An eight-character content sha, a redaction
+#       placeholder, or an eight-DIGIT decimal integer that the shape happens to
+#       match. The obvious fix -- require at least one of `a`-`f` -- was
+#       MEASURED and rejected: 2.3% of the 3,013 real session ids in the
+#       reference archive are all digits (about 70 of them), so that fix trades
+#       two false positives for a seventy-id blind spot. `plans/08` rule 9.
+ID_INVENTORY_PINS: list[tuple[str, int, str]] = [
+    ('docs/upstream/PHASE-1-SCOUT.md', 14,
+     '(s) codex/cursor/pi uuid stand-ins hand-written by the 8.1 rewrite. Their'
+     ' first eight characters hold FOUR distinct hex digits (`0c000012`,'
+     ' `7a000003`), one over the entropy test. Raising the test to four would'
+     ' clear all 14 and would also blind it to 43 of the 3,013 real ids in the'
+     ' reference archive, which is the wrong trade. Rewrite them instead.'),
+    ('evals/ASK-EVALS.md', 1,
+     '(b) the agent session uuid inside a kept --potsherd-dir citation. evals/ is'
+     ' RESERVED; the same token is pinned in four other files for the same reason.'),
+
+    # ---- (r) THE BIG ONE, and the reason this rule exists. ONE real
+    # reference-corpus session id is the canonical eight-hex example for every
+    # verb: `potsherd tag <id>`, `pin`, `unpin`, `link`, `ls --linked-to`,
+    # `graft`, `card`, and the "needs a session id" error message. A SECOND real
+    # id is the other end of the `link` example. Both are on a paying
+    # developer's machine and both are in a public repository. Nineteen of the
+    # files below are RESERVED by phase 8's worker map to workers other than the
+    # one that wrote this rule, which is why they are pinned rather than fixed;
+    # `phases/phase-8/registration-W7.txt` names the exact substitution each one
+    # needs. The demo corpus's own `9c4d2f18` is the substitute, and this file's
+    # header has said so since T5.9.
+    ('packages/cli/src/commands/card.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
+    ('packages/cli/src/commands/graft.ts', 4, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
+    ('packages/cli/src/commands/link.ts', 2, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.' + ' Both ends of the `link` example.'),
+    ('packages/cli/src/commands/tag.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
+    ('packages/cli/src/filters.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
+    ('packages/cli/src/index.ts', 17, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.' + ' Every verb\'s --help example block.'),
+    ('packages/cli/src/session-ref.ts', 3, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
+    ('packages/core/src/browse.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
+    ('packages/core/src/graft.ts', 16, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.' + ' The citation-parsing docstrings.'),
+    ('packages/core/src/tags.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
+    ('packages/mcp/src/tools/graft.ts', 2, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
+    ('tests/open-threads.test.ts', 2, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
+    ('tests/redact.test.ts', 9,
+     '(r) the same real id, plus two more real ids, in the redaction fixtures.'
+     ' This test and tests/fixtures/secrets/agent-transcript.txt are the pair'
+     ' that made the whole leak invisible -- see ID_SOURCE_EXCLUDE above.'),
+    ('tests/recall.test.ts', 4,
+     '(r) the same real id, and a real subagent id derived from it.'),
+
+    ('packages/core/src/adapters/pi.ts', 2,
+     '(r) a real ~/.pi session id in a docstring, and a real ~/.pi DAG record id'
+     ' beside it. The docs/ half of this pair was repaired by T8.H.'),
+    ('packages/core/src/ask.ts', 1,
+     '(r) a real session cited in a docstring as the case a bug was measured on.'),
+    ('tests/adapters/codex.test.ts', 1,
+     '(r) a real ~/.codex rollout id, labelled in the test as "the one rollout'
+     ' on this machine".'),
+    ('tests/adapters/pi.test.ts', 1, '(r) a real ~/.pi session id in a filename assertion.'),
+    ('tests/graft.test.ts', 1,
+     '(r) a real ghost session id in a comment recording where a bug was found.'),
+    ('tests/parser.test.ts', 3, '(r) the same real ~/.codex rollout id as codex.test.ts.'),
+
+    ('plugins/claude-code/dist/mcp.js', 3,
+     '(r) vendored esbuild output; carries whatever packages/ says, plus (n) an'
+     ' eight-digit decimal byte count.'),
+    ('plugins/claude-code/dist/potsherd.js', 23,
+     '(r) the same, at the size of the whole CLI. These two clear by re-running'
+     ' scripts/vendor-plugin.mjs AFTER packages/ is fixed, and not before.'),
+
+    ('packages/core/src/redact.ts', 6, '(n) the `‹redacted:aws:<sha8>›` placeholder sha8.'),
+    ('packages/core/src/render/ask.ts', 1, '(n) the same redaction placeholder sha8.'),
+    ('packages/core/src/search/snippet.ts', 1, '(n) the same redaction placeholder sha8.'),
+    ('tests/ask.test.ts', 1, '(n) the redaction placeholder sha8.'),
+    ('tests/cards.test.ts', 1,
+     '(n) 16777619, the FNV-1a prime, in a hash function. Eight digits.'),
+    ('phases/phase-2/VERIFICATION.md', 1,
+     '(n) a truncated content sha over a 721-file listing, cited to show two'
+     ' listings matched. Not a session id; the full sha is written nowhere, so'
+     ' S3b cannot reach it.'),
+
+    ('phases/phase-3/evidence-verify/evals-reference-set.txt', 1,
+     '(b) the agent session uuid inside a kept --potsherd-dir citation.'),
+    ('phases/phase-4/evidence-T4.3/README.txt', 1,
+     '(b) the agent session uuid inside the kept index path this evidence folder'
+     ' is required to cite.'),
+    ('phases/phase-5/evidence-orchestrator/model-invoked-recall.md', 1,
+     '(b) the agent session uuid inside a kept scratchpad citation.'),
+    ('phases/phase-5/registration-T5.3.txt', 1,
+     '(b) the agent session uuid inside a kept config-dir citation. The SAME'
+     ' uuid printed as an `ls` row identity, twenty lines further down, was NOT'
+     ' left standing -- exemption (b) covers a path, not a session identity.'),
+    ('phases/phase-5/registration-T5.4.txt', 1,
+     '(b) the agent session uuid inside a kept scratchpad citation. Same split'
+     ' as T5.3: the `harness/id:` line that named a real codex rollout is gone.'),
+]
+
+
 # --------------------------------------------------------------------- engine
 
 SKIP_SUFFIXES = {'.png', '.jpg', '.jpeg', '.gif', '.pdf', '.zip', '.wasm', '.onnx', '.bin'}
@@ -580,10 +981,18 @@ def allowed(path: str, rule: str) -> str | None:
 # to a directory. Rows without one are checked at a path outside `docs/`, which
 # is where all eleven original probes have always effectively been.
 SELFTEST: list[tuple] = [
+    # These two used to carry a REAL id -- the very one the first entry of
+    # REAL_CORPUS_ID_HASHES bans by hash, printed here in full four hundred
+    # lines below the comment explaining why ids are hashed. T8.H swapped in a
+    # fixture id and added its hash instead. Both rules fire on them now: the
+    # blocklist because the hash is listed, the inventory because nothing in the
+    # repository accounts for the token. That the two agree on a known id is
+    # the point -- the inventory is a superset, not a replacement.
     ('a live-corpus session uuid',
-     'see session 85ef9531-1c4a-4f2b-9d3e-7a6b5c4d3e2f', ('corpus-id',)),
+     'see session 5d3f0a91-1c4a-4f2b-9d3e-7a6b5c4d3e2f',
+     ('corpus-id', 'corpus-id-inventory')),
     ('the same id in short form',
-     'potsherd show 85ef9531', ('corpus-id',)),
+     'potsherd show 5d3f0a91', ('corpus-id', 'corpus-id-inventory')),
     ('a live-corpus session title',
      'a session called "Build Instagram chat-only client" wins', ('corpus-title',)),
     ('a title wrapped across a comment',
@@ -597,10 +1006,28 @@ SELFTEST: list[tuple] = [
      '/Users/zebra/randomness/../Some-Private-Client/notes.md', ('home-path',)),
     ('CONTROL this repository\'s own checkout path',
      '/Users/zebra/randomness/potsherd/packages/core', ()),
+    # ---- corpus-id-inventory. The rule that does NOT need to have been told.
+    #
+    # The positive case is the whole difference between this rule and the
+    # blocklist above it: an id nobody has ever mentioned to this file, which
+    # `corpus-id` cannot see and this one refuses anyway. The four CONTROLs are
+    # the four shapes that are legitimately eight hex characters in a repository
+    # like this one, and a rule that starts flagging any of them is a rule
+    # somebody will switch off within a day.
+    ('an id-shaped token no derivable source accounts for',
+     'potsherd show 3f9a21c7', ('corpus-id-inventory',)),
+    ('the same unaccounted id in uuid form',
+     'session 3f9a21c7-4b16-4e02-9d5a-8c71e0f4b2a6', ('corpus-id-inventory',)),
+
     ('CONTROL a demo-corpus id',
      'potsherd show 9c4d2f18', ()),
     ('CONTROL a git sha',
      'commit b86bf59aa1c2d3e4f5061728394a5b6c7d8e9f01', ()),
+    ('CONTROL an npm integrity hash out of pnpm-lock.yaml',
+     'integrity: sha512-7KctNItTzHRiDg+jFxTM46o+Y/YS52V6HSopaWPggO6BbR+3MV/'
+     'rKMmq+zP93If7eVwadW9Yg9vHLjXDKIw9OQ==', ()),
+    ('CONTROL a hand-typed test literal',
+     "const id = 'aaaaaaaa-0000-4000-8000-000000000001';", ()),
     ('CONTROL placeholder home directories',
      'HOME=/home/dev/.claude and /Users/example/work', ()),
 
@@ -662,6 +1089,21 @@ SELFTEST: list[tuple] = [
      '"}]}}',
      (), 'tests/fixtures/pi/session.jsonl'),
 ]
+
+
+# The fifth control has to be built rather than typed: an ABBREVIATED git sha is
+# eight hex characters standing alone, which is exactly the id shape, and the
+# only honest way to probe it is against a commit this repository actually has.
+# `git rev-list -1 HEAD` gives one. If git is not available the row is dropped
+# rather than faked -- a probe that cannot run must not report "ok".
+try:
+    _head = subprocess.run(['git', 'rev-list', '-1', 'HEAD'], cwd=REPO,
+                           capture_output=True, text=True, check=True).stdout.strip()
+    if len(_head) == 40:
+        SELFTEST.append(('CONTROL an abbreviated sha of this repository\'s own HEAD',
+                         f'see commit {_head[:8]} for the rewrite', ()))
+except (subprocess.CalledProcessError, OSError):
+    pass
 
 
 # (label, argv after the script name, expected exit code). These probe the
@@ -766,6 +1208,29 @@ def parse_args(args: list[str]) -> tuple[list[str] | None, str | None]:
     return args, None
 
 
+def inventory_line(inventory: dict[str, str | None], partial: bool) -> str:
+    """The `corpus-id-inventory` rule's state, in one line, on every run.
+
+    A guard that only prints "ok" teaches nobody what it looked at. This says
+    how many id-shaped tokens are in the repository, which derivable source
+    accounts for each of them, and how big the unexplained residue is -- which
+    is the number ID_INVENTORY_PINS ratchets down."""
+    if partial:
+        return ('id inventory: partial sweep, not counted '
+                '(run with no arguments for the repository-wide number).')
+    by: dict[str, int] = {}
+    for source in inventory.values():
+        by[source or 'UNACCOUNTED'] = by.get(source or 'UNACCOUNTED', 0) + 1
+    un = by.pop('UNACCOUNTED', 0)
+    breakdown = ', '.join(f'{n} {label}' for label, n in sorted(by.items(), key=lambda x: -x[1]))
+    pinned_files = len(ID_INVENTORY_PINS)
+    pinned_hits = sum(c for _p, c, _w in ID_INVENTORY_PINS)
+    return (f'id inventory: {len(inventory)} distinct id-shaped tokens in tracked text; '
+            f'{len(inventory) - un} accounted for ({breakdown}); '
+            f'{un} unaccounted, pinned at {pinned_hits} occurrences across '
+            f'{pinned_files} files.')
+
+
 def main(argv: list[str]) -> int:
     files, err = parse_args(argv[1:])
     if err:
@@ -782,6 +1247,7 @@ def main(argv: list[str]) -> int:
     partial = bool(files)
     files = files or tracked_files()
     found: dict[tuple[str, str], list[tuple[int, str]]] = {}
+    inventory: dict[str, str | None] = {}
     swept = 0
 
     for path in files:
@@ -793,6 +1259,16 @@ def main(argv: list[str]) -> int:
         except (UnicodeDecodeError, OSError):
             continue
         swept += 1
+        # The inventory is repo-wide, so it is counted here rather than inside a
+        # rule: every id-shaped token in every file that is read, INCLUDING the
+        # ALLOWed trees, classified once. `found` still decides pass/fail; this
+        # is what the run reports about itself on its last line.
+        # ...except this file's own probe fixtures, which are not repository
+        # content: they exist to be flagged, and counting them would put the
+        # guard's test data into the number the guard reports about the repo.
+        if path != 'scripts/check-privacy.py':
+            for tok in id_tokens(text):
+                inventory.setdefault(tok[:8], classify_id(tok))
         for rule, spec in RULES.items():
             if allowed(path, rule):
                 continue
@@ -812,6 +1288,8 @@ def main(argv: list[str]) -> int:
                     found.setdefault((path, rule), []).append((n, hit))
 
     pinned = {(path, rule): (count, why) for path, rule, count, why in DEBT}
+    pinned.update({(path, 'corpus-id-inventory'): (count, why)
+                   for path, count, why in ID_INVENTORY_PINS})
     new: list[str] = []
     stale: list[str] = []
 
@@ -842,6 +1320,7 @@ def main(argv: list[str]) -> int:
         pins = (f'{len(DEBT)} pinned known violations all at their expected counts'
                 if DEBT else 'no pinned known violations left to carry')
         print(f'privacy: {swept} tracked text files swept, no real-corpus content, {pins}.')
+        print(inventory_line(inventory, partial))
         return 0
 
     print('=' * 78)
@@ -854,6 +1333,8 @@ def main(argv: list[str]) -> int:
         print('\nPINNED COUNTS THAT NO LONGER MATCH '
               '(somebody scrubbed a file and left the pin behind):\n')
         print('\n'.join(stale))
+    print()
+    print(inventory_line(inventory, partial))
     print(f"""
 {'-' * 78}
 THE RULE, so you can decide what to do about it

@@ -1,29 +1,57 @@
-potsherd graft · claude f7ac67c0 · 2026-07-02
+# reproduced against the synthetic demo corpus on 2026-08-22 (T8.H); the
+# original was captured against the live corpus in phase 4 and its headline
+# numbers are preserved below. the original carried a REAL ghost session id and
+# that ghost's REAL title in its header — family (2) corpus identity — with the
+# brief body withheld.
+#
+#   the original run, phase 4, 21 aug 2026, live corpus (ghost id and title
+#   withheld — both index a real transcript):
+#     tokens 137 of 150 (est., chars/3.6) · citations 13/13 · 241 prompts
+#     trimmed to fit: 8 lines dropped from the end
+#     model 1m 1s · 1 call · $0.038
+#     kept unredacted beside the repo; its path is in README.txt in this folder
+#
+# reproduced with:
+#   node packages/cli/bin/potsherd.js graft 77c6a3a4 --budget 150 \
+#     --claude-dir   <demo>/.claude    built by scripts/make-demo-corpus.mjs
+#     --potsherd-dir <demo>/.potsherd
+#   backend: agent-sdk (subscription); tokens `est.` (chars/3.6). binary v1.0.0.
+#   kept evidence dir: /tmp/w7-ids-evidence.1yC9gR
+#
+# THE FINDING IS UNCHANGED, and the re-run reproduces it line for line: on a
+# budget that cannot hold the brief, ALL 8 body lines are dropped, the brief
+# says `_trimmed 8 lines to fit --budget 150._` on its face, and it comes in
+# under the ceiling (133 of 150 here, 137 of 150 then). The prompts-only banner
+# is never a candidate for trimming — it is the thing that stops a ghost brief
+# implying the assistant's reply is known — and it survives here exactly as it
+# did in the original.
+#
+# THIS IS A RE-RUN, NOT AN EDITED PASTE. the session, the project, the title
+# and every word of the brief are synthetic.
 
-  Printer Web UI and Internet Social Experiment
+potsherd graft · claude 77c6a3a4 · 2025-11-15
 
-  tokens                       137   of 150 budget  ·  est. (chars/3.6)
-  citations                  13/13   distinct, and all resolve
+  Move payments-api onto pgbouncer
+
+  tokens                       133   of 150 budget  ·  est. (chars/3.6)
+  citations                    8/8   distinct, and all resolve
   exchanges                    241   prompts only — the assistant side is gone
   trimmed to fit                 8   lines dropped from the end
-  wrote                              /private/tmp/claude-501/-Users-zebra-rando…
-  model                      1m 1s   1 call  ·  $0.038
+  wrote                              /private/tmp/w7-ids-evidence.1yC9gR/cwd/.p…
+  model                      17.4s   1 call  ·  $0.016 est.
 
-────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────
 
-  [the brief body that printed here is withheld]
+# Move payments-api onto pgbouncer
 
-  WITHHELD FROM THE PUBLIC REPO — this artefact reproduces the *content* of real
-  sessions from the reference corpus, which includes a named third party's
-  business plans and a personal tweet. `00-README.md`'s secrets rule already
-  says committed artefacts use the synthetic demo corpus, not the live one;
-  phase 4 extends that from screenshots to every committed artefact.
+Brief from a past session. Written by potsherd; every claim carries `[77c6a3a4@seq]`, the exchange it came from.
 
-  The file itself is kept, unredacted and re-examinable, beside the repo at:
+> **prompts only.** This session was deleted; `history.jsonl` kept what the user asked and nothing kept what the assistant answered. Nothing below describes the assistant side — it is not recoverable.
 
-      /Users/zebra/randomness/potsherd-p4-evidence/T4.3/run7-tight-budget-trim.txt
+_trimmed 8 lines to fit --budget 150._
 
-  Evidence that cannot be re-examined is not evidence (`08` rule 5) — but
-  re-examinable does not mean published. The numbers this run produced are in
-  `README.txt` and in `phases/phase-4/HANDOFF.md`; only the transcript-derived
-  prose is held back.
+---
+
+source: claude 77c6a3a4-ba7a-4784-b325-02e0c14ea29c · 241 prompts · 2025-11-15
+
+  run  potsherd show 77c6a3a4  read the session this came from, end to end

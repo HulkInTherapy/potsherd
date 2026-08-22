@@ -1,31 +1,60 @@
-potsherd graft · claude a2cf864f · 2026-08-20
+# reproduced against the synthetic demo corpus on 2026-08-22 (T8.H); the
+# original was captured against the live corpus in phase 4 and its headline
+# numbers are preserved below. the original carried a REAL session id and that
+# session's REAL title in its header — family (2) corpus identity — with the
+# brief body withheld, so the withheld body was never the whole leak.
+#
+#   the original run, phase 4, 20 aug 2026, live corpus (session id, title and
+#   --about topic all withheld — the id and title index a real transcript and
+#   the topic is transcript prose):
+#     tokens 419 of 700 (est., chars/3.6) · citations 5/5 · exchanges 20
+#     model 2m 12s · 1 call · $0.038
+#     kept unredacted beside the repo; its path is in README.txt in this folder
+#
+# reproduced with:
+#   node packages/cli/bin/potsherd.js graft 81163900 --about "token refresh" \
+#     --budget 700 --clip \
+#     --claude-dir   <demo>/.claude    built by scripts/make-demo-corpus.mjs
+#     --potsherd-dir <demo>/.potsherd
+#   backend: agent-sdk (subscription); tokens `est.` (chars/3.6). binary v1.0.0.
+#   kept evidence dir: /tmp/w7-ids-evidence.1yC9gR
+#
+# THE FINDING IS UNCHANGED: the `--about` slice narrows the brief to one topic,
+# the header shows the `about` line, `--clip` reports the clipboard tool it
+# found, every citation resolves, and the brief lands inside the budget. The
+# exchange count is the demo session's (12) rather than the original's (20),
+# and the token count follows it down; the structure and every invariant are
+# the original's.
+#
+# THIS IS A RE-RUN, NOT AN EDITED PASTE. the session, the project, the title,
+# the --about topic and every word of the brief are synthetic.
 
-  Measured session archive, identified gap, planned digsite
-  about  session loss measurement
+potsherd graft · claude 81163900 · 2026-08-17
 
-  tokens                       419   of 700 budget  ·  est. (chars/3.6)
-  citations                    5/5   distinct, and all resolve
-  exchanges                     20   plans
-  wrote                              /private/tmp/claude-501/-Users-zebra-rando…
-  model                     2m 12s   1 call  ·  $0.038
+  Untangle token refresh error handling
+  about  token refresh
+
+  tokens                       181   of 700 budget  ·  est. (chars/3.6)
+  citations                    3/3   distinct, and all resolve
+  exchanges                     12   auth-gateway
+  wrote                              /private/tmp/w7-ids-evidence.1yC9gR/cwd/.p…
+  model                      29.9s   1 call  ·  $0.019 est.
 
   copied to the clipboard with pbcopy
 
-────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────
 
-  [the brief body that printed here is withheld]
+# Untangle token refresh error handling
 
-  WITHHELD FROM THE PUBLIC REPO — this artefact reproduces the *content* of real
-  sessions from the reference corpus, which includes a named third party's
-  business plans and a personal tweet. `00-README.md`'s secrets rule already
-  says committed artefacts use the synthetic demo corpus, not the live one;
-  phase 4 extends that from screenshots to every committed artefact.
+Brief from a past session, about **token refresh**. Written by potsherd; every claim carries `[81163900@seq]`, the exchange it came from.
 
-  The file itself is kept, unredacted and re-examinable, beside the repo at:
+- Websocket bridge performance has degraded since previous week, needs investigation [81163900@6]
+- Image resizer retry logic refactoring in progress to consolidate into one location [81163900@9]
+- Metrics exporter retry logic refactoring to consolidate into one location [81163900@10]
+- Allocation in loop identified as issue in both retry implementations [81163900@9] [81163900@10]
 
-      /Users/zebra/randomness/potsherd-p4-evidence/T4.3/run3-about-clip.txt
+---
 
-  Evidence that cannot be re-examined is not evidence (`08` rule 5) — but
-  re-examinable does not mean published. The numbers this run produced are in
-  `README.txt` and in `phases/phase-4/HANDOFF.md`; only the transcript-derived
-  prose is held back.
+source: claude 81163900-c7dd-449a-b86d-f60fed82857c · 12 exchanges · 2026-08-17
+
+  run  potsherd show 81163900  read the session this came from, end to end

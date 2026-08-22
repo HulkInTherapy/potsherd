@@ -1400,10 +1400,19 @@ v2→v3 migration), `branchSummary`, `compactionSummary`. **A parser must fail o
 
 | file | records | leaf id | branch points | on-mainline | off-mainline |
 |---|---:|---|---:|---:|---:|
-| `…_01a00001-…` | 6 (1 header + 5) | `36ef4bb7` | 0 | 5 | 0 |
-| `…_01a00002-…` | 5 (1 + 4) | `0b6df073` | 0 | 4 | 0 |
-| `…_01a00003-…` | 5 (1 + 4) | `6b5e0a6f` | 0 | 4 | 0 |
-| `…_01a00004-…` | 15 (1 + 14) | `a250333c` | 0 | 14 | 0 |
+| `…_01a00001-…` | 6 (1 header + 5) | `aa000011` | 0 | 5 | 0 |
+| `…_01a00002-…` | 5 (1 + 4) | `aa000012` | 0 | 4 | 0 |
+| `…_01a00003-…` | 5 (1 + 4) | `aa000013` | 0 | 4 | 0 |
+| `…_01a00004-…` | 15 (1 + 14) | `aa000014` | 0 | 14 | 0 |
+
+> **the record ids in the table above and in the DAG example below are synthetic** (T8.H,
+> 22 aug 2026). They were the REAL 8-hex DAG record ids off the reference machine's `~/.pi`
+> files — the same class of thing as the `thinking` block this document published for six
+> phases, one level down. `phases/phase-5/registration-T5.7.txt` argued they were harmless
+> because "they link to no person and no machine"; that is true and it is not the test. A
+> record id indexes a real transcript record, this repository is public, and the substitutes
+> below carry every fact the originals carried: four distinct leaves, one per file, and a
+> three-link parent chain. Nothing measured here changed.
 
 Every file is a pure linear chain; file order == chain order == timestamp order (verified monotonic
 in all 4). Branching is nonetheless first-class — `SessionManager` exposes `getBranch(fromId?)`,
@@ -1462,8 +1471,8 @@ text, and `content` may be a bare string.
   `message.toolCallId` → the block's `id`, with a redundant `message.toolName`. Success/failure is
   `message.isError` (boolean).
 - **parallel calls chain sequentially, not as siblings**: N calls in one assistant message produce N
-  `toolResult` records each the parent of the next (e.g. `b0953c36`(assistant, 2 calls) →
-  `508c8111`(toolResult) → `abdd92c4`(toolResult) → next assistant). Chain depth ≠ turn depth, and
+  `toolResult` records each the parent of the next (e.g. `aa000021`(assistant, 2 calls) →
+  `aa000022`(toolResult) → `aa000023`(toolResult) → next assistant). Chain depth ≠ turn depth, and
   the two results' `$.timestamp` can be identical.
 - **failed turns are still recorded**: `stopReason:"error"`, `content: []`, all-zero `usage`, and an
   `errorMessage` string. 3 of 8 assistant messages here are transport errors (e.g. `"Cannot read

@@ -1,3 +1,22 @@
+SUBSTITUTIONS AND RE-RUNS, 2026-08-22 (T8.H). This file named four REAL
+reference-corpus session ids in the clear — three sessions that were carded
+and one whose model call timed out. A session id is family (2) corpus
+identity in `scripts/check-privacy.py`'s own terms and this repository is
+public, so every one of them is gone from this page. Nothing else is: every
+count, every token/budget pair, every citation ratio, every wall time and
+every finding below is the ORIGINAL measurement, unchanged.
+
+Where a run has since been reproduced against the synthetic demo corpus, the
+table says so and the file itself carries a header recording the original's
+numbers beside the re-run's. Runs 1, 2 and 6 were re-run in T8.A; runs 3, 4,
+5 and 7 in T8.H. The one page that could not be re-run is `help.txt`, whose
+example id is a real id shipped in `packages/cli`'s `--help` — see its header
+and `phases/phase-8/registration-W7.txt`.
+
+Ids below are written as `run1's session`, `run3's session` and so on. That
+is deliberate: the runs' relationships to each other are the thing this page
+records, and they survive without the identities.
+
 T4.3 `graft` — real-run evidence, 21 aug 2026.
 
 Everything here was produced by `node packages/cli/bin/potsherd.js`, built from
@@ -12,9 +31,10 @@ THE KEPT INDEX (re-examinable; the corpus every number below came from)
     potsherd rescue --no-settings --claude-dir ~/.potsherd/archive-manual-2026-08-21 --potsherd-dir <above>
   contents: 236 sessions (37 top-level + 199 subagents), 299 ghosts,
             1,406 exchanges, 1,406 vectors, 2,971 recovered prompts.
-  cards were then written for 3ec2f5ca, a2cf864f and f7ac67c0 (one `card` run
-  each). 4c9339e0 was attempted and its model call timed out at 360 s, so no
-  brief here uses it.
+  cards were then written for run1's session, run3's session and run4's ghost
+  (one `card` run each). A fourth session was attempted and its model call
+  timed out at 360 s, so no brief here uses it. All four ids are withheld:
+  each indexes a live transcript.
 
 THE BACKEND
 
@@ -28,23 +48,25 @@ THE BACKEND
 THE RUNS
 
   file                       what                          tokens/budget  cites  wall
-  run1-by-id.txt             graft 3ec2f5ca                262 / 1,200    3/3    1m 14s
+  run1-by-id.txt             graft run1's session          262 / 1,200    3/3    1m 14s
   run2-by-query.txt          graft "[query withheld]       244 / 800      3/3    1m 58s
                                strategy" --budget 800
-  run3-about-clip.txt        graft a2cf864f --about        419 / 700      5/5    2m 12s
-                               "session loss measurement"
+  run3-about-clip.txt        graft run3's session --about  419 / 700      5/5    2m 12s
+                               "<topic withheld>"
                                --budget 700 --clip
-  run4-ghost.txt             graft f7ac67c0 (a GHOST)      397 / 1,200    10/10  2m 13s
-  run5-no-model-json.txt     graft 3ec2f5ca --no-model     368 / 1,200    3/3    <1s
+  run4-ghost.txt             graft run4's ghost            397 / 1,200    10/10  2m 13s
+  run5-no-model-json.txt     graft run1's session          368 / 1,200    3/3    <1s
+                               --no-model --json
                                --json                                            (no call)
   run6-clip-no-tool.txt      --clip with no pbcopy,        368 / 1,200    3/3    <1s
                                xclip, wl-copy or xsel on
                                PATH — a note, exit 0
-  run7-tight-budget-trim.txt graft f7ac67c0 --budget 150    137 / 150     13/13   1m 1s
+  run7-tight-budget-trim.txt graft run4's ghost --budget    137 / 150     13/13   1m 1s
+                               150
                                the ceiling doing real work
 
   "cites" is **distinct** `id8@seq` pairs, resolved / emitted. A brief can carry
-  more citation *tokens* than distinct pairs — run 3 cites `a2cf864f@20` on four
+  more citation *tokens* than distinct pairs — run 3 cites one `id8@seq` on four
   separate bullets — and `GraftResult.citations[]` holds one entry per distinct
   pair, each with its own `resolves`.
 
@@ -99,7 +121,7 @@ TWO BUGS THIS EVIDENCE CAUGHT, both found by reading a real brief by eye
      now matches the `id8@seq` token itself, wherever it sits.
      Regression: tests/graft.test.ts, "checks a comma group…".
 
-  2. The model returned the instruction's own placeholder, `[f7ac67c0@<seq>]`,
+  2. The model returned the instruction's own placeholder, `[<id8>@<seq>]`,
      on three bullets. `<seq>` is not a number, so nothing matched it and those
      bullets survived as uncited claims wearing something that looked like a
      citation. Placeholders are now stripped, and **any bullet left with no

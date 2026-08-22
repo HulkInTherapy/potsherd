@@ -1,28 +1,65 @@
-potsherd graft · claude f7ac67c0 · 2026-07-02
+# reproduced against the synthetic demo corpus on 2026-08-22 (T8.H); the
+# original was captured against the live corpus in phase 4 and its headline
+# numbers are preserved below. what this file used to hold was a header block,
+# a REAL ghost session id, that ghost's REAL title, and the words "[the brief
+# body that printed here is withheld]" — a session id and a session title are
+# family (2) corpus identity in `scripts/check-privacy.py`'s own terms, so the
+# withheld body was never the whole leak. run against the demo corpus the whole
+# artefact can be shown, which is the point of having a demo corpus.
+#
+#   the original run, phase 4, 21 aug 2026, live corpus (ghost id and title
+#   withheld — both index a real transcript):
+#     tokens 397 of 1,200 (est., chars/3.6) · citations 10/10 · 241 prompts
+#     model 2m 13s · 1 call · $0.023
+#     kept unredacted beside the repo; its path is in README.txt in this folder
+#
+# reproduced with:
+#   node packages/cli/bin/potsherd.js graft 77c6a3a4 --budget 1200 \
+#     --claude-dir   <demo>/.claude    built by scripts/make-demo-corpus.mjs
+#     --potsherd-dir <demo>/.potsherd
+#   backend: agent-sdk (subscription); tokens `est.` (chars/3.6) for the same
+#   reason the original's were — the subscription transport exposes no
+#   count_tokens endpoint. binary v1.0.0.
+#   kept evidence dir: /tmp/w7-ids-evidence.1yC9gR
+#
+# THE FINDING IS UNCHANGED and is what this file exists to show: a GHOST graft
+# carries the prompts-only banner, every bullet is prompt-side, and the brief
+# lands well inside the default 1,200 budget with every citation resolving. The
+# demo ghost has 241 prompts, the same count the original ghost had, because
+# the demo corpus reproduces the reference machine's shape.
+#
+# THIS IS A RE-RUN, NOT AN EDITED PASTE. the session, the project, the title
+# and every word of the brief are synthetic.
 
-  Printer Web UI and Internet Social Experiment
+potsherd graft · claude 77c6a3a4 · 2025-11-15
 
-  tokens                       397   of 1200 budget  ·  est. (chars/3.6)
-  citations                  10/10   distinct, and all resolve
+  Move payments-api onto pgbouncer
+
+  tokens                       307   of 1200 budget  ·  est. (chars/3.6)
+  citations                    8/8   distinct, and all resolve
   exchanges                    241   prompts only — the assistant side is gone
-  wrote                              /private/tmp/claude-501/-Users-zebra-rando…
-  model                     2m 13s   1 call  ·  $0.023
+  wrote                              /private/tmp/w7-ids-evidence.1yC9gR/cwd/.p…
+  model                      22.5s   1 call  ·  $0.0069 est.
 
-────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────
 
-  [the brief body that printed here is withheld]
+# Move payments-api onto pgbouncer
 
-  WITHHELD FROM THE PUBLIC REPO — this artefact reproduces the *content* of real
-  sessions from the reference corpus, which includes a named third party's
-  business plans and a personal tweet. `00-README.md`'s secrets rule already
-  says committed artefacts use the synthetic demo corpus, not the live one;
-  phase 4 extends that from screenshots to every committed artefact.
+Brief from a past session. Written by potsherd; every claim carries `[77c6a3a4@seq]`, the exchange it came from.
 
-  The file itself is kept, unredacted and re-examinable, beside the repo at:
+> **prompts only.** This session was deleted; `history.jsonl` kept what the user asked and nothing kept what the assistant answered. Nothing below describes the assistant side — it is not recoverable.
 
-      /Users/zebra/randomness/potsherd-p4-evidence/T4.3/run4-ghost.txt
+- Session store benchmarking (before/after) needed to validate the pgbouncer migration impact [77c6a3a4@233]
+- Session store behavior should be documented in the README [77c6a3a4@234]
+- Test suite status needs verification [77c6a3a4@235]
+- CLI argument parser has regressed in performance compared to last week—cause unknown [77c6a3a4@236]
+- Search indexer changes need blast radius assessment before proceeding [77c6a3a4@237]
+- Diff review must occur before implementing any writes [77c6a3a4@238]
+- Checkout flow resilience to disk-full conditions is unknown and needs clarification [77c6a3a4@239]
+- OCR pipeline changes require blast radius analysis [77c6a3a4@240]
 
-  Evidence that cannot be re-examined is not evidence (`08` rule 5) — but
-  re-examinable does not mean published. The numbers this run produced are in
-  `README.txt` and in `phases/phase-4/HANDOFF.md`; only the transcript-derived
-  prose is held back.
+---
+
+source: claude 77c6a3a4-ba7a-4784-b325-02e0c14ea29c · 241 prompts · 2025-11-15
+
+  run  potsherd show 77c6a3a4  read the session this came from, end to end

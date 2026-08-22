@@ -119,7 +119,8 @@ overrule me rather than rediscover them:
 
   - opaque provider-side response ids: `msg_08ae2935…`, `rs_08ae2935…`,
     `ctc_08ae2935…`, `call_hfAHQ9CKZlI6yJ7TTpRAAmRK`, and pi's 8-hex DAG ids
-    (`f8625e40`, `1ce9aa20`, …). These are real, but they link to no person and
+    (two of them were named here in the clear; both are withheld as of T8.H,
+    22 aug 2026). These are real, but they link to no person and
     no machine, no guard can tell them from synthetic ones, and pi's ids carry
     the parent/child chain the DAG section exists to explain. Every uuid in that
     file is now one I minted; these are not uuids.
@@ -326,3 +327,26 @@ but a future file could hide a path the same way.
 The thing the guard does buy: PHASE-1-SCOUT.md was scrubbed twice, and the
 second pass (this one) found session-id fragments the first had missed, because
 between the two passes nothing was watching. From f806b63 something is.
+
+--------------------------------------------------------------------------
+T8.H, 22 aug 2026 — AMENDMENT to the ruling above.
+
+The ruling "these are real, but they link to no person and no machine" was
+followed, and it was wrong on its own terms. `no guard can tell them from
+synthetic ones` is a statement about the guard, not about the ids: the ids
+are real record ids inside real `~/.pi` transcripts, in a public repository,
+and this is the same shape as the `thinking` block `docs/upstream/PHASE-1-
+SCOUT.md` published for six phases — one level down the record tree.
+
+`scripts/check-privacy.py` now enumerates every id-shaped token in tracked
+text and asks which source in the repository accounts for it, so the second
+half of the ruling no longer holds either: a guard CAN now tell, not by
+recognising a real id, but by refusing to accept an unexplained one.
+
+The two ids named above and the seven in `PHASE-1-SCOUT.md`'s DAG table and
+chain example are substituted with synthetic ids of the same shape. Every
+number, every chain and every finding in both files is unchanged. The
+provider-side `msg_`/`rs_`/`ctc_`/`call_` ids in the list above are NOT
+touched: they are opaque provider response handles, they are not id-shaped
+in this guard's terms, and the rest of that ruling stands.
+--------------------------------------------------------------------------

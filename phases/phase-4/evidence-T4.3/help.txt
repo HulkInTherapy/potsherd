@@ -1,3 +1,18 @@
+# SUBSTITUTION, 2026-08-22 (T8.H). `potsherd graft --help` was re-run at
+# v1.0.0 and its output is byte-identical to what this file held, with ONE
+# exception: the example id. The shipped `--help` uses an eight-hex example id
+# that is a REAL session on the reference machine — family (2) corpus identity
+# in `scripts/check-privacy.py`'s own terms — and it is not local to this file:
+# the same id is the canonical example across `packages/cli`, `packages/core`,
+# `packages/mcp`, several tests and the vendored plugin bundles. Those files
+# were RESERVED to other workers in phase 8, so this paste substitutes the
+# demo corpus's own `9c4d2f18` (the substitute `check-privacy.py`'s header
+# already names for exactly this) and the wider repair is recorded as an open
+# P0 in `phases/phase-8/registration-W7.txt`.
+#
+# Nothing else on this page is changed: every flag, every default, every line
+# of prose below is the real `--help` output.
+#
 Usage: potsherd graft [options] <session>
 
 a token-budgeted brief from one past session, ready to paste into an agent
@@ -27,9 +42,9 @@ Options:
   -h, --help             display help for command
 
 example:
-  potsherd graft 4c9339e0 --about pgbouncer --budget 800
+  potsherd graft 9c4d2f18 --about pgbouncer --budget 800
   potsherd graft "instagram client" --clip
-  potsherd graft 4c9339e0 --json | jq -r .brief
+  potsherd graft 9c4d2f18 --json | jq -r .brief
 
 the brief is written to ./.potsherd/graft-<id8>.md in the current directory —
 the one place potsherd writes outside ~/.potsherd — and that directory gets a

@@ -62,7 +62,7 @@ were not there.
 
 - **Carry the citations through.** The agent returns `SOURCES` lines shaped
   `<id8> · <project> · <harness> · <n> exchanges · <date>`. Put the id8 and the date next to the
-  claim they support. "You decided this on 4 July, in `<project>`, session `4c9339e0`" is the
+  claim they support. "You decided this on 4 July, in `<project>`, session `9c4d2f18`" is the
   sentence the user came for; "I remember we decided this" is the sentence that makes the whole
   archive worthless.
 - **Its quotes are the user's own words.** Reproduce them as quotes. Do not smooth them.
