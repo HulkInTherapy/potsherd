@@ -3,7 +3,19 @@
 **orchestrator 4, 22–23 August 2026.** Phase 9 ran solo, as `RESUME-PROMPT.md §4` permits; the
 verifier at the end did not. Release candidate `3264e6d`, CI green on all four legs.
 
-**Status: the verifier ran, said *No*, found 15 defects, all of which are fixed. Release candidate
+**Status: SHIPPED.** `v1.1.0` is tagged at `32ad48f` with CI green on the tag, **published to npm**,
+released on GitHub with the tarball attached, and one comment is posted on `obra/episodic-memory#128`.
+`POST-PUBLISH.md` beside this file has every check run after publication. The marketplace listing is
+not submitted and that is recorded rather than forgotten — §4.
+
+**The one deviation from the runbook:** `npm publish` returned `E403` asking for 2FA while
+`npm whoami` succeeded and the account's own `two-factor auth` was **disabled** — npm's publish
+policy, not account enforcement, so there was no OTP for anyone to read. The first reading of that
+error was wrong and `npm profile get` corrected it. meghavi supplied a granular access token; it was
+used through a `--userconfig` file in a `mktemp -d` and deleted in the same command. **No credential
+was created by the agent and none entered the tree**, which `phase-9-go-live.md` requires.
+
+The verifier ran, said *No*, found 15 defects, all of which are fixed. Release candidate
 is now `9758c52`, CI green on all four legs.** `VERIFICATION.md` beside this file is its report.
 
 The three that would have shipped: **the README npm renders was still a v1.0.0 document** whose
