@@ -1,5 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   db as store,
@@ -9,7 +12,10 @@ import {
   storedRedactionCounts,
   vecStatus,
   type Db,
+  type IndexReport,
 } from '@potsherd/core';
+import { renderIndexReceipt } from '../packages/cli/src/commands/index.js';
+import { themeFrom } from '../packages/cli/src/output.js';
 import { rmrf, tempDir } from './helpers.js';
 
 /**
@@ -443,3 +449,328 @@ describe('index: sqlite-vec fails soft', () => {
     db.close();
   });
 });
+
+// ------------------------------------------------ T8.E: offline on day one
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const bin = path.join(repoRoot, 'packages', 'cli', 'bin', 'potsherd.js');
+
+/**
+ * The verb, spawned the way a stranger runs it.
+ *
+ * `NODE_PATH` is deleted rather than inherited. vitest sets it to directories
+ * inside this repo's own `node_modules`, every child process inherits it, and
+ * a child that resolves a module through the parent's search path is not the
+ * child a user runs. It has silently invalidated a test in this build before.
+ */
+function cli(args: string[]): { code: number; stdout: string; stderr: string } {
+  const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: '1', COLUMNS: '80' };
+  delete env['NODE_PATH'];
+  delete env['CLAUDE_CONFIG_DIR'];
+  delete env['POTSHERD_DIR'];
+  delete env['XDG_CONFIG_HOME'];
+  try {
+    return {
+      code: 0,
+      stdout: execFileSync(process.execPath, [bin, ...args], {
+        encoding: 'utf8',
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+      stderr: '',
+    };
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string; stderr?: string };
+    return { code: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+  }
+}
+
+/**
+ * The same verb with the operating system holding the network shut.
+ *
+ * macOS only — `sandbox-exec` is the only thing on this machine that can deny
+ * a process the network without denying it the disk — so the tests that use
+ * it are skipped elsewhere and the portable assertions below stand on their
+ * own. What it buys is the difference between *asserting* that `index` does
+ * not download a model and *establishing* it: inside this sandbox no model
+ * could be reached, and the same sandbox proves it by making `--embed` fail.
+ */
+const CAN_DENY_NETWORK =
+  process.platform === 'darwin' && fs.existsSync('/usr/bin/sandbox-exec');
+
+function offlineCli(args: string[]): { code: number; stdout: string } {
+  const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: '1', COLUMNS: '80' };
+  delete env['NODE_PATH'];
+  try {
+    return {
+      code: 0,
+      stdout: execFileSync(
+        '/usr/bin/sandbox-exec',
+        ['-p', '(version 1)(allow default)(deny network*)', process.execPath, bin, ...args],
+        { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] },
+      ),
+    };
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string };
+    return { code: e.status ?? 1, stdout: e.stdout ?? '' };
+  }
+}
+
+/**
+ * `potsherd index` with no flags — the first thing a stranger runs after
+ * `audit` and `rescue` (`08` §8.6, `05` "< 2 s, offline").
+ *
+ * It used to fetch a 32 MB model and embed every exchange: 5m 43s against
+ * 10 s on the frozen reference archive, measured 2026-08-22. The default is
+ * now text only, `--embed` is the opt-in, and the receipt's last line is the
+ * offer.
+ */
+describe('potsherd index is offline by default (T8.E, 08 §8.6)', () => {
+  function corpus(): { claudeDir: string; root: string; dirs: string[] } {
+    const s = scratch();
+    writeTranscript(s.claudeDir);
+    return {
+      ...s,
+      dirs: ['--harness', 'claude', '--claude-dir', s.claudeDir, '--potsherd-dir', s.root],
+    };
+  }
+
+  it('embeds nothing and downloads nothing', () => {
+    const { root, dirs } = corpus();
+    const r = cli(['index', ...dirs, '--json']);
+    expect(r.code).toBe(0);
+    const j = JSON.parse(r.stdout) as {
+      totals: { exchanges: number };
+      embeddings: { enabled: boolean; downloaded: boolean; embedded: number };
+    };
+
+    // The index is real...
+    expect(j.totals.exchanges).toBe(2);
+    // ...and no part of it went near the model.
+    expect(j.embeddings).toMatchObject({ enabled: false, downloaded: false, embedded: 0 });
+
+    // Established, not asserted: the directory the 32 MB download lands in
+    // was never created. `potsherd index` cannot have fetched a model and
+    // left no model behind.
+    expect(fs.existsSync(path.join(root, 'models'))).toBe(false);
+  });
+
+  it('ends with one line offering the upgrade, and that line is the command', () => {
+    const { dirs } = corpus();
+    const out = cli(['index', ...dirs]).stdout.replace(/\s+$/, '');
+    const last = out.split('\n').at(-1)!;
+
+    expect(last.trim()).toBe(
+      'run  potsherd index --embed  for semantic search (32 MB model, ~6 min, once)',
+    );
+
+    // `09` §13.7 — if the documentation prints a command, the test runs that
+    // command as printed. The command is lifted back out of the line the user
+    // reads, not retyped from the source, and run against a corpus with
+    // nothing left to embed so that no 32 MB download can be started by the
+    // suite. What it proves is that the printed flag exists and is accepted:
+    // before T8.E `--embed` was not a flag at all, and this line would have
+    // told every new user to type an unknown option.
+    const printed = last.trim().replace(/^run\s+/, '').split(/\s{2,}/)[0]!;
+    expect(printed).toBe('potsherd index --embed');
+
+    const empty = scratch();
+    fs.mkdirSync(path.join(empty.claudeDir, 'projects'), { recursive: true });
+    const asPrinted = printed.split(' ').slice(1);
+    const r = cli([
+      ...asPrinted,
+      '--harness', 'claude',
+      '--claude-dir', empty.claudeDir,
+      '--potsherd-dir', empty.root,
+      '--json',
+    ]);
+    expect(r.code).toBe(0);
+    const j = JSON.parse(r.stdout) as { embeddings: { enabled: boolean; downloaded: boolean } };
+    // The flag was understood — embeddings were asked for — and there was
+    // nothing to embed, so nothing was fetched.
+    expect(j.embeddings).toMatchObject({ enabled: true, downloaded: false });
+    expect(fs.existsSync(path.join(empty.root, 'models'))).toBe(false);
+  });
+
+  /**
+   * `08` rule 8: a flag that is documented and does nothing is the worst kind.
+   *
+   * `--no-embed` now names the default, so it had to either go or keep a job.
+   * It keeps one: it is the way to say *and stop offering*. Someone who has
+   * declined once — in a SessionStart hook, in CI, on a metered connection —
+   * should not be sold the model on every run, and that is a difference you
+   * can see by diffing two receipts.
+   */
+  it('--no-embed is not a no-op: it turns the offer off', () => {
+    const a = corpus();
+    const b = corpus();
+    const offered = cli(['index', ...a.dirs]).stdout;
+    const declined = cli(['index', '--no-embed', ...b.dirs]).stdout;
+
+    expect(offered).toContain('run  potsherd index --embed  for semantic search');
+    expect(declined).not.toContain('--embed');
+    expect(declined).not.toContain('semantic search');
+
+    // And the receipt says which of the two silences it is.
+    expect(offered).toContain('text search only');
+    expect(offered).toContain('no model, no network');
+    expect(declined).toContain('skipped (--no-embed)');
+
+    // The index itself is identical: this flag changes what is said, not what
+    // is stored. Everything but the vectors row, the offer and the timings is
+    // the same receipt, line for line.
+    const body = (out: string) =>
+      out
+        .split('\n')
+        .filter((l) => !/vectors|--embed|index /.test(l))
+        .join('\n');
+    expect(body(declined)).toBe(body(offered));
+  });
+
+  it('is the last flag that wins when both are given', () => {
+    const a = corpus();
+    const b = corpus();
+    const off = JSON.parse(cli(['index', '--embed', '--no-embed', ...a.dirs, '--json']).stdout) as {
+      embeddings: { enabled: boolean };
+    };
+    expect(off.embeddings.enabled).toBe(false);
+    // The mirror image is only asserted as far as "it was asked for": actually
+    // embedding here would fetch 32 MB inside the test suite.
+    const on = JSON.parse(
+      offlineOrPlain(['index', '--no-embed', '--embed', ...b.dirs, '--json']),
+    ) as { embeddings: { enabled: boolean } };
+    expect(on.embeddings.enabled).toBe(true);
+  });
+
+  /**
+   * Where the sandbox earns its place. Two commands, one denied network:
+   *
+   *   `index --embed`  fails to reach the model — which is what proves the
+   *                    sandbox is really denying the network, rather than the
+   *                    test trusting that it is.
+   *   `index`          exits 0 and indexes everything — which is the claim.
+   *
+   * A test whose premise is "the machine happened to be offline" proves
+   * nothing on a machine that happens to be online. This one establishes the
+   * premise inside itself.
+   */
+  it.runIf(CAN_DENY_NETWORK)('runs where the network is denied, and --embed cannot', () => {
+    const a = corpus();
+    const b = corpus();
+
+    const reaching = offlineCli(['index', '--embed', ...a.dirs, '--json']);
+    const j = JSON.parse(reaching.stdout) as {
+      embeddings: { enabled: boolean; available: boolean; reason?: string };
+    };
+    expect(j.embeddings.enabled).toBe(true);
+    // The control: inside this sandbox the model is unreachable.
+    expect(j.embeddings.available).toBe(false);
+    expect(j.embeddings.reason ?? '').toMatch(/fetch|network|ENOTFOUND|EAI_AGAIN|unavailable/i);
+
+    const plain = offlineCli(['index', ...b.dirs, '--json']);
+    expect(plain.code).toBe(0);
+    const k = JSON.parse(plain.stdout) as {
+      totals: { exchanges: number };
+      embeddings: { enabled: boolean };
+    };
+    expect(k.totals.exchanges).toBe(2);
+    expect(k.embeddings.enabled).toBe(false);
+    // Nothing was degraded and nothing was retried: the default never wanted
+    // the network, so denying it changes no output at all.
+    expect(offlineCli(['index', ...b.dirs]).stdout).toContain('potsherd index --embed');
+  });
+
+  /**
+   * The row that did not exist before the default flipped.
+   *
+   * Someone who ran `index --embed` last week and plain `index` today still
+   * has 1,294 vectors, and this run did not refresh them. `—  skipped` would
+   * be false; the bare count would be worse, because it would read as "the
+   * vectors cover what was just parsed". So the count is printed *and*
+   * labelled.
+   */
+  it('says vectors exist but were not refreshed, rather than skipped', () => {
+    const t = themeFrom({ json: false, width: 80 });
+    const base = report({ enabled: false, upToDate: 0 });
+    expect(renderIndexReceipt(base, t, '/tmp/p', {})).toContain('text search only');
+
+    const stale = renderIndexReceipt(report({ enabled: false, upToDate: 1294 }), t, '/tmp/p', {});
+    expect(stale).toContain('1,294');
+    expect(stale).toContain('not refreshed this run');
+    expect(stale).not.toContain('skipped');
+    // Still offered, because refreshing them is the same command.
+    expect(stale).toContain('run  potsherd index --embed');
+
+    // And with --no-embed the offer is gone from both.
+    const declined = renderIndexReceipt(report({ enabled: false, upToDate: 1294 }), t, '/tmp/p', {
+      embed: false,
+    });
+    expect(declined).toContain('not refreshed this run');
+    expect(declined).not.toContain('run  potsherd index --embed');
+  });
+
+  it('does not offer semantic search over an empty index', () => {
+    const t = themeFrom({ json: false, width: 80 });
+    const nothing = report({ enabled: false, upToDate: 0, exchanges: 0 });
+    expect(renderIndexReceipt(nothing, t, '/tmp/p', {})).not.toContain('semantic search');
+  });
+
+  it('fits 60 and 80 columns with the offer on the end', () => {
+    for (const width of [60, 80]) {
+      const out = renderIndexReceipt(
+        report({ enabled: false, upToDate: 0 }),
+        themeFrom({ json: false, width }),
+        '/tmp/potsherd',
+        {},
+      );
+      expect(out).toContain('potsherd index --embed');
+      for (const line of out.split('\n')) {
+        expect(line.length, `"${line}" at ${width}`).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+});
+
+/** `index --embed` under the sandbox where one exists; plain elsewhere. */
+function offlineOrPlain(args: string[]): string {
+  return CAN_DENY_NETWORK ? offlineCli(args).stdout : cli(args).stdout;
+}
+
+/** A minimal {@link IndexReport}, for the receipt's own assertions. */
+function report(o: {
+  enabled: boolean;
+  upToDate: number;
+  exchanges?: number;
+}): IndexReport {
+  const exchanges = o.exchanges ?? 1294;
+  return {
+    ranAt: '2026-08-22T12:00:00.000Z',
+    full: false,
+    harnesses: [],
+    totals: {
+      sessions: 30,
+      exchanges,
+      toolCalls: 9243,
+      redactedExchanges: 175,
+      parsed: 227,
+      skipped: 0,
+      failed: 0,
+      bytes: 324_000_000,
+    },
+    recordTypes: [],
+    redaction: { total: 0, byType: {} },
+    ghosts: { ghosts: 299, prompts: 2971, unchanged: false } as IndexReport['ghosts'],
+    embeddings: {
+      enabled: o.enabled,
+      available: false,
+      model: 'Xenova/bge-small-en-v1.5',
+      embedded: 0,
+      upToDate: o.upToDate,
+      ghostPrompts: 0,
+      downloaded: false,
+      ms: 0,
+    },
+    vec: { available: false } as IndexReport['vec'],
+    ms: 10_700,
+  };
+}

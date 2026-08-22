@@ -1952,3 +1952,204 @@ describe('a written card can be read back whole (T2.7 D3)', () => {
     }
   });
 });
+
+// ------------------------------------------------ T8.E: --limit is a scope
+
+/**
+ * `08` §8.6 — `card --limit n` cards the **n newest**, and needs no `--all`.
+ *
+ * Two defects, one flag. The first: `card --limit 5` was refused with "say
+ * which sessions to card" unless `--all` came with it, which made the
+ * smallest and cheapest first card run the one command that did not work —
+ * and the dry-run already prints a quote for it, so the tool would price a
+ * run it then declined to perform.
+ *
+ * The second is the ordering. `planCards` runs two queries, sessions and
+ * ghosts, each `ORDER BY ... DESC`, and **concatenated** them before slicing.
+ * So "the 5 newest" was really "the 5 newest sessions, and ghosts only once
+ * the sessions ran out". On the reference archive that is 30 sessions in
+ * front of 299 ghosts: `--limit 5` could not reach a ghost whatever its date,
+ * and the 93% of the archive the sweep took was unreachable by the one flag
+ * meant to make a small first run possible.
+ *
+ * Both are asserted through the verb, because both were lost in the verb, and
+ * once at the planner, because that is where the order is now established.
+ */
+describe('card --limit is a scope, and it is the n newest (T8.E)', () => {
+  const AUG = (day: number) => `2026-08-${String(day).padStart(2, '0')}T12:00:00.000Z`;
+
+  /** A session eligible for a card (>= MIN_EXCHANGES), stamped with a date. */
+  function sessionAt(db: ReturnType<typeof store.open>, id: string, day: number): void {
+    db.prepare(
+      `INSERT INTO sessions (id, harness, project, project_slug, started_at, ended_at, title, source_mtime)
+       VALUES (?, 'claude', '/tmp/p', '-tmp-p', ?, ?, ?, 1)`,
+    ).run(id, AUG(day), AUG(day), `session ${id}`);
+    for (let i = 0; i < 4; i++) {
+      db.prepare(
+        `INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text)
+         VALUES (?, ?, ?, ?, 'the pooler drops connections under load', 'raise the limit')`,
+      ).run(`${id}-e${i}`, id, i, AUG(day));
+    }
+  }
+
+  /** A ghost eligible for a card (>= MIN_GHOST_PROMPTS), stamped with a date. */
+  function ghostAt(db: ReturnType<typeof store.open>, id: string, day: number): void {
+    db.prepare(
+      `INSERT INTO ghosts (session_id, harness, project, first_ts, last_ts, prompt_count, first_prompt, title)
+       VALUES (?, 'claude', '/tmp/p', ?, ?, 6, 'a recovered prompt', ?)`,
+    ).run(id, AUG(day), AUG(day), `ghost ${id}`);
+    for (let i = 0; i < 6; i++) {
+      db.prepare(
+        `INSERT INTO ghost_prompts (id, session_id, seq, ts, text)
+         VALUES (?, ?, ?, ?, 'a recovered prompt about the pooler')`,
+      ).run(`${id}-${i}`, id, i, AUG(day));
+    }
+  }
+
+  /**
+   * Six targets, interleaved in time and alternating kind, so that any order
+   * that groups by kind is visibly wrong:
+   *
+   *   06 aug  s3   04 aug  s2   02 aug  s1
+   *   05 aug  g3   03 aug  g2   01 aug  g1
+   */
+  function interleaved(root: string): void {
+    fs.mkdirSync(root, { recursive: true });
+    const db = store.open({ root });
+    sessionAt(db, 's1', 2);
+    sessionAt(db, 's2', 4);
+    sessionAt(db, 's3', 6);
+    ghostAt(db, 'g1', 1);
+    ghostAt(db, 'g2', 3);
+    ghostAt(db, 'g3', 5);
+    db.close();
+  }
+
+  function dryRun(root: string, extra: string[] = []): {
+    targets: number;
+    sessions: number;
+    ghosts: number;
+  } {
+    const r = cli(
+      ['card', '--dry-run', '--json', '--potsherd-dir', root, ...extra],
+      bare(),
+    );
+    expect(r.code).toBe(0);
+    return JSON.parse(r.stdout) as { targets: number; sessions: number; ghosts: number };
+  }
+
+  it('accepts --limit with no --all, and still refuses a bare card', () => {
+    const root = scratch();
+    interleaved(root);
+
+    // The regression this exists for: exit 0, and a quote for five.
+    expect(dryRun(root, ['--limit', '5']).targets).toBe(5);
+
+    // And the guard it must not have removed: `card` naming no scope at all
+    // is still an error, because "everything" has to be asked for.
+    const bareCard = cli(['card', '--dry-run', '--potsherd-dir', root], bare());
+    expect(bareCard.code).not.toBe(0);
+  });
+
+  it('takes the n newest across sessions and ghosts, not the n newest sessions', () => {
+    const root = scratch();
+    interleaved(root);
+
+    // 06 aug s3, 05 aug g3, 04 aug s2. Two sessions and one ghost — not the
+    // three sessions the concatenated lists used to hand back.
+    const three = dryRun(root, ['--limit', '3']);
+    expect(three.targets).toBe(3);
+    expect({ sessions: three.sessions, ghosts: three.ghosts }).toEqual({ sessions: 2, ghosts: 1 });
+
+    // The whole set, for the same reason in reverse: no cap, no re-ordering
+    // of what is in scope.
+    expect(dryRun(root, ['--all'])).toMatchObject({ targets: 6, sessions: 3, ghosts: 3 });
+  });
+
+  it('pins the order at the planner, by id', () => {
+    const root = scratch();
+    interleaved(root);
+    const db = store.open({ root });
+    try {
+      expect(planCards(db, {}).targets.map((t) => t.id)).toEqual([
+        's3', 'g3', 's2', 'g2', 's1', 'g1',
+      ]);
+      expect(planCards(db, { limit: 4 }).targets.map((t) => t.id)).toEqual(['s3', 'g3', 's2', 'g2']);
+    } finally {
+      db.close();
+    }
+  });
+
+  /**
+   * `card.ts:85`: a limit the quote honours and the run ignores is worse than
+   * no limit at all. The quote and the run are the same `plan.targets`, and
+   * this is the test that says so out loud — the number the CLI prints before
+   * the confirmation, and the ids `runCards` actually writes.
+   */
+  it('cards exactly what it quoted, and in the order it quoted', async () => {
+    const root = scratch();
+    interleaved(root);
+
+    const quoted = dryRun(root, ['--limit', '3']);
+    expect(quoted.targets).toBe(3);
+
+    const db = store.open({ root });
+    const llm = llmWith([GOOD_CARD, GOOD_CARD, GOOD_CARD, GOOD_CARD, GOOD_CARD, GOOD_CARD]);
+    const plan = planCards(db, { limit: 3 });
+    const report = await runCards(db, llm, { root, targets: plan.targets, embed: toyEmbed });
+    await llm.close();
+
+    expect(report.written + report.failed).toBe(quoted.targets);
+    expect(plan.targets.map((t) => t.id)).toEqual(['s3', 'g3', 's2']);
+    const carded = (
+      db.prepare('SELECT session_id FROM cards ORDER BY session_id').all() as {
+        session_id: string;
+      }[]
+    ).map((r) => r.session_id);
+    db.close();
+    expect(carded).toEqual(['g3', 's2', 's3']);
+  });
+
+  /**
+   * The combinations, decided rather than left undefined (T8.E). `--limit`
+   * caps *after* the filters and after eligibility, so it never widens a
+   * scope and never overrides one:
+   *
+   *   --ghosts-only --limit n   the n newest ghosts, and nothing else
+   *   --force --limit n         the n newest, carded or not
+   *   --dry-run --limit n       the quote for exactly those n
+   */
+  it('composes with --ghosts-only, --force and --dry-run', () => {
+    const root = scratch();
+    interleaved(root);
+
+    // Narrower, not wider: the cap applies inside the ghost scope.
+    expect(dryRun(root, ['--ghosts-only', '--limit', '2'])).toMatchObject({
+      targets: 2,
+      ghosts: 2,
+      sessions: 0,
+    });
+
+    // A card on the two newest takes them out of scope...
+    const db = store.open({ root });
+    for (const id of ['s3', 'g3']) {
+      writeCard(db, root, RECORD({ sessionId: id, projectSlug: '-tmp-p', project: '/tmp/p' }));
+    }
+    db.close();
+
+    // ...so the next `--limit 2` is the next two down, 04 aug and 03 aug.
+    expect(dryRun(root, ['--limit', '2'])).toMatchObject({ targets: 2, sessions: 1, ghosts: 1 });
+
+    // `--force` makes the carded ones eligible again, so the newest two are
+    // the newest two once more — the flag changes what is eligible before the
+    // cut, never the cut itself.
+    expect(dryRun(root, ['--limit', '2', '--force'])).toMatchObject({
+      targets: 2,
+      sessions: 1,
+      ghosts: 1,
+    });
+    // Two under --force, six with no cap: the cap is doing the work, not the
+    // eligibility rule.
+    expect(dryRun(root, ['--all', '--force']).targets).toBe(6);
+  });
+});

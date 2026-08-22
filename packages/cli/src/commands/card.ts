@@ -78,13 +78,23 @@ export interface CardCommandOptions extends GlobalOptions, FilterFlags {
    */
   ghostsOnly?: boolean;
   /**
-   * `--limit n`: card at most this many targets.
+   * `--limit n`: card the **n newest** targets.
    *
    * A shared filter flag, so it arrives here for free — but until T2.7 it was
    * dropped on the floor between `filterFlags()` and `planCards()`, and
    * `card --ghosts-only --limit 10` quoted and ran all ninety. A limit that
    * the quote honours and the run ignores is worse than no limit at all: the
-   * confirmation says 10 and the machine spends an hour.
+   * confirmation says 10 and the machine spends an hour. Quote and run share
+   * one `plan.targets`, so they cannot disagree.
+   *
+   * **T8.E: a limit is a scope.** `--limit 5` used to be refused with "say
+   * which sessions to card" unless `--all` (or a filter) came with it, which
+   * made the smallest, cheapest, most obvious first card run the one command
+   * that did not work. It now implies `--all`: everything eligible, ordered
+   * newest-first by `planCards`, cut to n. It still *composes* — `--ghosts-only
+   * --limit 5` is the five newest ghosts, `--project x --limit 5` the five
+   * newest in that project — because it caps after the filters, not instead
+   * of them, and `--force` only changes what is eligible before the cut.
    */
   limit?: number;
 }
@@ -98,6 +108,8 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
     const filters = parseFilters(db, o);
     if (o.ghostsOnly) filters.ghosts = 'only';
 
+    const limit = parseLimit(o.limit, 0);
+
     if (o.session) {
       const found = resolveSession(db, o.session);
       if (!found) {
@@ -106,6 +118,10 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
       filters.sessionId = found.id;
     } else if (
       !o.all &&
+      // `--limit n` names a scope on its own: the n newest. It is the first
+      // card run a stranger should make, and refusing it was the one thing
+      // standing between the dry-run quote and a real card (`08` §8.6).
+      limit === 0 &&
       !filters.pinned &&
       !filters.project &&
       !filters.tag &&
@@ -117,8 +133,8 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
       filters.status !== 'ghost'
     ) {
       throw new UserError(
-        'say which sessions to card',
-        'potsherd card --dry-run --all      # what the whole archive would cost',
+        'say which sessions to card — a session id, a filter, --limit n, or --all',
+        'potsherd card --limit 5 --dry-run      # the 5 newest, quoted before anything runs',
       );
     }
 
@@ -136,7 +152,6 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
       missing = err;
     }
 
-    const limit = parseLimit(o.limit, 0);
     const plan = planCards(db, {
       filters,
       force: Boolean(o.force),

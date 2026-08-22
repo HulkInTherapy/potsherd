@@ -1,0 +1,253 @@
+T8.E — first-run defaults (phase 8 §8.6). W5, branch p8/w5-firstrun, 2026-08-22.
+Every number below was measured on this machine on 2026-08-22. Nothing is
+carried over from the master's pre-phase measurement; where the two disagree,
+both are printed.
+
+================================================================================
+1. HOW THE WALK WAS RUN
+================================================================================
+script: walk.sh (kept at
+  /private/tmp/claude-501/-Users-zebra-randomness/32309a4f-f394-479d-adb9-1777faa9867a/scratchpad/walk.sh)
+
+Each verb is one process:
+
+  sandbox-exec -p '(version 1)(allow default)(deny network*)' \
+    env -i PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin \
+           HOME=$D/home TMPDIR=$D/tmp NO_COLOR=1 \
+    node packages/cli/bin/potsherd.js <verb> \
+      --claude-dir $SRC --potsherd-dir $D/potsherd  < /dev/null
+
+`env -i` means HOME is a fresh empty directory and CLAUDE_CONFIG_DIR,
+POTSHERD_DIR, XDG_CONFIG_HOME and NODE_PATH are all absent — not overridden,
+absent. NODE_PATH in particular: vitest points it at this repo's own
+node_modules and every child inherits it, which has invalidated a test in this
+build before.
+
+The five verbs are `audit`, `rescue --no-settings`, `index`, `ls`,
+`find pgbouncer`. `--yes` is never passed and `--no-settings` is, so nothing
+writes to the read-only source. Timing is wall clock around the process,
+python time.time() either side.
+
+NO NETWORK — established, not asserted
+--------------------------------------
+The whole walk runs inside a macOS sandbox profile that denies `network*`.
+Proof the profile denies, taken on the same machine at the same time:
+
+  curl https://huggingface.co                       outside sandbox → 200
+  sandbox-exec ... curl -m 8 https://huggingface.co inside          → exit 6 (DNS)
+  sandbox-exec ... curl -m 8 http://1.1.1.1         inside          → exit 7 (TCP)
+
+Both name resolution and a raw TCP connect to a literal IP fail inside. And
+the walk itself is the second proof: run against the same corpus before this
+change, `index` inside the sandbox printed
+  "first run: fetching the 32.4 MB embedding model into …"
+and then reported "no vector index: embeddings unavailable" — i.e. the old
+default really did reach for the network and really was denied. After the
+change that line is gone and nothing is reported unavailable, because nothing
+was wanted.
+
+The same establishment is in the suite: tests/index.test.ts, "runs where the
+network is denied, and --embed cannot" runs two commands under one sandbox —
+`index --embed` fails at the fetch (which is what proves the sandbox denies)
+and `index` exits 0 and indexes (which is the claim). Skipped off darwin;
+the portable tests beside it check that the models directory is never created.
+
+================================================================================
+2. THE WALK — frozen reference archive  (the number that counts)
+================================================================================
+source: ~/.potsherd/archive-manual-2026-08-21, read-only, 344 MB
+what it holds: 227 sources · 30 sessions · 197 sidechains · 1,294 exchanges ·
+               299 ghosts · 2,971 recovered prompts
+
+AFTER (T8.E), quiet machine — load average 5.2–6.0:
+
+  run   audit   rescue   index    ls     find    TOTAL   evidence dir
+  q1    0.47s   1.92s    8.90s   0.17s  0.18s   11.64s  /tmp/potsherd-w5-ref-q1-sTPemX/walk
+  q2    0.34s   1.72s   11.38s   0.17s  0.19s   13.80s  /tmp/potsherd-w5-ref-q2-vrPIez/walk
+  q3    0.38s   1.92s    9.63s   0.18s  0.18s   12.29s  /tmp/potsherd-w5-ref-q3-fMRY6J/walk
+
+  median total 12.29 s.  ACCEPTANCE MET (target: under 30 s, no network).
+
+AFTER (T8.E), contended machine — this box was also running the five sibling
+phase-8 workers, each building and testing its own worktree. Ten walks at load
+average 17.9–33.7:
+
+  totals: 24.80  36.41  36.34  65.04  36.00  24.64  34.92  29.55  48.43  39.68
+  min 24.64 s · median 36.2 s · max 65.04 s
+  dirs: /tmp/potsherd-w5-ref-after{,2..10}-*/walk
+
+  Under that load the walk does NOT meet 30 s, and this is reported rather
+  than narrowed (`09` §13.11). Two things are worth separating:
+    - the walk is the same walk; nothing was skipped or subsetted.
+    - the load is not the product's. `index` alone moved 8.9 s → 53.7 s across
+      the same binary and the same corpus purely with load, and §4 below shows
+      `index` and `index --no-embed` — which run identical code — differing by
+      2.7x on consecutive runs for the same reason.
+  The claim is therefore: 12.3 s on an idle machine, 36 s median while six
+  agents saturate an 8-core laptop.
+
+BEFORE (v1.0.0 default = embeddings on):
+
+  With the network available, `index` alone took 342.96 s. The walk that
+  contains it is ~345.7 s (audit 0.55 + rescue 1.83 + index 342.96 + ls ~0.2
+  + find ~0.2). That is the walk a stranger with wifi actually got.
+    dir: /tmp/potsherd-w5-embed-before-H4LVor
+
+  With the network denied, the same walk was 13.18 s — but it is not a walk
+  that succeeded, it is a walk that failed to download and degraded silently:
+    audit 0.55  rescue 2.00  index 10.28  ls 0.17  find 0.18  = 13.18 s
+    receipt: "vectors — no vector index: embeddings unavailable…"
+    dir: /tmp/potsherd-w5-ref-base-Jo76VT
+
+  So before T8.E the first-run experience was 5m 45s online or a broken
+  vectors row offline. After it, it is 12 s and an offer.
+
+================================================================================
+3. THE WALK — synthetic demo corpus
+================================================================================
+built with: node scripts/make-demo-corpus.mjs "$D/.claude"
+what it holds: 228 sources · 31 sessions · 197 sidechains · 439 exchanges ·
+               299 ghosts · 2,971 prompts · 546 KB
+
+  AFTER, quiet (load 5.0):
+    audit 0.20  rescue 0.39  index 0.54  ls 0.17  find 0.20  = 1.50 s
+    dir: /tmp/potsherd-w5-demo-q-C2tr5x/walk
+  AFTER, contended:
+    audit 0.87  rescue 1.29  index 3.57  ls 0.92  find 0.56  = 7.21 s
+    dir: /tmp/potsherd-w5-demo-after-jYwYra/walk
+  BEFORE (network denied; the download failed fast):
+    audit 0.24  rescue 0.98  index 2.98  ls 0.16  find 0.17  = 4.53 s
+    dir: /tmp/potsherd-w5-demo-base-VpGPRT/walk
+
+================================================================================
+4. index, WITH AND WITHOUT EMBEDDINGS
+================================================================================
+All on the frozen reference archive, fresh --potsherd-dir each time.
+
+  before, `index` (default was embeddings), network available   342.96 s  (5m 43s)
+  after,  `index --embed`, network available, fresh model       367.53 s  (6m 7s)
+  after,  `index` (default, text only), quiet                     8.90 s
+                                                                 11.38 s
+                                                                  9.63 s
+  after,  `index --no-embed`, quiet                               9.81 s
+
+`index` and `index --no-embed` run the same code; interleaved, six runs under
+varying load, they are indistinguishable:
+
+  r1 plain 21.52s   r1 --no-embed 22.55s   (load 21.9 / 18.9)
+  r2 plain 18.79s   r2 --no-embed 26.71s   (load 17.9 / 24.1)
+  r3 plain 20.74s   r3 --no-embed  9.81s   (load 22.7 / 20.2)
+  dir: /tmp/potsherd-w5-indexonly-33051
+
+That is the point of the change: the default now costs what `--no-embed` cost,
+and 6 minutes is something the user asks for. The printed "~6 min" is the mean
+of the two `--embed` measurements above, rounded; "32 MB" is fmt.bytes of
+MODEL_DOWNLOAD_BYTES = 34,014,426, which the CLI already renders as 32.4 MB.
+
+================================================================================
+5. card --limit 5 — the quote and the run
+================================================================================
+index: the reference-archive index from /tmp/potsherd-w5-ref-after6-gcMkDi,
+copied to /tmp/potsherd-w5-cardrun-dMGsZ4 so the walk evidence stayed pristine.
+Before T8.E, `card --limit 5` (no --all) exited non-zero with "say which
+sessions to card" and carded nothing.
+
+  potsherd card --limit 5 --dry-run       quote:  5 sessions to card
+                                                 10 model calls
+                                                 est. 2m 21s
+                                                 est. $0.441 equivalent
+  potsherd card --limit 5 --yes           run:    5 cards written
+                                                 10 model calls
+                                                 6m 47s wall
+                                                 $0.786 equivalent, $0 charged
+
+  SCOPE AGREES EXACTLY: 5 quoted / 5 carded, 10 calls quoted / 10 made. That
+  is the property `card.ts:85` records as broken once and the property the new
+  test pins ("cards exactly what it quoted, and in the order it quoted").
+
+  The *estimator* was 2.9x under on time and 1.8x under on cost. That is a
+  pre-existing calibration gap, not a scope disagreement — the run receipt
+  says so itself ("the estimate said 2m 21s") and `recordCardRun` has now
+  written the correction into `card_runs` on that index. It is not T8.E's.
+
+  All five targets came back sessions rather than ghosts, which is correct
+  newest-first behaviour on this archive: the surviving sessions are august
+  2026 and the ghosts are older. The mixed case is covered by the test, which
+  interleaves three sessions and three ghosts by date and asserts the cut is
+  2 sessions + 1 ghost rather than the 3 sessions + 0 ghosts the concatenated
+  lists used to return.
+
+================================================================================
+6. EVIDENCE DIRECTORIES (all kept)
+================================================================================
+/tmp/potsherd-w5-ref-q1-sTPemX          walk, reference archive, quiet
+/tmp/potsherd-w5-ref-q2-vrPIez          walk, reference archive, quiet
+/tmp/potsherd-w5-ref-q3-fMRY6J          walk, reference archive, quiet
+/tmp/potsherd-w5-ref-after-1OYNUa       walk, reference archive, contended
+/tmp/potsherd-w5-ref-after2-kt3OQl      "
+/tmp/potsherd-w5-ref-after3-ErabOZ      "
+/tmp/potsherd-w5-ref-after4-Mh3gBH      "
+/tmp/potsherd-w5-ref-after5-w1vrol      "
+/tmp/potsherd-w5-ref-after6-gcMkDi      "  (also the index the card run used)
+/tmp/potsherd-w5-ref-after7-NLYXMc      "
+/tmp/potsherd-w5-ref-after8-KvQ1h6      "
+/tmp/potsherd-w5-ref-after9-Auz3XV      "
+/tmp/potsherd-w5-ref-after10-udj6oX     "
+/tmp/potsherd-w5-ref-base-Jo76VT        walk, reference archive, BEFORE
+/tmp/potsherd-w5-demo-q-C2tr5x          walk, demo corpus, quiet
+/tmp/potsherd-w5-demo-after-jYwYra      walk, demo corpus, contended
+/tmp/potsherd-w5-demo-base-VpGPRT       walk, demo corpus, BEFORE
+/tmp/potsherd-w5-embed-before-H4LVor    index --embed equivalent, BEFORE, 342.96 s
+/tmp/potsherd-w5-embed-after-NLPn1I     index --embed, AFTER, 367.53 s
+/tmp/potsherd-w5-indexonly-33051        six interleaved index / index --no-embed runs
+/tmp/potsherd-w5-flagcheck-wLfzgO       tri-state flag matrix
+/tmp/potsherd-w5-flagcheck-zkrBLl       "
+/tmp/potsherd-w5-cardrun-dMGsZ4         card --limit 5 quote (quote.txt) and run (run.txt)
+
+Each walk directory holds log/{audit,rescue,index,ls,find}.{out,err}, the
+rescued archive under potsherd/, and the empty home/ the verbs ran with.
+
+================================================================================
+7. DECISIONS TAKEN, SO THEY ARE ON THE RECORD
+================================================================================
+--embed / --no-embed / no flag are three states, not two:
+  no flag   text only. no model, no download, no network. receipt's last line
+            offers the upgrade.
+  --embed   the opt-in. the only path that touches the network.
+  --no-embed  text only AND stop offering — the upgrade line is not printed.
+            Kept rather than deleted because it is the documented spelling of
+            "offline, and I mean it" (hooks, CI, metered connections), and
+            because `08` rule 8 will not have a flag that does nothing: this
+            one's effect is visible by diffing two receipts, and a test does
+            exactly that.
+  --embed --no-embed  last flag wins, as getopt has always done. Tested.
+
+the vectors row has three readings, not two:
+  disabled, no vectors in the index    "—  text search only · no model, no network"
+  disabled, no vectors, --no-embed     "—  skipped (--no-embed) · text search only"
+  disabled, vectors already present    "1,294  not refreshed this run · potsherd index --embed"
+  The third did not exist before. Someone who ran `--embed` last week and plain
+  `index` today still has their vectors and this run did not refresh them;
+  printing "— skipped" would be false and printing the bare count would be
+  worse, because it would read as covering what was just parsed.
+
+the upgrade line is suppressed when the index holds no exchanges at all.
+Offering semantic search over nothing is noise.
+
+--limit n:
+  is a scope. `card --limit 5` needs no --all. `card` naming no scope at all
+  is still an error.
+  is the n newest across sessions AND ghosts. `planCards` sorts the merged
+  list by COALESCE(ended_at,started_at) / COALESCE(last_ts,first_ts) desc, id
+  asc, before the cut. It used to concatenate two ordered lists and slice, so
+  on the reference archive `--limit 5` could not reach a ghost whatever its
+  date — 93% of the archive was unreachable by the flag meant to make a small
+  first run possible.
+  caps AFTER the filters and after eligibility, never instead of them:
+    --ghosts-only --limit 2   the two newest ghosts, nothing else
+    --force --limit 2         the two newest, carded or not (force changes
+                              what is eligible before the cut, not the cut)
+    --dry-run --limit 2       the quote for exactly those two
+    --limit 0 / -1 / "abc"    still refused by parseLimit, unchanged
+  the id tie-break exists so two targets stamped the same second cannot swap
+  places between the quote and the run it quotes.

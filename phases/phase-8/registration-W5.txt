@@ -1,0 +1,123 @@
+registration — W5 (T8.E, phase 8 §8.6: first-run defaults)
+branch p8/w5-firstrun · 2026-08-22
+
+Every line below is in a file W5 was told not to edit. Old text on the `-` line,
+new text on the `+` line. Nothing here is prose to copy; it is the lines.
+
+================================================================================
+A. packages/cli/src/index.ts  — RESERVED, and W5 edited it anyway (see report d)
+================================================================================
+The option had to exist before the default could flip: `--embed` was not a flag,
+and commander rejects an undeclared one, so `runIndex` had no third state to
+read. W5 applied these three hunks in an isolated commit so the branch builds
+and the walk is measurable. Drop that commit and re-apply by hand if the
+orchestrator would rather own the barrel.
+
+~ line 218
+-      .option('--no-embed', 'skip embeddings entirely — text search only, no model, no network')
++      .option('--embed', 'add semantic search: fetch the 32 MB model once, then embed (~6 min)')
++      .option('--no-embed', 'text only, and stop offering --embed (text only is the default)')
+
+~ line 225 (the help example block)
+-  potsherd index
+-  potsherd index --full
+-  potsherd index --harness claude --no-embed        # offline, fts only
++  potsherd index                                    # text only: no model, no network
++  potsherd index --embed                            # ...and semantic search, once
++  potsherd index --full
+
+~ line 235
+-          embed: opts['embed'] !== false,
++          ...(opts['embed'] === undefined ? {} : { embed: Boolean(opts['embed']) }),
+
+================================================================================
+B. README.md — six hunks
+================================================================================
+~ line 388
+-potsherd index --full --no-embed
++potsherd index --full
+
+~ line 402 (inside the ``` screen block)
+-  vectors                        —   skipped (--no-embed) · text search only
++  vectors                        —   text search only · no model, no network
+
+~ line 406 (the last line of that screen block; add the second line)
+   run  potsherd doctor  for parse coverage and every path read.
++  run  potsherd index --embed  for semantic search (32 MB model, ~6 min, once)
+
+~ line 415
+-potsherd index --harness claude --no-embed
++potsherd index --embed                # + semantic search, 32 MB model, once
+
+~ lines 425–426 (the table's first two body rows)
+-| `index --full --no-embed` | **8.8 s** | under a second — see the screen above |
+-| `index --full` (with vectors) | **4 m 42 s**, of which 4 m 32 s is embedding | 3.3 s |
++| `index --full` (the default, text only) | **8.8 s** | under a second — see the screen above |
++| `index --full --embed` (with vectors) | **4 m 42 s**, of which 4 m 32 s is embedding | 3.3 s |
+
+~ line 444
+-So **`--no-embed` is a first-class path, not a degraded one.** It needs no
+-model, no download and no network, and `find` works on day one without it —
+-every search screen in this readme was taken against a `--no-embed` index.
++So **text only is the default path, not a degraded one.** It needs no model,
++no download and no network, and `find` works on day one without them — every
++search screen in this readme was taken against a text-only index.
+
+~ line 451
+-first run. You can add them later: `potsherd index` again without `--no-embed`
+-fills in what is pending.
++first run, and you ask for them explicitly: `potsherd index --embed` fills in
++what is pending, and prints nothing until you do.
+
+Optional, if the orchestrator wants W5's own numbers instead of phase 1's in
+that table: on the frozen reference archive (324 MB, 227 sources, 1,294
+exchanges, 299 ghosts) on 2026-08-22, `index` = 8.9–11.4 s and
+`index --embed` = 6 m 7 s (5 m 43 s on a second run).
+
+================================================================================
+C. plugins/claude-code/README.md — one hunk
+================================================================================
+~ line 221
+-  (see below) and index by hand with `--no-embed`; the cost is vector search on
+-  new sessions.
++  (see below) and index by hand; `index` no longer fetches a model unless you
++  pass `--embed`, and the cost is vector search on new sessions.
+
+================================================================================
+D. printed commands that are now wrong — owned by other workers
+================================================================================
+Each of these prints a command to a user. After T8.E the command is either
+unreachable or misleading, so they are defects, not polish.
+
+packages/core/src/recall.ts:1163      (owner: another live worker)
+-      reason: 'no embeddings in the index — run  potsherd index  without --no-embed',
++      reason: 'no embeddings in the index — run  potsherd index --embed',
+
+packages/cli/src/commands/doctor.ts:324   (owner: another live worker)
+-        'it — so its SessionStart hook warns you first. `--no-embed` skips the ' +
+-        'download entirely.',
++        'it — so its SessionStart hook warns you first. Only `--embed` asks for ' +
++        'the download at all; `potsherd index` alone never touches the network.',
+  and the sentence three lines above it, `.text('no other network, except the
+  one-off embedding-model download.')`, now overstates what the default does.
+
+packages/core/src/ingest.ts:1004      (owner: another live worker)
+-    report.reason = '--no-embed: text search only';
++    report.reason = 'text only — pass --embed for semantic search';
+  Surfaces only in `index --json`.embeddings.reason. It says `--no-embed` after
+  a run where no flag was passed.
+
+packages/core/src/render/estimate.ts:170   (unowned; outside W5's file list)
+-      `potsherd card --all${o.maxUsd !== undefined ? ` --max-usd ${o.maxUsd}` : ''}`,
+  `potsherd card --limit 5 --dry-run` now works, and its last line reads
+  `run  potsherd card --all  to write these cards for real.` — which on the
+  reference archive is 123 targets, not the 5 just quoted. The dry-run should
+  echo back the scope it was given. Verified live on 2026-08-22.
+
+================================================================================
+E. barrel lines
+================================================================================
+none. `renderIndexReceipt` gained an optional fourth parameter and
+`CardTarget` gained a required `ts: string | null`; both are already exported
+through packages/core/src/index.ts and packages/cli/src/commands/index.ts and
+neither export list changes.

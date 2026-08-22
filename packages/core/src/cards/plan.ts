@@ -70,6 +70,19 @@ export interface CardTarget {
   /** The transcript changed after the card was written. */
   stale: boolean;
   isSidechain: boolean;
+  /**
+   * When this target last ran: `ended_at` or `started_at` for a session,
+   * `last_ts` or `first_ts` for a ghost. ISO-8601, so string order is time
+   * order.
+   *
+   * Carried on the target because {@link planCards} orders the merged list by
+   * it before {@link PlanOptions.limit} cuts, and "the n newest" is only true
+   * of an ordered list. Sessions and ghosts are two queries, each already
+   * ordered newest-first and then *concatenated*: before T8.E `--limit 5` on
+   * the reference archive returned the five newest surviving sessions and
+   * never reached the 299 ghosts, whatever their dates.
+   */
+  ts: string | null;
 }
 
 export interface SkipReasonCounts {
@@ -119,6 +132,7 @@ interface SessionRow {
   project_slug: string | null;
   is_sidechain: number;
   source_mtime: number | null;
+  ts: string | null;
   exchanges: number;
   chars: number;
   carded: number;
@@ -130,6 +144,7 @@ interface GhostRow {
   harness: Harness;
   title: string | null;
   project: string | null;
+  ts: string | null;
   prompts: number;
   chars: number;
   carded: number;
@@ -155,6 +170,7 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
     const rows = db
       .prepare(
         `SELECT s.id, s.harness, s.title, s.project, s.project_slug, s.is_sidechain, s.source_mtime,
+                COALESCE(s.ended_at, s.started_at) AS ts,
                 (SELECT COUNT(*) FROM exchanges e WHERE e.session_id = s.id) AS exchanges,
                 (SELECT COALESCE(SUM(length(e.user_text) + length(e.assistant_text)), 0)
                    FROM exchanges e WHERE e.session_id = s.id) AS chars,
@@ -189,6 +205,7 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
         carded: r.carded > 0,
         stale,
         isSidechain: r.is_sidechain === 1,
+        ts: r.ts,
       });
     }
   }
@@ -198,6 +215,7 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
     const rows = db
       .prepare(
         `SELECT g.session_id, g.harness, g.title, g.project,
+                COALESCE(g.last_ts, g.first_ts) AS ts,
                 (SELECT COUNT(*) FROM ghost_prompts p WHERE p.session_id = g.session_id) AS prompts,
                 (SELECT COALESCE(SUM(length(p.text)), 0)
                    FROM ghost_prompts p WHERE p.session_id = g.session_id) AS chars,
@@ -234,9 +252,17 @@ export function planCards(db: Db, options: PlanOptions = {}): CardPlan {
         carded: r.carded > 0,
         stale: false,
         isSidechain: false,
+        ts: r.ts,
       });
     }
   }
+
+  // Newest first, across both kinds, and *before* the cut (T8.E). Each query
+  // is already ordered, but the two lists are concatenated, so the order of
+  // the whole is sessions-then-ghosts until it is re-established here. The id
+  // breaks ties so two targets stamped the same second cannot swap places
+  // between the `--dry-run` quote and the run it quotes.
+  targets.sort((a, b) => (b.ts ?? '').localeCompare(a.ts ?? '') || a.id.localeCompare(b.id));
 
   const capped =
     options.limit !== undefined ? targets.slice(0, Math.max(0, options.limit)) : targets;
