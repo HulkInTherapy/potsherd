@@ -156,6 +156,51 @@ export interface ToolSpec {
  */
 export const VERIFIED_ON = '22 aug 2026';
 
+/**
+ * The document in this repository that holds every source url, with the date
+ * each was read. The legend cites it by path rather than by url because it is
+ * checked into the same commit as the table: a reader can open the exact
+ * version of the sources that produced the exact version of the table.
+ *
+ * `research/competitors.md`, which several comments in this file cite, lives
+ * in the planning folder and is deliberately **not** published; pointing a
+ * user's terminal at it would be a dangling reference.
+ */
+export const CLAIM_SOURCE = 'docs/memory-stack.md';
+
+/**
+ * T8.8 — the asymmetry, said once, at the top, in plain words.
+ *
+ * potsherd is graded here **by exercise** and every other tool **by
+ * documentation**. That is a real difference in evidence and it runs in
+ * potsherd's favour, which makes it the single most reputationally dangerous
+ * sentence in the product: a comparison table that flatters its author is
+ * precisely the thing `02`'s *what we refuse to build* says this project is
+ * not.
+ *
+ * Until this phase the asymmetry was disclosed only inside the `claim` column,
+ * per row, and in a footer under the recommendation — both true, both
+ * skippable. A reader scanning a table reads the header and the rows; a reader
+ * screenshotting one crops the footer. So the same fact now sits directly
+ * above the first row, before any tool has been named, and
+ * `tests/stack.test.ts` asserts that **both halves** of it are there, because
+ * half of this sentence is a boast.
+ *
+ * The fix is *not* to grade potsherd by documentation too. The asymmetry is
+ * honest — potsherd is the one tool on the list that is installed here — and
+ * levelling it down would throw away real evidence to make a table look even.
+ * The job is to state it where nobody can miss it.
+ *
+ * @param verifiedOn the fetch date; defaults to {@link VERIFIED_ON}.
+ */
+export function claimLegend(verifiedOn: string = VERIFIED_ON): string {
+  return (
+    `claim: potsherd's row was measured by running potsherd on this machine. ` +
+    `every other row was read from that project's own documentation on ${verifiedOn} ` +
+    `and was never run here. sources and fetch dates: ${CLAIM_SOURCE}`
+  );
+}
+
 // ---------------------------------------------------------------- the tools
 
 /**
@@ -550,6 +595,15 @@ export function recommend(detections: readonly Detection[]): Recommendation {
 
 export interface StackReport {
   verifiedOn: string;
+  /**
+   * {@link claimLegend} — the one sentence that says potsherd was measured and
+   * everyone else was read. Carried on the report, not composed by the
+   * renderer, so `stack` and `stack --json` cannot disagree about it and a
+   * later refactor of the terminal layout cannot drop it silently.
+   */
+  claimLegend: string;
+  /** Where the legend points: {@link CLAIM_SOURCE}. */
+  claimSource: string;
   failures: readonly Failure[];
   detections: Detection[];
   overlaps: Overlap[];
@@ -565,6 +619,8 @@ export function stackReport(env: NodeJS.ProcessEnv = process.env): StackReport {
   const detections = detectTools(env);
   return {
     verifiedOn: VERIFIED_ON,
+    claimLegend: claimLegend(),
+    claimSource: CLAIM_SOURCE,
     failures: FAILURES,
     detections,
     overlaps: overlaps(detections),

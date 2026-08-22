@@ -38,7 +38,13 @@ export interface StackOptions extends GlobalOptions {
  *      count beside a computed one is a count that will drift, so
  *      `tests/stack.test.ts` now reads it out of this comment and checks it
  *      against `stackReport()`.
- *   3. **Absence is a line, never an error.** A machine with none of these
+ *   3. **The asymmetry is stated above the table, not only in the column.**
+ *      potsherd's row was measured by running potsherd; every other row was
+ *      read from that project's documentation on a printed date. T8.8 moved
+ *      that sentence from the `claim` column and the footer — both skippable —
+ *      to the line directly above the first row. `stack.claimLegend()` owns
+ *      the wording and `tests/stack.test.ts` asserts both halves of it survive.
+ *   4. **Absence is a line, never an error.** A machine with none of these
  *      installed is the common case and gets a sentence saying so.
  */
 export async function runStack(o: StackOptions): Promise<number> {
@@ -48,6 +54,8 @@ export async function runStack(o: StackOptions): Promise<number> {
   if (o.json) {
     printJson({
       verifiedOn: r.verifiedOn,
+      claimLegend: r.claimLegend,
+      claimSource: r.claimSource,
       installed: r.installed,
       unverified: r.unverified,
       failures: r.failures,
@@ -128,6 +136,20 @@ export function render(r: stack.StackReport, t: Theme, o: StackOptions = {}): st
     const state = f.solved ? t.dim('solved elsewhere') : t.accent('unsolved');
     L.push(`    ${f.n}  ${pad(f.label, 16)}${wide ? pad(f.when, 26) + state : f.when}`);
   }
+  L.push('');
+
+  // ---- the claim legend, and it goes ABOVE the table.
+  //
+  // T8.8. The `claim` column at the right of every row already says `docs
+  // only` / `read here` / `this program`, and the footer already counts them.
+  // Both are true and both are skippable: a reader scans the header and the
+  // rows, and a screenshot crops the footer. The asymmetry that flatters us —
+  // potsherd graded by running it, everyone else by reading their docs — is
+  // therefore stated once, in a full sentence, before the first tool is named.
+  // It wraps rather than eliding: at 60 columns it becomes four lines, which
+  // is the correct trade, because a shortened version of this sentence is a
+  // less true one.
+  for (const line of fmt.wrap(r.claimLegend, t.width - 4)) L.push(t.dim(`  ${line}`));
   L.push('');
 
   // ---- the table.
