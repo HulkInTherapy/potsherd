@@ -252,19 +252,25 @@ export function unavailableList(status: BridgeStatus, ms = 0): BridgeList {
  * Separate from {@link emptyStatus} on purpose: "installed, nothing to search"
  * is a fact about the user's data, "schema not recognised" is a fact about
  * potsherd, and only the second one is a bug report worth filing.
+ *
+ * `headline` exists because not every mismatch is a *schema* mismatch: an
+ * agentmemory install whose server cannot be started is the same presence and
+ * a different sentence, and printing "schema not recognised" at someone whose
+ * schema was never read would send them to look in the wrong place.
  */
 export function unrecognisedStatus(
   bridge: BridgeName,
   path: string,
   why: string,
   schema: DiscoveredSchema | null = null,
+  headline: string = SCHEMA_UNAVAILABLE,
 ): BridgeStatus {
   return {
     bridge,
     presence: 'unrecognised',
     path,
     available: false,
-    detail: `${SCHEMA_UNAVAILABLE} (${why})`,
+    detail: `${headline} (${why})`,
     schema,
     rows: null,
     worker: null,

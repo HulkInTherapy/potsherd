@@ -58,6 +58,20 @@ export {
 } from './claude-mem.js';
 
 export {
+  AGENTMEMORY_TIMEOUT_MS,
+  SEARCH_TOOL,
+  agentMemoryDir,
+  closeAgentMemoryClients,
+  detectAgentMemory,
+  discoverLaunch,
+  parseHits,
+  queryAgentMemory,
+  warmClient,
+  type AgentMemoryOptions,
+  type LaunchCommand,
+} from './agentmemory.js';
+
+export {
   detectNotes,
   memoryDir,
   notesPaths,
