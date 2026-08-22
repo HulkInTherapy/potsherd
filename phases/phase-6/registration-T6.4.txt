@@ -1,0 +1,238 @@
+T6.4 `potsherd stack` and `link --suggest` — registration for the integrator.
+
+Paste these verbatim. Four files are touched, three of them RESERVED. Nothing
+else in any of them needs to change.
+
+Branch: task/T6.4-stack
+Shipped: packages/core/src/stack.ts · packages/core/src/link-suggest.ts ·
+         packages/cli/src/commands/stack.ts · tests/stack.test.ts (45 tests) ·
+         docs/memory-stack.md
+
+The branch builds, typechecks and tests green *without* any of this, because
+`commands/stack.ts` reaches its module directly while the barrel line is
+pending (step 2 below swaps that one line back), and `tests/stack.test.ts`
+imports every module by path. So this is registration, not repair.
+
+`packages/cli/src/commands/link.ts` belongs to another worker and was not
+touched. Step 4 is the change it needs, and it is one import plus one block.
+
+
+================================================================================
+1.  packages/core/src/index.ts                                        RESERVED
+================================================================================
+Append at the end of the phase-5 section, just above the final
+`export { VERSION } from './version.js';` line:
+
+// ---------------------------------------------------------------- phase 6
+// T6.4 — `stack`: the verb that says which tool owns which of `01 §1`'s four
+// failures, and which two potsherd loses. A namespace, like `setup`, because
+// the whole module is one verb's worth of detection plus one table.
+export * as stack from './stack.js';
+// T6.4 — `link --suggest`. Named exports rather than a namespace: `link.ts`
+// needs exactly two of them, and `renderSuggestions` lives beside
+// `MEASURED_PRECISION` on purpose so there is no wiring that leaves the
+// measured-precision disclosure out.
+export {
+  suggestLinks,
+  renderSuggestions,
+  MEASURED_PRECISION,
+  DEFAULT_LIMIT as SUGGEST_DEFAULT_LIMIT,
+  type LinkSuggestion,
+  type SuggestResult,
+  type SuggestOptions,
+  type Precision,
+} from './link-suggest.js';
+
+
+================================================================================
+2.  packages/cli/src/commands/stack.ts                            (not reserved)
+================================================================================
+Once step 1 has landed, replace these lines at the top of the file
+
+  import { format as fmt, Theme } from '@potsherd/core';
+  // `packages/core/src/index.ts` is reserved for the integrator this phase, so
+  // the barrel line — `export * as stack from './stack.js';` — is written out in
+  // `phases/phase-6/registration-T6.4.txt` rather than added here. Until it
+  // lands this import reaches the module directly, so the branch builds,
+  // typechecks and tests green; swap it for `stack` in the line above once the
+  // barrel carries it.
+  import * as stack from '../../../core/src/stack.js';
+
+with the one line every other command file uses:
+
+  import { format as fmt, stack, Theme } from '@potsherd/core';
+
+Nothing else changes; `stack` is used as a namespace either way.
+
+
+================================================================================
+3.  packages/cli/src/index.ts                                         RESERVED
+================================================================================
+(a) add to the imports from './commands/…', after the `runSetup` line:
+
+import { runStack } from './commands/stack.js';
+
+(b) the commander block. Place it after the `setup` block and before `index`,
+    so the help order reads  guard -> setup -> stack -> index: setup and stack
+    are the two verbs that are about the rest of the user's toolchain rather
+    than about their archive, and they read as a pair.
+
+  const stackCmd = addGlobals(
+    program
+      .command('stack')
+      .description('which memory tool covers which failure, and what potsherd does not do')
+      .option('--paths', 'print every path detection looked at, including the misses')
+      .option('--sources', 'print the url and fetch date behind every row'),
+  ).addHelpText('after', `
+example:
+  potsherd stack                    # the table, against what you have installed
+  potsherd stack --sources          # every claim, with the url it was read from
+  potsherd stack --paths            # why a tool you have installed reads as absent
+  potsherd stack --json | jq '.tools[] | select(.present)'
+
+every row says how far its claim was checked: read off this machine, read out
+of a real config file, or from that project's own docs on a printed date.`);
+  stackCmd.action(async (opts: Record<string, unknown>) => {
+    const o = globals(program, stackCmd, opts);
+    await run(
+      () =>
+        runStack({
+          ...o,
+          paths: Boolean(opts['paths']),
+          sources: Boolean(opts['sources']),
+        }),
+      o,
+    );
+  });
+
+    NOTE: the local is `stackCmd`, not `stack`, because step 2 puts the core
+    namespace `stack` in scope in `commands/stack.ts` and a reader moving
+    between the two files should not meet the same identifier meaning two
+    things. `index.ts` does not import the namespace today; the name is kept
+    distinct anyway.
+
+(c) the `link` block already in this file takes two required arguments.
+    `--suggest` takes none, so both become optional:
+
+    change      .argument('<a>', 'session id, or the first 8 characters of one')
+                .argument('<b>', 'the other one')
+    to          .argument('[a]', 'session id, or the first 8 characters of one')
+                .argument('[b]', 'the other one')
+
+    add the flag, after `--remove`:
+
+                .option('--suggest', 'propose cross-project links to accept by hand; writes nothing')
+
+    add to the help text, after the `--remove` example line:
+
+  potsherd link --suggest                            # proposals, nothing written
+
+    and in the action, pass it through — `a` and `b` are now `string | undefined`:
+
+  link.action(async (a: string | undefined, b: string | undefined, opts: Record<string, unknown>) => {
+    const o = globals(program, link, opts);
+    await run(
+      () =>
+        runLink({
+          ...o,
+          ...(a ? { a } : {}),
+          ...(b ? { b } : {}),
+          remove: Boolean(opts['remove']),
+          suggest: Boolean(opts['suggest']),
+          ...(opts['note'] ? { note: String(opts['note']) } : {}),
+        }),
+      o,
+    );
+  });
+
+
+================================================================================
+4.  packages/cli/src/commands/link.ts                      NOT MINE — T6.4 asks
+================================================================================
+One import and one block. `link.ts` belongs to another worker this phase, so
+nothing here was written on this branch.
+
+(a) the import. `renderSuggestions` and `suggestLinks` join the existing
+    `@potsherd/core` import list, and `wrap` comes off the `format` namespace
+    that file already imports as `fmt`:
+
+  import {
+    fitLine,
+    format as fmt,
+    linkSessions,
+    renderSuggestions,        // <- added
+    sessionLinks,
+    suggestLinks,             // <- added
+    Theme,
+    unlinkSessions,
+  } from '@potsherd/core';
+
+(b) `LinkCommandOptions` gains one optional flag, and `a`/`b` become optional
+    because `--suggest` takes neither:
+
+  export interface LinkCommandOptions extends GlobalOptions {
+    a?: string;
+    b?: string;
+    note?: string;
+    remove?: boolean;
+    suggest?: boolean;
+  }
+
+(c) the block. It goes immediately after
+
+      const { db } = openIndex(o);
+      try {
+
+    and before the two `mustResolve` calls, because `--suggest` resolves no
+    session reference:
+
+      if (o.suggest) {
+        const result = suggestLinks(db, {});
+        if (o.json) {
+          printJson(result);
+          return 0;
+        }
+        for (const line of renderSuggestions(result, themeFrom(o), fmt.wrap)) print(line);
+        return 0;
+      }
+
+    Then the existing two lines guard against a bare `potsherd link` with no
+    ids, which is now reachable:
+
+      if (!o.a || !o.b) {
+        throw new UserError(
+          'link needs two sessions, or --suggest',
+          'potsherd link --suggest',
+        );
+      }
+      const a = mustResolve(db, o.a, verb);
+      const b = mustResolve(db, o.b, verb);
+
+WHY THE RENDERER IS IN CORE. `renderSuggestions` sits in
+`packages/core/src/link-suggest.ts` beside `MEASURED_PRECISION` rather than in
+`link.ts`, and that is deliberate rather than convenient. Phase 4 measured this
+rule pass at **8 of 8 genuinely absent, 1–2 of 8 worth raising**
+(`phases/phase-4/evidence-T4.2/RESULTS.md`). The disclosure of that number is
+the condition on which the feature is allowed to exist, so it is not something
+a caller composes — it is printed by the same function that prints the rows,
+and `tests/stack.test.ts` asserts it reached the output.
+
+`suggestLinks` imports `openThreadCandidates` from `open-threads.ts` and does
+not reimplement it. It never imports `linkSessions`, and a test asserts the
+`links` table is untouched after a run.
+
+
+================================================================================
+verification, once all four steps have landed
+================================================================================
+  potsherd stack
+  potsherd stack --json | jq '.unverified, .installed'
+  potsherd stack --paths
+  potsherd stack --width 60          # degrades; nothing wraps
+  potsherd stack --ascii             # pure ascii
+  potsherd link --suggest
+  potsherd link --suggest --json | jq '.precision'
+  potsherd link --help               # shows the --suggest example
+
+  pnpm test                          # 1,213 tests in 29 files
+  python3 scripts/check-privacy.py   # green
