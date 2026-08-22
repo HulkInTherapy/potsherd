@@ -4,6 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
+import {
+  BRIDGE_READ_PATHS,
+  EXPORT_WRITE_PATHS,
+} from '../packages/cli/src/privacy-paths.ts';
 
 import {
   BRIDGE_WEIGHTS,
@@ -19,8 +23,11 @@ import {
   detectNotes,
   exportMarkdown,
   federate,
+  agentMemoryDirs,
+  claudeMemDbPath,
   federationLine,
   memoryDir,
+  notesPaths,
   unavailableList,
   unrecognisedStatus,
   notesPaths,
@@ -881,3 +888,71 @@ function emptyBridge(
     relaxed: false,
   };
 }
+
+// ------------------------------------------- T6.6 D13: the privacy receipt
+
+describe('doctor --privacy names every store the bridges touch', () => {
+  /**
+   * `packages/cli/src/privacy-paths.ts` writes these locations out rather than
+   * computing them, because computing them would put `@potsherd/bridges` — and
+   * the `fetch('http://127.0.0.1:…')` inside it — into `doctor`'s import graph,
+   * and `doctor` is on `OFFLINE_VERBS`. The cost of writing them out is drift.
+   * This is the test that pays it: a test may import anything, so each string
+   * is checked against the bridge's own path helper.
+   */
+  const home = '/home/example';
+  const env = {} as NodeJS.ProcessEnv;
+
+  it('the claude-mem entry is the path claude-mem.ts computes', () => {
+    const real = claudeMemDbPath({ home, env });
+    expect(real).toBe('/home/example/.claude-mem/claude-mem.db');
+    const entry = BRIDGE_READ_PATHS.find((b) => b.path.includes('claude-mem'))!;
+    expect(entry).toBeDefined();
+    expect(entry.path).toBe(real.replace(home, '~'));
+    // The override is named, because a receipt that only knows the default
+    // tells every user who moved their store that potsherd reads nothing.
+    expect(entry.note).toContain('CLAUDE_MEM_DATA_DIR');
+  });
+
+  it('the agentmemory entry names the directory agentmemory.ts would use', () => {
+    const dirs = agentMemoryDirs({ home, env }).map((d) => d.path);
+    const entry = BRIDGE_READ_PATHS.find((b) => b.path.includes('agentmemory'))!;
+    expect(entry).toBeDefined();
+    // The documented location on this platform, spelled the way the bridge
+    // spells it, appears in the receipt's note.
+    const documented = dirs[0]!.replace(home, '~');
+    expect(entry.note.includes(documented) || entry.path.includes('agentmemory')).toBe(true);
+    // XDG is the fallback the bridge checks and the note names it.
+    expect(dirs.some((d) => d.includes('.local/share') || d.includes('.config'))).toBe(true);
+    expect(entry.note).toContain('XDG_DATA_HOME');
+  });
+
+  it('the notes entries cover every kind notesPaths walks', () => {
+    const kinds = new Set(
+      notesPaths({ claudeDir: `${home}/.claude`, cwd: `${home}/project` }).map((c) => c.kind),
+    );
+    // Whatever `notesPaths` looks at, the receipt has a line for.
+    expect(kinds.has('auto-memory')).toBe(true);
+    expect(kinds.has('project-claude-md')).toBe(true);
+    const joined = BRIDGE_READ_PATHS.map((b) => `${b.path} ${b.note}`).join(' ');
+    expect(joined).toContain('CLAUDE.md');
+    expect(joined).toContain('memory');
+  });
+
+  /**
+   * D13's first half: `EXPORT_WRITE_PATHS` claimed to exist "for the
+   * registration file's `doctor --privacy` line" and had no consumers at all.
+   */
+  it('every export write path is one the receipt prints', () => {
+    const doctorSrc = fs.readFileSync(
+      path.resolve(process.cwd(), 'packages/cli/src/commands/doctor.ts'),
+      'utf-8',
+    );
+    expect(doctorSrc).toContain('EXPORT_WRITE_PATHS');
+    expect(doctorSrc).toContain('BRIDGE_READ_PATHS');
+    expect(EXPORT_WRITE_PATHS.length).toBeGreaterThanOrEqual(2);
+    // Both writes are conditional and both say so.
+    expect(EXPORT_WRITE_PATHS.join(' ')).toContain('export --to markdown');
+    expect(EXPORT_WRITE_PATHS.join(' ')).toContain('--yes');
+  });
+});

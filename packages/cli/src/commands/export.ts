@@ -278,7 +278,9 @@ function shellish(p: string): string {
   return /[\s'"$`\\]/.test(p) ? `'${p.replace(/'/g, "'\\''")}'` : p;
 }
 
-/** Exported for the registration file's `doctor --privacy` line. */
-export const EXPORT_WRITE_PATHS: readonly string[] = [
-  '<the dir you give to  export --to markdown>',
-];
+// T6.6 D13 — `EXPORT_WRITE_PATHS` lived here, claimed to exist "for the
+// registration file's `doctor --privacy` line", and had zero consumers. It is
+// now in `../privacy-paths.ts`, which `doctor` can import without pulling
+// `@potsherd/bridges` — and its socket — into an offline verb's import graph,
+// and it is printed. Re-exported so the name still resolves from here.
+export { EXPORT_WRITE_PATHS } from '../privacy-paths.js';

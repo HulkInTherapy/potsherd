@@ -35,6 +35,7 @@ import {
   type VecStatus,
 } from '@potsherd/core';
 import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
+import { BRIDGE_READ_PATHS, EXPORT_WRITE_PATHS } from '../privacy-paths.js';
 
 export interface DoctorOptions extends GlobalOptions {
   privacy?: boolean;
@@ -113,6 +114,12 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // holds the same redacted excerpts a model would have been sent, and no
     // model was called to write it.
     '<the path you give to  ask --readers-out>',
+    // T6.6 D13 — and `export` is the third. `EXPORT_WRITE_PATHS` was declared
+    // in `commands/export.ts` labelled "Exported for the registration file's
+    // `doctor --privacy` line" and had zero consumers, so the one verb that
+    // writes a directory of files wherever you point it appeared nowhere in
+    // the list of what potsherd writes.
+    ...EXPORT_WRITE_PATHS,
   ];
   const settingsFile = paths.claudePaths(report.claudeDir).settings;
   // `setup` writes one MCP stanza into each agent's own config file. That is
@@ -136,6 +143,9 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     if (o.json) {
       printJson({
         reads,
+        // The same list the human view prints, so a script and a person are
+        // reading one receipt.
+        bridgeReads: BRIDGE_READ_PATHS.map((b) => b.path),
         writes: written,
         writesWithConsent: [...consented, ...backups],
         network,
@@ -154,6 +164,19 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     for (const p of reads) {
       card.raw(`    ${show(p)}${fs.existsSync(p) ? '' : t.dim('  (absent)')}`);
     }
+    // T6.6 D13 — the other tools' stores. `03` §11 says this receipt lists
+    // every path read, and until now it listed none of these: `find --with`
+    // and `export --to` read a claude-mem database, an agentmemory store and
+    // the CLAUDE.md files the notes bridge walks up from the working
+    // directory. Written out rather than computed, because resolving them
+    // would put `@potsherd/bridges` — and its localhost socket — into an
+    // offline verb's import graph; `tests/bridges.test.ts` asserts each one
+    // against the bridge's own path helper so they cannot drift.
+    card.raw(`    ${t.dim('…and these, only when you name them with  --with / --to:')}`);
+    for (const b of BRIDGE_READ_PATHS) {
+      card.raw(`    ${show(b.path)}`);
+      card.raw(`      ${t.dim(b.note)}`);
+    }
     card.blank().text('writes:');
     for (const p of written) {
       card.raw(`    ${show(p)}`);
@@ -165,6 +188,11 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       } else if (p.startsWith('<the path you give')) {
         card.raw(`      ${t.dim('only when you pass the flag. it holds the same redacted excerpts a')}`);
         card.raw(`      ${t.dim('model would have been sent, and no model was called to write it')}`);
+      } else if (p.startsWith('<the dir you give')) {
+        card.raw(`      ${t.dim('one markdown file per card, only when you run export')}`);
+      } else if (p.startsWith('<your agentmemory')) {
+        card.raw(`      ${t.dim('rows into another tool\'s store. never without --yes, and')}`);
+        card.raw(`      ${t.dim('never at all unless you asked for that target')}`);
       }
     }
     card.blank().text('writes only after an explicit y at a diff:');
