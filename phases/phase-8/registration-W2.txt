@@ -1,0 +1,83 @@
+W2 — T8.B / phase 8.2, ghost titles.            branch p8/w2-titles
+=================================================================
+
+1. LINES NEEDED IN A RESERVED FILE
+----------------------------------
+NONE for the shipped fix.
+
+  packages/core/src/index.ts   no change needed. rescue.ts gained four
+                               exported symbols (GHOST_TITLE_MAX_CHARS,
+                               cutToCodePoints, isSubstantivePrompt,
+                               firstSubstantivePrompt). They are used inside
+                               core only and every test reaches them through
+                               rescue()'s behaviour, so nothing has to leave
+                               the package. Re-export them only if another
+                               worker wants the rule.
+  packages/cli/src/index.ts    no change. No new flag.
+  package.json / README.md     no change.
+  packages/core/src/browse.ts  NOT TOUCHED, as instructed. It needs no edit:
+                               ghosts.title is now never null, so its existing
+                               COALESCE(g.title, g.first_prompt) resolves to
+                               the derived title on every surface.
+
+2. SCHEMA MIGRATION NUMBER
+--------------------------
+W2 ADDED NO MIGRATION. The highest in packages/core/src/db.ts is still 8
+('ghost-vectors-table'). **9 is free.** The fix needed no schema change: both
+columns it writes (ghosts.title, ghosts.first_prompt) already exist, and the
+one-time recompute on upgrade is forced by an algorithm version folded into
+the ghost-rebuild fingerprint (rescue.ts, GHOST_ALGO_VERSION = 2) rather than
+by a migration.
+
+3. NOT SHIPPED — the live-untitled-session half of 8.2, and why
+---------------------------------------------------------------
+phase-8-hardening.md 8.2 also asks that a live session with no harness title
+be named by its first substantive prompt instead of <project>-<id8>. That is
+NOT in this branch. Writing the derived title into sessions.title empties
+`ls --untitled`, whose whole SQL is "no card title and no s.title":
+
+  packages/core/src/search/filters.ts:82  UNTITLED_SESSION_SQL
+
+Measured on evals/fixture/claude (evidence dir below): 61 sessions, 17 with no
+harness title, **15 of those 17 have a first user prompt that would become a
+title**. `ls --untitled` returns 9 rows today and would return at most 2. It
+would also fail an existing test in a file outside W2's deliverable list:
+
+  tests/annotate-cli.test.ts:334  'ls --untitled' >
+     'lists exactly the sessions with nothing but an id to call them by'
+     expects length > 0 and every displayTitle to match /-[0-9a-f]{8}$/
+
+Note also 10-MASTER-VERIFICATION.md line 35 files the `potsherd-<id8>` rows
+under **phase 8.4**, not 8.2 — 8.4's `ignore <project>` removes potsherd's own
+sdk sessions from the screen entirely, which is the other way to fix that row.
+
+THE COMPLETE PATCH, for whoever owns filters.ts (4 files, ~6 lines):
+
+  a) packages/core/src/db.ts — MIGRATION 9 (or the next free number):
+       ALTER TABLE sessions ADD COLUMN title_source TEXT;
+     null = the harness named it; 'prompt' = potsherd derived it.
+
+  b) packages/core/src/ingest.ts — in ingestSession's transaction, after the
+     exchanges are inserted (they are replaced wholesale, so the first one is
+     always present even on an incremental re-parse), when the session has no
+     harness title:
+       UPDATE sessions SET title = ?, title_source = 'prompt'
+        WHERE id = ? AND COALESCE(TRIM(title),'') = ''
+     with the value from rescue.ts's already-exported
+       cutToCodePoints(firstSubstantivePrompt(userTexts)!, GHOST_TITLE_MAX_CHARS)
+     — the same rule, the same 60 code points, derived post-redaction so a
+     masked secret cannot become a title.
+
+  c) packages/core/src/search/filters.ts:82 — one conjunct, so `--untitled`
+     keeps meaning "nothing a card would not improve":
+       COALESCE(TRIM(s.title), '') = '' OR s.title_source = 'prompt'
+     wrapped in parentheses against the existing NOT EXISTS on cards.
+
+  d) tests/annotate-cli.test.ts:334 — the displayTitle regex stops being
+     /-[0-9a-f]{8}$/ for every row; assert instead that no row has a card
+     title and that the uuid-shaped ones are the sessions with no substantive
+     prompt.
+
+4. EVIDENCE (outside the repo, kept)
+------------------------------------
+/private/tmp/claude-501/-Users-zebra-randomness/32309a4f-f394-479d-adb9-1777faa9867a/scratchpad/w2-evidence
