@@ -3,7 +3,7 @@ potsherd stats · ~/.potsherd · 22 aug 2026
   harness  sessions  subagents  ghosts  exchanges   bytes  span
   claude         31        197     299        439  546 KB  nov 2025 → aug 2026
 
-  sessions                      31   197 subagents · 21 titled · 0 archived
+  sessions                      31   197 subagents · 31 titled · 0 archived
   exchanges                    439   242 tool calls · 2 redacted
   ghosts                       299   2,971 prompts recovered · no assistant side
   secrets masked                 5   aws 1 · gcp 1 · github 1 · stripe 1 · …

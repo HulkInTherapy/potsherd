@@ -5,17 +5,17 @@ potsherd ls · 15 of 330
   19 aug  claude   auth-gateway     Rewrite rss parser to stream  ↳6      live
   17 aug  claude   auth-gateway     Untangle token refresh error handli…  live
   16 aug  claude   report-builder   Add a timeout to mock server          live
-  15 aug  claude   report-builder   report-builder-6fe53b91  ↳9           live
+  15 aug  claude   report-builder   why does the file uploader allocate…  live
   14 aug  claude   docs-site        Pin seed script behind a feature fl…  live
   13 aug  claude   docs-site        Fix checkout flow timeout handling…   live
   12 aug  claude   event-bus        Add a dry-run mode to audit log  ↳3   live
   11 aug  claude   event-bus        Move the event-bus consumers behind…  live
   10 aug  claude   event-bus        Investigate rss parser regression ↳5  live
    9 aug  claude   infra-terraform  Refactor csv importer into two pass…  live
-   8 aug  claude   infra-terraform  infra-terraform-08327c8b              live
+   8 aug  claude   infra-terraform  why is the audio transcoder not cov…  live
    7 aug  claude   infra-terraform  Document dead-letter queue  ↳4        live
-   6 aug  claude   mobile-shell     mobile-shell-532a725c  ↳8             live
-   5 aug  claude   mobile-shell     mobile-shell-b969824b  ↳2             live
+   6 aug  claude   mobile-shell     move the cli argument parser behind…  live
+   5 aug  claude   mobile-shell     refactor the audit log so the retry…  live
 
   31 sessions · 197 subagents inside them · 299 ghosts, prompts only
   run  potsherd show <id8>  to read one, or  potsherd find <words>

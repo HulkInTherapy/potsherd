@@ -24,5 +24,5 @@ potsherd find "pgbouncer" · 4 sessions · bm25 · 12ms
     assistant side not recoverable · potsherd show 9f9d323a
 
   3 ghost hits · 1 from subagents
-  text search only — the words matched; --vectors on adds semantic search
+  text search only — the words matched; index --embed adds semantic search
   run  potsherd show <id8>  to read one, or  potsherd ask <words>

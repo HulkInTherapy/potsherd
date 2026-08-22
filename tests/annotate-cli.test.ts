@@ -130,9 +130,22 @@ function firstUserPrompt(id: string): string | null {
  * what `phase-8-hardening.md` §8.2 asked for — not a slash command, at least
  * eight characters, and not one of seven conversational stopwords — and will
  * fail if the shipped rule drifts away from it.
+ *
+ * The harness's own furniture is taken off first, and that is part of the
+ * behaviour rather than an implementation detail: a pasted screenshot arrives
+ * as `[Image: source: …/clipboard-….png]` on the line above what the person
+ * typed, and a rule that measured the raw string named a session after the
+ * placeholder — and after the home directory inside it. Restated here too,
+ * deliberately, rather than imported.
  */
+function stripFurniture(text: string): string {
+  return text
+    .replace(/\[Image:[^\]]*\]?/gi, ' ')
+    .replace(/Caveat: The messages below were generated[^\n]*/gi, ' ');
+}
+
 function isNotSubstantive(text: string): boolean {
-  const clean = text.replace(/\s+/g, ' ').trim();
+  const clean = stripFurniture(text).replace(/\s+/g, ' ').trim();
   const stop = new Set(['clear', 'continue', 'ok', 'yes', 'hi', 'y', 'n']);
   return (
     clean === '' || clean.startsWith('/') || [...clean].length < 8 || stop.has(clean.toLowerCase())
@@ -408,9 +421,17 @@ describe('ls --untitled', () => {
       } else {
         const first = firstUserPrompt(s.id);
         expect(first, s.displayTitle).not.toBeNull();
-        // The stored title is the opening of that prompt, cut — not a summary
-        // of it, and not some other exchange's words.
-        expect(first!.replace(/\s+/g, ' ').startsWith(s.displayTitle)).toBe(true);
+        // The stored title is the opening of that prompt WITH THE HARNESS'S
+        // FURNITURE OFF, cut — not a summary of it, and not some other
+        // exchange's words. The strip is the point of the assertion and not a
+        // concession to it: `[Image: source: …/clipboard-2026-06-20.png]` on
+        // the line above `why is the pay button grey here` used to become the
+        // whole of a 60-character title, placeholder and home directory and
+        // all, and the words the person actually typed never reached the row.
+        expect(
+          stripFurniture(first!).replace(/\s+/g, ' ').trim().startsWith(s.displayTitle),
+          `${s.displayTitle} <- ${first}`,
+        ).toBe(true);
       }
     }
   });
@@ -424,7 +445,14 @@ describe('ls --untitled', () => {
     const harnessNamed = all.filter((s) => {
       if (/-[0-9a-f]{8}$/.test(s.displayTitle)) return false;
       const first = firstUserPrompt(s.id);
-      return first === null || !first.replace(/\s+/g, ' ').startsWith(s.displayTitle);
+      // Against the FURNITURE-STRIPPED prompt, because that is what a derived
+      // title is made of: the raw string starts with `[Image: …]` where the
+      // title starts with the words after it, so a raw comparison called a
+      // potsherd-derived title a harness one.
+      return (
+        first === null ||
+        !stripFurniture(first).replace(/\s+/g, ' ').trim().startsWith(s.displayTitle)
+      );
     });
     expect(harnessNamed.length).toBeGreaterThan(0);
     for (const s of harnessNamed) expect(untitled.has(s.id), s.displayTitle).toBe(false);

@@ -7,6 +7,7 @@ import { readHistory } from './claude/history.js';
 import { readSessionsIndexes } from './claude/sessions-index.js';
 import { open as openDb, type Db } from './db.js';
 import { fallbackTitle } from './recall.js';
+import { stripBoilerplate } from './search/snippet.js';
 import { withLockAsync } from './lock.js';
 
 /**
@@ -409,18 +410,42 @@ export function cutToCodePoints(text: string, max: number): string {
 
 /** Whether this prompt names the session it opened. See `TITLE_STOPWORDS`. */
 export function isSubstantivePrompt(text: string | null | undefined): boolean {
-  const clean = collapse(text);
+  const clean = titleText(text);
   if (!clean) return false;
   if (clean.startsWith('/')) return false;
   if (Array.from(clean).length < MIN_TITLE_CHARS) return false;
   return !TITLE_STOPWORDS.has(clean.toLowerCase());
 }
 
+/**
+ * What a prompt contributes to a title: its own words, with the harness's
+ * furniture taken off the front.
+ *
+ * A pasted screenshot arrives as `[Image: source: …/clipboard-2026-06-20.png]`
+ * on its own line, followed by what the person actually typed. Both halves are
+ * one prompt, so a rule that reads the raw string sees a long non-slash
+ * candidate, accepts it, and cuts a 60-character title that is entirely
+ * placeholder and half of a home directory — `why is the pay button grey here`
+ * pushed off the end.
+ *
+ * Rejecting such a prompt would be wrong too: it *does* name its session. So
+ * the furniture is removed and the words are kept. `stripBoilerplate` is the
+ * same function `find` uses to decide what may be quoted as evidence, which is
+ * the right authority — a string too empty to quote is too empty to name, and
+ * a string with words left is worth both.
+ *
+ * This also disposes of most of the home paths that reached the title column,
+ * because the path was *inside* the placeholder.
+ */
+function titleText(text: string | null | undefined): string {
+  return collapse(stripBoilerplate(text ?? ''));
+}
+
 /** The first prompt in `texts` that names its session, collapsed. Or null. */
 export function firstSubstantivePrompt(
   texts: Iterable<string | null | undefined>,
 ): string | null {
-  for (const t of texts) if (isSubstantivePrompt(t)) return collapse(t);
+  for (const t of texts) if (isSubstantivePrompt(t)) return titleText(t);
   return null;
 }
 

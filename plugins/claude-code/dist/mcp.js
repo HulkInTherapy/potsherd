@@ -24020,6 +24020,24 @@ CREATE INDEX IF NOT EXISTS card_runs_backend ON card_runs(backend, ran_at);
     // a declining migration rolls its whole transaction back, which would take
     // the column with it.
     run: createGhostVecTable
+  },
+  {
+    version: 9,
+    name: "session-title-source",
+    // Who named this session.
+    //
+    // NULL is the whole history of the column: the harness wrote the title, or
+    // there is no title at all. `'prompt'` means potsherd derived one from the
+    // session's first substantive prompt (`ingest.ts`, `rescue.ts`'s rule), and
+    // it exists so that `--untitled` can keep meaning what it has always meant.
+    //
+    // Without it, deriving a title empties `ls --untitled`: its SQL is "no card
+    // title and no `s.title`", so the moment potsherd writes a title of its own
+    // the flag stops finding the sessions it exists to find. A flag that
+    // silently stops meaning anything is worse than one that was never added,
+    // so the derivation and this column land together and `--untitled` reads
+    // "nothing a card would not improve" instead.
+    up: `ALTER TABLE sessions ADD COLUMN title_source TEXT;`
   }
 ];
 function open(opts = {}) {
@@ -24228,7 +24246,7 @@ function unique(list) {
 }
 
 // ../core/dist/search/filters.js
-var UNTITLED_SESSION_SQL = `COALESCE(TRIM(s.title), '') = ''
+var UNTITLED_SESSION_SQL = `(COALESCE(TRIM(s.title), '') = '' OR s.title_source = 'prompt')
        AND NOT EXISTS (SELECT 1 FROM cards c
                         WHERE c.session_id = s.id AND COALESCE(TRIM(c.title), '') <> '')`;
 var UNTITLED_GHOST_SQL = `COALESCE(TRIM(g.title), '') = ''
@@ -26320,7 +26338,8 @@ async function recall(db, query, requested = {}, options = {}) {
     wanted.delete("vec_exchanges");
     wanted.delete("vec_cards");
     wanted.delete("vec_ghost_prompts");
-    vectors.reason = "the words matched; --vectors on adds semantic search";
+    const state = vectorState(db, options.root);
+    vectors.reason = state.vectors === 0 || !state.available ? "the words matched; index --embed adds semantic search" : "the words matched; --vectors on adds semantic search";
   }
   if (wanted.has("vec_exchanges") || wanted.has("vec_cards") || wanted.has("vec_ghost_prompts")) {
     try {
@@ -26608,6 +26627,45 @@ function countGhosts(db) {
 }
 function firstLine2(s) {
   return (s.split("\n")[0] ?? s).trim();
+}
+
+// ../core/dist/rescue.js
+var TITLE_STOPWORDS = /* @__PURE__ */ new Set([
+  "clear",
+  "continue",
+  "ok",
+  "yes",
+  "hi",
+  "y",
+  "n"
+]);
+var MIN_TITLE_CHARS = 8;
+var GHOST_TITLE_MAX_CHARS = 60;
+function collapse2(text) {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+function cutToCodePoints(text, max) {
+  const points = Array.from(text);
+  return points.length <= max ? text : points.slice(0, max).join("");
+}
+function isSubstantivePrompt(text) {
+  const clean = titleText(text);
+  if (!clean)
+    return false;
+  if (clean.startsWith("/"))
+    return false;
+  if (Array.from(clean).length < MIN_TITLE_CHARS)
+    return false;
+  return !TITLE_STOPWORDS.has(clean.toLowerCase());
+}
+function titleText(text) {
+  return collapse2(stripBoilerplate(text ?? ""));
+}
+function firstSubstantivePrompt(texts) {
+  for (const t of texts)
+    if (isSubstantivePrompt(t))
+      return titleText(t);
+  return null;
 }
 
 // ../core/dist/adapters/claude.js
@@ -29775,11 +29833,16 @@ function ingestSession(db, parsed, options = {}) {
     toolCallCount += clean.toolCalls.length;
     redacted.push(clean);
   }
+  const derivedTitle = session.title ? null : firstSubstantivePrompt(redacted.map((e) => e.userText));
   const run2 = db.transaction(() => {
     upsertSession(db, session, parsed, options);
     clearExchanges(db, session.id);
     for (const exchange of redacted)
       insertExchange(db, exchange);
+    if (derivedTitle) {
+      db.prepare(`UPDATE sessions SET title = ?, title_source = 'prompt'
+          WHERE id = ? AND COALESCE(TRIM(title), '') = ''`).run(cutToCodePoints(derivedTitle, GHOST_TITLE_MAX_CHARS), session.id);
+    }
   });
   run2();
   return {
@@ -29807,6 +29870,12 @@ function upsertSession(db, s, parsed, o) {
        project = excluded.project, project_slug = excluded.project_slug,
        started_at = excluded.started_at, ended_at = excluded.ended_at,
        title = COALESCE(excluded.title, sessions.title),
+       -- The moment the harness names a session, potsherd's derived name is
+       -- gone and so is the mark saying potsherd made it. Without this a
+       -- session that gained a summary on a later pass would keep
+       -- title_source = 'prompt' and sit in --untitled for ever.
+       title_source = CASE WHEN excluded.title IS NOT NULL
+                           THEN NULL ELSE sessions.title_source END,
        git_branch = COALESCE(excluded.git_branch, sessions.git_branch),
        entrypoint = COALESCE(excluded.entrypoint, sessions.entrypoint),
        model = COALESCE(excluded.model, sessions.model),

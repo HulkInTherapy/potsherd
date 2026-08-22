@@ -17,7 +17,7 @@ what potsherd leaves you  —  potsherd ls
     19 aug  claude   auth-gateway    Rewrite rss parser to stream  ↳6   live
     17 aug  claude   auth-gateway    Untangle token refresh error han…  live
     16 aug  claude   report-builder  Add a timeout to mock server       live
-    15 aug  claude   report-builder  report-builder-6fe53b91  ↳9        live
+    15 aug  claude   report-builder  why does the file uploader alloc…  live
   
     31 sessions · 197 subagents inside them · 299 ghosts, prompts only
     run  potsherd show <id8>  to read one, or  potsherd find <words>

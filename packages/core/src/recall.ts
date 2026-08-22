@@ -1383,7 +1383,17 @@ export async function recall(
     wanted.delete('vec_exchanges');
     wanted.delete('vec_cards');
     wanted.delete('vec_ghost_prompts');
-    vectors.reason = 'the words matched; --vectors on adds semantic search';
+    // Which upgrade to offer depends on whether there is a vector index to
+    // turn on. Before 8.6 there almost always was, because `index` embedded by
+    // default; 8.6 made text-only the default, so on a new machine this line
+    // ran with zero embeddings and told the reader to pass `--vectors on`,
+    // which cannot work until a model has been fetched. The FIRST `find` a
+    // stranger runs is exactly the case it was wrong for.
+    const state = vectorState(db, options.root);
+    vectors.reason =
+      state.vectors === 0 || !state.available
+        ? 'the words matched; index --embed adds semantic search'
+        : 'the words matched; --vectors on adds semantic search';
   }
 
   // One forward pass, two lists. The query embedding is the expensive part

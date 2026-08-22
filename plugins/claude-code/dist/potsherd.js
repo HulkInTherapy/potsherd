@@ -4001,6 +4001,24 @@ CREATE INDEX IF NOT EXISTS card_runs_backend ON card_runs(backend, ran_at);
     // a declining migration rolls its whole transaction back, which would take
     // the column with it.
     run: createGhostVecTable
+  },
+  {
+    version: 9,
+    name: "session-title-source",
+    // Who named this session.
+    //
+    // NULL is the whole history of the column: the harness wrote the title, or
+    // there is no title at all. `'prompt'` means potsherd derived one from the
+    // session's first substantive prompt (`ingest.ts`, `rescue.ts`'s rule), and
+    // it exists so that `--untitled` can keep meaning what it has always meant.
+    //
+    // Without it, deriving a title empties `ls --untitled`: its SQL is "no card
+    // title and no `s.title`", so the moment potsherd writes a title of its own
+    // the flag stops finding the sessions it exists to find. A flag that
+    // silently stops meaning anything is worse than one that was never added,
+    // so the derivation and this column land together and `--untitled` reads
+    // "nothing a card would not improve" instead.
+    up: `ALTER TABLE sessions ADD COLUMN title_source TEXT;`
   }
 ];
 function open(opts = {}) {
@@ -5145,6 +5163,7 @@ async function readHistory(dir, opts = {}) {
   const scan2 = {
     path: p,
     exists: fs8.existsSync(p),
+    withPrompts: Boolean(opts.withPrompts),
     lines: 0,
     malformed: 0,
     orphanPrompts: 0,
@@ -5292,416 +5311,6 @@ function numOr(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : void 0;
 }
 
-// ../core/dist/audit.js
-var DAY_MS = 864e5;
-async function collectAudit(dir, now = /* @__PURE__ */ new Date(), opts = {}) {
-  const root = claudeDir(dir);
-  const disk = scanClaudeDisk(root, { titles: true });
-  const history = await readHistory(root);
-  const index = readSessionsIndexes(root);
-  const cleanup = readCleanupStatus(root);
-  const archive = readArchiveState(opts.potsherdDir);
-  return { disk, history, index, cleanup, archive, claudeDir: root, now };
-}
-async function audit(dir, now = /* @__PURE__ */ new Date(), opts = {}) {
-  const started = Date.now();
-  const input = await collectAudit(dir, now, opts);
-  const report = computeAudit(input);
-  report.timings.totalMs = Date.now() - started;
-  return report;
-}
-function computeAudit(input) {
-  const { disk, history, index, cleanup, archive, claudeDir: root, now } = input;
-  const cp = claudePaths(root);
-  const warnings = [];
-  const onDiskIds = new Set(disk.sessions.map((s) => s.sessionId));
-  const everIds = new Set(onDiskIds);
-  for (const id of history.sessions.keys())
-    everIds.add(id);
-  for (const [id, e] of index.entries)
-    if (!e.isSidechain)
-      everIds.add(id);
-  const deletedIds = /* @__PURE__ */ new Set();
-  for (const id of everIds)
-    if (!onDiskIds.has(id))
-      deletedIds.add(id);
-  let promptsLost = 0;
-  let promptsSurviving = 0;
-  for (const [id, sess] of history.sessions) {
-    if (deletedIds.has(id))
-      promptsLost += sess.promptCount;
-    else
-      promptsSurviving += sess.promptCount;
-  }
-  const byProject = /* @__PURE__ */ new Map();
-  const projectOfSession = /* @__PURE__ */ new Map();
-  for (const [id, sess] of history.sessions) {
-    const proj = sess.project || "unknown";
-    projectOfSession.set(id, proj);
-    const agg = byProject.get(proj) ?? { total: 0, alive: 0, prompts: 0, lastTs: null };
-    agg.total++;
-    if (onDiskIds.has(id))
-      agg.alive++;
-    else
-      agg.prompts += sess.promptCount;
-    if (sess.lastTs && (agg.lastTs === null || sess.lastTs > agg.lastTs))
-      agg.lastTs = sess.lastTs;
-    byProject.set(proj, agg);
-  }
-  for (const s of disk.sessions) {
-    const proj = s.project;
-    const agg = byProject.get(proj) ?? { total: 0, alive: 0, prompts: 0, lastTs: null };
-    if (!projectOfSession.has(s.sessionId))
-      agg.total++;
-    agg.alive++;
-    byProject.set(proj, agg);
-  }
-  const projectsWiped = rollUpWipedProjects(byProject);
-  const period = cleanup.effective;
-  const nextSweep = disk.sessions.map((s) => ({
-    id: s.sessionId,
-    title: s.title,
-    project: s.project,
-    daysLeft: period - Math.floor((now.getTime() - s.mtime.getTime()) / DAY_MS),
-    bytes: s.bytes,
-    mtime: s.mtime.toISOString()
-  })).sort((a, b) => a.daysLeft - b.daysLeft);
-  if (!disk.exists)
-    warnings.push(`no projects directory at ${cp.projects}`);
-  if (!history.exists)
-    warnings.push(`no history.jsonl at ${cp.history} \u2014 ghosts cannot be rebuilt`);
-  if (history.malformed > 0) {
-    const n2 = history.malformed;
-    warnings.push(`${n2} malformed ${n2 === 1 ? "line" : "lines"} in history.jsonl (skipped)`);
-  }
-  for (const bad of index.malformed)
-    warnings.push(`unreadable sessions-index.json: ${bad}`);
-  for (const s of [...disk.sessions, ...disk.sidechains]) {
-    if (s.error)
-      warnings.push(`unreadable transcript ${s.sourcePath}: ${s.error}`);
-  }
-  const recordTypes = {};
-  for (const s of [...disk.sessions, ...disk.sidechains]) {
-    for (const [type, n2] of Object.entries(s.typesSeen)) {
-      recordTypes[type] = (recordTypes[type] ?? 0) + n2;
-    }
-  }
-  const pathsRead = [
-    cp.projects,
-    cp.history,
-    ...index.files,
-    cleanup.files.user.path,
-    cleanup.files.local.path,
-    cleanup.files.managed.path
-  ];
-  return {
-    measuredAt: now.toISOString(),
-    claudeDir: root,
-    claudeDirExists: disk.exists || history.exists,
-    sessionsEver: everIds.size,
-    onDisk: onDiskIds.size,
-    deleted: deletedIds.size,
-    promptsLost,
-    promptsSurviving,
-    historySessions: history.sessions.size,
-    historyOnDisk: [...history.sessions.keys()].filter((id) => onDiskIds.has(id)).length,
-    historyPrompts: promptsLost + promptsSurviving,
-    historyFirstTs: history.firstTs ? new Date(history.firstTs).toISOString() : null,
-    historyLastTs: history.lastTs ? new Date(history.lastTs).toISOString() : null,
-    projectsWiped,
-    projectsWithSessions: countProjectsWithSessions(disk),
-    projectDirs: disk.projects.length,
-    nextSweep,
-    nextSweepWithin7Days: nextSweep.filter((s) => s.daysLeft <= 7).length,
-    nextSweepWithinOneDay: nextSweep.filter((s) => s.daysLeft <= 1).length,
-    cleanupPeriodDays: cleanup.declared,
-    cleanupPeriodEffective: cleanup.effective,
-    cleanupPeriodSource: cleanup.source,
-    cleanupEditable: cleanup.editable,
-    ...cleanup.reason ? { cleanupReason: cleanup.reason } : {},
-    onDiskFiles: disk.sessions.length,
-    sidechainFiles: disk.sidechains.length,
-    bytes: disk.totalBytes,
-    sdkSessions: disk.sessions.filter((s) => s.entrypoint === "sdk-ts").length,
-    titledSessions: disk.sessions.filter((s) => Boolean(s.title)).length,
-    memoryFiles: disk.projects.reduce((a, p) => a + p.memoryFiles, 0),
-    sessionsIndexFiles: index.files.length,
-    archive,
-    recordTypes,
-    pathsRead,
-    timings: { scanMs: disk.scanMs, historyMs: history.scanMs, totalMs: 0 },
-    warnings
-  };
-}
-function rollUpWipedProjects(byProject) {
-  const alive = [];
-  const wiped = [];
-  for (const [project, agg] of byProject) {
-    if (agg.total === 0)
-      continue;
-    (agg.alive > 0 ? alive : wiped).push(project);
-  }
-  const isUnder = (child, parent) => child !== parent && child.startsWith(parent.endsWith("/") ? parent : parent + "/");
-  const all = [...alive, ...wiped];
-  const isContainer = (p) => all.filter((o) => isUnder(o, p)).length >= 2;
-  const shields = alive.filter((a) => !isContainer(a));
-  const parents = wiped.filter((w) => !isContainer(w));
-  const merged = /* @__PURE__ */ new Map();
-  for (const project of wiped) {
-    if (shields.some((a) => isUnder(project, a)))
-      continue;
-    let owner = project;
-    for (const other of parents) {
-      if (isUnder(project, other) && other.length > (owner === project ? 0 : owner.length)) {
-        owner = other;
-      }
-    }
-    const agg = byProject.get(project);
-    const existing = merged.get(owner);
-    if (existing) {
-      existing.sessions += agg.total;
-      existing.prompts += agg.prompts;
-      if (agg.lastTs && (existing.lastTs === null || agg.lastTs > existing.lastTs)) {
-        existing.lastTs = agg.lastTs;
-      }
-    } else {
-      merged.set(owner, {
-        project: owner,
-        name: basename(owner),
-        sessions: agg.total,
-        prompts: agg.prompts,
-        lastTs: agg.lastTs
-      });
-    }
-  }
-  return [...merged.values()].sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name));
-}
-function countProjectsWithSessions(disk) {
-  const slugs = /* @__PURE__ */ new Set();
-  for (const s of disk.sessions)
-    slugs.add(s.projectSlug);
-  return slugs.size;
-}
-function basename(p) {
-  const parts = p.replace(/[/\\]+$/, "").split(/[/\\]/);
-  return parts[parts.length - 1] || p;
-}
-
-// ../core/dist/render/audit-card.js
-function renderAuditCard(r, t = new Theme()) {
-  const card = new Card(t);
-  card.heading("audit", tildify(r.claudeDir), date(r.measuredAt)).blank();
-  if (!r.claudeDirExists) {
-    card.text(`no Claude Code data at ${tildify(r.claudeDir)}.`).blank().text("if Claude Code stores its data elsewhere, point potsherd at it:").raw(`  potsherd audit --claude-dir <path>`).blank();
-    return card.toString();
-  }
-  const rows = [];
-  rows.push({
-    label: "sessions ever started",
-    value: num(r.sessionsEver),
-    note: historyRange(r, t)
-  });
-  rows.push({ label: "still on disk", value: num(r.onDisk) });
-  rows.push({
-    // Name the culprit only while it is still the culprit. Once the user has
-    // raised cleanupPeriodDays, "deleted by 3650-day sweep" would be a lie
-    // about sessions the 30-day default took months ago.
-    label: r.cleanupPeriodEffective === 30 ? "deleted by 30-day sweep" : "already deleted",
-    value: num(r.deleted),
-    note: r.deleted > 0 ? pct(r.deleted, r.sessionsEver) : "",
-    tone: r.deleted > 0 ? "accent" : "none"
-  });
-  rows.push({ label: "prompts lost", value: num(r.promptsLost) });
-  if (r.projectsWiped.length > 0) {
-    const width = Math.max(12, noteWidth(t));
-    rows.push({
-      label: "projects wiped entirely",
-      value: num(r.projectsWiped.length),
-      note: joinFit(r.projectsWiped.map((p) => p.name), width, ` ${t.sep} `, t.ellip)
-    });
-  }
-  card.rows(rows).blank();
-  const sweepRows = [];
-  const doomed = r.nextSweepWithin7Days;
-  const soon = r.nextSweepWithinOneDay;
-  sweepRows.push({
-    label: "next sweep will delete",
-    value: num(doomed),
-    note: doomed ? `sessions in ${t.le} 7 days` + (soon ? `   (${num(soon)} within one day)` : "") : "nothing in the next 7 days",
-    tone: doomed > 0 ? "warn" : "ok"
-  });
-  sweepRows.push({
-    label: "cleanupPeriodDays",
-    // A settings value, not a quantity: no thousands separator.
-    value: r.cleanupPeriodDays === null ? "unset" : String(r.cleanupPeriodDays),
-    note: r.cleanupPeriodDays === null ? `${t.arrow} ${r.cleanupPeriodEffective} (default)` : r.cleanupPeriodSource !== "user" ? `${t.arrow} ${r.cleanupPeriodEffective} (${r.cleanupPeriodSource})` : r.cleanupPeriodEffective >= 365 ? "the sweep is effectively off" : ""
-  });
-  card.rows(sweepRows).blank();
-  if (r.warnings.length) {
-    for (const w of r.warnings.slice(0, 3))
-      card.text(t.dim(`note: ${w}`));
-    if (r.warnings.length > 3)
-      card.text(t.dim(`note: ${r.warnings.length - 3} more (see --json)`));
-    card.blank();
-  }
-  closing(card, r, t);
-  return card.toString();
-}
-function closing(card, r, t) {
-  if (r.onDisk === 0 && r.deleted === 0) {
-    card.text("no sessions found yet. run Claude Code once, then audit again.");
-    return;
-  }
-  const rescued = r.archive;
-  if (!rescued || rescued.rescues === 0) {
-    if (r.deleted > 0) {
-      card.text(r.deleted === 1 ? "the prompts from that one session are recoverable from history.jsonl." : `the prompts from all ${num(r.deleted)} are recoverable from history.jsonl.`);
-      card.fix("potsherd rescue", "to archive what is left and rebuild the ghosts.", "to archive what is left.");
-    } else {
-      card.text("nothing has been deleted yet.");
-      card.fix("potsherd rescue", "to archive what you have before the sweep runs.", "to archive what you have.");
-    }
-    return;
-  }
-  const missing = r.deleted - rescued.ghosts;
-  card.text(`${num(rescued.ghosts)} ghosts rebuilt ${t.sep} ${bytes(rescued.archivedBytes)} archived ${t.sep} last rescue ${rescued.lastRescueAt ? date(rescued.lastRescueAt) : "unknown"}`);
-  if (missing > 0) {
-    const n2 = `${num(missing)} ${plural(missing, "session")}`;
-    card.fix("potsherd rescue", `${t.arrow} ${n2} ${plural(missing, "is", "are")} not archived yet.`, `${t.arrow} ${n2} still missing.`);
-    return;
-  }
-  if (r.cleanupPeriodEffective < 365) {
-    card.fix("potsherd rescue --yes", "to stop the sweep taking any more.", "to stop the sweep.");
-    return;
-  }
-  card.fix("potsherd guard", "to take a copy at every startup, automatically.", "to copy at every startup.");
-}
-function historyRange(r, t) {
-  if (!r.historyFirstTs || !r.historyLastTs)
-    return "";
-  const a = monthYear(r.historyFirstTs);
-  const b = monthYear(r.historyLastTs);
-  return a === b ? a : `${a} ${t.arrow} ${b}`;
-}
-function renderSweepList(r, t = new Theme(), limit = 10) {
-  if (r.nextSweep.length === 0)
-    return "";
-  const card = new Card(t);
-  card.blank().text("sessions the sweep takes next:");
-  for (const s of r.nextSweep.slice(0, limit)) {
-    const when2 = s.daysLeft <= 0 ? "at next startup" : s.daysLeft === 1 ? "in 1 day" : `in ${s.daysLeft} days`;
-    const label3 = s.title ?? `${basename2(s.project)}-${s.id.slice(0, 8)}`;
-    card.raw(`    ${t.warn(pad(when2, 16))}${elide(label3, Math.max(20, t.width - 24))}`);
-  }
-  if (r.nextSweep.length > limit) {
-    card.raw(`    ${t.dim(`${r.nextSweep.length - limit} more`)}`);
-  }
-  return card.toString();
-}
-function pad(s, w) {
-  return s.length >= w ? s : s + " ".repeat(w - s.length);
-}
-function basename2(p) {
-  const parts = p.replace(/[/\\]+$/, "").split(/[/\\]/);
-  return parts[parts.length - 1] || p;
-}
-
-// ../core/dist/render/verify.js
-import process7 from "node:process";
-var VERIFY_SCRIPT_PATH = "scripts/verify-audit.py";
-var VERIFY_SCRIPT_URL = "https://github.com/HulkInTherapy/potsherd/blob/main/scripts/verify-audit.py";
-var VERIFY_SNIPPET = `python3 - <<'PY'
-import glob, json, os
-root = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
-proj = os.path.join(root, "projects")
-
-# a session is a transcript directly inside a project dir. subagent transcripts
-# live in a subagents/ directory and belong to their parent session, so they are
-# never counted as sessions.
-on_disk = {os.path.basename(p)[:-6] for p in glob.glob(os.path.join(proj, "*", "*.jsonl"))
-           if "subagents" not in p.split(os.sep)}
-
-prompts = {}
-try:
-    with open(os.path.join(root, "history.jsonl"), encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            try:
-                sid = json.loads(line).get("sessionId")
-            except ValueError:
-                continue                       # a torn line is skipped, never fatal
-            if sid:
-                prompts[sid] = prompts.get(sid, 0) + 1
-except OSError:
-    pass
-
-indexed = set()
-for p in glob.glob(os.path.join(proj, "*", "sessions-index.json")):
-    try:
-        with open(p, encoding="utf-8") as fh:
-            entries = json.load(fh).get("entries", [])
-    except (OSError, ValueError):
-        continue
-    indexed |= {e["sessionId"] for e in entries
-                if e.get("sessionId") and not e.get("isSidechain")}
-
-ever = on_disk | set(prompts) | indexed        # sessions ever started
-gone = ever - on_disk                          # deleted
-print("sessions ever started %7d" % len(ever))
-print("still on disk         %7d" % len(on_disk))
-print("deleted               %7d" % len(gone))
-print("prompts lost          %7d" % sum(prompts.get(s, 0) for s in gone))
-PY`;
-var VERIFY_DEFINITIONS = {
-  sessionsEver: "distinct session ids in any of history.jsonl, the transcripts on disk, or a sessions-index.json",
-  onDisk: "of those, the ones with a transcript file today",
-  deleted: "sessions ever started \u2212 still on disk",
-  promptsLost: "lines in history.jsonl whose sessionId is deleted"
-};
-function snippetFor(claudeDir2, o = {}) {
-  const env = o.env ?? process7.env;
-  const dflt = env["CLAUDE_CONFIG_DIR"];
-  const home2 = env["HOME"] ?? "";
-  const isDefault = claudeDir2 === dflt || home2 !== "" && claudeDir2 === `${home2}/.claude`.replace(/\/+/g, "/");
-  if (isDefault)
-    return VERIFY_SNIPPET;
-  return VERIFY_SNIPPET.replace("python3 - <<'PY'", `CLAUDE_CONFIG_DIR=${JSON.stringify(claudeDir2)} python3 - <<'PY'`);
-}
-function verifyInfo(claudeDir2, o = {}) {
-  return {
-    claudeDir: claudeDir2,
-    scriptPath: VERIFY_SCRIPT_PATH,
-    scriptUrl: VERIFY_SCRIPT_URL,
-    snippet: snippetFor(claudeDir2, o),
-    definitions: VERIFY_DEFINITIONS
-  };
-}
-function renderVerify(claudeDir2, t = new Theme()) {
-  const card = new Card(t);
-  card.heading("audit --verify", claudeDir2, date(/* @__PURE__ */ new Date())).blank();
-  card.text("nobody should have to trust potsherd to check potsherd. this recomputes");
-  card.text("the four headline numbers with the python standard library and nothing");
-  card.text("else \u2014 no potsherd, no database, no checkout needed. paste it:");
-  card.blank();
-  for (const line of snippetFor(claudeDir2).split("\n"))
-    card.raw(line);
-  card.blank();
-  card.text("the definitions it implements:");
-  card.blank();
-  card.rows([
-    { label: "sessions ever started", value: "", note: "in history, on disk, or in a sessions-index" },
-    { label: "still on disk", value: "", note: "of those, the ones with a transcript today" },
-    { label: "deleted", value: "", note: `sessions ever ${t.g("\u2212", "-")} still on disk` },
-    { label: "prompts lost", value: "", note: "history lines whose sessionId is deleted" }
-  ]);
-  card.blank();
-  card.text(`the same code, with --json and --claude-dir: ${VERIFY_SCRIPT_PATH}`);
-  card.fit(VERIFY_SCRIPT_URL, "https://github.com/HulkInTherapy/potsherd");
-  card.blank();
-  card.text("if the two ever disagree, the python is right and potsherd has a bug.");
-  card.fix("potsherd audit --json", "to compare the four numbers.", "and compare.");
-  return card.toString();
-}
-
 // ../core/dist/rescue.js
 import fs12 from "node:fs";
 import path10 from "node:path";
@@ -5846,7 +5455,7 @@ function unique(list) {
 }
 
 // ../core/dist/search/filters.js
-var UNTITLED_SESSION_SQL = `COALESCE(TRIM(s.title), '') = ''
+var UNTITLED_SESSION_SQL = `(COALESCE(TRIM(s.title), '') = '' OR s.title_source = 'prompt')
        AND NOT EXISTS (SELECT 1 FROM cards c
                         WHERE c.session_id = s.id AND COALESCE(TRIM(c.title), '') <> '')`;
 var UNTITLED_GHOST_SQL = `COALESCE(TRIM(g.title), '') = ''
@@ -7032,7 +6641,7 @@ function cut(text, start, end, pick3) {
 import fs10 from "node:fs";
 import os2 from "node:os";
 import path8 from "node:path";
-import process8 from "node:process";
+import process7 from "node:process";
 var EMBEDDING_VERSION = 1;
 var MODEL_ID = "Xenova/bge-small-en-v1.5";
 var MODEL_DTYPE = "q8";
@@ -7041,7 +6650,7 @@ var MODEL_DOWNLOAD_BYTES = 34014426;
 var BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
 var MAX_INPUT_CHARS = 2e3;
 function embedThreads() {
-  const override = Number(process8.env["POTSHERD_EMBED_THREADS"]);
+  const override = Number(process7.env["POTSHERD_EMBED_THREADS"]);
   if (Number.isFinite(override) && override >= 1)
     return Math.floor(override);
   const logical = os2.availableParallelism?.() ?? os2.cpus().length ?? 2;
@@ -7956,7 +7565,8 @@ async function recall(db, query, requested = {}, options = {}) {
     wanted.delete("vec_exchanges");
     wanted.delete("vec_cards");
     wanted.delete("vec_ghost_prompts");
-    vectors.reason = "the words matched; --vectors on adds semantic search";
+    const state = vectorState(db, options.root);
+    vectors.reason = state.vectors === 0 || !state.available ? "the words matched; index --embed adds semantic search" : "the words matched; --vectors on adds semantic search";
   }
   if (wanted.has("vec_exchanges") || wanted.has("vec_cards") || wanted.has("vec_ghost_prompts")) {
     try {
@@ -8468,7 +8078,7 @@ function cutToCodePoints(text, max2) {
   return points.length <= max2 ? text : points.slice(0, max2).join("");
 }
 function isSubstantivePrompt(text) {
-  const clean = collapse2(text);
+  const clean = titleText(text);
   if (!clean)
     return false;
   if (clean.startsWith("/"))
@@ -8477,10 +8087,13 @@ function isSubstantivePrompt(text) {
     return false;
   return !TITLE_STOPWORDS.has(clean.toLowerCase());
 }
+function titleText(text) {
+  return collapse2(stripBoilerplate(text ?? ""));
+}
 function firstSubstantivePrompt(texts) {
   for (const t of texts)
     if (isSubstantivePrompt(t))
-      return collapse2(t);
+      return titleText(t);
   return null;
 }
 function ghostTitle(summary3, substantive, project, sessionId) {
@@ -8689,6 +8302,449 @@ function readdirSafe2(dir, withTypes) {
   } catch {
     return [];
   }
+}
+
+// ../core/dist/audit.js
+var DAY_MS = 864e5;
+async function collectAudit(dir, now = /* @__PURE__ */ new Date(), opts = {}) {
+  const root = claudeDir(dir);
+  const disk = scanClaudeDisk(root, { titles: true });
+  const history = await readHistory(root, { withPrompts: true });
+  const index = readSessionsIndexes(root);
+  const cleanup = readCleanupStatus(root);
+  const archive = readArchiveState(opts.potsherdDir);
+  return { disk, history, index, cleanup, archive, claudeDir: root, now };
+}
+async function audit(dir, now = /* @__PURE__ */ new Date(), opts = {}) {
+  const started = Date.now();
+  const input = await collectAudit(dir, now, opts);
+  const report = computeAudit(input);
+  report.timings.totalMs = Date.now() - started;
+  return report;
+}
+function computeAudit(input) {
+  const { disk, history, index, cleanup, archive, claudeDir: root, now } = input;
+  const cp = claudePaths(root);
+  const warnings = [];
+  const onDiskIds = new Set(disk.sessions.map((s) => s.sessionId));
+  const everIds = new Set(onDiskIds);
+  for (const id of history.sessions.keys())
+    everIds.add(id);
+  for (const [id, e] of index.entries)
+    if (!e.isSidechain)
+      everIds.add(id);
+  const deletedIds = /* @__PURE__ */ new Set();
+  for (const id of everIds)
+    if (!onDiskIds.has(id))
+      deletedIds.add(id);
+  let promptsLost = 0;
+  let promptsSurviving = 0;
+  let deletedOnlyStubs = 0;
+  for (const [id, sess] of history.sessions) {
+    if (deletedIds.has(id)) {
+      promptsLost += sess.promptCount;
+      if (!sess.prompts.some((p) => isSubstantivePrompt(p.text)))
+        deletedOnlyStubs += 1;
+    } else
+      promptsSurviving += sess.promptCount;
+  }
+  const byProject = /* @__PURE__ */ new Map();
+  const projectOfSession = /* @__PURE__ */ new Map();
+  for (const [id, sess] of history.sessions) {
+    const proj = sess.project || "unknown";
+    projectOfSession.set(id, proj);
+    const agg = byProject.get(proj) ?? { total: 0, alive: 0, prompts: 0, lastTs: null };
+    agg.total++;
+    if (onDiskIds.has(id))
+      agg.alive++;
+    else
+      agg.prompts += sess.promptCount;
+    if (sess.lastTs && (agg.lastTs === null || sess.lastTs > agg.lastTs))
+      agg.lastTs = sess.lastTs;
+    byProject.set(proj, agg);
+  }
+  for (const s of disk.sessions) {
+    const proj = s.project;
+    const agg = byProject.get(proj) ?? { total: 0, alive: 0, prompts: 0, lastTs: null };
+    if (!projectOfSession.has(s.sessionId))
+      agg.total++;
+    agg.alive++;
+    byProject.set(proj, agg);
+  }
+  const projectsWiped = rollUpWipedProjects(byProject);
+  const period = cleanup.effective;
+  const nextSweep = disk.sessions.map((s) => ({
+    id: s.sessionId,
+    title: s.title,
+    project: s.project,
+    daysLeft: period - Math.floor((now.getTime() - s.mtime.getTime()) / DAY_MS),
+    bytes: s.bytes,
+    mtime: s.mtime.toISOString()
+  })).sort((a, b) => a.daysLeft - b.daysLeft);
+  if (!disk.exists)
+    warnings.push(`no projects directory at ${cp.projects}`);
+  if (!history.exists)
+    warnings.push(`no history.jsonl at ${cp.history} \u2014 ghosts cannot be rebuilt`);
+  if (history.malformed > 0) {
+    const n2 = history.malformed;
+    warnings.push(`${n2} malformed ${n2 === 1 ? "line" : "lines"} in history.jsonl (skipped)`);
+  }
+  for (const bad of index.malformed)
+    warnings.push(`unreadable sessions-index.json: ${bad}`);
+  for (const s of [...disk.sessions, ...disk.sidechains]) {
+    if (s.error)
+      warnings.push(`unreadable transcript ${s.sourcePath}: ${s.error}`);
+  }
+  const recordTypes = {};
+  for (const s of [...disk.sessions, ...disk.sidechains]) {
+    for (const [type, n2] of Object.entries(s.typesSeen)) {
+      recordTypes[type] = (recordTypes[type] ?? 0) + n2;
+    }
+  }
+  const pathsRead = [
+    cp.projects,
+    cp.history,
+    ...index.files,
+    cleanup.files.user.path,
+    cleanup.files.local.path,
+    cleanup.files.managed.path
+  ];
+  return {
+    measuredAt: now.toISOString(),
+    claudeDir: root,
+    claudeDirExists: disk.exists || history.exists,
+    sessionsEver: everIds.size,
+    onDisk: onDiskIds.size,
+    deleted: deletedIds.size,
+    promptsLost,
+    promptsSurviving,
+    deletedWithoutSubstantivePrompt: history.withPrompts ? deletedOnlyStubs : null,
+    historySessions: history.sessions.size,
+    historyOnDisk: [...history.sessions.keys()].filter((id) => onDiskIds.has(id)).length,
+    historyPrompts: promptsLost + promptsSurviving,
+    historyFirstTs: history.firstTs ? new Date(history.firstTs).toISOString() : null,
+    historyLastTs: history.lastTs ? new Date(history.lastTs).toISOString() : null,
+    projectsWiped,
+    projectsWithSessions: countProjectsWithSessions(disk),
+    projectDirs: disk.projects.length,
+    nextSweep,
+    nextSweepWithin7Days: nextSweep.filter((s) => s.daysLeft <= 7).length,
+    nextSweepWithinOneDay: nextSweep.filter((s) => s.daysLeft <= 1).length,
+    cleanupPeriodDays: cleanup.declared,
+    cleanupPeriodEffective: cleanup.effective,
+    cleanupPeriodSource: cleanup.source,
+    cleanupEditable: cleanup.editable,
+    ...cleanup.reason ? { cleanupReason: cleanup.reason } : {},
+    onDiskFiles: disk.sessions.length,
+    sidechainFiles: disk.sidechains.length,
+    bytes: disk.totalBytes,
+    sdkSessions: disk.sessions.filter((s) => s.entrypoint === "sdk-ts").length,
+    titledSessions: disk.sessions.filter((s) => Boolean(s.title)).length,
+    memoryFiles: disk.projects.reduce((a, p) => a + p.memoryFiles, 0),
+    sessionsIndexFiles: index.files.length,
+    archive,
+    recordTypes,
+    pathsRead,
+    timings: { scanMs: disk.scanMs, historyMs: history.scanMs, totalMs: 0 },
+    warnings
+  };
+}
+function rollUpWipedProjects(byProject) {
+  const alive = [];
+  const wiped = [];
+  for (const [project, agg] of byProject) {
+    if (agg.total === 0)
+      continue;
+    (agg.alive > 0 ? alive : wiped).push(project);
+  }
+  const isUnder = (child, parent) => child !== parent && child.startsWith(parent.endsWith("/") ? parent : parent + "/");
+  const all = [...alive, ...wiped];
+  const isContainer = (p) => all.filter((o) => isUnder(o, p)).length >= 2;
+  const shields = alive.filter((a) => !isContainer(a));
+  const parents = wiped.filter((w) => !isContainer(w));
+  const merged = /* @__PURE__ */ new Map();
+  for (const project of wiped) {
+    if (shields.some((a) => isUnder(project, a)))
+      continue;
+    let owner = project;
+    for (const other of parents) {
+      if (isUnder(project, other) && other.length > (owner === project ? 0 : owner.length)) {
+        owner = other;
+      }
+    }
+    const agg = byProject.get(project);
+    const existing = merged.get(owner);
+    if (existing) {
+      existing.sessions += agg.total;
+      existing.prompts += agg.prompts;
+      if (agg.lastTs && (existing.lastTs === null || agg.lastTs > existing.lastTs)) {
+        existing.lastTs = agg.lastTs;
+      }
+    } else {
+      merged.set(owner, {
+        project: owner,
+        name: basename(owner),
+        sessions: agg.total,
+        prompts: agg.prompts,
+        lastTs: agg.lastTs
+      });
+    }
+  }
+  return [...merged.values()].sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name));
+}
+function countProjectsWithSessions(disk) {
+  const slugs = /* @__PURE__ */ new Set();
+  for (const s of disk.sessions)
+    slugs.add(s.projectSlug);
+  return slugs.size;
+}
+function basename(p) {
+  const parts = p.replace(/[/\\]+$/, "").split(/[/\\]/);
+  return parts[parts.length - 1] || p;
+}
+
+// ../core/dist/render/audit-card.js
+function renderAuditCard(r, t = new Theme()) {
+  const card = new Card(t);
+  card.heading("audit", tildify(r.claudeDir), date(r.measuredAt)).blank();
+  if (!r.claudeDirExists) {
+    card.text(`no Claude Code data at ${tildify(r.claudeDir)}.`).blank().text("if Claude Code stores its data elsewhere, point potsherd at it:").raw(`  potsherd audit --claude-dir <path>`).blank();
+    return card.toString();
+  }
+  const rows = [];
+  rows.push({
+    label: "sessions ever started",
+    value: num(r.sessionsEver),
+    note: historyRange(r, t)
+  });
+  rows.push({ label: "still on disk", value: num(r.onDisk) });
+  rows.push({
+    // Name the culprit only while it is still the culprit. Once the user has
+    // raised cleanupPeriodDays, "deleted by 3650-day sweep" would be a lie
+    // about sessions the 30-day default took months ago.
+    label: r.cleanupPeriodEffective === 30 ? "deleted by 30-day sweep" : "already deleted",
+    value: num(r.deleted),
+    note: r.deleted > 0 ? pct(r.deleted, r.sessionsEver) : "",
+    tone: r.deleted > 0 ? "accent" : "none"
+  });
+  rows.push({ label: "prompts lost", value: num(r.promptsLost) });
+  if ((r.deletedWithoutSubstantivePrompt ?? 0) > 0) {
+    rows.push({
+      label: "only commands and stubs",
+      value: num(r.deletedWithoutSubstantivePrompt),
+      note: `of the ${num(r.deleted)} deleted`
+    });
+  }
+  if (r.projectsWiped.length > 0) {
+    const width = Math.max(12, noteWidth(t));
+    rows.push({
+      label: "projects wiped entirely",
+      value: num(r.projectsWiped.length),
+      note: joinFit(r.projectsWiped.map((p) => p.name), width, ` ${t.sep} `, t.ellip)
+    });
+  }
+  card.rows(rows).blank();
+  const sweepRows = [];
+  const doomed = r.nextSweepWithin7Days;
+  const soon = r.nextSweepWithinOneDay;
+  sweepRows.push({
+    label: "next sweep will delete",
+    value: num(doomed),
+    note: doomed ? `sessions in ${t.le} 7 days` + (soon ? `   (${num(soon)} within one day)` : "") : "nothing in the next 7 days",
+    tone: doomed > 0 ? "warn" : "ok"
+  });
+  sweepRows.push({
+    label: "cleanupPeriodDays",
+    // A settings value, not a quantity: no thousands separator.
+    value: r.cleanupPeriodDays === null ? "unset" : String(r.cleanupPeriodDays),
+    note: r.cleanupPeriodDays === null ? `${t.arrow} ${r.cleanupPeriodEffective} (default)` : r.cleanupPeriodSource !== "user" ? `${t.arrow} ${r.cleanupPeriodEffective} (${r.cleanupPeriodSource})` : r.cleanupPeriodEffective >= 365 ? "the sweep is effectively off" : ""
+  });
+  card.rows(sweepRows).blank();
+  if (r.warnings.length) {
+    for (const w of r.warnings.slice(0, 3))
+      card.text(t.dim(`note: ${w}`));
+    if (r.warnings.length > 3)
+      card.text(t.dim(`note: ${r.warnings.length - 3} more (see --json)`));
+    card.blank();
+  }
+  closing(card, r, t);
+  return card.toString();
+}
+function closing(card, r, t) {
+  if (r.onDisk === 0 && r.deleted === 0) {
+    card.text("no sessions found yet. run Claude Code once, then audit again.");
+    return;
+  }
+  const rescued = r.archive;
+  if (!rescued || rescued.rescues === 0) {
+    if (r.deleted > 0) {
+      card.text(r.deleted === 1 ? "the prompts from that one session are recoverable from history.jsonl." : `the prompts from all ${num(r.deleted)} are recoverable from history.jsonl.`);
+      card.fix("potsherd rescue", "to archive what is left and rebuild the ghosts.", "to archive what is left.");
+    } else {
+      card.text("nothing has been deleted yet.");
+      card.fix("potsherd rescue", "to archive what you have before the sweep runs.", "to archive what you have.");
+    }
+    return;
+  }
+  const missing = r.deleted - rescued.ghosts;
+  card.text(`${num(rescued.ghosts)} ghosts rebuilt ${t.sep} ${bytes(rescued.archivedBytes)} archived ${t.sep} last rescue ${rescued.lastRescueAt ? date(rescued.lastRescueAt) : "unknown"}`);
+  if (missing > 0) {
+    const n2 = `${num(missing)} ${plural(missing, "session")}`;
+    card.fix("potsherd rescue", `${t.arrow} ${n2} ${plural(missing, "is", "are")} not archived yet.`, `${t.arrow} ${n2} still missing.`);
+    return;
+  }
+  if (r.cleanupPeriodEffective < 365) {
+    card.fix("potsherd rescue --yes", "to stop the sweep taking any more.", "to stop the sweep.");
+    return;
+  }
+  card.fix("potsherd guard", "to take a copy at every startup, automatically.", "to copy at every startup.");
+}
+function historyRange(r, t) {
+  if (!r.historyFirstTs || !r.historyLastTs)
+    return "";
+  const a = monthYear(r.historyFirstTs);
+  const b = monthYear(r.historyLastTs);
+  return a === b ? a : `${a} ${t.arrow} ${b}`;
+}
+function renderSweepList(r, t = new Theme(), limit = 10) {
+  if (r.nextSweep.length === 0)
+    return "";
+  const card = new Card(t);
+  card.blank().text("sessions the sweep takes next:");
+  for (const s of r.nextSweep.slice(0, limit)) {
+    const when2 = s.daysLeft <= 0 ? "at next startup" : s.daysLeft === 1 ? "in 1 day" : `in ${s.daysLeft} days`;
+    const label3 = s.title ?? `${basename2(s.project)}-${s.id.slice(0, 8)}`;
+    card.raw(`    ${t.warn(pad(when2, 16))}${elide(label3, Math.max(20, t.width - 24))}`);
+  }
+  if (r.nextSweep.length > limit) {
+    card.raw(`    ${t.dim(`${r.nextSweep.length - limit} more`)}`);
+  }
+  return card.toString();
+}
+function pad(s, w) {
+  return s.length >= w ? s : s + " ".repeat(w - s.length);
+}
+function basename2(p) {
+  const parts = p.replace(/[/\\]+$/, "").split(/[/\\]/);
+  return parts[parts.length - 1] || p;
+}
+
+// ../core/dist/render/verify.js
+import process8 from "node:process";
+var VERIFY_SCRIPT_PATH = "scripts/verify-audit.py";
+var VERIFY_SCRIPT_URL = "https://github.com/HulkInTherapy/potsherd/blob/main/scripts/verify-audit.py";
+var VERIFY_SNIPPET = `python3 - <<'PY'
+import glob, json, os
+root = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
+proj = os.path.join(root, "projects")
+
+# a session is a transcript directly inside a project dir. subagent transcripts
+# live in a subagents/ directory and belong to their parent session, so they are
+# never counted as sessions.
+on_disk = {os.path.basename(p)[:-6] for p in glob.glob(os.path.join(proj, "*", "*.jsonl"))
+           if "subagents" not in p.split(os.sep)}
+
+STOP = {"clear", "continue", "ok", "yes", "hi", "y", "n"}
+
+def names(text):
+    "does this prompt name the session it opened?"
+    c = " ".join((text or "").split())
+    return bool(c) and not c.startswith("/") and len(c) >= 8 and c.lower() not in STOP
+
+prompts, named = {}, set()
+try:
+    with open(os.path.join(root, "history.jsonl"), encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue                       # a torn line is skipped, never fatal
+            sid = rec.get("sessionId")
+            if sid:
+                prompts[sid] = prompts.get(sid, 0) + 1
+                if names(rec.get("display")):
+                    named.add(sid)
+except OSError:
+    pass
+
+indexed = set()
+for p in glob.glob(os.path.join(proj, "*", "sessions-index.json")):
+    try:
+        with open(p, encoding="utf-8") as fh:
+            entries = json.load(fh).get("entries", [])
+    except (OSError, ValueError):
+        continue
+    indexed |= {e["sessionId"] for e in entries
+                if e.get("sessionId") and not e.get("isSidechain")}
+
+ever = on_disk | set(prompts) | indexed        # sessions ever started
+gone = ever - on_disk                          # deleted
+# of the deleted, the ones that recorded something and nothing that names them.
+# a deleted session with no history line at all recorded nothing rather than
+# something unnameable, so the s-in-prompts test is part of the question.
+stubs = sum(1 for s in gone if s in prompts and s not in named)
+print("sessions ever started   %7d" % len(ever))
+print("still on disk           %7d" % len(on_disk))
+print("deleted                 %7d" % len(gone))
+print("prompts lost            %7d" % sum(prompts.get(s, 0) for s in gone))
+if stubs:
+    print("only commands and stubs %7d" % stubs)
+PY`;
+var VERIFY_DEFINITIONS = {
+  sessionsEver: "distinct session ids in any of history.jsonl, the transcripts on disk, or a sessions-index.json",
+  onDisk: "of those, the ones with a transcript file today",
+  deleted: "sessions ever started \u2212 still on disk",
+  promptsLost: "lines in history.jsonl whose sessionId is deleted",
+  deletedWithoutSubstantivePrompt: "deleted sessions with history lines but no prompt that names them: nothing that is not a slash command, is at least 8 characters, and is not one of clear, continue, ok, yes, hi, y, n"
+};
+function snippetFor(claudeDir2, o = {}) {
+  const env = o.env ?? process8.env;
+  const dflt = env["CLAUDE_CONFIG_DIR"];
+  const home2 = env["HOME"] ?? "";
+  const isDefault = claudeDir2 === dflt || home2 !== "" && claudeDir2 === `${home2}/.claude`.replace(/\/+/g, "/");
+  if (isDefault)
+    return VERIFY_SNIPPET;
+  return VERIFY_SNIPPET.replace("python3 - <<'PY'", `CLAUDE_CONFIG_DIR=${JSON.stringify(claudeDir2)} python3 - <<'PY'`);
+}
+function verifyInfo(claudeDir2, o = {}) {
+  return {
+    claudeDir: claudeDir2,
+    scriptPath: VERIFY_SCRIPT_PATH,
+    scriptUrl: VERIFY_SCRIPT_URL,
+    snippet: snippetFor(claudeDir2, o),
+    definitions: VERIFY_DEFINITIONS
+  };
+}
+function renderVerify(claudeDir2, t = new Theme()) {
+  const card = new Card(t);
+  card.heading("audit --verify", claudeDir2, date(/* @__PURE__ */ new Date())).blank();
+  card.text("nobody should have to trust potsherd to check potsherd. this recomputes");
+  card.text("every number on the audit card with the python standard library and");
+  card.text("nothing else \u2014 no potsherd, no database, no checkout needed. paste it:");
+  card.blank();
+  for (const line of snippetFor(claudeDir2).split("\n"))
+    card.raw(line);
+  card.blank();
+  card.text("the definitions it implements:");
+  card.blank();
+  card.rows([
+    { label: "sessions ever started", value: "", note: "in history, on disk, or in a sessions-index" },
+    { label: "still on disk", value: "", note: "of those, the ones with a transcript today" },
+    { label: "deleted", value: "", note: `sessions ever ${t.g("\u2212", "-")} still on disk` },
+    { label: "prompts lost", value: "", note: "history lines whose sessionId is deleted" },
+    {
+      label: "only commands and stubs",
+      value: "",
+      note: "of those, with no prompt that names them"
+    }
+  ]);
+  card.blank();
+  card.text(`the same code, with --json and --claude-dir: ${VERIFY_SCRIPT_PATH}`);
+  card.fit(VERIFY_SCRIPT_URL, "https://github.com/HulkInTherapy/potsherd");
+  card.blank();
+  card.text("if the two ever disagree, the python is right and potsherd has a bug.");
+  card.fix("potsherd audit --json", "to compare them number for number.", "and compare.");
+  return card.toString();
 }
 
 // ../core/dist/render/rescue-receipt.js
@@ -12499,11 +12555,16 @@ function ingestSession(db, parsed, options = {}) {
     toolCallCount += clean.toolCalls.length;
     redacted.push(clean);
   }
+  const derivedTitle = session.title ? null : firstSubstantivePrompt(redacted.map((e) => e.userText));
   const run3 = db.transaction(() => {
     upsertSession(db, session, parsed, options);
     clearExchanges(db, session.id);
     for (const exchange of redacted)
       insertExchange(db, exchange);
+    if (derivedTitle) {
+      db.prepare(`UPDATE sessions SET title = ?, title_source = 'prompt'
+          WHERE id = ? AND COALESCE(TRIM(title), '') = ''`).run(cutToCodePoints(derivedTitle, GHOST_TITLE_MAX_CHARS), session.id);
+    }
   });
   run3();
   return {
@@ -12531,6 +12592,12 @@ function upsertSession(db, s, parsed, o) {
        project = excluded.project, project_slug = excluded.project_slug,
        started_at = excluded.started_at, ended_at = excluded.ended_at,
        title = COALESCE(excluded.title, sessions.title),
+       -- The moment the harness names a session, potsherd's derived name is
+       -- gone and so is the mark saying potsherd made it. Without this a
+       -- session that gained a summary on a later pass would keep
+       -- title_source = 'prompt' and sit in --untitled for ever.
+       title_source = CASE WHEN excluded.title IS NOT NULL
+                           THEN NULL ELSE sessions.title_source END,
        git_branch = COALESCE(excluded.git_branch, sessions.git_branch),
        entrypoint = COALESCE(excluded.entrypoint, sessions.entrypoint),
        model = COALESCE(excluded.model, sessions.model),
@@ -13710,7 +13777,15 @@ function stats(db, options = {}) {
               SUM(s.is_sidechain = 1) AS sidechains,
               SUM(s.user_prompts)     AS prompts,
               SUM(s.bytes)            AS bytes,
-              SUM(s.title IS NOT NULL) AS titled,
+              -- Scoped to the sessions the "sessions" value counts.
+              --
+              -- SUM(s.title IS NOT NULL) summed over sidechains too. That was
+              -- invisible while no subagent transcript ever carried a title,
+              -- and 8.2 gave every one of them a title derived from its first
+              -- prompt: the reference corpus's note went from
+              -- "31 sessions - 197 subagents - 21 titled" to "225 titled",
+              -- a count larger than the number it qualifies.
+              SUM(s.is_sidechain = 0 AND s.title IS NOT NULL) AS titled,
               SUM(s.status = 'live')   AS live,
               SUM(s.status = 'archived') AS archived,
               MIN(s.started_at)        AS first_ts,
@@ -22608,6 +22683,7 @@ async function runAudit(o) {
       deleted: report.deleted,
       promptsLost: report.promptsLost,
       promptsSurviving: report.promptsSurviving,
+      deletedWithoutSubstantivePrompt: report.deletedWithoutSubstantivePrompt,
       projectsWiped: report.projectsWiped.map((p) => ({
         project: p.project,
         name: p.name,
@@ -23211,7 +23287,16 @@ async function runDoctor(o) {
       label: "sessions on disk",
       value: format_exports.num(report.onDiskFiles),
       // The live corpus's size belongs to this row, not to `files archived`.
-      note: `${format_exports.num(report.titledSessions)} titled ${t.mid} ${format_exports.num(report.sdkSessions)} sdk ${t.mid} ${format_exports.bytes(report.bytes)}`
+      note: (
+        // `harness-titled`, not `titled`. `stats` prints `31 titled` for this
+        // same corpus and means something else by it — every session that has
+        // a NAME, including the 8.2 titles potsherd derives from the first
+        // substantive prompt. This line counts only the ones the harness
+        // itself named, which is what `doctor` is for: what is on disk and
+        // what came with it. Two screens, one word, two numbers, and neither
+        // said which question it answered — `09 §13.12`.
+        `${format_exports.num(report.titledSessions)} harness-titled ${t.mid} ${format_exports.num(report.sdkSessions)} sdk ${t.mid} ${format_exports.bytes(report.bytes)}`
+      )
     },
     { label: "sidechains on disk", value: format_exports.num(report.sidechainFiles), note: "subagent transcripts" },
     {

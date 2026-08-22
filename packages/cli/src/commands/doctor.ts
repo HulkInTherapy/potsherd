@@ -448,7 +448,14 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       value: fmt.num(report.onDiskFiles),
       // The live corpus's size belongs to this row, not to `files archived`.
       note:
-        `${fmt.num(report.titledSessions)} titled ${t.mid} ${fmt.num(report.sdkSessions)} sdk ` +
+        // `harness-titled`, not `titled`. `stats` prints `31 titled` for this
+        // same corpus and means something else by it — every session that has
+        // a NAME, including the 8.2 titles potsherd derives from the first
+        // substantive prompt. This line counts only the ones the harness
+        // itself named, which is what `doctor` is for: what is on disk and
+        // what came with it. Two screens, one word, two numbers, and neither
+        // said which question it answered — `09 §13.12`.
+        `${fmt.num(report.titledSessions)} harness-titled ${t.mid} ${fmt.num(report.sdkSessions)} sdk ` +
         `${t.mid} ${fmt.bytes(report.bytes)}`,
     },
     { label: 'sidechains on disk', value: fmt.num(report.sidechainFiles), note: 'subagent transcripts' },

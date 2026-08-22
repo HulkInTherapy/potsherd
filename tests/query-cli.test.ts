@@ -213,28 +213,27 @@ describe('find', () => {
     // snippet was `[Image: source: /var/folders/…/clipboard-…]`, so nothing on
     // the screen said why that result was there.
     //
-    // Held over the **snippet lines**, which is what the complaint was about
-    // and what `bestSnippet` / `isMostlyBoilerplate` fixed. It used to be held
-    // over the whole of stdout, which was the same thing while a session's
-    // heading could only ever be a harness title or a uuid. 8.2 made a heading
-    // a *prompt*, and `rescue.ts`'s stopping rule — not a slash command, at
-    // least eight characters, not a stopword — admits
+    // Held over the WHOLE of stdout, which is where it started and where it
+    // belongs. W8 narrowed it to the snippet lines for one release-candidate
+    // hour, and said so: 8.2 made a session heading a *prompt*, and
+    // `rescue.ts`'s stopping rule — not a slash command, at least eight
+    // characters, not a stopword — admitted
     // `[Image: source: …/clipboard-….png]`, so the one eval-corpus session
-    // whose prompts are all paste placeholders is now headed by one.
+    // whose prompts are all paste placeholders became headed by one. Narrowing
+    // was the honest holding action; it was not the fix.
     //
-    // That is a real defect and it is NOT this test's: the fix is to compose
-    // the existing `isMostlyBoilerplate` into the title rule in `rescue.ts`,
-    // where the ghost path and the live path would change together. It is
-    // written up in phases/phase-8/registration-W8.txt. What this test still
-    // holds, exactly as before, is that no line of quoted evidence is a
-    // placeholder — and it now also holds that the screen says why the result
-    // is there in words, which is the thing the reader actually needed.
+    // The fix was to compose `isMostlyBoilerplate` — which this same file's
+    // complaint produced, and which `find` already uses to refuse a
+    // placeholder as a SNIPPET — into the title CANDIDATE filter. A string too
+    // empty to quote as evidence is too empty to use as a name. So the
+    // assertion is broad again: no placeholder anywhere on the screen, in a
+    // snippet or in a heading.
     const r = run(['find', 'pay button spinner', '--width', '80']);
     const snippets = stripAnsi(r.stdout)
       .split('\n')
       .filter((l) => /^ {4}(?!run )\S/.test(l));
     expect(snippets.length).toBeGreaterThan(0);
-    for (const line of snippets) expect(line, line).not.toContain('[Image:');
+    expect(r.stdout).not.toContain('[Image:');
     expect(r.stdout).toContain('spinner');
   });
 
@@ -296,7 +295,14 @@ describe('find', () => {
   }, 60_000);
 
   it('says why a result is there when no snippet can show it', () => {
-    const r = run(['find', 'pay button spinner', '--width', '80']);
+    // `timezone drift` rather than `pay button spinner`: this is the query
+    // `plans/09 §13.5` measured for exactly this behaviour — one session
+    // returned on the strength of its title alone, because its body contains
+    // neither word — and the session it returns carries a HARNESS title, so
+    // the case survives changes to how potsherd derives titles of its own.
+    // The old query reached this branch only incidentally, and stopped when
+    // 8.2 gave the session it depended on a real name.
+    const r = run(['find', 'timezone drift', '--width', '80']);
     expect(r.stdout).toContain('the session title matched');
   });
 
