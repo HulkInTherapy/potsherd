@@ -66,10 +66,16 @@ export * as claude from './adapters/claude.js';
 export * as codex from './adapters/codex.js';
 export * as cursor from './adapters/cursor.js';
 export * as pi from './adapters/pi.js';
+export * as gemini from './adapters/gemini.js';
+export * as opencode from './adapters/opencode.js';
+export * as copilot from './adapters/copilot.js';
 export { claudeAdapter } from './adapters/claude.js';
 export { codexAdapter } from './adapters/codex.js';
 export { cursorAdapter } from './adapters/cursor.js';
 export { piAdapter } from './adapters/pi.js';
+export { geminiAdapter } from './adapters/gemini.js';
+export { opencodeAdapter } from './adapters/opencode.js';
+export { copilotAdapter } from './adapters/copilot.js';
 
 // L2 — redaction. Runs before anything is written to the index (`03` §5).
 export * as redaction from './redact.js';

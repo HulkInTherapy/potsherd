@@ -1,0 +1,231 @@
+T6.1 — registration lines for the three remaining harness adapters
+==================================================================
+
+gemini, opencode, copilot. After this, potsherd reads every coding agent named
+in `plans/03-ARCHITECTURE.md` §2.
+
+All three are labelled `unverified — documentation only`. None of the three was
+present *with sessions* on the machine they were written on:
+
+    gemini    ~/.gemini exists; no tmp/, no chats. (Only Antigravity's own
+              protobuf state, a different product.)          -> empty dir
+    opencode  ~/.local/share/opencode does not exist at all.  -> not present
+    copilot   ~/.copilot exists and the CLI has run (logs from 2026-08);
+              it has written no session-state/ whatever.      -> empty dir
+
+`plans/research/formats.md` marks all three sections **unmeasured** in so many
+words. Each adapter says `unverified` in its file header, in its doctor line and
+in its doctor note. Do not read these as measured formats.
+
+
+1. THE BARREL — packages/core/src/index.ts
+------------------------------------------
+
+Added to the namespaced adapter block (after the `pi` line):
+
+    export * as gemini from './adapters/gemini.js';
+    export * as opencode from './adapters/opencode.js';
+    export * as copilot from './adapters/copilot.js';
+
+Added to the flat adapter-object block (after the `piAdapter` line):
+
+    export { geminiAdapter } from './adapters/gemini.js';
+    export { opencodeAdapter } from './adapters/opencode.js';
+    export { copilotAdapter } from './adapters/copilot.js';
+
+
+2. THE `HARNESSES` ENTRY — packages/core/src/adapters/types.ts
+--------------------------------------------------------------
+
+**No change was needed and none was made.** `Harness` and `HARNESSES` already
+carried all seven names, in `doctor`'s order, from phase 1:
+
+    export const HARNESSES: readonly Harness[] = [
+      'claude',
+      'codex',
+      'cursor',
+      'pi',
+      'gemini',
+      'opencode',
+      'copilot',
+    ] as const;
+
+The three names were declared before the adapters existed; T6.1 fills them in.
+The live registration that *did* need three new entries is `adapterSpecs()` in
+`packages/core/src/ingest.ts` — the one list `index`, `doctor` and `stats` all
+walk, so a harness cannot be supported by one verb and invisible to another.
+Appended there, in `HARNESSES` order:
+
+    {
+      harness: 'gemini',
+      displayName: geminiAdapterModule.DISPLAY_NAME,          // 'Gemini CLI'
+      sourceDir: geminiAdapterModule.sourceDir(o.geminiDir),
+      discover: () => geminiAdapterModule.discover(o.geminiDir),
+      parse: (source) => geminiAdapterModule.parse(source),
+      version: () => 'unknown',
+      novel: () => true,
+    },
+    {
+      harness: 'opencode',
+      displayName: opencodeAdapterModule.DISPLAY_NAME,        // 'opencode'
+      sourceDir: opencodeAdapterModule.sourceDir(o.opencodeDir),
+      discover: () => opencodeAdapterModule.discover(o.opencodeDir),
+      parse: (source) => opencodeAdapterModule.parse(source),
+      version: () => 'unknown',
+      novel: () => true,
+    },
+    {
+      harness: 'copilot',
+      displayName: copilotAdapterModule.DISPLAY_NAME,         // 'Copilot CLI'
+      sourceDir: copilotAdapterModule.sourceDir(o.copilotDir),
+      discover: () => copilotAdapterModule.discover(o.copilotDir),
+      parse: (source) => copilotAdapterModule.parse(source),
+      version: () => 'unknown',
+      novel: () => true,
+    },
+
+with the matching imports:
+
+    import * as geminiAdapterModule from './adapters/gemini.js';
+    import * as opencodeAdapterModule from './adapters/opencode.js';
+    import * as copilotAdapterModule from './adapters/copilot.js';
+
+and three new optional fields on `AdapterOptions`, so tests can point each
+adapter at a fixture directory and never at the developer's real one:
+
+    geminiDir?: string;
+    opencodeDir?: string;
+    copilotDir?: string;
+
+`packages/core/src/paths.ts` gained the overridable resolvers behind those —
+`geminiDir()` / `geminiTmpDir()` (`POTSHERD_GEMINI_DIR`), `opencodeDir()`
+(`POTSHERD_OPENCODE_DIR`), `copilotDir()` / `copilotSessionStateDir()`
+(`POTSHERD_COPILOT_DIR`) — matching how cursor and pi already worked, and
+`harnessSourceDirs()` now names those env vars so `doctor --privacy` shows them.
+
+
+3. THE `doctor` LINES — packages/cli/src/commands/doctor.ts
+-----------------------------------------------------------
+
+The `phase 6` / `not yet parsed` stub loop is deleted. Each of the three now
+pushes a real row, exactly as claude/codex/cursor/pi do:
+
+    out.push({
+      harness: 'gemini',
+      supported: true,
+      phase: 6,
+      path: geminiAdapter.sourceDir(),
+      line: geminiAdapter.doctorLine(),
+    });
+
+    out.push({
+      harness: 'opencode',
+      supported: true,
+      phase: 6,
+      path: opencodeAdapter.sourceDir(),
+      line: opencodeAdapter.doctorLine(),
+    });
+
+    out.push({
+      harness: 'copilot',
+      supported: true,
+      phase: 6,
+      path: copilotAdapter.sourceDir(),
+      line: copilotAdapter.doctorLine(),
+    });
+
+with the imports added to the `@potsherd/core` destructure:
+
+    gemini as geminiAdapter,
+    opencode as opencodeAdapter,
+    copilot as copilotAdapter,
+
+and three note lines beside the existing cursor one, so a caveat is never only
+in a source file:
+
+    card.text(t.dim(fmt.clip(geminiAdapter.GEMINI_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+    card.text(t.dim(fmt.clip(opencodeAdapter.OPENCODE_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+    card.text(t.dim(fmt.clip(copilotAdapter.COPILOT_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+
+Each `doctorLine()` lives in its own adapter, not here, for the reason pi's
+header gives: the adapter and its status cannot then drift apart.
+
+
+4. WHAT EACH `doctor` LINE SAYS, AND WHY IT HAS TO
+--------------------------------------------------
+
+The phase file requires the line to say plainly whether a harness is **not
+installed**, **installed with no sessions**, or **parsed**. "0 sessions" alone
+cannot distinguish the first two, and they call for completely different things
+from the user, so each adapter branches explicitly:
+
+gemini
+    absent   Gemini CLI not installed
+    empty    Gemini CLI installed, no saved chats (use /chat save) · unverified format
+    empty    Gemini CLI installed, no tmp/ yet — no chats saved · unverified format
+    ready    <n> checkpoints · unverified format
+
+opencode  (four states: a database can be present and unreadable)
+    absent       opencode not installed
+    empty        opencode installed, no sessions yet · unverified format
+    empty        opencode installed, no sqlite store — this install uses
+                 storage/ json, which potsherd does not read yet
+    unsupported  <the reason describeStore() gave> · unverified format
+    ready        <n> sessions [· <k> stores unsupported] · unverified format
+
+copilot
+    absent   Copilot CLI not installed
+    empty    Copilot CLI installed, but it has written no session-state/ · unverified format
+    empty    Copilot CLI installed, session-state/ holds no sessions · unverified format
+    ready    <n> sessions [· <k> unreadable] · unverified format
+
+Every one of those branches has a test.
+
+
+5. VERBATIM, ON THE REFERENCE MACHINE (2026-08-22)
+--------------------------------------------------
+
+    adapters:
+        claude      ready     ~/.claude/projects            40 sessions · 258 sidec…
+        codex       ready     ~/.codex/sessions             1 session · 2.0 MB · 1…
+        cursor      ready     ~/.cursor/projects            2 sessions · 2 sidechai…
+        pi          ready     ~/.pi/agent/sessions          4 sessions
+        gemini      empty     ~/.gemini/tmp                 Gemini CLI installed, n…
+        opencode    absent    ~/.local/share/opencode       opencode not installed
+        copilot     empty     ~/.copilot/session-state      Copilot CLI installed,…
+      cursor: no timestamps on assistant turns (session times come from file mtim…
+      gemini: format unverified — this adapter was written from documentation, no…
+      opencode: format unverified — this adapter was written from documentation,…
+      copilot: format unverified — this adapter was written from documentation, n…
+
+The three phase-6 lines report `empty`, `absent`, `empty` — which is the true
+state of this machine, and is exactly why all three are labelled unverified.
+
+
+6. FILES
+--------
+
+new:
+    packages/core/src/adapters/gemini.ts
+    packages/core/src/adapters/opencode.ts
+    packages/core/src/adapters/copilot.ts
+    tests/adapters/gemini.test.ts                      25 tests
+    tests/adapters/opencode.test.ts                    29 tests
+    tests/adapters/copilot.test.ts                     22 tests
+    tests/fixtures/gemini/tmp/<hash>/chats/*.json      synthetic
+    tests/fixtures/opencode/make-opencode-db.mjs       synthetic builder
+    tests/fixtures/copilot/session-state/**            synthetic
+    phases/phase-6/registration-T6.1.txt               this file
+
+changed:
+    packages/core/src/index.ts            barrel
+    packages/core/src/ingest.ts           adapterSpecs + AdapterOptions
+    packages/core/src/paths.ts            overridable dirs + env vars
+    packages/cli/src/commands/doctor.ts   three real rows, three notes
+    package.json                          better-sqlite3 as a root devDependency,
+                                          so the opencode fixture builder resolves
+
+unchanged, deliberately:
+    packages/core/src/adapters/types.ts   HARNESSES already held all seven
+
+No schema migration was needed; the store is still at 8.

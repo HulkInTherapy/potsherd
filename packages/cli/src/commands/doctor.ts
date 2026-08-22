@@ -15,6 +15,9 @@ import {
   db as store,
   paths,
   pi as piAdapter,
+  gemini as geminiAdapter,
+  opencode as opencodeAdapter,
+  copilot as copilotAdapter,
   format as fmt,
   Card,
   consent,
@@ -363,6 +366,9 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     card.raw(`    ${a.supported ? line : t.dim(line)}`);
   }
   card.text(t.dim(fmt.clip(cursorAdapter.CURSOR_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+  card.text(t.dim(fmt.clip(geminiAdapter.GEMINI_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+  card.text(t.dim(fmt.clip(opencodeAdapter.OPENCODE_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+  card.text(t.dim(fmt.clip(copilotAdapter.COPILOT_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
 
   const fatal = report.warnings.filter((w) => w.startsWith('unreadable transcript'));
   card.blank();
@@ -446,21 +452,36 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     line: piAdapter.doctorLine(),
   });
 
-  // Not yet written. `doctor` still names the directory it would read, so a
-  // user of one of these knows potsherd has not silently ignored them.
-  for (const [harness, dir] of [
-    ['gemini', paths.harnessSourceDirs().find((h) => h.harness === 'gemini')?.dir ?? ''],
-    ['opencode', paths.opencodeDir()],
-    ['copilot', paths.harnessSourceDirs().find((h) => h.harness === 'copilot')?.dir ?? ''],
-  ] as const) {
-    out.push({
-      harness,
-      supported: false,
-      phase: 6,
-      path: dir,
-      line: `${harness.padEnd(12)}${'phase 6'.padEnd(10)}${paths.tildify(dir).padEnd(28)}  not yet parsed`,
-    });
-  }
+  // Phase 6, T6.1. All three are `unverified — documentation only`: none was
+  // present with sessions on the machine they were written on, so each was
+  // built against `plans/research/formats.md` (which marks all three sections
+  // **unmeasured**) and synthetic fixtures. Each adapter's own `doctorLine()`
+  // says so, and distinguishes **not installed** from **installed with no
+  // sessions** from **parsed** — "0 sessions" alone cannot tell those apart.
+  out.push({
+    harness: 'gemini',
+    supported: true,
+    phase: 6,
+    path: geminiAdapter.sourceDir(),
+    line: geminiAdapter.doctorLine(),
+  });
+
+  out.push({
+    harness: 'opencode',
+    supported: true,
+    phase: 6,
+    path: opencodeAdapter.sourceDir(),
+    line: opencodeAdapter.doctorLine(),
+  });
+
+  out.push({
+    harness: 'copilot',
+    supported: true,
+    phase: 6,
+    path: copilotAdapter.sourceDir(),
+    line: copilotAdapter.doctorLine(),
+  });
+
   return out;
 }
 
