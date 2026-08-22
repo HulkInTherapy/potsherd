@@ -44,11 +44,44 @@ export function themeFrom(o: GlobalOptions): Theme {
   return active;
 }
 
+/**
+ * `potsherd ls | head -5` used to end in a Node stack trace.
+ *
+ * `head` closes the pipe as soon as it has its five lines; the next write to a
+ * closed pipe raises EPIPE, and an unhandled `error` on stdout is a hard crash
+ * with fourteen lines of internal frames -- under a rule (`plans/05`) that says
+ * no stack traces without `--debug`. Piping into `head`, `grep -q` or `less`
+ * and quitting early is not a user error at all; it is the normal way to read
+ * a long listing, and the only correct response is to stop writing and leave
+ * quietly.
+ *
+ * Installed once, at module load, because `print` is not the only writer --
+ * `printJson`, `fail` and `Progress` all reach the same two streams.
+ */
+function silenceBrokenPipe(stream: NodeJS.WriteStream): void {
+  stream.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') {
+      // The reader has gone. Exit 0: `potsherd ls | head` succeeded.
+      process.exit(0);
+    }
+    throw err;
+  });
+}
+silenceBrokenPipe(process.stdout);
+silenceBrokenPipe(process.stderr);
+
+/** True once the pipe we were writing into has closed. */
+function writable(stream: NodeJS.WriteStream): boolean {
+  return !stream.destroyed && stream.writable;
+}
+
 export function printJson(value: unknown): void {
+  if (!writable(process.stdout)) return;
   process.stdout.write(JSON.stringify(value, null, 2) + '\n');
 }
 
 export function print(s: string): void {
+  if (!writable(process.stdout)) return;
   // The fold is width-preserving (Theme.asciiLine), so it can never turn a
   // line that fitted the terminal into one that does not.
   const out = active ? active.asciiLine(s) : s;

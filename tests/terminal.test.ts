@@ -372,4 +372,70 @@ describe('the version a user reads', () => {
     // one-line check rather than a parse.
     expect(manifest('packages/cli/package.json').version).toMatch(/^\d+\.\d+\.\d+$/);
   });
+
+  /**
+   * The four-way check above was still not wide enough. At tag `v0.7.0` the
+   * binary printed `0.4.0`: the four things it names agreed with each other
+   * perfectly, and all four were three releases stale, because nothing joined
+   * them to the tag. Two more surfaces were never in it at all — the plugin
+   * manifest a marketplace listing shows, and the marketplace entry itself,
+   * which said `0.5.0` for two phases after phase 5.
+   *
+   * So: every manifest in the repository that carries a potsherd version is
+   * enumerated here rather than listed, and the git tag is checked when a git
+   * checkout is what the test is running inside. A published tarball has no
+   * `.git`, and CI's shallow clone may have no tags; both skip loudly rather
+   * than assert something the environment, not the test, established
+   * (`09 §7.2`).
+   */
+  it('is the same string in every manifest that carries one', () => {
+    const cli = manifest('packages/cli/package.json').version;
+    const carriers: [string, (o: Record<string, unknown>) => unknown][] = [
+      ['packages/core/package.json', (o) => o['version']],
+      ['packages/cli/package.json', (o) => o['version']],
+      ['packages/mcp/package.json', (o) => o['version']],
+      ['packages/bridges/package.json', (o) => o['version']],
+      ['plugins/claude-code/.claude-plugin/plugin.json', (o) => o['version']],
+      ['plugins/codex/.codex-plugin/plugin.json', (o) => o['version']],
+      [
+        '.claude-plugin/marketplace.json',
+        (o) => (o['plugins'] as { version: string }[])[0]?.version,
+      ],
+    ];
+    for (const [rel, pick] of carriers) {
+      const json = JSON.parse(fs.readFileSync(path.join(repo, rel), 'utf-8')) as Record<
+        string,
+        unknown
+      >;
+      expect(pick(json), `${rel} carries a stale version`).toBe(cli);
+    }
+  });
+
+  it('is not behind the newest git tag in this checkout', () => {
+    if (!fs.existsSync(path.join(repo, '.git'))) return; // a packed tarball
+    let tags: string[];
+    try {
+      tags = execFileSync('git', ['tag', '--list', 'v[0-9]*'], { cwd: repo, encoding: 'utf8' })
+        .split('\n')
+        .map((t) => t.trim())
+        .filter(Boolean);
+    } catch {
+      return; // no git binary
+    }
+    if (tags.length === 0) return; // a shallow clone with no tags
+
+    const parse = (s: string): [number, number, number] => {
+      const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(s);
+      return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0];
+    };
+    const cmp = (a: [number, number, number], b: [number, number, number]): number =>
+      a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+
+    const newest = tags.map(parse).sort(cmp).at(-1) as [number, number, number];
+    const here = parse(VERSION);
+    expect(
+      cmp(here, newest),
+      `VERSION is ${VERSION} but this checkout already has tag v${newest.join('.')}`,
+    ).toBeGreaterThanOrEqual(0);
+  });
 });

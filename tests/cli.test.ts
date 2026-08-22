@@ -756,7 +756,87 @@ describe('potsherd card', () => {
   });
 
   it('is on the tour', () => {
-    expect(run([]).stdout).toContain('potsherd card');
+    expect(run([]).stdout).toContain('card');
+  });
+});
+
+/**
+ * The no-args screen, which `plans/05` calls the first of the "every verb ends
+ * with the next verb" lines and phase 7 rewrote from a twenty-row dump into a
+ * six-verb path.
+ *
+ * The load-bearing test is the last one. `stack` shipped in phase 6 as a
+ * 589-line module and 45 tests that the command line could not reach, and the
+ * suite stayed green partly because *"every verb has --help"* passed precisely
+ * because `stack` was not a verb. A tour derived by hand from a list somebody
+ * remembered can drift the same way, so it is checked against commander's own
+ * registry rather than against a second hand-written list.
+ */
+describe('the tour', () => {
+  const verbs = (): string[] => {
+    const help = run(['--help']).stdout;
+    const body = help.slice(help.indexOf('Commands:'));
+    return [...body.matchAll(/^ {2}(\w[\w-]*)/gm)]
+      .map((m) => m[1] as string)
+      .filter((v) => v !== 'help');
+  };
+
+  it('leads with the six of plans/05, numbered and in order', () => {
+    const out = run([]).stdout;
+    const order = ['audit', 'rescue', 'ls', 'find', 'ask', 'graft'];
+    const at = order.map((v) => out.indexOf(`potsherd ${v} `));
+    expect(at.every((i) => i > 0), `missing one of ${order.join(', ')}`).toBe(true);
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+    for (const [i, v] of order.entries()) {
+      expect(out).toMatch(new RegExp(`${i + 1}\\s+potsherd ${v}\\b`));
+    }
+  });
+
+  it('names every verb the binary actually registers', () => {
+    const out = run([]).stdout;
+    const missing = verbs().filter((v) => !new RegExp(`\\b${v}\\b`).test(out));
+    expect(missing, `verbs the tour does not name: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('names nothing the binary does not register', () => {
+    const registered = new Set(verbs());
+    const out = run([]).stdout;
+    // Only the two verb blocks, so prose like "sessions" is not mistaken for one.
+    const named = [...out.matchAll(/^\s+(?:\d\s+potsherd )?([a-z][a-z-]{1,9})\b/gm)]
+      .map((m) => m[1] as string)
+      .filter((w) => !['potsherd', 'also', 'the', 'start', 'card'].includes(w) || registered.has(w));
+    for (const n of named) {
+      if (['the', 'start', 'also'].includes(n)) continue;
+      expect(registered.has(n) || n === 'potsherd', `${n} is on the tour but is not a verb`).toBe(
+        true,
+      );
+    }
+  });
+
+  it('fits the width it is given, at 80 and at 60', () => {
+    for (const w of [80, 60]) {
+      for (const line of run(['--width', String(w)]).stdout.split('\n')) {
+        expect([...line].length, `${w}: ${line}`).toBeLessThanOrEqual(w);
+      }
+    }
+  });
+
+  it('is the tour for a global flag with no verb, not an empty screen', () => {
+    // `potsherd --ascii` and `potsherd --width 60` are what anyone taking a
+    // screenshot types. Both used to parse to nothing and print nothing at all.
+    expect(run(['--ascii']).stdout).toContain('start here');
+    expect(run(['--width', '60']).stdout).toContain('start here');
+    expect(run(['--ascii']).stdout).not.toMatch(/[^\x00-\x7F]/);
+  });
+
+  it('carries the same data under --json', () => {
+    const j = JSON.parse(run(['--json']).stdout) as {
+      path: { verb: string }[];
+      also: { verb: string }[];
+    };
+    expect(j.path.map((p) => p.verb)).toEqual(['audit', 'rescue', 'ls', 'find', 'ask', 'graft']);
+    const all = [...j.path, ...j.also].map((p) => p.verb).sort();
+    expect(all).toEqual(verbs().sort());
   });
 });
 

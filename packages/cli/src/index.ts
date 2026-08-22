@@ -1,8 +1,8 @@
 import process from 'node:process';
 import { Command, Option } from 'commander';
-import { Theme, ASK_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
+import { ASK_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
 import { closeAgentMemoryClients } from '@potsherd/bridges';
-import { fail, print, type GlobalOptions } from './output.js';
+import { fail, print, printJson, themeFrom, type GlobalOptions } from './output.js';
 import { runAudit } from './commands/audit.js';
 import { runRescue } from './commands/rescue.js';
 import { runGuard } from './commands/guard.js';
@@ -34,6 +34,14 @@ export { VERSION };
  *   3. the global flags work in either position, because `potsherd audit --json`
  *      is what people actually type.
  */
+
+/**
+ * The global flags, as they look in argv. Used to decide whether an invocation
+ * carries a verb at all: `potsherd --ascii` should print the tour in ASCII, not
+ * an empty screen.
+ */
+const GLOBAL_ONLY =
+  /^(--json|--no-color|--ascii|--width|--claude-dir|--potsherd-dir|--debug|\d+|\/.*|~.*)$/;
 
 /** Registered on the program *and* on every verb, so position never matters. */
 function addGlobals(cmd: Command): Command {
@@ -731,8 +739,20 @@ of a real config file, or from that project's own docs on a printed date.`);
   });
 
 
-  if (argv.length <= 2) {
-    tour();
+  // `potsherd` alone is the tour -- and so is `potsherd --ascii`, `potsherd
+  // --width 60` and `potsherd --json`, which are the three spellings anyone
+  // taking a screenshot or piping the output actually types. Before this, a
+  // global flag with no verb parsed to nothing and printed nothing at all: the
+  // program exited 0 having produced an empty screen.
+  const globalsOnly = argv.slice(2).every((a) => GLOBAL_ONLY.test(a));
+  if (argv.length <= 2 || globalsOnly) {
+    const i = argv.indexOf('--width');
+    tour({
+      ...(i >= 0 && argv[i + 1] ? { width: Number(argv[i + 1]) } : {}),
+      ascii: argv.includes('--ascii'),
+      color: !argv.includes('--no-color'),
+      json: argv.includes('--json'),
+    });
     return;
   }
 
@@ -776,29 +796,105 @@ async function run(fn: () => Promise<number>, o: GlobalOptions): Promise<void> {
   }
 }
 
-function tour(): void {
-  const t = new Theme();
-  const rows: [string, string][] = [
-    ['audit', 'how many sessions Claude Code has already deleted'],
-    ['rescue', 'archive what is left; rebuild the deleted ones as ghosts'],
-    ['guard', 'take a copy at every startup, before the sweep can run'],
-    ['index', 'parse, redact and index every transcript, ready to search'],
-    ['ls', 'every session by title, newest first — ghosts included'],
-    ['find', 'search every prompt, every subagent, every deleted session'],
-    ['show', 'read one session end to end'],
-    ['card', 'summarise each session into a card you can scan'],
-    ['tag', 'your own tags on a session: +postgres -mysql'],
-    ['pin', 'keep one where you can find it; ★ marks it in ls'],
-    ['link', 'record that two sessions are the same thread'],
-    ['stats', 'what is in the index, per harness'],
-    ['doctor', 'what potsherd can see, and every path it reads or writes'],
-  ];
-  print('');
-  print(`  ${t.bold('potsherd')} ${t.dim(VERSION)}  ${t.dim('— your coding-agent sessions, rescued and searchable')}`);
-  print('');
-  for (const [verb, what] of rows) {
-    print(`  potsherd ${verb.padEnd(9)}${t.dim(what)}`);
+/**
+ * `potsherd` with no arguments.
+ *
+ * It used to print all thirteen verbs it had at the time, one per line, in
+ * registration order -- which by phase 6 was twenty verbs and no longer a tour
+ * but a second `--help`. `plans/05` is specific about the shape this should
+ * have instead: *"every verb ends with the next verb. audit -> rescue -> ls ->
+ * find -> ask -> graft. the tool teaches itself in the last line of each
+ * output."* The no-args screen is the first of those last lines, so it is the
+ * path, numbered, and nothing else in the same visual weight.
+ *
+ * The other fourteen verbs are named -- leaving them out would make the screen
+ * a lie about what the product does -- but as one dim wrapped run with the one
+ * command that opens any of them. Twenty rows of equal weight teaches nothing
+ * about which to type first; six numbered ones and a footnote does.
+ *
+ * Fits 80x24 with room to spare and re-wraps at 60 (`tests/terminal.test.ts`
+ * checks every verb at both widths, and this screen with them).
+ */
+/**
+ * The six, in the order a user meets them. `05`'s path, unchanged.
+ *
+ * Each carries two glosses. `05` asks for a screen designed at 80 columns that
+ * *degrades* to 60, and the long gloss does not fit 60 -- so rather than wrap a
+ * table or truncate a sentence mid-word, the narrow rendering drops the
+ * repeated `potsherd ` prefix and uses the short gloss. Both say the same
+ * thing; the second says it in half the room.
+ */
+const PATH6: [string, string, string][] = [
+  ['audit', 'how many sessions Claude Code has already deleted', 'what Claude Code deleted'],
+  ['rescue', 'archive what is left; rebuild the deleted ones as ghosts', 'archive what is left'],
+  ['ls', 'every session by title, newest first — ghosts included', 'every session by title'],
+  ['find', 'search every prompt, every subagent, every ghost', 'search every prompt'],
+  ['ask', 'one answer over the whole archive, with citations', 'one cited answer'],
+  ['graft', 'carry a past session into the agent you are in', 'carry one into your agent'],
+];
+
+/**
+ * The other thirteen, grouped by what they are for rather than by registration
+ * order. A flat list of thirteen names teaches nothing; three groups of four or
+ * five, each with one gloss, is still one glance.
+ */
+const REST: [string[], string][] = [
+  [['index', 'show', 'stats', 'doctor'], 'the archive, and what is in it'],
+  [['card', 'tag', 'pin', 'unpin', 'link', 'guard'], 'what you add to it'],
+  [['setup', 'export', 'stack'], 'reaching your other tools'],
+];
+
+function tour(o: { width?: number; ascii?: boolean; color?: boolean; json?: boolean } = {}): void {
+  const t = themeFrom(o);
+  const w = t.width;
+
+  // `--json` on everything, carrying the same data as the human view: the tour
+  // is a list of verbs, so that is what it carries.
+  if (o.json) {
+    printJson({
+      version: VERSION,
+      path: PATH6.map(([verb, what]) => ({ verb, what })),
+      also: REST.flatMap(([verbs, group]) => verbs.map((verb) => ({ verb, group }))),
+      start: 'potsherd audit',
+    });
+    return;
   }
+
+  const wide = w >= 80;
+  print('');
+  print(
+    `  ${t.bold('potsherd')} ${t.dim(VERSION)}  ${t.dim(
+      wide
+        ? `${t.g('—', '-')} your coding-agent sessions, rescued and searchable`
+        : `${t.g('—', '-')} your sessions, rescued and searchable`,
+    )}`,
+  );
+  print('');
+  print(`  ${t.dim('the six, in the order you meet them:')}`);
+  print('');
+  for (const [i, [verb, long, short]] of PATH6.entries()) {
+    print(
+      wide
+        ? `    ${t.dim(String(i + 1))}  potsherd ${verb.padEnd(7)} ${t.dim(long)}`
+        : `    ${t.dim(String(i + 1))}  ${verb.padEnd(7)} ${t.dim(short)}`,
+    );
+  }
+  print('');
+
+  const names = REST.map(([verbs]) => verbs.join('  '));
+  const col = Math.max(...names.map((n) => n.length));
+  // At 80 the gloss sits in its own column; below ~76 there is no room for it
+  // and the names wrap on their own, because a wrapped table is worse than a
+  // missing gloss (plans/05: "never wraps a table").
+  const roomy = w >= 9 + col + 2 + Math.max(...REST.map(([, g]) => g.length));
+  REST.forEach(([, gloss], i) => {
+    const label = i === 0 ? '  also:  ' : '         ';
+    const line = roomy
+      ? `${label}${names[i]?.padEnd(col)}  ${gloss}`
+      : `${label}${names[i]}`;
+    print(t.dim(line));
+  });
+  print(t.dim(`         potsherd help <verb> for any of them`));
   print('');
   print(`  start here:  ${t.accent('potsherd audit')}`);
   print('');
