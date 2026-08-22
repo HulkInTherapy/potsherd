@@ -22485,6 +22485,10 @@ async function runDoctor(o) {
     const show = (p) => format_exports.elideMiddle(paths_exports.tildify(p), pathW, t2);
     const note = (text, indent = 6) => {
       const pad4 = " ".repeat(indent);
+      if (Theme.len(pad4 + text) <= t2.width) {
+        card2.raw(`${pad4}${t2.dim(text)}`);
+        return;
+      }
       for (const line of format_exports.wrap(text, Math.max(20, t2.width - indent - 1))) {
         card2.raw(`${pad4}${t2.dim(line)}`);
       }
