@@ -1,6 +1,6 @@
 # phase 7 — polish and release · HANDOFF
 
-**date:** 22 aug 2026 · **tests:** 1,428 green, 35 files · tag `v1.0.0`
+**date:** 22 aug 2026 · **tests:** 1,434 green, 35 files · tag `v1.0.0`
 **baseline at start:** `d54a703`, 1,354 tests, `VERSION` = `0.4.0` at tag `v0.7.0`.
 
 The last phase. Run **solo by the orchestrator** rather than as a worker wave — the reason is in
@@ -36,7 +36,7 @@ Three changes, none of which publishes anything:
    `SAVEPOINT`, nested the way better-sqlite3 nests because `ingest.ts` relies on it.
 
 **The evidence that matters is not the eleven tests in `tests/sqlite-driver.test.ts`. It is that
-all 1,428 tests pass under `POTSHERD_SQLITE=node`,** and CI runs the whole suite that way as a
+all 1,434 tests pass under `POTSHERD_SQLITE=node`,** and CI runs the whole suite that way as a
 second job. A fallback nobody exercises is the phantom-flag failure this project has recorded six
 times.
 

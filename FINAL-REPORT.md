@@ -38,7 +38,7 @@ stats ask graft setup export stack doctor` (+ `help`).
 | bridges | claude-mem, agentmemory and `CLAUDE.md`, read-only, federated into `find --with` |
 | adapters | Claude Code, Codex, Cursor, pi — verified. Gemini, opencode, Copilot — **documentation only** |
 
-**1,426 tests, 35 files.** Green on macOS and Ubuntu × Node 22 and 24, and green
+**1,434 tests, 35 files.** Green on macOS and Ubuntu × Node 22 and 24, and green
 again with `POTSHERD_SQLITE=node` — the whole suite on Node's own SQLite, which
 is what makes a plugin install work with nothing else on the machine.
 
@@ -115,7 +115,7 @@ And without a corpus at all:
 
 ```bash
 python3 scripts/check-privacy.py --selftest    # the guard proving it can fail
-pnpm test                                       # 1,426
+pnpm test                                       # 1,434
 POTSHERD_SQLITE=node pnpm test                  # the same, on Node's own sqlite
 ```
 
@@ -144,7 +144,7 @@ POTSHERD_SQLITE=node pnpm test                  # the same, on Node's own sqlite
 | plugin `SessionStart` | 6.5–10.5 ms hook time, 128–146 ms total | < 1 s | met |
 | fresh Ubuntu, clone only | audit 117 ms, index 333 ms | < 60 s to first audit | met |
 | fresh macOS `$HOME` | audit 183 ms | < 60 s | met |
-| tarball install | 17 MB, ~1.6 s | — | recorded (was 764 MB) |
+| tarball install | 17 MB; 1.6 s on one run and 2.9 s on another | — | recorded (was 764 MB) |
 
 The three misses are recorded rather than hidden, and in each case the *target*
 was corrected in the plan rather than the measurement being reshaped to fit it.
@@ -178,7 +178,7 @@ the number look better.
 |---|---|
 | 9 | `npm publish` and the marketplace submission — a person's job; commands in `docs/release/` |
 | 10 | the upstream PR to obra/episodic-memory — prepared, unsubmitted, and **`#128` is already open and overlaps it** |
-| 11 | eleven privacy pins remain, all phase-0..4 evidence pastes; the honest repair is re-running the evidence, not editing the paste |
+| 11 | fourteen privacy pins remain — eleven phase-0..4 evidence pastes plus three forbidden-string lists that a guard has to name in order to ban; the honest repair for the first eleven is re-running the evidence, not editing the paste |
 | 12 | `evals/ask-selftest.ts` has no case for `quote-empty` or `answer-missing` |
 | 13 | full index with embeddings is 4m 11s; `--no-embed` at 8.7 s is the shippable path |
 | 14 | a real macOS *user account* was never created — a clean `$HOME` with every override cleared was, and `doctor --privacy` was grepped to prove it |

@@ -418,8 +418,12 @@ function chosen(o: SetupOptions): setup.ClientId[] {
   // it demand `--all` to answer that was the flag disagreeing with its
   // description. It changes nothing, so there is nothing to be careful about.
   if (o.status) return [...setup.CLIENT_IDS];
+  // 110 characters at every width before this: the seven client flags on one
+  // line after `try:`. `05` gives an error one line of what happened and one of
+  // the fix, and neither may run off the screen — so the fix names one flag and
+  // the verb that lists the rest, which is a thing a reader can act on.
   throw new UserError(
     'setup needs to know which agent to configure',
-    `potsherd setup --cursor      (or ${setup.CLIENT_IDS.map((c) => '--' + c).join(' ')} / --all)`,
+    'potsherd setup --claude       (potsherd setup --status lists all seven)',
   );
 }

@@ -45,7 +45,7 @@ bytes, the bytes are the demo corpus's own and not the reference machine's.
 
 > **Status: v1.0.0. All eight phases shipped.** 20 verbs, a Claude Code plugin,
 > an MCP server with six tools, adapters for seven coding agents, and bridges
-> into three other memory tools. 1,426 tests, green on macOS and Ubuntu across
+> into three other memory tools. 1,434 tests, green on macOS and Ubuntu across
 > Node 22 and 24 — and green again on Node's own SQLite, which is what makes a
 > plugin install work with nothing else on the machine.
 
@@ -1134,7 +1134,7 @@ and because neither of them needs a `node_modules` to start.
 
 **That includes the database.** `better-sqlite3` is a native addon and cannot be
 vendored into one file, so potsherd falls back to `node:sqlite`, which Node
-ships itself. The whole 1,426-test suite runs green under it in CI, on the same
+ships itself. The whole 1,434-test suite runs green under it in CI, on the same
 matrix as the addon, because a fallback nobody exercises is not a fallback.
 `potsherd doctor` prints which one you are on.
 

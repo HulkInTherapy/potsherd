@@ -306,6 +306,82 @@ describe('sidechains are not sessions', () => {
   });
 });
 
+/**
+ * The honesty contract, run the way the documentation says to run it.
+ *
+ * `FINAL-REPORT.md` §4 hands a reader this line:
+ *
+ *     potsherd audit --claude-dir X --verify --json | jq -r .snippet | sh
+ *
+ * and `sh` does not inherit a flag — so the snippet read `~/.claude` and
+ * answered about a different corpus. A fresh verifier followed exactly that
+ * line and reported **340 / 41** against the audit's **330 / 31**, which reads
+ * as potsherd under-reporting by ten. The product was right; the artefact whose
+ * entire purpose is that nobody has to trust the product was answering a
+ * different question.
+ *
+ * So the test is the pipeline, not the function: audit against a fixture, take
+ * the snippet out of `--json`, run it in a shell that was told nothing, and
+ * require the four numbers to match.
+ */
+describe('audit --verify, piped the way the docs pipe it', () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const bin = path.join(repoRoot, 'packages', 'cli', 'bin', 'potsherd.js');
+  const run = (args: string[]): { code: number; stdout: string } => {
+    try {
+      return {
+        code: 0,
+        stdout: execFileSync(process.execPath, [bin, ...args], {
+          encoding: 'utf8',
+          env: { ...process.env, NO_COLOR: '1' },
+        }),
+      };
+    } catch (err) {
+      const e = err as { status?: number; stdout?: string };
+      return { code: e.status ?? 1, stdout: e.stdout ?? '' };
+    }
+  };
+
+  it('recomputes the same four numbers with no flag and no environment', () => {
+    const r = run(['audit', '--verify', '--json', '--claude-dir', FIXTURE_CLAUDE]);
+    expect(r.code).toBe(0);
+    const { snippet } = JSON.parse(r.stdout) as { snippet: string };
+
+    const a = JSON.parse(
+      run(['audit', '--json', '--claude-dir', FIXTURE_CLAUDE]).stdout,
+    ) as Record<string, number>;
+
+    // A shell with CLAUDE_CONFIG_DIR deliberately *cleared*: the point is that
+    // the snippet carries what it needs.
+    const env: Record<string, string | undefined> = { ...process.env };
+    delete env['CLAUDE_CONFIG_DIR'];
+    const out = execFileSync('sh', ['-c', snippet], {
+      encoding: 'utf8',
+      env: env as NodeJS.ProcessEnv,
+    });
+
+    const got: Record<string, number> = {};
+    for (const line of out.split('\n')) {
+      const m = /^(.*?)\s+(\d+)$/.exec(line.trim());
+      if (m) got[m[1] as string] = Number(m[2]);
+    }
+    expect(got['sessions ever started']).toBe(a['sessionsEver']);
+    expect(got['still on disk']).toBe(a['onDisk']);
+    expect(got['deleted']).toBe(a['deleted']);
+    expect(got['prompts lost']).toBe(a['promptsLost']);
+  });
+
+  it('leaves the default form alone, so a pasted snippet names no machine path', () => {
+    // With no `--claude-dir` the environment variable is the honest answer, and
+    // baking in a resolved home would put a machine path into something people
+    // paste into issues.
+    const r = run(['audit', '--verify', '--json']);
+    const { snippet } = JSON.parse(r.stdout) as { snippet: string };
+    expect(snippet.startsWith("python3 - <<'PY'")).toBe(true);
+    expect(snippet).not.toContain(process.env['HOME'] ?? '\u0000never');
+  });
+});
+
 describe('audit --verify', () => {
   it('prints python that needs no checkout and no potsherd', async () => {
     const { VERIFY_SNIPPET, renderVerify } = await import('@potsherd/core');

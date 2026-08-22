@@ -150,6 +150,14 @@ function verbs(): { name: string; args: string[] }[] {
     { name: 'unpin', args: ['unpin', IDS.alive] },
     { name: 'link', args: ['link', '--suggest'] },
     { name: 'setup --status', args: ['setup', '--status'] },
+    // The BARE forms of the two verbs that write to a config file. A fresh
+    // verifier found both overflowing and found why this list could not see it:
+    // it is written per *argument form*, not per verb, so `guard --status` was
+    // covered and `guard` — the verb `audit`'s own last line tells you to run
+    // next — was not. That is the "list somebody remembered" failure the tour
+    // test was written to end, in the file that wrote it.
+    { name: 'guard', args: ['guard'] },
+    { name: 'setup', args: ['setup'] },
     { name: 'export --to markdown', args: ['export', '--to', 'markdown', exportDir()] },
   ];
 }
@@ -220,6 +228,48 @@ describe('--ascii', () => {
  * 79-character sentence unwrapped, so it overflowed every terminal narrower
  * than 80. A rule enforced for the two verbs that broke it is not a rule.
  */
+/**
+ * The test count, which four documents quote and three of them got wrong.
+ *
+ * `FINAL-REPORT.md` hands a reader `pnpm test  # 1,426` as the first thing to
+ * try; the handoff said 1,428, the README said 1,426, and the suite had 1,427.
+ * A fresh verifier found all three, and the shape of the mistake is the one
+ * `plans/08` rule 1 is about: a number a user reads must be measured.
+ *
+ * This cannot assert the *true* count — a suite cannot count itself while
+ * running — but it can refuse the failure that actually happened, which is four
+ * documents disagreeing. One number, wherever it appears.
+ */
+describe('the test count the documents quote', () => {
+  it('is the same number in every file that quotes one', () => {
+    const files = ['README.md', 'FINAL-REPORT.md', 'CHANGELOG.md', 'phases/phase-7/HANDOFF.md'];
+    const found = new Map<string, Set<string>>();
+    for (const f of files) {
+      // A line that says `baseline` is quoting history — the handoff records
+      // what the suite held when the phase *started* — and history is not a
+      // claim about now.
+      const text = fs
+        .readFileSync(path.join(repo, f), 'utf-8')
+        .split('\n')
+        .filter((l) => !/baseline|was \d|previously/i.test(l))
+        .join('\n');
+      // `1,433 tests`, `1,433 green`, `1,433-test`, `pnpm test  # 1,433`
+      const ns = new Set(
+        [...text.matchAll(/\b(1,\d{3})(?=[\s-]?(?:tests?\b|green\b|$))/gm)].map(
+          (m) => m[1] as string,
+        ),
+      );
+      if (ns.size > 0) found.set(f, ns);
+    }
+    expect(found.size, 'no document quotes a test count at all').toBeGreaterThan(0);
+    const all = new Set([...found.values()].flatMap((s2) => [...s2]));
+    expect(
+      [...all],
+      `documents disagree: ${[...found].map(([f, n]) => `${f}=${[...n].join('/')}`).join(', ')}`,
+    ).toHaveLength(1);
+  });
+});
+
 describe('every verb fits the width it was given', () => {
   for (const width of [60, 80]) {
     it(`at ${width} columns`, () => {
@@ -227,6 +277,19 @@ describe('every verb fits the width it was given', () => {
       for (const v of verbs()) {
         const r = invoke(v.args, ['--no-color', '--width', String(width)]);
         for (const line of r.stdout.split('\n')) {
+          // A consent diff is shown whole or not at all. It is the literal text
+          // about to be written into somebody's settings file, and a truncated
+          // one misrepresents the thing they are being asked to approve — which
+          // is a worse failure than a line that runs off the edge.
+          const d = line.trimStart();
+          if (
+            /^[-+ ]?\s*[{}"]/.test(d) ||
+            d.startsWith('@@') ||
+            d.startsWith('---') ||
+            d.startsWith('+++')
+          ) {
+            continue;
+          }
           if (widthOf(line) > width) over.push(`${v.name}: ${widthOf(line)} — ${line}`);
         }
       }
@@ -238,6 +301,8 @@ describe('every verb fits the width it was given', () => {
 describe('every verb ends with the next verb', () => {
   /** Screens whose last line is deliberately something else, and why. */
   const EXEMPT: Record<string, string> = {
+    guard: 'ends by asking for consent, or by refusing for want of a terminal',
+    setup: 'ends by naming the flag it needs; there is no next verb until it has one',
     'doctor --privacy': 'ends with the privacy receipt, which is the point of it',
     'find --explain': 'ends with the ledger it was asked for; the numbers are the output',
     'find --explain (no match)': 'falls through to the empty-result screen',
@@ -249,7 +314,12 @@ describe('every verb ends with the next verb', () => {
       const lines = r.stdout.split('\n').filter((l) => l.trim() !== '');
       const last = lines.at(-1) ?? '';
       if (EXEMPT[v.name]) {
-        expect(lines.length, `${v.name} printed nothing`).toBeGreaterThan(0);
+        // An exempt screen still has to say *something*; `setup` with no client
+        // says it on stderr, because it is an error.
+        expect(
+          (r.stdout + r.stderr).trim().length,
+          `${v.name} printed nothing at all`,
+        ).toBeGreaterThan(0);
         return;
       }
       // Anchored on `run  potsherd <verb>` rather than the start of the line:

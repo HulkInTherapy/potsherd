@@ -52,7 +52,9 @@ function addGlobals(cmd: Command): Command {
   // that fixes it, and for a mistyped flag that command names the verb.
   const name = cmd.name();
   if (name && name !== 'potsherd') {
-    cmd.showHelpAfterError(`(run  potsherd ${name} --help  for this verb's flags and an example)`);
+    // Short enough that the longest verb name still fits 60 columns: `(run
+    // potsherd export --help  for its flags and an example)` is 59.
+    cmd.showHelpAfterError(`(run  potsherd ${name} --help  for its flags and an example)`);
   }
   return cmd
     .option('--json', 'machine-readable output, same data as the human view')

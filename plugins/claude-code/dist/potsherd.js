@@ -971,7 +971,7 @@ var require_command = __commonJS({
     var childProcess = __require("node:child_process");
     var path31 = __require("node:path");
     var fs39 = __require("node:fs");
-    var process21 = __require("node:process");
+    var process22 = __require("node:process");
     var { Argument: Argument2, humanReadableArgName } = require_argument();
     var { CommanderError: CommanderError2 } = require_error();
     var { Help: Help2 } = require_help();
@@ -1017,10 +1017,10 @@ var require_command = __commonJS({
         this._showHelpAfterError = false;
         this._showSuggestionAfterError = true;
         this._outputConfiguration = {
-          writeOut: (str2) => process21.stdout.write(str2),
-          writeErr: (str2) => process21.stderr.write(str2),
-          getOutHelpWidth: () => process21.stdout.isTTY ? process21.stdout.columns : void 0,
-          getErrHelpWidth: () => process21.stderr.isTTY ? process21.stderr.columns : void 0,
+          writeOut: (str2) => process22.stdout.write(str2),
+          writeErr: (str2) => process22.stderr.write(str2),
+          getOutHelpWidth: () => process22.stdout.isTTY ? process22.stdout.columns : void 0,
+          getErrHelpWidth: () => process22.stderr.isTTY ? process22.stderr.columns : void 0,
           outputError: (str2, write) => write(str2)
         };
         this._hidden = false;
@@ -1399,7 +1399,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
         if (this._exitCallback) {
           this._exitCallback(new CommanderError2(exitCode3, code, message2));
         }
-        process21.exit(exitCode3);
+        process22.exit(exitCode3);
       }
       /**
        * Register callback `fn` for the command.
@@ -1797,16 +1797,16 @@ Expecting one of '${allowedValues.join("', '")}'`);
         }
         parseOptions = parseOptions || {};
         if (argv === void 0 && parseOptions.from === void 0) {
-          if (process21.versions?.electron) {
+          if (process22.versions?.electron) {
             parseOptions.from = "electron";
           }
-          const execArgv = process21.execArgv ?? [];
+          const execArgv = process22.execArgv ?? [];
           if (execArgv.includes("-e") || execArgv.includes("--eval") || execArgv.includes("-p") || execArgv.includes("--print")) {
             parseOptions.from = "eval";
           }
         }
         if (argv === void 0) {
-          argv = process21.argv;
+          argv = process22.argv;
         }
         this.rawArgs = argv.slice();
         let userArgs;
@@ -1817,7 +1817,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
             userArgs = argv.slice(2);
             break;
           case "electron":
-            if (process21.defaultApp) {
+            if (process22.defaultApp) {
               this._scriptPath = argv[1];
               userArgs = argv.slice(2);
             } else {
@@ -1945,23 +1945,23 @@ Expecting one of '${allowedValues.join("', '")}'`);
         }
         launchWithNode = sourceExt.includes(path31.extname(executableFile));
         let proc;
-        if (process21.platform !== "win32") {
+        if (process22.platform !== "win32") {
           if (launchWithNode) {
             args.unshift(executableFile);
-            args = incrementNodeInspectorPort(process21.execArgv).concat(args);
-            proc = childProcess.spawn(process21.argv[0], args, { stdio: "inherit" });
+            args = incrementNodeInspectorPort(process22.execArgv).concat(args);
+            proc = childProcess.spawn(process22.argv[0], args, { stdio: "inherit" });
           } else {
             proc = childProcess.spawn(executableFile, args, { stdio: "inherit" });
           }
         } else {
           args.unshift(executableFile);
-          args = incrementNodeInspectorPort(process21.execArgv).concat(args);
-          proc = childProcess.spawn(process21.execPath, args, { stdio: "inherit" });
+          args = incrementNodeInspectorPort(process22.execArgv).concat(args);
+          proc = childProcess.spawn(process22.execPath, args, { stdio: "inherit" });
         }
         if (!proc.killed) {
           const signals = ["SIGUSR1", "SIGUSR2", "SIGTERM", "SIGINT", "SIGHUP"];
           signals.forEach((signal) => {
-            process21.on(signal, () => {
+            process22.on(signal, () => {
               if (proc.killed === false && proc.exitCode === null) {
                 proc.kill(signal);
               }
@@ -1972,7 +1972,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
         proc.on("close", (code) => {
           code = code ?? 1;
           if (!exitCallback) {
-            process21.exit(code);
+            process22.exit(code);
           } else {
             exitCallback(
               new CommanderError2(
@@ -1995,7 +1995,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
             throw new Error(`'${executableFile}' not executable`);
           }
           if (!exitCallback) {
-            process21.exit(1);
+            process22.exit(1);
           } else {
             const wrappedError = new CommanderError2(
               1,
@@ -2487,13 +2487,13 @@ Expecting one of '${allowedValues.join("', '")}'`);
        */
       _parseOptionsEnv() {
         this.options.forEach((option) => {
-          if (option.envVar && option.envVar in process21.env) {
+          if (option.envVar && option.envVar in process22.env) {
             const optionKey = option.attributeName();
             if (this.getOptionValue(optionKey) === void 0 || ["default", "config", "env"].includes(
               this.getOptionValueSource(optionKey)
             )) {
               if (option.required || option.optional) {
-                this.emit(`optionEnv:${option.name()}`, process21.env[option.envVar]);
+                this.emit(`optionEnv:${option.name()}`, process22.env[option.envVar]);
               } else {
                 this.emit(`optionEnv:${option.name()}`);
               }
@@ -2922,7 +2922,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
        */
       help(contextOptions) {
         this.outputHelp(contextOptions);
-        let exitCode3 = process21.exitCode || 0;
+        let exitCode3 = process22.exitCode || 0;
         if (exitCode3 === 0 && contextOptions && typeof contextOptions !== "function" && contextOptions.error) {
           exitCode3 = 1;
         }
@@ -3030,7 +3030,7 @@ var require_commander = __commonJS({
 });
 
 // src/index.ts
-import process20 from "node:process";
+import process21 from "node:process";
 
 // ../../node_modules/.pnpm/commander@12.1.0/node_modules/commander/esm.mjs
 var import_index = __toESM(require_commander(), 1);
@@ -5607,6 +5607,7 @@ function basename2(p) {
 }
 
 // ../core/dist/render/verify.js
+import process7 from "node:process";
 var VERIFY_SCRIPT_PATH = "scripts/verify-audit.py";
 var VERIFY_SCRIPT_URL = "https://github.com/HulkInTherapy/potsherd/blob/main/scripts/verify-audit.py";
 var VERIFY_SNIPPET = `python3 - <<'PY'
@@ -5656,12 +5657,21 @@ var VERIFY_DEFINITIONS = {
   deleted: "sessions ever started \u2212 still on disk",
   promptsLost: "lines in history.jsonl whose sessionId is deleted"
 };
-function verifyInfo(claudeDir2) {
+function snippetFor(claudeDir2, o = {}) {
+  const env = o.env ?? process7.env;
+  const dflt = env["CLAUDE_CONFIG_DIR"];
+  const home2 = env["HOME"] ?? "";
+  const isDefault = claudeDir2 === dflt || home2 !== "" && claudeDir2 === `${home2}/.claude`.replace(/\/+/g, "/");
+  if (isDefault)
+    return VERIFY_SNIPPET;
+  return VERIFY_SNIPPET.replace("python3 - <<'PY'", `CLAUDE_CONFIG_DIR=${JSON.stringify(claudeDir2)} python3 - <<'PY'`);
+}
+function verifyInfo(claudeDir2, o = {}) {
   return {
     claudeDir: claudeDir2,
     scriptPath: VERIFY_SCRIPT_PATH,
     scriptUrl: VERIFY_SCRIPT_URL,
-    snippet: VERIFY_SNIPPET,
+    snippet: snippetFor(claudeDir2, o),
     definitions: VERIFY_DEFINITIONS
   };
 }
@@ -5672,7 +5682,7 @@ function renderVerify(claudeDir2, t = new Theme()) {
   card.text("the four headline numbers with the python standard library and nothing");
   card.text("else \u2014 no potsherd, no database, no checkout needed. paste it:");
   card.blank();
-  for (const line of VERIFY_SNIPPET.split("\n"))
+  for (const line of snippetFor(claudeDir2).split("\n"))
     card.raw(line);
   card.blank();
   card.text("the definitions it implements:");
@@ -10452,7 +10462,7 @@ import path19 from "node:path";
 import fs21 from "node:fs";
 import os2 from "node:os";
 import path18 from "node:path";
-import process7 from "node:process";
+import process8 from "node:process";
 var EMBEDDING_VERSION = 1;
 var MODEL_ID = "Xenova/bge-small-en-v1.5";
 var MODEL_DTYPE = "q8";
@@ -10461,7 +10471,7 @@ var MODEL_DOWNLOAD_BYTES = 34014426;
 var BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
 var MAX_INPUT_CHARS = 2e3;
 function embedThreads() {
-  const override = Number(process7.env["POTSHERD_EMBED_THREADS"]);
+  const override = Number(process8.env["POTSHERD_EMBED_THREADS"]);
   if (Number.isFinite(override) && override >= 1)
     return Math.floor(override);
   const logical = os2.availableParallelism?.() ?? os2.cpus().length ?? 2;
@@ -14915,7 +14925,7 @@ import { spawn } from "node:child_process";
 import fs26 from "node:fs";
 import os3 from "node:os";
 import path21 from "node:path";
-import process8 from "node:process";
+import process9 from "node:process";
 var MODEL_CALL_VERBS = ["card", "ask", "graft"];
 var OFFLINE_VERBS = [
   "audit",
@@ -15221,7 +15231,7 @@ function fmtUsd(n2) {
   return n2 < 0.01 && n2 > 0 ? `$${n2.toFixed(4)}` : `$${n2.toFixed(2)}`;
 }
 var REENTRANCY_ENV = "POTSHERD_LLM_GUARD";
-function insidePotsherdCall(env = process8.env) {
+function insidePotsherdCall(env = process9.env) {
   return env[REENTRANCY_ENV] === "1";
 }
 var ReentrancyError = class extends Error {
@@ -15271,7 +15281,7 @@ function resolvable(specifier) {
   }
 }
 function availability(o = {}) {
-  const env = o.env ?? process8.env;
+  const env = o.env ?? process9.env;
   const which2 = o.which ?? ((n2) => onPath(n2, env));
   const key = env["ANTHROPIC_API_KEY"];
   const canResolve = o.resolvable ?? resolvable;
@@ -15285,7 +15295,7 @@ function availability(o = {}) {
   };
 }
 function detectBackend(o = {}) {
-  const env = o.env ?? process8.env;
+  const env = o.env ?? process9.env;
   const avail = availability(o);
   const requested = o.model ?? env["POTSHERD_MODEL"] ?? CARD_MODEL;
   const forced = o.backend ?? env["POTSHERD_LLM_BACKEND"];
@@ -15650,7 +15660,7 @@ var Llm = class _Llm {
    * none and {@link ReentrancyError} when potsherd spawned this process.
    */
   static open(opts = {}) {
-    const env = opts.env ?? process8.env;
+    const env = opts.env ?? process9.env;
     if (insidePotsherdCall(env) && !opts.transport)
       throw new ReentrancyError();
     if (opts.transport) {
@@ -18800,7 +18810,9 @@ function nothing(r, t) {
   }
   out.push(INDENT + clip(`no grounded answer in ${num(r.searched)} ${plural(r.searched, "session")} searched`, t.width - 2, t));
   out.push("");
-  out.push(INDENT + t.dim(r.dropped.length > 0 ? `every sentence was dropped for want of a citation that resolves (${num(r.dropped.length)}).` : "the readers found nothing that answers the question."));
+  const failed = r.readers.filter((x) => x.error);
+  const allFailed = r.readers.length > 0 && failed.length === r.readers.length;
+  out.push(INDENT + t.dim(allFailed ? `no reader could run, so nothing was read: ${clip(failed[0]?.error ?? "the backend did not answer", t.width - 30, t)}` : r.dropped.length > 0 ? `every sentence was dropped for want of a citation that resolves (${num(r.dropped.length)}).` : "the readers found nothing that answers the question."));
   out.push("");
   return out;
 }
@@ -18866,7 +18878,7 @@ function maskSafeCut(s, want) {
 // ../core/dist/graft.js
 import fs28 from "node:fs";
 import path23 from "node:path";
-import process9 from "node:process";
+import process10 from "node:process";
 import { spawnSync } from "node:child_process";
 var DEFAULT_BUDGET = 1200;
 var ABOUT_K = 6;
@@ -18892,7 +18904,7 @@ async function countTokens(text, o = {}) {
   const fallback = { tokens: tokensForText(text), estimated: true };
   if (o.backend !== "api")
     return fallback;
-  const env = o.env ?? process9.env;
+  const env = o.env ?? process10.env;
   const apiKey = env["ANTHROPIC_API_KEY"];
   if (!apiKey)
     return fallback;
@@ -19297,10 +19309,10 @@ function cardOnlyBody(src) {
   }
   return out;
 }
-function graftDir(cwd = process9.cwd()) {
+function graftDir(cwd = process10.cwd()) {
   return path23.join(cwd, ".potsherd");
 }
-function graftPath(id8, cwd = process9.cwd()) {
+function graftPath(id8, cwd = process10.cwd()) {
   return path23.join(graftDir(cwd), `graft-${id8}.md`);
 }
 var GITIGNORE_BODY = [
@@ -19309,7 +19321,7 @@ var GITIGNORE_BODY = [
   "*",
   ""
 ].join("\n");
-function ensureGraftDir(cwd = process9.cwd()) {
+function ensureGraftDir(cwd = process10.cwd()) {
   const dir = graftDir(cwd);
   fs28.mkdirSync(dir, { recursive: true });
   const ignore = path23.join(dir, ".gitignore");
@@ -19348,7 +19360,7 @@ async function graft(db, target, o = {}) {
   const started = Date.now();
   const budget = Math.max(MIN_BUDGET, Math.floor(o.budget ?? DEFAULT_BUDGET));
   const about = o.about?.trim() || null;
-  const cwd = o.cwd ?? process9.cwd();
+  const cwd = o.cwd ?? process10.cwd();
   const write = o.write !== false;
   const resolved = await resolveTarget(db, target, o.root ? { root: o.root } : {});
   const src = await collectSource(db, resolved.sessionId, {
@@ -19610,7 +19622,7 @@ __export(setup_exports, {
   planClients: () => planClients,
   resolveMcpServer: () => resolveMcpServer,
   setupWritePaths: () => setupWritePaths,
-  snippetFor: () => snippetFor,
+  snippetFor: () => snippetFor2,
   tomlHasInlineServers: () => tomlHasInlineServers,
   tomlServers: () => tomlServers,
   tomlTable: () => tomlTable,
@@ -19619,19 +19631,19 @@ __export(setup_exports, {
 });
 import fs29 from "node:fs";
 import path24 from "node:path";
-import process10 from "node:process";
+import process11 from "node:process";
 var SERVER_NAME = "potsherd";
 var MCP_BIN = "potsherd-mcp";
 var MCP_ENTRY_RELATIVE = path24.join("packages", "mcp", "dist", "index.js");
 var MCP_PACKAGE_RELATIVE = path24.join("node_modules", "@potsherd", "mcp", "dist", "index.js");
-function resolveMcpServer(entry = process10.argv[1], env = process10.env) {
+function resolveMcpServer(entry = process11.argv[1], env = process11.env) {
   const found = onPath(MCP_BIN, env);
   if (found)
     return { command: MCP_BIN, args: [], via: "path", file: found, exists: true };
   const local = findMcpEntry(entry);
   if (local.file) {
     return {
-      command: process10.execPath,
+      command: process11.execPath,
       args: [local.file],
       via: local.exists ? "local" : "assumed",
       file: local.file,
@@ -19641,7 +19653,7 @@ function resolveMcpServer(entry = process10.argv[1], env = process10.env) {
   return { command: MCP_BIN, args: [], via: "assumed", exists: false };
 }
 function findMcpEntry(entry) {
-  const start = entry && fs29.existsSync(entry) ? path24.dirname(path24.resolve(entry)) : process10.cwd();
+  const start = entry && fs29.existsSync(entry) ? path24.dirname(path24.resolve(entry)) : process11.cwd();
   let dir = start;
   let workspace = null;
   for (let i = 0; i < 8; i++) {
@@ -19664,12 +19676,12 @@ function findMcpEntry(entry) {
 function stdio(res) {
   return { command: res.command, args: [...res.args] };
 }
-function opencodeConfigDir(env = process10.env) {
+function opencodeConfigDir(env = process11.env) {
   const xdg = env["XDG_CONFIG_HOME"];
   const base2 = xdg && xdg.trim() ? path24.resolve(expandTilde(xdg.trim())) : path24.join(home(), ".config");
   return path24.join(base2, "opencode");
 }
-function claudeJsonPath(dir, env = process10.env) {
+function claudeJsonPath(dir, env = process11.env) {
   const override = dir ?? (env["CLAUDE_CONFIG_DIR"]?.trim() || void 0);
   if (override)
     return path24.join(claudeDir(override), ".claude.json");
@@ -19773,7 +19785,7 @@ function clientSpec(id) {
   return spec;
 }
 function detectClient(spec, opts = {}) {
-  const env = opts.env ?? process10.env;
+  const env = opts.env ?? process11.env;
   const p = spec.id === "claude" ? claudeJsonPath(opts.claudeDir, env) : spec.configPath(env);
   const dir = spec.homeDir(env);
   const bin = spec.bins.map((b) => onPath(b, env)).find((x) => Boolean(x)) ?? null;
@@ -19944,7 +19956,7 @@ function tomlWithout(text, name) {
   return out.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 function planClient(spec, opts = {}) {
-  const env = opts.env ?? process10.env;
+  const env = opts.env ?? process11.env;
   const detection = detectClient(spec, {
     ...opts.claudeDir ? { claudeDir: opts.claudeDir } : {},
     env
@@ -19961,7 +19973,7 @@ function planClient(spec, opts = {}) {
     label: spec.label,
     format: spec.format,
     keeps: detection.others,
-    snippet: snippetFor(spec, entry),
+    snippet: snippetFor2(spec, entry),
     detection,
     resolution
   };
@@ -20024,7 +20036,7 @@ function removeStanza(spec, read, before) {
   }
   return stringifySettings(json);
 }
-function snippetFor(spec, entry) {
+function snippetFor2(spec, entry) {
   if (spec.format === "toml")
     return tomlTable(SERVER_NAME, entry);
   const doc = {};
@@ -20057,7 +20069,7 @@ function manualSteps(plan) {
     lines.push("  " + l);
   return lines;
 }
-function setupWritePaths(env = process10.env) {
+function setupWritePaths(env = process11.env) {
   return CLIENTS.map((spec) => spec.id === "claude" ? claudeJsonPath(void 0, env) : spec.configPath(env));
 }
 
@@ -20078,7 +20090,7 @@ __export(stack_exports, {
 });
 import { existsSync } from "node:fs";
 import path25 from "node:path";
-import process11 from "node:process";
+import process12 from "node:process";
 var FAILURES = [
   { n: 1, label: "context rot", when: "during a session", solved: true },
   { n: 2, label: "cold start", when: "next day, same repo", solved: true },
@@ -20130,9 +20142,9 @@ var TOOLS = [
     // the phase brief and `03 §10` both assumed. Both are checked, because a
     // detector that only knows the wrong path reports "absent" on a machine
     // where the tool is running.
-    markers: (env = process11.env) => [
+    markers: (env = process12.env) => [
       path25.join(home(), ".agentmemory"),
-      process11.platform === "darwin" ? path25.join(home(), "Library", "Application Support", "agentmemory") : path25.join(env["XDG_DATA_HOME"]?.trim() ? expandTilde(env["XDG_DATA_HOME"].trim()) : path25.join(home(), ".local", "share"), "agentmemory")
+      process12.platform === "darwin" ? path25.join(home(), "Library", "Application Support", "agentmemory") : path25.join(env["XDG_DATA_HOME"]?.trim() ? expandTilde(env["XDG_DATA_HOME"].trim()) : path25.join(home(), ".local", "share"), "agentmemory")
     ],
     coverage: ["no", "yes", "partial", "partial"],
     note: "the only one here that backfills: `import-jsonl` reads ~/.claude/projects. only what the sweep left.",
@@ -20225,7 +20237,7 @@ var TOOLS = [
     injectsAtStart: true
   }
 ];
-function episodicIndexPath(env = process11.env) {
+function episodicIndexPath(env = process12.env) {
   const xdg = env["XDG_CONFIG_HOME"];
   const base2 = xdg && xdg.trim() ? path25.resolve(expandTilde(xdg.trim())) : path25.join(home(), ".config");
   return path25.join(base2, "superpowers", "conversation-index", "db.sqlite");
@@ -20236,7 +20248,7 @@ function toolSpec(id) {
     throw new Error(`unknown tool: ${id}`);
   return spec;
 }
-function detectTools(env = process11.env) {
+function detectTools(env = process12.env) {
   return TOOLS.map((spec) => {
     const markers = spec.markers(env);
     const found = markers.filter((m) => safeExists(m));
@@ -20323,7 +20335,7 @@ function recommend(detections) {
   }
   return { rows, actions };
 }
-function stackReport(env = process11.env) {
+function stackReport(env = process12.env) {
   const detections = detectTools(env);
   return {
     verifiedOn: VERIFIED_ON,
@@ -21965,7 +21977,7 @@ function firstHeading(markdown) {
 }
 
 // src/output.ts
-import process12 from "node:process";
+import process13 from "node:process";
 import * as readline2 from "node:readline/promises";
 var active = null;
 function themeFrom(o) {
@@ -21980,24 +21992,24 @@ function themeFrom(o) {
 function silenceBrokenPipe(stream) {
   stream.on("error", (err) => {
     if (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED") {
-      process12.exit(0);
+      process13.exit(0);
     }
     throw err;
   });
 }
-silenceBrokenPipe(process12.stdout);
-silenceBrokenPipe(process12.stderr);
+silenceBrokenPipe(process13.stdout);
+silenceBrokenPipe(process13.stderr);
 function writable(stream) {
   return !stream.destroyed && stream.writable;
 }
 function printJson(value) {
-  if (!writable(process12.stdout)) return;
-  process12.stdout.write(JSON.stringify(value, null, 2) + "\n");
+  if (!writable(process13.stdout)) return;
+  process13.stdout.write(JSON.stringify(value, null, 2) + "\n");
 }
 function print(s) {
-  if (!writable(process12.stdout)) return;
+  if (!writable(process13.stdout)) return;
   const out = active ? active.asciiLine(s) : s;
-  process12.stdout.write(out.endsWith("\n") ? out : out + "\n");
+  process13.stdout.write(out.endsWith("\n") ? out : out + "\n");
 }
 var UserError = class extends Error {
   constructor(message2, fix, code = 1) {
@@ -22010,26 +22022,26 @@ var UserError = class extends Error {
 function fail(err, o) {
   const t = themeFrom({ ...o, json: false });
   if (err instanceof UserError) {
-    process12.stderr.write(`${t.warn("potsherd:")} ${err.message}
+    process13.stderr.write(`${t.warn("potsherd:")} ${err.message}
 `);
-    if (err.fix) process12.stderr.write(`  try:  ${err.fix}
+    if (err.fix) process13.stderr.write(`  try:  ${err.fix}
 `);
-    process12.exit(err.code);
+    process13.exit(err.code);
   }
   const e = err;
-  process12.stderr.write(`${t.warn("potsherd:")} ${e?.message ?? String(err)}
+  process13.stderr.write(`${t.warn("potsherd:")} ${e?.message ?? String(err)}
 `);
   const fix = typeof e?.fix === "string" && e.fix ? e.fix : null;
-  if (fix) process12.stderr.write(`  try:  ${fix}
+  if (fix) process13.stderr.write(`  try:  ${fix}
 `);
-  else if (!o.debug) process12.stderr.write("  try:  re-run with --debug for the full error\n");
-  if (o.debug && e?.stack) process12.stderr.write(e.stack + "\n");
-  process12.exit(typeof e?.code === "number" && e.code > 0 ? e.code : 1);
+  else if (!o.debug) process13.stderr.write("  try:  re-run with --debug for the full error\n");
+  if (o.debug && e?.stack) process13.stderr.write(e.stack + "\n");
+  process13.exit(typeof e?.code === "number" && e.code > 0 ? e.code : 1);
 }
 async function confirm(question, opts = {}) {
   const fallback = opts.default ?? false;
-  if (!process12.stdin.isTTY) return fallback;
-  const rl = readline2.createInterface({ input: process12.stdin, output: process12.stdout });
+  if (!process13.stdin.isTTY) return fallback;
+  const rl = readline2.createInterface({ input: process13.stdin, output: process13.stdout });
   try {
     const suffix = opts.default ? "[Y/n]" : "[y/N]";
     const raw = await rl.question(`${question} ${suffix} `);
@@ -22037,7 +22049,7 @@ async function confirm(question, opts = {}) {
     if (!answer) return fallback;
     return answer === "y" || answer === "yes";
   } catch {
-    process12.stdout.write("\n");
+    process13.stdout.write("\n");
     return fallback;
   } finally {
     rl.close();
@@ -22063,10 +22075,10 @@ var Progress = class {
     const filled = Math.round(frac * width);
     const bar = "#".repeat(filled) + ".".repeat(width - filled);
     const line = `  ${this.label} [${bar}] ${done}/${total}${note ? "  " + note : ""}`;
-    process12.stderr.write("\r" + line.slice(0, (process12.stderr.columns ?? 80) - 1) + "\x1B[K");
+    process13.stderr.write("\r" + line.slice(0, (process13.stderr.columns ?? 80) - 1) + "\x1B[K");
   }
   done() {
-    if (this.active) process12.stderr.write("\r\x1B[K");
+    if (this.active) process13.stderr.write("\r\x1B[K");
     this.active = false;
   }
 };
@@ -22238,10 +22250,10 @@ async function askForSettings(diff, days, currentEffective, o) {
 
 // src/commands/guard.ts
 import fs35 from "node:fs";
-import process13 from "node:process";
+import process14 from "node:process";
 async function runGuard(o) {
   const t = themeFrom(o);
-  const resolution = consent_exports.guardCommandFor(process13.argv[1]);
+  const resolution = consent_exports.guardCommandFor(process14.argv[1]);
   const installed = consent_exports.installedGuardCommand(o.claudeDir);
   if (o.status) return status(o, t, installed, resolution);
   const proposal = consent_exports.proposeGuardHook(o.claudeDir, {
@@ -22267,9 +22279,21 @@ async function runGuard(o) {
   }
   if (!o.json && !o.quiet) {
     print("");
-    print(o.remove ? `  potsherd will remove its SessionStart hook from ${paths_exports.tildify(proposal.path)}.` : `  potsherd will add one SessionStart hook to ${paths_exports.tildify(proposal.path)}.`);
+    const fit2 = (lead, tail2) => {
+      const whole = `  ${lead} ${tail2}`;
+      if (Theme.len(whole) <= t.width) {
+        print(whole);
+        return;
+      }
+      print(`  ${lead}`);
+      print(`      ${format_exports.elideMiddle(tail2, t.width - 6, t.ellip)}`);
+    };
+    fit2(
+      o.remove ? "potsherd will remove its SessionStart hook from" : "potsherd will add one SessionStart hook to",
+      paths_exports.tildify(proposal.path)
+    );
     if (!o.remove) {
-      print(`  It runs  ${resolution.command}`);
+      fit2("It runs", resolution.command);
       print("  and exits in well under a second when nothing has changed.");
       if (resolution.via === "absolute") {
         print("");
@@ -22286,9 +22310,9 @@ async function runGuard(o) {
   }
   let approved = o.yes ?? false;
   if (!approved) {
-    if (!process13.stdin.isTTY) {
+    if (!process14.stdin.isTTY) {
       throw new UserError(
-        "guard needs a terminal to confirm the settings change",
+        "guard needs a terminal to confirm the change",
         "potsherd guard --yes"
       );
     }
@@ -22379,7 +22403,7 @@ function commandLooksRunnable(command) {
 // src/commands/doctor.ts
 import fs36 from "node:fs";
 import nodePath from "node:path";
-import process14 from "node:process";
+import process15 from "node:process";
 
 // src/privacy-paths.ts
 var EXPORT_WRITE_PATHS = [
@@ -22448,7 +22472,7 @@ async function runDoctor(o) {
     // `03` §11 says this receipt lists *every* path written — and it has
     // under-reported once already, when it still said "no network" after the
     // product had started calling a model. So it lists this one.
-    nodePath.join(process14.cwd(), ".potsherd", "graft-<id8>.md"),
+    nodePath.join(process15.cwd(), ".potsherd", "graft-<id8>.md"),
     // And `ask --readers-out` is the second, at a path the user names. It
     // holds the same redacted excerpts a model would have been sent, and no
     // model was called to write it.
@@ -22590,8 +22614,8 @@ async function runDoctor(o) {
   if (o.json) {
     printJson({
       version: VERSION_STRING,
-      node: process14.version,
-      platform: process14.platform,
+      node: process15.version,
+      platform: process15.platform,
       claudeDir: report.claudeDir,
       claudeDirExists: report.claudeDirExists,
       potsherdDir: root,
@@ -22640,7 +22664,7 @@ async function runDoctor(o) {
   }
   const t = themeFrom(o);
   const card = new Card(t);
-  card.heading("doctor", `potsherd ${VERSION_STRING}`, `node ${process14.version}`).blank();
+  card.heading("doctor", `potsherd ${VERSION_STRING}`, `node ${process15.version}`).blank();
   card.rows([
     { label: "claude dir", value: "", note: paths_exports.tildify(report.claudeDir) + (report.claudeDirExists ? "" : "  (not found)") },
     { label: "potsherd dir", value: "", note: paths_exports.tildify(root) },
@@ -22898,13 +22922,13 @@ function schemaNote(schema, vec) {
 }
 
 // src/commands/index.ts
-import process15 from "node:process";
+import process16 from "node:process";
 var INDEXABLE = ["claude", "codex", "cursor", "pi"];
 var NOT_YET = ["gemini", "opencode", "copilot"];
 async function runIndex(o) {
   const t = themeFrom(o);
   const root = paths_exports.potsherdDir(o.potsherdDir);
-  const showProgress = !o.json && !o.quiet && Boolean(process15.stderr.isTTY);
+  const showProgress = !o.json && !o.quiet && Boolean(process16.stderr.isTTY);
   if (o.full && o.incremental) {
     throw new UserError(
       "--full and --incremental ask for opposite things",
@@ -23553,7 +23577,7 @@ async function runStats(o) {
 }
 
 // src/commands/card.ts
-import process16 from "node:process";
+import process17 from "node:process";
 async function runCard(o) {
   if (o.probe) return probe(o);
   if (o.export) return runExport(o, o.export);
@@ -23624,7 +23648,7 @@ async function runCard(o) {
       ...o.maxUsd !== void 0 ? { maxUsd: o.maxUsd } : {},
       ...o.maxTokens !== void 0 ? { maxTokens: o.maxTokens } : {}
     });
-    const showProgress = !o.json && !o.quiet && Boolean(process16.stderr.isTTY);
+    const showProgress = !o.json && !o.quiet && Boolean(process17.stderr.isTTY);
     const bar = new Progress("carding", showProgress);
     const concurrency = o.concurrency ?? DEFAULT_CONCURRENCY;
     let report;
@@ -24156,7 +24180,7 @@ function receipt2(t, verb, a, b, what, note) {
 // src/commands/ask.ts
 import fs38 from "node:fs";
 import nodePath2 from "node:path";
-import process17 from "node:process";
+import process18 from "node:process";
 async function runAsk(o) {
   const question = o.question?.trim();
   if (!question) {
@@ -24184,7 +24208,7 @@ async function runAsk(o) {
   const { db, root } = openIndex(o);
   const t = themeFrom(o);
   const drops = [];
-  const progress = new Progress("reading", !o.json && !o.quiet && Boolean(process17.stderr.isTTY));
+  const progress = new Progress("reading", !o.json && !o.quiet && Boolean(process18.stderr.isTTY));
   try {
     const filters = parseFilters(db, o);
     const k = positive(o.k, ASK_K, "--k");
@@ -24477,15 +24501,15 @@ function exitCode(r) {
 }
 function reportDrops(drops) {
   if (drops.length === 0) {
-    process17.stderr.write("  filter: nothing dropped\n");
+    process18.stderr.write("  filter: nothing dropped\n");
     return;
   }
-  process17.stderr.write(`  filter: ${drops.length} dropped
+  process18.stderr.write(`  filter: ${drops.length} dropped
 `);
   for (const d of drops) {
     const where = d.sessionId ? `${d.sessionId.slice(0, 8)}@${d.seq}` : "";
     const text = d.text.replace(/\s+/g, " ").slice(0, 90);
-    process17.stderr.write(`    ${d.kind.padEnd(8)} ${d.reason.padEnd(16)} ${where.padEnd(14)} ${text}
+    process18.stderr.write(`    ${d.kind.padEnd(8)} ${d.reason.padEnd(16)} ${where.padEnd(14)} ${text}
 `);
   }
 }
@@ -24523,7 +24547,7 @@ function vectorMode2(o) {
 }
 
 // src/commands/graft.ts
-import process18 from "node:process";
+import process19 from "node:process";
 async function runGraft(o) {
   const target = o.target?.trim();
   if (!target) {
@@ -24588,7 +24612,7 @@ function openLlm2(o) {
     return Llm.open({
       ...typeof o.model === "string" && o.model ? { model: o.model } : {},
       ...o.backend ? { backend: o.backend } : {},
-      env: process18.env
+      env: process19.env
     });
   } catch (err) {
     if (err instanceof NoBackendError || err instanceof ReentrancyError) return null;
@@ -24597,12 +24621,12 @@ function openLlm2(o) {
 }
 
 // src/commands/setup.ts
-import process19 from "node:process";
+import process20 from "node:process";
 var SETUP_CLIENTS = setup_exports.CLIENT_IDS;
 async function runSetup(o) {
   const t = themeFrom(o);
   const wanted = chosen(o);
-  const resolution = setup_exports.resolveMcpServer(process19.argv[1]);
+  const resolution = setup_exports.resolveMcpServer(process20.argv[1]);
   if (o.status) return status2(o, wanted);
   const plans = setup_exports.planClients(wanted, {
     remove: o.remove ?? false,
@@ -24653,7 +24677,7 @@ async function runSetup(o) {
     }
     let approved = o.yes ?? false;
     if (!approved) {
-      if (!process19.stdin.isTTY) {
+      if (!process20.stdin.isTTY) {
         throw new UserError(
           `setup needs a terminal to confirm the change to ${paths_exports.tildify(plan.path)}`,
           `potsherd setup --${plan.client} --yes`
@@ -24742,7 +24766,7 @@ function status2(o, wanted) {
   const rows = setup_exports.detectAll(o.claudeDir ? { claudeDir: o.claudeDir } : {}).filter((d) => wanted.includes(d.client));
   if (o.json) {
     printJson({
-      server: serverJson(setup_exports.resolveMcpServer(process19.argv[1])),
+      server: serverJson(setup_exports.resolveMcpServer(process20.argv[1])),
       clients: rows.map((d) => ({
         client: d.client,
         label: d.label,
@@ -24863,7 +24887,7 @@ function chosen(o) {
   if (o.status) return [...setup_exports.CLIENT_IDS];
   throw new UserError(
     "setup needs to know which agent to configure",
-    `potsherd setup --cursor      (or ${setup_exports.CLIENT_IDS.map((c) => "--" + c).join(" ")} / --all)`
+    "potsherd setup --claude       (potsherd setup --status lists all seven)"
   );
 }
 
@@ -25224,7 +25248,7 @@ var GLOBAL_ONLY = /^(--json|--no-color|--ascii|--width|--claude-dir|--potsherd-d
 function addGlobals(cmd) {
   const name = cmd.name();
   if (name && name !== "potsherd") {
-    cmd.showHelpAfterError(`(run  potsherd ${name} --help  for this verb's flags and an example)`);
+    cmd.showHelpAfterError(`(run  potsherd ${name} --help  for its flags and an example)`);
   }
   return cmd.option("--json", "machine-readable output, same data as the human view").option("--no-color", "disable colour (NO_COLOR is honoured too)").option("--ascii", "ASCII-only glyphs, for terminals without a unicode font").addOption(new Option("--width <n>", "render for this terminal width").argParser(Number)).option("--claude-dir <path>", "read Claude Code data from here (CLAUDE_CONFIG_DIR is honoured)").option("--potsherd-dir <path>", "potsherd's own directory (default ~/.potsherd)").option("--debug", "print full errors");
 }
@@ -25718,7 +25742,7 @@ function globals(program2, cmd, local) {
 async function run2(fn, o) {
   try {
     const code = await fn();
-    if (code) process20.exitCode = code;
+    if (code) process21.exitCode = code;
   } catch (err) {
     fail(err, o);
   } finally {
@@ -25779,7 +25803,7 @@ function tour(o = {}) {
   print(`  start here:  ${t.accent("potsherd audit")}`);
   print("");
 }
-main(process20.argv);
+main(process21.argv);
 export {
   VERSION
 };

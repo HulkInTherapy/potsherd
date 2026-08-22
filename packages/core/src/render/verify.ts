@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { Card } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
@@ -87,12 +88,47 @@ export const VERIFY_DEFINITIONS: Record<string, string> = {
   promptsLost: 'lines in history.jsonl whose sessionId is deleted',
 };
 
-export function verifyInfo(claudeDir: string): VerifyInfo {
+/**
+ * The snippet, bound to the directory the audit it corroborates was run
+ * against.
+ *
+ * `VERIFY_SNIPPET` defaults to `CLAUDE_CONFIG_DIR` or `~/.claude`, which is
+ * right when somebody pastes it into a fresh shell and wrong the moment it is
+ * *piped* out of a run that had `--claude-dir`:
+ *
+ *     potsherd audit --claude-dir X --verify --json | jq -r .snippet | sh
+ *
+ * `sh` does not inherit a flag. The verifier followed exactly that line out of
+ * `FINAL-REPORT.md`, got **340 / 41** against the audit's **330 / 31**, and
+ * reported the honesty contract as broken — the one claim in this product that
+ * exists so nobody has to trust it. The product was right and the snippet was
+ * answering a different question, which is worse than being wrong, because it
+ * is wrong in a way that reads as an audit under-reporting by ten.
+ *
+ * So a snippet emitted for a *named* directory says so, on one line, above the
+ * code. The default form — no `--claude-dir` — is unchanged, because there the
+ * environment variable is the honest answer and hard-coding the resolved home
+ * would put a machine path into something people paste into issues.
+ */
+export function snippetFor(claudeDir: string, o: { env?: NodeJS.ProcessEnv } = {}): string {
+  const env = o.env ?? process.env;
+  const dflt = env['CLAUDE_CONFIG_DIR'];
+  const home = env['HOME'] ?? '';
+  const isDefault =
+    claudeDir === dflt || (home !== '' && claudeDir === `${home}/.claude`.replace(/\/+/g, '/'));
+  if (isDefault) return VERIFY_SNIPPET;
+  return VERIFY_SNIPPET.replace(
+    "python3 - <<'PY'",
+    `CLAUDE_CONFIG_DIR=${JSON.stringify(claudeDir)} python3 - <<'PY'`,
+  );
+}
+
+export function verifyInfo(claudeDir: string, o: { env?: NodeJS.ProcessEnv } = {}): VerifyInfo {
   return {
     claudeDir,
     scriptPath: VERIFY_SCRIPT_PATH,
     scriptUrl: VERIFY_SCRIPT_URL,
-    snippet: VERIFY_SNIPPET,
+    snippet: snippetFor(claudeDir, o),
     definitions: VERIFY_DEFINITIONS,
   };
 }
@@ -109,7 +145,7 @@ export function renderVerify(claudeDir: string, t: Theme = new Theme()): string 
   card.text('the four headline numbers with the python standard library and nothing');
   card.text('else — no potsherd, no database, no checkout needed. paste it:');
   card.blank();
-  for (const line of VERIFY_SNIPPET.split('\n')) card.raw(line);
+  for (const line of snippetFor(claudeDir).split('\n')) card.raw(line);
   card.blank();
   card.text('the definitions it implements:');
   card.blank();

@@ -44,11 +44,31 @@ export async function runGuard(o: GuardOptions): Promise<number> {
 
   if (!o.json && !o.quiet) {
     print('');
-    print(o.remove
-      ? `  potsherd will remove its SessionStart hook from ${paths.tildify(proposal.path)}.`
-      : `  potsherd will add one SessionStart hook to ${paths.tildify(proposal.path)}.`);
+    // The settings path and the resolved command are both as long as somebody's
+    // home directory is deep, and neither was width-aware: 90 characters at
+    // `--width 80` for an ordinary macOS home, and four overflowing lines at 60.
+    // Found by a fresh verifier, who also found why the width test could not
+    // see it — `verbs()` listed `guard --status`, and this is bare `guard`.
+    //
+    // The sentence gives way and the path elides in the middle, because the
+    // last segment is what identifies a file.
+    const fit = (lead: string, tail: string): void => {
+      const whole = `  ${lead} ${tail}`;
+      if (Theme.len(whole) <= t.width) {
+        print(whole);
+        return;
+      }
+      print(`  ${lead}`);
+      print(`      ${fmt.elideMiddle(tail, t.width - 6, t.ellip)}`);
+    };
+    fit(
+      o.remove
+        ? 'potsherd will remove its SessionStart hook from'
+        : 'potsherd will add one SessionStart hook to',
+      paths.tildify(proposal.path),
+    );
     if (!o.remove) {
-      print(`  It runs  ${resolution.command}`);
+      fit('It runs', resolution.command);
       print('  and exits in well under a second when nothing has changed.');
       if (resolution.via === 'absolute') {
         print('');
@@ -70,7 +90,7 @@ export async function runGuard(o: GuardOptions): Promise<number> {
   if (!approved) {
     if (!process.stdin.isTTY) {
       throw new UserError(
-        'guard needs a terminal to confirm the settings change',
+        'guard needs a terminal to confirm the change',
         'potsherd guard --yes',
       );
     }

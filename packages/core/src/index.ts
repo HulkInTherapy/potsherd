@@ -19,6 +19,7 @@ export {
   renderVerify,
   verifyInfo,
   VERIFY_SNIPPET,
+  snippetFor,
   VERIFY_SCRIPT_PATH,
   VERIFY_SCRIPT_URL,
   VERIFY_DEFINITIONS,
