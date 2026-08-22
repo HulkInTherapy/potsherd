@@ -620,6 +620,12 @@ describe('the two model tools with no backend', () => {
     const { client, close } = await connect();
     try {
       const id = await anySession(client);
+      // Whether the *checkout* already has a .potsherd/ is not this test's
+      // business: a stray one from any earlier run in this directory would
+      // otherwise read as "the server wrote here", which is the opposite of
+      // what is being asserted. Record the before-state and compare.
+      const cwdDotPotsherd = path.join(process.cwd(), '.potsherd');
+      const existedBefore = fs.existsSync(cwdDotPotsherd);
       const r = await call(client, 'potsherd_graft', { session: id, budget: 400 });
       expect(r['via']).toBe('card-only');
       expect(String(r['brief']).length).toBeGreaterThan(0);
@@ -628,7 +634,7 @@ describe('the two model tools with no backend', () => {
       expect(fs.existsSync(String(r['path']))).toBe(true);
       // Into the project it was given, never into the process's own cwd.
       expect(String(r['path']).startsWith(project)).toBe(true);
-      expect(fs.existsSync(path.join(process.cwd(), '.potsherd'))).toBe(false);
+      expect(fs.existsSync(cwdDotPotsherd)).toBe(existedBefore);
     } finally {
       await close();
     }
