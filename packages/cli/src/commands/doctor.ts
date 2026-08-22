@@ -11,6 +11,7 @@ import {
   detectBackend,
   MODEL_CALL_VERBS,
   NoBackendError,
+  LOCAL_SOCKET_VERBS,
   OFFLINE_VERBS,
   db as store,
   paths,
@@ -193,6 +194,10 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       ask: 'one call, over the shortlist it retrieved',
       graft: 'one call, to compress one session into a brief',
     };
+    const socketNote: Record<string, string> = {
+      find: '--with <tool>, to read another tool\'s store',
+      export: '--to <tool>, to write rows into one',
+    };
     for (const verb of MODEL_CALL_VERBS) {
       const note = verbNote[verb];
       card.raw(`    potsherd ${verb.padEnd(8)}${note ? `  ${note}` : ''}`.trimEnd());
@@ -202,6 +207,23 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // find their verb in it, and `ls…w, stats` is a list with the answer cut
     // out of the middle.
     for (const line of fmt.wrap(OFFLINE_VERBS.join(', '), pathW)) card.raw(`    ${line}`);
+
+    // T6.6 D2/D12. `find` and `export` were in the list above, under the words
+    // "open no socket at all", while both were probing 127.0.0.1 and spawning
+    // another program to talk to. The fix was not to move the word `export`
+    // into a screenshot — it was to stop the receipt saying something false,
+    // and only then regenerate the screen. `LOCAL_SOCKET_VERBS` carries the
+    // whole reasoning.
+    card.blank().text('these call no model either, but do open a socket on');
+    card.raw(`  ${t.dim('this machine — and only when you ask them to:')}`);
+    for (const verb of LOCAL_SOCKET_VERBS) {
+      const note = socketNote[verb];
+      card.raw(`    potsherd ${verb.padEnd(8)}${note ? `  ${note}` : ''}`.trimEnd());
+    }
+    card.raw(`      ${t.dim("claude-mem is read over http://127.0.0.1; agentmemory by")}`);
+    card.raw(`      ${t.dim('launching its mcp server, itself a shim over an http')}`);
+    card.raw(`      ${t.dim('backend on localhost. nothing leaves this machine, and')}`);
+    card.raw(`      ${t.dim('without the flag neither opens anything at all.')}`);
 
     card.blank().text('who receives them:');
     for (const line of fmt.wrap(network.to, pathW)) card.raw(`    ${line}`);

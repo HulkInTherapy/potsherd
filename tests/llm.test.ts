@@ -10,6 +10,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   TIMEOUT_RETRIES,
   MODEL_CALL_VERBS,
+  LOCAL_SOCKET_VERBS,
   OFFLINE_VERBS,
   CARD_MODEL,
   CHARS_PER_TOKEN,
@@ -1368,7 +1369,7 @@ describe('which verbs may call a model (T2.7 D2)', () => {
    * here — at the moment it is registered — rather than shipping into a
    * receipt that quietly skips it.
    */
-  it('every registered command is in one of the two privacy lists', () => {
+  it('every registered command is in one of the three privacy lists', () => {
     const src = fs.readFileSync(
       path.resolve(process.cwd(), 'packages/cli/src/index.ts'),
       'utf-8',
@@ -1381,7 +1382,11 @@ describe('which verbs may call a model (T2.7 D2)', () => {
     expect(registered).toContain('unpin');
     expect(registered).toContain('doctor');
 
-    const disclosed = new Set([...MODEL_CALL_VERBS, ...OFFLINE_VERBS]);
+    const disclosed = new Set([
+      ...MODEL_CALL_VERBS,
+      ...OFFLINE_VERBS,
+      ...LOCAL_SOCKET_VERBS,
+    ]);
     const undisclosed = registered.filter((v) => !disclosed.has(v));
     expect(undisclosed).toEqual([]);
 
@@ -1390,9 +1395,53 @@ describe('which verbs may call a model (T2.7 D2)', () => {
     const known = new Set(registered);
     expect([...disclosed].filter((v) => !known.has(v))).toEqual([]);
 
-    // The two lists are disjoint: a verb cannot both call a model and be
-    // guaranteed to open no socket.
-    const both = MODEL_CALL_VERBS.filter((v) => OFFLINE_VERBS.includes(v));
-    expect(both).toEqual([]);
+    // The lists are pairwise disjoint: a verb cannot both call a model and be
+    // guaranteed to open no socket, and it cannot both open a socket and be
+    // guaranteed not to.
+    expect(MODEL_CALL_VERBS.filter((v) => OFFLINE_VERBS.includes(v))).toEqual([]);
+    expect(MODEL_CALL_VERBS.filter((v) => LOCAL_SOCKET_VERBS.includes(v))).toEqual([]);
+    expect(OFFLINE_VERBS.filter((v) => LOCAL_SOCKET_VERBS.includes(v))).toEqual([]);
+  });
+
+  /**
+   * T6.6 D2/D12 — the direction the CI guard structurally cannot check.
+   *
+   * `.github/workflows/ci.yml` proves *published screen == live output*. It
+   * has never been able to prove *live output == truth*, and all three false
+   * claims this receipt has shipped got through it intact. This is the first
+   * test that reads the claim against the code it is a claim about.
+   *
+   * The rule: a verb that `doctor --privacy` prints under "open no socket at
+   * all" must not reach a bridge. `@potsherd/bridges` is where every socket
+   * in this product that is not a model call lives — `claude-mem.ts` does
+   * `fetch('http://127.0.0.1:…')`, `agentmemory.ts` spawns an MCP server that
+   * is a shim over `localhost:3111` — so importing it *is* the socket, and a
+   * command file that imports it cannot be on the offline list.
+   */
+  it('no verb on the "open no socket at all" list reaches @potsherd/bridges', () => {
+    const dir = path.resolve(process.cwd(), 'packages/cli/src/commands');
+    const federates: string[] = [];
+    for (const file of fs.readdirSync(dir)) {
+      if (!file.endsWith('.ts')) continue;
+      const src = fs.readFileSync(path.join(dir, file), 'utf-8');
+      if (/from\s*'@potsherd\/bridges'/.test(src)) federates.push(file.replace(/\.ts$/, ''));
+    }
+    // Non-vacuous: the scan must actually find the two verbs we know federate.
+    expect(federates.sort()).toEqual([...LOCAL_SOCKET_VERBS].sort());
+    expect(federates.filter((v) => OFFLINE_VERBS.includes(v))).toEqual([]);
+  });
+
+  /**
+   * And the claim itself, read out of the bridge that makes it false. If a
+   * future bridge stops using localhost the sentence can be revisited; while
+   * one does, "open no socket at all" over `find` is a published falsehood.
+   */
+  it('the bridges really do open a localhost socket, which is why the list is split', () => {
+    const bridges = path.resolve(process.cwd(), 'packages/bridges/src');
+    const claudeMem = fs.readFileSync(path.join(bridges, 'claude-mem.ts'), 'utf-8');
+    expect(claudeMem).toMatch(/fetch\(/);
+    expect(claudeMem).toContain('http://127.0.0.1');
+    const agentMemory = fs.readFileSync(path.join(bridges, 'agentmemory.ts'), 'utf-8');
+    expect(agentMemory).toMatch(/\bspawn\(/);
   });
 });

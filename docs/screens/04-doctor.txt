@@ -31,10 +31,13 @@ potsherd doctor · potsherd 0.4.0 · node v24.9.0
     codex       absent    ~/.codex/sessions             Codex CLI not installed
     cursor      absent    ~/.cursor/projects            Cursor not installed
     pi          absent    ~/.pi/agent/sessions          pi not installed
-    gemini      phase 6   ~/.gemini/tmp                 not yet parsed
-    opencode    phase 6   ~/.local/share/opencode       not yet parsed
-    copilot     phase 6   ~/.copilot/session-state      not yet parsed
+    gemini      absent    ~/.gemini/tmp                 Gemini CLI not installed
+    opencode    absent    ~/.local/share/opencode       opencode not installed
+    copilot     absent    ~/.copilot/session-state      Copilot CLI not install…
   cursor: no timestamps on assistant turns (session times come from file mtim…
+  gemini: format unverified — this adapter was written from documentation, no…
+  opencode: format unverified — this adapter was written from documentation,…
+  copilot: format unverified — this adapter was written from documentation, n…
 
   fatal parse errors             0   none
 

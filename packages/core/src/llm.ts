@@ -87,7 +87,7 @@ import { onPath } from './resolve-bin.js';
 export const MODEL_CALL_VERBS: readonly string[] = ['card', 'ask', 'graft'];
 
 /**
- * Verbs that are guaranteed to make no model call and open no socket.
+ * Verbs that are guaranteed to make no model call **and open no socket**.
  *
  * Named explicitly rather than left as "everything else", because "which of
  * these is safe to run on a client's laptop" is the question the receipt is
@@ -96,9 +96,27 @@ export const MODEL_CALL_VERBS: readonly string[] = ['card', 'ask', 'graft'];
  * `unpin` was answered by omission for two phases: registered in the CLI and
  * missing from both lists, so the receipt said nothing either way about it —
  * the exact failure the paragraph above says the list exists to prevent.
- * `tests/llm.test.ts` now asserts that these two lists together cover every
+ * `tests/llm.test.ts` now asserts that these lists together cover every
  * command the CLI registers, which is the only form of this list that keeps
  * its own promise.
+ *
+ * **T6.6 D2/D12 — `find` and `export` were on this list and should not have
+ * been.** The receipt printed "and open no socket at all" over both of them
+ * while `bridges/claude-mem.ts` was doing `fetch('http://127.0.0.1:<port>/…')`
+ * to probe claude-mem's worker, and `bridges/agentmemory.ts` was spawning
+ * `@agentmemory/mcp` and speaking JSON-RPC to it — a program its own header
+ * comment records as "a thin shim over an HTTP backend at AGENTMEMORY_URL
+ * (default http://localhost:3111)". The `export` entry below even *said* so,
+ * in a code comment, three lines under the constant the user is shown:
+ * "it opens no socket except the localhost probes the bridges use". A
+ * qualification a reader never sees is not a qualification.
+ *
+ * That is the third false claim this receipt has published (`08` rule 1: "no
+ * network", then the `index --quiet` announcement, now this), and all three
+ * failed the same way — the CI guard proves *screen == live output*, never
+ * *live output == truth*. So the two federating verbs moved to
+ * {@link LOCAL_SOCKET_VERBS}, and the sentence above each list is now one a
+ * reader can hold the product to.
  */
 export const OFFLINE_VERBS: readonly string[] = [
   'audit',
@@ -106,7 +124,6 @@ export const OFFLINE_VERBS: readonly string[] = [
   'guard',
   'index',
   'ls',
-  'find',
   'show',
   'stats',
   'tag',
@@ -118,16 +135,36 @@ export const OFFLINE_VERBS: readonly string[] = [
   // for the same reason `unpin` does: `doctor --privacy` answers by omission
   // otherwise, and an answer by omission is not one.
   'setup',
-  // `export` writes markdown into a directory the user names, and — only with
-  // an explicit --yes — rows into another memory tool's store. Both are local
-  // writes. It opens no socket except the localhost probes the bridges use to
-  // find a store, and it calls no model.
-  'export',
   // `stack` only detects which memory tools are installed: it stats directories
   // and reads two of its own files. No model, no socket.
   'stack',
   'doctor',
 ];
+
+/**
+ * Verbs that call **no model**, but do open a socket — to this machine only,
+ * and only to a memory tool you already have installed.
+ *
+ * Both federate through `@potsherd/bridges`, and both do it only when asked:
+ *
+ *   - `find --with <tool>` reads the other tool's store. For claude-mem that
+ *     means `fetch('http://127.0.0.1:<port>/api/search/observations…')` against
+ *     its worker (`bridges/claude-mem.ts`); for agentmemory it means spawning
+ *     the `@agentmemory/mcp` server and speaking JSON-RPC over its stdio, and
+ *     that server is itself a shim over an HTTP backend on `localhost:3111`.
+ *   - `export --to <tool>` writes into that same store, and reaches it the
+ *     same way.
+ *
+ * Without the flag neither opens anything: a bare `potsherd find` is a query
+ * against potsherd's own SQLite file and nothing else. The receipt says so
+ * rather than leaving the reader to infer it, because "find is safe on a
+ * client's laptop" and "find is safe on a client's laptop as long as you do
+ * not pass --with" are different answers to the question it is read to answer.
+ *
+ * Nothing here leaves the machine. That is a smaller claim than "no socket"
+ * and it is the true one.
+ */
+export const LOCAL_SOCKET_VERBS: readonly string[] = ['find', 'export'];
 
 // ------------------------------------------------------------------ models
 

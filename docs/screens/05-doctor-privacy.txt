@@ -58,8 +58,17 @@ potsherd doctor --privacy · 22 aug 2026
     potsherd graft     one call, to compress one session into a brief
 
   these never do, and open no socket at all:
-    audit, rescue, guard, index, ls, find, show, stats, tag, pin,
-    unpin, link, setup, doctor
+    audit, rescue, guard, index, ls, show, stats, tag, pin, unpin,
+    link, setup, stack, doctor
+
+  these call no model either, but do open a socket on
+  this machine — and only when you ask them to:
+    potsherd find      --with <tool>, to read another tool's store
+    potsherd export    --to <tool>, to write rows into one
+      claude-mem is read over http://127.0.0.1; agentmemory by
+      launching its mcp server, itself a shim over an http
+      backend on localhost. nothing leaves this machine, and
+      without the flag neither opens anything at all.
 
   who receives them:
     your own Claude subscription, via ~/.claude/local/claude

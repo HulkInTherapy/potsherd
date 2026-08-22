@@ -1,4 +1,4 @@
-potsherd find "pgbouncer" · 4 sessions · bm25 · 10ms
+potsherd find "pgbouncer" · 4 sessions · bm25 · 11ms
 
   Pool the ingest workers through pgbouncer                        claude · live
   data-pipeline · 21 aug · 8 exchanges · main                             0.0275
