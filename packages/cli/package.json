@@ -27,7 +27,7 @@
     "node": ">=22"
   },
   "bin": {
-    "potsherd": "./bin/potsherd.js"
+    "potsherd": "bin/potsherd.js"
   },
   "files": [
     "bin",

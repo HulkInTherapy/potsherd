@@ -61,7 +61,7 @@ sh plugins/claude-code/bin/potsherd audit
 
 That is the whole thing. No `pnpm install`, no build, no native module — the
 plugin carries its own bundled CLI and MCP server, and Node's own SQLite covers
-the database. **Measured in a fresh Debian container: `audit` in 117 ms.**
+the database. **Measured in a fresh Debian container: `audit` in 122 ms.**
 
 In Claude Code:
 
@@ -147,8 +147,10 @@ POTSHERD_SQLITE=node pnpm test                  # the same, on Node's own sqlite
 | `graft` budget | 137/150 · 222/1200 · 397/1200 · 487/1200 | ≤ budget | met |
 | `graft` citations | 3/3 · 5/5 · 7/7 · 10/10 · 13/13 | 100% | met |
 | plugin `SessionStart` | 6.5–10.5 ms hook time, 128–146 ms total | < 1 s | met |
-| fresh Ubuntu, clone only | audit 117 ms, index 333 ms | < 60 s to first audit | met |
-| fresh macOS `$HOME` | audit 183 ms | < 60 s | met |
+| fresh Debian container, node 24, clone only | audit 122 ms, index 397 ms | < 60 s to first audit | met |
+| fresh Debian container, node 22, clone only | audit 146 ms, index 420 ms | < 60 s | met |
+| fresh macOS `$HOME`, every override cleared | audit 183 ms, whole `audit→find` walk 1.86 s | < 60 s | met |
+| npm tarball into an empty project | 17 MB installed, `audit` runs | — | met |
 | tarball install | 17 MB; 1.6 s on one run and 2.9 s on another | — | recorded (was 764 MB) |
 
 The three misses are recorded rather than hidden, and in each case the *target*
