@@ -397,6 +397,36 @@ export const WEAK_FLOOR = 0.5;
  */
 export const STRONG_FLOOR = 0.75;
 
+/**
+ * The best a row whose only evidence is a **card** may ever be labelled.
+ *
+ * F6, and the reason it is a constant here rather than a rule in `recall.ts`:
+ * `strong` is a promise with a documented meaning — *an agent may act on this
+ * without reading the rows* — and this file is where that promise is defined.
+ *
+ * Why a card cannot keep it. A card is the artefact of a model call over a
+ * transcript. Coverage, the ceiling every other row is judged by, is counted
+ * over the text the row can show; for a card that text is the summary, so a
+ * card that happens to have paraphrased the user's question covers it
+ * perfectly and, at rank 1 of an uncorroborated list, scores
+ * `1.0 x (0.6 + 0.25) = 0.85` — comfortably {@link STRONG_FLOOR}. Corroborated
+ * by `vec_cards` it reaches 0.925. That is a summary certifying itself, and it
+ * was reachable before T10.7: `tests/cards-lane.test.ts` measures both numbers
+ * and then asserts the label is `weak` anyway.
+ *
+ * `weak` rather than `none`, deliberately. `none` would delete card-only rows
+ * at `find`'s default floor and turn the demotion into a silencing — and
+ * routing is the job Bet 02 was restated to *keep*. A card says "this thread
+ * is probably worth opening", which is exactly what `weak` means: worth a
+ * reader, not worth acting on.
+ */
+export const ROUTING_CEILING: Confidence = 'weak';
+
+/** The worse of two labels — a ceiling, where {@link maxConfidence} is a floor. */
+export function capConfidence(a: Confidence, b: Confidence): Confidence {
+  return RANK[a] <= RANK[b] ? a : b;
+}
+
 /** What one row of a result offers the calibrator. */
 export interface RowEvidence {
   /**
@@ -414,6 +444,15 @@ export interface RowEvidence {
   strength: number;
   /** Distinct lists that put this row in their candidates. */
   lists: number;
+  /**
+   * The best label this row is allowed to carry, whatever it scores.
+   *
+   * Absent for an ordinary row. `recall()` passes {@link ROUTING_CEILING} for
+   * a row whose only evidence is a card (F6). The mechanism is generic and the
+   * policy is not: this file owns what `strong` means, `recall.ts` owns which
+   * rows are disqualified from claiming it.
+   */
+  ceiling?: Confidence;
 }
 
 export interface Calibrated {
@@ -424,6 +463,17 @@ export interface Calibrated {
   coverage: number;
   strength: number;
   agreement: number;
+  /**
+   * The cap that was applied, when one was — so `--json` can say *why* a row
+   * scoring 0.925 is labelled `weak` rather than leaving a caller to conclude
+   * the two numbers disagree.
+   *
+   * {@link score} is **not** rewritten by the cap. The arithmetic stays true
+   * and the label is the thing that is refused; a capped score would have made
+   * `coverage x (base + …)` stop reproducing, which is the one property that
+   * makes this module debuggable from `--explain` alone.
+   */
+  ceiling?: Confidence;
 }
 
 /**
@@ -441,7 +491,19 @@ export function calibrate(e: RowEvidence): Calibrated {
   const score = clamp01(
     coverage * (WEIGHT_BASE + WEIGHT_STRENGTH * strength + WEIGHT_AGREEMENT * agreement),
   );
-  return { score, confidence: label(score), coverage, strength, agreement };
+  // The cap, when the caller named one. `capConfidence` is a `min` over the
+  // three-word ladder, so no score can climb past it — which is what makes "a
+  // card-only hit cannot reach `strong`" a fact about this function rather
+  // than a fact about how well cards happen to score.
+  const confidence = e.ceiling ? capConfidence(label(score), e.ceiling) : label(score);
+  return {
+    score,
+    confidence,
+    coverage,
+    strength,
+    agreement,
+    ...(e.ceiling ? { ceiling: e.ceiling } : {}),
+  };
 }
 
 /** Which band a calibrated score falls in. */

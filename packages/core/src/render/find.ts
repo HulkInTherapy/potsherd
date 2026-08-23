@@ -309,9 +309,18 @@ function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[]
     // the parent said something only the subagent ever said. Sidechains are
     // the one thing no other tool surfaces; burying them under a parent's
     // heading with no attribution is the same as not surfacing them.
-    const mark = memberMark(s, hit, t);
+    const mark = memberMark(s, hit, t) + laneMark(hit, t);
     const rendered = snippetLine(hit, t, width - 2 - Theme.len(mark));
     if (rendered) lines.push(INDENT + '  ' + mark + rendered);
+  }
+  // F6 — the block says, in its own words, that nothing under it is a
+  // transcript. The snippet above it is a model's paragraph about the session,
+  // and it is highlighted and quoted exactly like a sentence somebody typed;
+  // without this line a reader has no way to tell the two apart, which is the
+  // whole of the finding. The word "routing" is on the line because it is also
+  // the instruction: this is a thread to open, not a fact to repeat.
+  if (s.lane === 'routing') {
+    lines.push(INDENT + '  ' + t.dim(f.clip(CARD_ONLY_NOTE, width - 2, t)));
   }
   // Why is this block on the screen? A snippet with a highlighted word answers
   // that by itself. When no snippet carries one — the title matched, or the
@@ -319,7 +328,7 @@ function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[]
   // block has to say so in words, or the reader is left looking at a paragraph
   // with no visible connection to what they typed. That was the T1.7 review's
   // sharpest complaint and it is a one-line fix.
-  if (s.hits.length > 0 && !quotable.some((h) => h.snippet.match)) {
+  if (s.hits.length > 0 && !quotable.some((h) => h.snippet.match) && s.lane !== 'routing') {
     lines.push(INDENT + '  ' + t.dim(f.clip(unmatchedReason(s, r), width - 2, t)));
   }
 
@@ -390,10 +399,43 @@ function memberMark(s: RecallSession, hit: RecallHit, t: Theme): string {
   return t.dim(`${who} `);
 }
 
+/**
+ * What a card-only block says about itself, in the human view.
+ *
+ * Exported because `tests/cards-lane.test.ts` asserts the screen carries it
+ * and because a second spelling of this sentence somewhere else would be a
+ * second thing to keep true. `--json` does not carry the sentence — it carries
+ * `lane: "routing"` on the block and on the hit, so nothing has to parse
+ * prose to filter on it.
+ */
+export const CARD_ONLY_NOTE =
+  'card only — routing, not evidence: this is a summary of that session, not its transcript';
+
+/**
+ * `card` in front of a snippet cut from one.
+ *
+ * A card hit's snippet is the card's title and summary, and it is windowed,
+ * highlighted and printed in exactly the space a transcript quote occupies. On
+ * the audit's screen three of those sat above the real transcripts, quoting
+ * sentences no human ever typed, with nothing on the line to say so — `find`
+ * only admitted it when *nothing* in the block could show a match
+ * ({@link unmatchedReason}), which is the case that does not arise when the
+ * card matched well.
+ */
+function laneMark(hit: RecallHit, t: Theme): string {
+  return hit.kind === 'card' ? t.dim('card ') : '';
+}
+
 /** One line saying why a block with no quotable match is in the results. */
 function unmatchedReason(s: RecallSession, r: RecallResult): string {
   if (s.hits.some((h) => h.kind === 'card')) {
-    return 'the session card matched; the transcript does not use those words';
+    // The honest note the audit quoted approvingly — kept, and no longer the
+    // only thing standing between a summary and a citation. A `routing` block
+    // prints {@link CARD_ONLY_NOTE} instead, which says the same thing and
+    // also says what to do with it.
+    return s.lane === 'routing'
+      ? CARD_ONLY_NOTE
+      : 'the session card matched; the transcript does not use those words';
   }
   if (s.hits.some((h) => h.kind === 'title')) {
     return 'the session title matched; the body does not use those words';
@@ -566,6 +608,12 @@ function footer(r: RecallResult, t: Theme): string {
   const sidechains = r.sessions.filter(
     (s) => s.isSidechain || s.hits.some((h) => h.isSidechain && h.sessionId !== s.id),
   ).length;
+  // F6 — how much of this page is not evidence, counted rather than described.
+  // It goes first, ahead of the ghost and subagent counts, because it is the
+  // one number on the line that changes what the reader should do with the
+  // rows above it.
+  const routing = r.sessions.filter((s) => s.lane === 'routing').length;
+  if (routing) parts.push(`${f.num(routing)} card-only ${t.dash} routing, not evidence`);
   if (ghosts) parts.push(`${f.num(ghosts)} ghost ${f.plural(ghosts, 'hit')}`);
   if (sidechains) parts.push(`${f.num(sidechains)} from subagents`);
   if (r.relaxed) parts.push('relaxed to any-word matching');
