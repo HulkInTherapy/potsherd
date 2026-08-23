@@ -1,0 +1,7 @@
+{
+  "name": "potsherd-claude-code-plugin",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Marks dist/*.js as ES modules when this directory is installed on its own. A marketplace install copies only plugins/claude-code/, so the repository's root package.json is not found; Node then uses the nearest one above — on a real machine that is ~/.claude/package.json, which has no \"type\" field — and the bundle fails to load as CommonJS. A copy in /tmp has no package.json above it, so Node auto-detects ESM and the same bundle runs: that is why the fresh-copy test passed while the real install crashed."
+}

@@ -563,6 +563,7 @@ describe('the version a user reads', () => {
       ['packages/mcp/package.json', (o) => o['version']],
       ['packages/bridges/package.json', (o) => o['version']],
       ['plugins/claude-code/.claude-plugin/plugin.json', (o) => o['version']],
+      ['plugins/claude-code/package.json', (o) => o['version']],
       ['plugins/codex/.codex-plugin/plugin.json', (o) => o['version']],
       [
         '.claude-plugin/marketplace.json',
