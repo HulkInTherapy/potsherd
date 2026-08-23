@@ -85,7 +85,19 @@ export async function runGraft(o: GraftCommandOptions): Promise<number> {
     });
 
     if (o.json) {
-      printJson(graftJson(report));
+      // `graftJson` is the shared shape; the chain is added here rather than
+      // there so that a caller who grafts a session that was never forked sees
+      // exactly the object it saw before, with `sessions: 1`.
+      //
+      // Both fields matter to an agent. `sessions` says the exchange count is
+      // a **thread's**, spanning transcripts, so it cannot be reconciled
+      // against `show <id>` on the id alone; `threadId` is the root, which is
+      // the stable name for the work across every fork of it.
+      printJson({
+        ...graftJson(report),
+        sessions: report.sessions,
+        threadId: report.threadId,
+      });
       return 0;
     }
     print(renderGraft(report, themeFrom(o)));

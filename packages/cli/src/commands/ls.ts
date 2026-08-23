@@ -59,6 +59,12 @@ export async function runLs(o: LsCommandOptions): Promise<number> {
         ghosts: result.ghosts,
         sidechains: result.sidechains,
         rolledUp: result.rolledUp,
+        // Earlier links of a fork/resume chain, folded into the row of the
+        // link that carries the work (`threads.ts`, audit F4). Reported for
+        // the same reason `rolledUp` is: a listing that quietly drops rows is
+        // lying about the archive, and a script needs to know the count is a
+        // thread's rather than a file's.
+        threaded: result.threaded,
         // The names of the ignored projects live here and not on the screen:
         // a script needs them, a screenshot must not carry them.
         ignored: result.ignored,
@@ -100,6 +106,9 @@ export async function runLs(o: LsCommandOptions): Promise<number> {
           exchanges: s.exchanges,
           bytes: s.bytes,
           resume: s.resume,
+          // The chain, with every member's id, so a script can still address
+          // the transcripts the human view folded. Null is the ordinary case.
+          thread: s.thread,
         })),
       });
       return 0;

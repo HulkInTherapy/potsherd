@@ -84,6 +84,16 @@ export async function runShow(o: ShowCommandOptions): Promise<number> {
         exchanges: result.exchanges,
         ghostPrompts: result.ghostPrompts ?? null,
         children: result.children,
+        // The fork/resume chain this transcript is a link in (`threads.ts`).
+        //
+        // `show` deliberately still renders **one transcript**: asked for a
+        // session id it prints that session's exchanges and no others. What it
+        // could not do before was say where the rest of the work went — an
+        // agent reading four exchanges had no way to learn that 119 more sit
+        // one hop away under a different id. `session.thread` is that pointer,
+        // and it names every link so the next call can be made without a
+        // search.
+        thread: result.session.thread,
         // The whole card, not `cardTitle` and `cardSource`. A machine reader
         // asking `show --json` for a carded session was getting the two
         // fields the *title* needed and none of the card (T2.7 D3).

@@ -9,6 +9,7 @@ import { resolveSession, showSession, type ShowResult } from './browse.js';
 import { readCard, type StoredCard } from './cards/write.js';
 import { PROMPTS_ONLY } from './cards/ghost.js';
 import { projectName } from './recall.js';
+import { sessionDay, threadOf, threadTotals, type Thread } from './threads.js';
 import { recall } from './recall.js';
 import {
   CHARS_PER_TOKEN,
@@ -78,7 +79,12 @@ export interface GraftResult {
   project: string;
   harness: Harness;
   about: string | null;
+  /** Exchanges the brief was drawn from — the **thread's**, not the file's. */
   exchanges: number;
+  /** Transcripts that thread spans. 1 for a session nothing was forked from. */
+  sessions: number;
+  /** The root of the fork/resume chain; equals `sessionId` for a thread of one. */
+  threadId: string;
   date: string;
   budget: number;
   tokens: number;
@@ -244,10 +250,23 @@ export function sourceLine(o: {
   date: string;
   /** True when the source is a ghost, in which case `exchanges` counts prompts. */
   isGhost?: boolean;
+  /**
+   * Transcripts the count spans, when the source is a fork/resume chain.
+   *
+   * One is the whole history of this line and prints nothing, so every brief
+   * ever written keeps the wording it had. More than one has to be said: a
+   * `source:` line claiming 123 exchanges of a session whose transcript holds
+   * 4 is exactly the unattributable citation this line exists to prevent, and
+   * the reader needs to know that `--resume` on the id gets them the newest
+   * link and not the whole chain.
+   */
+  sessions?: number;
 }): string {
   const n = o.exchanges;
   const noun = o.isGhost ? 'prompt' : 'exchange';
-  return `source: ${o.harness} ${o.sessionId} · ${n} ${noun}${n === 1 ? '' : 's'} · ${o.date}`;
+  const across =
+    o.sessions && o.sessions > 1 ? ` across ${o.sessions} sessions` : '';
+  return `source: ${o.harness} ${o.sessionId} · ${n} ${noun}${n === 1 ? '' : 's'}${across} · ${o.date}`;
 }
 
 // --------------------------------------------------------------- counting
@@ -786,7 +805,7 @@ export interface GraftSource {
    * a card, which used to leave the prompt with no session content at all.
    * {@link sliceVia} says which.
    */
-  slice: { seq: number; ts: string | null; text: string }[];
+  slice: { seq: number; ts: string | null; text: string; id8: string }[];
   /**
    * How {@link slice} was chosen: the `--about` topic, the recency default, or
    * `null` when it is empty. The card-only path keys off this, so that a
@@ -794,8 +813,16 @@ export interface GraftSource {
    * exchange — is not mistaken for a topic the user actually asked for.
    */
   sliceVia: 'about' | 'recent' | null;
-  /** Exchanges (or prompts) the whole session holds. */
+  /**
+   * Exchanges (or prompts) the whole **thread** holds.
+   *
+   * The audit's fixture is why this is not `show.total`: the session the user
+   * was last working in holds 4 exchanges and its chain holds 123, and a brief
+   * that says 4 is a brief that tells a returning agent to look somewhere else.
+   */
   exchanges: number;
+  /** The fork/resume chain, root first. One entry when there is no chain. */
+  thread: Thread;
   date: string;
   harness: Harness;
   project: string;
@@ -843,22 +870,43 @@ export async function collectSource(
   const card = readCard(db, sessionId);
   const id8 = sessionId.slice(0, 8);
 
+  // **F4.** The unit is the chain, not the file. `claude --resume` writes a
+  // new transcript whose head is a copy of the old one, and potsherd's dedup
+  // correctly leaves the copied exchanges with the session that had them
+  // first — so the transcript the user names is the one with the *least* of
+  // their work in it. Every session is a thread here, of one link or of
+  // several, so nothing below has a special case for the ordinary shape.
+  const thread = threadOf(db, sessionId);
+  const totals = threadTotals(db, thread);
+  const chained = thread.sessions.length > 1;
+
   const slice: GraftSource['slice'] = [];
   let sliceVia: GraftSource['sliceVia'] = null;
   const about = o.about?.trim();
   if (about) {
-    const hits = await recall(
-      db,
-      about,
-      { sessionId },
-      { limit: 1, perSession: Math.max(1, o.k ?? ABOUT_K), ...(o.root ? { root: o.root } : {}) },
-    );
-    const wanted = hits.hits.filter((h) => h.sessionId === sessionId && typeof h.seq === 'number');
-    for (const h of wanted.slice(0, o.k ?? ABOUT_K)) {
-      const text = sliceText(h.userText ?? '', h.assistantText ?? '', isGhost);
-      if (text) slice.push({ seq: h.seq as number, ts: h.ts ?? null, text });
+    // One `recall` per link. The chain is two or three transcripts, never
+    // hundreds, and a filter that took a list would be a change to `recall`'s
+    // shape for the sake of a loop this short.
+    const perSession = Math.max(1, o.k ?? ABOUT_K);
+    const found: { seq: number; ts: string | null; text: string; id8: string }[] = [];
+    for (const member of thread.sessions) {
+      const hits = await recall(
+        db,
+        about,
+        { sessionId: member },
+        { limit: 1, perSession, ...(o.root ? { root: o.root } : {}) },
+      );
+      const wanted = hits.hits.filter((h) => h.sessionId === member && typeof h.seq === 'number');
+      for (const h of wanted.slice(0, perSession)) {
+        const text = sliceText(h.userText ?? '', h.assistantText ?? '', isGhost);
+        if (text) found.push({ seq: h.seq as number, ts: h.ts ?? null, text, id8: member.slice(0, 8) });
+      }
     }
-    slice.sort((a, b) => a.seq - b.seq);
+    // Chronological across the chain, then cut: the newest link's exchanges
+    // are the ones a re-entry brief is for, and `--about` on a thread that
+    // matched in both links must not spend the whole budget on the older one.
+    found.sort((a, b) => (a.ts ?? '').localeCompare(b.ts ?? '') || a.seq - b.seq);
+    for (const f of found.slice(-(o.k ?? ABOUT_K))) slice.push(f);
     sliceVia = slice.length ? 'about' : null;
   } else if (!card) {
     // **T4.7a G1.** No topic and no card used to mean *no material*: the
@@ -871,24 +919,29 @@ export async function collectSource(
     // for: *where did I leave off*. No embedder and no query are involved, so
     // this works offline, with `--no-embed`, and on a session `recall` has
     // never scored.
+    //
+    // **The tail of the thread, not of the file (F4).** On the audit's
+    // fixture the newest link holds 4 exchanges and the link before it holds
+    // 119; the last eight exchanges of the *work* straddle the two, and a
+    // brief built from one file alone is a brief about whichever end of the
+    // chain the user happened to name.
     const units = show.ghostPrompts
-      ? show.ghostPrompts.map((p) => ({ seq: p.seq, ts: p.ts, user: p.text, assistant: '' }))
-      : show.exchanges.map((e) => ({
-          seq: e.seq,
-          ts: e.ts,
-          user: e.userText ?? '',
-          assistant: e.assistantText ?? '',
-        }));
+      ? show.ghostPrompts.map((p) => ({
+          seq: p.seq,
+          ts: p.ts,
+          user: p.text,
+          assistant: '',
+          id8: sessionId.slice(0, 8),
+        }))
+      : threadUnits(db, thread);
     for (const u of units.slice(-Math.max(1, o.k ?? RECENT_K))) {
       const text = sliceText(u.user, u.assistant, isGhost);
-      if (text) slice.push({ seq: u.seq, ts: u.ts, text });
+      if (text) slice.push({ seq: u.seq, ts: u.ts, text, id8: u.id8 });
     }
-    slice.sort((a, b) => a.seq - b.seq);
     sliceVia = slice.length ? 'recent' : null;
   }
 
   const s = show.session;
-  const when = s.endedAt ?? s.startedAt ?? null;
   return {
     sessionId,
     show,
@@ -897,12 +950,57 @@ export async function collectSource(
     id8,
     slice,
     sliceVia,
-    exchanges: show.total,
-    date: when ? when.slice(0, 10) : 'unknown date',
+    // A ghost has no thread — `history.jsonl` kept prompts, not records — so
+    // its count stays its own, and the noun stays `prompts`.
+    exchanges: isGhost || !chained ? show.total : totals.exchanges,
+    thread,
+    // **The promoted rule.** This used to be `s.endedAt ?? s.startedAt`, right
+    // here, and it was the only correct dating computation in the codebase:
+    // `graft` printed 2026-08-20 for the audit's fixture while `show`, `ls`
+    // and `find` printed 12 aug. It now lives in `threads.ts` where every verb
+    // can reach it, and the copy that was here is gone.
+    date: sessionDay(
+      chained ? { startedAt: totals.startedAt, endedAt: totals.endedAt } : s,
+    ),
     harness: s.harness,
     project: projectName(s.project),
     title: s.displayTitle,
   };
+}
+
+/**
+ * Every exchange of a whole chain, oldest first.
+ *
+ * Ordered by timestamp and not by `seq`, because `seq` restarts at 1 in each
+ * transcript: sorting a merged chain by seq would interleave the newest link's
+ * first exchange with the root's first exchange and call the result
+ * chronological.
+ */
+function threadUnits(
+  db: Db,
+  thread: Thread,
+): { seq: number; ts: string | null; user: string; assistant: string; id8: string }[] {
+  const marks = thread.sessions.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT session_id, seq, ts, user_text, assistant_text FROM exchanges
+        WHERE session_id IN (${marks})
+        ORDER BY COALESCE(ts, ''), session_id, seq`,
+    )
+    .all(...thread.sessions) as {
+    session_id: string;
+    seq: number;
+    ts: string | null;
+    user_text: string;
+    assistant_text: string;
+  }[];
+  return rows.map((r) => ({
+    seq: r.seq,
+    ts: r.ts,
+    user: r.user_text ?? '',
+    assistant: r.assistant_text ?? '',
+    id8: r.session_id.slice(0, 8),
+  }));
 }
 
 // ------------------------------------------------------------- the prompt
@@ -936,12 +1034,20 @@ export function buildPrompt(src: GraftSource, o: { about?: string | null; budget
   }
   const lines: string[] = [];
   const about = o.about?.trim();
+  const chained = src.thread.sessions.length > 1;
   // The budget the model is asked for is under the ceiling, because the trim
   // that follows is a fallback, not the plan.
   const askFor = Math.max(80, Math.floor(o.budget * 0.75));
 
   lines.push(`Session ${src.id8} · ${src.harness} · project ${src.project || 'unknown'} · ${src.date}`);
   lines.push(`Title: ${src.title}`);
+  if (chained) {
+    lines.push(
+      `This session is the newest link of a ${src.thread.sessions.length}-transcript chain ` +
+        `(${src.thread.sessions.map((id) => id.slice(0, 8)).join(' → ')}), ` +
+        `${src.exchanges} exchanges of one continuous piece of work. Treat it as one session.`,
+    );
+  }
   if (src.isGhost) {
     lines.push(
       'THIS SESSION IS A GHOST: only the user prompts survive. The assistant side was deleted ' +
@@ -980,7 +1086,11 @@ export function buildPrompt(src: GraftSource, o: { about?: string | null; budget
         : `## the last ${src.slice.length} exchange${src.slice.length === 1 ? '' : 's'} of the session`,
     );
     for (const ex of src.slice) {
-      lines.push('', `[seq ${ex.seq}${ex.ts ? ` · ${ex.ts.slice(0, 10)}` : ''}]`, ex.text);
+      // The citation token itself, not a bare `seq`, once a brief can draw on
+      // more than one transcript: the model is told to copy what it sees, and
+      // what it sees has to be the thing that resolves.
+      const tag = chained ? `[${ex.id8}@${ex.seq}` : `[seq ${ex.seq}`;
+      lines.push('', `${tag}${ex.ts ? ` · ${ex.ts.slice(0, 10)}` : ''}]`, ex.text);
     }
     lines.push('');
   }
@@ -996,12 +1106,14 @@ export function buildPrompt(src: GraftSource, o: { about?: string | null; budget
     `Hard rules:`,
     `- At most ${askFor} tokens. Shorter is better. No preamble, no sign-off, no headings.`,
     `- Markdown bullets only, one fact per bullet.`,
-    `- Every bullet ends with a citation: a literal open bracket, ${src.id8}, an at sign, the seq number, a close bracket. ` +
-      `Write the actual number. A bullet you send with the word "seq" still in it will be deleted.`,
+    chained
+      ? `- Every bullet ends with a citation in square brackets, copied exactly as it appears above the exchange it came from — the eight characters, an at sign, the number. This work spans ${src.thread.sessions.length} transcripts and the eight characters differ between them; never move a number from one to another.`
+      : `- Every bullet ends with a citation: a literal open bracket, ${src.id8}, an at sign, the seq number, a close bracket. ` +
+        `Write the actual number. A bullet you send with the word "seq" still in it will be deleted.`,
     `- Two sources on one bullet are written as two separate bracket pairs, never inside one pair.`,
     legal.length
-      ? `- The ONLY legal seq numbers are: ${legal.join(', ')}. A bullet you cannot cite from that list is a bullet you must not write.`
-      : `- You have no seq numbers to cite. Write nothing but the single line: NONE.`,
+      ? `- The ONLY legal citations are: ${legal.join(', ')}. A bullet you cannot cite from that list is a bullet you must not write.`
+      : `- You have nothing to cite. Write nothing but the single line: NONE.`,
     `- State decisions and open threads. Do not restate the title.`,
     src.isGhost
       ? `- Say nothing about what the assistant replied; only what the user asked for.`
@@ -1026,21 +1138,35 @@ export function hasMaterial(src: GraftSource): boolean {
   return Boolean(src.card) || src.slice.length > 0;
 }
 
-function legalSeqs(src: GraftSource): number[] {
-  const out = new Set<number>();
-  for (const ex of src.slice) out.add(ex.seq);
+/**
+ * The citations the model is allowed to write, in the form it must write them.
+ *
+ * Bare seq numbers while the brief draws on one transcript — which is every
+ * brief that ever shipped, and the wording those tests pin. A chain has to
+ * name the transcript too, because seq 1 exists in each link and means a
+ * different exchange in each.
+ */
+function legalSeqs(src: GraftSource): string[] {
+  const chained = src.thread.sessions.length > 1;
+  const out = new Set<string>();
+  const add = (seq: number, id8: string): void => {
+    out.add(chained ? `${id8}@${seq}` : String(seq));
+  };
+  for (const ex of src.slice) add(ex.seq, ex.id8);
   if (src.card) {
-    for (const d of src.card.card.decisions) for (const s of d.evidence_seq) out.add(s);
-    for (const t of src.card.card.open_threads) for (const s of t.evidence_seq) out.add(s);
+    for (const d of src.card.card.decisions) for (const s of d.evidence_seq) add(s, src.id8);
+    for (const t of src.card.card.open_threads) for (const s of t.evidence_seq) add(s, src.id8);
   }
   if (out.size === 0) {
     // No topic and no card: offer the first and last few exchanges, which is
     // what a brief with nothing else to go on can honestly cite.
     const seqs = src.show.exchanges.map((e) => e.seq);
     const prompts = src.show.ghostPrompts?.map((p) => p.seq) ?? [];
-    for (const s of [...seqs, ...prompts].slice(0, 12)) out.add(s);
+    for (const s of [...seqs, ...prompts].slice(0, 12)) add(s, src.id8);
   }
-  return [...out].sort((a, b) => a - b).slice(0, 40);
+  const list = [...out];
+  if (!chained) list.sort((a, b) => Number(a) - Number(b));
+  return list.slice(0, 40);
 }
 
 // ---------------------------------------------------------- the card path
@@ -1065,14 +1191,18 @@ export function cardOnlyBody(src: GraftSource): string[] {
       ? src.show.ghostPrompts.map((p) => ({ seq: p.seq, text: p.text }))
       : src.show.exchanges.map((e) => ({ seq: e.seq, text: e.userText }));
     const chosen = src.slice.length
-      ? src.slice.map((s) => ({ seq: s.seq, text: s.text }))
-      : units.slice(0, 8);
+      ? src.slice.map((s) => ({ seq: s.seq, text: s.text, id8: s.id8 }))
+      : units.slice(0, 8).map((u) => ({ ...u, id8: src.id8 }));
     for (const u of chosen) {
       // T4.7a G5: `units` is raw transcript, so a harness wrapper reaches this
       // path when `--about` matched nothing and there is no card. The slice is
       // already stripped in `collectSource`; stripping twice is a no-op.
       const text = clipSafe(stripHarnessBoilerplate(u.text).replace(/\s+/g, ' ').trim(), 200);
-      if (text) out.push(`- ${text} [${src.id8}@${u.seq}]`);
+      // The citation names the transcript the exchange is **in**, not the one
+      // the user typed. On a chain those differ, and an `[id8@seq]` pointing
+      // at the wrong link is a citation that does not resolve — which the pass
+      // below would delete, taking the line with it.
+      if (text) out.push(`- ${text} [${u.id8}@${u.seq}]`);
     }
     return out;
   }
@@ -1108,7 +1238,7 @@ export function cardOnlyBody(src: GraftSource): string[] {
     out.push('', '**from the transcript**');
     for (const ex of src.slice) {
       const text = clipSafe(ex.text.replace(/\s+/g, ' ').trim(), 220);
-      if (text) out.push(`- ${text} [${src.id8}@${ex.seq}]`);
+      if (text) out.push(`- ${text} [${ex.id8}@${ex.seq}]`);
     }
   }
   return out;
@@ -1310,6 +1440,8 @@ export async function graft(db: Db, target: string, o: GraftOptions = {}): Promi
     harness: src.harness,
     about,
     exchanges: src.exchanges,
+    sessions: src.thread.sessions.length,
+    threadId: src.thread.id,
     date: src.date,
     budget,
     tokens: budgeted.tokens,
@@ -1344,7 +1476,14 @@ function buildHead(
   // a claim about the brief that the brief itself contradicts. `sliceVia`
   // carries exactly the fact needed: the topic is only claimed when the topic
   // is what chose the material.
-  const cite = `Written by potsherd; every claim carries \`[${src.id8}@seq]\`, the exchange it came from.`;
+  // The header promises the shape of the citations below it, so on a chain it
+  // has to promise the shape the chain actually uses: the links have different
+  // id8s, and a header naming one of them is a header the body contradicts.
+  const chained = src.thread.sessions.length > 1;
+  const cite = chained
+    ? `Written by potsherd from ${src.thread.sessions.length} transcripts of one thread; every claim ` +
+      `carries \`[id8@seq]\` — the transcript and the exchange it came from.`
+    : `Written by potsherd; every claim carries \`[${src.id8}@seq]\`, the exchange it came from.`;
   if (o.about && src.sliceVia === 'about') {
     head.push(`Brief from a past session, about **${o.about}**. ${cite}`);
   } else if (o.about) {
@@ -1392,6 +1531,7 @@ function buildTail(src: GraftSource, pass: CitationPass): string[] {
       exchanges: src.exchanges,
       date: src.date,
       isGhost: src.isGhost,
+      sessions: src.isGhost ? 1 : src.thread.sessions.length,
     }),
   );
   return tail;
