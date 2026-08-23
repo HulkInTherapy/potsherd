@@ -55,7 +55,7 @@ describe('the plugin directory, installed on its own under a commonjs parent', (
     expect(r.stderr).not.toMatch(/Failed to load the ES module|Cannot use import statement/);
   });
 
-  it('the bundled MCP server answers tools/list with all six tools', () => {
+  it('the bundled MCP server answers tools/list with all three tools', () => {
     const frames = [
       { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '0' } } },
       { jsonrpc: '2.0', method: 'notifications/initialized' },
@@ -74,7 +74,9 @@ describe('the plugin directory, installed on its own under a commonjs parent', (
       .find((d) => d && d.id === 2);
     expect(reply, 'no tools/list reply').toBeTruthy();
     const names = reply.result.tools.map((t: { name: string }) => t.name).sort();
-    expect(names).toEqual(['potsherd_ask', 'potsherd_find', 'potsherd_graft', 'potsherd_ls', 'potsherd_read', 'potsherd_tag']);
+    // T10.6 §B7: three tools. `plugins/*/dist` is build output — this passes
+    // once the orchestrator has run `pnpm vendor`.
+    expect(names).toEqual(['potsherd_graft', 'potsherd_read', 'potsherd_recall']);
   });
 
   it('and the same copy WITHOUT its package.json fails the way the install did', () => {

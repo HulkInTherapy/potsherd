@@ -105,26 +105,59 @@ export type ScopeArg = z.infer<typeof SCOPE>;
 
 // --------------------------------------------------------------- confidence
 //
-// T10.1 (audit F1, plan §B1) is adding a one-word calibration label to every
-// `recall` row and to the result envelope, in the human view and `--json`
-// alike, and making a `none` result return zero rows.
+// T10.1 (audit F1, plan §B1) has LANDED on main. Its shape is no longer an
+// assumption, and this block is written against the real one:
 //
-// This package **reads** that label; it does not compute one. That distinction
-// is the whole point of F1: a second implementation of "is this a good match"
-// living at the MCP surface would be a second answer the user could catch
-// disagreeing with the first, and an agent cannot act on two cliffs.
+//   envelope  `confidence`, `minConfidence`, `belowFloor` (rows withheld)
+//   row       `confidence`, `calibration.{score,coverage,strength,agreement}`
+//   type      `Confidence` is exported from the `@potsherd/core` barrel
 //
-// So there is exactly one string constant naming the field and exactly one
-// function reading it. When T10.1 lands with a different name, this constant is
-// the diff.
+// This package **reads** those fields; it does not compute one. That
+// distinction is the whole point of F1: a second implementation of "is this a
+// good match" living at the MCP surface would be a second answer the user
+// could catch disagreeing with the first, and an agent cannot act on two
+// cliffs.
+//
+// **The one thing integration still has to do.** This worktree was cut before
+// T10.1 landed and may not fetch, so `Confidence` is declared here rather than
+// imported. It is the same three words in the same order. At integration,
+// delete the `export type Confidence` line below and add core to the import at
+// the top of this file:
+//
+//     import { type Confidence } from '@potsherd/core';
+//
+// Nothing else changes: every read already goes through the three functions
+// underneath, and every field name is a constant.
 
+/** @see the note above — replace with the `@potsherd/core` export at integration. */
 export type Confidence = 'strong' | 'weak' | 'none';
 
-/** The field name T10.1 is adding. The one place integration has to touch. */
+/** The field name on a row and on the envelope. */
 export const CONFIDENCE_FIELD = 'confidence';
+
+/** The envelope's floor, and the count of rows the floor withheld. */
+export const MIN_CONFIDENCE_FIELD = 'minConfidence';
+export const BELOW_FLOOR_FIELD = 'belowFloor';
+
+/** The per-row calibration detail T10.1 attaches. */
+export const CALIBRATION_FIELD = 'calibration';
 
 /** The three words, in order, worst last. */
 export const CONFIDENCE_VALUES: readonly Confidence[] = ['strong', 'weak', 'none'];
+
+/**
+ * The floor the agent-facing door searches at.
+ *
+ * `'weak'` — the same value the orchestrator has already given `find`, so the
+ * human path and the model path return an honest empty on the same cliff. This
+ * is the single most important line in this package and it is the reason F1
+ * mattered: without a floor, `find` returned ten confident-looking rows for a
+ * word that does not exist in any human language, and the rational thing for
+ * an agent to do with that is to distrust the whole result set and answer from
+ * the repository in front of it. Which is exactly what the audit's two
+ * archaeologist runs did.
+ */
+export const AGENT_FLOOR: Confidence = 'weak';
 
 /**
  * The confidence a core object carries, or `null` when this build's core does
@@ -133,11 +166,40 @@ export const CONFIDENCE_VALUES: readonly Confidence[] = ['strong', 'weak', 'none
  * `null` is not `'none'` and must never be rendered as one. `'none'` is a
  * measurement — *the archive does not contain this* — and it is the answer the
  * auditor said buys more trust than a page of maybes. `null` is the absence of
- * a measurement, which is exactly the v1.1.0 state the audit scored 3/10, and
- * the reply says so in words rather than pretending to a cliff it does not have.
+ * a measurement, which is the pre-T10.1 state the audit scored 3/10, and the
+ * reply says so in words rather than pretending to a cliff it does not have.
  */
 export function confidenceOf(row: unknown): Confidence | null {
+  return readConfidence(row, CONFIDENCE_FIELD);
+}
+
+/** The floor a result was searched at, as the core result reports it. */
+export function minConfidenceOf(result: unknown): Confidence | null {
+  return readConfidence(result, MIN_CONFIDENCE_FIELD);
+}
+
+/** How many rows the floor withheld, as the core result counted them. */
+export function belowFloorOf(result: unknown): number | null {
+  if (!result || typeof result !== 'object') return null;
+  const v = (result as Record<string, unknown>)[BELOW_FLOOR_FIELD];
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * T10.1's per-row detail — `{ score, coverage, strength, agreement }` — passed
+ * through untouched.
+ *
+ * Passed through rather than projected field by field, on purpose. This is the
+ * arithmetic behind the one-word label, and the surface that re-listed its
+ * members by hand would silently drop the fifth one T10.1 adds next.
+ */
+export function calibrationOf(row: unknown): unknown {
   if (!row || typeof row !== 'object') return null;
-  const v = (row as Record<string, unknown>)[CONFIDENCE_FIELD];
+  return (row as Record<string, unknown>)[CALIBRATION_FIELD] ?? null;
+}
+
+function readConfidence(o: unknown, field: string): Confidence | null {
+  if (!o || typeof o !== 'object') return null;
+  const v = (o as Record<string, unknown>)[field];
   return v === 'strong' || v === 'weak' || v === 'none' ? (v as Confidence) : null;
 }

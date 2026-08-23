@@ -356,7 +356,7 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
       expect((JSON.parse(audit.stdout) as { deleted: number }).deleted).toBe(3);
     });
 
-    it('carries an MCP server that starts and lists its six tools', () => {
+    it('carries an MCP server that starts and lists its three tools', () => {
       const dir = cloned();
       // One `tools/list` over stdio. A server that fails to start is invisible
       // by design, so the only honest check is to speak the protocol to it.
@@ -382,13 +382,13 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
         .map((l) => JSON.parse(l) as { id?: number; result?: { tools?: { name: string }[] } })
         .find((m) => m.id === 2)?.result?.tools;
       expect(tools, `no tools/list reply. stderr:\n${r.stderr}`).toBeDefined();
+      // T10.6 §B7 collapsed six tools to three. The bundle under test here is
+      // `plugins/*/dist`, which is BUILD OUTPUT: this assertion is true of the
+      // source and becomes true of the bundle when `pnpm vendor` runs.
       expect((tools ?? []).map((t) => t.name).sort()).toEqual([
-        'potsherd_ask',
-        'potsherd_find',
         'potsherd_graft',
-        'potsherd_ls',
         'potsherd_read',
-        'potsherd_tag',
+        'potsherd_recall',
       ]);
     });
   });

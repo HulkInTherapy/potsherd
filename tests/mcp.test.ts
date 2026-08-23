@@ -9,6 +9,7 @@ import { indexAll, paths } from '@potsherd/core';
 import { makeContext, resolveGraftCwd } from '../packages/mcp/src/context.js';
 import { TOOLS, WRITE_TOOLS } from '../packages/mcp/src/server.js';
 import { runRecall } from '../packages/mcp/src/tools/recall.js';
+import { AGENT_FLOOR, CONFIDENCE_VALUES } from '../packages/mcp/src/tools/shapes.js';
 import * as shipped from '../packages/mcp/src/descriptions.js';
 import {
   call,
@@ -410,6 +411,77 @@ describe('the cliff (F1) — confidence, read and never re-derived', () => {
     }
     // The budget is honoured, in the est. tokens the reply itself reports.
     expect(Number(r['windowTokens'])).toBeLessThanOrEqual(Number(r['windowBudget']));
+  });
+
+  it('searches at the same floor the human view searches at', async () => {
+    // T10.1 landed `minConfidence` and the orchestrator gave `find` the floor
+    // at 'weak'. The model-facing door has to search at the SAME floor, or an
+    // agent gets rows a human was spared — which is audit F1 with the blame
+    // moved rather than the defect fixed.
+    expect(AGENT_FLOOR).toBe('weak');
+    expect(CONFIDENCE_VALUES).toEqual(['strong', 'weak', 'none']);
+
+    // Asserted on the source as well as on the constant, because the constant
+    // being right is worth nothing if the call site stops passing it. This is
+    // the one line in the package whose deletion would be silent.
+    const src = fs.readFileSync(
+      path.join(repo, 'packages', 'mcp', 'src', 'tools', 'recall.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/\[MIN_CONFIDENCE_FIELD\]:\s*AGENT_FLOOR/);
+    expect(src).toMatch(/await recall\(db, query, filters, options\)/);
+  });
+
+  it('reports the floor it ran at and how many rows it withheld', async () => {
+    const r = await runRecall(ctx(), { query: 'pgbouncer' });
+    expect('minConfidence' in r).toBe(true);
+    expect('belowFloor' in r).toBe(true);
+    const floor = r['minConfidence'];
+    expect(floor === null || CONFIDENCE_VALUES.includes(floor as never)).toBe(true);
+    const withheld = r['belowFloor'];
+    expect(withheld === null || typeof withheld === 'number').toBe(true);
+  });
+
+  it('passes T10.1 calibration through untouched rather than re-projecting it', async () => {
+    // `{ score, coverage, strength, agreement }` is the arithmetic behind the
+    // one-word label. A surface that re-listed its members by hand would drop
+    // the fifth one T10.1 adds next, so it is passed through whole.
+    const r = await runRecall(ctx(), { query: 'pgbouncer', scope: { limit: 3 } });
+    for (const t of r['threads'] as { calibration: unknown }[]) {
+      expect('calibration' in t).toBe(true);
+    }
+    for (const h of r['hits'] as { calibration: unknown }[]) {
+      expect('calibration' in h).toBe(true);
+    }
+  });
+
+  it('an honest empty is zero rows, whatever produced it', async () => {
+    // The invariant, asserted unconditionally: whenever the envelope says
+    // `none`, there is nothing in the arrays. It holds by construction on the
+    // surface as well as in core, so neither side can regress alone.
+    for (const query of ['pgbouncer', 'zzzqqq flurblewomp aardvark protocol']) {
+      const r = await runRecall(ctx(), { query });
+      if (r['confidence'] !== 'none') continue;
+      expect(r['noMatch']).toBe(true);
+      expect(r['threads']).toEqual([]);
+      expect(r['hits']).toEqual([]);
+      expect(String(r['note'])).toMatch(/^no match\./);
+    }
+  });
+
+  it('the nonsense control returns none once the floor is live', async () => {
+    // The audit's own control: `find "zzzqqq flurblewomp aardvark protocol"`
+    // returned ten rows at 0.0110. Skipped rather than failed while this
+    // worktree's core predates T10.1 — the invariant above still binds.
+    const r = await runRecall(ctx(), { query: 'zzzqqq flurblewomp aardvark protocol' });
+    if (r['confidence'] === null) {
+      process.stderr.write(
+        '\n  nonsense control: core in this worktree predates T10.1 (confidence null) — invariant asserted, cliff not\n',
+      );
+      return;
+    }
+    expect(r['confidence']).toBe('none');
+    expect(r['threads']).toEqual([]);
   });
 
   it('a card hit is labelled as not evidence (F6)', async () => {

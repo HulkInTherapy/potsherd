@@ -7,7 +7,18 @@ import { UserError } from '../../../cli/src/output.js';
 import { withIndexAsync, type ServerContext } from '../context.js';
 import { RECALL_DESCRIPTION } from '../descriptions.js';
 import { guarded, jsonResult } from '../result.js';
-import { SCOPE, WANT, confidenceOf, type Confidence, type ScopeArg } from './shapes.js';
+import {
+  AGENT_FLOOR,
+  MIN_CONFIDENCE_FIELD,
+  SCOPE,
+  WANT,
+  belowFloorOf,
+  calibrationOf,
+  confidenceOf,
+  minConfidenceOf,
+  type Confidence,
+  type ScopeArg,
+} from './shapes.js';
 import { mintCitation } from './sources.js';
 import { threadIdOf } from './thread.js';
 
@@ -86,6 +97,8 @@ export interface RecallWindow {
   kind: string;
   isSidechain: boolean;
   confidence: Confidence | null;
+  /** T10.1's `{ score, coverage, strength, agreement }`, passed through. */
+  calibration: unknown;
   citation: string;
   text: string;
 }
@@ -107,12 +120,46 @@ export async function runRecall(
   return withIndexAsync(ctx, async (db, root) => {
     const filters = parseFilters(db, toFlags(scope));
     const limit = parseLimit(scope.limit, 10);
-    const result = await recall(db, query, filters, { limit, root, vectors: 'auto' });
+
+    /**
+     * **The floor.** The single most important line in this file.
+     *
+     * `packages/cli/src/commands/find.ts` searches at `minConfidence: 'weak'`
+     * so the human view returns zero rows and `no match` rather than ten
+     * confident-looking rows scored 0.0110. This door searches at the same
+     * floor, from the same constant, because a model path that returned rows
+     * the human path withheld would put the agent back exactly where audit F1
+     * found it:
+     *
+     * > I have no way to distinguish "the archive contains your answer" from
+     * > "the archive contains nothing and I am showing you the ten least-bad
+     * > rows." So the agent does the rational thing: it treats the whole result
+     * > set as unreliable and falls back to a source it *can* verify — the repo
+     * > in front of it.
+     *
+     * The cast is scaffolding, not a design choice: this worktree was cut
+     * before T10.1 landed and may not fetch, so its `RecallOptions` does not
+     * declare the field yet. At integration the cast becomes a no-op and can
+     * be deleted; the field name is a constant either way.
+     */
+    const options = {
+      limit,
+      root,
+      vectors: 'auto',
+      [MIN_CONFIDENCE_FIELD]: AGENT_FLOOR,
+    } as Parameters<typeof recall>[3];
+
+    const result = await recall(db, query, filters, options);
 
     // T10.1's label, read — never re-derived. `null` means this build of core
     // does not carry one yet, and `null` is not `none`: see `shapes.ts`.
     const confidence = confidenceOf(result);
     const calibrated = confidence !== null;
+    // The floor the search actually ran at, and how many rows it withheld —
+    // read off the result rather than echoed from the argument, so a core that
+    // clamps or ignores the floor is visible here instead of being covered up.
+    const minConfidence = minConfidenceOf(result);
+    const belowFloor = belowFloorOf(result);
 
     /**
      * The honest empty.
@@ -136,6 +183,15 @@ export async function runRecall(
       // ---------------------------------------------------------- the cliff
       confidence,
       calibrated,
+      minConfidence,
+      /**
+       * Rows the floor withheld.
+       *
+       * Reported rather than hidden, because "nothing matched" and "eleven
+       * things matched and none of them well enough to show you" are different
+       * answers and the agent should be able to say which one it got.
+       */
+      belowFloor,
       noMatch,
       /**
        * `05`'s honesty contract, and audit item 9: *tell me what you can't do,
@@ -146,8 +202,10 @@ export async function runRecall(
       capability: capabilityLine(result.vectors),
       vectors: result.vectors,
       note: noMatch
-        ? 'no match. The archive does not contain this. Say so — do not widen into a guess, and ' +
-          'do not answer from the repository in front of you.'
+        ? 'no match. The archive does not contain this' +
+          (belowFloor ? `, though ${String(belowFloor)} rows were withheld below the ${String(minConfidence ?? AGENT_FLOOR)} floor` : '') +
+          '. Say so — do not widen into a guess, and do not answer from the repository in ' +
+          'front of you.'
         : calibrated
           ? null
           : 'this build of potsherd does not calibrate its scores yet, so "confidence" is null ' +
@@ -224,6 +282,7 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
       threadOf: threadIdOf(lead) === null ? 'session' : 'chain',
       links: members.map((m) => ({ sessionId: m.id, id8: m.id.slice(0, 8), exchanges: m.exchanges })),
       confidence: confidenceOf(lead),
+      calibration: calibrationOf(lead),
       kind: lead.kind,
       harness: lead.harness,
       title: lead.title,
@@ -269,6 +328,7 @@ function hitJson(h: Hit, sessions: readonly Session[]): Record<string, unknown> 
     seq: h.seq ?? null,
     ts: h.ts ?? null,
     confidence: confidenceOf(h),
+    calibration: calibrationOf(h),
     score: h.score,
     from: h.from,
     snippet: h.snippet.text,
@@ -320,6 +380,7 @@ function windowsFrom(
         kind: h.kind,
         isSidechain: h.isSidechain,
         confidence: confidenceOf(h),
+        calibration: calibrationOf(h),
         citation: mintCitation({
           sessionId: h.sessionId,
           kind: q.s.kind,
