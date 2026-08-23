@@ -850,13 +850,28 @@ export function networkDisclosure(): { backend: string | null; to: string; detai
     };
   } catch (err) {
     if (!(err instanceof NoBackendError)) throw err;
+    // `NoBackendError` no longer means "no model". Rung 1 is the host agent
+    // itself, and on a machine with no binary and no key that rung is still
+    // reachable — `ask` completes through the seam and potsherd filters the
+    // citations in code. Printing "there is no model backend" there would be
+    // the privacy screen making a claim the product had stopped honouring,
+    // which is the one thing this screen exists not to do.
+    const seam = err.rung === 'host-seam';
     return {
       backend: null,
-      to: 'nobody — there is no model backend on this machine.',
-      detail: [
-        'no `claude` binary and no ANTHROPIC_API_KEY, so `potsherd card`',
-        'refuses rather than calling anything. every other verb still works.',
-      ],
+      to: seam
+        ? 'the coding agent you are already talking to — potsherd emits the prompts, it answers them.'
+        : 'nobody — there is no model backend on this machine.',
+      detail: seam
+        ? [
+            'no binary, no key, and none needed: `ask` runs through the seam and',
+            'potsherd filters the citations in code. nothing leaves this machine',
+            'that the agent in front of you is not already holding.',
+          ]
+        : [
+            'no `claude` binary and no ANTHROPIC_API_KEY, so `potsherd card`',
+            'refuses rather than calling anything. every other verb still works.',
+          ],
     };
   }
 }

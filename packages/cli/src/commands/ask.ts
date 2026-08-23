@@ -729,7 +729,17 @@ export async function writeSynthesisFile(
     potsherd: VERSION,
     question: q,
     k: base.k ?? ASK_K,
-    sessionIds: input.sessions.map((s) => s.sessionId),
+    // THE FULL SHORTLIST, not the synthesizer's inputs.
+    //
+    // `--filter-in` re-derives the live shortlist and refuses when this list
+    // does not cover it, because answering from a stale file would print the
+    // live run's counts over recorded content. The synthesizer, though, only
+    // ever sees the sessions whose readers found something — four of six here
+    // is an ordinary result, not a degenerate one. Recording the subset made
+    // the freshness check fire on the happy path: every seam round trip in
+    // which any reader reported `found: false` was refused, which is almost
+    // all of them. `staged.live` is the same list `--filter-in` will compute.
+    sessionIds: staged ? staged.live : input.sessions.map((s) => s.sessionId),
     system: input.system,
     schema: input.schema,
     // Redacted on the way out for the reason `writeReadersFile` gives: `llm.ts`

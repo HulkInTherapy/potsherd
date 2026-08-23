@@ -15727,6 +15727,22 @@ var CALL_PROFILES = {
     measured: false,
     basis: "not measured \u2014 api list price and an assumed latency"
   },
+  // The same binary the agent sdk drives, spawned directly, so it inherits
+  // that fit. **Not measured at card size** — the only real numbers on the
+  // reference machine are two probe calls (13.0 s and 8.7 s wall for a
+  // 30-character prompt), which say nothing about a 40,000-character one. The
+  // range is widened accordingly rather than the point estimate moved.
+  "claude-cli": {
+    baseMs: 46200,
+    msPerKChar: 915,
+    baseUsd: 0.016,
+    usdPerMChar: 1.057,
+    outputTokensPerCall: 2100,
+    parallelEfficiency: 0.8,
+    spread: { timeLow: 0.4, timeHigh: 3, usdLow: 0.7, usdHigh: 1.6 },
+    measured: false,
+    basis: "est. \u2014 the agent-sdk fit for the same binary, spawned directly"
+  },
   // Likewise unverified: codex is not installed on the reference machine
   // (`CodexTransport`'s note says the same). It spawns a CLI like the agent
   // sdk does, so it inherits those timings and is priced from tokens.
@@ -15739,7 +15755,7 @@ var CALL_PROFILES = {
     parallelEfficiency: 0.8,
     spread: { timeLow: 0.4, timeHigh: 3, usdLow: 0.7, usdHigh: 1.6 },
     measured: false,
-    basis: "not measured \u2014 assumed to behave like the agent sdk"
+    basis: "est. \u2014 argv verified at codex 0.149.0, timings assumed from the agent sdk"
   }
 };
 function callProfile(backend) {
@@ -15954,35 +15970,100 @@ var ReentrancyError = class extends Error {
     super(`refusing to call a model from inside one (${REENTRANCY_ENV}=1). potsherd spawned this process; it must not spawn another.`);
   }
 };
+function hostAgent(env = process9.env) {
+  const forced = env["POTSHERD_HARNESS"];
+  if (forced === "claude-code" || forced === "codex" || forced === "cursor")
+    return forced;
+  if (env["CLAUDECODE"] === "1" || (env["CLAUDE_CODE_ENTRYPOINT"] ?? "") !== "")
+    return "claude-code";
+  if (env["CODEX_HOME"] || env["CODEX_SANDBOX"])
+    return "codex";
+  if (env["CURSOR_AGENT"] || env["CURSOR_TRACE_ID"])
+    return "cursor";
+  return null;
+}
+var RESOLUTION_LADDER = [
+  {
+    id: "host-seam",
+    rung: 1,
+    backend: null,
+    label: "the host agent is the model",
+    ready: (a) => a.hostSeam
+  },
+  {
+    id: "claude-cli",
+    rung: 2,
+    backend: "claude-cli",
+    label: "the claude binary, spawned",
+    ready: (a) => a.claude !== null
+  },
+  {
+    id: "codex-cli",
+    rung: 2,
+    backend: "codex",
+    label: "the codex binary, spawned",
+    ready: (a) => a.codex !== null
+  },
+  {
+    id: "agent-sdk",
+    rung: 3,
+    backend: "agent-sdk",
+    label: "the agent sdk, already installed",
+    ready: (a) => a.claude !== null && a.agentSdk
+  },
+  {
+    id: "api-key",
+    rung: 3,
+    backend: "api",
+    label: "an api key, already set",
+    ready: (a) => a.apiKey && a.apiSdk
+  }
+];
+function ladderFor(a) {
+  if (a.host !== "codex")
+    return RESOLUTION_LADDER;
+  const codex = RESOLUTION_LADDER.find((r) => r.id === "codex-cli");
+  if (!codex)
+    return RESOLUTION_LADDER;
+  const rest = RESOLUTION_LADDER.filter((r) => r.id !== "codex-cli");
+  const at = rest.findIndex((r) => r.id === "claude-cli");
+  if (at < 0)
+    return RESOLUTION_LADDER;
+  return [...rest.slice(0, at), codex, ...rest.slice(at)];
+}
+function topRung(a) {
+  return ladderFor(a).find((r) => r.ready(a)) ?? null;
+}
+function transportRung(a) {
+  return ladderFor(a).find((r) => r.backend !== null && r.ready(a)) ?? null;
+}
 var NoBackendError = class _NoBackendError extends Error {
   name = "NoBackendError";
   fix;
   availability;
+  /** The highest rung that *is* reachable, when one is. Null for none at all. */
+  rung;
   constructor(availability2) {
     super(_NoBackendError.message(availability2));
     this.availability = availability2;
     this.fix = _NoBackendError.fixFor(availability2);
-  }
-  /** True when the *signal* is there and the module that does the talking is not. */
-  static halfInstalled(a) {
-    if (a.claude !== null && !a.agentSdk)
-      return "@anthropic-ai/claude-agent-sdk";
-    if (a.apiKey && !a.apiSdk)
-      return "@anthropic-ai/sdk";
-    return null;
+    this.rung = topRung(availability2)?.id ?? null;
   }
   static message(a) {
-    const missing = _NoBackendError.halfInstalled(a);
-    if (missing) {
-      return `this potsherd cannot reach a model: ${missing} is not installed.
-        It is an optional dependency: it and the embedding runtime are 677 MB of an
-        install that is 17 MB without them.`;
+    if (a.hostSeam) {
+      return `no model backend on this machine \u2014 and none is needed: potsherd is running inside ${a.host}, which is already a model on your own subscription.
+        Run the seam: potsherd emits the prompts, you answer them, potsherd filters the citations in code.`;
     }
-    return "no way to reach a model: no `claude` binary on PATH, no `codex`, and ANTHROPIC_API_KEY is not set.\n        potsherd cards run on your Claude Code subscription (install Claude Code), or on an Anthropic API key as a fallback.";
+    const key = a.apiKey ? "\n        ANTHROPIC_API_KEY is set but the Anthropic SDK is not installed." : "";
+    return "no way to reach a model: no `claude` binary on PATH, no `codex`, and no coding agent around this process." + key + "\n        potsherd runs on the Claude Code subscription you already have \u2014 installing Claude Code is enough.";
   }
   static fixFor(a) {
-    const missing = _NoBackendError.halfInstalled(a);
-    return missing ? `npm install -g ${missing}` : "https://claude.com/product/claude-code  \u2014 or  export ANTHROPIC_API_KEY=\u2026";
+    if (a.hostSeam) {
+      return 'potsherd ask "\u2026" --readers-out r.json   # then --readers-in / --synthesis-out / --filter-in';
+    }
+    if (a.apiKey && !a.apiSdk)
+      return "npm install -g @anthropic-ai/sdk";
+    return "https://claude.com/product/claude-code";
   }
 };
 function resolvable(specifier) {
@@ -15998,13 +16079,16 @@ function availability(o = {}) {
   const which2 = o.which ?? ((n2) => onPath(n2, env));
   const key = env["ANTHROPIC_API_KEY"];
   const canResolve = o.resolvable ?? resolvable;
+  const host = hostAgent(env);
   return {
     claude: which2("claude"),
     codex: which2("codex"),
     apiKey: typeof key === "string" && key.trim().length > 0,
-    codexHarness: env["POTSHERD_HARNESS"] === "codex" || Boolean(env["CODEX_HOME"]) || Boolean(env["CODEX_SANDBOX"]),
+    codexHarness: host === "codex",
     agentSdk: canResolve("@anthropic-ai/claude-agent-sdk"),
-    apiSdk: canResolve("@anthropic-ai/sdk")
+    apiSdk: canResolve("@anthropic-ai/sdk"),
+    host,
+    hostSeam: host !== null
   };
 }
 function detectBackend(o = {}) {
@@ -16012,37 +16096,31 @@ function detectBackend(o = {}) {
   const avail = availability(o);
   const requested = o.model ?? env["POTSHERD_MODEL"] ?? CARD_MODEL;
   const forced = o.backend ?? env["POTSHERD_LLM_BACKEND"];
-  const choose = (backend, why2, bin) => ({
+  const choose = (backend, rung2, why2, bin) => ({
     backend,
     model: resolveModel(requested, backend),
     requested,
     why: why2,
+    rung: rung2?.rung ?? 3,
+    rungId: rung2?.id ?? null,
     ...bin ? { bin } : {},
     chargeable: backend === "api",
     availability: avail
   });
+  const rungFor = (backend) => RESOLUTION_LADDER.find((r) => r.backend === backend) ?? null;
   if (forced) {
-    if (forced === "agent-sdk")
-      return choose("agent-sdk", "forced", avail.claude ?? void 0);
-    if (forced === "codex")
-      return choose("codex", "forced", avail.codex ?? void 0);
-    if (forced === "api")
-      return choose("api", "forced");
+    const rung2 = rungFor(forced);
+    if (!rung2)
+      throw new NoBackendError(avail);
+    const bin = forced === "agent-sdk" || forced === "claude-cli" ? avail.claude ?? "claude" : forced === "codex" ? avail.codex ?? "codex" : void 0;
+    return choose(forced, rung2, "forced", bin);
+  }
+  const rung = transportRung(avail);
+  if (!rung || !rung.backend)
     throw new NoBackendError(avail);
-  }
-  if (avail.claude && avail.agentSdk) {
-    return choose("agent-sdk", `claude on PATH (${avail.claude})`, avail.claude);
-  }
-  if (avail.codexHarness && avail.codex) {
-    return choose("codex", `codex is the harness and there is no claude`, avail.codex);
-  }
-  if (avail.apiKey && avail.apiSdk) {
-    return choose("api", "no claude binary; ANTHROPIC_API_KEY is set");
-  }
-  if (avail.codex) {
-    return choose("codex", "codex on PATH; no claude and no api key", avail.codex);
-  }
-  throw new NoBackendError(avail);
+  const seam = avail.hostSeam && rung.rung > 1 ? `; rung 1 (${avail.host}) is live too` : "";
+  const where = rung.backend === "api" ? "ANTHROPIC_API_KEY is set" : rung.backend === "codex" ? `codex on PATH (${avail.codex})` : `claude on PATH (${avail.claude})`;
+  return choose(rung.backend, rung, `rung ${rung.rung} \u2014 ${rung.label}: ${where}${seam}`, rung.backend === "codex" ? avail.codex ?? void 0 : avail.claude ?? void 0);
 }
 var LlmError = class extends Error {
   fix;
@@ -16058,15 +16136,35 @@ var LlmError = class extends Error {
    * clock twice.
    */
   timedOut;
+  /**
+   * What the child printed before it failed, when it was a spawned one.
+   *
+   * A CLI that fails by *answering* — `claude -p` exits non-zero and prints
+   * `{"is_error":true,"result":"Not logged in · Please run /login"}` on
+   * stdout — is a CLI whose exit code alone says nothing a user can act on.
+   * `potsherd: claude exited 1 / try: claude --version` was the message that
+   * came out of exactly that, and `claude --version` works fine, so the
+   * suggested fix confirmed the machine was healthy while the run stayed
+   * broken. The transport reads this and says the real sentence instead.
+   */
+  stdout;
   constructor(message2, fix, cause, options = {}) {
     super(message2);
     this.fix = fix;
     this.cause = cause;
     this.timedOut = options.timedOut ?? false;
+    if (options.stdout !== void 0)
+      this.stdout = options.stdout;
   }
 };
 function makeScratch(tmpRoot) {
   return fs27.mkdtempSync(path22.join(tmpRoot ?? os3.tmpdir(), "potsherd-llm-"));
+}
+var CLAUDE_CWD_NAME = "potsherd-llm-cwd";
+function stableScratch(tmpRoot) {
+  const dir = path22.join(tmpRoot ?? os3.tmpdir(), CLAUDE_CWD_NAME);
+  fs27.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 function dropScratch(dir) {
   if (!dir)
@@ -16164,6 +16262,115 @@ var AgentSdkTransport = class {
     this.scratch = null;
   }
 };
+var CLAUDE_CLI_ARGS = [
+  "--print",
+  "--output-format",
+  "json",
+  "--tools",
+  "",
+  "--permission-mode",
+  "dontAsk",
+  "--no-session-persistence",
+  "--setting-sources",
+  ""
+];
+var ClaudeCliTransport = class {
+  opts;
+  backend = "claude-cli";
+  scratch = null;
+  constructor(opts) {
+    this.opts = opts;
+  }
+  async send(req) {
+    this.scratch ??= stableScratch(this.opts.tmpRoot);
+    const extra = (this.opts.env["POTSHERD_CLAUDE_ARGS"] ?? "").split(" ").filter(Boolean);
+    const args = [
+      ...CLAUDE_CLI_ARGS,
+      "--model",
+      req.model,
+      ...req.system ? ["--system-prompt", req.system] : [],
+      ...extra
+    ];
+    let out;
+    try {
+      out = await run(this.opts.bin, args, {
+        input: req.prompt,
+        cwd: this.scratch,
+        env: { ...this.opts.env, [REENTRANCY_ENV]: "1" },
+        timeoutMs: req.timeoutMs,
+        ...req.signal ? { signal: req.signal } : {}
+      });
+    } catch (err) {
+      const reply = err instanceof LlmError ? parseClaudeCli(err.stdout ?? "") : null;
+      const said = reply?.said ?? reply?.text ?? "";
+      if (said) {
+        throw new LlmError(`claude --print could not answer: ${said.split("\n")[0]}`, /not logged in|\/login/i.test(said) ? "claude   # sign in once, then retry" : 'claude -p "hello"', err);
+      }
+      throw err;
+    }
+    const parsed = parseClaudeCli(out.stdout);
+    if (parsed.error) {
+      throw new LlmError(`claude --print ended as ${parsed.error}`, 'claude -p "hello"   # check the subscription is active, then retry');
+    }
+    if (!parsed.text) {
+      throw new LlmError(`claude --print produced no answer${out.stderr ? `: ${out.stderr.trim().split("\n").slice(-1)[0]}` : ""}`, 'claude -p "hello"   # check claude runs at all');
+    }
+    return {
+      text: parsed.text,
+      ...parsed.model ? { model: parsed.model } : {},
+      ...parsed.inputTokens !== void 0 ? { inputTokens: parsed.inputTokens } : {},
+      ...parsed.outputTokens !== void 0 ? { outputTokens: parsed.outputTokens } : {},
+      ...parsed.usd !== void 0 ? { usd: parsed.usd } : {}
+    };
+  }
+  /**
+   * Nothing to clean up, on purpose. See {@link CLAUDE_CWD_NAME}: removing the
+   * cwd would not remove the `~/.claude/projects` entry named after it, and
+   * the next call would then mint a second one. Keeping it is what holds the
+   * footprint at one directory instead of one per call.
+   */
+  async close() {
+    this.scratch = null;
+  }
+};
+function parseClaudeCli(stdout) {
+  const raw = stdout.trim();
+  if (!raw)
+    return { text: "" };
+  let obj = null;
+  try {
+    const v = JSON.parse(raw);
+    if (v && typeof v === "object" && !Array.isArray(v))
+      obj = v;
+  } catch {
+    obj = null;
+  }
+  if (!obj)
+    return { text: raw };
+  const said = typeof obj["result"] === "string" ? obj["result"].trim() : "";
+  const subtype = typeof obj["subtype"] === "string" ? obj["subtype"] : "";
+  if (obj["is_error"] === true || subtype !== "" && subtype !== "success") {
+    return { text: "", error: subtype || "an error", ...said ? { said } : {} };
+  }
+  const text = said;
+  const usage = asRecord(obj["usage"]);
+  const num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+  const inputTokens = usage ? num2(usage["input_tokens"]) + num2(usage["cache_creation_input_tokens"]) + num2(usage["cache_read_input_tokens"]) : 0;
+  const outputTokens = usage ? num2(usage["output_tokens"]) : 0;
+  const modelUsage = asRecord(obj["modelUsage"]);
+  const model = modelUsage ? Object.keys(modelUsage)[0] : void 0;
+  const usd = typeof obj["total_cost_usd"] === "number" ? obj["total_cost_usd"] : void 0;
+  return {
+    text,
+    ...model ? { model } : {},
+    ...inputTokens > 0 ? { inputTokens } : {},
+    ...outputTokens > 0 ? { outputTokens } : {},
+    ...usd !== void 0 ? { usd } : {}
+  };
+}
+function asRecord(v) {
+  return v && typeof v === "object" && !Array.isArray(v) ? v : null;
+}
 var CodexTransport = class {
   opts;
   backend = "codex";
@@ -16174,13 +16381,21 @@ var CodexTransport = class {
   async send(req) {
     this.scratch ??= makeScratch(this.opts.tmpRoot);
     const extra = (this.opts.env["POTSHERD_CODEX_ARGS"] ?? "").split(" ").filter(Boolean);
+    const lastMessage = path22.join(this.scratch, "last-message.txt");
     const args = [
       "exec",
       "--skip-git-repo-check",
+      // Verified at 0.149.0: no session files on disk, so a model call cannot
+      // write into the archive potsherd reads.
+      "--ephemeral",
+      // Verified at 0.149.0: config.toml is not loaded, auth still is.
+      "--ignore-user-config",
       "--cd",
       this.scratch,
       "--model",
       req.model,
+      "--output-last-message",
+      lastMessage,
       ...extra,
       "-"
     ];
@@ -16188,11 +16403,12 @@ var CodexTransport = class {
       input: req.system ? `${req.system}
 
 ${req.prompt}` : req.prompt,
+      cwd: this.scratch,
       env: { ...this.opts.env, [REENTRANCY_ENV]: "1" },
       timeoutMs: req.timeoutMs,
       ...req.signal ? { signal: req.signal } : {}
     });
-    const text = lastAgentMessage(out.stdout);
+    const text = readIfPresent(lastMessage) || lastAgentMessage(out.stdout);
     if (!text) {
       throw new LlmError(`codex exec produced no answer${out.stderr ? `: ${out.stderr.trim().split("\n").slice(-1)[0]}` : ""}`, 'codex exec "hello"   # check codex runs at all');
     }
@@ -16203,6 +16419,13 @@ ${req.prompt}` : req.prompt,
     this.scratch = null;
   }
 };
+function readIfPresent(file) {
+  try {
+    return fs27.readFileSync(file, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
 function lastAgentMessage(stdout) {
   const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
   const events = [];
@@ -16289,7 +16512,11 @@ var ApiTransport = class {
 };
 function run(bin, args, o) {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { env: o.env, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(bin, args, {
+      env: o.env,
+      ...o.cwd ? { cwd: o.cwd } : {},
+      stdio: ["pipe", "pipe", "pipe"]
+    });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -16325,7 +16552,7 @@ function run(bin, args, o) {
       clearTimeout(timer);
       o.signal?.removeEventListener("abort", onAbort);
       if (code !== 0) {
-        reject(new LlmError(`${path22.basename(bin)} exited ${code}${stderr.trim() ? `: ${stderr.trim().split("\n").slice(-1)[0]}` : ""}`, `${path22.basename(bin)} --version`));
+        reject(new LlmError(`${path22.basename(bin)} exited ${code}${stderr.trim() ? `: ${stderr.trim().split("\n").slice(-1)[0]}` : ""}`, `${path22.basename(bin)} --version`, void 0, { stdout }));
         return;
       }
       resolve({ stdout, stderr, code: code ?? 0 });
@@ -16384,6 +16611,10 @@ var Llm = class _Llm {
       env,
       ...opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {},
       ...env["POTSHERD_CLAUDE_BIN"] ? { bin: env["POTSHERD_CLAUDE_BIN"] } : {}
+    }) : choice.backend === "claude-cli" ? new ClaudeCliTransport({
+      env,
+      bin: env["POTSHERD_CLAUDE_BIN"] || choice.bin || "claude",
+      ...opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {}
     }) : choice.backend === "codex" ? new CodexTransport({
       env,
       bin: choice.bin ?? "codex",
@@ -19041,17 +19272,19 @@ async function ask(db, question, o = {}) {
       return base2({ refused: true, refusal: "budget" });
     }
     o.onProgress?.({ step: "synthesize", done: 0, total: 1, spend: meter.total });
-    const ownSynth = o.llm ?? openLlm(o.model ?? (cheap ? ASK_CHEAP_MODEL : ASK_MODEL), budget, o);
-    meter.track(ownSynth);
+    const summaries = cardSummaries(db, targets);
+    const ownSynth = o.synthFn ? null : o.llm ?? openLlm(o.model ?? (cheap ? ASK_CHEAP_MODEL : ASK_MODEL), budget, o);
+    if (ownSynth)
+      meter.track(ownSynth);
     let proposed;
     try {
-      proposed = await synthesize(ownSynth, q2, answered, cardSummaries(db, targets), o.signal);
+      proposed = o.synthFn ? await hostSynthesize(o.synthFn, q2, answered, summaries) : await synthesize(ownSynth, q2, answered, summaries, o.signal);
     } catch (err) {
       if (!(err instanceof BudgetError))
         throw err;
       return base2({ refused: true, refusal: "budget" });
     } finally {
-      if (!o.llm)
+      if (ownSynth && !o.llm)
         await ownSynth.close().catch(() => {
         });
     }
@@ -19062,7 +19295,7 @@ async function ask(db, question, o = {}) {
     const refused = strict && filtered.evidence.length < STRICT_MIN_EVIDENCE;
     let openThreads = [];
     if (o.openThreads !== false && !refused) {
-      openThreads = await tryOpenThreads(db, targets, ownSynth === o.llm ? o.llm : null, budget, o);
+      openThreads = await tryOpenThreads(db, targets, ownSynth && ownSynth === o.llm ? o.llm : null, budget, o);
       o.onProgress?.({
         step: "threads",
         done: openThreads.length,
@@ -19279,7 +19512,7 @@ function validateReader(v) {
     answer_fragment: typeof o["answer_fragment"] === "string" ? o["answer_fragment"] : ""
   };
 }
-async function synthesize(llm, question, answered, summaries, signal) {
+function synthPrompt(question, answered, summaries) {
   const blocks = answered.map(({ out, t }) => {
     const quotes = out.quotes.map((qq) => `    seq ${qq.seq} ${qq.ts ?? ""} "${qq.text.replace(/\s+/g, " ").trim()}"`).join("\n");
     return `session_id: ${t.sessionId}   (${t.project}/${t.id8}${t.isGhost ? ", GHOST \u2014 prompts only, the assistant side is not recoverable" : ""}${t.isSidechain ? ", subagent transcript" : ""})
@@ -19287,8 +19520,7 @@ async function synthesize(llm, question, answered, summaries, signal) {
   quotes:
 ${quotes}`;
   });
-  const r = await llm.json({
-    prompt: `Question: ${question}
+  return `Question: ${question}
 
 Readers:
 
@@ -19297,7 +19529,22 @@ ${blocks.join("\n\n")}
 ` + (summaries ? `Card summaries for these sessions:
 ${summaries}
 
-` : "") + "Use only the session_id values printed above. Copy each quote exactly as printed, including its seq.",
+` : "") + "Use only the session_id values printed above. Copy each quote exactly as printed, including its seq.";
+}
+function synthSource(t) {
+  return {
+    sessionId: t.sessionId,
+    id8: t.id8,
+    project: t.project,
+    harness: t.harness,
+    isGhost: t.isGhost,
+    isSidechain: t.isSidechain,
+    seqs: t.units.map((u) => u.seq)
+  };
+}
+async function synthesize(llm, question, answered, summaries, signal) {
+  const r = await llm.json({
+    prompt: synthPrompt(question, answered.map(({ out, t }) => ({ out, t: synthSource(t) })), summaries),
     system: SYNTH_SYSTEM,
     schema: SYNTH_SCHEMA,
     label: "synthesizer",
@@ -19307,6 +19554,17 @@ ${summaries}
     ...signal ? { signal } : {}
   });
   return r.value;
+}
+async function hostSynthesize(fn, question, answered, summaries) {
+  const sources = answered.map(({ out, t }) => ({ out, t: synthSource(t) }));
+  const raw = await fn({
+    question,
+    prompt: synthPrompt(question, sources, summaries),
+    system: SYNTH_SYSTEM,
+    schema: SYNTH_SCHEMA,
+    sessions: sources.map((s) => s.t)
+  });
+  return validateSynth(raw) ?? { evidence: [], answer: [] };
 }
 function validateSynth(v) {
   if (typeof v !== "object" || v === null)
@@ -23736,10 +23994,15 @@ function networkDisclosure() {
     };
   } catch (err) {
     if (!(err instanceof NoBackendError)) throw err;
+    const seam = err.rung === "host-seam";
     return {
       backend: null,
-      to: "nobody \u2014 there is no model backend on this machine.",
-      detail: [
+      to: seam ? "the coding agent you are already talking to \u2014 potsherd emits the prompts, it answers them." : "nobody \u2014 there is no model backend on this machine.",
+      detail: seam ? [
+        "no binary, no key, and none needed: `ask` runs through the seam and",
+        "potsherd filters the citations in code. nothing leaves this machine",
+        "that the agent in front of you is not already holding."
+      ] : [
         "no `claude` binary and no ANTHROPIC_API_KEY, so `potsherd card`",
         "refuses rather than calling anything. every other verb still works."
       ]
@@ -24695,7 +24958,13 @@ function runJson(report, choice, concurrency) {
     usd: Number(report.usd.toFixed(4)),
     seconds: Math.round(report.ms / 1e3),
     concurrency,
-    backend: choice ? { name: choice.backend, model: choice.model, chargeable: choice.chargeable } : null,
+    backend: choice ? {
+      name: choice.backend,
+      model: choice.model,
+      rung: choice.rung,
+      rungId: choice.rungId,
+      chargeable: choice.chargeable
+    } : null,
     aborted: report.aborted ?? null,
     errors: report.errors,
     cards: report.cards
@@ -24703,15 +24972,26 @@ function runJson(report, choice, concurrency) {
 }
 function backendNote(choice, missing) {
   if (choice) {
-    return choice.chargeable ? `${choice.backend} \u2014 metered, ANTHROPIC_API_KEY` : `${choice.backend} \u2014 your own subscription, $0`;
+    const rung = `rung ${choice.rung}`;
+    return choice.chargeable ? `${choice.backend} \u2014 ${rung}, metered, ANTHROPIC_API_KEY` : `${choice.backend} \u2014 ${rung}, your own subscription, $0`;
   }
-  return "no backend \u2014 install Claude Code or set ANTHROPIC_API_KEY";
+  return missing ? `no backend \u2014 ${missing.fix}` : "no backend";
 }
 function cardJson(plan, choice, missing, o) {
   return {
     dryRun: Boolean(o.dryRun),
-    backend: choice ? { name: choice.backend, model: choice.model, why: choice.why, chargeable: choice.chargeable } : null,
-    missing: missing ? { message: missing.message, fix: missing.fix } : null,
+    backend: choice ? {
+      name: choice.backend,
+      model: choice.model,
+      why: choice.why,
+      // A1's ladder, as data. An agent reading `--json` should not have to
+      // parse `why` to learn that the host seam was available and the
+      // 677 MB package was not needed.
+      rung: choice.rung,
+      rungId: choice.rungId,
+      chargeable: choice.chargeable
+    } : null,
+    missing: missing ? { message: missing.message, fix: missing.fix, rung: missing.rung } : null,
     targets: plan.targets.length,
     sessions: plan.sessions,
     ghosts: plan.ghosts,
@@ -25244,13 +25524,34 @@ async function runAsk(o) {
   }
   const readersOut = flagPath(o.readersOut);
   const readersIn = flagPath(o.readersIn);
+  const synthesisOut = flagPath(o.synthesisOut);
+  const filterIn = flagPath(o.filterIn);
   if (readersOut && readersIn) {
     throw new UserError(
       "--readers-out and --readers-in are the two halves of one round trip, not two flags for one run",
       'potsherd ask "\u2026" --readers-out r.json   # then run your readers, then --readers-in r.json'
     );
   }
-  if (!readersOut) {
+  if (synthesisOut && filterIn) {
+    throw new UserError(
+      "--synthesis-out and --filter-in are the two halves of one round trip, not two flags for one run",
+      'potsherd ask "\u2026" --readers-in r.json --synthesis-out s.json   # then answer it, then --filter-in s.json'
+    );
+  }
+  if (filterIn && (readersOut || readersIn)) {
+    throw new UserError(
+      "--filter-in carries its own reader outputs \u2014 it does not take a reader file as well",
+      'potsherd ask "\u2026" --filter-in s.json'
+    );
+  }
+  if (readersOut && synthesisOut) {
+    throw new UserError(
+      "--readers-out stops before the readers have run, so there is no synthesis prompt to write yet",
+      'potsherd ask "\u2026" --readers-out r.json   # run your readers, then --readers-in r.json --synthesis-out s.json'
+    );
+  }
+  const modelless = Boolean(readersOut || filterIn || synthesisOut && readersIn);
+  if (!modelless) {
     try {
       detectBackend({ ...o.model ? { model: o.model } : {} });
     } catch (err) {
@@ -25282,7 +25583,10 @@ async function runAsk(o) {
     if (readersOut) {
       return await recordReaders(db, question, base2, readersOut, o, t);
     }
-    const result = readersIn ? await replayReaders(db, question, base2, readersIn) : await ask(db, question, { ...base2, onProgress });
+    if (synthesisOut) {
+      return await recordSynthesis(db, question, base2, synthesisOut, readersIn, o, t, onProgress);
+    }
+    const result = filterIn ? await filterHostAnswer(db, question, base2, filterIn) : readersIn ? await replayReaders(db, question, base2, readersIn) : await ask(db, question, { ...base2, onProgress });
     if (o.debug) reportDrops(drops);
     if (o.json) {
       printJson(result);
@@ -25388,6 +25692,10 @@ function readersOutReceipt(file, abs, probe2, t) {
   return lines.join("\n");
 }
 async function replayReaders(db, question, base2, path32) {
+  const staged = await stageReaders(db, question, base2, path32);
+  return ask(db, question, { ...base2, readerFn: staged.readerFn });
+}
+async function stageReaders(db, question, base2, path32) {
   const abs = nodePath2.resolve(path32);
   const file = readReadersFile(abs);
   const q2 = redactOutgoing(question).text;
@@ -25423,7 +25731,232 @@ async function replayReaders(db, question, base2, path32) {
     if (!out) throw new Error(`no recorded output for ${input.sessionId}`);
     return out;
   };
-  return ask(db, question, { ...base2, readerFn });
+  return { readerFn, outputs, live, abs };
+}
+var SYNTHESIS_FILE_KIND = "potsherd.ask.synthesis";
+var SYNTHESIS_FILE_VERSION = 1;
+function synthCapture() {
+  const seen = { input: null };
+  const fn = async (input) => {
+    seen.input = input;
+    return { evidence: [], answer: [] };
+  };
+  return { fn, seen };
+}
+async function writeSynthesisFile(db, question, base2, path32, readersPath, onProgress) {
+  const staged = readersPath ? await stageReaders(db, question, base2, readersPath) : null;
+  const cap2 = synthCapture();
+  const probe2 = await ask(db, question, {
+    ...base2,
+    ...staged ? { readerFn: staged.readerFn } : {},
+    ...onProgress && !staged ? { onProgress } : {},
+    synthFn: cap2.fn,
+    openThreads: false
+  });
+  const abs = nodePath2.resolve(path32);
+  if (!cap2.seen.input) return { file: null, abs, probe: probe2 };
+  const input = cap2.seen.input;
+  const q2 = redactOutgoing(question).text;
+  const file = {
+    kind: SYNTHESIS_FILE_KIND,
+    version: SYNTHESIS_FILE_VERSION,
+    potsherd: VERSION,
+    question: q2,
+    k: base2.k ?? ASK_K,
+    // THE FULL SHORTLIST, not the synthesizer's inputs.
+    //
+    // `--filter-in` re-derives the live shortlist and refuses when this list
+    // does not cover it, because answering from a stale file would print the
+    // live run's counts over recorded content. The synthesizer, though, only
+    // ever sees the sessions whose readers found something — four of six here
+    // is an ordinary result, not a degenerate one. Recording the subset made
+    // the freshness check fire on the happy path: every seam round trip in
+    // which any reader reported `found: false` was refused, which is almost
+    // all of them. `staged.live` is the same list `--filter-in` will compute.
+    sessionIds: staged ? staged.live : input.sessions.map((s) => s.sessionId),
+    system: input.system,
+    schema: input.schema,
+    // Redacted on the way out for the reason `writeReadersFile` gives: `llm.ts`
+    // masks every outgoing string immediately before a transport sees it, so a
+    // file a user names must not be able to hold a byte a model would not have
+    // been sent. It is a no-op today and the test asserts that it is.
+    prompt: redactOutgoing(input.prompt).text,
+    sessions: input.sessions,
+    readers: staged ? staged.outputs : []
+  };
+  fs40.mkdirSync(nodePath2.dirname(abs), { recursive: true });
+  fs40.writeFileSync(abs, `${JSON.stringify(file, null, 2)}
+`, "utf8");
+  return { file, abs, probe: probe2 };
+}
+async function recordSynthesis(db, question, base2, path32, readersPath, o, t, onProgress) {
+  const { file, abs, probe: probe2 } = await writeSynthesisFile(
+    db,
+    question,
+    base2,
+    path32,
+    readersPath,
+    onProgress
+  );
+  if (o.json) {
+    printJson({
+      kind: SYNTHESIS_FILE_KIND,
+      version: SYNTHESIS_FILE_VERSION,
+      path: abs,
+      question: file?.question ?? redactOutgoing(question).text,
+      k: file?.k ?? base2.k ?? ASK_K,
+      sessionIds: file?.sessionIds ?? [],
+      sessions: file?.sessions ?? [],
+      promptChars: file?.prompt.length ?? 0,
+      matching: probe2.matching,
+      searched: probe2.searched,
+      modelCalls: probe2.spend.calls
+    });
+  } else {
+    print(synthesisOutReceipt(file, abs, probe2, t));
+  }
+  return file ? 0 : 1;
+}
+function synthesisOutReceipt(file, abs, probe2, t) {
+  const lines = [];
+  if (!file) {
+    lines.push(`  no reader found anything \u2014 no synthesis prompt written to ${abs}`);
+    return lines.join("\n");
+  }
+  const n2 = file.sessions.length;
+  lines.push(`  ${t.accent("1 synthesis prompt")} \u2192 ${abs}`);
+  lines.push(
+    `  built from ${n2} session${n2 === 1 ? "" : "s"} of ${probe2.searched} read ${t.sep} ${file.prompt.length.toLocaleString("en-US")} chars`
+  );
+  lines.push("");
+  for (const s of file.sessions) {
+    lines.push(
+      `    ${s.id8}  ${s.project}${s.isGhost ? t.dim("  ghost") : ""}${s.isSidechain ? t.dim("  subagent") : ""}  ${t.dim(`seq ${s.seqs.join(", ")}`)}`
+    );
+  }
+  lines.push("");
+  lines.push(
+    `  ${t.dim(`no model call was made (${probe2.spend.calls}). the prompt is redacted, as sent.`)}`
+  );
+  lines.push("");
+  lines.push('  answer "prompt" in the shape of "schema", add it to the file as "reply", then:');
+  lines.push(`    potsherd ask "${file.question}" --filter-in ${abs}`);
+  return lines.join("\n");
+}
+async function filterHostAnswer(db, question, base2, path32) {
+  const abs = nodePath2.resolve(path32);
+  const file = readSynthesisFile(abs);
+  const q2 = redactOutgoing(question).text;
+  if (file.question !== q2) {
+    throw new UserError(
+      `${abs} was recorded against a different question \u2014 replaying it would answer "${file.question}" and print it under "${q2}"`,
+      `potsherd ask "${file.question}" --filter-in ${abs}`
+    );
+  }
+  const k = base2.k ?? ASK_K;
+  if (file.k !== k) {
+    throw new UserError(
+      `${abs} was recorded with --k ${file.k} and this run asked for --k ${k}, which is a different shortlist`,
+      `potsherd ask "${q2}" --k ${file.k} --filter-in ${abs}`
+    );
+  }
+  if (file.reply === void 0 || file.reply === null) {
+    throw new UserError(
+      `${abs} has no "reply" \u2014 it is a --synthesis-out recording that nobody has answered yet`,
+      'answer its "prompt" in the shape of its "schema", then add the object as "reply"'
+    );
+  }
+  const rec = recorder();
+  await ask(db, question, { ...base2, concurrency: 1, openThreads: false, readerFn: rec.fn });
+  const live = rec.seen.map((x) => x.sessionId);
+  matchOrFail(abs, q2, "recorded shortlist", file.sessionIds, live);
+  const known = new Set(live);
+  const orphans = file.readers.map((r) => r.sessionId).filter((id) => !known.has(id));
+  if (orphans.length > 0) {
+    throw new UserError(
+      `${abs}'s "readers" name ${orphans.length} session${orphans.length === 1 ? "" : "s"} this question no longer shortlists (${id8s(orphans)}), so its answer rests on evidence that is no longer in scope`,
+      `potsherd ask "${q2}" --readers-out r.json    # re-record, then run the round trip again`
+    );
+  }
+  const byId = /* @__PURE__ */ new Map();
+  for (const out of file.readers) byId.set(out.sessionId, out);
+  const readerFn = async (input) => byId.get(input.sessionId) ?? { found: false, quotes: [], answer_fragment: "" };
+  return ask(db, question, {
+    ...base2,
+    readerFn,
+    synthFn: async () => file.reply,
+    openThreads: false
+  });
+}
+function readSynthesisFile(abs) {
+  let raw;
+  try {
+    raw = fs40.readFileSync(abs, "utf8");
+  } catch {
+    throw new UserError(`cannot read ${abs}`, `potsherd ask "\u2026" --readers-in r.json --synthesis-out ${abs}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new UserError(
+      `${abs} is not JSON \u2014 ${err instanceof Error ? err.message : String(err)}`,
+      `potsherd ask "\u2026" --readers-in r.json --synthesis-out ${abs}`
+    );
+  }
+  if (!isRecord2(parsed)) {
+    throw new UserError(`${abs} is not a synthesis file \u2014 expected a JSON object`, `potsherd ask "\u2026" --readers-in r.json --synthesis-out ${abs}`);
+  }
+  if (parsed["kind"] !== SYNTHESIS_FILE_KIND) {
+    throw new UserError(
+      `${abs} is not a synthesis file \u2014 "kind" is ${JSON.stringify(parsed["kind"] ?? null)}, expected "${SYNTHESIS_FILE_KIND}"`,
+      parsed["kind"] === READERS_FILE_KIND ? `potsherd ask "\u2026" --readers-in ${abs} --synthesis-out s.json    # that is the reader file` : `potsherd ask "\u2026" --readers-in r.json --synthesis-out ${abs}`
+    );
+  }
+  const v = parsed["version"];
+  if (v !== SYNTHESIS_FILE_VERSION) {
+    throw new UserError(
+      typeof v === "number" ? `${abs} is a v${String(v)} synthesis file and this potsherd (${VERSION}) reads v${String(SYNTHESIS_FILE_VERSION)}` : `${abs} has no "version" \u2014 this potsherd (${VERSION}) reads v${String(SYNTHESIS_FILE_VERSION)} synthesis files`,
+      `potsherd ask "\u2026" --readers-in r.json --synthesis-out ${abs}    # re-record with this build`
+    );
+  }
+  const question = parsed["question"];
+  if (typeof question !== "string" || question.trim() === "") {
+    throw new UserError(
+      `${abs} has no "question" \u2014 a synthesis file that cannot say what it was recorded for is not replayable`,
+      `potsherd ask "\u2026" --readers-in r.json --synthesis-out ${abs}`
+    );
+  }
+  const k = parsed["k"];
+  if (typeof k !== "number" || !Number.isFinite(k) || k < 1) {
+    throw new UserError(`${abs} has no usable "k"`, `potsherd ask "\u2026" --readers-in r.json --synthesis-out ${abs}`);
+  }
+  const sessionIds = parsed["sessionIds"];
+  if (!Array.isArray(sessionIds) || sessionIds.some((x) => typeof x !== "string" || x === "")) {
+    throw new UserError(`${abs} has no usable "sessionIds"`, `potsherd ask "\u2026" --readers-in r.json --synthesis-out ${abs}`);
+  }
+  const rawReaders = parsed["readers"];
+  if (!Array.isArray(rawReaders)) {
+    throw new UserError(
+      `${abs} has no "readers" array \u2014 the answer would be filtered against nothing`,
+      `potsherd ask "\u2026" --readers-in r.json --synthesis-out ${abs}`
+    );
+  }
+  const readers = rawReaders.map((entry, i) => readerOutput(abs, entry, i));
+  return {
+    kind: SYNTHESIS_FILE_KIND,
+    version: SYNTHESIS_FILE_VERSION,
+    potsherd: typeof parsed["potsherd"] === "string" ? parsed["potsherd"] : "",
+    question,
+    k,
+    sessionIds,
+    system: typeof parsed["system"] === "string" ? parsed["system"] : "",
+    schema: typeof parsed["schema"] === "string" ? parsed["schema"] : "",
+    prompt: typeof parsed["prompt"] === "string" ? parsed["prompt"] : "",
+    sessions: Array.isArray(parsed["sessions"]) ? parsed["sessions"] : [],
+    readers,
+    ...parsed["reply"] !== void 0 ? { reply: parsed["reply"] } : {}
+  };
 }
 function matchOrFail(abs, question, what, recorded, live) {
   const have = new Set(recorded);
@@ -26475,7 +27008,7 @@ filters, one example each \u2014 they compose, and all of them are AND:
       new Option("--concurrency <n>", "model calls in flight at once").argParser(Number).default(ASK_CONCURRENCY)
     ).addOption(
       new Option("--vectors <mode>", "the vector half of the shortlist (default on)").choices(["auto", "on", "off"])
-    ).option("--no-vec", "text search only \u2014 the same as --vectors off").option("--readers-out <path>", "write what the readers would be given to this file; makes no model call").option("--readers-in <path>", "answer from reader outputs recorded in this file, filter and all")
+    ).option("--no-vec", "text search only \u2014 the same as --vectors off").option("--readers-out <path>", "write what the readers would be given to this file; makes no model call").option("--readers-in <path>", "answer from reader outputs recorded in this file, filter and all").option("--synthesis-out <path>", "write the synthesis prompt to this file; makes no model call").option("--filter-in <path>", "filter the answer recorded in this file and print it, cited")
   ).addHelpText("after", `
 example:
   potsherd ask "how did we handle pgbouncer with prepared statements?"
@@ -26507,7 +27040,13 @@ exit codes:  0 answered  \xB7  1 nothing matched  \xB7  2 --strict refused`);
         ...opts["readerModel"] ? { readerModel: String(opts["readerModel"]) } : {},
         ...opts["vectors"] ? { vectors: String(opts["vectors"]) } : {},
         ...opts["readersOut"] ? { readersOut: String(opts["readersOut"]) } : {},
-        ...opts["readersIn"] ? { readersIn: String(opts["readersIn"]) } : {}
+        ...opts["readersIn"] ? { readersIn: String(opts["readersIn"]) } : {},
+        // Both halves are load-bearing. The action enumerates every flag it
+        // forwards, so registering the option without forwarding it drops the
+        // flag SILENTLY and the run falls through to a real synthesis call --
+        // which is exactly how this failed the first time it was run.
+        ...opts["synthesisOut"] ? { synthesisOut: String(opts["synthesisOut"]) } : {},
+        ...opts["filterIn"] ? { filterIn: String(opts["filterIn"]) } : {}
       }),
       o
     );

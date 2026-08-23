@@ -613,3 +613,81 @@ describe('the seam produces the answer the binary path would have produced', () 
     await normalLlm.close();
   });
 });
+
+// ====================== 6. a reader that found nothing is an ordinary result
+
+/**
+ * The bug this section exists for, and why the rest of the file could not see it.
+ *
+ * `--synthesis-out` recorded its `sessionIds` from the synthesizer's *inputs* —
+ * the sessions whose readers came back `found: true`. `--filter-in` re-derives
+ * the live shortlist and refuses when the recorded list does not cover it,
+ * because answering from a stale file would print a live run's counts over
+ * recorded content. That check is right. The list it was given was not.
+ *
+ * So every round trip in which any reader reported `found: false` was refused —
+ * and on a real archive that is almost all of them: the first end-to-end run
+ * over the demo corpus shortlisted six sessions, four of which legitimately had
+ * nothing to say, and the seam rejected its own output.
+ *
+ * `seedDb()` seeds ONE session. With one session the synthesizer's inputs and
+ * the shortlist are the same list, so the two can never disagree and no
+ * assertion in this file can fail. The premise was the fixture, not the code
+ * (`09 §7.2`), which is why a green suite shipped a broken happy path.
+ */
+function seedTwo(): { root: string; db: ReturnType<typeof store.open> } {
+  const { root, db } = seedDb();
+  const QUIET = '22222222-0000-4000-8000-000000000002';
+  db.prepare(
+    `INSERT INTO sessions (id, harness, title, project, project_slug, source_path, status,
+        is_sidechain, started_at, ended_at, user_prompts, assistant_turns, bytes, indexed_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  ).run(QUIET, 'claude', 'the other pooler thread', '/tmp/Ledger', '-tmp-Ledger', '/tmp/y.jsonl',
+    'live', 0, '2026-08-03T09:00:00.000Z', '2026-08-03T10:00:00.000Z', 1, 1, 100,
+    '2026-08-05T00:00:00.000Z');
+  db.prepare(
+    `INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text, files_touched)
+     VALUES (?,?,?,?,?,?,?)`,
+  ).run('q01', QUIET, 1, '2026-08-03T09:00:00.000Z',
+    // Shortlisted on the words and empty on the answer, which is the whole
+    // point: a session that is genuinely about pgbouncer and prepared
+    // statements, in which nothing was decided. `find` is right to surface it
+    // and the reader is right to come back `found: false`.
+    'someone raised pgbouncer and prepared statements in standup and nobody had context',
+    'Noted, no decision here — the pgbouncer prepared statements question is still open.', '[]');
+  db.exec("INSERT INTO exchanges_fts(exchanges_fts) VALUES('rebuild')");
+  return { root, db };
+}
+
+describe('a shortlisted session whose reader found nothing', () => {
+  it('is recorded in the synthesis file, so --filter-in accepts its own output', async () => {
+    const { root, db } = seedTwo();
+    const QUIET = '22222222-0000-4000-8000-000000000002';
+
+    // Both sessions are shortlisted; only one has an answer in it. That is the
+    // ordinary case, not a degenerate one.
+    const readers = await readersWithOutputs(db, root, [
+      RECORDED,
+      { sessionId: QUIET, found: false, quotes: [], answer_fragment: '' },
+    ]);
+    const synth = outFile('synthesis-two.json');
+    const { file } = await writeSynthesisFile(db, QUESTION, { root }, synth, readers);
+
+    // The synthesizer saw one session. The FILE must record both, because both
+    // are what `--filter-in` will find when it recomputes the shortlist.
+    expect(file).not.toBeNull();
+    expect(file!.sessions).toHaveLength(1);
+    expect(file!.sessionIds).toHaveLength(2);
+    expect(file!.sessionIds).toContain(QUIET);
+
+    // And the round trip completes rather than refusing. Before the fix this
+    // threw: "recorded shortlist does not match the shortlist this question
+    // produces now: 1 shortlisted session it does not cover".
+    answerWith(synth, HONEST);
+    const result = await filterHostAnswer(db, QUESTION, { root }, synth);
+    expect(result.spend.calls).toBe(0);
+    expect(result.answer).toContain('client cache was set to zero');
+
+    db.close();
+  });
+});

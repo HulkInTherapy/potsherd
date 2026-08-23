@@ -359,7 +359,9 @@ filters, one example each — they compose, and all of them are AND:
       // Code's native Agent tool, say — and hand the outputs back, so the
       // synthesizer, the citation filter and --strict all run unchanged.
       .option('--readers-out <path>', 'write what the readers would be given to this file; makes no model call')
-      .option('--readers-in <path>', 'answer from reader outputs recorded in this file, filter and all'),
+      .option('--readers-in <path>', 'answer from reader outputs recorded in this file, filter and all')
+      .option('--synthesis-out <path>', 'write the synthesis prompt to this file; makes no model call')
+      .option('--filter-in <path>', 'filter the answer recorded in this file and print it, cited'),
   ).addHelpText('after', `
 example:
   potsherd ask "how did we handle pgbouncer with prepared statements?"
@@ -393,6 +395,12 @@ exit codes:  0 answered  ·  1 nothing matched  ·  2 --strict refused`);
           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
           ...(opts['readersOut'] ? { readersOut: String(opts['readersOut']) } : {}),
           ...(opts['readersIn'] ? { readersIn: String(opts['readersIn']) } : {}),
+          // Both halves are load-bearing. The action enumerates every flag it
+          // forwards, so registering the option without forwarding it drops the
+          // flag SILENTLY and the run falls through to a real synthesis call --
+          // which is exactly how this failed the first time it was run.
+          ...(opts['synthesisOut'] ? { synthesisOut: String(opts['synthesisOut']) } : {}),
+          ...(opts['filterIn'] ? { filterIn: String(opts['filterIn']) } : {}),
         }),
       o,
     );

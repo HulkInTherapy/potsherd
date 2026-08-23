@@ -1217,18 +1217,15 @@ npm install -g ./potsherd-1.1.0.tgz
 potsherd audit
 ```
 
-**17 MB, and about 1.6 s.** Everything heavy is an optional peer dependency and
-none of it is installed unless you ask: the two model SDKs and the embedding
-runtime are 677 MB of what used to be a 764 MB install, for features most people
-will never turn on. Without them, everything that reads your own files works and
-the three verbs that call a model refuse with one sentence naming the one
-command that fixes it.
+**17 MB, and about 1.6 s.** There is no second install, and no tier.
 
-```bash
-npm install -g @anthropic-ai/claude-agent-sdk   # card, ask, graft
-npm install -g @huggingface/transformers         # vector search
-npm install -g sqlite-vec                        # ...and its sqlite half
-```
+`ask`, `card` and `graft` need a model, and the model is the subscription you
+already have. Inside a coding agent, potsherd emits the prompts and the agent
+you are talking to answers them — no key, no SDK, no download, and the citation
+filter still runs in potsherd's own code, so the guarantee does not depend on
+trusting the model that produced the answer. In a bare terminal it uses the
+`claude` binary you already installed to get here. An SDK or an API key is used
+if it happens to be present and is never asked for.
 
 ### What it needs
 

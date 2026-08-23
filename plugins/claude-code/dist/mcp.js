@@ -36330,6 +36330,22 @@ var CALL_PROFILES = {
     measured: false,
     basis: "not measured \u2014 api list price and an assumed latency"
   },
+  // The same binary the agent sdk drives, spawned directly, so it inherits
+  // that fit. **Not measured at card size** — the only real numbers on the
+  // reference machine are two probe calls (13.0 s and 8.7 s wall for a
+  // 30-character prompt), which say nothing about a 40,000-character one. The
+  // range is widened accordingly rather than the point estimate moved.
+  "claude-cli": {
+    baseMs: 46200,
+    msPerKChar: 915,
+    baseUsd: 0.016,
+    usdPerMChar: 1.057,
+    outputTokensPerCall: 2100,
+    parallelEfficiency: 0.8,
+    spread: { timeLow: 0.4, timeHigh: 3, usdLow: 0.7, usdHigh: 1.6 },
+    measured: false,
+    basis: "est. \u2014 the agent-sdk fit for the same binary, spawned directly"
+  },
   // Likewise unverified: codex is not installed on the reference machine
   // (`CodexTransport`'s note says the same). It spawns a CLI like the agent
   // sdk does, so it inherits those timings and is priced from tokens.
@@ -36342,7 +36358,7 @@ var CALL_PROFILES = {
     parallelEfficiency: 0.8,
     spread: { timeLow: 0.4, timeHigh: 3, usdLow: 0.7, usdHigh: 1.6 },
     measured: false,
-    basis: "not measured \u2014 assumed to behave like the agent sdk"
+    basis: "est. \u2014 argv verified at codex 0.149.0, timings assumed from the agent sdk"
   }
 };
 function callProfile(backend) {
@@ -36557,35 +36573,100 @@ var ReentrancyError = class extends Error {
     super(`refusing to call a model from inside one (${REENTRANCY_ENV}=1). potsherd spawned this process; it must not spawn another.`);
   }
 };
+function hostAgent(env = process11.env) {
+  const forced = env["POTSHERD_HARNESS"];
+  if (forced === "claude-code" || forced === "codex" || forced === "cursor")
+    return forced;
+  if (env["CLAUDECODE"] === "1" || (env["CLAUDE_CODE_ENTRYPOINT"] ?? "") !== "")
+    return "claude-code";
+  if (env["CODEX_HOME"] || env["CODEX_SANDBOX"])
+    return "codex";
+  if (env["CURSOR_AGENT"] || env["CURSOR_TRACE_ID"])
+    return "cursor";
+  return null;
+}
+var RESOLUTION_LADDER = [
+  {
+    id: "host-seam",
+    rung: 1,
+    backend: null,
+    label: "the host agent is the model",
+    ready: (a) => a.hostSeam
+  },
+  {
+    id: "claude-cli",
+    rung: 2,
+    backend: "claude-cli",
+    label: "the claude binary, spawned",
+    ready: (a) => a.claude !== null
+  },
+  {
+    id: "codex-cli",
+    rung: 2,
+    backend: "codex",
+    label: "the codex binary, spawned",
+    ready: (a) => a.codex !== null
+  },
+  {
+    id: "agent-sdk",
+    rung: 3,
+    backend: "agent-sdk",
+    label: "the agent sdk, already installed",
+    ready: (a) => a.claude !== null && a.agentSdk
+  },
+  {
+    id: "api-key",
+    rung: 3,
+    backend: "api",
+    label: "an api key, already set",
+    ready: (a) => a.apiKey && a.apiSdk
+  }
+];
+function ladderFor(a) {
+  if (a.host !== "codex")
+    return RESOLUTION_LADDER;
+  const codex = RESOLUTION_LADDER.find((r) => r.id === "codex-cli");
+  if (!codex)
+    return RESOLUTION_LADDER;
+  const rest = RESOLUTION_LADDER.filter((r) => r.id !== "codex-cli");
+  const at = rest.findIndex((r) => r.id === "claude-cli");
+  if (at < 0)
+    return RESOLUTION_LADDER;
+  return [...rest.slice(0, at), codex, ...rest.slice(at)];
+}
+function topRung(a) {
+  return ladderFor(a).find((r) => r.ready(a)) ?? null;
+}
+function transportRung(a) {
+  return ladderFor(a).find((r) => r.backend !== null && r.ready(a)) ?? null;
+}
 var NoBackendError = class _NoBackendError extends Error {
   name = "NoBackendError";
   fix;
   availability;
+  /** The highest rung that *is* reachable, when one is. Null for none at all. */
+  rung;
   constructor(availability2) {
     super(_NoBackendError.message(availability2));
     this.availability = availability2;
     this.fix = _NoBackendError.fixFor(availability2);
-  }
-  /** True when the *signal* is there and the module that does the talking is not. */
-  static halfInstalled(a) {
-    if (a.claude !== null && !a.agentSdk)
-      return "@anthropic-ai/claude-agent-sdk";
-    if (a.apiKey && !a.apiSdk)
-      return "@anthropic-ai/sdk";
-    return null;
+    this.rung = topRung(availability2)?.id ?? null;
   }
   static message(a) {
-    const missing = _NoBackendError.halfInstalled(a);
-    if (missing) {
-      return `this potsherd cannot reach a model: ${missing} is not installed.
-        It is an optional dependency: it and the embedding runtime are 677 MB of an
-        install that is 17 MB without them.`;
+    if (a.hostSeam) {
+      return `no model backend on this machine \u2014 and none is needed: potsherd is running inside ${a.host}, which is already a model on your own subscription.
+        Run the seam: potsherd emits the prompts, you answer them, potsherd filters the citations in code.`;
     }
-    return "no way to reach a model: no `claude` binary on PATH, no `codex`, and ANTHROPIC_API_KEY is not set.\n        potsherd cards run on your Claude Code subscription (install Claude Code), or on an Anthropic API key as a fallback.";
+    const key = a.apiKey ? "\n        ANTHROPIC_API_KEY is set but the Anthropic SDK is not installed." : "";
+    return "no way to reach a model: no `claude` binary on PATH, no `codex`, and no coding agent around this process." + key + "\n        potsherd runs on the Claude Code subscription you already have \u2014 installing Claude Code is enough.";
   }
   static fixFor(a) {
-    const missing = _NoBackendError.halfInstalled(a);
-    return missing ? `npm install -g ${missing}` : "https://claude.com/product/claude-code  \u2014 or  export ANTHROPIC_API_KEY=\u2026";
+    if (a.hostSeam) {
+      return 'potsherd ask "\u2026" --readers-out r.json   # then --readers-in / --synthesis-out / --filter-in';
+    }
+    if (a.apiKey && !a.apiSdk)
+      return "npm install -g @anthropic-ai/sdk";
+    return "https://claude.com/product/claude-code";
   }
 };
 function resolvable(specifier) {
@@ -36601,13 +36682,16 @@ function availability(o = {}) {
   const which = o.which ?? ((n2) => onPath(n2, env));
   const key = env["ANTHROPIC_API_KEY"];
   const canResolve = o.resolvable ?? resolvable;
+  const host = hostAgent(env);
   return {
     claude: which("claude"),
     codex: which("codex"),
     apiKey: typeof key === "string" && key.trim().length > 0,
-    codexHarness: env["POTSHERD_HARNESS"] === "codex" || Boolean(env["CODEX_HOME"]) || Boolean(env["CODEX_SANDBOX"]),
+    codexHarness: host === "codex",
     agentSdk: canResolve("@anthropic-ai/claude-agent-sdk"),
-    apiSdk: canResolve("@anthropic-ai/sdk")
+    apiSdk: canResolve("@anthropic-ai/sdk"),
+    host,
+    hostSeam: host !== null
   };
 }
 function detectBackend(o = {}) {
@@ -36615,37 +36699,31 @@ function detectBackend(o = {}) {
   const avail = availability(o);
   const requested = o.model ?? env["POTSHERD_MODEL"] ?? CARD_MODEL;
   const forced = o.backend ?? env["POTSHERD_LLM_BACKEND"];
-  const choose = (backend, why2, bin) => ({
+  const choose = (backend, rung2, why2, bin) => ({
     backend,
     model: resolveModel(requested, backend),
     requested,
     why: why2,
+    rung: rung2?.rung ?? 3,
+    rungId: rung2?.id ?? null,
     ...bin ? { bin } : {},
     chargeable: backend === "api",
     availability: avail
   });
+  const rungFor = (backend) => RESOLUTION_LADDER.find((r) => r.backend === backend) ?? null;
   if (forced) {
-    if (forced === "agent-sdk")
-      return choose("agent-sdk", "forced", avail.claude ?? void 0);
-    if (forced === "codex")
-      return choose("codex", "forced", avail.codex ?? void 0);
-    if (forced === "api")
-      return choose("api", "forced");
+    const rung2 = rungFor(forced);
+    if (!rung2)
+      throw new NoBackendError(avail);
+    const bin = forced === "agent-sdk" || forced === "claude-cli" ? avail.claude ?? "claude" : forced === "codex" ? avail.codex ?? "codex" : void 0;
+    return choose(forced, rung2, "forced", bin);
+  }
+  const rung = transportRung(avail);
+  if (!rung || !rung.backend)
     throw new NoBackendError(avail);
-  }
-  if (avail.claude && avail.agentSdk) {
-    return choose("agent-sdk", `claude on PATH (${avail.claude})`, avail.claude);
-  }
-  if (avail.codexHarness && avail.codex) {
-    return choose("codex", `codex is the harness and there is no claude`, avail.codex);
-  }
-  if (avail.apiKey && avail.apiSdk) {
-    return choose("api", "no claude binary; ANTHROPIC_API_KEY is set");
-  }
-  if (avail.codex) {
-    return choose("codex", "codex on PATH; no claude and no api key", avail.codex);
-  }
-  throw new NoBackendError(avail);
+  const seam = avail.hostSeam && rung.rung > 1 ? `; rung 1 (${avail.host}) is live too` : "";
+  const where = rung.backend === "api" ? "ANTHROPIC_API_KEY is set" : rung.backend === "codex" ? `codex on PATH (${avail.codex})` : `claude on PATH (${avail.claude})`;
+  return choose(rung.backend, rung, `rung ${rung.rung} \u2014 ${rung.label}: ${where}${seam}`, rung.backend === "codex" ? avail.codex ?? void 0 : avail.claude ?? void 0);
 }
 var LlmError = class extends Error {
   fix;
@@ -36661,15 +36739,35 @@ var LlmError = class extends Error {
    * clock twice.
    */
   timedOut;
+  /**
+   * What the child printed before it failed, when it was a spawned one.
+   *
+   * A CLI that fails by *answering* — `claude -p` exits non-zero and prints
+   * `{"is_error":true,"result":"Not logged in · Please run /login"}` on
+   * stdout — is a CLI whose exit code alone says nothing a user can act on.
+   * `potsherd: claude exited 1 / try: claude --version` was the message that
+   * came out of exactly that, and `claude --version` works fine, so the
+   * suggested fix confirmed the machine was healthy while the run stayed
+   * broken. The transport reads this and says the real sentence instead.
+   */
+  stdout;
   constructor(message2, fix, cause, options = {}) {
     super(message2);
     this.fix = fix;
     this.cause = cause;
     this.timedOut = options.timedOut ?? false;
+    if (options.stdout !== void 0)
+      this.stdout = options.stdout;
   }
 };
 function makeScratch(tmpRoot) {
   return fs27.mkdtempSync(path22.join(tmpRoot ?? os3.tmpdir(), "potsherd-llm-"));
+}
+var CLAUDE_CWD_NAME = "potsherd-llm-cwd";
+function stableScratch(tmpRoot) {
+  const dir = path22.join(tmpRoot ?? os3.tmpdir(), CLAUDE_CWD_NAME);
+  fs27.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 function dropScratch(dir) {
   if (!dir)
@@ -36767,6 +36865,115 @@ var AgentSdkTransport = class {
     this.scratch = null;
   }
 };
+var CLAUDE_CLI_ARGS = [
+  "--print",
+  "--output-format",
+  "json",
+  "--tools",
+  "",
+  "--permission-mode",
+  "dontAsk",
+  "--no-session-persistence",
+  "--setting-sources",
+  ""
+];
+var ClaudeCliTransport = class {
+  opts;
+  backend = "claude-cli";
+  scratch = null;
+  constructor(opts) {
+    this.opts = opts;
+  }
+  async send(req) {
+    this.scratch ??= stableScratch(this.opts.tmpRoot);
+    const extra = (this.opts.env["POTSHERD_CLAUDE_ARGS"] ?? "").split(" ").filter(Boolean);
+    const args = [
+      ...CLAUDE_CLI_ARGS,
+      "--model",
+      req.model,
+      ...req.system ? ["--system-prompt", req.system] : [],
+      ...extra
+    ];
+    let out;
+    try {
+      out = await run(this.opts.bin, args, {
+        input: req.prompt,
+        cwd: this.scratch,
+        env: { ...this.opts.env, [REENTRANCY_ENV]: "1" },
+        timeoutMs: req.timeoutMs,
+        ...req.signal ? { signal: req.signal } : {}
+      });
+    } catch (err) {
+      const reply = err instanceof LlmError ? parseClaudeCli(err.stdout ?? "") : null;
+      const said = reply?.said ?? reply?.text ?? "";
+      if (said) {
+        throw new LlmError(`claude --print could not answer: ${said.split("\n")[0]}`, /not logged in|\/login/i.test(said) ? "claude   # sign in once, then retry" : 'claude -p "hello"', err);
+      }
+      throw err;
+    }
+    const parsed = parseClaudeCli(out.stdout);
+    if (parsed.error) {
+      throw new LlmError(`claude --print ended as ${parsed.error}`, 'claude -p "hello"   # check the subscription is active, then retry');
+    }
+    if (!parsed.text) {
+      throw new LlmError(`claude --print produced no answer${out.stderr ? `: ${out.stderr.trim().split("\n").slice(-1)[0]}` : ""}`, 'claude -p "hello"   # check claude runs at all');
+    }
+    return {
+      text: parsed.text,
+      ...parsed.model ? { model: parsed.model } : {},
+      ...parsed.inputTokens !== void 0 ? { inputTokens: parsed.inputTokens } : {},
+      ...parsed.outputTokens !== void 0 ? { outputTokens: parsed.outputTokens } : {},
+      ...parsed.usd !== void 0 ? { usd: parsed.usd } : {}
+    };
+  }
+  /**
+   * Nothing to clean up, on purpose. See {@link CLAUDE_CWD_NAME}: removing the
+   * cwd would not remove the `~/.claude/projects` entry named after it, and
+   * the next call would then mint a second one. Keeping it is what holds the
+   * footprint at one directory instead of one per call.
+   */
+  async close() {
+    this.scratch = null;
+  }
+};
+function parseClaudeCli(stdout) {
+  const raw = stdout.trim();
+  if (!raw)
+    return { text: "" };
+  let obj = null;
+  try {
+    const v = JSON.parse(raw);
+    if (v && typeof v === "object" && !Array.isArray(v))
+      obj = v;
+  } catch {
+    obj = null;
+  }
+  if (!obj)
+    return { text: raw };
+  const said = typeof obj["result"] === "string" ? obj["result"].trim() : "";
+  const subtype = typeof obj["subtype"] === "string" ? obj["subtype"] : "";
+  if (obj["is_error"] === true || subtype !== "" && subtype !== "success") {
+    return { text: "", error: subtype || "an error", ...said ? { said } : {} };
+  }
+  const text = said;
+  const usage = asRecord(obj["usage"]);
+  const num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+  const inputTokens = usage ? num2(usage["input_tokens"]) + num2(usage["cache_creation_input_tokens"]) + num2(usage["cache_read_input_tokens"]) : 0;
+  const outputTokens = usage ? num2(usage["output_tokens"]) : 0;
+  const modelUsage = asRecord(obj["modelUsage"]);
+  const model = modelUsage ? Object.keys(modelUsage)[0] : void 0;
+  const usd = typeof obj["total_cost_usd"] === "number" ? obj["total_cost_usd"] : void 0;
+  return {
+    text,
+    ...model ? { model } : {},
+    ...inputTokens > 0 ? { inputTokens } : {},
+    ...outputTokens > 0 ? { outputTokens } : {},
+    ...usd !== void 0 ? { usd } : {}
+  };
+}
+function asRecord(v) {
+  return v && typeof v === "object" && !Array.isArray(v) ? v : null;
+}
 var CodexTransport = class {
   opts;
   backend = "codex";
@@ -36777,13 +36984,21 @@ var CodexTransport = class {
   async send(req) {
     this.scratch ??= makeScratch(this.opts.tmpRoot);
     const extra = (this.opts.env["POTSHERD_CODEX_ARGS"] ?? "").split(" ").filter(Boolean);
+    const lastMessage = path22.join(this.scratch, "last-message.txt");
     const args = [
       "exec",
       "--skip-git-repo-check",
+      // Verified at 0.149.0: no session files on disk, so a model call cannot
+      // write into the archive potsherd reads.
+      "--ephemeral",
+      // Verified at 0.149.0: config.toml is not loaded, auth still is.
+      "--ignore-user-config",
       "--cd",
       this.scratch,
       "--model",
       req.model,
+      "--output-last-message",
+      lastMessage,
       ...extra,
       "-"
     ];
@@ -36791,11 +37006,12 @@ var CodexTransport = class {
       input: req.system ? `${req.system}
 
 ${req.prompt}` : req.prompt,
+      cwd: this.scratch,
       env: { ...this.opts.env, [REENTRANCY_ENV]: "1" },
       timeoutMs: req.timeoutMs,
       ...req.signal ? { signal: req.signal } : {}
     });
-    const text = lastAgentMessage(out.stdout);
+    const text = readIfPresent(lastMessage) || lastAgentMessage(out.stdout);
     if (!text) {
       throw new LlmError(`codex exec produced no answer${out.stderr ? `: ${out.stderr.trim().split("\n").slice(-1)[0]}` : ""}`, 'codex exec "hello"   # check codex runs at all');
     }
@@ -36806,6 +37022,13 @@ ${req.prompt}` : req.prompt,
     this.scratch = null;
   }
 };
+function readIfPresent(file2) {
+  try {
+    return fs27.readFileSync(file2, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
 function lastAgentMessage(stdout) {
   const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
   const events = [];
@@ -36892,7 +37115,11 @@ var ApiTransport = class {
 };
 function run(bin, args, o) {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { env: o.env, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(bin, args, {
+      env: o.env,
+      ...o.cwd ? { cwd: o.cwd } : {},
+      stdio: ["pipe", "pipe", "pipe"]
+    });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -36928,7 +37155,7 @@ function run(bin, args, o) {
       clearTimeout(timer);
       o.signal?.removeEventListener("abort", onAbort);
       if (code !== 0) {
-        reject(new LlmError(`${path22.basename(bin)} exited ${code}${stderr.trim() ? `: ${stderr.trim().split("\n").slice(-1)[0]}` : ""}`, `${path22.basename(bin)} --version`));
+        reject(new LlmError(`${path22.basename(bin)} exited ${code}${stderr.trim() ? `: ${stderr.trim().split("\n").slice(-1)[0]}` : ""}`, `${path22.basename(bin)} --version`, void 0, { stdout }));
         return;
       }
       resolve({ stdout, stderr, code: code ?? 0 });
@@ -36987,6 +37214,10 @@ var Llm = class _Llm {
       env,
       ...opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {},
       ...env["POTSHERD_CLAUDE_BIN"] ? { bin: env["POTSHERD_CLAUDE_BIN"] } : {}
+    }) : choice.backend === "claude-cli" ? new ClaudeCliTransport({
+      env,
+      bin: env["POTSHERD_CLAUDE_BIN"] || choice.bin || "claude",
+      ...opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {}
     }) : choice.backend === "codex" ? new CodexTransport({
       env,
       bin: choice.bin ?? "codex",
@@ -39653,17 +39884,19 @@ async function ask(db, question, o = {}) {
       return base2({ refused: true, refusal: "budget" });
     }
     o.onProgress?.({ step: "synthesize", done: 0, total: 1, spend: meter.total });
-    const ownSynth = o.llm ?? openLlm(o.model ?? (cheap ? ASK_CHEAP_MODEL : ASK_MODEL), budget, o);
-    meter.track(ownSynth);
+    const summaries = cardSummaries(db, targets);
+    const ownSynth = o.synthFn ? null : o.llm ?? openLlm(o.model ?? (cheap ? ASK_CHEAP_MODEL : ASK_MODEL), budget, o);
+    if (ownSynth)
+      meter.track(ownSynth);
     let proposed;
     try {
-      proposed = await synthesize(ownSynth, q, answered, cardSummaries(db, targets), o.signal);
+      proposed = o.synthFn ? await hostSynthesize(o.synthFn, q, answered, summaries) : await synthesize(ownSynth, q, answered, summaries, o.signal);
     } catch (err) {
       if (!(err instanceof BudgetError))
         throw err;
       return base2({ refused: true, refusal: "budget" });
     } finally {
-      if (!o.llm)
+      if (ownSynth && !o.llm)
         await ownSynth.close().catch(() => {
         });
     }
@@ -39674,7 +39907,7 @@ async function ask(db, question, o = {}) {
     const refused = strict && filtered.evidence.length < STRICT_MIN_EVIDENCE;
     let openThreads = [];
     if (o.openThreads !== false && !refused) {
-      openThreads = await tryOpenThreads(db, targets, ownSynth === o.llm ? o.llm : null, budget, o);
+      openThreads = await tryOpenThreads(db, targets, ownSynth && ownSynth === o.llm ? o.llm : null, budget, o);
       o.onProgress?.({
         step: "threads",
         done: openThreads.length,
@@ -39891,7 +40124,7 @@ function validateReader(v) {
     answer_fragment: typeof o["answer_fragment"] === "string" ? o["answer_fragment"] : ""
   };
 }
-async function synthesize(llm, question, answered, summaries, signal) {
+function synthPrompt(question, answered, summaries) {
   const blocks = answered.map(({ out, t }) => {
     const quotes = out.quotes.map((qq) => `    seq ${qq.seq} ${qq.ts ?? ""} "${qq.text.replace(/\s+/g, " ").trim()}"`).join("\n");
     return `session_id: ${t.sessionId}   (${t.project}/${t.id8}${t.isGhost ? ", GHOST \u2014 prompts only, the assistant side is not recoverable" : ""}${t.isSidechain ? ", subagent transcript" : ""})
@@ -39899,8 +40132,7 @@ async function synthesize(llm, question, answered, summaries, signal) {
   quotes:
 ${quotes}`;
   });
-  const r = await llm.json({
-    prompt: `Question: ${question}
+  return `Question: ${question}
 
 Readers:
 
@@ -39909,7 +40141,22 @@ ${blocks.join("\n\n")}
 ` + (summaries ? `Card summaries for these sessions:
 ${summaries}
 
-` : "") + "Use only the session_id values printed above. Copy each quote exactly as printed, including its seq.",
+` : "") + "Use only the session_id values printed above. Copy each quote exactly as printed, including its seq.";
+}
+function synthSource(t) {
+  return {
+    sessionId: t.sessionId,
+    id8: t.id8,
+    project: t.project,
+    harness: t.harness,
+    isGhost: t.isGhost,
+    isSidechain: t.isSidechain,
+    seqs: t.units.map((u) => u.seq)
+  };
+}
+async function synthesize(llm, question, answered, summaries, signal) {
+  const r = await llm.json({
+    prompt: synthPrompt(question, answered.map(({ out, t }) => ({ out, t: synthSource(t) })), summaries),
     system: SYNTH_SYSTEM,
     schema: SYNTH_SCHEMA,
     label: "synthesizer",
@@ -39919,6 +40166,17 @@ ${summaries}
     ...signal ? { signal } : {}
   });
   return r.value;
+}
+async function hostSynthesize(fn, question, answered, summaries) {
+  const sources = answered.map(({ out, t }) => ({ out, t: synthSource(t) }));
+  const raw = await fn({
+    question,
+    prompt: synthPrompt(question, sources, summaries),
+    system: SYNTH_SYSTEM,
+    schema: SYNTH_SCHEMA,
+    sessions: sources.map((s) => s.t)
+  });
+  return validateSynth(raw) ?? { evidence: [], answer: [] };
 }
 function validateSynth(v) {
   if (typeof v !== "object" || v === null)
