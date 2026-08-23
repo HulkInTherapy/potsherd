@@ -50,9 +50,24 @@ export function renderFind(
 
   if (result.sessions.length === 0) {
     lines.push(
-      INDENT + f.clip(`nothing in the index matches ${JSON.stringify(result.query)}.`, t.width - 2, t),
+      INDENT +
+        f.clip(
+          result.belowFloor > 0
+            ? `nothing in the index answers ${JSON.stringify(result.query)}.`
+            : `nothing in the index matches ${JSON.stringify(result.query)}.`,
+          t.width - 2,
+          t,
+        ),
     );
     lines.push('');
+    // The honest empty, and the reason it is honest is on the screen. "Nothing
+    // matches" and "six things matched and not one of them enough" are
+    // different facts about the archive, and an agent that is told the first
+    // when the second is true will widen a query that did not need widening.
+    // The escape hatch is named here rather than in `--help`, because this is
+    // the one screen where a human's "show me anything" is a reasonable thing
+    // to want and an agent's is not.
+    lines.push(...withheldNote(result, t));
     if (!result.vectors.available && result.vectors.reason) {
       lines.push(INDENT + t.dim(f.clip(`text search only ${t.dash} ${result.vectors.reason}`, t.width - 2, t)));
     }
@@ -68,14 +83,8 @@ export function renderFind(
       lines.push(...ignoreNote(result, t));
       return lines.join('\n');
     }
-    // Two variants, because "run potsherd ls to see what is indexed, or
-    // potsherd index to add more" is 77 characters and the terminal may be 60.
-    const long = 'to see what is indexed, or  potsherd index  to add more';
-    const wide = INDENT + t.dim('run') + '  potsherd ls  ' + t.dim(long);
     lines.push(...ignoreNote(result, t));
-    lines.push(
-      Theme.len(wide) <= t.width ? wide : INDENT + t.dim('run') + '  potsherd ls  ' + t.dim('or  potsherd index'),
-    );
+    lines.push(nextVerbOnEmpty(result, t));
     return lines.join('\n');
   }
 
@@ -101,6 +110,67 @@ export function renderFind(
   lines.push(...ignoreNote(result, t));
   lines.push(nextVerb(t));
   return lines.join('\n');
+}
+
+/**
+ * What the floor withheld, and the one flag that overrides it.
+ *
+ * Printed only when something was actually withheld. `find` reports what it
+ * did not show for the same reason {@link ignoreNote} reports what it did not
+ * search: a ranking cannot say what it would have returned without being run
+ * again, and "these rows scored below the floor" is the fact the reader needs
+ * either way.
+ */
+function withheldNote(result: RecallResult, t: Theme): string[] {
+  const n = result.belowFloor;
+  if (n <= 0) return [];
+  const what = `${f.num(n)} ${f.plural(n, 'session')} matched some of those words and none of them enough`;
+  const flag = '--min-confidence none';
+  const wide = `${what}  ${t.sep}  ${flag}`;
+  const out: string[] = [];
+  if (Theme.len(INDENT + wide) <= t.width) {
+    out.push(INDENT + t.dim(wide));
+  } else {
+    // The flag gets its own line rather than being dropped. `ignoreNote` may
+    // lose its `--all` at 60 columns because the *count* is the fact that
+    // matters there; here the escape hatch is the fact that matters, and a
+    // screen that withholds rows without saying how to see them is the same
+    // silent degradation this task exists to remove.
+    for (const line of f.wrap(what, t.width - INDENT.length)) out.push(INDENT + t.dim(line));
+    out.push(INDENT + t.dim(`${flag}  shows them anyway`));
+  }
+  out.push('');
+  return out;
+}
+
+/**
+ * The last line of an empty screen, and the reason the archaeologist's
+ * instructions became reachable.
+ *
+ * `agents/session-archaeologist.md` says *"if nothing comes back, widen once —
+ * then once more… two widenings is the limit"*. Before the floor existed
+ * nothing ever came back empty, so that path was dead code and `NOT FOUND`
+ * could never be correctly emitted. Now that a search can honestly come back
+ * with nothing, the screen has to say which of the two empties it is: a query
+ * whose rows were all withheld is one to **narrow** to its distinctive words,
+ * and a query that matched nothing at all is one where there may be nothing to
+ * index yet.
+ */
+function nextVerbOnEmpty(result: RecallResult, t: Theme): string {
+  if (result.belowFloor > 0) {
+    const long = 'with two or three distinctive words, or  potsherd ls';
+    const wide = INDENT + t.dim('run') + '  potsherd find  ' + t.dim(long);
+    return Theme.len(wide) <= t.width
+      ? wide
+      : INDENT + t.dim('run') + '  potsherd find  ' + t.dim('with fewer words');
+  }
+  // Two variants, because "run potsherd ls to see what is indexed, or
+  // potsherd index to add more" is 77 characters and the terminal may be 60.
+  const long = 'to see what is indexed, or  potsherd index  to add more';
+  const wide = INDENT + t.dim('run') + '  potsherd ls  ' + t.dim(long);
+  return Theme.len(wide) <= t.width
+    ? wide
+    : INDENT + t.dim('run') + '  potsherd ls  ' + t.dim('or  potsherd index');
 }
 
 /**
@@ -150,16 +220,34 @@ function nextVerb(t: Theme): string {
     : INDENT + t.dim('run') + '  potsherd show <id8>  ' + t.dim('or  potsherd ask <words>');
 }
 
+/**
+ * The one line an agent reads before deciding whether to read anything else.
+ *
+ * `no match` when the page is empty — including when it is empty *because* the
+ * floor withheld everything — and otherwise the envelope confidence, in the
+ * same three words `--json` uses. `05`: the header carries what the screen is,
+ * and the last line carries what to do next.
+ */
 function headline(r: RecallResult, t: Theme): string {
-  const parts = [`potsherd find ${JSON.stringify(r.query)}`];
-  parts.push(
-    r.sessions.length === 0
-      ? 'no match'
-      : `${f.num(r.sessions.length)} ${f.plural(r.sessions.length, 'session')}`,
-  );
-  parts.push(r.vectors.used ? 'bm25 + vectors' : 'bm25');
-  parts.push(f.duration(r.ms));
-  return f.clip(parts.join(` ${t.sep} `), t.width, t);
+  const fixed: string[] = [];
+  if (r.sessions.length === 0) {
+    fixed.push('no match');
+  } else {
+    fixed.push(`${f.num(r.sessions.length)} ${f.plural(r.sessions.length, 'session')}`);
+    fixed.push(r.confidence);
+  }
+  fixed.push(r.vectors.used ? 'bm25 + vectors' : 'bm25');
+  fixed.push(f.duration(r.ms));
+  // The query is the only variable-length field on the line, so it is the one
+  // that gives way — elided in the middle, per `05`. Clipping the whole line
+  // instead took the duration off the end the moment a query ran long, which
+  // is the wrong thing to lose: a reader can reconstruct the words they just
+  // typed and cannot reconstruct how confident the answer is.
+  const sep = ` ${t.sep} `;
+  const rest = fixed.join(sep);
+  const room = Math.max(12, t.width - Theme.len(rest) - sep.length);
+  const verb = f.elide(`potsherd find ${JSON.stringify(r.query)}`, room, t);
+  return f.clip([verb, rest].join(sep), t.width, t);
 }
 
 function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[] {
@@ -188,7 +276,13 @@ function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[]
   );
   if (s.gitBranch) meta.push(s.gitBranch);
   if (s.agentName) meta.push(s.agentName);
-  const score = s.score.toFixed(4);
+  // The confidence sits where the eye already goes for the score, and in front
+  // of it, because the score is the thing F1 found to be uninformative: a true
+  // topic and an absent one are 1.12x apart in this column. The word is not a
+  // restatement of the number beside it — it is computed from evidence the
+  // number no longer contains (`calibration.ts`), and `--json` carries the
+  // identical word on the identical row.
+  const score = `${s.confidence}  ${s.score.toFixed(4)}`;
   const metaLine = f.clip(meta.join(` ${t.sep} `), Math.max(10, width - score.length - 2), t);
   lines.push(
     INDENT +

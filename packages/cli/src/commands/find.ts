@@ -1,4 +1,4 @@
-import { recall, renderFind, search as searchNs } from '@potsherd/core';
+import { recall, renderFind, search as searchNs, type RecallOptions } from '@potsherd/core';
 import {
   federate,
   federationLine,
@@ -9,6 +9,19 @@ import {
 } from '@potsherd/bridges';
 import { print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 import { openIndex, parseFilters, parseLimit, type FilterFlags } from '../filters.js';
+
+/**
+ * `strong | weak | none`, derived from the option it is passed to rather than
+ * spelled out again here.
+ *
+ * `@potsherd/core` does not yet re-export the `Confidence` union from its
+ * barrel — `packages/core/src/index.ts` is another worker's file this task may
+ * not edit — and a second hand-written copy of the three words is exactly the
+ * kind of duplicate that survives one of them being renamed. Reading the type
+ * off `RecallOptions` cannot drift: if the union changes, this stops
+ * compiling. Replace with a direct import when the barrel carries it.
+ */
+type Confidence = NonNullable<RecallOptions['minConfidence']>;
 
 export interface FindCommandOptions extends GlobalOptions, FilterFlags {
   query: string;
@@ -35,6 +48,29 @@ export interface FindCommandOptions extends GlobalOptions, FilterFlags {
    * still applies.
    */
   all?: boolean;
+  /**
+   * `--min-confidence strong|weak|none` — the floor, and the escape hatch.
+   *
+   * `weak` by default, which is the whole of F1: a block whose calibration
+   * says the archive does not answer the question is withheld rather than
+   * ranked. `none` shows everything the ranker found, including the rows the
+   * floor exists to hide.
+   *
+   * It is off by default and it is spelled as a *level* rather than as a
+   * `--show-everything` switch, because the two readers of this verb want
+   * opposite things and only one of them can say so. A human's "show me
+   * anything, I will judge" is legitimate — they glance at the titles and know
+   * — and typing the flag is exactly that judgement being exercised. An
+   * agent's is not: an unlabelled least-bad row is indistinguishable from an
+   * answer, and the audit that started this task is a transcript of an agent
+   * acting on ten of them. So the default protects the caller who cannot tell,
+   * and the flag serves the caller who can.
+   *
+   * `strong` is the third value and it is not decoration: it is what a script
+   * that wants "answer or nothing" should pass, and it makes `find q ||
+   * fallback` mean what it looks like it means.
+   */
+  minConfidence?: string;
 }
 
 /**
@@ -68,6 +104,12 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
       // meaning as `ls --all` and `stats --all`; `find --project X` also
       // overrides the list, because naming a project is asking for it.
       all: Boolean(o.all),
+      // The floor is set here and not inside `recall()`. `recall()` is also
+      // the shortlist builder for `ask` and `graft`, which hand their rows to
+      // a *reader* that can see for itself that a row is noise; `find` hands
+      // its rows to whoever typed the query. One number, set by the caller who
+      // knows who is reading. See `RecallOptions.minConfidence`.
+      minConfidence: minConfidence(o),
     });
 
     // `--with` federates other memory tools' hits alongside ours. `federate()`
@@ -129,6 +171,13 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
         // reading one number. `--explain --json` is how the eval harness will
         // ask why a query lost without parsing a terminal layout.
         ...(o.explain ? { explain: searchNs.explain(result) } : {}),
+        // The three F1 fields, on the envelope. Identical vocabulary and
+        // identical values to the human view — `tests/recall.test.ts` pins
+        // that the two agree, because an agent that has to reconcile two
+        // spellings of "did you find it" will trust neither.
+        confidence: result.confidence,
+        minConfidence: result.minConfidence,
+        withheld: result.belowFloor,
         vectors: result.vectors,
         ignored: result.ignored,
         lists: result.lists,
@@ -153,6 +202,21 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
           exchanges: s.exchanges,
           resume: s.resume,
           score: s.score,
+          confidence: s.confidence,
+          // 0..1, and **not** `score` rescaled. `score` is reciprocal rank
+          // fusion — a function of rank alone, which is why a true topic and a
+          // topic the archive has never heard of come out 1.12x apart.
+          // `calibrated` is computed from the evidence RRF discards: how many
+          // of the query's distinctive words this conversation can actually
+          // show (`coverage`), each list's own bm25/cosine magnitude relative
+          // to that list's best for this query (`strength`), and how many
+          // lists independently found it (`agreement`). Coverage multiplies
+          // the other two, so it is a ceiling: nothing can lift a row whose
+          // words are not there. See `packages/core/src/calibration.ts`.
+          calibrated: s.calibration.score,
+          coverage: s.calibration.coverage,
+          strength: s.calibration.strength,
+          agreement: s.calibration.agreement,
           hits: s.hits.map((h) => ({
             kind: h.kind,
             // A block is a *conversation*, and a conversation can hold the
@@ -166,6 +230,8 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
             seq: h.seq ?? null,
             ts: h.ts ?? null,
             score: h.score,
+            confidence: h.confidence,
+            calibrated: h.calibration.score,
             from: h.from,
             snippet: h.snippet.text,
             match: h.snippet.match ?? null,
@@ -195,6 +261,25 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
     return result.sessions.length ? 0 : 1;
   } finally {
     db.close();
+  }
+}
+
+/**
+ * `weak` by default: the floor is on, and `--min-confidence none` turns it off.
+ *
+ * An unrecognised value is a typo, and a typo that silently means `none` would
+ * turn the floor off on the one command line that was trying to raise it. The
+ * option is registered with `.choices([...])` so commander refuses it first;
+ * this is the second wall, for the callers that reach `runFind` directly.
+ */
+export function minConfidence(o: FindCommandOptions): Confidence {
+  switch (o.minConfidence) {
+    case 'none':
+      return 'none';
+    case 'strong':
+      return 'strong';
+    default:
+      return 'weak';
   }
 }
 

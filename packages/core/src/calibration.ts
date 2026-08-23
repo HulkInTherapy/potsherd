@@ -1,5 +1,6 @@
 import type { Db } from './db.js';
 import type { Backend, Calibration, Estimate } from './llm.js';
+import { wordMatchesToken, wordSpans } from './search/snippet.js';
 
 /**
  * The estimator's self-check: what a run was quoted at, what it cost, and how
@@ -246,4 +247,263 @@ export function compareToEstimate(
     timeRatio: ratio(actual.seconds, e.seconds),
     usdRatio: ratio(actual.usd, e.usd),
   };
+}
+
+// ===================================================================
+// retrieval confidence — F1, "a cliff, not a ranking"
+// ===================================================================
+
+/**
+ * The second axis of `find`, and the reason this section is in the file named
+ * `calibration` rather than in `recall.ts`: both halves answer the same
+ * question — *how much should the number on the screen be trusted?* — and
+ * neither of them is the ranker.
+ *
+ * ## The defect this exists to fix
+ *
+ * Measured on the reference archive at `99bbb8b` (433 MB, 332 transcripts),
+ * `index --no-embed`:
+ *
+ * ```
+ * potsherd find "privacy guard redaction"            4 rows, top 0.01836   true topic
+ * potsherd find "kubernetes ingress payment service"  2 rows, top 0.01639   absent topic
+ * ```
+ *
+ * A topic the archive answers and a topic the archive has never heard of are
+ * **1.12x** apart. An agent given those two numbers cannot tell them apart,
+ * so it does the rational thing and stops trusting the whole result set.
+ *
+ * ## Why the obvious fix cannot work
+ *
+ * The fused score is reciprocal rank fusion: `weight * 1/(k + rank)`. It is a
+ * function of **rank only** — by the time it exists, how *well* anything
+ * matched has already been discarded. Normalising it against the query's own
+ * distribution therefore maps the top row to 1.0 whether that row is a
+ * bullseye or the least-bad of two bad rows, and `kubernetes ingress payment
+ * service` would come out as a confident 1.0. RRF stays the ranker; this is a
+ * separate axis computed from evidence RRF throws away.
+ *
+ * ## What it is computed from
+ *
+ * Three things, all of which `recall()` already has and none of which is the
+ * fused score:
+ *
+ *   1. **coverage** — of the distinctive words the user typed, what fraction
+ *      does this row actually contain. Counted with the same prefix-tolerant
+ *      matcher the snippet highlighter uses, over the same text the reader is
+ *      about to be shown, so the number and the screen cannot disagree.
+ *   2. **strength** — `from[].raw`: the list's *own* magnitude for this row
+ *      (bm25, or cosine), as a fraction of the best magnitude that same list
+ *      produced for this same query. Relative, never absolute: a bm25 of -13
+ *      means nothing across corpora and everything against the -18 the same
+ *      query got from the same index.
+ *   3. **agreement** — how many of the eight lists independently put this row
+ *      in their candidates. One list is a claim; three are a corroboration.
+ *
+ * and combines them **multiplicatively on coverage**:
+ *
+ * ```
+ * calibrated = coverage * (BASE + W_STRENGTH * strength + W_AGREEMENT * agreement)
+ * ```
+ *
+ * The shape is the whole point. Coverage is a *ceiling*: no amount of
+ * corroboration and no bm25 magnitude can lift a row whose words are not
+ * there. That is the cliff. Strength and agreement only decide how far a row
+ * falls *below* its own coverage — which is what separates the exchange that
+ * is about the pooler decision from the one that mentions the word once.
+ *
+ * ## Scale
+ *
+ * Every input is a ratio against something the same query produced on the same
+ * index. Nothing here is an absolute magnitude, so nothing here should move
+ * when the corpus grows from 0.5 MB to 433 MB. That was a design constraint,
+ * not a discovery: a floor expressed in bm25 units would have to be re-fitted
+ * per machine and would be wrong on the first one that was not the author's.
+ */
+export type Confidence = 'strong' | 'weak' | 'none';
+
+/** Worst to best, so a minimum can be compared as a number. */
+const RANK: Record<Confidence, number> = { none: 0, weak: 1, strong: 2 };
+
+/** `a` is at least as confident as `b`. */
+export function atLeastConfident(a: Confidence, b: Confidence): boolean {
+  return RANK[a] >= RANK[b];
+}
+
+/** The better of two labels. */
+export function maxConfidence(a: Confidence, b: Confidence): Confidence {
+  return RANK[a] >= RANK[b] ? a : b;
+}
+
+/**
+ * How much of the calibrated score a row gets for merely being a match at all.
+ *
+ * With `WEIGHT_STRENGTH` and `WEIGHT_AGREEMENT` this is a partition of 1, so a
+ * perfectly corroborated top-of-every-list row scores exactly its coverage and
+ * nothing scores above it.
+ */
+export const WEIGHT_BASE = 0.6;
+
+/** What the list's own magnitude, relative to that list's best, is worth. */
+export const WEIGHT_STRENGTH = 0.25;
+
+/** What independent lists agreeing is worth. */
+export const WEIGHT_AGREEMENT = 0.15;
+
+/**
+ * Lists that have to agree before agreement is worth its full share.
+ *
+ * Three, not eight: on a text-only index four of the eight lists cannot run at
+ * all, and a rule that needed all of them would score every result on a
+ * `--no-embed` machine as uncorroborated. Three is the most a bm25-only index
+ * can produce for one row (`exchanges_fts` + `titles` + `cards_fts`, or the
+ * two ghost lists plus a title).
+ */
+export const AGREEMENT_LISTS = 3;
+
+/**
+ * The floor. Below this a row is `none`, and `find` returns it to nobody.
+ *
+ * **This is a stopping rule, not an argmax.** It was not fitted to the six
+ * queries that score it — phase 3 recorded `WEIGHTS.vec_* = 1.5` the same way
+ * and for the same reason, and a constant tuned against its own exam is not
+ * evidence of anything. It is 0.5 because 0.5 is the only number in the range
+ * with an argument attached: at a rank-1 row of an uncorroborated list
+ * (`strength` 1, `agreement` 0, so a multiplier of 0.85) it means **a row must
+ * show a clear majority of the distinctive words that were typed** — 2 of 3,
+ * 3 of 4, 3 of 5. A row showing half or fewer is answering a different
+ * question than the one asked, and the honest thing to do with it is not to
+ * show it.
+ *
+ * What was measured, and what it decided: on the demo corpus (0.5 MB, 31
+ * sessions, 299 ghosts) the true-topic queries put every kept row at coverage
+ * 1.0 and every dropped row at 1/3 or 1/4. The gap either side of this number
+ * is a factor of three, so the number is not sitting on a cliff edge — which
+ * is the only property a threshold has to have. `tests/calibration.test.ts`
+ * fails when it moves, in both directions (`plans/08` rule 3).
+ */
+export const WEAK_FLOOR = 0.5;
+
+/**
+ * `strong` — the archive answers this.
+ *
+ * 0.75, by the same argument as {@link WEAK_FLOOR} and the same stopping rule.
+ * At the uncorroborated rank-1 multiplier of 0.85 it means **essentially all
+ * of the distinctive words are present in one conversation**; a row missing a
+ * quarter of them can still reach `strong`, but only by being corroborated by
+ * a second and third list, which is a different kind of evidence for the same
+ * claim. An agent may act on `strong` without reading the rows. That is what
+ * it is for, and it is why the bar is where it is rather than one band lower.
+ */
+export const STRONG_FLOOR = 0.75;
+
+/** What one row of a result offers the calibrator. */
+export interface RowEvidence {
+  /**
+   * Distinct query terms this row can actually show, over how many were asked
+   * for. `terms` of 0 means the query was all function words; see
+   * {@link calibrate}.
+   */
+  covered: number;
+  terms: number;
+  /**
+   * The best `from[].raw` this row earned, as a fraction of the best raw the
+   * same list produced for the same query. 1 means "this list found nothing
+   * better"; 0.4 means "four rows above it in its own list matched harder".
+   */
+  strength: number;
+  /** Distinct lists that put this row in their candidates. */
+  lists: number;
+}
+
+export interface Calibrated {
+  /** 0..1. See the header: coverage, gated by strength and agreement. */
+  score: number;
+  confidence: Confidence;
+  /** The three inputs, so `--explain` and a bug report can show the arithmetic. */
+  coverage: number;
+  strength: number;
+  agreement: number;
+}
+
+/**
+ * One row's confidence, from evidence the fusion discarded.
+ *
+ * A query with no distinctive terms at all — `find "the"`, `find "it is"` —
+ * has nothing to have covered, and calling that `none` would delete a result
+ * the user can plainly see is correct. Coverage is 1 in that case by
+ * definition: every word asked for is present, there just were not many.
+ */
+export function calibrate(e: RowEvidence): Calibrated {
+  const coverage = e.terms > 0 ? clamp01(e.covered / e.terms) : 1;
+  const strength = clamp01(e.strength);
+  const agreement = clamp01((e.lists - 1) / (AGREEMENT_LISTS - 1));
+  const score = clamp01(
+    coverage * (WEIGHT_BASE + WEIGHT_STRENGTH * strength + WEIGHT_AGREEMENT * agreement),
+  );
+  return { score, confidence: label(score), coverage, strength, agreement };
+}
+
+/** Which band a calibrated score falls in. */
+export function label(score: number): Confidence {
+  if (score >= STRONG_FLOOR) return 'strong';
+  if (score >= WEAK_FLOOR) return 'weak';
+  return 'none';
+}
+
+/**
+ * A list's own magnitude for one row, as a fraction of that list's best for
+ * this query.
+ *
+ * bm25 is negative and lower is better; cosine is [-1, 1] and higher is
+ * better; `titles` has no magnitude at all, because `titleMatches` already
+ * dropped every title that did not match the query best — so every title hit
+ * that survives is by construction the strongest of its kind.
+ *
+ * Relative, never absolute. `plans/08` and this task's brief both say the same
+ * thing: a rule expressed in bm25 units is a rule that has to be re-fitted for
+ * every corpus size, and would be wrong on the first machine that is not the
+ * author's.
+ */
+export function relativeStrength(raw: number, best: number, kind: 'bm25' | 'cosine' | 'flat'): number {
+  if (kind === 'flat') return 1;
+  if (!Number.isFinite(raw) || !Number.isFinite(best)) return 0;
+  if (kind === 'bm25') {
+    // Both negative. |best| is the largest magnitude the list produced.
+    const b = Math.abs(best);
+    if (!(b > 0)) return 1;
+    return clamp01(Math.abs(raw) / b);
+  }
+  if (!(best > 0)) return 0;
+  return clamp01(Math.max(0, raw) / best);
+}
+
+function clamp01(x: number): number {
+  if (!Number.isFinite(x)) return 0;
+  return Math.min(1, Math.max(0, x));
+}
+
+/**
+ * How many of `terms` this text can actually show.
+ *
+ * Counted with {@link wordMatchesToken} — the same prefix-tolerant matcher the
+ * snippet highlighter uses — over the same text the reader is about to see, so
+ * the confidence label and the highlighted words on the screen can never
+ * disagree. fts5 does not stem, so `find "icons"` against a transcript that
+ * says `icon` is two tokens to the ranker and one word to a human; the reader
+ * is right and the ranker is the one being explained.
+ */
+export function coveredTerms(terms: readonly string[], text: string): number {
+  if (terms.length === 0 || !text) return 0;
+  const words = new Set(wordSpans(text).map((w) => w.word));
+  let n = 0;
+  for (const t of terms) {
+    for (const w of words) {
+      if (wordMatchesToken(w, t)) {
+        n++;
+        break;
+      }
+    }
+  }
+  return n;
 }
