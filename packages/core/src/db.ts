@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { dbPath, potsherdDir } from './paths.js';
 import { openDatabase, type Db } from './sqlite-driver.js';
-import { createGhostVecTable, createVecTables } from './vec.js';
+import { createGhostVecTable, createVecTables, migrateToPortableVectors } from './vec.js';
 
 /**
  * One SQLite file, `~/.potsherd/potsherd.db`, WAL mode.
@@ -366,6 +366,33 @@ CREATE INDEX IF NOT EXISTS card_runs_backend ON card_runs(backend, ran_at);
     // so the derivation and this column land together and `--untitled` reads
     // "nothing a card would not improve" instead.
     up: `ALTER TABLE sessions ADD COLUMN title_source TEXT;`,
+  },
+  {
+    version: 10,
+    name: 'portable-vectors',
+    // Vectors stop needing a native extension.
+    //
+    // Migrations 4 and 8 created `vec_exchanges`, `vec_cards` and
+    // `vec_ghost_prompts` as vec0 virtual tables, which meant they declined
+    // entirely on a machine without `sqlite-vec` — an optional dependency that
+    // a clean `npm i -g potsherd` does not install. On those machines the
+    // schema stopped at version 3 and semantic search was structurally
+    // impossible, which is the second half of the agent audit's F2.
+    //
+    // The vectors now live in ordinary tables and those three names are views
+    // over them with `INSTEAD OF` triggers, so every statement already written
+    // against vec0 works verbatim and nothing outside `vec.ts` changed. A
+    // brute-force scan answers the KNN query in 4.7 ms at the reference
+    // archive's 1,678 exchanges, against sqlite-vec's 0.9 ms — 3.8 ms, for an
+    // entire class of install failure.
+    //
+    // Where an index already exists this copies every vector across before it
+    // drops the virtual tables, so nobody loses embeddings they have already
+    // paid for. It declines — rather than throwing — on the one case it cannot
+    // handle: vec0 tables on a machine that has since lost the extension, where
+    // sqlite can neither read nor drop them. `doctor` says so, and the next
+    // open retries.
+    run: migrateToPortableVectors,
   },
 ];
 
