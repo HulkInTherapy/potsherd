@@ -74,6 +74,49 @@ carries and throws away: `from[].raw` holds each list's own bm25 magnitude / cos
 | 3 | T10.8 `note` write-back · T10.9 keyphrase · C leftovers | |
 | 4 | fresh verifier → fixes → v1.2.0 via the provenance workflow | |
 
+## the orchestrator's own first defect, logged before anything else
+
+`docs/AGENT-AUDIT-2026-08-23.md` was left **untracked** by orchestrator 4. Orchestrator 5 committed
+and pushed it in `96a0166` without reading it against the guard. It carried **seven real session
+ids** and **three real project directory names**, on a public repository, for about thirty minutes.
+
+Two rules already written down, both broken in the same minute:
+
+- **`09 §16.7` — read the exit code, not the last line.** The guard *was* run. `tail -2` printed its
+  header caveat, which reads like a pass. The run had already failed with exit 1, and the `&&` chain
+  committed because the `tail`, not the guard, was the last command in it.
+- **`09 §13.9` — a guard's stated limitation is an open item.** The `project-name` rule is an
+  exact-substring list whose own header says *"exact is the whole weakness"*. It did not know
+  `Proteus`, so twelve occurrences walked through the rule that exists to catch them.
+
+Repaired: session ids became stable placeholders drawn from the guard's own hand-typed-literal class
+(≤ 3 distinct hex digits), project names became `<project-a>`…`<project-c>`, one-to-one so every
+claim that depends on two ids being the same or different still reads. A header note in the document
+says the substitution happened. The unredacted copy lives outside the repo. `Proteus`/`proteus` were
+added to `REAL_PROJECT_NAMES`, and `tests/open-threads.test.ts` gave up its `/Users/example/proteus`.
+
+History rewritten and force-pushed. **Verified from a fresh clone, not from this machine:** HEAD
+`595413c`, zero real ids in the audit, orphan commit absent. The orphan may stay addressable by
+exact SHA on GitHub until it is garbage-collected; that is recorded rather than hidden.
+
+## lineage measured on the real archive, for T10.3
+
+`uuid` overlap across the 35 transcripts with more than 20 records:
+
+| overlap | shared uuids | child | parent |
+|---:|---:|---|---|
+| **0.99** | 1,660 | 1,836 rec · 12→20 aug · 37 MB | 2,409 rec · 12→19 aug · 38 MB |
+| **0.96** | 194 | 292 rec · 16 jul→29 jul · 1.3 MB | 483 rec · 16 jul→3 aug · 27 MB |
+
+The audit found the first chain. **The second is new** — it was never reported, and it is the same
+defect a month earlier. Two chains, **4 of 35 sessions (11%)**, and both children are among the
+largest files in the archive: the sessions the thread model fails on are exactly the sessions with
+the most work in them. Record dates are present on the records themselves, so dating by content
+needs no new source of truth — only for the ranker to stop inheriting the fork point.
+
 ## status
 
-- **wave 1: briefing.**
+- **wave 1: running.** T10.1 calibration · T10.2 model ladder · T10.4 lazy vectors.
+- orchestrator, in parallel: the traffic workflow (`ci: keep the traffic numbers…`), the audit
+  redaction above, and the lineage measurement above.
+- **`NPM_TOKEN` is NOT set** (`gh secret list -R HulkInTherapy/potsherd` is empty). Asked meghavi.
