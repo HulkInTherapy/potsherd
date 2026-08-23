@@ -137,7 +137,65 @@ interface EvalQuery {
   class?: string;
   /** `sidechain` | `ghost` | `card` | `text`: where in the index the answer is. */
   needs?: string;
+  /**
+   * T10.1 — a confidence control rather than a recall query.
+   *
+   * `strong`   the archive answers this: at least one row, envelope `strong`.
+   * `no-match` the archive does not: **zero** rows.
+   *
+   * Controls carry no `expected_session_prefix`, because two of the three are
+   * asserting that the right answer is nothing, and they are held out of
+   * recall@1 and recall@k entirely — folding three unanswerable queries into a
+   * 25-query denominator would move the phase-3 gate by nine points and would
+   * be measuring the floor with an instrument that cannot see it.
+   */
+  control?: 'strong' | 'no-match';
   note?: string;
+}
+
+/** One control, run and judged. */
+interface ControlOutcome {
+  query: EvalQuery;
+  want: 'strong' | 'no-match';
+  rows: number;
+  confidence: string;
+  withheld: number;
+  pass: boolean;
+}
+
+/**
+ * The three controls, at the floor `potsherd find` actually uses.
+ *
+ * `minConfidence: 'weak'` and not the library default, which withholds
+ * nothing: the floor is set by the *verb*, because `recall()` is also the
+ * shortlist builder for `ask` and `graft`, and those hand their rows to a
+ * reader who can judge for themselves. What is measured here is what a person
+ * or an agent typing `potsherd find` gets.
+ */
+async function runControls(root: string, controls: EvalQuery[]): Promise<ControlOutcome[]> {
+  const db = store.open({ root });
+  const out: ControlOutcome[] = [];
+  try {
+    for (const q of controls) {
+      const r = await recall(db, q.query, {}, { limit: 10, root, vectors: false, minConfidence: 'weak' });
+      const want = q.control!;
+      const pass =
+        want === 'no-match'
+          ? r.sessions.length === 0
+          : r.sessions.length > 0 && r.confidence === 'strong';
+      out.push({
+        query: q,
+        want,
+        rows: r.sessions.length,
+        confidence: r.confidence,
+        withheld: r.belowFloor,
+        pass,
+      });
+    }
+  } finally {
+    db.close();
+  }
+  return out;
 }
 
 interface Outcome {
@@ -688,7 +746,13 @@ function gateFor(
 
 async function main(): Promise<void> {
   const o = parseArgs(process.argv.slice(2));
-  const queries = readQueries(o.set);
+  const all = readQueries(o.set);
+  // Two instruments in one file, kept apart. The recall set asks *did the right
+  // conversation come back*; the controls ask *did the tool admit when there is
+  // no right conversation*. Mixing their denominators would make each one a
+  // worse measure of the other.
+  const controls = all.filter((q) => q.control);
+  const queries = all.filter((q) => !q.control);
 
   // `--vectors` is the old single-mode switch; honour it, but the default is
   // all four modes, because "hybrid ≥ bm25" is only a claim when the two
@@ -723,6 +787,7 @@ async function main(): Promise<void> {
 
   const runs: { mode: Mode; outcomes: Outcome[] }[] = [];
   let overlap: Overlap[] = [];
+  let controlOutcomes: ControlOutcome[] = [];
   try {
     for (const key of wanted) {
       const mode = o.noCards
@@ -734,6 +799,7 @@ async function main(): Promise<void> {
       runs.push({ mode, outcomes: await runMode(root, queries, mode, o.k, weights) });
     }
     overlap = overlaps(root, queries, o.overlap);
+    controlOutcomes = await runControls(root, controls);
   } finally {
     built?.cleanup();
   }
@@ -748,7 +814,11 @@ async function main(): Promise<void> {
   const verdict = gates.find((g) => g.mode === 'hybrid') ?? null;
   const primary = runs.find((r) => r.mode.key === 'bm25') ?? runs[0]!;
   const phase1 = scoreAt(primary.outcomes, o.k) / total >= PHASE_1_GATE;
-  const ok = verdict ? verdict.pass : phase1;
+  // `plans/08` rule 4: a benchmark that cannot fail is worse than no benchmark.
+  // A control that is reported and not enforced is exactly that, so a red
+  // control fails the run on its own — the recall score cannot buy it back.
+  const controlsPass = controlOutcomes.every((c) => c.pass);
+  const ok = (verdict ? verdict.pass : phase1) && controlsPass;
 
   if (o.json) {
     process.stdout.write(
@@ -758,6 +828,14 @@ async function main(): Promise<void> {
           root: o.keep || o.potsherdDir ? root : null,
           k: o.k,
           queries: total,
+          controls: controlOutcomes.map((c) => ({
+            query: c.query.query,
+            want: c.want,
+            rows: c.rows,
+            confidence: c.confidence,
+            withheld: c.withheld,
+            pass: c.pass,
+          })),
           coverage: coverage(queries),
           // Both halves of the amended gate, separately, per judged mode —
           // `wide` (recall@k, `>=`) and `tight` (recall@1, `>`) — so a pass is
@@ -989,6 +1067,22 @@ async function main(): Promise<void> {
           ? t.ok('PASS') + t.dim(' — the amended phase-3 gate would merge this fusion')
           : t.warn('FAIL') + t.dim(' — the amended phase-3 gate would not merge this fusion')),
     );
+  }
+  if (controlOutcomes.length > 0) {
+    out.push('');
+    out.push(INDENT + t.dim(`confidence controls  ${t.sep}  the floor potsherd find runs at`));
+    for (const c of controlOutcomes) {
+      const want = c.want === 'no-match' ? 'zero rows' : 'rows at strong';
+      const got =
+        c.rows === 0
+          ? `no match${c.withheld > 0 ? `, ${c.withheld} withheld` : ''}`
+          : `${c.rows} ${c.rows === 1 ? 'row' : 'rows'} ${c.confidence}`;
+      out.push(
+        INDENT +
+          (c.pass ? t.ok('  ok  ') : t.warn(' FAIL ')) +
+          ` ${want.padEnd(15)} ${got.padEnd(24)} ${t.dim(c.query.query)}`,
+      );
+    }
   }
   if (o.keep && built) out.push(INDENT + t.dim(`index kept at ${built.root}`));
   process.stdout.write(out.join('\n') + '\n');
