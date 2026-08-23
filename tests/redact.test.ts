@@ -190,7 +190,7 @@ describe('agent-transcript fixture (T1.4b)', () => {
       'req_011CQm4Xt7Rk9vZ2pN8bY3sF',         // anthropic request id
       'chatcmpl-9xY2kP7mQ4vN8bR3tL6wZ1sHfDgJa', // openai completion id
       'call_9fJk2LmPq8sTvXyZ0aBcDeFg',        // openai tool call id
-      'exec-4c9339e0-b186-4006-b5c1-e7537c8b9353', // prefixed uuid
+      'exec-9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43', // prefixed uuid
       'agent-af69275032b68b31a',              // claude code sidechain id
       '01ARZ3NDEKTSV4RRFFQ69G5FAV',           // ulid
       '5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03', // sha256
@@ -530,7 +530,7 @@ describe('rules', () => {
     'assistant turn msg_01XFDUDYJgAACzvnptvVoYEL answered in 4.2s',      // E1
     'x-request-id: req_011CQm4Xt7Rk9vZ2pN8bY3sF',                        // E1
     'call_9fJk2LmPq8sTvXyZ0aBcDeFg returned two files',                  // E1
-    'exec-4c9339e0-b186-4006-b5c1-e7537c8b9353 finished with status 0',  // E2b
+    'exec-9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43 finished with status 0',  // E2b
     'blake3-af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262', // E4
     '01ARZ3NDEKTSV4RRFFQ69G5FAV was minted at 2016-07-30T23:36:17Z',     // E5
     'https://www.linkedin.com/posts/y-combinator_reducto-has-just-raised-a-75m-series-b-activity-7383909473913880576-ba7M', // E6

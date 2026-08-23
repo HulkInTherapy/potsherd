@@ -272,10 +272,10 @@ describe('claude parser', () => {
  * from both is exactly the mistake this parser has to not make.
  */
 function writeCodexRollout(dir: string): string {
-  const file = path.join(dir, 'rollout-2026-07-21T19-35-33-019f84ff-05f6-7ad0-8ba3-4064f23a1fb5.jsonl');
+  const file = path.join(dir, 'rollout-2026-07-21T19-35-33-01900000-0000-7000-8000-000000000001.jsonl');
   const t = (s: number) => `2026-07-21T14:0${s}:00.000Z`;
   const lines = [
-    { timestamp: t(0), type: 'session_meta', payload: { session_id: '019f84ff-05f6-7ad0-8ba3-4064f23a1fb5', cwd: '/tmp/potsherd-codex', cli_version: '0.145.0', originator: 'Codex Desktop' } },
+    { timestamp: t(0), type: 'session_meta', payload: { session_id: '01900000-0000-7000-8000-000000000001', cwd: '/tmp/potsherd-codex', cli_version: '0.145.0', originator: 'Codex Desktop' } },
     { timestamp: t(1), type: 'turn_context', payload: { cwd: '/tmp/potsherd-codex', model: 'gpt-5-codex' } },
     { timestamp: t(2), type: 'event_msg', payload: { type: 'user_message', message: 'add a retry to the uploader' } },
     { timestamp: t(2), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context>cwd=/tmp/potsherd-codex</environment_context>' }] } },
@@ -328,7 +328,7 @@ describe('codex parser', () => {
     });
     rmrf(dir);
 
-    expect(session.id).toBe('019f84ff-05f6-7ad0-8ba3-4064f23a1fb5');
+    expect(session.id).toBe('01900000-0000-7000-8000-000000000001');
     expect(session.harness).toBe('codex');
     expect(session.project).toBe('/tmp/potsherd-codex');
     expect(session.model).toBe('gpt-5-codex');

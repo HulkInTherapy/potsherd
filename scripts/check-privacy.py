@@ -510,6 +510,28 @@ def id_sources() -> dict[str, str]:
             for tok in id_tokens(f.read_text(encoding='utf-8')):
                 add(tok, 'a lockfile hash')
 
+    # S6  a numeric constant this repository declares with digit separators.
+    #
+    # `MODEL_DOWNLOAD_BYTES = 34_014_426` is unmistakable in TypeScript and
+    # invisible in the bundle: esbuild strips the separators, and eight decimal
+    # digits are eight valid hex characters, so the vendored output grows an
+    # id-shaped token that no source appeared to account for. The repository
+    # CAN derive it -- it is the same number, one underscore-strip away -- so it
+    # is accounted rather than pinned. Pinning it would have hidden a real id
+    # behind a count, which is the failure the inventory exists to prevent.
+    for path in tracked_files():                                        # S6
+        if not path.startswith(('packages/',)) or not path.endswith(('.ts', '.mts')):
+            continue
+        f = REPO / path
+        if not f.is_file():
+            continue
+        try:
+            body = f.read_text(encoding='utf-8')
+        except (UnicodeDecodeError, OSError):
+            continue
+        for lit in re.findall(r'\b\d[\d_]{6,}\b', body):
+            add(lit.replace('_', ''), 'a numeric literal this repository writes with separators')
+
     _ID_SOURCES = src
     return src
 
@@ -866,7 +888,7 @@ DEBT: list[tuple[str, str, int, str]] = [
 # ratchet, like the pins below and like DEBT: lower it when it falls, never
 # raise it. It exists because the per-file pins are counts, and a count cannot
 # tell one unaccounted id from another -- see `unaccounted_total`.
-ID_INVENTORY_CEILING = 29
+ID_INVENTORY_CEILING = 19
 
 ID_INVENTORY_PINS: list[tuple[str, int, str]] = [
     ('docs/upstream/PHASE-1-SCOUT.md', 14,
@@ -890,43 +912,17 @@ ID_INVENTORY_PINS: list[tuple[str, int, str]] = [
     # `phases/phase-8/registration-W7.txt` names the exact substitution each one
     # needs. The demo corpus's own `9c4d2f18` is the substitute, and this file's
     # header has said so since T5.9.
-    ('packages/cli/src/commands/card.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
-    ('packages/cli/src/commands/graft.ts', 4, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
-    ('packages/cli/src/commands/link.ts', 2, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.' + ' Both ends of the `link` example.'),
-    ('packages/cli/src/commands/tag.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
-    ('packages/cli/src/filters.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
-    ('packages/cli/src/index.ts', 17, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.' + ' Every verb\'s --help example block.'),
-    ('packages/cli/src/session-ref.ts', 3, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
-    ('packages/core/src/browse.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
-    ('packages/core/src/graft.ts', 16, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.' + ' The citation-parsing docstrings.'),
-    ('packages/core/src/tags.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
-    ('tests/open-threads.test.ts', 2, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
-    ('tests/redact.test.ts', 9,
+    ('packages/core/src/graft.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.' + ' The citation-parsing docstrings.'),
+    ('tests/redact.test.ts', 7,
      '(r) the same real id, plus two more real ids, in the redaction fixtures.'
      ' This test and tests/fixtures/secrets/agent-transcript.txt are the pair'
      ' that made the whole leak invisible -- see ID_SOURCE_EXCLUDE above.'),
-    ('tests/recall.test.ts', 4,
+    ('tests/recall.test.ts', 1,
      '(r) the same real id, and a real subagent id derived from it.'),
 
-    ('packages/core/src/adapters/pi.ts', 2,
-     '(r) a real ~/.pi session id in a docstring, and a real ~/.pi DAG record id'
-     ' beside it. The docs/ half of this pair was repaired by T8.H.'),
     ('packages/core/src/ask.ts', 1,
      '(r) a real session cited in a docstring as the case a bug was measured on.'),
-    ('tests/adapters/codex.test.ts', 1,
-     '(r) a real ~/.codex rollout id, labelled in the test as "the one rollout'
-     ' on this machine".'),
-    ('tests/adapters/pi.test.ts', 1, '(r) a real ~/.pi session id in a filename assertion.'),
-    ('tests/graft.test.ts', 1,
-     '(r) a real ghost session id in a comment recording where a bug was found.'),
-    ('tests/parser.test.ts', 3, '(r) the same real ~/.codex rollout id as codex.test.ts.'),
 
-    ('plugins/claude-code/dist/mcp.js', 2,
-     '(r) vendored esbuild output; carries whatever packages/ says, plus (n) an'
-     ' eight-digit decimal byte count.'),
-    ('plugins/claude-code/dist/potsherd.js', 23,
-     '(r) the same, at the size of the whole CLI. These two clear by re-running'
-     ' scripts/vendor-plugin.mjs AFTER packages/ is fixed, and not before.'),
 
     ('packages/core/src/redact.ts', 6, '(n) the `‹redacted:aws:<sha8>›` placeholder sha8.'),
     ('packages/core/src/render/ask.ts', 1, '(n) the same redaction placeholder sha8.'),

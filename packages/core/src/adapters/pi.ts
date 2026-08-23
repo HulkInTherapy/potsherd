@@ -86,7 +86,7 @@ import {
  *   3. **pi records two disagreeing clocks.** Every `message` record has an
  *      outer ISO `timestamp` and an inner epoch-ms `message.timestamp`, and
  *      they differ in all 4 real files — by up to **9.35 s** (record
- *      `36ef4bb7`: outer `08:10:07.079Z`, inner `08:09:57.733Z`), which is
+ *      `aa000011`: outer `08:10:07.079Z`, inner `08:09:57.733Z`), which is
  *      larger than the gap between adjacent turns. A rule that depends on
  *      "the" timestamp has to pick one of two contradictory clocks first.
  *
@@ -218,8 +218,8 @@ export function discover(override?: string): SessionSource[] {
 }
 
 /**
- * `2026-05-13T08-09-45-791Z_019e206c-8b63-736e-8b39-8d01e7e5b678.jsonl` ->
- * `019e206c-8b63-736e-8b39-8d01e7e5b678`. The prefix is a file-safe stamp, not
+ * `2026-05-13T08-09-45-791Z_01a00001-1000-7000-8000-000000000001.jsonl` ->
+ * `01a00001-1000-7000-8000-000000000001`. The prefix is a file-safe stamp, not
  * an ISO timestamp; the id is everything after the **last** `_`, because the
  * stamp itself never contains one.
  */

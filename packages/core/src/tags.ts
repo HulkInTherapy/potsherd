@@ -99,7 +99,7 @@ export function normalizeTag(raw: string): string | null {
 /**
  * Split `+postgres -infra rls` into what to add and what to remove.
  *
- * A bare word means add: `potsherd tag 4c9339e0 postgres` is what people type
+ * A bare word means add: `potsherd tag 9c4d2f18 postgres` is what people type
  * the first time, and refusing it to insist on a `+` would be pedantry. Only
  * a leading `-` removes.
  *

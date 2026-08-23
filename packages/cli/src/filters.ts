@@ -97,7 +97,7 @@ function resolveTag(value: string): string {
 }
 
 /**
- * `--linked-to 4c9339e0` -> the whole session id.
+ * `--linked-to 9c4d2f18` -> the whole session id.
  *
  * The filter compares ids, and `links` stores whole ones, so the prefix a user
  * reads off `ls` has to be resolved before it reaches SQL. Resolving here also

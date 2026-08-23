@@ -565,7 +565,7 @@ export function resumeCommand(
   // one, so its own resume command would fail. Printing it anyway would be the
   // worst kind of wrong: a command that looks like the fix and is not.
   if (status !== 'live') return null;
-  // A subagent transcript is not resumable — `4c9339e0-…:agent-a02db260…` is
+  // A subagent transcript is not resumable — `9c4d2f18-…:agent-a02db260…` is
   // potsherd's id for a file, not a session claude will reopen. What the user
   // actually wants is the conversation that spawned it, so that is what is
   // offered. This is the difference between a command that works and a

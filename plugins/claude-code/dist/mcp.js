@@ -23811,8 +23811,8 @@ __export(db_exports, {
   sqliteAvailable: () => sqliteAvailable,
   sqliteDriverName: () => sqliteDriverName
 });
-import fs from "node:fs";
-import path2 from "node:path";
+import fs2 from "node:fs";
+import path3 from "node:path";
 
 // ../core/dist/sqlite-driver.js
 import { createRequire } from "node:module";
@@ -23970,6 +23970,20 @@ function wrap2(db) {
         throw new Error("this sqlite cannot load extensions");
       db.loadExtension(path30);
     },
+    // 5. **`function()` registers an application-defined function.** Both
+    //    drivers spell it the same way and both take the arity from
+    //    `impl.length`; only the forwarding was missing. `vec.ts` is the sole
+    //    caller and it is not optional there — `match()` and
+    //    `potsherd_vec_distance()` are what make `vec_exchanges` searchable
+    //    without a native extension, so a driver that cannot register them has
+    //    no vector search at all. It stays a shim method rather than a call-site
+    //    branch for the same reason as the other four: no query in the codebase
+    //    should know which driver it is on.
+    function(name, options, impl) {
+      if (!db.function)
+        throw new Error("this sqlite cannot register functions");
+      db.function(name, options, impl);
+    },
     get inTransaction() {
       return depth > 0;
     }
@@ -23979,83 +23993,743 @@ function wrap2(db) {
 
 // ../core/dist/vec.js
 import { createRequire as createRequire2 } from "node:module";
+import process6 from "node:process";
+
+// ../core/dist/embeddings.js
+var embeddings_exports = {};
+__export(embeddings_exports, {
+  ACQUIRE_BYTES: () => ACQUIRE_BYTES,
+  BGE_QUERY_PREFIX: () => BGE_QUERY_PREFIX,
+  EMBEDDING_DIMENSIONS: () => EMBEDDING_DIMENSIONS,
+  EMBEDDING_VERSION: () => EMBEDDING_VERSION,
+  EmbeddingUnavailableError: () => EmbeddingUnavailableError,
+  MODEL_DOWNLOAD_BYTES: () => MODEL_DOWNLOAD_BYTES,
+  MODEL_DTYPE: () => MODEL_DTYPE,
+  MODEL_ID: () => MODEL_ID,
+  RUNTIME_SUBDIR: () => RUNTIME_SUBDIR,
+  RUNTIME_VERSION: () => RUNTIME_VERSION,
+  TOKENIZERS_VERSION: () => TOKENIZERS_VERSION,
+  acquire: () => acquire,
+  acquisitionPlan: () => acquisitionPlan,
+  blobToEmbedding: () => blobToEmbedding,
+  embedThreads: () => embedThreads,
+  embeddingBackend: () => embeddingBackend,
+  embeddingToBlob: () => embeddingToBlob,
+  ensureModel: () => ensureModel,
+  exchangeText: () => exchangeText,
+  generateEmbedding: () => generateEmbedding,
+  generateExchangeEmbedding: () => generateExchangeEmbedding,
+  generateExchangeEmbeddings: () => generateExchangeEmbeddings,
+  generateQueryEmbedding: () => generateQueryEmbedding,
+  initEmbeddings: () => initEmbeddings,
+  isEmbeddingReady: () => isEmbeddingReady,
+  isModelCached: () => isModelCached,
+  isRuntimeCached: () => isRuntimeCached,
+  modelBase: () => modelBase,
+  offline: () => offline,
+  requiredFiles: () => requiredFiles,
+  resetEmbeddings: () => resetEmbeddings,
+  runtimeBase: () => runtimeBase,
+  runtimeHosts: () => runtimeHosts,
+  withQueryPrefix: () => withQueryPrefix
+});
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os2 from "node:os";
+import path2 from "node:path";
 import process5 from "node:process";
+import { pathToFileURL } from "node:url";
+var EMBEDDING_VERSION = 1;
+var MODEL_ID = "Xenova/bge-small-en-v1.5";
+var MODEL_DTYPE = "q8";
+var EMBEDDING_DIMENSIONS = 384;
+var BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
+var MAX_INPUT_CHARS = 2e3;
+var MAX_TOKENS = 512;
+var RUNTIME_VERSION = "1.27.0";
+var TOKENIZERS_VERSION = "0.1.3";
+function runtimeBase() {
+  const override = process5.env["POTSHERD_RUNTIME_BASE"];
+  return override && override.trim() ? stripSlash(override.trim()) : "https://cdn.jsdelivr.net/npm";
+}
+function modelBase() {
+  const override = process5.env["POTSHERD_MODEL_BASE"];
+  return override && override.trim() ? stripSlash(override.trim()) : "https://huggingface.co";
+}
+var RUNTIME_SUBDIR = `runtime/onnxruntime-web-${RUNTIME_VERSION}`;
+function runtimeFiles() {
+  const ort = `${runtimeBase()}/onnxruntime-web@${RUNTIME_VERSION}/dist`;
+  const tok = `${runtimeBase()}/@huggingface/tokenizers@${TOKENIZERS_VERSION}/dist`;
+  return [
+    {
+      name: `${RUNTIME_SUBDIR}/ort.wasm.bundle.min.mjs`,
+      url: `${ort}/ort.wasm.bundle.min.mjs`,
+      bytes: 72799,
+      sha256: "1db5e1c5cd2b860eed85e6eeff23e2aaa7cffcc407f67093bcc888f631b94ba9"
+    },
+    {
+      name: `${RUNTIME_SUBDIR}/ort-wasm-simd-threaded.mjs`,
+      url: `${ort}/ort-wasm-simd-threaded.mjs`,
+      bytes: 24180,
+      sha256: "0a1e718d99c41b22c21f2520ff4f9e883a6b5533856e398d21816ee8eb8185d3"
+    },
+    {
+      name: `${RUNTIME_SUBDIR}/ort-wasm-simd-threaded.wasm`,
+      url: `${ort}/ort-wasm-simd-threaded.wasm`,
+      bytes: 13479978,
+      sha256: "d1ab1b94b16a65b29d710d0b587b29e7bed336827577623913479b8afe8113e6"
+    },
+    {
+      name: `${RUNTIME_SUBDIR}/tokenizers.mjs`,
+      url: `${tok}/tokenizers.mjs`,
+      bytes: 81970,
+      sha256: "6d92e25f9576e67124b3a3f910f5cc1df95a42bde4df4f5387f62dee4554f301"
+    }
+  ];
+}
+function modelFiles() {
+  const base2 = `${modelBase()}/${MODEL_ID}/resolve/main`;
+  const at = (name, bytes2, sha256) => ({
+    name: `${MODEL_ID}/${name}`,
+    url: `${base2}/${name}`,
+    bytes: bytes2,
+    sha256
+  });
+  return [
+    at("config.json", 683, "fa73f90bf92c8cace1fbcb709626306f2bdbc9ea3e5b5f94b440df9b6aa56350"),
+    at("tokenizer_config.json", 366, "9261e7d79b44c8195c1cada2b453e55b00aeb81e907a6664974b4d7776172ab3"),
+    at("tokenizer.json", 711396, "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"),
+    at("onnx/model_quantized.onnx", 34014426, "6c9c6101a956d62dfb5e7190c538226c0c5bb9cb27b651234b6df063ee7dbfe4")
+  ];
+}
+function requiredFiles() {
+  return [...runtimeFiles(), ...modelFiles()];
+}
+function runtimeHosts() {
+  const hosts = [...new Set([runtimeBase(), modelBase()].map(hostOf))].filter(Boolean);
+  if (hosts.length === 0)
+    return "nowhere \u2014 every source is a local path";
+  if (hosts.length === 1)
+    return hosts[0];
+  return `${hosts.slice(0, -1).join(", ")} and ${hosts[hosts.length - 1]}`;
+}
+function hostOf(base2) {
+  try {
+    const u = new URL(base2);
+    return u.protocol === "file:" ? "" : u.host;
+  } catch {
+    return "";
+  }
+}
+var ACQUIRE_BYTES = requiredFiles().reduce((n2, f) => n2 + f.bytes, 0);
+var MODEL_DOWNLOAD_BYTES = 34014426;
+function haveFile(cacheDir, f) {
+  try {
+    return fs.statSync(path2.join(cacheDir, ...f.name.split("/"))).size === f.bytes;
+  } catch {
+    return false;
+  }
+}
+function acquisitionPlan(cacheDir = modelsDir()) {
+  const missing = requiredFiles().filter((f) => !haveFile(cacheDir, f));
+  const bytes2 = missing.reduce((n2, f) => n2 + f.bytes, 0);
+  return { missing, bytes: bytes2, complete: missing.length === 0 };
+}
+function isModelCached(cacheDir = modelsDir()) {
+  return modelFiles().every((f) => haveFile(cacheDir, f));
+}
+function isRuntimeCached(cacheDir = modelsDir()) {
+  return runtimeFiles().every((f) => haveFile(cacheDir, f));
+}
+function isEmbeddingReady(cacheDir = modelsDir()) {
+  return acquisitionPlan(cacheDir).complete;
+}
+var EmbeddingUnavailableError = class extends Error {
+  reason;
+  constructor(reason) {
+    super(reason);
+    this.reason = reason;
+    this.name = "EmbeddingUnavailableError";
+  }
+};
+function offline() {
+  for (const key of ["POTSHERD_OFFLINE", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"]) {
+    const v = process5.env[key];
+    if (v && v !== "0")
+      return true;
+  }
+  return false;
+}
+async function acquire(cacheDir = modelsDir(), onProgress) {
+  const plan = acquisitionPlan(cacheDir);
+  if (plan.complete)
+    return;
+  if (offline()) {
+    throw new EmbeddingUnavailableError("offline \u2014 the embedding runtime was not fetched");
+  }
+  let done = 0;
+  for (const file2 of plan.missing) {
+    const dest = path2.join(cacheDir, ...file2.name.split("/"));
+    fs.mkdirSync(path2.dirname(dest), { recursive: true });
+    const part = `${dest}.part`;
+    const before = done;
+    try {
+      const res = await fetch(file2.url, { redirect: "follow" });
+      if (!res.ok || !res.body) {
+        throw new Error(`${res.status} ${res.statusText || "no body"}`);
+      }
+      const hash2 = crypto.createHash("sha256");
+      const out = fs.createWriteStream(part);
+      try {
+        for await (const chunk of res.body) {
+          hash2.update(chunk);
+          done += chunk.byteLength;
+          if (!out.write(chunk)) {
+            await new Promise((resolve) => out.once("drain", () => resolve()));
+          }
+          onProgress?.({ done: Math.min(done, plan.bytes), total: plan.bytes, file: file2.name });
+        }
+      } finally {
+        await new Promise((resolve, reject) => out.end((err) => err ? reject(err) : resolve()));
+      }
+      const digest = hash2.digest("hex");
+      if (digest !== file2.sha256) {
+        throw new Error(`checksum mismatch (got ${digest.slice(0, 12)}\u2026)`);
+      }
+      const size = fs.statSync(part).size;
+      if (size !== file2.bytes)
+        throw new Error(`size mismatch (${size} of ${file2.bytes})`);
+      fs.renameSync(part, dest);
+    } catch (err) {
+      try {
+        fs.rmSync(part, { force: true });
+      } catch {
+      }
+      done = before;
+      throw new EmbeddingUnavailableError(`could not fetch ${file2.name}: ${firstLine(err?.message ?? String(err))}`);
+    }
+  }
+}
+function embedThreads() {
+  const override = Number(process5.env["POTSHERD_EMBED_THREADS"]);
+  if (Number.isFinite(override) && override >= 1)
+    return Math.floor(override);
+  const logical = os2.availableParallelism?.() ?? os2.cpus().length ?? 2;
+  return Math.max(1, Math.min(4, Math.floor(logical / 2)));
+}
+var pipelinePromise = null;
+var backend = null;
+function embeddingBackend() {
+  return backend;
+}
+async function initEmbeddings(options = {}) {
+  await getPipeline(options);
+}
+var ensureModel = initEmbeddings;
+async function getPipeline(options = {}) {
+  if (pipelinePromise)
+    return pipelinePromise;
+  pipelinePromise = (async () => {
+    const cacheDir = options.cacheDir ?? modelsDir();
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const forced = (process5.env["POTSHERD_EMBED_BACKEND"] ?? "").trim().toLowerCase();
+    if (forced === "native") {
+      backend = "native";
+      return nativePipeline(cacheDir, options);
+    }
+    if (!acquisitionPlan(cacheDir).complete) {
+      if (options.noAcquire) {
+        throw new EmbeddingUnavailableError("the embedding runtime is not on this machine yet \u2014 potsherd index fetches it");
+      }
+      const onProgress = options.onProgress;
+      await acquire(cacheDir, onProgress ? (p) => onProgress(p.total > 0 ? Math.min(1, p.done / p.total) : 0, p.file) : void 0);
+    }
+    backend = "wasm";
+    return wasmPipeline(cacheDir);
+  })();
+  try {
+    return await pipelinePromise;
+  } catch (error51) {
+    pipelinePromise = null;
+    backend = null;
+    throw error51;
+  }
+}
+async function wasmPipeline(cacheDir) {
+  const dir = path2.join(cacheDir, ...RUNTIME_SUBDIR.split("/"));
+  const modelDir = path2.join(cacheDir, ...MODEL_ID.split("/"));
+  const ort = await import(
+    /* @vite-ignore */
+    pathToFileUrl(path2.join(dir, "ort.wasm.bundle.min.mjs"))
+  );
+  const { Tokenizer } = await import(
+    /* @vite-ignore */
+    pathToFileUrl(path2.join(dir, "tokenizers.mjs"))
+  );
+  const threads = embedThreads();
+  ort.env.wasm.wasmPaths = `${dir}${path2.sep}`;
+  ort.env.wasm.numThreads = threads;
+  ort.env.logLevel = "error";
+  const tokenizer = new Tokenizer(JSON.parse(fs.readFileSync(path2.join(modelDir, "tokenizer.json"), "utf8")), JSON.parse(fs.readFileSync(path2.join(modelDir, "tokenizer_config.json"), "utf8")));
+  const weights = new Uint8Array(fs.readFileSync(path2.join(modelDir, "onnx", "model_quantized.onnx")));
+  const session = await ort.InferenceSession.create(weights, {
+    executionProviders: ["wasm"],
+    graphOptimizationLevel: "all",
+    intraOpNumThreads: threads,
+    interOpNumThreads: 1
+  });
+  const wantsTypeIds = session.inputNames.includes("token_type_ids");
+  const sepId = sepTokenId(path2.join(modelDir, "tokenizer.json"));
+  const one2 = async (text) => {
+    const enc = tokenizer.encode(text, {
+      add_special_tokens: true,
+      return_token_type_ids: true
+    });
+    const ids = truncate(enc.ids, sepId);
+    const mask = enc.attention_mask.slice(0, ids.length);
+    const n2 = ids.length;
+    const big = (xs) => BigInt64Array.from(xs, (x) => BigInt(x));
+    const feeds = {
+      input_ids: new ort.Tensor("int64", big(ids), [1, n2]),
+      attention_mask: new ort.Tensor("int64", big(mask), [1, n2])
+    };
+    if (wantsTypeIds) {
+      feeds["token_type_ids"] = new ort.Tensor("int64", big((enc.token_type_ids ?? ids.map(() => 0)).slice(0, n2)), [1, n2]);
+    }
+    const out = await session.run(feeds);
+    const hidden = out[session.outputNames[0]];
+    const width = hidden.dims[hidden.dims.length - 1] ?? EMBEDDING_DIMENSIONS;
+    const length = hidden.dims.length === 3 ? hidden.dims[1] ?? n2 : n2;
+    const data = hidden.data;
+    const v = new Float32Array(width);
+    let counted = 0;
+    for (let i = 0; i < length; i += 1) {
+      if (!mask[i])
+        continue;
+      counted += 1;
+      const base2 = i * width;
+      for (let j = 0; j < width; j += 1)
+        v[j] = (v[j] ?? 0) + (data[base2 + j] ?? 0);
+    }
+    if (counted > 0)
+      for (let j = 0; j < width; j += 1)
+        v[j] = (v[j] ?? 0) / counted;
+    let norm = 0;
+    for (let j = 0; j < width; j += 1)
+      norm += (v[j] ?? 0) ** 2;
+    norm = Math.sqrt(norm) || 1;
+    for (let j = 0; j < width; j += 1)
+      v[j] = (v[j] ?? 0) / norm;
+    return v;
+  };
+  return async (input) => {
+    if (typeof input === "string") {
+      const v = await one2(input);
+      return { data: v, dims: [1, v.length] };
+    }
+    const parts = [];
+    for (const text of input)
+      parts.push(await one2(text));
+    const width = parts[0]?.length ?? EMBEDDING_DIMENSIONS;
+    const all = new Float32Array(parts.length * width);
+    parts.forEach((p, i) => all.set(p, i * width));
+    return { data: all, dims: [parts.length, width] };
+  };
+}
+function truncate(ids, sepId) {
+  if (ids.length <= MAX_TOKENS)
+    return [...ids];
+  const cut2 = ids.slice(0, MAX_TOKENS);
+  if (sepId !== null)
+    cut2[MAX_TOKENS - 1] = sepId;
+  return cut2;
+}
+function sepTokenId(tokenizerJson) {
+  try {
+    const spec = JSON.parse(fs.readFileSync(tokenizerJson, "utf8"));
+    const added = spec.added_tokens?.find((t) => t.content === "[SEP]");
+    if (added)
+      return added.id;
+    const fromVocab = spec.model?.vocab?.["[SEP]"];
+    return typeof fromVocab === "number" ? fromVocab : null;
+  } catch {
+    return null;
+  }
+}
+async function nativePipeline(cacheDir, options) {
+  let transformers;
+  try {
+    transformers = await import(
+      /* @vite-ignore */
+      "@huggingface/transformers"
+    );
+  } catch {
+    throw new EmbeddingUnavailableError("the native embedding runtime is not on this machine");
+  }
+  const env = transformers.env;
+  env["allowLocalModels"] = true;
+  env["useBrowserCache"] = false;
+  env["cacheDir"] = cacheDir;
+  const onProgress = options.onProgress;
+  const built = await transformers.pipeline("feature-extraction", MODEL_ID, {
+    dtype: MODEL_DTYPE,
+    session_options: { intraOpNumThreads: embedThreads(), interOpNumThreads: 1 },
+    progress_callback: onProgress ? (p) => {
+      if (typeof p !== "object" || p === null)
+        return;
+      const rec = p;
+      if (typeof rec.progress === "number") {
+        onProgress(Math.max(0, Math.min(1, rec.progress / 100)), rec.file ?? "");
+      }
+    } : () => {
+    }
+  });
+  return built;
+}
+function resetEmbeddings() {
+  pipelinePromise = null;
+  backend = null;
+}
+async function generateEmbedding(text, options = {}) {
+  const pipe2 = await getPipeline(options);
+  const output = await pipe2(text.substring(0, MAX_INPUT_CHARS), {
+    pooling: "mean",
+    normalize: true
+  });
+  return Array.from(output.data);
+}
+function withQueryPrefix(query) {
+  if (query.startsWith(BGE_QUERY_PREFIX))
+    return query;
+  return BGE_QUERY_PREFIX + query;
+}
+async function generateQueryEmbedding(query, options = {}) {
+  return generateEmbedding(withQueryPrefix(query), options);
+}
+function exchangeText(userText, assistantText, toolNames) {
+  let combined = `User: ${userText}
+
+Assistant: ${assistantText}`;
+  if (toolNames && toolNames.length > 0) {
+    combined += `
+
+Tools: ${toolNames.join(", ")}`;
+  }
+  return combined;
+}
+async function generateExchangeEmbedding(userText, assistantText, toolNames, options = {}) {
+  return generateEmbedding(exchangeText(userText, assistantText, toolNames), options);
+}
+async function generateExchangeEmbeddings(items, options = {}) {
+  if (items.length === 0)
+    return [];
+  const texts = items.map((i) => exchangeText(i.userText, i.assistantText, i.toolNames).substring(0, MAX_INPUT_CHARS));
+  const pipe2 = await getPipeline(options);
+  const output = await pipe2(texts, { pooling: "mean", normalize: true });
+  const data = output.data;
+  if (data.length !== texts.length * EMBEDDING_DIMENSIONS) {
+    const out2 = [];
+    for (const text of texts)
+      out2.push(await generateEmbedding(text, options));
+    return out2;
+  }
+  const out = [];
+  for (let i = 0; i < texts.length; i += 1) {
+    out.push(Array.from(data.slice(i * EMBEDDING_DIMENSIONS, (i + 1) * EMBEDDING_DIMENSIONS)));
+  }
+  return out;
+}
+function embeddingToBlob(embedding) {
+  return Buffer.from(new Float32Array(embedding).buffer);
+}
+function blobToEmbedding(blob) {
+  const buf = Buffer.isBuffer(blob) ? blob : Buffer.from(blob);
+  if (buf.byteOffset % 4 === 0) {
+    return new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
+  }
+  const copy = Buffer.from(buf);
+  return new Float32Array(copy.buffer, copy.byteOffset, Math.floor(copy.byteLength / 4));
+}
+function stripSlash(s) {
+  return s.endsWith("/") ? s.slice(0, -1) : s;
+}
+function firstLine(s) {
+  return (s.split("\n")[0] ?? s).trim();
+}
+function pathToFileUrl(p) {
+  if (!fs.existsSync(p)) {
+    throw new EmbeddingUnavailableError(`missing runtime file: ${path2.basename(p)}`);
+  }
+  return pathToFileURL(path2.resolve(p)).href;
+}
+
+// ../core/dist/doctor-line.js
+function vectorReport(counts2) {
+  const total = counts2.embedded + counts2.pending;
+  const runtimeReady = isEmbeddingReady(counts2.cacheDir);
+  const acquireBytes = runtimeReady ? 0 : acquisitionPlan(counts2.cacheDir).bytes || ACQUIRE_BYTES;
+  const base2 = {
+    embedded: counts2.embedded,
+    pending: counts2.pending,
+    total,
+    runtimeReady,
+    acquireBytes,
+    ...counts2.backend ? { backend: counts2.backend } : {}
+  };
+  if (counts2.reason)
+    return { ...base2, phase: "unavailable", reason: counts2.reason };
+  if (total === 0)
+    return { ...base2, phase: "empty" };
+  if (counts2.pending === 0)
+    return { ...base2, phase: "ready" };
+  if (counts2.embedded === 0)
+    return { ...base2, phase: "pending" };
+  return { ...base2, phase: "warming" };
+}
+function warmingLine(r, num2 = String) {
+  return `semantic search: warming (${num2(r.embedded)} of ${num2(r.total)} embedded)`;
+}
+function vectorNote(r, opts = {}) {
+  const num2 = opts.num ?? String;
+  const bytes2 = opts.bytes ?? ((n2) => `${Math.round(n2 / 1e6)} MB`);
+  const dash = opts.dash ?? "\u2014";
+  const runtime = r.backend === "native" ? "bge-small, 384-d" : "bge-small, 384-d, wasm";
+  switch (r.phase) {
+    case "ready":
+      return { value: num2(r.embedded), parts: [runtime, "every exchange"], tone: "ok" };
+    case "warming":
+      return {
+        value: num2(r.embedded),
+        parts: [`warming ${num2(r.embedded)} of ${num2(r.total)}`, runtime],
+        tone: "ok"
+      };
+    case "pending":
+      return {
+        value: dash,
+        parts: r.runtimeReady ? [`warming 0 of ${num2(r.total)}`, runtime] : [`0 of ${num2(r.total)}`, `${bytes2(r.acquireBytes)} runtime not fetched yet`],
+        tone: "dim"
+      };
+    case "empty":
+      return { value: dash, parts: ["nothing indexed yet"], tone: "dim" };
+    case "unavailable":
+    default:
+      return {
+        value: r.embedded > 0 ? num2(r.embedded) : dash,
+        parts: [r.reason ?? "semantic search is not running here", "text search still works"],
+        tone: "dim"
+      };
+  }
+}
+function fitNote(parts, width, sep = " \xB7 ") {
+  const kept = [];
+  for (const part of parts) {
+    const next = kept.length === 0 ? part : `${kept.join(sep)}${sep}${part}`;
+    if (kept.length > 0 && next.length > width)
+      break;
+    kept.push(part);
+  }
+  return kept.join(sep);
+}
+function formatDoctorLine(o) {
+  return `${o.harness.padEnd(12)}${o.status.padEnd(10)}${tildify(o.dir).padEnd(28)}  ${o.note}`;
+}
+
+// ../core/dist/vec.js
 var require_2 = createRequire2(import.meta.url);
 var loaded = /* @__PURE__ */ new WeakMap();
-function locate() {
-  const off = process5.env["POTSHERD_NO_VEC"];
-  if (off && off !== "0" && off !== "") {
-    return { reason: "disabled by POTSHERD_NO_VEC" };
+var needles = /* @__PURE__ */ new WeakMap();
+function installVectorFunctions(db) {
+  const fn = db.function;
+  if (typeof fn !== "function") {
+    return { ok: false, reason: "this sqlite driver cannot register functions" };
   }
   try {
-    const mod = require_2("sqlite-vec");
-    return { path: mod.getLoadablePath() };
+    const register = db.function.bind(db);
+    register("match", { deterministic: false }, (needle, _row) => {
+      if (needle instanceof Uint8Array || Buffer.isBuffer(needle)) {
+        needles.set(db, blobToEmbedding(needle));
+      }
+      return 1;
+    });
+    register("potsherd_vec_distance", { deterministic: false }, (row2) => {
+      const q = needles.get(db);
+      if (!q)
+        return Number.MAX_VALUE;
+      if (!(row2 instanceof Uint8Array) && !Buffer.isBuffer(row2))
+        return Number.MAX_VALUE;
+      const v = blobToEmbedding(row2);
+      const n2 = Math.min(q.length, v.length);
+      let sum2 = 0;
+      for (let i = 0; i < n2; i += 1) {
+        const d = (q[i] ?? 0) - (v[i] ?? 0);
+        sum2 += d * d;
+      }
+      return Math.sqrt(sum2);
+    });
+    return { ok: true };
   } catch (err) {
-    const message2 = err?.message ?? String(err);
-    if (/Cannot find module/.test(message2)) {
-      return { reason: "sqlite-vec is not installed \u2014 install it for vector search" };
-    }
-    return { reason: firstLine(message2) };
+    return { ok: false, reason: firstLine2(err?.message ?? String(err)) };
+  }
+}
+function loadLegacyExtension(db) {
+  const off = process6.env["POTSHERD_NO_VEC"];
+  if (off && off !== "0")
+    return {};
+  try {
+    const mod = require_2("sqlite-vec");
+    const p = mod.getLoadablePath();
+    db.loadExtension(p);
+    const row2 = db.prepare("SELECT vec_version() AS v").get();
+    return { path: p, ...row2?.v ? { version: row2.v } : {} };
+  } catch {
+    return {};
   }
 }
 function loadVec(db) {
   const cached3 = loaded.get(db);
   if (cached3)
     return cached3;
-  const found = locate();
-  if ("reason" in found) {
-    const status2 = { available: false, reason: found.reason };
-    loaded.set(db, status2);
-    return status2;
-  }
-  let status;
-  try {
-    db.loadExtension(found.path);
-    const row2 = db.prepare("SELECT vec_version() AS v").get();
-    status = { available: true, path: found.path, ...row2?.v ? { version: row2.v } : {} };
-  } catch (err) {
-    status = {
-      available: false,
-      path: found.path,
-      reason: firstLine(err?.message ?? String(err))
-    };
-  }
+  const fns = installVectorFunctions(db);
+  const legacy = loadLegacyExtension(db);
+  const status = fns.ok ? { available: true, backend: "scan", ...legacy } : { available: false, reason: fns.reason, ...legacy };
   loaded.set(db, status);
   return status;
 }
-function vecStatus(db) {
-  return loaded.get(db) ?? loadVec(db);
+function vecStatus(db, root) {
+  const base2 = loaded.get(db) ?? loadVec(db);
+  if (root === void 0)
+    return base2;
+  const counts2 = vectorCounts(db);
+  const cacheDir = modelsDir(potsherdDir(root));
+  const backend2 = embeddingBackend();
+  const reason = base2.available ? void 0 : base2.reason;
+  const report = vectorReport({
+    embedded: counts2.embedded,
+    pending: counts2.pending,
+    cacheDir,
+    ...backend2 ? { backend: backend2 } : {},
+    ...reason ? { reason } : {}
+  });
+  const worded = vectorNote(report, { num, bytes });
+  return {
+    ...base2,
+    report,
+    row: {
+      ...worded,
+      note: (width, sep = " \xB7 ") => fitNote(worded.parts, width, sep)
+    },
+    line: statusLine(report),
+    embed: (options = {}) => embedPending(db, { cacheDir, ...options })
+  };
+}
+function statusLine(r) {
+  if (r.phase === "ready" || r.phase === "empty")
+    return null;
+  if (r.phase === "unavailable") {
+    return `semantic search: ${r.reason ?? "not running on this machine"}`;
+  }
+  return warmingLine(r, num);
 }
 function vecAvailable(db) {
   return vecStatus(db).available;
 }
+var EXCHANGE_STORE = `
+CREATE TABLE IF NOT EXISTS vec_blob_exchanges (
+  id TEXT PRIMARY KEY, embedding BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS vec_blob_cards (
+  session_id TEXT PRIMARY KEY, embedding BLOB NOT NULL
+);
+CREATE VIEW IF NOT EXISTS vec_exchanges AS
+  SELECT id, embedding, potsherd_vec_distance(embedding) AS distance
+    FROM vec_blob_exchanges;
+CREATE TRIGGER IF NOT EXISTS vec_exchanges_insert INSTEAD OF INSERT ON vec_exchanges
+BEGIN
+  INSERT OR REPLACE INTO vec_blob_exchanges (id, embedding) VALUES (NEW.id, NEW.embedding);
+END;
+CREATE TRIGGER IF NOT EXISTS vec_exchanges_delete INSTEAD OF DELETE ON vec_exchanges
+BEGIN
+  DELETE FROM vec_blob_exchanges WHERE id = OLD.id;
+END;
+CREATE VIEW IF NOT EXISTS vec_cards AS
+  SELECT session_id, embedding, potsherd_vec_distance(embedding) AS distance
+    FROM vec_blob_cards;
+CREATE TRIGGER IF NOT EXISTS vec_cards_insert INSTEAD OF INSERT ON vec_cards
+BEGIN
+  INSERT OR REPLACE INTO vec_blob_cards (session_id, embedding)
+    VALUES (NEW.session_id, NEW.embedding);
+END;
+CREATE TRIGGER IF NOT EXISTS vec_cards_delete INSTEAD OF DELETE ON vec_cards
+BEGIN
+  DELETE FROM vec_blob_cards WHERE session_id = OLD.session_id;
+END;
+`;
+var GHOST_STORE = `
+CREATE TABLE IF NOT EXISTS vec_blob_ghost_prompts (
+  id TEXT PRIMARY KEY, embedding BLOB NOT NULL
+);
+CREATE VIEW IF NOT EXISTS vec_ghost_prompts AS
+  SELECT id, embedding, potsherd_vec_distance(embedding) AS distance
+    FROM vec_blob_ghost_prompts;
+CREATE TRIGGER IF NOT EXISTS vec_ghost_prompts_insert
+INSTEAD OF INSERT ON vec_ghost_prompts
+BEGIN
+  INSERT OR REPLACE INTO vec_blob_ghost_prompts (id, embedding) VALUES (NEW.id, NEW.embedding);
+END;
+CREATE TRIGGER IF NOT EXISTS vec_ghost_prompts_delete
+INSTEAD OF DELETE ON vec_ghost_prompts
+BEGIN
+  DELETE FROM vec_blob_ghost_prompts WHERE id = OLD.id;
+END;
+`;
 function createVecTables(db) {
-  if (!loadVec(db).available)
-    return false;
+  loadVec(db);
   try {
-    db.exec(`
-CREATE VIRTUAL TABLE IF NOT EXISTS vec_exchanges USING vec0(
-  id TEXT PRIMARY KEY, embedding FLOAT[384]
-);
-CREATE VIRTUAL TABLE IF NOT EXISTS vec_cards USING vec0(
-  session_id TEXT PRIMARY KEY, embedding FLOAT[384]
-);
-`);
+    if (legacyVecTable(db, "vec_exchanges") || legacyVecTable(db, "vec_cards")) {
+      return true;
+    }
+    db.exec(EXCHANGE_STORE);
     return true;
   } catch {
     return false;
   }
 }
 function createGhostVecTable(db) {
-  if (!loadVec(db).available)
-    return false;
+  loadVec(db);
   try {
-    db.exec(`
-CREATE VIRTUAL TABLE IF NOT EXISTS vec_ghost_prompts USING vec0(
-  id TEXT PRIMARY KEY, embedding FLOAT[384]
-);
-`);
+    if (legacyVecTable(db, "vec_ghost_prompts"))
+      return true;
+    db.exec(GHOST_STORE);
     return true;
+  } catch {
+    return false;
+  }
+}
+function migrateToPortableVectors(db) {
+  loadVec(db);
+  const legacy = ["vec_exchanges", "vec_cards", "vec_ghost_prompts"].filter((t) => legacyVecTable(db, t));
+  try {
+    for (const table2 of legacy) {
+      const key = table2 === "vec_cards" ? "session_id" : "id";
+      const blob = `vec_blob_${table2.slice("vec_".length)}`;
+      db.exec(table2 === "vec_ghost_prompts" ? `CREATE TABLE IF NOT EXISTS vec_blob_ghost_prompts (id TEXT PRIMARY KEY, embedding BLOB NOT NULL);` : `CREATE TABLE IF NOT EXISTS ${blob} (${key} TEXT PRIMARY KEY, embedding BLOB NOT NULL);`);
+      const rows = db.prepare(`SELECT ${key} AS k, embedding AS e FROM ${table2}`).all();
+      const insert = db.prepare(`INSERT OR REPLACE INTO ${blob} (${key}, embedding) VALUES (?, ?)`);
+      for (const row2 of rows)
+        insert.run(row2.k, row2.e);
+      db.exec(`DROP TABLE ${table2};`);
+    }
+  } catch (err) {
+    return false;
+  }
+  db.exec(EXCHANGE_STORE);
+  db.exec(GHOST_STORE);
+  return true;
+}
+function legacyVecTable(db, name) {
+  try {
+    const row2 = db.prepare(`SELECT type, sql FROM sqlite_master WHERE name = ?`).get(name);
+    return Boolean(row2 && row2.type === "table" && /USING\s+vec0/i.test(row2.sql ?? ""));
   } catch {
     return false;
   }
@@ -24068,7 +24742,123 @@ function vecTablesExist(db) {
     return false;
   }
 }
-function firstLine(s) {
+function vectorCounts(db) {
+  let embedded = 0;
+  let pending = 0;
+  for (const table2 of ["exchanges", "ghost_prompts"]) {
+    try {
+      const row2 = db.prepare(`SELECT
+             SUM(CASE WHEN embedding_version = ? THEN 1 ELSE 0 END) AS ok,
+             SUM(CASE WHEN embedding_version IS NULL OR embedding_version != ? THEN 1 ELSE 0 END) AS todo
+           FROM ${table2}`).get(EMBEDDING_VERSION, EMBEDDING_VERSION);
+      embedded += row2.ok ?? 0;
+      pending += row2.todo ?? 0;
+    } catch {
+    }
+  }
+  return { embedded, pending };
+}
+async function embedPending(db, options = {}) {
+  const started = Date.now();
+  const cacheDir = options.cacheDir ?? modelsDir();
+  const status = loadVec(db);
+  if (!status.available) {
+    return { embedded: 0, remaining: 0, ms: Date.now() - started, reason: status.reason ?? "no vector store" };
+  }
+  const queue = pendingRows(db, options.limit);
+  if (queue.error) {
+    return { embedded: 0, remaining: 0, ms: Date.now() - started, reason: queue.error };
+  }
+  const rows = queue.rows;
+  if (rows.length === 0) {
+    return { embedded: 0, remaining: 0, ms: Date.now() - started };
+  }
+  const embedOptions = {
+    cacheDir,
+    ...options.noAcquire ? { noAcquire: true } : {},
+    ...options.onProgress ? {
+      onProgress: (fraction, file2) => options.onProgress?.({
+        phase: "acquire",
+        done: Math.round(fraction * 100),
+        total: 100,
+        file: file2
+      })
+    } : {}
+  };
+  const writers = {
+    exchange: {
+      insert: db.prepare("INSERT INTO vec_exchanges (id, embedding) VALUES (?, ?)"),
+      stamp: db.prepare("UPDATE exchanges SET embedding_version = ? WHERE id = ?")
+    },
+    ghost: {
+      insert: db.prepare("INSERT INTO vec_ghost_prompts (id, embedding) VALUES (?, ?)"),
+      stamp: db.prepare("UPDATE ghost_prompts SET embedding_version = ? WHERE id = ?")
+    }
+  };
+  let embedded = 0;
+  let reason;
+  for (const row2 of rows) {
+    if (options.shouldStop?.()) {
+      reason = "stopped";
+      break;
+    }
+    let vector;
+    try {
+      vector = await generateExchangeEmbedding(row2.userText, row2.assistantText, void 0, embedOptions);
+    } catch (err) {
+      reason = err instanceof EmbeddingUnavailableError ? err.reason : firstLine2(err?.message ?? String(err));
+      break;
+    }
+    const w = row2.kind === "ghost" ? writers.ghost : writers.exchange;
+    try {
+      w.insert.run(row2.id, embeddingToBlob(vector));
+      w.stamp.run(EMBEDDING_VERSION, row2.id);
+      embedded += 1;
+    } catch (err) {
+      reason = firstLine2(err?.message ?? String(err));
+      break;
+    }
+    options.onProgress?.({ phase: "embed", done: embedded, total: rows.length });
+  }
+  const backend2 = embeddingBackend();
+  return {
+    embedded,
+    remaining: vectorCounts(db).pending,
+    ms: Date.now() - started,
+    ...backend2 ? { backend: backend2 } : {},
+    ...reason ? { reason } : {}
+  };
+}
+function pendingRows(db, limit) {
+  const cap2 = limit && limit > 0 ? limit : 1e6;
+  const sql = `
+SELECT kind, id, a, b FROM (
+  SELECT 'exchange' AS kind, id, user_text AS a, assistant_text AS b, ts
+    FROM exchanges
+   WHERE embedding_version IS NULL OR embedding_version != ?
+  UNION ALL
+  SELECT 'ghost' AS kind, id, text AS a, NULL AS b, ts
+    FROM ghost_prompts
+   WHERE embedding_version IS NULL OR embedding_version != ?
+)
+ORDER BY ts IS NULL, ts DESC
+LIMIT ?`;
+  let raw;
+  try {
+    raw = db.prepare(sql).all(EMBEDDING_VERSION, EMBEDDING_VERSION, Math.min(cap2, 1e6));
+  } catch (err) {
+    return { rows: [], error: firstLine2(err?.message ?? String(err)) };
+  }
+  return {
+    rows: raw.map((r) => ({
+      kind: r.kind === "ghost" ? "ghost" : "exchange",
+      id: r.id,
+      userText: r.a ?? "",
+      assistantText: r.b ?? ""
+    }))
+  };
+}
+function firstLine2(s) {
   return (s.split("\n")[0] ?? s).trim();
 }
 
@@ -24392,13 +25182,110 @@ CREATE INDEX IF NOT EXISTS card_runs_backend ON card_runs(backend, ran_at);
     // so the derivation and this column land together and `--untitled` reads
     // "nothing a card would not improve" instead.
     up: `ALTER TABLE sessions ADD COLUMN title_source TEXT;`
+  },
+  {
+    version: 10,
+    name: "portable-vectors",
+    // Vectors stop needing a native extension.
+    //
+    // Migrations 4 and 8 created `vec_exchanges`, `vec_cards` and
+    // `vec_ghost_prompts` as vec0 virtual tables, which meant they declined
+    // entirely on a machine without `sqlite-vec` — an optional dependency that
+    // a clean `npm i -g potsherd` does not install. On those machines the
+    // schema stopped at version 3 and semantic search was structurally
+    // impossible, which is the second half of the agent audit's F2.
+    //
+    // The vectors now live in ordinary tables and those three names are views
+    // over them with `INSTEAD OF` triggers, so every statement already written
+    // against vec0 works verbatim and nothing outside `vec.ts` changed. A
+    // brute-force scan answers the KNN query in 4.7 ms at the reference
+    // archive's 1,678 exchanges, against sqlite-vec's 0.9 ms — 3.8 ms, for an
+    // entire class of install failure.
+    //
+    // Where an index already exists this copies every vector across before it
+    // drops the virtual tables, so nobody loses embeddings they have already
+    // paid for. It declines — rather than throwing — on the one case it cannot
+    // handle: vec0 tables on a machine that has since lost the extension, where
+    // sqlite can neither read nor drop them. `doctor` says so, and the next
+    // open retries.
+    run: migrateToPortableVectors
+  },
+  {
+    version: 11,
+    name: "threads",
+    // The fork/resume chain, and the evidence it is derived from.
+    //
+    // `claude --resume <id>` writes a **new** transcript whose head is a copy
+    // of the old one. potsherd stored each file as an independent session with
+    // no pointer to the other, and the agent audit (F4) measured what that
+    // costs: a session with 123 exchanges of work grafts as 4, and `show`
+    // dates it eight days before the first exchange it prints on the same
+    // screen.
+    //
+    // Three tables, because the derivation has to survive an incremental run
+    // that opens one transcript out of 328:
+    //
+    //   `session_record_ids`       the harness's own record ids, per session.
+    //                              The evidence. Written by `ingest.ts` when a
+    //                              transcript is parsed, so a run that skips a
+    //                              file still has that file's ids to compare.
+    //   `session_declared_parents` the parent the records themselves name
+    //                              (claude's `session_id`, which survives the
+    //                              rewrite of `sessionId`). Kept whether or
+    //                              not it is corroborated, so `threads.ts` can
+    //                              report the ones it refused rather than
+    //                              silently dropping them.
+    //   `session_threads`          the derived chain. Rebuilt whole on every
+    //                              `index`; never hand-edited.
+    //
+    // `ON DELETE CASCADE` retires all three with their session, exactly like
+    // `session_record_types` (migration 5).
+    //
+    // The last two statements are migration 5's trick and are here for its
+    // reason: every session indexed before this migration has no record ids
+    // stored, so the incremental test would skip all of them for ever and the
+    // first chain would be derived from an empty table. Clearing the
+    // fingerprints makes the next `index` re-read each transcript once and
+    // fill the evidence in honestly. `index:ghosts` is left alone — ghosts
+    // have no transcript and nothing here concerns them.
+    up: `
+CREATE TABLE IF NOT EXISTS session_record_ids (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  record_id  TEXT NOT NULL,
+  PRIMARY KEY (session_id, record_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS session_record_ids_record ON session_record_ids(record_id);
+
+CREATE TABLE IF NOT EXISTS session_declared_parents (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  parent_id  TEXT NOT NULL,
+  records    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, parent_id)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS session_threads (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  thread_id  TEXT NOT NULL,
+  parent_id  TEXT,
+  head       INTEGER NOT NULL DEFAULT 0,
+  depth      INTEGER NOT NULL DEFAULT 0,
+  via        TEXT,
+  shared     INTEGER NOT NULL DEFAULT 0,
+  overlap    REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS session_threads_thread ON session_threads(thread_id);
+CREATE INDEX IF NOT EXISTS session_threads_head   ON session_threads(head);
+
+DELETE FROM sync_state WHERE key LIKE 'index:%' AND key <> 'index:ghosts';
+UPDATE sessions SET source_mtime = NULL;
+`
   }
 ];
 function open(opts = {}) {
   const root = opts.root ?? potsherdDir();
   const file2 = opts.file ?? dbPath(root);
   if (file2 !== ":memory:") {
-    fs.mkdirSync(path2.dirname(file2), { recursive: true, mode: 448 });
+    fs2.mkdirSync(path3.dirname(file2), { recursive: true, mode: 448 });
   }
   const db = openDatabase(file2, { readonly: opts.readonly ?? false });
   if (!opts.readonly) {
@@ -24407,7 +25294,7 @@ function open(opts = {}) {
     if (file2 !== ":memory:") {
       for (const f of [file2, `${file2}-wal`, `${file2}-shm`]) {
         try {
-          fs.chmodSync(f, 384);
+          fs2.chmodSync(f, 384);
         } catch {
         }
       }
@@ -24415,6 +25302,7 @@ function open(opts = {}) {
   }
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
+  loadVec(db);
   if (!opts.readonly)
     migrate(db);
   return db;
@@ -24478,13 +25366,13 @@ function count(db, table2) {
 var lock_exports = {};
 __export(lock_exports, {
   LockBusyError: () => LockBusyError,
-  acquire: () => acquire,
+  acquire: () => acquire2,
   withLock: () => withLock,
   withLockAsync: () => withLockAsync
 });
-import fs2 from "node:fs";
-import path3 from "node:path";
-import process6 from "node:process";
+import fs3 from "node:fs";
+import path4 from "node:path";
+import process7 from "node:process";
 var STALE_MS = 5 * 6e4;
 var LockBusyError = class extends Error {
   holder;
@@ -24494,21 +25382,21 @@ var LockBusyError = class extends Error {
     this.name = "LockBusyError";
   }
 };
-function acquire(op, opts = {}) {
+function acquire2(op, opts = {}) {
   const root = opts.root ?? potsherdDir();
-  const lockPath = path3.join(root, ".lock");
+  const lockPath = path4.join(root, ".lock");
   const deadline = Date.now() + (opts.wait ?? 0);
-  fs2.mkdirSync(root, { recursive: true, mode: 448 });
+  fs3.mkdirSync(root, { recursive: true, mode: 448 });
   for (; ; ) {
     try {
-      fs2.mkdirSync(lockPath);
+      fs3.mkdirSync(lockPath);
       const info = {
-        pid: process6.pid,
+        pid: process7.pid,
         op,
         at: (/* @__PURE__ */ new Date()).toISOString(),
-        host: process6.env.HOSTNAME ?? ""
+        host: process7.env.HOSTNAME ?? ""
       };
-      fs2.writeFileSync(path3.join(lockPath, "owner.json"), JSON.stringify(info), { mode: 384 });
+      fs3.writeFileSync(path4.join(lockPath, "owner.json"), JSON.stringify(info), { mode: 384 });
       let released = false;
       return {
         path: lockPath,
@@ -24517,7 +25405,7 @@ function acquire(op, opts = {}) {
             return;
           released = true;
           try {
-            fs2.rmSync(lockPath, { recursive: true, force: true });
+            fs3.rmSync(lockPath, { recursive: true, force: true });
           } catch {
           }
         }
@@ -24528,7 +25416,7 @@ function acquire(op, opts = {}) {
       const holder = readOwner(lockPath);
       if (isStale(lockPath, holder)) {
         try {
-          fs2.rmSync(lockPath, { recursive: true, force: true });
+          fs3.rmSync(lockPath, { recursive: true, force: true });
         } catch {
         }
         continue;
@@ -24540,7 +25428,7 @@ function acquire(op, opts = {}) {
   }
 }
 function withLock(op, fn, opts = {}) {
-  const lock = acquire(op, opts);
+  const lock = acquire2(op, opts);
   try {
     return fn();
   } finally {
@@ -24548,7 +25436,7 @@ function withLock(op, fn, opts = {}) {
   }
 }
 async function withLockAsync(op, fn, opts = {}) {
-  const lock = acquire(op, opts);
+  const lock = acquire2(op, opts);
   try {
     return await fn();
   } finally {
@@ -24557,25 +25445,25 @@ async function withLockAsync(op, fn, opts = {}) {
 }
 function readOwner(lockPath) {
   try {
-    return JSON.parse(fs2.readFileSync(path3.join(lockPath, "owner.json"), "utf8"));
+    return JSON.parse(fs3.readFileSync(path4.join(lockPath, "owner.json"), "utf8"));
   } catch {
     return null;
   }
 }
 function isStale(lockPath, holder) {
-  if (holder && holder.pid && (!holder.host || holder.host === (process6.env.HOSTNAME ?? ""))) {
+  if (holder && holder.pid && (!holder.host || holder.host === (process7.env.HOSTNAME ?? ""))) {
     if (!pidAlive(holder.pid))
       return true;
   }
   try {
-    return Date.now() - fs2.statSync(lockPath).mtimeMs > STALE_MS;
+    return Date.now() - fs3.statSync(lockPath).mtimeMs > STALE_MS;
   } catch {
     return true;
   }
 }
 function pidAlive(pid) {
   try {
-    process6.kill(pid, 0);
+    process7.kill(pid, 0);
     return true;
   } catch (err) {
     return err.code === "EPERM";
@@ -24599,28 +25487,28 @@ __export(consent_exports, {
   proposeGuardHook: () => proposeGuardHook,
   settingsExists: () => settingsExists
 });
-import fs5 from "node:fs";
+import fs6 from "node:fs";
 
 // ../core/dist/resolve-bin.js
-import fs3 from "node:fs";
-import path4 from "node:path";
-import process7 from "node:process";
-function onPath(name = "potsherd", env = process7.env) {
+import fs4 from "node:fs";
+import path5 from "node:path";
+import process8 from "node:process";
+function onPath(name = "potsherd", env = process8.env) {
   const raw = env["PATH"];
   if (!raw)
     return null;
-  const exts = process7.platform === "win32" ? (env["PATHEXT"] ?? ".EXE;.CMD;.BAT").split(";") : [""];
-  for (const dir of raw.split(path4.delimiter)) {
+  const exts = process8.platform === "win32" ? (env["PATHEXT"] ?? ".EXE;.CMD;.BAT").split(";") : [""];
+  for (const dir of raw.split(path5.delimiter)) {
     if (!dir)
       continue;
     for (const ext of exts) {
-      const candidate = path4.join(dir, name + ext);
+      const candidate = path5.join(dir, name + ext);
       try {
-        const st = fs3.statSync(candidate);
+        const st = fs4.statSync(candidate);
         if (st.isFile()) {
-          if (process7.platform === "win32")
+          if (process8.platform === "win32")
             return candidate;
-          fs3.accessSync(candidate, fs3.constants.X_OK);
+          fs4.accessSync(candidate, fs4.constants.X_OK);
           return candidate;
         }
       } catch {
@@ -24633,7 +25521,7 @@ function resolveHookCommand(args, entry2) {
   const found = onPath("potsherd");
   if (found)
     return { command: `potsherd ${args}`, via: "path", file: found };
-  const self = entry2 && fs3.existsSync(entry2) ? path4.resolve(entry2) : null;
+  const self = entry2 && fs4.existsSync(entry2) ? path5.resolve(entry2) : null;
   if (self) {
     return { command: `node "${self}" ${args}`, via: "absolute", file: self };
   }
@@ -24641,16 +25529,16 @@ function resolveHookCommand(args, entry2) {
 }
 
 // ../core/dist/claude/settings.js
-import fs4 from "node:fs";
-import path5 from "node:path";
+import fs5 from "node:fs";
+import path6 from "node:path";
 var CLAUDE_DEFAULT_CLEANUP_DAYS = 30;
 var POTSHERD_CLEANUP_DAYS = 3650;
 function readSettingsFile(p) {
-  if (!fs4.existsSync(p))
+  if (!fs5.existsSync(p))
     return { path: p, exists: false };
   let text;
   try {
-    text = fs4.readFileSync(p, "utf8");
+    text = fs5.readFileSync(p, "utf8");
   } catch (err) {
     return { path: p, exists: true, parseError: `unreadable: ${err.message}` };
   }
@@ -24734,13 +25622,13 @@ function backupPath(p, now = /* @__PURE__ */ new Date()) {
 }
 function writeSettingsWithBackup(p, json2, now = /* @__PURE__ */ new Date()) {
   let backup = null;
-  if (fs4.existsSync(p)) {
+  if (fs5.existsSync(p)) {
     backup = backupPath(p, now);
-    fs4.copyFileSync(p, backup);
+    fs5.copyFileSync(p, backup);
   } else {
-    fs4.mkdirSync(path5.dirname(p), { recursive: true });
+    fs5.mkdirSync(path6.dirname(p), { recursive: true });
   }
-  fs4.writeFileSync(p, stringifySettings(json2), { mode: 384 });
+  fs5.writeFileSync(p, stringifySettings(json2), { mode: 384 });
   return { backup };
 }
 function unifiedDiff(before, after, label3) {
@@ -24902,11 +25790,11 @@ function shortPath(p) {
   return h && p.startsWith(h) ? "~" + p.slice(h.length) : p;
 }
 function settingsExists(dir) {
-  return fs5.existsSync(claudePaths(dir).settings);
+  return fs6.existsSync(claudePaths(dir).settings);
 }
 
 // ../core/dist/theme.js
-import process8 from "node:process";
+import process9 from "node:process";
 var CSI = "\x1B[";
 var Theme = class {
   color;
@@ -25075,24 +25963,24 @@ function stripAnsi(s) {
   return s.replace(ANSI_RE, "");
 }
 function detectColor() {
-  if (process8.env.NO_COLOR !== void 0 && process8.env.NO_COLOR !== "")
+  if (process9.env.NO_COLOR !== void 0 && process9.env.NO_COLOR !== "")
     return false;
-  if (process8.env.FORCE_COLOR && process8.env.FORCE_COLOR !== "0")
+  if (process9.env.FORCE_COLOR && process9.env.FORCE_COLOR !== "0")
     return true;
-  if (process8.env.TERM === "dumb")
+  if (process9.env.TERM === "dumb")
     return false;
-  return Boolean(process8.stdout.isTTY);
+  return Boolean(process9.stdout.isTTY);
 }
 function detectAscii() {
-  if (process8.env.POTSHERD_ASCII === "1")
+  if (process9.env.POTSHERD_ASCII === "1")
     return true;
-  const enc = `${process8.env.LC_ALL ?? process8.env.LC_CTYPE ?? process8.env.LANG ?? ""}`;
+  const enc = `${process9.env.LC_ALL ?? process9.env.LC_CTYPE ?? process9.env.LANG ?? ""}`;
   if (enc && !/utf-?8/i.test(enc))
     return true;
   return false;
 }
 function detectWidth() {
-  const cols = process8.stdout.columns;
+  const cols = process9.stdout.columns;
   if (!cols || cols < 40)
     return 80;
   return Math.min(cols, 100);
@@ -25299,10 +26187,10 @@ function table(t, rows, opts = {}) {
 }
 
 // ../core/dist/archive-state.js
-import fs6 from "node:fs";
+import fs7 from "node:fs";
 function readArchiveState(root = potsherdDir()) {
   const file2 = dbPath(root);
-  if (!fs6.existsSync(file2))
+  if (!fs7.existsSync(file2))
     return null;
   let db;
   try {
@@ -25330,8 +26218,8 @@ function readArchiveState(root = potsherdDir()) {
 }
 
 // ../core/dist/claude/scan.js
-import fs7 from "node:fs";
-import path6 from "node:path";
+import fs8 from "node:fs";
+import path7 from "node:path";
 var HEAD_BYTES = 64 * 1024;
 var TAIL_BYTES = 64 * 1024;
 var TAIL_ESCALATED_BYTES = 1024 * 1024;
@@ -25342,7 +26230,7 @@ function scanClaudeDisk(dir, opts = {}) {
   const projectsDir = cp.projects;
   const out = {
     projectsDir,
-    exists: fs7.existsSync(projectsDir),
+    exists: fs8.existsSync(projectsDir),
     projects: [],
     sessions: [],
     sidechains: [],
@@ -25357,19 +26245,19 @@ function scanClaudeDisk(dir, opts = {}) {
     if (!entry2.isDirectory())
       continue;
     const slug = entry2.name;
-    const projDir = path6.join(projectsDir, slug);
-    const memoryDir = path6.join(projDir, "memory");
-    const memoryFiles = fs7.existsSync(memoryDir) ? readdirSafe(memoryDir).filter((f) => f.endsWith(".md")).length : 0;
+    const projDir = path7.join(projectsDir, slug);
+    const memoryDir = path7.join(projDir, "memory");
+    const memoryFiles = fs8.existsSync(memoryDir) ? readdirSafe(memoryDir).filter((f) => f.endsWith(".md")).length : 0;
     out.projects.push({
       slug,
       dir: projDir,
-      hasSessionsIndex: fs7.existsSync(path6.join(projDir, "sessions-index.json")),
+      hasSessionsIndex: fs8.existsSync(path7.join(projDir, "sessions-index.json")),
       hasMemory: memoryFiles > 0,
       memoryFiles
     });
     for (const child of readdirSafe(projDir, { withFileTypes: true })) {
       if (child.isFile() && child.name.endsWith(".jsonl")) {
-        const f = scanFile(path6.join(projDir, child.name), slug, {
+        const f = scanFile(path7.join(projDir, child.name), slug, {
           sessionId: child.name.slice(0, -".jsonl".length),
           isSidechain: false,
           titles: opts.titles !== false,
@@ -25379,14 +26267,14 @@ function scanClaudeDisk(dir, opts = {}) {
         out.totalBytes += f.bytes;
       } else if (child.isDirectory()) {
         const nested = child.name === SIDECHAIN_DIR;
-        const subDir = nested ? path6.join(projDir, child.name) : path6.join(projDir, child.name, SIDECHAIN_DIR);
-        if (!fs7.existsSync(subDir))
+        const subDir = nested ? path7.join(projDir, child.name) : path7.join(projDir, child.name, SIDECHAIN_DIR);
+        if (!fs8.existsSync(subDir))
           continue;
         for (const sub of readdirSafe(subDir)) {
           if (!sub.endsWith(".jsonl"))
             continue;
           const fileId = sub.slice(0, -".jsonl".length);
-          const f = scanFile(path6.join(subDir, sub), slug, {
+          const f = scanFile(path7.join(subDir, sub), slug, {
             // With no enclosing session directory the parent session is
             // whatever the records say; the filename is only an agent name.
             sessionId: nested ? fileId : child.name,
@@ -25427,12 +26315,12 @@ function scanFile(file2, slug, opts) {
   };
   let fd;
   try {
-    const st = fs7.statSync(file2);
+    const st = fs8.statSync(file2);
     rec.bytes = st.size;
     rec.mtime = st.mtime;
     if (opts.content === false)
       return rec;
-    fd = fs7.openSync(file2, "r");
+    fd = fs8.openSync(file2, "r");
     const headText = readAt(fd, 0, Math.min(HEAD_BYTES, st.size));
     applyRecords(rec, splitLines(headText, { dropLast: st.size > HEAD_BYTES }));
     if (st.size > HEAD_BYTES) {
@@ -25450,7 +26338,7 @@ function scanFile(file2, slug, opts) {
   } finally {
     if (fd !== void 0) {
       try {
-        fs7.closeSync(fd);
+        fs8.closeSync(fd);
       } catch {
       }
     }
@@ -25461,7 +26349,7 @@ function readAt(fd, position, length) {
   if (length <= 0)
     return "";
   const buf = Buffer.allocUnsafe(length);
-  const read = fs7.readSync(fd, buf, 0, length, position);
+  const read = fs8.readSync(fd, buf, 0, length, position);
   return buf.subarray(0, read).toString("utf8");
 }
 function splitLines(text, o) {
@@ -25521,21 +26409,21 @@ function slugToPathGuess(slug) {
 }
 function readdirSafe(dir, o) {
   try {
-    return o ? fs7.readdirSync(dir, o) : fs7.readdirSync(dir);
+    return o ? fs8.readdirSync(dir, o) : fs8.readdirSync(dir);
   } catch {
     return [];
   }
 }
 
 // ../core/dist/claude/history.js
-import fs8 from "node:fs";
+import fs9 from "node:fs";
 import readline from "node:readline";
 async function readHistory(dir, opts = {}) {
   const started = Date.now();
   const p = claudePaths(dir).history;
   const scan2 = {
     path: p,
-    exists: fs8.existsSync(p),
+    exists: fs9.existsSync(p),
     withPrompts: Boolean(opts.withPrompts),
     lines: 0,
     malformed: 0,
@@ -25550,10 +26438,10 @@ async function readHistory(dir, opts = {}) {
     scan2.scanMs = Date.now() - started;
     return scan2;
   }
-  scan2.bytes = fs8.statSync(p).size;
+  scan2.bytes = fs9.statSync(p).size;
   const maxChars = opts.maxPromptChars ?? 8e3;
   const rl = readline.createInterface({
-    input: fs8.createReadStream(p, { encoding: "utf8" }),
+    input: fs9.createReadStream(p, { encoding: "utf8" }),
     crlfDelay: Infinity
   });
   for await (const line of rl) {
@@ -25621,25 +26509,25 @@ async function readHistory(dir, opts = {}) {
 }
 
 // ../core/dist/claude/sessions-index.js
-import fs9 from "node:fs";
-import path7 from "node:path";
+import fs10 from "node:fs";
+import path8 from "node:path";
 function readSessionsIndexes(dir) {
   const projectsDir = claudePaths(dir).projects;
   const out = { files: [], entries: /* @__PURE__ */ new Map(), malformed: [] };
   let slugs;
   try {
-    slugs = fs9.readdirSync(projectsDir);
+    slugs = fs10.readdirSync(projectsDir);
   } catch {
     return out;
   }
   for (const slug of slugs) {
-    const p = path7.join(projectsDir, slug, "sessions-index.json");
-    if (!fs9.existsSync(p))
+    const p = path8.join(projectsDir, slug, "sessions-index.json");
+    if (!fs10.existsSync(p))
       continue;
     out.files.push(p);
     let parsed;
     try {
-      parsed = JSON.parse(fs9.readFileSync(p, "utf8"));
+      parsed = JSON.parse(fs10.readFileSync(p, "utf8"));
     } catch {
       out.malformed.push(p);
       continue;
@@ -25687,7 +26575,7 @@ function numOr(v) {
 // ../core/dist/rescue.js
 import fs12 from "node:fs";
 import path10 from "node:path";
-import crypto from "node:crypto";
+import crypto2 from "node:crypto";
 
 // ../core/dist/tags.js
 var MAX_TAG_LENGTH = 32;
@@ -27064,149 +27952,6 @@ function cut(text, start, end, pick3) {
   };
 }
 
-// ../core/dist/embeddings.js
-var embeddings_exports = {};
-__export(embeddings_exports, {
-  BGE_QUERY_PREFIX: () => BGE_QUERY_PREFIX,
-  EMBEDDING_DIMENSIONS: () => EMBEDDING_DIMENSIONS,
-  EMBEDDING_VERSION: () => EMBEDDING_VERSION,
-  MODEL_DOWNLOAD_BYTES: () => MODEL_DOWNLOAD_BYTES,
-  MODEL_DTYPE: () => MODEL_DTYPE,
-  MODEL_ID: () => MODEL_ID,
-  embedThreads: () => embedThreads,
-  embeddingToBlob: () => embeddingToBlob,
-  ensureModel: () => ensureModel,
-  exchangeText: () => exchangeText,
-  generateEmbedding: () => generateEmbedding,
-  generateExchangeEmbedding: () => generateExchangeEmbedding,
-  generateExchangeEmbeddings: () => generateExchangeEmbeddings,
-  generateQueryEmbedding: () => generateQueryEmbedding,
-  initEmbeddings: () => initEmbeddings,
-  isModelCached: () => isModelCached,
-  resetEmbeddings: () => resetEmbeddings,
-  withQueryPrefix: () => withQueryPrefix
-});
-import fs10 from "node:fs";
-import os2 from "node:os";
-import path8 from "node:path";
-import process9 from "node:process";
-var EMBEDDING_VERSION = 1;
-var MODEL_ID = "Xenova/bge-small-en-v1.5";
-var MODEL_DTYPE = "q8";
-var EMBEDDING_DIMENSIONS = 384;
-var MODEL_DOWNLOAD_BYTES = 34014426;
-var BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
-var MAX_INPUT_CHARS = 2e3;
-function embedThreads() {
-  const override = Number(process9.env["POTSHERD_EMBED_THREADS"]);
-  if (Number.isFinite(override) && override >= 1)
-    return Math.floor(override);
-  const logical = os2.availableParallelism?.() ?? os2.cpus().length ?? 2;
-  return Math.max(1, Math.min(4, Math.floor(logical / 2)));
-}
-var pipelinePromise = null;
-function isModelCached(cacheDir = modelsDir()) {
-  const dir = path8.join(cacheDir, ...MODEL_ID.split("/"), "onnx");
-  try {
-    return fs10.readdirSync(dir).some((f) => f.endsWith(".onnx") && fs10.statSync(path8.join(dir, f)).size > 1e6);
-  } catch {
-    return false;
-  }
-}
-async function initEmbeddings(options = {}) {
-  await getPipeline(options);
-}
-var ensureModel = initEmbeddings;
-async function getPipeline(options = {}) {
-  if (pipelinePromise)
-    return pipelinePromise;
-  pipelinePromise = (async () => {
-    const cacheDir = options.cacheDir ?? modelsDir();
-    fs10.mkdirSync(cacheDir, { recursive: true });
-    const transformers = await import("@huggingface/transformers");
-    const env = transformers.env;
-    env.allowLocalModels = true;
-    env.useBrowserCache = false;
-    env.cacheDir = cacheDir;
-    const onProgress = options.onProgress;
-    const built = await transformers.pipeline("feature-extraction", MODEL_ID, {
-      dtype: MODEL_DTYPE,
-      session_options: { intraOpNumThreads: embedThreads(), interOpNumThreads: 1 },
-      progress_callback: onProgress ? (p) => {
-        if (typeof p !== "object" || p === null)
-          return;
-        const rec = p;
-        if (typeof rec.progress === "number") {
-          onProgress(Math.max(0, Math.min(1, rec.progress / 100)), rec.file ?? "");
-        }
-      } : () => {
-      }
-    });
-    return built;
-  })();
-  try {
-    return await pipelinePromise;
-  } catch (error51) {
-    pipelinePromise = null;
-    throw error51;
-  }
-}
-function resetEmbeddings() {
-  pipelinePromise = null;
-}
-async function generateEmbedding(text, options = {}) {
-  const pipe2 = await getPipeline(options);
-  const output = await pipe2(text.substring(0, MAX_INPUT_CHARS), {
-    pooling: "mean",
-    normalize: true
-  });
-  return Array.from(output.data);
-}
-function withQueryPrefix(query) {
-  if (query.startsWith(BGE_QUERY_PREFIX))
-    return query;
-  return BGE_QUERY_PREFIX + query;
-}
-async function generateQueryEmbedding(query, options = {}) {
-  return generateEmbedding(withQueryPrefix(query), options);
-}
-function exchangeText(userText, assistantText, toolNames) {
-  let combined = `User: ${userText}
-
-Assistant: ${assistantText}`;
-  if (toolNames && toolNames.length > 0) {
-    combined += `
-
-Tools: ${toolNames.join(", ")}`;
-  }
-  return combined;
-}
-async function generateExchangeEmbedding(userText, assistantText, toolNames, options = {}) {
-  return generateEmbedding(exchangeText(userText, assistantText, toolNames), options);
-}
-async function generateExchangeEmbeddings(items, options = {}) {
-  if (items.length === 0)
-    return [];
-  const texts = items.map((i) => exchangeText(i.userText, i.assistantText, i.toolNames).substring(0, MAX_INPUT_CHARS));
-  const pipe2 = await getPipeline(options);
-  const output = await pipe2(texts, { pooling: "mean", normalize: true });
-  const data = output.data;
-  if (data.length !== texts.length * EMBEDDING_DIMENSIONS) {
-    const out2 = [];
-    for (const text of texts)
-      out2.push(await generateEmbedding(text, options));
-    return out2;
-  }
-  const out = [];
-  for (let i = 0; i < texts.length; i += 1) {
-    out.push(Array.from(data.slice(i * EMBEDDING_DIMENSIONS, (i + 1) * EMBEDDING_DIMENSIONS)));
-  }
-  return out;
-}
-function embeddingToBlob(embedding) {
-  return Buffer.from(new Float32Array(embedding).buffer);
-}
-
 // ../core/dist/ignore.js
 import fs11 from "node:fs";
 import path9 from "node:path";
@@ -28245,7 +28990,7 @@ async function recall(db, query, requested = {}, options = {}) {
       vectors.used = used;
     } catch (err) {
       vectors.used = false;
-      vectors.reason = `vectors unavailable: ${firstLine2(err?.message ?? String(err))}`;
+      vectors.reason = `vectors unavailable: ${firstLine3(err?.message ?? String(err))}`;
     }
   }
   const quotable = fts.tokens.filter((t) => !QUOTE_STOPWORDS.has(t));
@@ -28550,7 +29295,7 @@ function countGhosts(db) {
     return 0;
   }
 }
-function firstLine2(s) {
+function firstLine3(s) {
   return (s.split("\n")[0] ?? s).trim();
 }
 
@@ -28814,7 +29559,7 @@ function ghostFingerprint(historyPath, disk) {
   }
   const parts = [`algo:${String(GHOST_ALGO_VERSION)}`, `history:${hs.size}:${Math.floor(hs.mtimeMs)}`];
   const ids = disk.sessions.map((s) => s.sessionId).sort();
-  parts.push(`sessions:${ids.length}:${crypto.createHash("sha256").update(ids.join("\n")).digest("hex")}`);
+  parts.push(`sessions:${ids.length}:${crypto2.createHash("sha256").update(ids.join("\n")).digest("hex")}`);
   for (const proj of (disk.projects ?? []).filter((p) => p.hasSessionsIndex)) {
     const p = path10.join(proj.dir, "sessions-index.json");
     try {
@@ -28824,7 +29569,7 @@ function ghostFingerprint(historyPath, disk) {
       parts.push(`index:${p}:gone`);
     }
   }
-  return crypto.createHash("sha256").update(parts.sort().join("\n")).digest("hex");
+  return crypto2.createHash("sha256").update(parts.sort().join("\n")).digest("hex");
 }
 var GHOST_ALGO_VERSION = 2;
 var GHOST_FINGERPRINT_KEY = "claude:ghosts";
@@ -28972,7 +29717,7 @@ async function ghostPass(db, src, disk, result, opts) {
   }
 }
 function sha256File(p) {
-  const hash2 = crypto.createHash("sha256");
+  const hash2 = crypto2.createHash("sha256");
   const fd = fs12.openSync(p, "r");
   try {
     const buf = Buffer.allocUnsafe(1 << 20);
@@ -29640,15 +30385,10 @@ __export(claude_exports, {
 import fs15 from "node:fs";
 import path12 from "node:path";
 
-// ../core/dist/doctor-line.js
-function formatDoctorLine(o) {
-  return `${o.harness.padEnd(12)}${o.status.padEnd(10)}${tildify(o.dir).padEnd(28)}  ${o.note}`;
-}
-
 // ../core/dist/parser/claude.js
 import fs14 from "node:fs";
 import path11 from "node:path";
-import crypto2 from "node:crypto";
+import crypto3 from "node:crypto";
 
 // ../core/dist/parser/jsonl.js
 import fs13 from "node:fs";
@@ -30024,7 +30764,7 @@ function toolResultBlocks(content) {
   return content.filter((b) => isRecord(b) && b.type === "tool_result");
 }
 function exchangeId(sessionId, seq) {
-  return crypto2.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
+  return crypto3.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
 }
 
 // ../core/dist/adapters/claude.js
@@ -31436,7 +32176,7 @@ __export(pi_exports, {
 });
 import fs19 from "node:fs";
 import path16 from "node:path";
-import crypto3 from "node:crypto";
+import crypto4 from "node:crypto";
 var HANDLED_TYPES2 = /* @__PURE__ */ new Set([
   "session",
   "message",
@@ -31775,7 +32515,7 @@ function statBytes3(absolute2) {
   }
 }
 function exchangeId2(sessionId, seq) {
-  return crypto3.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
+  return crypto4.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
 }
 var piAdapter = {
   harness: "pi",
@@ -31808,7 +32548,7 @@ __export(gemini_exports, {
 });
 import fs20 from "node:fs";
 import path17 from "node:path";
-import crypto4 from "node:crypto";
+import crypto5 from "node:crypto";
 var DISPLAY_NAME2 = "Gemini CLI";
 var CHATS_DIR = "chats";
 var GEMINI_FORMAT_UNVERIFIED = true;
@@ -32086,7 +32826,7 @@ function isHumanTurn(role, parts) {
   return parts.some((p) => !isRecord(p.functionResponse));
 }
 function projectHashes(cwd) {
-  const sha = (s) => crypto4.createHash("sha256").update(s).digest("hex");
+  const sha = (s) => crypto5.createHash("sha256").update(s).digest("hex");
   const trimmed = cwd.length > 1 ? cwd.replace(/[/\\]+$/, "") : cwd;
   return uniq([sha(cwd), sha(trimmed), sha(trimmed + path17.sep)]);
 }
@@ -33197,9 +33937,231 @@ var copilotAdapter = {
 var copilot_default = copilotAdapter;
 
 // ../core/dist/ingest.js
-import crypto5 from "node:crypto";
+import crypto6 from "node:crypto";
 import fs23 from "node:fs";
 import path20 from "node:path";
+
+// ../core/dist/threads.js
+var OVERLAP_THRESHOLD = 0.75;
+var MIN_SHARED_RECORDS = 10;
+var LINEAGE_HARNESSES = ["claude"];
+function sessionDate(s) {
+  return s.endedAt ?? s.startedAt ?? null;
+}
+function sessionDay(s, fallback = "unknown date") {
+  const when2 = sessionDate(s);
+  return when2 ? when2.slice(0, 10) : fallback;
+}
+function contentStartedAt(db, sessionId) {
+  const row2 = db.prepare(`SELECT MIN(ts) AS t FROM exchanges
+        WHERE session_id = ? AND ts IS NOT NULL AND TRIM(ts) <> ''`).get(sessionId);
+  return row2?.t ?? null;
+}
+function redateFromContent(db, sessionId) {
+  const start = contentStartedAt(db, sessionId);
+  if (!start)
+    return false;
+  const info = db.prepare("UPDATE sessions SET started_at = ? WHERE id = ? AND started_at IS NOT ?").run(start, sessionId, start);
+  return (info.changes ?? 0) > 0;
+}
+function sessionSizes(db) {
+  const size = /* @__PURE__ */ new Map();
+  for (const r of db.prepare("SELECT session_id AS id, COUNT(*) AS n FROM session_record_ids GROUP BY session_id").all()) {
+    size.set(r.id, r.n);
+  }
+  const ended = /* @__PURE__ */ new Map();
+  for (const r of db.prepare(`SELECT id, COALESCE(ended_at, started_at, '') AS w FROM sessions
+        WHERE id IN (SELECT session_id FROM session_record_ids)`).all()) {
+    ended.set(r.id, r.w);
+  }
+  return { size, ended };
+}
+function sharedCounts(db) {
+  const rows = db.prepare(`SELECT record_id, session_id FROM session_record_ids
+        WHERE record_id IN (
+          SELECT record_id FROM session_record_ids GROUP BY record_id HAVING COUNT(*) > 1)
+        ORDER BY record_id`).all();
+  const pairs = /* @__PURE__ */ new Map();
+  let at = 0;
+  while (at < rows.length) {
+    let end = at;
+    while (end < rows.length && rows[end].record_id === rows[at].record_id)
+      end += 1;
+    const group = rows.slice(at, end).map((r) => r.session_id);
+    for (let i = 0; i < group.length; i += 1) {
+      for (let j = i + 1; j < group.length; j += 1) {
+        const a = group[i];
+        const b = group[j];
+        const key = a < b ? `${a}\0${b}` : `${b}\0${a}`;
+        pairs.set(key, (pairs.get(key) ?? 0) + 1);
+      }
+    }
+    at = end;
+  }
+  return pairs;
+}
+function orient(a, b, sizes) {
+  const wa = sizes.ended.get(a) ?? "";
+  const wb = sizes.ended.get(b) ?? "";
+  if (wa !== wb)
+    return wa > wb ? { child: a, parent: b } : { child: b, parent: a };
+  const sa = sizes.size.get(a) ?? 0;
+  const sb = sizes.size.get(b) ?? 0;
+  if (sa !== sb)
+    return sa > sb ? { child: a, parent: b } : { child: b, parent: a };
+  return a > b ? { child: a, parent: b } : { child: b, parent: a };
+}
+function deriveThreads(db) {
+  const sizes = sessionSizes(db);
+  const shared = sharedCounts(db);
+  const declared = /* @__PURE__ */ new Map();
+  for (const r of db.prepare("SELECT session_id, parent_id, records FROM session_declared_parents").all()) {
+    const list = declared.get(r.session_id) ?? [];
+    list.push({ parent: r.parent_id, records: r.records });
+    declared.set(r.session_id, list);
+  }
+  const best = /* @__PURE__ */ new Map();
+  const refused = [];
+  const consider = (edge) => {
+    const held = best.get(edge.child);
+    if (!held || edge.via === "declared" && held.via === "overlap" || edge.via === held.via && edge.overlap > held.overlap) {
+      best.set(edge.child, edge);
+    }
+  };
+  for (const [key, count2] of shared) {
+    const [a, b] = key.split("\0");
+    const smaller = Math.min(sizes.size.get(a) ?? 0, sizes.size.get(b) ?? 0);
+    if (smaller === 0)
+      continue;
+    const overlap2 = count2 / smaller;
+    if (count2 < MIN_SHARED_RECORDS || overlap2 < OVERLAP_THRESHOLD)
+      continue;
+    const { child, parent } = orient(a, b, sizes);
+    const declaresChild = (declared.get(child) ?? []).some((d) => d.parent === parent);
+    const declaresParent = (declared.get(parent) ?? []).some((d) => d.parent === child);
+    const via = declaresChild || declaresParent ? "declared" : "overlap";
+    const flip = declaresParent && !declaresChild;
+    consider({
+      child: flip ? parent : child,
+      parent: flip ? child : parent,
+      via,
+      shared: count2,
+      overlap: overlap2
+    });
+  }
+  for (const [child, list] of declared) {
+    for (const d of list) {
+      const key = child < d.parent ? `${child}\0${d.parent}` : `${d.parent}\0${child}`;
+      const count2 = shared.get(key) ?? 0;
+      const edge = best.get(child);
+      if (edge && edge.parent === d.parent)
+        continue;
+      if (!sizes.size.has(d.parent)) {
+        refused.push({ child, declared: d.parent, records: d.records, shared: 0, why: "parent-not-indexed" });
+      } else if (count2 === 0) {
+        refused.push({ child, declared: d.parent, records: d.records, shared: 0, why: "no-shared-records" });
+      } else {
+        refused.push({ child, declared: d.parent, records: d.records, shared: count2, why: "below-threshold" });
+      }
+    }
+  }
+  const parentOf = /* @__PURE__ */ new Map();
+  for (const [child, edge] of best)
+    parentOf.set(child, edge);
+  const rootOf = (id) => {
+    const seen = /* @__PURE__ */ new Set([id]);
+    let at = id;
+    let depth = 0;
+    for (; ; ) {
+      const edge = parentOf.get(at);
+      if (!edge || seen.has(edge.parent))
+        return { root: at, depth };
+      seen.add(edge.parent);
+      at = edge.parent;
+      depth += 1;
+    }
+  };
+  const members = /* @__PURE__ */ new Map();
+  const rows = [];
+  const all = /* @__PURE__ */ new Set([...parentOf.keys(), ...[...parentOf.values()].map((e) => e.parent)]);
+  for (const id of all) {
+    const { root, depth } = rootOf(id);
+    const edge = parentOf.get(id) ?? null;
+    rows.push({
+      sessionId: id,
+      threadId: root,
+      parentId: edge?.parent ?? null,
+      head: false,
+      // decided once the whole chain is known, below
+      depth,
+      via: edge?.via ?? null,
+      shared: edge?.shared ?? 0,
+      overlap: edge?.overlap ?? 0
+    });
+    const list = members.get(root) ?? [];
+    list.push(id);
+    members.set(root, list);
+  }
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  const threads = [];
+  for (const [root, ids] of members) {
+    const ordered = [...ids].sort((x, y) => byId.get(x).depth - byId.get(y).depth || (sizes.ended.get(x) ?? "").localeCompare(sizes.ended.get(y) ?? "") || x.localeCompare(y));
+    const head = ordered[ordered.length - 1];
+    byId.get(head).head = true;
+    threads.push({ id: root, sessions: ordered, head });
+  }
+  threads.sort((a, b) => a.id.localeCompare(b.id));
+  const write = db.transaction(() => {
+    db.prepare("DELETE FROM session_threads").run();
+    const ins = db.prepare(`INSERT INTO session_threads
+         (session_id, thread_id, parent_id, head, depth, via, shared, overlap)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const r of rows) {
+      ins.run(r.sessionId, r.threadId, r.parentId, r.head ? 1 : 0, r.depth, r.via, r.shared, r.overlap);
+    }
+  });
+  write();
+  const withoutLineage = db.prepare(`SELECT DISTINCT harness FROM sessions
+          WHERE id NOT IN (SELECT session_id FROM session_record_ids) ORDER BY harness`).all().map((r) => r.harness).filter((h) => !LINEAGE_HARNESSES.includes(h));
+  refused.sort((a, b) => b.records - a.records || a.child.localeCompare(b.child));
+  return {
+    threads,
+    edges: [...parentOf.values()].sort((a, b) => a.child.localeCompare(b.child)),
+    refused,
+    withoutLineage,
+    candidates: sizes.size.size
+  };
+}
+function threadOf(db, sessionId) {
+  const row2 = db.prepare("SELECT thread_id FROM session_threads WHERE session_id = ?").get(sessionId);
+  if (!row2)
+    return { id: sessionId, sessions: [sessionId], head: sessionId };
+  const rows = db.prepare(`SELECT session_id, depth, head FROM session_threads
+        WHERE thread_id = ? ORDER BY depth, session_id`).all(row2.thread_id);
+  const sessions = rows.map((r) => r.session_id);
+  const head = rows.find((r) => r.head === 1)?.session_id ?? sessions[sessions.length - 1];
+  return { id: row2.thread_id, sessions, head };
+}
+function threadTotals(db, thread) {
+  const marks = thread.sessions.map(() => "?").join(",");
+  const row2 = db.prepare(`SELECT COUNT(*) AS sessions,
+              COALESCE(SUM(s.user_prompts), 0) AS prompts,
+              COALESCE(SUM(s.bytes), 0) AS bytes,
+              MIN(s.started_at) AS started_at,
+              MAX(COALESCE(s.ended_at, s.started_at)) AS ended_at,
+              (SELECT COUNT(*) FROM exchanges e WHERE e.session_id IN (${marks})) AS exchanges
+         FROM sessions s WHERE s.id IN (${marks})`).get(...thread.sessions, ...thread.sessions);
+  return {
+    sessions: row2.sessions,
+    exchanges: row2.exchanges,
+    prompts: row2.prompts,
+    bytes: row2.bytes,
+    startedAt: row2.started_at,
+    endedAt: row2.ended_at
+  };
+}
+
+// ../core/dist/ingest.js
 function adapterSpecs(o = {}) {
   return [
     {
@@ -33307,6 +34269,7 @@ function ingestSession(db, parsed, options = {}) {
     clearExchanges(db, session.id);
     for (const exchange of redacted)
       insertExchange(db, exchange);
+    redateFromContent(db, session.id);
     if (derivedTitle) {
       db.prepare(`UPDATE sessions SET title = ?, title_source = 'prompt'
           WHERE id = ? AND COALESCE(TRIM(title), '') = ''`).run(cutToCodePoints(derivedTitle, GHOST_TITLE_MAX_CHARS), session.id);
@@ -33526,7 +34489,7 @@ function writeIndexState(db, key, value) {
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(key, value, (/* @__PURE__ */ new Date()).toISOString());
 }
 function sourceFingerprint(sources) {
-  const hash2 = crypto5.createHash("sha256");
+  const hash2 = crypto6.createHash("sha256");
   for (const s of [...sources].sort((a, b) => a.path < b.path ? -1 : 1)) {
     hash2.update(`${s.path}:${s.bytes}:${Math.floor(s.mtimeMs)}
 `);
@@ -33554,6 +34517,7 @@ async function indexAll(options = {}) {
       redaction = addCounts(redaction, report.redaction);
       harnesses.push(report.harness_);
     }
+    const threads = deriveThreads(db);
     options.onProgress?.({ phase: "ghosts" });
     const ghosts = ingestGhosts(db, { full: Boolean(options.full) });
     redaction = addCounts(redaction, ghosts.counts);
@@ -33575,6 +34539,7 @@ async function indexAll(options = {}) {
       totals,
       recordTypes: [...recordTypes.values()].sort((a, b) => Number(b.novel) - Number(a.novel) || b.count - a.count || (a.harness < b.harness ? -1 : a.harness > b.harness ? 1 : 0) || (a.type < b.type ? -1 : 1)),
       redaction,
+      threads,
       ghosts,
       embeddings,
       vec: vecStatus(db),
@@ -33667,6 +34632,11 @@ async function indexHarness(db, spec, options, recordTypes) {
     report.parsed += 1;
     report.malformedLines += parsed.malformedLines;
     redaction = addCounts(redaction, result.counts);
+    try {
+      await indexLineage(db, spec.harness, source, parsed.session.id);
+    } catch (err) {
+      report.errors.push(`lineage ${path20.basename(source.path)}: ${err.message}`);
+    }
     const version2 = spec.version(parsed);
     writeSessionRecordTypes(db, parsed.session.id, spec, version2, parsed.unknownTypes);
     for (const [type, count2] of Object.entries(parsed.unknownTypes)) {
@@ -33692,6 +34662,43 @@ async function indexHarness(db, spec, options, recordTypes) {
   fillStoredCounts(db, report);
   report.ms = Date.now() - started;
   return { harness_: report, redaction };
+}
+var LINEAGE_FIELDS = {
+  claude: { id: "uuid", declaredParent: "session_id" }
+};
+async function indexLineage(db, harness, source, sessionId) {
+  if (!LINEAGE_HARNESSES.includes(harness))
+    return;
+  const fields = LINEAGE_FIELDS[harness];
+  if (!fields || source.isSidechain)
+    return;
+  const ids = [];
+  const declared = /* @__PURE__ */ new Map();
+  for await (const line of readJsonlLines(source.path)) {
+    if (!line.terminated)
+      break;
+    const record2 = parseJsonLine(line.text);
+    if (!isRecord(record2))
+      continue;
+    const id = record2[fields.id];
+    if (typeof id === "string" && id)
+      ids.push(id);
+    const parent = record2[fields.declaredParent];
+    if (typeof parent === "string" && parent && parent !== sessionId) {
+      declared.set(parent, (declared.get(parent) ?? 0) + 1);
+    }
+  }
+  const write = db.transaction(() => {
+    db.prepare("DELETE FROM session_record_ids WHERE session_id = ?").run(sessionId);
+    db.prepare("DELETE FROM session_declared_parents WHERE session_id = ?").run(sessionId);
+    const insId = db.prepare("INSERT OR IGNORE INTO session_record_ids (session_id, record_id) VALUES (?, ?)");
+    for (const id of ids)
+      insId.run(sessionId, id);
+    const insParent = db.prepare("INSERT OR REPLACE INTO session_declared_parents (session_id, parent_id, records) VALUES (?, ?, ?)");
+    for (const [parent, n2] of declared)
+      insParent.run(sessionId, parent, n2);
+  });
+  write();
 }
 function fillStoredCounts(db, report) {
   const s = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(is_sidechain), 0) AS side
@@ -33762,7 +34769,7 @@ async function embedExchanges(db, options, vec) {
       }
     } catch (err) {
       report.available = false;
-      report.reason = `embeddings unavailable: ${firstLine3(err?.message ?? String(err))}`;
+      report.reason = `embeddings unavailable: ${firstLine4(err?.message ?? String(err))}`;
       report.ms = Date.now() - started;
       return report;
     }
@@ -33874,7 +34881,7 @@ function storedRecordTypes(db) {
     return [];
   }
 }
-function firstLine3(s) {
+function firstLine4(s) {
   return (s.split("\n")[0] ?? s).trim();
 }
 function sum(xs, f) {
@@ -34271,6 +35278,17 @@ function readPriorCard(db, sessionId) {
 var ROLLUP = `AND (s.is_sidechain = 0
        OR s.parent_session_id IS NULL
        OR NOT EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id))`;
+function threadRollup(f) {
+  const head = f.sql.replace(/\bs\./g, "hs.");
+  return {
+    sql: `AND NOT EXISTS (
+       SELECT 1 FROM session_threads t
+        WHERE t.session_id = s.id AND t.head = 0
+          AND EXISTS (SELECT 1 FROM session_threads h JOIN sessions hs ON hs.id = h.session_id
+                       WHERE h.thread_id = t.thread_id AND h.head = 1 ${head}))`,
+    params: [...f.params]
+  };
+}
 var SESSION_COLUMNS2 = `s.id, s.harness, s.title, s.project, s.started_at, s.ended_at, s.status,
        s.is_sidechain, s.parent_session_id, s.agent_name, s.git_branch,
        s.user_prompts, s.assistant_turns, s.bytes,
@@ -34291,8 +35309,41 @@ function withCardTitle(s, card) {
   const clean = card?.card_title?.replace(/\s+/g, " ").trim();
   const source = card?.card_source?.trim() || null;
   if (!clean)
-    return { ...s, cardTitle: null, cardSource: source, tags: [] };
-  return { ...s, title: clean, displayTitle: clean, cardTitle: clean, cardSource: source, tags: [] };
+    return { ...s, cardTitle: null, cardSource: source, tags: [], thread: null };
+  return {
+    ...s,
+    title: clean,
+    displayTitle: clean,
+    cardTitle: clean,
+    cardSource: source,
+    tags: [],
+    thread: null
+  };
+}
+function withThreads(db, rows) {
+  for (const row2 of rows) {
+    if (row2.kind !== "session")
+      continue;
+    const thread = threadOf(db, row2.id);
+    if (thread.sessions.length < 2)
+      continue;
+    const totals = threadTotals(db, thread);
+    row2.thread = {
+      id: thread.id,
+      sessions: thread.sessions,
+      head: thread.head,
+      isHead: thread.head === row2.id,
+      exchanges: totals.exchanges
+    };
+    if (thread.head !== row2.id)
+      continue;
+    row2.exchanges = totals.exchanges;
+    row2.prompts = totals.prompts;
+    row2.bytes = totals.bytes;
+    row2.startedAt = totals.startedAt ?? row2.startedAt;
+    row2.endedAt = totals.endedAt ?? row2.endedAt;
+  }
+  return rows;
 }
 function withTags(db, rows) {
   if (rows.length === 0)
@@ -34336,21 +35387,26 @@ function listSessions(db, requested = {}, options = {}) {
   let ghosts = 0;
   let sidechains = 0;
   let rolledUp = 0;
+  let threaded = 0;
   if (sessionsInScope(filters)) {
     const f = buildSessionFilters(filters);
     const rollup = (filters.sidechains ?? "include") === "include" ? ROLLUP : "";
-    const found = db.prepare(`SELECT ${SESSION_COLUMNS2} FROM sessions s WHERE 1=1 ${f.sql} ${rollup}
+    const thread = threadRollup(f);
+    const both = `${rollup} ${thread.sql}`;
+    const bothParams = [...f.params, ...thread.params];
+    const found = db.prepare(`SELECT ${SESSION_COLUMNS2} FROM sessions s WHERE 1=1 ${f.sql} ${both}
           ORDER BY COALESCE(s.ended_at, s.started_at) DESC, s.id
-          LIMIT ?`).all(...f.params, want);
+          LIMIT ?`).all(...bothParams, want);
     for (const r of found)
       rows.push(withCardTitle(fromSessionRow(r), r));
     const counted = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(s.is_sidechain), 0) AS sidechains
-           FROM sessions s WHERE 1=1 ${f.sql} ${rollup}`).get(...f.params);
+           FROM sessions s WHERE 1=1 ${f.sql} ${both}`).get(...bothParams);
     total += counted.n;
     sidechains = counted.sidechains;
     hidden += countHidden(db, filters, ignore.applied, rollup, "sessions", counted.n);
+    threaded = db.prepare(`SELECT COUNT(*) AS n FROM sessions s WHERE 1=1 ${f.sql} ${rollup}`).get(...f.params).n - counted.n;
     if (rollup) {
-      rolledUp = db.prepare(`SELECT COUNT(*) AS n FROM sessions s WHERE 1=1 ${f.sql}`).get(...f.params).n - counted.n;
+      rolledUp = db.prepare(`SELECT COUNT(*) AS n FROM sessions s WHERE 1=1 ${f.sql}`).get(...f.params).n - counted.n - threaded;
     }
   }
   if (ghostsInScope(filters)) {
@@ -34365,12 +35421,14 @@ function listSessions(db, requested = {}, options = {}) {
     ghosts = counted.n;
     hidden += countHidden(db, filters, ignore.applied, "", "ghosts", counted.n);
   }
+  withThreads(db, rows);
   rows.sort((a, b) => when(b).localeCompare(when(a)) || a.id.localeCompare(b.id));
   return {
     sessions: withTags(db, rows.slice(offset, offset + limit)),
     total,
     ghosts,
     rolledUp,
+    threaded,
     sidechains,
     ignored: { entries: ignore.entries, projects: ignore.projects, hidden },
     filters
@@ -34382,8 +35440,9 @@ function countHidden(db, filters, applied, rollup, table2, shown) {
   const open2 = { ...filters };
   delete open2.excludeProjects;
   const f = table2 === "sessions" ? buildSessionFilters(open2) : buildGhostFilters(open2);
-  const sql = table2 === "sessions" ? `SELECT COUNT(*) AS n FROM sessions s WHERE 1=1 ${f.sql} ${rollup}` : `SELECT COUNT(*) AS n FROM ghosts g WHERE 1=1 ${f.sql}`;
-  const all = db.prepare(sql).get(...f.params).n;
+  const thread = table2 === "sessions" ? threadRollup(f) : { sql: "", params: [] };
+  const sql = table2 === "sessions" ? `SELECT COUNT(*) AS n FROM sessions s WHERE 1=1 ${f.sql} ${rollup} ${thread.sql}` : `SELECT COUNT(*) AS n FROM ghosts g WHERE 1=1 ${f.sql}`;
+  const all = db.prepare(sql).get(...f.params, ...thread.params).n;
   return Math.max(0, all - shown);
 }
 function when(s) {
@@ -34439,6 +35498,16 @@ function showSession(db, id, options = {}) {
   const sessionRow = db.prepare(`SELECT ${SESSION_COLUMNS2} FROM sessions s WHERE s.id = ?`).get(id);
   if (sessionRow) {
     const session2 = withTags(db, [withCardTitle(fromSessionRow(sessionRow), sessionRow)])[0];
+    const chain = threadOf(db, id);
+    if (chain.sessions.length > 1) {
+      session2.thread = {
+        id: chain.id,
+        sessions: chain.sessions,
+        head: chain.head,
+        isHead: chain.head === id,
+        exchanges: threadTotals(db, chain).exchanges
+      };
+    }
     const total2 = session2.exchanges;
     const { from: from2, to: to2 } = window(total2, options);
     const rows = db.prepare(`SELECT id, seq, ts, user_text, assistant_text, files_touched, is_sidechain, redacted
@@ -36290,8 +37359,8 @@ function modelClass(model) {
 function isAlias(model) {
   return MODEL_ALIASES.includes(model);
 }
-function resolveModel(model, backend) {
-  if (backend === "api" && isAlias(model))
+function resolveModel(model, backend2) {
+  if (backend2 === "api" && isAlias(model))
     return API_MODEL_IDS[model];
   return model;
 }
@@ -36361,8 +37430,8 @@ var CALL_PROFILES = {
     basis: "est. \u2014 argv verified at codex 0.149.0, timings assumed from the agent sdk"
   }
 };
-function callProfile(backend) {
-  return CALL_PROFILES[backend ?? "agent-sdk"] ?? CALL_PROFILES["agent-sdk"];
+function callProfile(backend2) {
+  return CALL_PROFILES[backend2 ?? "agent-sdk"] ?? CALL_PROFILES["agent-sdk"];
 }
 var HARNESS_OVERHEAD_USD = CALL_PROFILES["agent-sdk"].baseUsd;
 function effectiveConcurrency(n2, profile) {
@@ -36699,18 +37768,18 @@ function detectBackend(o = {}) {
   const avail = availability(o);
   const requested = o.model ?? env["POTSHERD_MODEL"] ?? CARD_MODEL;
   const forced = o.backend ?? env["POTSHERD_LLM_BACKEND"];
-  const choose = (backend, rung2, why2, bin) => ({
-    backend,
-    model: resolveModel(requested, backend),
+  const choose = (backend2, rung2, why2, bin) => ({
+    backend: backend2,
+    model: resolveModel(requested, backend2),
     requested,
     why: why2,
     rung: rung2?.rung ?? 3,
     rungId: rung2?.id ?? null,
     ...bin ? { bin } : {},
-    chargeable: backend === "api",
+    chargeable: backend2 === "api",
     availability: avail
   });
-  const rungFor = (backend) => RESOLUTION_LADDER.find((r) => r.backend === backend) ?? null;
+  const rungFor = (backend2) => RESOLUTION_LADDER.find((r) => r.backend === backend2) ?? null;
   if (forced) {
     const rung2 = rungFor(forced);
     if (!rung2)
@@ -40534,7 +41603,8 @@ function expandCitationGroups(line) {
 function sourceLine(o) {
   const n2 = o.exchanges;
   const noun = o.isGhost ? "prompt" : "exchange";
-  return `source: ${o.harness} ${o.sessionId} \xB7 ${n2} ${noun}${n2 === 1 ? "" : "s"} \xB7 ${o.date}`;
+  const across = o.sessions && o.sessions > 1 ? ` across ${o.sessions} sessions` : "";
+  return `source: ${o.harness} ${o.sessionId} \xB7 ${n2} ${noun}${n2 === 1 ? "" : "s"}${across} \xB7 ${o.date}`;
 }
 async function countTokens(text, o = {}) {
   const fallback = { tokens: tokensForText(text), estimated: true };
@@ -40560,10 +41630,10 @@ async function countTokens(text, o = {}) {
   }
 }
 function counterFor(llm, env) {
-  const backend = llm?.backend;
+  const backend2 = llm?.backend;
   const model = llm?.model;
   return (text) => countTokens(text, {
-    ...backend ? { backend } : {},
+    ...backend2 ? { backend: backend2 } : {},
     ...model ? { model } : {},
     ...env ? { env } : {}
   });
@@ -40761,7 +41831,7 @@ var GraftError = class extends Error {
 async function resolveTarget(db, target, o = {}) {
   const needle = target?.trim() ?? "";
   if (!needle)
-    throw new GraftError("graft needs a session id or a query", "potsherd graft 4c9339e0");
+    throw new GraftError("graft needs a session id or a query", "potsherd graft 9c4d2f18");
   const direct = resolveSession(db, needle);
   if (direct && !direct.ambiguous)
     return { sessionId: direct.id, kind: direct.kind, via: "id" };
@@ -40792,36 +41862,44 @@ async function collectSource(db, sessionId, o = {}) {
   const isGhost = show.session.status === "ghost" || Boolean(show.ghostPrompts);
   const card = readCard(db, sessionId);
   const id8 = sessionId.slice(0, 8);
+  const thread = threadOf(db, sessionId);
+  const totals = threadTotals(db, thread);
+  const chained = thread.sessions.length > 1;
   const slice = [];
   let sliceVia = null;
   const about = o.about?.trim();
   if (about) {
-    const hits = await recall(db, about, { sessionId }, { limit: 1, perSession: Math.max(1, o.k ?? ABOUT_K), ...o.root ? { root: o.root } : {} });
-    const wanted = hits.hits.filter((h) => h.sessionId === sessionId && typeof h.seq === "number");
-    for (const h of wanted.slice(0, o.k ?? ABOUT_K)) {
-      const text = sliceText(h.userText ?? "", h.assistantText ?? "", isGhost);
-      if (text)
-        slice.push({ seq: h.seq, ts: h.ts ?? null, text });
+    const perSession = Math.max(1, o.k ?? ABOUT_K);
+    const found = [];
+    for (const member of thread.sessions) {
+      const hits = await recall(db, about, { sessionId: member }, { limit: 1, perSession, ...o.root ? { root: o.root } : {} });
+      const wanted = hits.hits.filter((h) => h.sessionId === member && typeof h.seq === "number");
+      for (const h of wanted.slice(0, perSession)) {
+        const text = sliceText(h.userText ?? "", h.assistantText ?? "", isGhost);
+        if (text)
+          found.push({ seq: h.seq, ts: h.ts ?? null, text, id8: member.slice(0, 8) });
+      }
     }
-    slice.sort((a, b) => a.seq - b.seq);
+    found.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? "") || a.seq - b.seq);
+    for (const f of found.slice(-(o.k ?? ABOUT_K)))
+      slice.push(f);
     sliceVia = slice.length ? "about" : null;
   } else if (!card) {
-    const units = show.ghostPrompts ? show.ghostPrompts.map((p) => ({ seq: p.seq, ts: p.ts, user: p.text, assistant: "" })) : show.exchanges.map((e) => ({
-      seq: e.seq,
-      ts: e.ts,
-      user: e.userText ?? "",
-      assistant: e.assistantText ?? ""
-    }));
+    const units = show.ghostPrompts ? show.ghostPrompts.map((p) => ({
+      seq: p.seq,
+      ts: p.ts,
+      user: p.text,
+      assistant: "",
+      id8: sessionId.slice(0, 8)
+    })) : threadUnits(db, thread);
     for (const u of units.slice(-Math.max(1, o.k ?? RECENT_K))) {
       const text = sliceText(u.user, u.assistant, isGhost);
       if (text)
-        slice.push({ seq: u.seq, ts: u.ts, text });
+        slice.push({ seq: u.seq, ts: u.ts, text, id8: u.id8 });
     }
-    slice.sort((a, b) => a.seq - b.seq);
     sliceVia = slice.length ? "recent" : null;
   }
   const s = show.session;
-  const when2 = s.endedAt ?? s.startedAt ?? null;
   return {
     sessionId,
     show,
@@ -40830,12 +41908,33 @@ async function collectSource(db, sessionId, o = {}) {
     id8,
     slice,
     sliceVia,
-    exchanges: show.total,
-    date: when2 ? when2.slice(0, 10) : "unknown date",
+    // A ghost has no thread — `history.jsonl` kept prompts, not records — so
+    // its count stays its own, and the noun stays `prompts`.
+    exchanges: isGhost || !chained ? show.total : totals.exchanges,
+    thread,
+    // **The promoted rule.** This used to be `s.endedAt ?? s.startedAt`, right
+    // here, and it was the only correct dating computation in the codebase:
+    // `graft` printed 2026-08-20 for the audit's fixture while `show`, `ls`
+    // and `find` printed 12 aug. It now lives in `threads.ts` where every verb
+    // can reach it, and the copy that was here is gone.
+    date: sessionDay(chained ? { startedAt: totals.startedAt, endedAt: totals.endedAt } : s),
     harness: s.harness,
     project: projectName(s.project),
     title: s.displayTitle
   };
+}
+function threadUnits(db, thread) {
+  const marks = thread.sessions.map(() => "?").join(",");
+  const rows = db.prepare(`SELECT session_id, seq, ts, user_text, assistant_text FROM exchanges
+        WHERE session_id IN (${marks})
+        ORDER BY COALESCE(ts, ''), session_id, seq`).all(...thread.sessions);
+  return rows.map((r) => ({
+    seq: r.seq,
+    ts: r.ts,
+    user: r.user_text ?? "",
+    assistant: r.assistant_text ?? "",
+    id8: r.session_id.slice(0, 8)
+  }));
 }
 var GRAFT_SYSTEM = "You compress one past coding session into a re-entry brief for a different agent that has never seen it. You are not summarising for a human reader; you are handing a colleague the facts they need to continue work.";
 function buildPrompt(src, o) {
@@ -40844,9 +41943,13 @@ function buildPrompt(src, o) {
   }
   const lines = [];
   const about = o.about?.trim();
+  const chained = src.thread.sessions.length > 1;
   const askFor = Math.max(80, Math.floor(o.budget * 0.75));
   lines.push(`Session ${src.id8} \xB7 ${src.harness} \xB7 project ${src.project || "unknown"} \xB7 ${src.date}`);
   lines.push(`Title: ${src.title}`);
+  if (chained) {
+    lines.push(`This session is the newest link of a ${src.thread.sessions.length}-transcript chain (${src.thread.sessions.map((id) => id.slice(0, 8)).join(" \u2192 ")}), ${src.exchanges} exchanges of one continuous piece of work. Treat it as one session.`);
+  }
   if (src.isGhost) {
     lines.push("THIS SESSION IS A GHOST: only the user prompts survive. The assistant side was deleted and is not recoverable. Never state what the assistant answered, decided or did.");
   }
@@ -40877,49 +41980,72 @@ function buildPrompt(src, o) {
   if (src.slice.length) {
     lines.push(about ? `## exchanges about "${about}"` : `## the last ${src.slice.length} exchange${src.slice.length === 1 ? "" : "s"} of the session`);
     for (const ex of src.slice) {
-      lines.push("", `[seq ${ex.seq}${ex.ts ? ` \xB7 ${ex.ts.slice(0, 10)}` : ""}]`, ex.text);
+      const tag = chained ? `[${ex.id8}@${ex.seq}` : `[seq ${ex.seq}`;
+      lines.push("", `${tag}${ex.ts ? ` \xB7 ${ex.ts.slice(0, 10)}` : ""}]`, ex.text);
     }
     lines.push("");
   }
   const legal = legalSeqs(src);
   lines.push("## your task");
   lines.push(about ? `Write a re-entry brief about "${about}", drawn only from the material above.` : "Write a re-entry brief, drawn only from the material above.");
-  lines.push(`Hard rules:`, `- At most ${askFor} tokens. Shorter is better. No preamble, no sign-off, no headings.`, `- Markdown bullets only, one fact per bullet.`, `- Every bullet ends with a citation: a literal open bracket, ${src.id8}, an at sign, the seq number, a close bracket. Write the actual number. A bullet you send with the word "seq" still in it will be deleted.`, `- Two sources on one bullet are written as two separate bracket pairs, never inside one pair.`, legal.length ? `- The ONLY legal seq numbers are: ${legal.join(", ")}. A bullet you cannot cite from that list is a bullet you must not write.` : `- You have no seq numbers to cite. Write nothing but the single line: NONE.`, `- State decisions and open threads. Do not restate the title.`, src.isGhost ? `- Say nothing about what the assistant replied; only what the user asked for.` : `- Prefer what was decided and why over what was tried.`, `- No secrets. Text of the form \u2039redacted:\u2026\u203A is a mask; copy it verbatim or leave it out.`);
+  lines.push(
+    `Hard rules:`,
+    `- At most ${askFor} tokens. Shorter is better. No preamble, no sign-off, no headings.`,
+    `- Markdown bullets only, one fact per bullet.`,
+    chained ? `- Every bullet ends with a citation in square brackets, copied exactly as it appears above the exchange it came from \u2014 the eight characters, an at sign, the number. This work spans ${src.thread.sessions.length} transcripts and the eight characters differ between them; never move a number from one to another.` : `- Every bullet ends with a citation: a literal open bracket, ${src.id8}, an at sign, the seq number, a close bracket. Write the actual number. A bullet you send with the word "seq" still in it will be deleted.`,
+    `- Two sources on one bullet are written as two separate bracket pairs, never inside one pair.`,
+    // The wording is split, not generalised. "The ONLY legal seq numbers are"
+    // is the sentence a one-transcript brief has always carried, and the shape
+    // of a prompt is a thing tests pin and models have been observed against:
+    // a chain is a new case and gets a new sentence, rather than every brief
+    // ever written getting a changed one.
+    legal.length ? chained ? `- The ONLY legal citations are: ${legal.join(", ")}. A bullet you cannot cite from that list is a bullet you must not write.` : `- The ONLY legal seq numbers are: ${legal.join(", ")}. A bullet you cannot cite from that list is a bullet you must not write.` : `- You have no seq numbers to cite. Write nothing but the single line: NONE.`,
+    `- State decisions and open threads. Do not restate the title.`,
+    src.isGhost ? `- Say nothing about what the assistant replied; only what the user asked for.` : `- Prefer what was decided and why over what was tried.`,
+    `- No secrets. Text of the form \u2039redacted:\u2026\u203A is a mask; copy it verbatim or leave it out.`
+  );
   return lines.join("\n");
 }
 function hasMaterial(src) {
   return Boolean(src.card) || src.slice.length > 0;
 }
 function legalSeqs(src) {
+  const chained = src.thread.sessions.length > 1;
   const out = /* @__PURE__ */ new Set();
+  const add = (seq, id8) => {
+    out.add(chained ? `${id8}@${seq}` : String(seq));
+  };
   for (const ex of src.slice)
-    out.add(ex.seq);
+    add(ex.seq, ex.id8);
   if (src.card) {
     for (const d of src.card.card.decisions)
       for (const s of d.evidence_seq)
-        out.add(s);
+        add(s, src.id8);
     for (const t of src.card.card.open_threads)
       for (const s of t.evidence_seq)
-        out.add(s);
+        add(s, src.id8);
   }
   if (out.size === 0) {
     const seqs = src.show.exchanges.map((e) => e.seq);
     const prompts = src.show.ghostPrompts?.map((p) => p.seq) ?? [];
     for (const s of [...seqs, ...prompts].slice(0, 12))
-      out.add(s);
+      add(s, src.id8);
   }
-  return [...out].sort((a, b) => a - b).slice(0, 40);
+  const list = [...out];
+  if (!chained)
+    list.sort((a, b) => Number(a) - Number(b));
+  return list.slice(0, 40);
 }
 function cardOnlyBody(src) {
   const out = [];
   const cite = (seqs) => seqs.length ? ` ${seqs.map((s) => `[${src.id8}@${s}]`).join(" ")}` : "";
   if (!src.card) {
     const units = src.show.ghostPrompts ? src.show.ghostPrompts.map((p) => ({ seq: p.seq, text: p.text })) : src.show.exchanges.map((e) => ({ seq: e.seq, text: e.userText }));
-    const chosen = src.slice.length ? src.slice.map((s) => ({ seq: s.seq, text: s.text })) : units.slice(0, 8);
+    const chosen = src.slice.length ? src.slice.map((s) => ({ seq: s.seq, text: s.text, id8: s.id8 })) : units.slice(0, 8).map((u) => ({ ...u, id8: src.id8 }));
     for (const u of chosen) {
       const text = clipSafe(stripHarnessBoilerplate(u.text).replace(/\s+/g, " ").trim(), 200);
       if (text)
-        out.push(`- ${text} [${src.id8}@${u.seq}]`);
+        out.push(`- ${text} [${u.id8}@${u.seq}]`);
     }
     return out;
   }
@@ -40940,7 +42066,7 @@ function cardOnlyBody(src) {
     for (const ex of src.slice) {
       const text = clipSafe(ex.text.replace(/\s+/g, " ").trim(), 220);
       if (text)
-        out.push(`- ${text} [${src.id8}@${ex.seq}]`);
+        out.push(`- ${text} [${ex.id8}@${ex.seq}]`);
     }
   }
   return out;
@@ -41069,6 +42195,8 @@ async function graft(db, target, o = {}) {
     harness: src.harness,
     about,
     exchanges: src.exchanges,
+    sessions: src.thread.sessions.length,
+    threadId: src.thread.id,
     date: src.date,
     budget,
     tokens: budgeted.tokens,
@@ -41093,7 +42221,8 @@ function buildHead(src, o) {
   const head = [];
   head.push(`# ${src.title}`);
   head.push("");
-  const cite = `Written by potsherd; every claim carries \`[${src.id8}@seq]\`, the exchange it came from.`;
+  const chained = src.thread.sessions.length > 1;
+  const cite = chained ? `Written by potsherd from ${src.thread.sessions.length} transcripts of one thread; every claim carries \`[id8@seq]\` \u2014 the transcript and the exchange it came from.` : `Written by potsherd; every claim carries \`[${src.id8}@seq]\`, the exchange it came from.`;
   if (o.about && src.sliceVia === "about") {
     head.push(`Brief from a past session, about **${o.about}**. ${cite}`);
   } else if (o.about) {
@@ -41122,7 +42251,8 @@ function buildTail(src, pass) {
     sessionId: src.sessionId,
     exchanges: src.exchanges,
     date: src.date,
-    isGhost: src.isGhost
+    isGhost: src.isGhost,
+    sessions: src.isGhost ? 1 : src.thread.sessions.length
   }));
   return tail2;
 }

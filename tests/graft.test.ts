@@ -551,7 +551,7 @@ describe('every citation resolves, or it is not printed', () => {
   });
 
   it('drops a bullet that carries the unfilled template instead of a seq', () => {
-    // Found on a real ghost run: the model copied `[f7ac67c0@<seq>]` verbatim
+    // Found on a real ghost run: the model copied `[<a real ghost, id withheld>@<seq>]` verbatim
     // out of the instruction. `<seq>` is not a number, so a citation pattern
     // never sees it, and the bullet reads as *uncited* rather than as
     // miscited — kept, unchecked, and visibly carrying a citation that is not
@@ -604,12 +604,12 @@ describe('every citation resolves, or it is not printed', () => {
     // the false citation deleted, and a dangling " ." left where it had been.
     const pass = resolveCitations(
       db,
-      'We migrated the whole fleet to Aurora Serverless v2 [4c9339e0aaaa@999].',
+      'We migrated the whole fleet to Aurora Serverless v2 [9c4d2f18aaaa@999].',
       { sessionId: pgbouncerId },
     );
     expect(pass.text.trim()).toBe('');
     expect(pass.droppedLines).toHaveLength(1);
-    expect(pass.citations).toEqual([{ id8: '4c9339e0aaaa', seq: 999, resolves: false }]);
+    expect(pass.citations).toEqual([{ id8: '9c4d2f18aaaa', seq: 999, resolves: false }]);
   });
 
   it('keeps a prose claim that cites — the rule is cited-or-dropped, not bulleted', () => {

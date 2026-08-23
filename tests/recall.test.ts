@@ -557,8 +557,8 @@ describe('resume commands', () => {
   });
 
   it('names a subagent by the half of its id that is its own', () => {
-    expect(idTag('4c9339e0-b186-4006-b5c1-e7537c8b9353')).toBe('4c9339e0');
-    expect(idTag('4c9339e0-b186-4006-b5c1-e7537c8b9353:agent-a02db260b621e9897')).toBe('a02db260');
+    expect(idTag('9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43')).toBe('9c4d2f18');
+    expect(idTag('9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43:agent-a02db260b621e9897')).toBe('a02db260');
   });
 });
 

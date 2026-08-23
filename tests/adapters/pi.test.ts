@@ -62,8 +62,8 @@ describe('pi adapter — discovery', () => {
   it('takes the session id after the LAST underscore — the prefix is not ISO-8601', () => {
     // `2026-05-13T08-09-45-791Z` — `:` and `.` are replaced with `-`, so the
     // prefix must never be split on `T` or fed to `new Date()`.
-    expect(sessionIdFromFilename('2026-05-13T08-09-45-791Z_019e2062-7c3e-7548-85dc-10176658c9a3.jsonl'))
-      .toBe('019e2062-7c3e-7548-85dc-10176658c9a3');
+    expect(sessionIdFromFilename('2026-05-13T08-09-45-791Z_01a00001-1000-7000-8000-000000000001.jsonl'))
+      .toBe('01a00001-1000-7000-8000-000000000001');
     expect(sessionIdFromFilename('no-underscore.jsonl')).toBe('no-underscore');
   });
 

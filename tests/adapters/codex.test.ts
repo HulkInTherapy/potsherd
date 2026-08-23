@@ -416,7 +416,7 @@ describe('the codex fixtures', () => {
     expect(files.length).toBeGreaterThan(4);
 
     const realHome = os.homedir();
-    const realSessionId = '019f84ff-05f6-7ad0-8ba3-4064f23a1fb5'; // the one rollout on this machine
+    const realSessionId = '01900000-0000-7000-8000-000000000001'; // the one rollout on this machine
     for (const file of files) {
       const text = fs.readFileSync(file, 'utf8');
       expect(text, file).not.toContain(realHome);

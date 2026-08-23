@@ -227,16 +227,37 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
   it('never prints an install command for a package that is not published', () => {
     // D4. `npm i -g potsherd` was the single documented repair, printed in
     // both plugin READMEs, in the shim's exit-127 message and in the
-    // SessionStart hook's systemMessage. `npm view potsherd version` is a 404:
-    // the package is unpublished. A user following it got nothing and was told
-    // nothing. Every remaining mention has to be flagged as a 404, not offered
-    // as a fix — so a line that says the words must also say "not published"
-    // or "404" within it.
+    // SessionStart hook's systemMessage — while `npm view potsherd version`
+    // was a 404. A user following it got nothing and was told nothing. Every
+    // remaining mention had to be flagged as a 404 rather than offered as a
+    // fix, so a line saying the words must also say "not published" or "404".
+    //
+    // **The premise expired at v1.1.0.** The package is published; the command
+    // now works. This is kept as defence-in-depth for the next unpublished
+    // thing rather than deleted, because the failure it describes is generic:
+    // printing a repair nobody can run.
+    //
+    // TWO SCOPE CORRECTIONS, both found in phase 10 when it went red.
+    //
+    // 1. It walked `dist/`, which is **bundled build output**. esbuild keeps
+    //    comments, so a source comment reasoning ABOUT the install — "a clean
+    //    `npm i -g potsherd` does not install [the optional peers]" — arrives
+    //    in the bundle and trips a rule about what is PRINTED. A comment
+    //    inside a bundle is never printed to anybody.
+    // 2. That is the same mistake in reverse as `09 §11`: an artefact is only
+    //    verified in the place it runs, and a bundle's comments do not run.
+    //
+    // So the walk covers the surfaces a user actually reads — hooks, shims,
+    // skills, agents, READMEs — and skips vendored bundles, which are checked
+    // by being regenerated rather than by being read.
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const f = path.join(dir, e.name);
         if (e.isDirectory()) {
+          // Vendored build output: comments survive bundling and are not a
+          // surface anybody reads. See the note above.
+          if (e.name === 'dist') continue;
           walk(f);
           continue;
         }

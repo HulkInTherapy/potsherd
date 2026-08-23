@@ -59,7 +59,7 @@ export async function runLink(o: LinkCommandOptions): Promise<number> {
     if (!o.a || !o.b) {
       throw new UserError(
         'link needs two sessions',
-        'potsherd link 4c9339e0 f1665f76   (or: potsherd link --suggest)',
+        'potsherd link 9c4d2f18 b2181bfe   (or: potsherd link --suggest)',
       );
     }
     const a = mustResolve(db, o.a, verb);

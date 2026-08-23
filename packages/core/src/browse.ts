@@ -488,7 +488,7 @@ export interface ResolvedSession {
  *
  * Two rules that matter more than they look:
  *
- * **A parent wins over its own subagents.** `4c9339e0` is a prefix of one
+ * **A parent wins over its own subagents.** `9c4d2f18` is a prefix of one
  * session and of the 32 subagent transcripts it spawned, because their ids all
  * start with its uuid. Calling that ambiguous would make every session with
  * subagents unshowable. The conversation is what the user meant.

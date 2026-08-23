@@ -73,7 +73,7 @@ export interface CardCommandOptions extends GlobalOptions, FilterFlags {
    * Spelled as its own boolean rather than as the bare `--ghosts` the phase
    * plan sketches, because `--ghosts <mode>` is a shared filter flag that
    * takes a value on `find` and `ls` too. Making it optional-valued would let
-   * `potsherd card --ghosts 4c9339e0` swallow the session argument. `rescue`
+   * `potsherd card --ghosts 9c4d2f18` swallow the session argument. `rescue`
    * already spells the same idea `--ghosts-only`.
    */
   ghostsOnly?: boolean;

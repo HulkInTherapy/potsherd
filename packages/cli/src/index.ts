@@ -423,7 +423,7 @@ example:
   potsherd ls --project event-bus --since 30d
   potsherd ls --ghosts only --limit 40               # what the sweep took
   potsherd ls --tag postgres --pinned --since 30d    # filters compose
-  potsherd ls --linked-to 4c9339e0                   # both ends of a link
+  potsherd ls --linked-to 9c4d2f18                   # both ends of a link
   potsherd ls --untitled                             # what to card next
   potsherd ls --resume-menu                          # pick a session by title
   potsherd ls --harness codex --json | jq -r '.sessions[].displayTitle'
@@ -445,11 +445,11 @@ example:
       .argument('[tags...]', '+tag to add, -tag to remove; none at all lists them'),
   ).addHelpText('after', `
 example:
-  potsherd tag 4c9339e0                              # what it carries now
-  potsherd tag 4c9339e0 +postgres +infra
-  potsherd tag 4c9339e0 +postgres -mysql             # add and remove at once
+  potsherd tag 9c4d2f18                              # what it carries now
+  potsherd tag 9c4d2f18 +postgres +infra
+  potsherd tag 9c4d2f18 +postgres -mysql             # add and remove at once
   potsherd ls --tag postgres
-  potsherd tag 4c9339e0 --json | jq -r '.tags[]'`);
+  potsherd tag 9c4d2f18 --json | jq -r '.tags[]'`);
   tag.action(async (session: string, tags: string[], opts: Record<string, unknown>) => {
     const o = globals(program, tag, opts);
     // `-infra` never reaches commander (see splitTagOperands); what does reach
@@ -465,9 +465,9 @@ example:
       .argument('<session>', 'session id, or the first 8 characters of one'),
   ).addHelpText('after', `
 example:
-  potsherd pin 4c9339e0
+  potsherd pin 9c4d2f18
   potsherd ls --pinned
-  potsherd pin 4c9339e0 --json | jq .pinnedAt`);
+  potsherd pin 9c4d2f18 --json | jq .pinnedAt`);
   pin.action(async (session: string, opts: Record<string, unknown>) => {
     const o = globals(program, pin, opts);
     await run(() => runPin({ ...o, session }), o);
@@ -480,7 +480,7 @@ example:
       .argument('<session>', 'session id, or the first 8 characters of one'),
   ).addHelpText('after', `
 example:
-  potsherd unpin 4c9339e0`);
+  potsherd unpin 9c4d2f18`);
   unpin.action(async (session: string, opts: Record<string, unknown>) => {
     const o = globals(program, unpin, opts);
     await run(() => runPin({ ...o, session, remove: true }), o);
@@ -543,10 +543,10 @@ example:
       .option('--suggest', 'propose cross-project links to accept by hand; writes nothing'),
   ).addHelpText('after', `
 example:
-  potsherd link 4c9339e0 f1665f76 --note "same pgbouncer fix"
-  potsherd ls --linked-to 4c9339e0                   # finds it from either end
-  potsherd ls --linked-to f1665f76
-  potsherd link 4c9339e0 f1665f76 --remove
+  potsherd link 9c4d2f18 b2181bfe --note "same pgbouncer fix"
+  potsherd ls --linked-to 9c4d2f18                   # finds it from either end
+  potsherd ls --linked-to b2181bfe
+  potsherd link 9c4d2f18 b2181bfe --remove
   potsherd link --suggest                            # proposals, nothing written`);
   link.action(async (a: string | undefined, b: string | undefined, opts: Record<string, unknown>) => {
     const o = globals(program, link, opts);
@@ -617,9 +617,9 @@ example:
       ),
   ).addHelpText('after', `
 example:
-  potsherd graft 4c9339e0 --about pgbouncer --budget 800
+  potsherd graft 9c4d2f18 --about pgbouncer --budget 800
   potsherd graft "instagram client" --clip
-  potsherd graft 4c9339e0 --json | jq -r .brief
+  potsherd graft 9c4d2f18 --json | jq -r .brief
 
 the brief is written to ./.potsherd/graft-<id8>.md in the current directory —
 the one place potsherd writes outside ~/.potsherd — and that directory gets a
@@ -694,7 +694,7 @@ example:
   potsherd card --dry-run --all                      # what it would cost, calls nothing
   potsherd card --dry-run --all --json | jq .estimate
   potsherd card --all --max-usd 2
-  potsherd card 4c9339e0 --model sonnet
+  potsherd card 9c4d2f18 --model sonnet
   potsherd card --ghosts-only --max-usd 2                # only what the sweep deleted
   potsherd card --ghosts-only --limit 10             # a small run first
   potsherd card --export ~/vault/sessions            # copy the markdown mirror out

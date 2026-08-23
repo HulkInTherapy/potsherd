@@ -25,7 +25,7 @@ import { mustResolve } from '../session-ref.js';
  * that is three decisions:
  *
  * **The target may be a query.** `graft "instagram client"` is in the spec
- * alongside `graft 4c9339e0`, so the id path goes through `session-ref.ts` —
+ * alongside `graft 9c4d2f18`, so the id path goes through `session-ref.ts` —
  * the resolver `show`, `tag`, `pin` and `link` already share — and only falls
  * through to `recall` when nothing in the index has an id like that. There is
  * no second resolver.
@@ -56,7 +56,7 @@ export interface GraftCommandOptions extends GlobalOptions {
 export async function runGraft(o: GraftCommandOptions): Promise<number> {
   const target = o.target?.trim();
   if (!target) {
-    throw new UserError('graft needs a session id or a query', 'potsherd graft 4c9339e0');
+    throw new UserError('graft needs a session id or a query', 'potsherd graft 9c4d2f18');
   }
 
   const budget = parseBudget(o.budget);
@@ -64,8 +64,8 @@ export async function runGraft(o: GraftCommandOptions): Promise<number> {
   let llm: LlmType | null = null;
 
   try {
-    // The id form resolves through the shared resolver, so `graft 4c9339e0`
-    // and `show 4c9339e0` can never mean two different sessions — and an
+    // The id form resolves through the shared resolver, so `graft 9c4d2f18`
+    // and `show 9c4d2f18` can never mean two different sessions — and an
     // ambiguous prefix lists its candidates here rather than being silently
     // handed to `recall` as a search term.
     const resolved = looksLikeId(target) ? tryResolve(db, target) : null;

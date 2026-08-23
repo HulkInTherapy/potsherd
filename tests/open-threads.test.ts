@@ -656,8 +656,8 @@ function candidate(over: Partial<OpenThreadCandidate> = {}): OpenThreadCandidate
   return {
     what: DECIDED.what,
     why: DECIDED.why,
-    sessionId: '4c9339e0-0000-4000-8000-000000000000',
-    id8: '4c9339e0',
+    sessionId: '9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43',
+    id8: '9c4d2f18',
     project: LEDGER,
     ts: '2026-07-01T17:00:00.000Z',
     evidenceSeqs: [7],

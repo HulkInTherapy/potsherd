@@ -27,7 +27,7 @@ export interface TagCommandOptions extends GlobalOptions {
  * same reason.
  *
  * With no `+`/`-` argument it lists what the session already carries, so
- * `potsherd tag 4c9339e0` is a safe thing to type when you cannot remember.
+ * `potsherd tag 9c4d2f18` is a safe thing to type when you cannot remember.
  */
 export async function runTag(o: TagCommandOptions): Promise<number> {
   const { db } = openIndex(o);

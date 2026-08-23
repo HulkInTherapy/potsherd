@@ -169,18 +169,18 @@ export const RECENT_K = 8;
 export const MIN_BUDGET = 60;
 
 /**
- * `4c9339e0@12` — the citation the brief carries inline, wherever it appears.
+ * `9c4d2f18@12` — the citation the brief carries inline, wherever it appears.
  *
  * Deliberately **not** anchored to its brackets. The canonical shape is
- * `[4c9339e0@12]`, and that is what the prompt asks for, but a model that has
- * two exchanges to cite writes `[4c9339e0@24, 4c9339e0@158]` about a third of
+ * `[9c4d2f18@12]`, and that is what the prompt asks for, but a model that has
+ * two exchanges to cite writes `[9c4d2f18@24, 9c4d2f18@158]` about a third of
  * the time — and a bracket-anchored pattern matches neither of those, so the
  * whole line reads as *uncited* and sails past the check untouched. That is
  * the worst possible outcome for this regex: not a dropped citation, an
  * unchecked one. Matching the `id8@seq` token itself catches every form.
  *
  * **The seq is `\d+`, not `\d{1,7}` (T4.7a G7).** The bounded form did not
- * refuse an eight-digit seq — it *truncated* it: `[4c9339e0@12345678]` matched
+ * refuse an eight-digit seq — it *truncated* it: `[9c4d2f18@12345678]` matched
  * only the first seven digits and `--json` then reported
  * `{"seq":1234567,"resolves":false}`, a number that appears nowhere in the
  * brief and nowhere in the transcript. A fabricated citation invented by the
@@ -192,7 +192,7 @@ export const MIN_BUDGET = 60;
 export const CITATION_RE = /([0-9a-f]{6,40})@(\d+)/gi;
 
 /**
- * `[4c9339e0@24, 158]` → `[4c9339e0@24, 4c9339e0@158]` (T4.7a G6).
+ * `[9c4d2f18@24, 158]` → `[9c4d2f18@24, 9c4d2f18@158]` (T4.7a G6).
  *
  * T4.3 taught the citation pattern to see `[id8@24, id8@158]`, and it does.
  * But a model that has written the id once shortens the second reference about
@@ -569,7 +569,7 @@ const STRUCTURAL: readonly RegExp[] = [
  * in : "We migrated the whole fleet to Aurora Serverless v2 last quarter."
  * out: "We migrated the whole fleet to Aurora Serverless v2 last quarter."
  *
- * in : "We migrated to Aurora Serverless v2 [4c9339e0aaaa@999]."
+ * in : "We migrated to Aurora Serverless v2 [9c4d2f18aaaa@999]."
  * out: "We migrated to Aurora Serverless v2 ."
  * ```
  *
@@ -600,8 +600,8 @@ function isClaim(line: string): boolean {
 /**
  * Clean up after a citation was cut out of a bracket group.
  *
- * Removing `4c9339e0@158` from `[4c9339e0@24, 4c9339e0@158]` leaves
- * `[4c9339e0@24, ]`, and removing both leaves `[, ]`. Neither is something a
+ * Removing `9c4d2f18@158` from `[9c4d2f18@24, 9c4d2f18@158]` leaves
+ * `[9c4d2f18@24, ]`, and removing both leaves `[, ]`. Neither is something a
  * reader should ever see, and the empty pair is worse than the stray comma:
  * it looks like a citation that failed to render rather than one that was
  * never true.
@@ -760,15 +760,15 @@ export class GraftError extends Error {
  * A session id, a prefix of one, or a query — whichever the user typed.
  *
  * The id form goes through `browse.resolveSession`, the same resolver `show`,
- * `tag`, `pin` and `link` use, so `potsherd graft 4c9339e0` and
- * `potsherd show 4c9339e0` can never disagree about which session that is.
+ * `tag`, `pin` and `link` use, so `potsherd graft 9c4d2f18` and
+ * `potsherd show 9c4d2f18` can never disagree about which session that is.
  * Only when that finds nothing does this fall through to `recall`, which is
  * the query form the spec asks for: *"a session id, or a query (then the top
  * session)"*.
  */
 export async function resolveTarget(db: Db, target: string, o: { root?: string } = {}): Promise<Target> {
   const needle = target?.trim() ?? '';
-  if (!needle) throw new GraftError('graft needs a session id or a query', 'potsherd graft 4c9339e0');
+  if (!needle) throw new GraftError('graft needs a session id or a query', 'potsherd graft 9c4d2f18');
 
   const direct = resolveSession(db, needle);
   if (direct && !direct.ambiguous) return { sessionId: direct.id, kind: direct.kind, via: 'id' };

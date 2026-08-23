@@ -16,8 +16,8 @@ export interface ResolvedRef {
  * Every verb that names a session takes the same eight characters `ls` and
  * `find` print, because nobody retypes a uuid. There is exactly one
  * implementation of what those eight characters mean
- * (`browse.ts`'s `resolveSession`), so `potsherd show 4c9339e0` and
- * `potsherd tag 4c9339e0` can never disagree about which session that is —
+ * (`browse.ts`'s `resolveSession`), so `potsherd show 9c4d2f18` and
+ * `potsherd tag 9c4d2f18` can never disagree about which session that is —
  * which they would within a week if this were written twice.
  *
  * What this adds is the failure side. A reference that resolves to nothing is
@@ -31,7 +31,7 @@ export interface ResolvedRef {
 export function mustResolve(db: Db, ref: string, verb: string): ResolvedRef {
   const needle = ref?.trim() ?? '';
   if (!needle) {
-    throw new UserError(`${verb} needs a session id`, `potsherd ${verb} 4c9339e0`);
+    throw new UserError(`${verb} needs a session id`, `potsherd ${verb} 9c4d2f18`);
   }
 
   const found = resolveSession(db, needle);
