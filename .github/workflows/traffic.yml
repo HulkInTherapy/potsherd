@@ -1,0 +1,127 @@
+name: traffic
+
+# GitHub keeps repository traffic for **14 days** and then deletes it. Nothing
+# in the API lets you ask for the fifteenth day back. So a project that wants to
+# know whether anyone actually arrived — and from where, and whether it was a
+# person or a crawler — has to write the numbers down before they expire.
+#
+# This job appends one snapshot per day to `traffic/snapshots.jsonl` on an
+# **orphan branch** called `traffic-data`, for two reasons:
+#
+#   1. `main` stays a history of the product. A daily bot commit on `main` is
+#      noise in `git log` and a merge conflict waiting for every worktree.
+#   2. `scripts/check-privacy.py` sweeps tracked text on `main`. Referrer
+#      hostnames are third-party strings this repository did not write and
+#      cannot vouch for; they do not belong in the swept set.
+#
+# ## the four endpoints, and why all four
+#
+# `views` and `clones` each report `count` **and** `uniques`. The gap between
+# them is the closest thing GitHub gives you to bot-vs-human: a crawler fetches
+# once from many addresses, a person fetches many times from one. Neither number
+# alone says anything. `popular/paths` says which page did the work;
+# `popular/referrers` says who sent them.
+#
+# ## what this is not
+#
+# It is not analytics on users — GitHub reports no identity and neither does
+# this. It is a count of fetches, kept past the window in which the platform
+# throws it away. Nothing here is published in the product, and no number from
+# it may appear in a README without the date it was measured.
+
+on:
+  schedule:
+    # 03:17 UTC — off the hour, because everyone schedules on the hour and the
+    # API is rate-limited per hour. Daily is well inside the 14-day window, so a
+    # week of failed runs still loses nothing.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: traffic
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: check out the data branch, creating it if this is the first run
+        run: |
+          set -euo pipefail
+          git init -q data && cd data
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          if git fetch -q --depth 1 origin traffic-data 2>/dev/null; then
+            git checkout -q FETCH_HEAD
+            git checkout -q -B traffic-data
+          else
+            git checkout -q --orphan traffic-data
+            mkdir -p traffic
+            printf '%s\n' \
+              '# traffic snapshots' '' \
+              'One JSON object per line in `traffic/snapshots.jsonl`, appended daily by' \
+              '`.github/workflows/traffic.yml`, because GitHub deletes repository traffic' \
+              'after 14 days.' '' \
+              'This branch is data. It carries no source and is never merged into `main`.' \
+              > README.md
+          fi
+
+      - name: fetch the four endpoints
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd data && mkdir -p traffic
+
+          # A failed endpoint must not silently become an empty snapshot that
+          # reads like a day with no traffic. Each one records either its
+          # payload or the reason it has none, and the row says which.
+          get() {
+            if out="$(gh api "repos/$REPO/traffic/$1" 2>/tmp/err)"; then
+              printf '%s' "$out"
+            else
+              printf '{"error":%s}' "$(node -p 'JSON.stringify(require("fs").readFileSync("/tmp/err","utf8").trim().split("\n").pop())')"
+            fi
+          }
+
+          VIEWS="$(get views)"
+          CLONES="$(get clones)"
+          PATHS="$(get popular/paths)"
+          REFERRERS="$(get popular/referrers)"
+
+          # `date -u` at collection time, not the API's own window edges: the
+          # row has to say when it was taken, independently of what it contains.
+          VIEWS="$VIEWS" CLONES="$CLONES" PATHS="$PATHS" REFERRERS="$REFERRERS" \
+          node -e '
+            const p = (s) => { try { return JSON.parse(s); } catch { return { error: "unparseable" }; } };
+            const row = {
+              takenAt: new Date().toISOString(),
+              views: p(process.env.VIEWS),
+              clones: p(process.env.CLONES),
+              paths: p(process.env.PATHS),
+              referrers: p(process.env.REFERRERS),
+            };
+            require("node:fs").appendFileSync("traffic/snapshots.jsonl", JSON.stringify(row) + "\n");
+            const n = (x) => (x && typeof x.count === "number" ? `${x.count} / ${x.uniques} unique` : "unavailable");
+            console.log(`views   ${n(row.views)}`);
+            console.log(`clones  ${n(row.clones)}`);
+          '
+
+      - name: commit the snapshot
+        run: |
+          set -euo pipefail
+          cd data
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A
+          # Two runs in one day, or a day the API had nothing new, must not
+          # produce an empty commit and a pointless push.
+          if git diff --cached --quiet; then
+            echo 'nothing changed'
+            exit 0
+          fi
+          git commit -q -m "traffic: snapshot $(date -u +%Y-%m-%d)"
+          git push -q origin traffic-data

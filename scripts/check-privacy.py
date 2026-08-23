@@ -258,6 +258,11 @@ REAL_PROJECT_NAMES = [
     'Meghavi', 'lexaiLMS', 'Veyu', 'anilearn', 'Crimes-cog', 'Ops-Outreach-Engine',
     'Fulcrum', 'meghbrain', 'maths_practice', 'maths-practice',
     'Infant-State-Recognition', 'Protfolio',
+    # Added phase 10: the agent audit published this one to a public repo
+    # twelve times before the rule that was supposed to catch it was asked
+    # whether it knew the name. The list is exact-substring and therefore
+    # only knows what it has been told; every name learned goes in here.
+    'Proteus', 'proteus',
 ]
 
 # Subject matter that is in this repo only because it was in somebody's real

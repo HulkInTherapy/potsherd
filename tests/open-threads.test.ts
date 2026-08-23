@@ -386,7 +386,7 @@ describe('T4.2 rule pass — "decided in A, never seen in B"', () => {
     });
     // Two related projects, neither of which ever mentions it. That is still
     // one claim, and `OpenThreadCandidate` can name only one `otherProject`.
-    for (const p of [BRAINSTORE, '/Users/example/proteus']) {
+    for (const p of [BRAINSTORE, '/Users/example/orbiter']) {
       addCard(db, {
         project: p,
         topics: SIBLING_TOPICS,
