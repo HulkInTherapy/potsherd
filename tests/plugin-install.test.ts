@@ -12,7 +12,7 @@
 // environment that reproduces the install, not the one that hides it.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -55,6 +55,38 @@ describe('the plugin directory, installed on its own under a commonjs parent', (
     expect(r.stderr).not.toMatch(/Failed to load the ES module|Cannot use import statement/);
   });
 
+  /**
+   * `plugins/<harness>/dist` is BUILD OUTPUT, so every assertion here is about
+   * whatever was last vendored rather than about the current source. A comment
+   * used to say so and nothing enforced it, which makes the test's premise
+   * something a person had to remember instead of something the test
+   * establishes (`09 §7.2`, the recurring one). If the bundles are stale this
+   * fails HERE, naming the command, rather than passing on last release's
+   * behaviour under this release's name.
+   */
+  it('the vendored bundles are not older than the source they claim to be', () => {
+    const newest = (dir: string): number => {
+      let latest = 0;
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const f = join(dir, e.name);
+        if (e.isDirectory()) {
+          if (e.name === 'dist' || e.name === 'node_modules') continue;
+          latest = Math.max(latest, newest(f));
+        } else if (e.name.endsWith('.ts')) {
+          latest = Math.max(latest, statSync(f).mtimeMs);
+        }
+      }
+      return latest;
+    };
+    const srcRoot = join(REPO, 'packages');
+    const bundle = join(PLUGIN_SRC, 'dist', 'mcp.js');
+    expect(existsSync(bundle), `${bundle} is missing — run: pnpm build && pnpm vendor`).toBe(true);
+    expect(
+      statSync(bundle).mtimeMs,
+      'the vendored plugin bundle is older than packages/**/*.ts — run: pnpm build && pnpm vendor',
+    ).toBeGreaterThanOrEqual(newest(srcRoot));
+  });
+
   it('the bundled MCP server answers tools/list with all three tools', () => {
     const frames = [
       { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '0' } } },
@@ -74,8 +106,6 @@ describe('the plugin directory, installed on its own under a commonjs parent', (
       .find((d) => d && d.id === 2);
     expect(reply, 'no tools/list reply').toBeTruthy();
     const names = reply.result.tools.map((t: { name: string }) => t.name).sort();
-    // T10.6 §B7: three tools. `plugins/*/dist` is build output — this passes
-    // once the orchestrator has run `pnpm vendor`.
     expect(names).toEqual(['potsherd_graft', 'potsherd_read', 'potsherd_recall']);
   });
 

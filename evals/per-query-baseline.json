@@ -1,0 +1,975 @@
+{
+  "note": "Per-query pass/fail, pinned so a regression names WHICH query fell rather than only how many. Regenerate deliberately with: pnpm evals -- --json | node scripts/write-eval-baseline.mjs",
+  "k": 5,
+  "total": 60,
+  "modes": {
+    "bm25": {
+      "what we gave up by putting a proxy in front of postgres": {
+        "hit": true,
+        "hit1": true
+      },
+      "the list that got slower the further back you went": {
+        "hit": false,
+        "hit1": false
+      },
+      "we made the background job defer to the webhook": {
+        "hit": true,
+        "hit1": false
+      },
+      "charged the customer twice because the client retried": {
+        "hit": false,
+        "hit1": false
+      },
+      "we were sending events faster than they would accept": {
+        "hit": false,
+        "hit1": false
+      },
+      "the import that ate three gigabytes on the big files": {
+        "hit": true,
+        "hit1": true
+      },
+      "how much retrying the payment provider would tolerate": {
+        "hit": true,
+        "hit1": true
+      },
+      "the shopper was billed twice when the card reader lost signal": {
+        "hit": true,
+        "hit1": true
+      },
+      "the numbers came out at double after somebody re-ran the job": {
+        "hit": true,
+        "hit1": false
+      },
+      "stop counting the same event twice in the rollup": {
+        "hit": true,
+        "hit1": true
+      },
+      "eu region reporting a day late": {
+        "hit": true,
+        "hit1": false
+      },
+      "why one region file always landed later than the others": {
+        "hit": false,
+        "hit1": false
+      },
+      "why the conversion chart said more finished than began": {
+        "hit": false,
+        "hit1": false
+      },
+      "tls stopped working across the whole estate at midnight": {
+        "hit": true,
+        "hit1": true
+      },
+      "some traffic kept reaching the previous version after we switched over": {
+        "hit": false,
+        "hit1": false
+      },
+      "the pod kept getting killed even though the app was fine": {
+        "hit": false,
+        "hit1": false
+      },
+      "container killed": {
+        "hit": true,
+        "hit1": true
+      },
+      "picking one region to own the timer instead of electing a leader": {
+        "hit": true,
+        "hit1": true
+      },
+      "why we merged the two result lists on rank instead of score": {
+        "hit": true,
+        "hit1": true
+      },
+      "why names sometimes took forever to turn into addresses": {
+        "hit": false,
+        "hit1": false
+      },
+      "maintenance window": {
+        "hit": true,
+        "hit1": true
+      },
+      "why the overnight copy no longer finished in time": {
+        "hit": false,
+        "hit1": false
+      },
+      "people on android saw every alert show up two times": {
+        "hit": true,
+        "hit1": true
+      },
+      "changes the user had already undone came back": {
+        "hit": true,
+        "hit1": false
+      },
+      "the upload that repeated itself when the app died halfway": {
+        "hit": false,
+        "hit1": false
+      },
+      "the button that looked broken while a lookup was still running": {
+        "hit": true,
+        "hit1": true
+      },
+      "why we refused to fix the intermittent checkout failure with a timeout": {
+        "hit": true,
+        "hit1": false
+      },
+      "the picture that held up the first render": {
+        "hit": false,
+        "hit1": false
+      },
+      "keeping the chart colours readable on both backgrounds": {
+        "hit": true,
+        "hit1": false
+      },
+      "the cursor jumped away after the on-screen keyboard closed": {
+        "hit": false,
+        "hit1": false
+      },
+      "stopping tab from wandering behind the overlay": {
+        "hit": true,
+        "hit1": false
+      },
+      "why the pictures were suddenly twice as tall": {
+        "hit": false,
+        "hit1": false
+      },
+      "the dependency that shipped every language it had ever supported": {
+        "hit": false,
+        "hit1": false
+      },
+      "it scored well in testing and badly for real users": {
+        "hit": false,
+        "hit1": false
+      },
+      "the search box that only worked if you got the word exactly right": {
+        "hit": true,
+        "hit1": true
+      },
+      "old documentation coming above the page people actually needed": {
+        "hit": true,
+        "hit1": true
+      },
+      "what was the session about people not being able to sign in": {
+        "hit": false,
+        "hit1": false
+      },
+      "monthly finance report": {
+        "hit": false,
+        "hit1": false
+      },
+      "what was the deployment pipeline that broke every night": {
+        "hit": true,
+        "hit1": true
+      },
+      "janky scrolling": {
+        "hit": true,
+        "hit1": true
+      },
+      "the design discussion about incremental sync": {
+        "hit": true,
+        "hit1": false
+      },
+      "data leakage": {
+        "hit": true,
+        "hit1": true
+      },
+      "which import made the icon set so big": {
+        "hit": true,
+        "hit1": false
+      },
+      "the thing quietly eating most of the cloud bill": {
+        "hit": true,
+        "hit1": true
+      },
+      "where the pennies went when we changed the file format": {
+        "hit": true,
+        "hit1": true
+      },
+      "what the accessibility audit said about the rotating banner": {
+        "hit": true,
+        "hit1": true
+      },
+      "how many a second before the latency went off a cliff": {
+        "hit": false,
+        "hit1": false
+      },
+      "how many required columns the loader was not filling in": {
+        "hit": true,
+        "hit1": false
+      },
+      "the batch job that overran the backup window": {
+        "hit": true,
+        "hit1": false
+      },
+      "the machine that kept running out of space because old images piled up": {
+        "hit": false,
+        "hit1": false
+      },
+      "the submission that came back over a missing label": {
+        "hit": true,
+        "hit1": true
+      },
+      "the second screen that cut out when the dock got hot": {
+        "hit": true,
+        "hit1": false
+      },
+      "customer names sitting in a database nobody scrubbed": {
+        "hit": true,
+        "hit1": false
+      },
+      "printing over the network stopped working on a linux box": {
+        "hit": true,
+        "hit1": true
+      },
+      "whether page two belonged in the site index at all": {
+        "hit": false,
+        "hit1": false
+      },
+      "the keyboard I had to reconnect after the laptop woke up": {
+        "hit": true,
+        "hit1": false
+      },
+      "the camera that disappeared after an update and we rolled back": {
+        "hit": true,
+        "hit1": true
+      },
+      "disk errors with plenty of room left": {
+        "hit": true,
+        "hit1": true
+      },
+      "rendering an enormous bill one page at a time": {
+        "hit": true,
+        "hit1": true
+      },
+      "the form that submitted itself twice on a quick double tap": {
+        "hit": true,
+        "hit1": true
+      }
+    },
+    "vectors": {
+      "what we gave up by putting a proxy in front of postgres": {
+        "hit": true,
+        "hit1": true
+      },
+      "the list that got slower the further back you went": {
+        "hit": true,
+        "hit1": false
+      },
+      "we made the background job defer to the webhook": {
+        "hit": false,
+        "hit1": false
+      },
+      "charged the customer twice because the client retried": {
+        "hit": true,
+        "hit1": false
+      },
+      "we were sending events faster than they would accept": {
+        "hit": false,
+        "hit1": false
+      },
+      "the import that ate three gigabytes on the big files": {
+        "hit": true,
+        "hit1": true
+      },
+      "how much retrying the payment provider would tolerate": {
+        "hit": true,
+        "hit1": true
+      },
+      "the shopper was billed twice when the card reader lost signal": {
+        "hit": true,
+        "hit1": false
+      },
+      "the numbers came out at double after somebody re-ran the job": {
+        "hit": true,
+        "hit1": true
+      },
+      "stop counting the same event twice in the rollup": {
+        "hit": true,
+        "hit1": true
+      },
+      "eu region reporting a day late": {
+        "hit": true,
+        "hit1": true
+      },
+      "why one region file always landed later than the others": {
+        "hit": true,
+        "hit1": false
+      },
+      "why the conversion chart said more finished than began": {
+        "hit": true,
+        "hit1": false
+      },
+      "tls stopped working across the whole estate at midnight": {
+        "hit": false,
+        "hit1": false
+      },
+      "some traffic kept reaching the previous version after we switched over": {
+        "hit": false,
+        "hit1": false
+      },
+      "the pod kept getting killed even though the app was fine": {
+        "hit": false,
+        "hit1": false
+      },
+      "container killed": {
+        "hit": true,
+        "hit1": true
+      },
+      "picking one region to own the timer instead of electing a leader": {
+        "hit": true,
+        "hit1": true
+      },
+      "why we merged the two result lists on rank instead of score": {
+        "hit": true,
+        "hit1": true
+      },
+      "why names sometimes took forever to turn into addresses": {
+        "hit": true,
+        "hit1": false
+      },
+      "maintenance window": {
+        "hit": true,
+        "hit1": false
+      },
+      "why the overnight copy no longer finished in time": {
+        "hit": true,
+        "hit1": false
+      },
+      "people on android saw every alert show up two times": {
+        "hit": false,
+        "hit1": false
+      },
+      "changes the user had already undone came back": {
+        "hit": true,
+        "hit1": true
+      },
+      "the upload that repeated itself when the app died halfway": {
+        "hit": true,
+        "hit1": true
+      },
+      "the button that looked broken while a lookup was still running": {
+        "hit": false,
+        "hit1": false
+      },
+      "why we refused to fix the intermittent checkout failure with a timeout": {
+        "hit": true,
+        "hit1": false
+      },
+      "the picture that held up the first render": {
+        "hit": true,
+        "hit1": false
+      },
+      "keeping the chart colours readable on both backgrounds": {
+        "hit": true,
+        "hit1": false
+      },
+      "the cursor jumped away after the on-screen keyboard closed": {
+        "hit": false,
+        "hit1": false
+      },
+      "stopping tab from wandering behind the overlay": {
+        "hit": true,
+        "hit1": true
+      },
+      "why the pictures were suddenly twice as tall": {
+        "hit": true,
+        "hit1": true
+      },
+      "the dependency that shipped every language it had ever supported": {
+        "hit": true,
+        "hit1": true
+      },
+      "it scored well in testing and badly for real users": {
+        "hit": false,
+        "hit1": false
+      },
+      "the search box that only worked if you got the word exactly right": {
+        "hit": true,
+        "hit1": false
+      },
+      "old documentation coming above the page people actually needed": {
+        "hit": true,
+        "hit1": true
+      },
+      "what was the session about people not being able to sign in": {
+        "hit": true,
+        "hit1": false
+      },
+      "monthly finance report": {
+        "hit": true,
+        "hit1": false
+      },
+      "what was the deployment pipeline that broke every night": {
+        "hit": true,
+        "hit1": false
+      },
+      "janky scrolling": {
+        "hit": true,
+        "hit1": false
+      },
+      "the design discussion about incremental sync": {
+        "hit": true,
+        "hit1": false
+      },
+      "data leakage": {
+        "hit": true,
+        "hit1": false
+      },
+      "which import made the icon set so big": {
+        "hit": true,
+        "hit1": false
+      },
+      "the thing quietly eating most of the cloud bill": {
+        "hit": true,
+        "hit1": false
+      },
+      "where the pennies went when we changed the file format": {
+        "hit": true,
+        "hit1": true
+      },
+      "what the accessibility audit said about the rotating banner": {
+        "hit": true,
+        "hit1": false
+      },
+      "how many a second before the latency went off a cliff": {
+        "hit": true,
+        "hit1": true
+      },
+      "how many required columns the loader was not filling in": {
+        "hit": true,
+        "hit1": false
+      },
+      "the batch job that overran the backup window": {
+        "hit": true,
+        "hit1": false
+      },
+      "the machine that kept running out of space because old images piled up": {
+        "hit": true,
+        "hit1": true
+      },
+      "the submission that came back over a missing label": {
+        "hit": true,
+        "hit1": false
+      },
+      "the second screen that cut out when the dock got hot": {
+        "hit": true,
+        "hit1": true
+      },
+      "customer names sitting in a database nobody scrubbed": {
+        "hit": true,
+        "hit1": true
+      },
+      "printing over the network stopped working on a linux box": {
+        "hit": true,
+        "hit1": false
+      },
+      "whether page two belonged in the site index at all": {
+        "hit": true,
+        "hit1": false
+      },
+      "the keyboard I had to reconnect after the laptop woke up": {
+        "hit": true,
+        "hit1": true
+      },
+      "the camera that disappeared after an update and we rolled back": {
+        "hit": true,
+        "hit1": true
+      },
+      "disk errors with plenty of room left": {
+        "hit": true,
+        "hit1": false
+      },
+      "rendering an enormous bill one page at a time": {
+        "hit": true,
+        "hit1": true
+      },
+      "the form that submitted itself twice on a quick double tap": {
+        "hit": true,
+        "hit1": true
+      }
+    },
+    "hybrid": {
+      "what we gave up by putting a proxy in front of postgres": {
+        "hit": true,
+        "hit1": true
+      },
+      "the list that got slower the further back you went": {
+        "hit": false,
+        "hit1": false
+      },
+      "we made the background job defer to the webhook": {
+        "hit": true,
+        "hit1": false
+      },
+      "charged the customer twice because the client retried": {
+        "hit": true,
+        "hit1": true
+      },
+      "we were sending events faster than they would accept": {
+        "hit": false,
+        "hit1": false
+      },
+      "the import that ate three gigabytes on the big files": {
+        "hit": true,
+        "hit1": true
+      },
+      "how much retrying the payment provider would tolerate": {
+        "hit": true,
+        "hit1": false
+      },
+      "the shopper was billed twice when the card reader lost signal": {
+        "hit": true,
+        "hit1": true
+      },
+      "the numbers came out at double after somebody re-ran the job": {
+        "hit": true,
+        "hit1": false
+      },
+      "stop counting the same event twice in the rollup": {
+        "hit": true,
+        "hit1": false
+      },
+      "eu region reporting a day late": {
+        "hit": true,
+        "hit1": false
+      },
+      "why one region file always landed later than the others": {
+        "hit": true,
+        "hit1": true
+      },
+      "why the conversion chart said more finished than began": {
+        "hit": true,
+        "hit1": true
+      },
+      "tls stopped working across the whole estate at midnight": {
+        "hit": true,
+        "hit1": false
+      },
+      "some traffic kept reaching the previous version after we switched over": {
+        "hit": false,
+        "hit1": false
+      },
+      "the pod kept getting killed even though the app was fine": {
+        "hit": false,
+        "hit1": false
+      },
+      "container killed": {
+        "hit": true,
+        "hit1": true
+      },
+      "picking one region to own the timer instead of electing a leader": {
+        "hit": true,
+        "hit1": false
+      },
+      "why we merged the two result lists on rank instead of score": {
+        "hit": true,
+        "hit1": true
+      },
+      "why names sometimes took forever to turn into addresses": {
+        "hit": false,
+        "hit1": false
+      },
+      "maintenance window": {
+        "hit": true,
+        "hit1": true
+      },
+      "why the overnight copy no longer finished in time": {
+        "hit": true,
+        "hit1": true
+      },
+      "people on android saw every alert show up two times": {
+        "hit": true,
+        "hit1": false
+      },
+      "changes the user had already undone came back": {
+        "hit": true,
+        "hit1": true
+      },
+      "the upload that repeated itself when the app died halfway": {
+        "hit": true,
+        "hit1": false
+      },
+      "the button that looked broken while a lookup was still running": {
+        "hit": true,
+        "hit1": false
+      },
+      "why we refused to fix the intermittent checkout failure with a timeout": {
+        "hit": true,
+        "hit1": false
+      },
+      "the picture that held up the first render": {
+        "hit": true,
+        "hit1": false
+      },
+      "keeping the chart colours readable on both backgrounds": {
+        "hit": true,
+        "hit1": false
+      },
+      "the cursor jumped away after the on-screen keyboard closed": {
+        "hit": false,
+        "hit1": false
+      },
+      "stopping tab from wandering behind the overlay": {
+        "hit": true,
+        "hit1": true
+      },
+      "why the pictures were suddenly twice as tall": {
+        "hit": true,
+        "hit1": false
+      },
+      "the dependency that shipped every language it had ever supported": {
+        "hit": true,
+        "hit1": false
+      },
+      "it scored well in testing and badly for real users": {
+        "hit": false,
+        "hit1": false
+      },
+      "the search box that only worked if you got the word exactly right": {
+        "hit": true,
+        "hit1": true
+      },
+      "old documentation coming above the page people actually needed": {
+        "hit": true,
+        "hit1": true
+      },
+      "what was the session about people not being able to sign in": {
+        "hit": true,
+        "hit1": true
+      },
+      "monthly finance report": {
+        "hit": true,
+        "hit1": true
+      },
+      "what was the deployment pipeline that broke every night": {
+        "hit": true,
+        "hit1": true
+      },
+      "janky scrolling": {
+        "hit": true,
+        "hit1": true
+      },
+      "the design discussion about incremental sync": {
+        "hit": true,
+        "hit1": true
+      },
+      "data leakage": {
+        "hit": true,
+        "hit1": true
+      },
+      "which import made the icon set so big": {
+        "hit": true,
+        "hit1": false
+      },
+      "the thing quietly eating most of the cloud bill": {
+        "hit": true,
+        "hit1": true
+      },
+      "where the pennies went when we changed the file format": {
+        "hit": true,
+        "hit1": true
+      },
+      "what the accessibility audit said about the rotating banner": {
+        "hit": true,
+        "hit1": false
+      },
+      "how many a second before the latency went off a cliff": {
+        "hit": false,
+        "hit1": false
+      },
+      "how many required columns the loader was not filling in": {
+        "hit": true,
+        "hit1": false
+      },
+      "the batch job that overran the backup window": {
+        "hit": true,
+        "hit1": false
+      },
+      "the machine that kept running out of space because old images piled up": {
+        "hit": false,
+        "hit1": false
+      },
+      "the submission that came back over a missing label": {
+        "hit": true,
+        "hit1": false
+      },
+      "the second screen that cut out when the dock got hot": {
+        "hit": true,
+        "hit1": false
+      },
+      "customer names sitting in a database nobody scrubbed": {
+        "hit": true,
+        "hit1": false
+      },
+      "printing over the network stopped working on a linux box": {
+        "hit": true,
+        "hit1": true
+      },
+      "whether page two belonged in the site index at all": {
+        "hit": true,
+        "hit1": false
+      },
+      "the keyboard I had to reconnect after the laptop woke up": {
+        "hit": true,
+        "hit1": false
+      },
+      "the camera that disappeared after an update and we rolled back": {
+        "hit": true,
+        "hit1": true
+      },
+      "disk errors with plenty of room left": {
+        "hit": true,
+        "hit1": true
+      },
+      "rendering an enormous bill one page at a time": {
+        "hit": true,
+        "hit1": true
+      },
+      "the form that submitted itself twice on a quick double tap": {
+        "hit": true,
+        "hit1": true
+      }
+    },
+    "always": {
+      "what we gave up by putting a proxy in front of postgres": {
+        "hit": true,
+        "hit1": true
+      },
+      "the list that got slower the further back you went": {
+        "hit": false,
+        "hit1": false
+      },
+      "we made the background job defer to the webhook": {
+        "hit": true,
+        "hit1": false
+      },
+      "charged the customer twice because the client retried": {
+        "hit": true,
+        "hit1": true
+      },
+      "we were sending events faster than they would accept": {
+        "hit": false,
+        "hit1": false
+      },
+      "the import that ate three gigabytes on the big files": {
+        "hit": true,
+        "hit1": true
+      },
+      "how much retrying the payment provider would tolerate": {
+        "hit": true,
+        "hit1": false
+      },
+      "the shopper was billed twice when the card reader lost signal": {
+        "hit": true,
+        "hit1": true
+      },
+      "the numbers came out at double after somebody re-ran the job": {
+        "hit": true,
+        "hit1": false
+      },
+      "stop counting the same event twice in the rollup": {
+        "hit": true,
+        "hit1": false
+      },
+      "eu region reporting a day late": {
+        "hit": true,
+        "hit1": false
+      },
+      "why one region file always landed later than the others": {
+        "hit": true,
+        "hit1": true
+      },
+      "why the conversion chart said more finished than began": {
+        "hit": true,
+        "hit1": true
+      },
+      "tls stopped working across the whole estate at midnight": {
+        "hit": true,
+        "hit1": false
+      },
+      "some traffic kept reaching the previous version after we switched over": {
+        "hit": false,
+        "hit1": false
+      },
+      "the pod kept getting killed even though the app was fine": {
+        "hit": false,
+        "hit1": false
+      },
+      "container killed": {
+        "hit": true,
+        "hit1": true
+      },
+      "picking one region to own the timer instead of electing a leader": {
+        "hit": true,
+        "hit1": false
+      },
+      "why we merged the two result lists on rank instead of score": {
+        "hit": true,
+        "hit1": true
+      },
+      "why names sometimes took forever to turn into addresses": {
+        "hit": false,
+        "hit1": false
+      },
+      "maintenance window": {
+        "hit": true,
+        "hit1": true
+      },
+      "why the overnight copy no longer finished in time": {
+        "hit": true,
+        "hit1": true
+      },
+      "people on android saw every alert show up two times": {
+        "hit": true,
+        "hit1": false
+      },
+      "changes the user had already undone came back": {
+        "hit": true,
+        "hit1": true
+      },
+      "the upload that repeated itself when the app died halfway": {
+        "hit": true,
+        "hit1": false
+      },
+      "the button that looked broken while a lookup was still running": {
+        "hit": true,
+        "hit1": false
+      },
+      "why we refused to fix the intermittent checkout failure with a timeout": {
+        "hit": true,
+        "hit1": false
+      },
+      "the picture that held up the first render": {
+        "hit": true,
+        "hit1": false
+      },
+      "keeping the chart colours readable on both backgrounds": {
+        "hit": true,
+        "hit1": false
+      },
+      "the cursor jumped away after the on-screen keyboard closed": {
+        "hit": false,
+        "hit1": false
+      },
+      "stopping tab from wandering behind the overlay": {
+        "hit": true,
+        "hit1": true
+      },
+      "why the pictures were suddenly twice as tall": {
+        "hit": true,
+        "hit1": false
+      },
+      "the dependency that shipped every language it had ever supported": {
+        "hit": true,
+        "hit1": false
+      },
+      "it scored well in testing and badly for real users": {
+        "hit": false,
+        "hit1": false
+      },
+      "the search box that only worked if you got the word exactly right": {
+        "hit": true,
+        "hit1": true
+      },
+      "old documentation coming above the page people actually needed": {
+        "hit": true,
+        "hit1": true
+      },
+      "what was the session about people not being able to sign in": {
+        "hit": true,
+        "hit1": true
+      },
+      "monthly finance report": {
+        "hit": true,
+        "hit1": true
+      },
+      "what was the deployment pipeline that broke every night": {
+        "hit": true,
+        "hit1": true
+      },
+      "janky scrolling": {
+        "hit": true,
+        "hit1": true
+      },
+      "the design discussion about incremental sync": {
+        "hit": true,
+        "hit1": true
+      },
+      "data leakage": {
+        "hit": true,
+        "hit1": true
+      },
+      "which import made the icon set so big": {
+        "hit": true,
+        "hit1": false
+      },
+      "the thing quietly eating most of the cloud bill": {
+        "hit": true,
+        "hit1": true
+      },
+      "where the pennies went when we changed the file format": {
+        "hit": true,
+        "hit1": true
+      },
+      "what the accessibility audit said about the rotating banner": {
+        "hit": true,
+        "hit1": false
+      },
+      "how many a second before the latency went off a cliff": {
+        "hit": false,
+        "hit1": false
+      },
+      "how many required columns the loader was not filling in": {
+        "hit": true,
+        "hit1": false
+      },
+      "the batch job that overran the backup window": {
+        "hit": true,
+        "hit1": false
+      },
+      "the machine that kept running out of space because old images piled up": {
+        "hit": false,
+        "hit1": false
+      },
+      "the submission that came back over a missing label": {
+        "hit": true,
+        "hit1": false
+      },
+      "the second screen that cut out when the dock got hot": {
+        "hit": true,
+        "hit1": false
+      },
+      "customer names sitting in a database nobody scrubbed": {
+        "hit": true,
+        "hit1": false
+      },
+      "printing over the network stopped working on a linux box": {
+        "hit": true,
+        "hit1": true
+      },
+      "whether page two belonged in the site index at all": {
+        "hit": true,
+        "hit1": false
+      },
+      "the keyboard I had to reconnect after the laptop woke up": {
+        "hit": true,
+        "hit1": false
+      },
+      "the camera that disappeared after an update and we rolled back": {
+        "hit": true,
+        "hit1": true
+      },
+      "disk errors with plenty of room left": {
+        "hit": true,
+        "hit1": true
+      },
+      "rendering an enormous bill one page at a time": {
+        "hit": true,
+        "hit1": true
+      },
+      "the form that submitted itself twice on a quick double tap": {
+        "hit": true,
+        "hit1": true
+      }
+    }
+  }
+}

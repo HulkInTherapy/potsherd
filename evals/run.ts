@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { compareToBaseline, readBaseline } from './baseline.js';
 import { fileURLToPath } from 'node:url';
 import {
   LISTS,
@@ -1083,6 +1084,47 @@ async function main(): Promise<void> {
           ` ${want.padEnd(15)} ${got.padEnd(24)} ${t.dim(c.query.query)}`,
       );
     }
+  }
+  // The floor is a count, and a count cannot say WHAT broke. This names it.
+  const { flips, unknownQueries } = compareToBaseline(
+    runs.map(({ mode, outcomes }) => ({
+      mode: mode.key,
+      results: outcomes.map((r) => ({
+        query: r.query.query,
+        hit: hitAt(r, o.k),
+        hit1: hitAt(r, 1),
+      })),
+    })),
+    readBaseline(),
+  );
+  if (flips.length > 0 || unknownQueries > 0) {
+    out.push('');
+    out.push(
+      INDENT + t.dim(`against the pinned per-query baseline  ${t.sep}  evals/per-query-baseline.json`),
+    );
+    for (const f of flips.slice(0, 12)) {
+      const label = f.direction === 'lost' ? t.warn(' lost ') : t.ok(' gain ');
+      const metric = f.metric === 'hit' ? `recall@${String(o.k)}` : 'recall@1';
+      out.push(
+        INDENT + label + ` ${f.mode.padEnd(8)} ${metric.padEnd(9)} ${t.dim(fmt.clip(f.query, 52))}`,
+      );
+    }
+    if (flips.length > 12) {
+      out.push(INDENT + t.dim(`  … and ${String(flips.length - 12)} more`));
+    }
+    if (unknownQueries > 0) {
+      out.push(
+        INDENT +
+          t.dim(
+            `  ${String(unknownQueries)} query-results are not in the baseline — new queries, ` +
+              'not regressions',
+          ),
+      );
+    }
+    out.push(
+      INDENT +
+        t.dim('  regenerate deliberately:  pnpm evals -- --json | node scripts/write-eval-baseline.mjs'),
+    );
   }
   if (o.keep && built) out.push(INDENT + t.dim(`index kept at ${built.root}`));
   process.stdout.write(out.join('\n') + '\n');

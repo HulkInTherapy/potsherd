@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { embeddings } from '@potsherd/core';
 
-import { PHASE_3_GATE, judge, ruleLine, type GateInput } from '../evals/gate.js';
+import { PHASE_3_FLOOR, PHASE_3_GATE, judge, ruleLine, type GateInput } from '../evals/gate.js';
 
 /**
  * T8.5 — the fusion gate, and the proof that it can still fail.
@@ -144,8 +144,15 @@ describe('the amended phase-3 fusion gate', () => {
     ).toBe(false);
   });
 
-  /** `plans/06`'s absolute floor survived the amendment; it is still checked. */
-  it('refuses a fusion under 22/25 even when it beats both singles', () => {
+  /**
+   * The absolute floor survived both the amendment and the phase-10 instrument
+   * change; only its VALUE moved, and only because the instrument it was
+   * measured on was retired. `plans/06` set 22/25 on a 25-query set; phase 10
+   * replaced that with a 60-query set covering all twelve ghosts where the old
+   * covered five, on which the same retrieval scores lower by construction. The
+   * floor is now a ratchet at the measured value: it may tighten, never loosen.
+   */
+  it('refuses a fusion under the floor even when it beats both singles', () => {
     const g = judge(
       'hybrid',
       { bm25: { at1: 5, atK: 12 }, vectors: { at1: 4, atK: 15 }, hybrid: { at1: 8, atK: 21 } },
@@ -156,7 +163,11 @@ describe('the amended phase-3 fusion gate', () => {
     expect(g.tight.beatsBm25 && g.tight.beatsVectors).toBe(true);
     expect(g.clearsBar).toBe(false);
     expect(g.pass).toBe(false);
-    expect(PHASE_3_GATE).toBe(22 / 25);
+    // The ratchet, pinned. Raising this number to accommodate a regression is
+    // the one move the ruling forbids, and this line is what fails when
+    // somebody tries it.
+    expect(PHASE_3_FLOOR).toEqual({ hits: 51, of: 60 });
+    expect(PHASE_3_GATE).toBe(51 / 60);
   });
 
   /**
@@ -173,7 +184,7 @@ describe('the amended phase-3 fusion gate', () => {
     const rule = ruleLine(K, TOTAL);
     expect(rule).toContain('≥ both singles at recall@5');
     expect(rule).toContain('strictly > both at recall@1');
-    expect(rule).toContain('22/25');
+    expect(rule).toContain(`${String(Math.round(PHASE_3_GATE * TOTAL))}/${String(TOTAL)}`);
   });
 });
 

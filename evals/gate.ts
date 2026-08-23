@@ -62,12 +62,34 @@
 export const PHASE_1_GATE = 0.8;
 
 /**
- * `plans/06`'s absolute bar, kept by the amendment: hybrid ≥ 22/25 at
- * recall@k. The amendment changed how hybrid is compared *against the
- * singles*; it did not lower the floor, and a fusion that fell under 22/25
- * would still be refused.
+ * The absolute floor, as a **ratchet** rather than a carried-over percentage.
+ *
+ * `plans/06` set it at 22/25 — 88% — and phase 8.5's amendment kept it. Phase
+ * 10 replaced the instrument: the 25-query set decided its verdict on a margin
+ * of one against noise of about 2.2, and the 60-query set that replaced it
+ * covers all twelve ghosts where the old covered five. A ghost has no
+ * recoverable assistant side, so the same retrieval scores *lower* on the new
+ * set by construction. 88% was a measured value on a retired instrument, not an
+ * independently derived floor, and comparing 51/60 against it is comparing two
+ * different tests.
+ *
+ * **Ruled by the author of the original gate (24 aug 2026): ratchet at the
+ * measured value. It may never fall. It lowers — meaning tightens — only when
+ * retrieval improves, never rises to accommodate a regression.** This is the
+ * discipline `scripts/check-privacy.py` already runs on its id ceiling, in this
+ * repository, for the same reason: a number nobody can derive is still worth
+ * keeping as a thing that must not get worse.
+ *
+ * Deriving a principled absolute floor from what a user actually needs is on
+ * the P2 list and blocks nothing.
+ *
+ * What did NOT move, by the same ruling: both fusion clauses, and the
+ * `--vector-weight 0` regression check. The ratchet is the floor alone.
  */
-export const PHASE_3_GATE = 22 / 25;
+export const PHASE_3_FLOOR = { hits: 51, of: 60 } as const;
+
+/** The floor as a ratio, for a set of a different size. */
+export const PHASE_3_GATE = PHASE_3_FLOOR.hits / PHASE_3_FLOOR.of;
 
 /** recall@1 and recall@k for one retrieval mode, over the same query set. */
 export interface ModeScore {
