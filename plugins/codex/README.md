@@ -32,7 +32,7 @@ Codex over MCP.
 |---|---|
 | `SessionEnd` hook | Indexes the thread that just ended, detached, so `potsherd ls --since 1h` finds it. Cards it too, but only if you opt in. |
 | `SessionStart` hook | Does no indexing. It exists to say the two things `SessionEnd` structurally cannot — see [Why SessionStart only talks](#why-sessionstart-only-talks). |
-| MCP server `potsherd` | The same six read-mostly tools the Claude Code plugin exposes: `potsherd_find`, `potsherd_read`, `potsherd_ask`, `potsherd_graft`, `potsherd_ls`, `potsherd_tag`. |
+| MCP server `potsherd` | The same three tools the Claude Code plugin exposes: `potsherd_recall`, `potsherd_read`, `potsherd_graft`. |
 
 There are **no skills and no agent** here. The Claude Code plugin ships both;
 Codex has its own skills format and this plugin does not attempt it. Nothing is
@@ -170,7 +170,7 @@ it exists for the same reason. Naming
 `../../packages/mcp/dist/index.js` here directly — which this file used to —
 means that in a marketplace install, where `dist/` is gitignored and absent,
 `node` dies with a module-not-found stack trace before the server speaks MCP
-and all six tools are simply missing from the client with no explanation. The
+and all three tools are simply missing from the client with no explanation. The
 shim writes the three paths it tried, and the build command, to the server log
 instead.
 

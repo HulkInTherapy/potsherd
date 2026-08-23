@@ -1,24 +1,27 @@
 # potsherd as an MCP server
 
-potsherd ships a stdio MCP server with six tools, so any MCP client can search,
-read, interrogate and re-enter your coding-agent sessions without leaving the
-agent you are already in.
+potsherd ships a stdio MCP server with three tools, so any MCP client can
+search, read and re-enter your coding-agent sessions without leaving the agent
+you are already in.
 
 ```
-potsherd_find    search every prompt, every subagent, every deleted session
-potsherd_read    read one session, paginated by line
-potsherd_ask     one cited answer over the shortlist it retrieved
-potsherd_graft   a token-budgeted brief that re-enters an old session
-potsherd_ls      sessions by title, newest first
-potsherd_tag     your own tags on a session
+potsherd_recall  search every prompt, every subagent, every deleted session,
+                 with a confidence label and an honest empty
+potsherd_read    read one thread, paginated, by seq and timestamp
+potsherd_graft   a token-budgeted brief that re-enters an old thread
 ```
 
-Six, not fifty-four. Four of them only read. The two that write are
-`potsherd_tag`, which puts your labels in the index, and `potsherd_graft`,
-which saves its brief as `./.potsherd/graft-<id8>.md` in the directory you ran
-the client from — the only potsherd write outside `~/.potsherd`. Both are
-annotated `readOnlyHint: false`, so a client that asks before running a write
-tool will ask before running either.
+Three, not fifty-four — and three rather than the six this server carried until
+v1.2.0. The reason for the cut is the reason the count matters at all: six tools
+with overlapping descriptions cost a model a decision on every call, and it will
+sometimes make the wrong one. Three with disjoint jobs cost it none. `find`,
+`ls` and `ask` all became modes of `potsherd_recall`, which is one question —
+*what is in the archive about this* — asked once.
+
+Only `potsherd_graft` writes, saving its brief as `./.potsherd/graft-<id8>.md`
+in the directory you ran the client from — the only potsherd write outside
+`~/.potsherd`. It is annotated `readOnlyHint: false`, so a client that asks
+before running a write tool will ask before running it.
 
 ## the one command
 
@@ -74,7 +77,7 @@ Two forms work, and `setup` picks between them the way `guard` does:
 | `potsherd-mcp` | it is on your `PATH` | survives an upgrade, reads best in a diff |
 | `/abs/path/to/node /abs/path/to/packages/mcp/dist/index.js` | it is not | pinned to this install |
 
-(Inside the two plugins the same server is launched through `bin/potsherd-mcp`, which resolves the bundle and, when there is none, writes the three paths it tried to the server log rather than dying with a module-not-found trace and taking all six tools with it silently.)
+(Inside the two plugins the same server is launched through `bin/potsherd-mcp`, which resolves the bundle and, when there is none, writes the three paths it tried to the server log rather than dying with a module-not-found trace and taking all three tools with it silently.)
 
 The absolute `node` in the second form is deliberate. Several of these clients
 are GUI applications launched from Finder or a desktop entry, and those inherit
@@ -221,7 +224,7 @@ when it has to create the file, and leaves it alone when it does not.
 }
 ```
 
-`"tools": ["*"]` enables all six. Name them individually to enable fewer.
+`"tools": ["*"]` enables all three. Name them individually to enable fewer.
 
 ## pi
 

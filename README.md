@@ -61,7 +61,7 @@ the size — it holds about half a megabyte — so wherever a block below prints
 bytes, the bytes are the demo corpus's own and not the reference machine's.
 
 > **Status: v1.1.0. Nine phases shipped.** 21 verbs, a Claude Code plugin,
-> an MCP server with six tools, adapters for seven coding agents, and bridges
+> an MCP server with three tools, adapters for seven coding agents, and bridges
 > into three other memory tools. 1,532 tests, green on macOS and Ubuntu across
 > Node 22 and 24 — and green again on Node's own SQLite, which is what makes a
 > plugin install work with nothing else on the machine.
@@ -815,7 +815,7 @@ Tested in print mode, with a control:
 
 ```
 "what did we decide about pgbouncer … last month?"  → Skill → Agent
-                                                      → 5× potsherd_find, 1× potsherd_ls
+                                                   → 3× potsherd_recall, 1× potsherd_read
 "what does a connection pooler do, in general?"     → NO TOOLS. answered directly.
 ```
 
@@ -852,7 +852,7 @@ from whatever is nearest to hand.**
 
 ## Other agents — `potsherd setup`
 
-The same six tools, over MCP, in whatever you use.
+The same three tools, over MCP, in whatever you use.
 
 ```bash
 potsherd setup --status        # the seven clients, and how far each was checked
@@ -871,8 +871,9 @@ That distinction is not a footnote — it is a field on each client, printed as
 [`docs/mcp-clients.md`](docs/mcp-clients.md), and asserted by a test. The
 weakest is pi: the real `~/.pi/agent/settings.json` has no MCP key at all.
 
-The server is six tools and stays six: `potsherd_find`, `potsherd_read`,
-`potsherd_ask`, `potsherd_graft`, `potsherd_ls`, `potsherd_tag`. One competitor
+The server is three tools and stays three: `potsherd_recall`, `potsherd_read`,
+`potsherd_graft`. Six overlapping tools cost a model a decision on every call;
+three with disjoint jobs cost it none. One competitor
 in this space ships 54, which is the anti-pattern.
 
 ## Take it somewhere else — `potsherd export`
@@ -1186,10 +1187,10 @@ matrix as the addon, because a fallback nobody exercises is not a fallback.
 Measured on a fresh Debian container with no `node_modules` anywhere, on **Node
 22.23.2 and 24.19.0**: clone, then `audit` — **122 ms** — then `rescue`,
 `index` (228 transcripts, 397 ms), `ls`, `find`, `show --html`, `audit
---verify`, and an MCP server answering `tools/list` with all six tools.
+--verify`, and an MCP server answering `tools/list` with all three tools.
 
 That was not true until v1.0.0. Before it, a marketplace install produced a
-plugin with no CLI and no MCP server: all six tools vanished from the client and
+plugin with no CLI and no MCP server: every tool vanished from the client and
 the `session-archaeologist` agent was left holding `Read`.
 
 ### From a checkout

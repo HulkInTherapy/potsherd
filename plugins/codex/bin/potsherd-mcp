@@ -4,7 +4,7 @@
 # `.mcp.json` used to name a path relative to the plugin root
 # directly. In a marketplace install that file does not exist — `dist/` is
 # gitignored — so `node` died with a module-not-found stack trace before the
-# server ever spoke MCP, all six tools vanished from the client, and the only
+# server ever spoke MCP, every tool vanished from the client, and the only
 # symptom was a tool list that was simply shorter. `session-archaeologist`,
 # whose `tools:` are five `mcp__plugin_potsherd_potsherd__*` entries plus
 # `Read`, was left holding `Read` and answered "not found" to everything.
@@ -53,8 +53,7 @@ Looked in three places:
   2. $ROOT/../../packages/mcp/dist/index.js       (the surrounding checkout)
   3. potsherd-mcp on PATH                         (a global install)
 
-All six tools — potsherd_find, potsherd_read, potsherd_ask, potsherd_graft,
-potsherd_ls, potsherd_tag — are therefore absent.
+All three tools — potsherd_recall, potsherd_read, potsherd_graft — are therefore absent.
 
 potsherd is not published to npm yet, so there is no install command.
 Build it from a checkout:

@@ -1,3 +1,4 @@
+import { type Confidence } from '@potsherd/core';
 import { z } from 'zod';
 
 /**
@@ -118,19 +119,11 @@ export type ScopeArg = z.infer<typeof SCOPE>;
 // could catch disagreeing with the first, and an agent cannot act on two
 // cliffs.
 //
-// **The one thing integration still has to do.** This worktree was cut before
-// T10.1 landed and may not fetch, so `Confidence` is declared here rather than
-// imported. It is the same three words in the same order. At integration,
-// delete the `export type Confidence` line below and add core to the import at
-// the top of this file:
-//
-//     import { type Confidence } from '@potsherd/core';
-//
-// Nothing else changes: every read already goes through the three functions
-// underneath, and every field name is a constant.
+// `Confidence` is imported from the core barrel rather than restated here.
+// A second declaration of the same three words is a second place for them to
+// drift apart, and the one thing this surface must never do is disagree with
+// the CLI about whether the archive answered the question.
 
-/** @see the note above — replace with the `@potsherd/core` export at integration. */
-export type Confidence = 'strong' | 'weak' | 'none';
 
 /** The field name on a row and on the envelope. */
 export const CONFIDENCE_FIELD = 'confidence';

@@ -18,7 +18,7 @@ real install, not from memory — see [What was verified](#what-was-verified).
 | `SessionStart` hook | Runs `rescue` detached, so a copy of every transcript exists before the next sweep. **Measured 6.5–10.5 ms** of hook time on the no-change path. |
 | `SessionStart` hook (brief) | Off by default. When enabled, injects a short list of recent sessions if this project has been untouched for 7+ days. |
 | `SessionEnd` hook | Indexes the session that just ended, detached, so `potsherd ls --since 1h` finds it. Cards it too, but only if you opt in. |
-| MCP server `potsherd` | Six read-mostly tools: `potsherd_find`, `potsherd_read`, `potsherd_ask`, `potsherd_graft`, `potsherd_ls`, `potsherd_tag`. |
+| MCP server `potsherd` | Three tools with disjoint jobs: `potsherd_recall`, `potsherd_read`, `potsherd_graft`. |
 | Skills and agent | `/potsherd <verb>`, plus a `remembering-sessions` skill the model reaches for on "last time…" questions. |
 | `bin/potsherd` | The shim every skill routes through. See [Which potsherd runs](#which-potsherd-runs). |
 
@@ -59,7 +59,7 @@ clones a *second* copy with no `dist/` in it, and that copy is what the plugin
 will look beside.
 
 Without a built potsherd the hooks take no copy, `/potsherd` runs nothing, and
-**all six MCP tools are absent** — which also leaves `session-archaeologist`
+**all three MCP tools are absent** — which also leaves `session-archaeologist`
 holding nothing but `Read`, so it answers "not found" to everything. None of
 that is silent: the hook prints a `systemMessage` naming the problem, the shim
 exits `127` listing the three places it looked, and `bin/potsherd-mcp` writes
@@ -149,7 +149,7 @@ server key in `.mcp.json`. Claude Code derives MCP tool names from both:
 
 ```
 mcp__plugin_<plugin-name>_<server-name>__<tool-name>
-  →  mcp__plugin_potsherd_potsherd__potsherd_find
+  →  mcp__plugin_potsherd_potsherd__potsherd_recall
 ```
 
 `agents/session-archaeologist.md` names its tools in that full form. **Rename

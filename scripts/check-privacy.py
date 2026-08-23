@@ -900,7 +900,6 @@ ID_INVENTORY_PINS: list[tuple[str, int, str]] = [
     ('packages/core/src/browse.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
     ('packages/core/src/graft.ts', 16, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.' + ' The citation-parsing docstrings.'),
     ('packages/core/src/tags.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
-    ('packages/mcp/src/tools/graft.ts', 2, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
     ('tests/open-threads.test.ts', 2, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.'),
     ('tests/redact.test.ts', 9,
      '(r) the same real id, plus two more real ids, in the redaction fixtures.'
@@ -922,7 +921,7 @@ ID_INVENTORY_PINS: list[tuple[str, int, str]] = [
      '(r) a real ghost session id in a comment recording where a bug was found.'),
     ('tests/parser.test.ts', 3, '(r) the same real ~/.codex rollout id as codex.test.ts.'),
 
-    ('plugins/claude-code/dist/mcp.js', 3,
+    ('plugins/claude-code/dist/mcp.js', 2,
      '(r) vendored esbuild output; carries whatever packages/ says, plus (n) an'
      ' eight-digit decimal byte count.'),
     ('plugins/claude-code/dist/potsherd.js', 23,

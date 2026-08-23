@@ -4370,10 +4370,10 @@ function writeSettingsWithBackup(p, json, now = /* @__PURE__ */ new Date()) {
   fs4.writeFileSync(p, stringifySettings(json), { mode: 384 });
   return { backup };
 }
-function unifiedDiff(before, after, label3) {
+function unifiedDiff(before, after, label4) {
   const a = before.split("\n");
   const b = after.split("\n");
-  const out = [`--- ${label3}`, `+++ ${label3}`];
+  const out = [`--- ${label4}`, `+++ ${label4}`];
   let start = 0;
   while (start < a.length && start < b.length && a[start] === b[start])
     start++;
@@ -4784,12 +4784,12 @@ var Card = class {
   row(r) {
     const labelW = this.labelWidth();
     const noteW = Math.max(0, this.t.width - INDENT.length - labelW - VALUE_W - GAP);
-    const label3 = (r.label.length > labelW ? elide(r.label, labelW, this.t) : r.label).padEnd(labelW);
+    const label4 = (r.label.length > labelW ? elide(r.label, labelW, this.t) : r.label).padEnd(labelW);
     const rawValue = r.value ?? "";
     const value = rawValue.length > VALUE_W ? rawValue : rawValue.padStart(VALUE_W);
     const note = r.note ? clip(r.note, noteW, this.t) : "";
     const coloured = this.tone(value, r.tone);
-    const line = `${INDENT}${label3}${coloured}${note ? "   " + this.noteTone(note, r.tone) : ""}`;
+    const line = `${INDENT}${label4}${coloured}${note ? "   " + this.noteTone(note, r.tone) : ""}`;
     this.push(line.trimEnd());
     return this;
   }
@@ -6902,6 +6902,136 @@ function emptyIgnoreReport(entries = []) {
   return { entries: [...entries], projects: [], hidden: 0 };
 }
 
+// ../core/dist/calibration.js
+var MIN_CALLS = 5;
+var CALIBRATION_WINDOW = 5;
+var MAX_RATIO = 5;
+var MIN_RATIO = 1 / MAX_RATIO;
+function recordCardRun(db, run3) {
+  const ranAt = run3.ranAt ?? (/* @__PURE__ */ new Date()).toISOString();
+  const timeRatio = ratio(run3.actualSeconds, run3.predictedSeconds);
+  const usdRatio = ratio(run3.actualUsd, run3.predictedUsd);
+  const info = db.prepare(`INSERT INTO card_runs
+         (ran_at, backend, model, concurrency, targets,
+          predicted_calls, predicted_seconds, predicted_usd,
+          actual_calls, actual_seconds, actual_usd,
+          time_ratio, usd_ratio, complete)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(ranAt, run3.backend, run3.model, run3.concurrency, run3.targets, run3.predictedCalls, run3.predictedSeconds, run3.predictedUsd, run3.actualCalls, run3.actualSeconds, run3.actualUsd, timeRatio, usdRatio, run3.complete ? 1 : 0);
+  return { ...run3, ranAt, id: Number(info.lastInsertRowid), timeRatio, usdRatio };
+}
+function readCalibration(db, o = {}) {
+  let rows;
+  try {
+    rows = db.prepare(`SELECT time_ratio, usd_ratio, ran_at
+           FROM card_runs
+          WHERE complete = 1
+            AND actual_calls >= ?
+            AND predicted_seconds > 0
+            AND predicted_usd > 0
+            ${o.backend ? "AND backend = ?" : ""}
+          ORDER BY ran_at DESC, id DESC
+          LIMIT ?`).all(...o.backend ? [MIN_CALLS, o.backend, o.window ?? CALIBRATION_WINDOW] : [MIN_CALLS, o.window ?? CALIBRATION_WINDOW]);
+  } catch {
+    return null;
+  }
+  if (rows.length === 0)
+    return null;
+  const cal = {
+    timeRatio: clamp(median(rows.map((r) => r.time_ratio))),
+    usdRatio: clamp(median(rows.map((r) => r.usd_ratio))),
+    samples: rows.length
+  };
+  const last2 = rows[0]?.ran_at;
+  return last2 ? { ...cal, lastRanAt: last2 } : cal;
+}
+function accuracyShort(run3) {
+  const t = describe(ratio(run3.actualSeconds, run3.predictedSeconds));
+  const u = describe(ratio(run3.actualUsd, run3.predictedUsd));
+  return `${t} on time, ${u} on cost`;
+}
+function describe(r) {
+  if (r >= 0.9 && r <= 1.1)
+    return "right";
+  return r > 1 ? `${r.toFixed(1)}x under` : `${(1 / r).toFixed(1)}x over`;
+}
+function ratio(actual, predicted) {
+  if (!(predicted > 0) || !(actual > 0))
+    return 1;
+  return actual / predicted;
+}
+function clamp(r) {
+  if (!Number.isFinite(r) || r <= 0)
+    return 1;
+  return Math.min(MAX_RATIO, Math.max(MIN_RATIO, r));
+}
+function median(xs) {
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+var RANK = { none: 0, weak: 1, strong: 2 };
+function atLeastConfident(a, b) {
+  return RANK[a] >= RANK[b];
+}
+function maxConfidence(a, b) {
+  return RANK[a] >= RANK[b] ? a : b;
+}
+var WEIGHT_BASE = 0.6;
+var WEIGHT_STRENGTH = 0.25;
+var WEIGHT_AGREEMENT = 0.15;
+var AGREEMENT_LISTS = 3;
+var WEAK_FLOOR = 0.5;
+var STRONG_FLOOR = 0.75;
+function calibrate(e) {
+  const coverage = e.terms > 0 ? clamp01(e.covered / e.terms) : 1;
+  const strength = clamp01(e.strength);
+  const agreement = clamp01((e.lists - 1) / (AGREEMENT_LISTS - 1));
+  const score = clamp01(coverage * (WEIGHT_BASE + WEIGHT_STRENGTH * strength + WEIGHT_AGREEMENT * agreement));
+  return { score, confidence: label(score), coverage, strength, agreement };
+}
+function label(score) {
+  if (score >= STRONG_FLOOR)
+    return "strong";
+  if (score >= WEAK_FLOOR)
+    return "weak";
+  return "none";
+}
+function relativeStrength(raw, best, kind) {
+  if (kind === "flat")
+    return 1;
+  if (!Number.isFinite(raw) || !Number.isFinite(best))
+    return 0;
+  if (kind === "bm25") {
+    const b = Math.abs(best);
+    if (!(b > 0))
+      return 1;
+    return clamp01(Math.abs(raw) / b);
+  }
+  if (!(best > 0))
+    return 0;
+  return clamp01(Math.max(0, raw) / best);
+}
+function clamp01(x) {
+  if (!Number.isFinite(x))
+    return 0;
+  return Math.min(1, Math.max(0, x));
+}
+function coveredTerms(terms, text) {
+  if (terms.length === 0 || !text)
+    return 0;
+  const words = new Set(wordSpans(text).map((w) => w.word));
+  let n2 = 0;
+  for (const t of terms) {
+    for (const w of words) {
+      if (wordMatchesToken(w, t)) {
+        n2++;
+        break;
+      }
+    }
+  }
+  return n2;
+}
+
 // ../core/dist/recall.js
 var LISTS = [
   "titles",
@@ -7475,6 +7605,7 @@ async function recall(db, query, requested = {}, options = {}) {
   const perSession = Math.max(1, options.perSession ?? PER_SESSION);
   const baseWeights = { ...WEIGHTS, ...options.weights };
   const corroboration = options.corroboration ?? CORROBORATION;
+  const minConfidence2 = options.minConfidence ?? "none";
   const depth = Math.max(options.candidates ?? Math.max(limit * 10, 60), limit);
   const ghosts = filters.status === "ghost" ? "only" : filters.ghosts ?? "include";
   const sidechains = filters.sidechains ?? "include";
@@ -7497,6 +7628,9 @@ async function recall(db, query, requested = {}, options = {}) {
     ghostsOnly: ghosts === "only",
     indexedGhosts: countGhosts(db),
     ignored,
+    confidence: "none",
+    minConfidence: minConfidence2,
+    belowFloor: 0,
     ms: Date.now() - started
   });
   const vecMode = options.vectors ?? "auto";
@@ -7633,6 +7767,26 @@ async function recall(db, query, requested = {}, options = {}) {
     });
   }
   const ranked = [...fused.values()].sort((a, b) => b.score - a.score || (a.seq ?? 0) - (b.seq ?? 0));
+  const bestRaw = /* @__PURE__ */ new Map();
+  for (const [name, hits] of Object.entries(lists)) {
+    if (hits.length === 0)
+      continue;
+    const kind = rawKind(name);
+    if (kind === "flat")
+      continue;
+    let best = hits[0].raw;
+    for (const h of hits)
+      best = kind === "bm25" ? Math.min(best, h.raw) : Math.max(best, h.raw);
+    bestRaw.set(name, best);
+  }
+  const strengthOf = (from) => {
+    let best = 0;
+    for (const f of from) {
+      const kind = rawKind(f.list);
+      best = Math.max(best, relativeStrength(f.raw, bestRaw.get(f.list) ?? 0, kind));
+    }
+    return best;
+  };
   const conversationOf = conversationKeys(db, ranked.map((h) => h.sessionId));
   const perSessionCount = /* @__PURE__ */ new Map();
   const kept = [];
@@ -7642,6 +7796,12 @@ async function recall(db, query, requested = {}, options = {}) {
     if (n2 >= perSession)
       continue;
     perSessionCount.set(conversation, n2 + 1);
+    const calibration = calibrate({
+      covered: coveredTerms(quotableTokens, `${hit2.userText} ${hit2.assistantText ?? ""}`),
+      terms: quotableTokens.length,
+      strength: strengthOf(hit2.from),
+      lists: new Set(hit2.from.map((f) => f.list)).size
+    });
     kept.push({
       kind: hit2.kind,
       sessionId: hit2.sessionId,
@@ -7653,7 +7813,9 @@ async function recall(db, query, requested = {}, options = {}) {
       snippet: bestSnippet(hit2.userText, hit2.assistantText, query, quotableTokens),
       isSidechain: hit2.isSidechain,
       score: hit2.score,
-      from: hit2.from
+      from: hit2.from,
+      calibration,
+      confidence: calibration.confidence
     });
   }
   const order = [];
@@ -7688,12 +7850,31 @@ async function recall(db, query, requested = {}, options = {}) {
       seenText.add(key);
       return true;
     });
-    sessions.push({ ...m, score: sessionScore(hits, corroboration), hits });
+    const blockText = [m.displayTitle, m.title ?? ""].concat(hits.map((h) => `${h.userText} ${h.assistantText ?? ""}`)).join(" ");
+    const calibration = calibrate({
+      covered: coveredTerms(quotableTokens, blockText),
+      terms: quotableTokens.length,
+      strength: Math.max(0, ...hits.map((h) => h.calibration.strength)),
+      lists: new Set(hits.flatMap((h) => h.from.map((f) => f.list))).size
+    });
+    sessions.push({
+      ...m,
+      score: sessionScore(hits, corroboration),
+      calibration,
+      confidence: calibration.confidence,
+      hits
+    });
     if (sessions.length >= limit * 3)
       break;
   }
+  const built = sessions.length;
+  const surviving = sessions.filter((s) => atLeastConfident(s.confidence, minConfidence2));
+  const belowFloor = built - surviving.length;
+  sessions.length = 0;
+  sessions.push(...surviving);
   sessions.sort((a, b) => b.score - a.score);
   sessions.length = Math.min(sessions.length, limit);
+  const confidence = sessions.reduce((best, s) => maxConfidence(best, s.confidence), "none");
   const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => b.score - a.score);
   return {
     query,
@@ -7708,8 +7889,16 @@ async function recall(db, query, requested = {}, options = {}) {
     ghostsOnly: ghosts === "only",
     indexedGhosts: sessions.length === 0 ? countGhosts(db) : null,
     ignored,
+    confidence,
+    minConfidence: minConfidence2,
+    belowFloor,
     ms: Date.now() - started
   };
+}
+function rawKind(list) {
+  if (list === "titles")
+    return "flat";
+  return list.startsWith("vec_") ? "cosine" : "bm25";
 }
 function conversationKeys(db, ids) {
   const distinct = [...new Set(ids)];
@@ -8613,8 +8802,8 @@ function renderSweepList(r, t = new Theme(), limit = 10) {
   card.blank().text("sessions the sweep takes next:");
   for (const s of r.nextSweep.slice(0, limit)) {
     const when2 = s.daysLeft <= 0 ? "at next startup" : s.daysLeft === 1 ? "in 1 day" : `in ${s.daysLeft} days`;
-    const label3 = s.title ?? `${basename2(s.project)}-${s.id.slice(0, 8)}`;
-    card.raw(`    ${t.warn(pad(when2, 16))}${elide(label3, Math.max(20, t.width - 24))}`);
+    const label4 = s.title ?? `${basename2(s.project)}-${s.id.slice(0, 8)}`;
+    card.raw(`    ${t.warn(pad(when2, 16))}${elide(label4, Math.max(20, t.width - 24))}`);
   }
   if (r.nextSweep.length > limit) {
     card.raw(`    ${t.dim(`${r.nextSweep.length - limit} more`)}`);
@@ -14074,7 +14263,7 @@ function solveWeights(hits, k = RRF_K) {
   const known = () => {
     const out2 = /* @__PURE__ */ new Map();
     for (const [list, values] of samples)
-      out2.set(list, median(values));
+      out2.set(list, median2(values));
     return out2;
   };
   for (let pass = 0; pass < 3; pass++) {
@@ -14100,7 +14289,7 @@ function solveWeights(hits, k = RRF_K) {
   }
   return out;
 }
-function median(values) {
+function median2(values) {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
@@ -14132,8 +14321,9 @@ function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), o
   lines.push(t.dim(headline(result, t)));
   lines.push("");
   if (result.sessions.length === 0) {
-    lines.push(INDENT + clip(`nothing in the index matches ${JSON.stringify(result.query)}.`, t.width - 2, t));
+    lines.push(INDENT + clip(result.belowFloor > 0 ? `nothing in the index answers ${JSON.stringify(result.query)}.` : `nothing in the index matches ${JSON.stringify(result.query)}.`, t.width - 2, t));
     lines.push("");
+    lines.push(...withheldNote(result, t));
     if (!result.vectors.available && result.vectors.reason) {
       lines.push(INDENT + t.dim(clip(`text search only ${t.dash} ${result.vectors.reason}`, t.width - 2, t)));
     }
@@ -14142,10 +14332,8 @@ function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), o
       lines.push(...ignoreNote(result, t));
       return lines.join("\n");
     }
-    const long = "to see what is indexed, or  potsherd index  to add more";
-    const wide = INDENT + t.dim("run") + "  potsherd ls  " + t.dim(long);
     lines.push(...ignoreNote(result, t));
-    lines.push(Theme.len(wide) <= t.width ? wide : INDENT + t.dim("run") + "  potsherd ls  " + t.dim("or  potsherd index"));
+    lines.push(nextVerbOnEmpty(result, t));
     return lines.join("\n");
   }
   result.sessions.forEach((s, i) => {
@@ -14166,6 +14354,34 @@ function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), o
   lines.push(nextVerb(t));
   return lines.join("\n");
 }
+function withheldNote(result, t) {
+  const n2 = result.belowFloor;
+  if (n2 <= 0)
+    return [];
+  const what = `${num(n2)} ${plural(n2, "session")} matched some of those words and none of them enough`;
+  const flag = "--min-confidence none";
+  const wide = `${what}  ${t.sep}  ${flag}`;
+  const out = [];
+  if (Theme.len(INDENT + wide) <= t.width) {
+    out.push(INDENT + t.dim(wide));
+  } else {
+    for (const line of wrap(what, t.width - INDENT.length))
+      out.push(INDENT + t.dim(line));
+    out.push(INDENT + t.dim(`${flag}  shows them anyway`));
+  }
+  out.push("");
+  return out;
+}
+function nextVerbOnEmpty(result, t) {
+  if (result.belowFloor > 0) {
+    const long2 = "with two or three distinctive words, or  potsherd ls";
+    const wide2 = INDENT + t.dim("run") + "  potsherd find  " + t.dim(long2);
+    return Theme.len(wide2) <= t.width ? wide2 : INDENT + t.dim("run") + "  potsherd find  " + t.dim("with fewer words");
+  }
+  const long = "to see what is indexed, or  potsherd index  to add more";
+  const wide = INDENT + t.dim("run") + "  potsherd ls  " + t.dim(long);
+  return Theme.len(wide) <= t.width ? wide : INDENT + t.dim("run") + "  potsherd ls  " + t.dim("or  potsherd index");
+}
 function ignoreNote(result, t) {
   const n2 = result.ignored.hidden;
   if (n2 <= 0)
@@ -14182,11 +14398,20 @@ function nextVerb(t) {
   return Theme.len(wide) <= t.width ? wide : INDENT + t.dim("run") + "  potsherd show <id8>  " + t.dim("or  potsherd ask <words>");
 }
 function headline(r, t) {
-  const parts = [`potsherd find ${JSON.stringify(r.query)}`];
-  parts.push(r.sessions.length === 0 ? "no match" : `${num(r.sessions.length)} ${plural(r.sessions.length, "session")}`);
-  parts.push(r.vectors.used ? "bm25 + vectors" : "bm25");
-  parts.push(duration(r.ms));
-  return clip(parts.join(` ${t.sep} `), t.width, t);
+  const fixed = [];
+  if (r.sessions.length === 0) {
+    fixed.push("no match");
+  } else {
+    fixed.push(`${num(r.sessions.length)} ${plural(r.sessions.length, "session")}`);
+    fixed.push(r.confidence);
+  }
+  fixed.push(r.vectors.used ? "bm25 + vectors" : "bm25");
+  fixed.push(duration(r.ms));
+  const sep = ` ${t.sep} `;
+  const rest = fixed.join(sep);
+  const room = Math.max(12, t.width - Theme.len(rest) - sep.length);
+  const verb = elide(`potsherd find ${JSON.stringify(r.query)}`, room, t);
+  return clip([verb, rest].join(sep), t.width, t);
 }
 function block(s, r, t, now) {
   const lines = [];
@@ -14204,7 +14429,7 @@ function block(s, r, t, now) {
     meta.push(s.gitBranch);
   if (s.agentName)
     meta.push(s.agentName);
-  const score = s.score.toFixed(4);
+  const score = `${s.confidence}  ${s.score.toFixed(4)}`;
   const metaLine = clip(meta.join(` ${t.sep} `), Math.max(10, width - score.length - 2), t);
   lines.push(INDENT + t.dim(metaLine) + " ".repeat(Math.max(1, width - metaLine.length - score.length)) + t.dim(score));
   const quotable = s.hits.filter((h) => h.kind !== "title" && h.snippet.text.trim().length > 0);
@@ -14416,9 +14641,9 @@ function sessionLedger(s, t, width) {
 function hitLedger(hit2, t, width) {
   const lines = [];
   const score = hit2.score.toFixed(4);
-  const label3 = elide(hit2.label, Math.max(8, width - 3 - score.length - 2), t);
-  const pad4 = Math.max(1, width - 3 - Theme.len(label3) - score.length);
-  lines.push(INDENT + "   " + label3 + " ".repeat(pad4) + t.dim(score));
+  const label4 = elide(hit2.label, Math.max(8, width - 3 - score.length - 2), t);
+  const pad4 = Math.max(1, width - 3 - Theme.len(label4) - score.length);
+  lines.push(INDENT + "   " + label4 + " ".repeat(pad4) + t.dim(score));
   for (const l of hit2.lists)
     lines.push(INDENT + "     " + detailRow(l, t, width - 5));
   return lines;
@@ -14657,7 +14882,7 @@ function renderShow(r, t = new Theme(), now = /* @__PURE__ */ new Date()) {
   if (r.ghostPrompts) {
     r.ghostPrompts.forEach((p, i) => {
       lines.push("");
-      lines.push(INDENT + label(t, r.from + i, p.ts, "you", now));
+      lines.push(INDENT + label2(t, r.from + i, p.ts, "you", now));
       lines.push(...prose(p.text, body, t, false));
     });
     lines.push("");
@@ -14666,7 +14891,7 @@ function renderShow(r, t = new Theme(), now = /* @__PURE__ */ new Date()) {
   }
   r.exchanges.forEach((e, i) => {
     lines.push("");
-    lines.push(INDENT + label(t, r.from + i, e.ts, "you", now, e));
+    lines.push(INDENT + label2(t, r.from + i, e.ts, "you", now, e));
     lines.push(...prose(e.userText, body, t, false));
     if (e.assistantText.trim()) {
       lines.push(INDENT + "  " + t.dim(s.harness));
@@ -14768,7 +14993,7 @@ function cardBlock(stored, t, width) {
   out.push(INDENT + t.dim("-".repeat(Math.max(8, Math.min(width - 4, 40)))));
   return out;
 }
-function label(t, n2, ts, who, now, e) {
+function label2(t, n2, ts, who, now, e) {
   const parts = [String(n2).padStart(3), ts ? shortDateTime(ts, now) : "", who];
   if (e?.isSidechain)
     parts.push("sidechain");
@@ -15358,8 +15583,8 @@ function monthPhrase(v, now) {
   let year = m[2] ? Number(m[2]) : now.getFullYear();
   if (!m[2] && idx > now.getMonth())
     year -= 1;
-  const label3 = `${MONTHS3[idx]} ${year}`;
-  return localRange(new Date(year, idx, 1), new Date(year, idx + 1, 1), label3);
+  const label4 = `${MONTHS3[idx]} ${year}`;
+  return localRange(new Date(year, idx, 1), new Date(year, idx + 1, 1), label4);
 }
 function weekday(v, now) {
   const m = /^(last |this |on )?([a-z]{3,9})$/.exec(v);
@@ -15382,18 +15607,18 @@ function dayLabel(d) {
 function pad2(n2) {
   return String(n2).padStart(2, "0");
 }
-function localRange(start, endExclusive, label3) {
+function localRange(start, endExclusive, label4) {
   return {
     start: start.toISOString(),
     end: new Date(+endExclusive - 1).toISOString(),
-    label: label3
+    label: label4
   };
 }
-function utcRange(startMs, endExclusiveMs, label3) {
+function utcRange(startMs, endExclusiveMs, label4) {
   return {
     start: new Date(startMs).toISOString(),
     end: new Date(endExclusiveMs - 1).toISOString(),
-    label: label3
+    label: label4
   };
 }
 
@@ -16461,74 +16686,6 @@ function ghostProjectSlug(project) {
   return p.replace(/[^A-Za-z0-9]/g, "-");
 }
 
-// ../core/dist/calibration.js
-var MIN_CALLS = 5;
-var CALIBRATION_WINDOW = 5;
-var MAX_RATIO = 5;
-var MIN_RATIO = 1 / MAX_RATIO;
-function recordCardRun(db, run3) {
-  const ranAt = run3.ranAt ?? (/* @__PURE__ */ new Date()).toISOString();
-  const timeRatio = ratio(run3.actualSeconds, run3.predictedSeconds);
-  const usdRatio = ratio(run3.actualUsd, run3.predictedUsd);
-  const info = db.prepare(`INSERT INTO card_runs
-         (ran_at, backend, model, concurrency, targets,
-          predicted_calls, predicted_seconds, predicted_usd,
-          actual_calls, actual_seconds, actual_usd,
-          time_ratio, usd_ratio, complete)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(ranAt, run3.backend, run3.model, run3.concurrency, run3.targets, run3.predictedCalls, run3.predictedSeconds, run3.predictedUsd, run3.actualCalls, run3.actualSeconds, run3.actualUsd, timeRatio, usdRatio, run3.complete ? 1 : 0);
-  return { ...run3, ranAt, id: Number(info.lastInsertRowid), timeRatio, usdRatio };
-}
-function readCalibration(db, o = {}) {
-  let rows;
-  try {
-    rows = db.prepare(`SELECT time_ratio, usd_ratio, ran_at
-           FROM card_runs
-          WHERE complete = 1
-            AND actual_calls >= ?
-            AND predicted_seconds > 0
-            AND predicted_usd > 0
-            ${o.backend ? "AND backend = ?" : ""}
-          ORDER BY ran_at DESC, id DESC
-          LIMIT ?`).all(...o.backend ? [MIN_CALLS, o.backend, o.window ?? CALIBRATION_WINDOW] : [MIN_CALLS, o.window ?? CALIBRATION_WINDOW]);
-  } catch {
-    return null;
-  }
-  if (rows.length === 0)
-    return null;
-  const cal = {
-    timeRatio: clamp(median2(rows.map((r) => r.time_ratio))),
-    usdRatio: clamp(median2(rows.map((r) => r.usd_ratio))),
-    samples: rows.length
-  };
-  const last2 = rows[0]?.ran_at;
-  return last2 ? { ...cal, lastRanAt: last2 } : cal;
-}
-function accuracyShort(run3) {
-  const t = describe(ratio(run3.actualSeconds, run3.predictedSeconds));
-  const u = describe(ratio(run3.actualUsd, run3.predictedUsd));
-  return `${t} on time, ${u} on cost`;
-}
-function describe(r) {
-  if (r >= 0.9 && r <= 1.1)
-    return "right";
-  return r > 1 ? `${r.toFixed(1)}x under` : `${(1 / r).toFixed(1)}x over`;
-}
-function ratio(actual, predicted) {
-  if (!(predicted > 0) || !(actual > 0))
-    return 1;
-  return actual / predicted;
-}
-function clamp(r) {
-  if (!Number.isFinite(r) || r <= 0)
-    return 1;
-  return Math.min(MAX_RATIO, Math.max(MIN_RATIO, r));
-}
-function median2(xs) {
-  const s = [...xs].sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
-
 // ../core/dist/cards/plan.js
 var MIN_EXCHANGES = 3;
 var MIN_GHOST_PROMPTS = 5;
@@ -17362,19 +17519,19 @@ async function extractCard(llm, transcript, options = {}) {
     return { card: fallback, chunks: 0, spend, parsed: false, model: llm.model };
   }
   const gate = options.gate ?? openGate;
-  const call = async (label3, prompt2) => {
+  const call = async (label4, prompt2) => {
     const r = await gate(() => llm.json({
       prompt: prompt2,
       system: systemFor(transcript),
       schema: CARD_SCHEMA,
       fallback,
       validate: validateCard,
-      label: label3,
+      label: label4,
       maxOutputTokens: options.maxOutputTokens ?? 2048,
       ...options.signal ? { signal: options.signal } : {}
     }));
     addSpend(spend, r);
-    options.onCall?.({ label: label3, usd: r.usd, ms: r.ms, parsed: r.parsed });
+    options.onCall?.({ label: label4, usd: r.usd, ms: r.ms, parsed: r.parsed });
     return { card: r.value, parsed: r.parsed };
   };
   if (chunks.length === 1) {
@@ -19348,7 +19505,7 @@ function answerText(sentences2, t) {
   return sentences2.map((s) => `${s.text} ${s.cites.map((c) => t.accent(`[${c}]`)).join("")}`).join(" ");
 }
 function evidenceLine(e, t, now) {
-  const label3 = `[${e.index}]`;
+  const label4 = `[${e.index}]`;
   const where = `${e.project}/${e.id8}`;
   const when2 = e.ts ? shortDateTime(e.ts, now) : t.dash;
   const marks = [];
@@ -19356,7 +19513,7 @@ function evidenceLine(e, t, now) {
     marks.push("ghost");
   if (e.isSidechain)
     marks.push("subagent");
-  const head = `${label3} ${where}  ${when2}${marks.length ? `  ${marks.join(" ")}` : ""}`;
+  const head = `${label4} ${where}  ${when2}${marks.length ? `  ${marks.join(" ")}` : ""}`;
   const room = t.width - Theme.len(head) - 6;
   const quote = clipQuote(e.quote, Math.min(QUOTE_CHARS, room), t);
   if (room >= 32) {
@@ -21111,10 +21268,10 @@ function renderSuggestions(r, t, wrap3) {
   L.push("");
   return L;
 }
-function field(label3, value, t, wrap3) {
+function field(label4, value, t, wrap3) {
   const w = 8;
   const lines = wrap3(value, Math.max(24, t.width - 5 - w));
-  return lines.map((l, i) => `     ${t.dim(i === 0 ? label3.padEnd(w) : " ".repeat(w))}${l}`);
+  return lines.map((l, i) => `     ${t.dim(i === 0 ? label4.padEnd(w) : " ".repeat(w))}${l}`);
 }
 function clip2(s, max2) {
   return s.length <= max2 ? s : "\u2026" + s.slice(s.length - (max2 - 1));
@@ -22279,7 +22436,7 @@ function queryNotes(query, opts = {}) {
   const hits = scored.slice(0, limit).map((s, i) => ({
     bridge: "notes",
     id: `${tildify2(s.section.file)}#${s.section.line}`,
-    title: oneLine2(`${label2(s.section.kind)} \u203A ${s.section.heading}`),
+    title: oneLine2(`${label3(s.section.kind)} \u203A ${s.section.heading}`),
     text: s.section.text,
     ts: null,
     source: s.section.file,
@@ -22320,7 +22477,7 @@ function scoreSection(section, tokens, requireAll) {
   const norm = 1 / (1 + Math.log10(1 + section.text.length / 400));
   return coverage * norm;
 }
-function label2(kind) {
+function label3(kind) {
   return kind === "auto-memory" ? "auto-memory" : kind === "global-claude-md" ? "~/.claude/CLAUDE.md" : "CLAUDE.md";
 }
 function oneLine2(s) {
@@ -22673,8 +22830,8 @@ async function confirm(question, opts = {}) {
   }
 }
 var Progress = class {
-  constructor(label3, enabled) {
-    this.label = label3;
+  constructor(label4, enabled) {
+    this.label = label4;
     this.enabled = enabled;
   }
   last = 0;
@@ -24010,7 +24167,13 @@ async function runFind(o) {
       // `--all` searches the projects the ignore list hides. Same flag, same
       // meaning as `ls --all` and `stats --all`; `find --project X` also
       // overrides the list, because naming a project is asking for it.
-      all: Boolean(o.all)
+      all: Boolean(o.all),
+      // The floor is set here and not inside `recall()`. `recall()` is also
+      // the shortlist builder for `ask` and `graft`, which hand their rows to
+      // a *reader* that can see for itself that a row is noise; `find` hands
+      // its rows to whoever typed the query. One number, set by the caller who
+      // knows who is reading. See `RecallOptions.minConfidence`.
+      minConfidence: minConfidence(o)
     });
     const wanted = (o.with ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
     const pending = [];
@@ -24034,6 +24197,13 @@ async function runFind(o) {
         // reading one number. `--explain --json` is how the eval harness will
         // ask why a query lost without parsing a terminal layout.
         ...o.explain ? { explain: search_exports.explain(result) } : {},
+        // The three F1 fields, on the envelope. Identical vocabulary and
+        // identical values to the human view — `tests/recall.test.ts` pins
+        // that the two agree, because an agent that has to reconcile two
+        // spellings of "did you find it" will trust neither.
+        confidence: result.confidence,
+        minConfidence: result.minConfidence,
+        withheld: result.belowFloor,
         vectors: result.vectors,
         ignored: result.ignored,
         lists: result.lists,
@@ -24058,6 +24228,21 @@ async function runFind(o) {
           exchanges: s.exchanges,
           resume: s.resume,
           score: s.score,
+          confidence: s.confidence,
+          // 0..1, and **not** `score` rescaled. `score` is reciprocal rank
+          // fusion — a function of rank alone, which is why a true topic and a
+          // topic the archive has never heard of come out 1.12x apart.
+          // `calibrated` is computed from the evidence RRF discards: how many
+          // of the query's distinctive words this conversation can actually
+          // show (`coverage`), each list's own bm25/cosine magnitude relative
+          // to that list's best for this query (`strength`), and how many
+          // lists independently found it (`agreement`). Coverage multiplies
+          // the other two, so it is a ceiling: nothing can lift a row whose
+          // words are not there. See `packages/core/src/calibration.ts`.
+          calibrated: s.calibration.score,
+          coverage: s.calibration.coverage,
+          strength: s.calibration.strength,
+          agreement: s.calibration.agreement,
           hits: s.hits.map((h) => ({
             kind: h.kind,
             // A block is a *conversation*, and a conversation can hold the
@@ -24071,6 +24256,8 @@ async function runFind(o) {
             seq: h.seq ?? null,
             ts: h.ts ?? null,
             score: h.score,
+            confidence: h.confidence,
+            calibrated: h.calibration.score,
             from: h.from,
             snippet: h.snippet.text,
             match: h.snippet.match ?? null
@@ -24089,6 +24276,16 @@ async function runFind(o) {
     return result.sessions.length ? 0 : 1;
   } finally {
     db.close();
+  }
+}
+function minConfidence(o) {
+  switch (o.minConfidence) {
+    case "none":
+      return "none";
+    case "strong":
+      return "strong";
+    default:
+      return "weak";
   }
 }
 function vectorMode(o) {
@@ -26008,7 +26205,7 @@ function render(r, t, o = {}) {
     ["also", "no knowledge graph. hindsight and greplica do that."],
     ["", "no server, no account, no telemetry. sqlite in ~/.potsherd."]
   ];
-  for (const [label3, text] of notDone) L.push(...hang(label3, 16, text, 4, t.width));
+  for (const [label4, text] of notDone) L.push(...hang(label4, 16, text, 4, t.width));
   L.push("");
   const here = r.detections.filter((d) => d.present && d.spec.id !== "potsherd");
   if (here.length) {
@@ -26085,11 +26282,11 @@ function claimLabel(d, t) {
 function coverageObject(c) {
   return { "1": c[0], "2": c[1], "3": c[2], "4": c[3] };
 }
-function hang(label3, labelW, text, indent, width) {
+function hang(label4, labelW, text, indent, width) {
   const lead = " ".repeat(indent);
   const body = Math.max(20, width - indent - labelW);
   const lines = format_exports.wrap(text, body);
-  return lines.map((line, i) => `${lead}${i === 0 ? pad3(label3, labelW) : " ".repeat(labelW)}${line}`);
+  return lines.map((line, i) => `${lead}${i === 0 ? pad3(label4, labelW) : " ".repeat(labelW)}${line}`);
 }
 function pad3(s, w) {
   if (w === 0) return "";
@@ -26220,6 +26417,8 @@ example:
       program2.command("find").description("search every prompt, every subagent and every deleted session").argument("<query>", "the words to look for")
     ).option("--file <path>", "only sessions that touched a path containing this").addOption(
       new Option("--vectors <mode>", "the vector half of the hybrid").choices(["auto", "on", "off"]).default("auto")
+    ).addOption(
+      new Option("--min-confidence <level>", "withhold rows the archive does not answer").choices(["strong", "weak", "none"]).default("weak")
     ).option("--no-vec", "text search only \u2014 the same as --vectors off").option("--explain", "show the per-list ranks and scores behind the order").option("--with <tools>", "also search other memory tools: claude-mem, agentmemory, notes").option("--all", "include the projects  potsherd ignore  hides")
   ).addHelpText("after", `
 example:
@@ -26253,6 +26452,7 @@ filters, one example each \u2014 they compose, and all of them are AND:
         vec: opts["vec"] !== false,
         explain: Boolean(opts["explain"]),
         all: Boolean(opts["all"]),
+        minConfidence: String(opts["minConfidence"] ?? "weak"),
         ...opts["vectors"] ? { vectors: String(opts["vectors"]) } : {},
         ...opts["with"] ? { with: String(opts["with"]) } : {}
       }),
@@ -26706,8 +26906,8 @@ function tour(o = {}) {
   const col2 = Math.max(...names.map((n2) => n2.length));
   const roomy = w >= 9 + col2 + 2 + Math.max(...REST.map(([, g]) => g.length));
   REST.forEach(([, gloss], i) => {
-    const label3 = i === 0 ? "  also:  " : "         ";
-    const line = roomy ? `${label3}${names[i]?.padEnd(col2)}  ${gloss}` : `${label3}${names[i]}`;
+    const label4 = i === 0 ? "  also:  " : "         ";
+    const line = roomy ? `${label4}${names[i]?.padEnd(col2)}  ${gloss}` : `${label4}${names[i]}`;
     print(t.dim(line));
   });
   print(t.dim(`         potsherd help <verb> for any of them`));

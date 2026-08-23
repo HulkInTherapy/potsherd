@@ -4,7 +4,7 @@
 # `.mcp.json` used to name `${CLAUDE_PLUGIN_ROOT}/../../packages/mcp/dist/index.js`
 # directly. In a marketplace install that file does not exist — `dist/` is
 # gitignored — so `node` died with a module-not-found stack trace before the
-# server ever spoke MCP, all six tools vanished from the client, and the only
+# server ever spoke MCP, every tool vanished from the client, and the only
 # symptom was a tool list that was simply shorter. `session-archaeologist`,
 # whose `tools:` are five `mcp__plugin_potsherd_potsherd__*` entries plus
 # `Read`, was left holding `Read` and answered "not found" to everything.
@@ -19,7 +19,7 @@
 # left external, so the server starts with an empty `node_modules`. Its six
 # tools all read the index, so on a machine with no `better-sqlite3` each one
 # answers with a sentence naming the fix -- which is a working server reporting
-# a missing dependency, not a client silently missing six tools.
+# a missing dependency, not a client silently missing every tool.
 set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -48,8 +48,7 @@ Looked in three places:
   2. $ROOT/../../packages/mcp/dist/index.js       (the surrounding checkout)
   3. potsherd-mcp on PATH                         (a global install)
 
-All six tools -- potsherd_find, potsherd_read, potsherd_ask, potsherd_graft,
-potsherd_ls, potsherd_tag -- are therefore absent, and the
+All three tools -- potsherd_recall, potsherd_read, potsherd_graft -- are therefore absent, and the
 session-archaeologist agent is left with no tools but Read.
 
 Place 1 is committed to this repository, so a normal install has it. If it is

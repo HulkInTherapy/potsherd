@@ -98,7 +98,7 @@ var require_code = __commonJS({
     }
     exports._ = _;
     var plus = new _Code("+");
-    function str(strs, ...args) {
+    function str2(strs, ...args) {
       const expr = [safeStringify(strs[0])];
       let i = 0;
       while (i < args.length) {
@@ -109,7 +109,7 @@ var require_code = __commonJS({
       optimize(expr);
       return new _Code(expr);
     }
-    exports.str = str;
+    exports.str = str2;
     function addCodeArg(code, arg) {
       if (arg instanceof _Code)
         code.push(...arg._items);
@@ -152,7 +152,7 @@ var require_code = __commonJS({
       return;
     }
     function strConcat(c1, c2) {
-      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str`${c1}${c2}`;
+      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str2`${c1}${c2}`;
     }
     exports.strConcat = strConcat;
     function interpolate(x) {
@@ -449,9 +449,9 @@ var require_codegen = __commonJS({
       }
     };
     var Label = class extends Node {
-      constructor(label) {
+      constructor(label3) {
         super();
-        this.label = label;
+        this.label = label3;
         this.names = {};
       }
       render({ _n }) {
@@ -459,14 +459,14 @@ var require_codegen = __commonJS({
       }
     };
     var Break = class extends Node {
-      constructor(label) {
+      constructor(label3) {
         super();
-        this.label = label;
+        this.label = label3;
         this.names = {};
       }
       render({ _n }) {
-        const label = this.label ? ` ${this.label}` : "";
-        return `break${label};` + _n;
+        const label3 = this.label ? ` ${this.label}` : "";
+        return `break${label3};` + _n;
       }
     };
     var Throw = class extends Node {
@@ -506,17 +506,17 @@ var require_codegen = __commonJS({
         this.nodes = nodes;
       }
       render(opts) {
-        return this.nodes.reduce((code, n) => code + n.render(opts), "");
+        return this.nodes.reduce((code, n2) => code + n2.render(opts), "");
       }
       optimizeNodes() {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
-          const n = nodes[i].optimizeNodes();
-          if (Array.isArray(n))
-            nodes.splice(i, 1, ...n);
-          else if (n)
-            nodes[i] = n;
+          const n2 = nodes[i].optimizeNodes();
+          if (Array.isArray(n2))
+            nodes.splice(i, 1, ...n2);
+          else if (n2)
+            nodes[i] = n2;
           else
             nodes.splice(i, 1);
         }
@@ -526,16 +526,16 @@ var require_codegen = __commonJS({
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
-          const n = nodes[i];
-          if (n.optimizeNames(names, constants))
+          const n2 = nodes[i];
+          if (n2.optimizeNames(names, constants))
             continue;
-          subtractNames(names, n.names);
+          subtractNames(names, n2.names);
           nodes.splice(i, 1);
         }
         return nodes.length > 0 ? this : void 0;
       }
       get names() {
-        return this.nodes.reduce((names, n) => addNames(names, n.names), {});
+        return this.nodes.reduce((names, n2) => addNames(names, n2.names), {});
       }
     };
     var BlockNode = class extends ParentNode {
@@ -878,12 +878,12 @@ var require_codegen = __commonJS({
         return this._endBlockNode(For);
       }
       // `label` statement
-      label(label) {
-        return this._leafNode(new Label(label));
+      label(label3) {
+        return this._leafNode(new Label(label3));
       }
       // `break` statement
-      break(label) {
-        return this._leafNode(new Break(label));
+      break(label3) {
+        return this._leafNode(new Break(label3));
       }
       // `return` statement
       return(value) {
@@ -946,8 +946,8 @@ var require_codegen = __commonJS({
       endFunc() {
         return this._endBlockNode(Func);
       }
-      optimize(n = 1) {
-        while (n-- > 0) {
+      optimize(n2 = 1) {
+        while (n2-- > 0) {
           this._root.optimizeNodes();
           this._root.optimizeNames(this._root.names, this._constants);
         }
@@ -961,19 +961,19 @@ var require_codegen = __commonJS({
         this._nodes.push(node);
       }
       _endBlockNode(N1, N2) {
-        const n = this._currNode;
-        if (n instanceof N1 || N2 && n instanceof N2) {
+        const n2 = this._currNode;
+        if (n2 instanceof N1 || N2 && n2 instanceof N2) {
           this._nodes.pop();
           return this;
         }
         throw new Error(`CodeGen: not in block "${N2 ? `${N1.kind}/${N2.kind}` : N1.kind}"`);
       }
       _elseNode(node) {
-        const n = this._currNode;
-        if (!(n instanceof If)) {
+        const n2 = this._currNode;
+        if (!(n2 instanceof If)) {
           throw new Error('CodeGen: "else" without "if"');
         }
-        this._currNode = n.else = node;
+        this._currNode = n2.else = node;
         return this;
       }
       get _root() {
@@ -990,8 +990,8 @@ var require_codegen = __commonJS({
     };
     exports.CodeGen = CodeGen;
     function addNames(names, from) {
-      for (const n in from)
-        names[n] = (names[n] || 0) + (from[n] || 0);
+      for (const n2 in from)
+        names[n2] = (names[n2] || 0) + (from[n2] || 0);
       return names;
     }
     function addExprNames(names, from) {
@@ -1011,11 +1011,11 @@ var require_codegen = __commonJS({
           items.push(c);
         return items;
       }, []));
-      function replaceName(n) {
-        const c = constants[n.str];
-        if (c === void 0 || names[n.str] !== 1)
-          return n;
-        delete names[n.str];
+      function replaceName(n2) {
+        const c = constants[n2.str];
+        if (c === void 0 || names[n2.str] !== 1)
+          return n2;
+        delete names[n2.str];
         return c;
       }
       function canOptimize(e) {
@@ -1023,8 +1023,8 @@ var require_codegen = __commonJS({
       }
     }
     function subtractNames(names, from) {
-      for (const n in from)
-        names[n] = (names[n] || 0) - (from[n] || 0);
+      for (const n2 in from)
+        names[n2] = (names[n2] || 0) - (from[n2] || 0);
     }
     function not(x) {
       return typeof x == "boolean" || typeof x == "number" || x === null ? !x : (0, code_1._)`!${par(x)}`;
@@ -1114,22 +1114,22 @@ var require_util = __commonJS({
       return (0, codegen_1._)`${topSchemaRef}${schemaPath}${(0, codegen_1.getProperty)(keyword)}`;
     }
     exports.schemaRefOrVal = schemaRefOrVal;
-    function unescapeFragment(str) {
-      return unescapeJsonPointer(decodeURIComponent(str));
+    function unescapeFragment(str2) {
+      return unescapeJsonPointer(decodeURIComponent(str2));
     }
     exports.unescapeFragment = unescapeFragment;
-    function escapeFragment(str) {
-      return encodeURIComponent(escapeJsonPointer(str));
+    function escapeFragment(str2) {
+      return encodeURIComponent(escapeJsonPointer(str2));
     }
     exports.escapeFragment = escapeFragment;
-    function escapeJsonPointer(str) {
-      if (typeof str == "number")
-        return `${str}`;
-      return str.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPointer(str2) {
+      if (typeof str2 == "number")
+        return `${str2}`;
+      return str2.replace(/~/g, "~0").replace(/\//g, "~1");
     }
     exports.escapeJsonPointer = escapeJsonPointer;
-    function unescapeJsonPointer(str) {
-      return str.replace(/~1/g, "/").replace(/~0/g, "~");
+    function unescapeJsonPointer(str2) {
+      return str2.replace(/~1/g, "/").replace(/~0/g, "~");
     }
     exports.unescapeJsonPointer = unescapeJsonPointer;
     function eachItem(xs, f) {
@@ -2154,8 +2154,8 @@ var require_json_schema_traverse = __commonJS({
         post(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
       }
     }
-    function escapeJsonPtr(str) {
-      return str.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPtr(str2) {
+      return str2.replace(/~/g, "~0").replace(/\//g, "~1");
     }
   }
 });
@@ -3219,15 +3219,15 @@ var require_utils = __commonJS({
         return { host, isIPV6: false };
       }
     }
-    function findToken(str, token) {
+    function findToken(str2, token) {
       let ind = 0;
-      for (let i = 0; i < str.length; i++) {
-        if (str[i] === token) ind++;
+      for (let i = 0; i < str2.length; i++) {
+        if (str2[i] === token) ind++;
       }
       return ind;
     }
-    function removeDotSegments(path23) {
-      let input = path23;
+    function removeDotSegments(path30) {
+      let input = path30;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3479,8 +3479,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path23, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path23 && path23 !== "/" ? path23 : void 0;
+        const [path30, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path30 && path30 !== "/" ? path30 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -3650,10 +3650,10 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative, options, skipNormalization) {
+    function resolveComponent(base2, relative, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
-        base = parse10(serialize(base, options), options);
+        base2 = parse10(serialize(base2, options), options);
         relative = parse10(serialize(relative, options), options);
       }
       options = options || {};
@@ -3673,32 +3673,32 @@ var require_fast_uri = __commonJS({
           target.query = relative.query;
         } else {
           if (!relative.path) {
-            target.path = base.path;
+            target.path = base2.path;
             if (relative.query !== void 0) {
               target.query = relative.query;
             } else {
-              target.query = base.query;
+              target.query = base2.query;
             }
           } else {
             if (relative.path[0] === "/") {
               target.path = removeDotSegments(relative.path);
             } else {
-              if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
+              if ((base2.userinfo !== void 0 || base2.host !== void 0 || base2.port !== void 0) && !base2.path) {
                 target.path = "/" + relative.path;
-              } else if (!base.path) {
+              } else if (!base2.path) {
                 target.path = relative.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative.path;
+                target.path = base2.path.slice(0, base2.path.lastIndexOf("/") + 1) + relative.path;
               }
               target.path = removeDotSegments(target.path);
             }
             target.query = relative.query;
           }
-          target.userinfo = base.userinfo;
-          target.host = base.host;
-          target.port = base.port;
+          target.userinfo = base2.userinfo;
+          target.host = base2.host;
+          target.port = base2.port;
         }
-        target.scheme = base.scheme;
+        target.scheme = base2.scheme;
       }
       target.fragment = relative.fragment;
       return target;
@@ -3985,7 +3985,7 @@ var require_core = __commonJS({
     var util_1 = require_util();
     var $dataRefSchema = require_data();
     var uri_1 = require_uri();
-    var defaultRegExp = (str, flags) => new RegExp(str, flags);
+    var defaultRegExp = (str2, flags) => new RegExp(str2, flags);
     defaultRegExp.code = "new RegExp";
     var META_IGNORE_OPTIONS = ["removeAdditional", "useDefaults", "coerceTypes"];
     var EXT_SCOPE_NAMES = /* @__PURE__ */ new Set([
@@ -4780,16 +4780,16 @@ var require_ucs2length = __commonJS({
   "../../node_modules/.pnpm/ajv@8.20.0/node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    function ucs2length(str) {
-      const len = str.length;
+    function ucs2length(str2) {
+      const len = str2.length;
       let length = 0;
       let pos = 0;
       let value;
       while (pos < len) {
         length++;
-        value = str.charCodeAt(pos++);
+        value = str2.charCodeAt(pos++);
         if (value >= 55296 && value <= 56319 && pos < len) {
-          value = str.charCodeAt(pos);
+          value = str2.charCodeAt(pos);
           if ((value & 64512) === 56320)
             pos++;
         }
@@ -5374,8 +5374,8 @@ var require_contains = __commonJS({
     var codegen_1 = require_codegen();
     var util_1 = require_util();
     var error51 = {
-      message: ({ params: { min, max } }) => max === void 0 ? (0, codegen_1.str)`must contain at least ${min} valid item(s)` : (0, codegen_1.str)`must contain at least ${min} and no more than ${max} valid item(s)`,
-      params: ({ params: { min, max } }) => max === void 0 ? (0, codegen_1._)`{minContains: ${min}}` : (0, codegen_1._)`{minContains: ${min}, maxContains: ${max}}`
+      message: ({ params: { min: min2, max: max2 } }) => max2 === void 0 ? (0, codegen_1.str)`must contain at least ${min2} valid item(s)` : (0, codegen_1.str)`must contain at least ${min2} and no more than ${max2} valid item(s)`,
+      params: ({ params: { min: min2, max: max2 } }) => max2 === void 0 ? (0, codegen_1._)`{minContains: ${min2}}` : (0, codegen_1._)`{minContains: ${min2}, maxContains: ${max2}}`
     };
     var def = {
       keyword: "contains",
@@ -5386,40 +5386,40 @@ var require_contains = __commonJS({
       error: error51,
       code(cxt) {
         const { gen, schema, parentSchema, data, it } = cxt;
-        let min;
-        let max;
+        let min2;
+        let max2;
         const { minContains, maxContains } = parentSchema;
         if (it.opts.next) {
-          min = minContains === void 0 ? 1 : minContains;
-          max = maxContains;
+          min2 = minContains === void 0 ? 1 : minContains;
+          max2 = maxContains;
         } else {
-          min = 1;
+          min2 = 1;
         }
         const len = gen.const("len", (0, codegen_1._)`${data}.length`);
-        cxt.setParams({ min, max });
-        if (max === void 0 && min === 0) {
+        cxt.setParams({ min: min2, max: max2 });
+        if (max2 === void 0 && min2 === 0) {
           (0, util_1.checkStrictMode)(it, `"minContains" == 0 without "maxContains": "contains" keyword ignored`);
           return;
         }
-        if (max !== void 0 && min > max) {
+        if (max2 !== void 0 && min2 > max2) {
           (0, util_1.checkStrictMode)(it, `"minContains" > "maxContains" is always invalid`);
           cxt.fail();
           return;
         }
         if ((0, util_1.alwaysValidSchema)(it, schema)) {
-          let cond = (0, codegen_1._)`${len} >= ${min}`;
-          if (max !== void 0)
-            cond = (0, codegen_1._)`${cond} && ${len} <= ${max}`;
+          let cond = (0, codegen_1._)`${len} >= ${min2}`;
+          if (max2 !== void 0)
+            cond = (0, codegen_1._)`${cond} && ${len} <= ${max2}`;
           cxt.pass(cond);
           return;
         }
         it.items = true;
         const valid = gen.name("valid");
-        if (max === void 0 && min === 1) {
+        if (max2 === void 0 && min2 === 1) {
           validateItems(valid, () => gen.if(valid, () => gen.break()));
-        } else if (min === 0) {
+        } else if (min2 === 0) {
           gen.let(valid, true);
-          if (max !== void 0)
+          if (max2 !== void 0)
             gen.if((0, codegen_1._)`${data}.length > 0`, validateItemsWithCount);
         } else {
           gen.let(valid, false);
@@ -5431,7 +5431,7 @@ var require_contains = __commonJS({
           const count2 = gen.let("count", 0);
           validateItems(schValid, () => gen.if(schValid, () => checkLimits(count2)));
         }
-        function validateItems(_valid, block) {
+        function validateItems(_valid, block2) {
           gen.forRange("i", 0, len, (i) => {
             cxt.subschema({
               keyword: "contains",
@@ -5439,19 +5439,19 @@ var require_contains = __commonJS({
               dataPropType: util_1.Type.Num,
               compositeRule: true
             }, _valid);
-            block();
+            block2();
           });
         }
         function checkLimits(count2) {
           gen.code((0, codegen_1._)`${count2}++`);
-          if (max === void 0) {
-            gen.if((0, codegen_1._)`${count2} >= ${min}`, () => gen.assign(valid, true).break());
+          if (max2 === void 0) {
+            gen.if((0, codegen_1._)`${count2} >= ${min2}`, () => gen.assign(valid, true).break());
           } else {
-            gen.if((0, codegen_1._)`${count2} > ${max}`, () => gen.assign(valid, false).break());
-            if (min === 1)
+            gen.if((0, codegen_1._)`${count2} > ${max2}`, () => gen.assign(valid, false).break());
+            if (min2 === 1)
               gen.assign(valid, true);
             else
-              gen.if((0, codegen_1._)`${count2} >= ${min}`, () => gen.assign(valid, true));
+              gen.if((0, codegen_1._)`${count2} >= ${min2}`, () => gen.assign(valid, true));
           }
         }
       }
@@ -6672,14 +6672,14 @@ var require_formats = __commonJS({
     }
     var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
     var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    function date6(str) {
-      const matches = DATE.exec(str);
+    function date6(str2) {
+      const matches = DATE.exec(str2);
       if (!matches)
         return false;
       const year = +matches[1];
       const month = +matches[2];
-      const day = +matches[3];
-      return month >= 1 && month <= 12 && day >= 1 && day <= (month === 2 && isLeapYear(year) ? 29 : DAYS[month]);
+      const day2 = +matches[3];
+      return month >= 1 && month <= 12 && day2 >= 1 && day2 <= (month === 2 && isLeapYear(year) ? 29 : DAYS[month]);
     }
     function compareDate(d1, d2) {
       if (!(d1 && d2))
@@ -6692,12 +6692,12 @@ var require_formats = __commonJS({
     }
     var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
     function getTime(strictTimeZone) {
-      return function time3(str) {
-        const matches = TIME.exec(str);
+      return function time3(str2) {
+        const matches = TIME.exec(str2);
         if (!matches)
           return false;
         const hr = +matches[1];
-        const min = +matches[2];
+        const min2 = +matches[2];
         const sec = +matches[3];
         const tz = matches[4];
         const tzSign = matches[5] === "-" ? -1 : 1;
@@ -6705,9 +6705,9 @@ var require_formats = __commonJS({
         const tzM = +(matches[7] || 0);
         if (tzH > 23 || tzM > 59 || strictTimeZone && !tz)
           return false;
-        if (hr <= 23 && min <= 59 && sec < 60)
+        if (hr <= 23 && min2 <= 59 && sec < 60)
           return true;
-        const utcMin = min - tzM * tzSign;
+        const utcMin = min2 - tzM * tzSign;
         const utcHr = hr - tzH * tzSign - (utcMin < 0 ? 1 : 0);
         return (utcHr === 23 || utcHr === -1) && (utcMin === 59 || utcMin === -1) && sec < 61;
       };
@@ -6739,8 +6739,8 @@ var require_formats = __commonJS({
     var DATE_TIME_SEPARATOR = /t|\s/i;
     function getDateTime(strictTimeZone) {
       const time3 = getTime(strictTimeZone);
-      return function date_time(str) {
-        const dateTime = str.split(DATE_TIME_SEPARATOR);
+      return function date_time(str2) {
+        const dateTime = str2.split(DATE_TIME_SEPARATOR);
         return dateTime.length === 2 && date6(dateTime[0]) && time3(dateTime[1]);
       };
     }
@@ -6765,13 +6765,13 @@ var require_formats = __commonJS({
     }
     var NOT_URI_FRAGMENT = /\/|:/;
     var URI = /^(?:[a-z][a-z0-9+\-.]*:)(?:\/?\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:]|%[0-9a-f]{2})*@)?(?:\[(?:(?:(?:(?:[0-9a-f]{1,4}:){6}|::(?:[0-9a-f]{1,4}:){5}|(?:[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){4}|(?:(?:[0-9a-f]{1,4}:){0,1}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){3}|(?:(?:[0-9a-f]{1,4}:){0,2}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){2}|(?:(?:[0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4})?::[0-9a-f]{1,4}:|(?:(?:[0-9a-f]{1,4}:){0,4}[0-9a-f]{1,4})?::)(?:[0-9a-f]{1,4}:[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))|(?:(?:[0-9a-f]{1,4}:){0,5}[0-9a-f]{1,4})?::[0-9a-f]{1,4}|(?:(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})?::)|[Vv][0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+)\]|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-z0-9\-._~!$&'()*+,;=]|%[0-9a-f]{2})*)(?::\d*)?(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*|\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)?|(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)(?:\?(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i;
-    function uri(str) {
-      return NOT_URI_FRAGMENT.test(str) && URI.test(str);
+    function uri(str2) {
+      return NOT_URI_FRAGMENT.test(str2) && URI.test(str2);
     }
     var BYTE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/gm;
-    function byte(str) {
+    function byte(str2) {
       BYTE.lastIndex = 0;
-      return BYTE.test(str);
+      return BYTE.test(str2);
     }
     var MIN_INT32 = -(2 ** 31);
     var MAX_INT32 = 2 ** 31 - 1;
@@ -6785,11 +6785,11 @@ var require_formats = __commonJS({
       return true;
     }
     var Z_ANCHOR = /[^\\]\\Z/;
-    function regex(str) {
-      if (Z_ANCHOR.test(str))
+    function regex(str2) {
+      if (Z_ANCHOR.test(str2))
         return false;
       try {
-        new RegExp(str);
+        new RegExp(str2);
         return true;
       } catch (e) {
         return false;
@@ -6899,12 +6899,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs22, exportName) {
+    function addFormats(ajv, list, fs35, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs22[f]);
+        ajv.addFormat(f, fs35[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -6913,9 +6913,9 @@ var require_dist = __commonJS({
 });
 
 // src/index.ts
-import fs21 from "node:fs";
-import process15 from "node:process";
-import path22 from "node:path";
+import fs34 from "node:fs";
+import process18 from "node:process";
+import path29 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // ../../node_modules/.pnpm/@modelcontextprotocol+sdk@1.30.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -7635,12 +7635,12 @@ function cleanRegex(source) {
   return source.slice(start, end);
 }
 function floatSafeRemainder(val, step) {
-  const ratio = val / step;
-  const roundedRatio = Math.round(ratio);
-  const tolerance = Number.EPSILON * Math.max(Math.abs(ratio), 1);
-  if (Math.abs(ratio - roundedRatio) < tolerance)
+  const ratio2 = val / step;
+  const roundedRatio = Math.round(ratio2);
+  const tolerance = Number.EPSILON * Math.max(Math.abs(ratio2), 1);
+  if (Math.abs(ratio2 - roundedRatio) < tolerance)
     return 0;
-  return ratio - roundedRatio;
+  return ratio2 - roundedRatio;
 }
 var EVALUATING = /* @__PURE__ */ Symbol("evaluating");
 function defineLazy(object3, key, getter) {
@@ -7687,10 +7687,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path23) {
-  if (!path23)
+function getElementAtPath(obj, path30) {
+  if (!path30)
     return obj;
-  return path23.reduce((acc, key) => acc?.[key], obj);
+  return path30.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7705,14 +7705,14 @@ function promiseAllObject(promisesObj) {
 }
 function randomString(length = 10) {
   const chars = "abcdefghijklmnopqrstuvwxyz";
-  let str = "";
+  let str2 = "";
   for (let i = 0; i < length; i++) {
-    str += chars[Math.floor(Math.random() * chars.length)];
+    str2 += chars[Math.floor(Math.random() * chars.length)];
   }
-  return str;
+  return str2;
 }
-function esc(str) {
-  return JSON.stringify(str);
+function esc(str2) {
+  return JSON.stringify(str2);
 }
 function slugify(input) {
   return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -7826,8 +7826,8 @@ var primitiveTypes = /* @__PURE__ */ new Set([
   "symbol",
   "undefined"
 ]);
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function escapeRegex(str2) {
+  return str2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function clone(inst, def, params) {
   const cl = new inst._zod.constr(def ?? inst._zod.def);
@@ -8099,11 +8099,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path23, issues) {
+function prefixIssues(path30, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path23);
+    iss.path.unshift(path30);
     return iss;
   });
 }
@@ -8250,16 +8250,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path23 = []) => {
+  const processError = (error52, path30 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path23, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path30, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path23, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path23, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
       } else {
-        const fullpath = [...path23, ...issue2.path];
+        const fullpath = [...path30, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -8286,17 +8286,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path23 = []) => {
+  const processError = (error52, path30 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path23, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path30, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path23, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path23, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
       } else {
-        const fullpath = [...path23, ...issue2.path];
+        const fullpath = [...path30, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -8328,8 +8328,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path23 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path23) {
+  const path30 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path30) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -9950,10 +9950,10 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
     const shape = def.shape;
     const propValues = {};
     for (const key in shape) {
-      const field = shape[key]._zod;
-      if (field.values) {
+      const field2 = shape[key]._zod;
+      if (field2.values) {
         propValues[key] ?? (propValues[key] = /* @__PURE__ */ new Set());
-        for (const v of field.values)
+        for (const v of field2.values)
           propValues[key].add(v);
       }
     }
@@ -20247,17 +20247,17 @@ var ZodArray = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
   inst._zod.processJSONSchema = (ctx, json2, params) => arrayProcessor(inst, ctx, json2, params);
   inst.element = def.element;
   _installLazyMethods(inst, "ZodArray", {
-    min(n, params) {
-      return this.check(_minLength(n, params));
+    min(n2, params) {
+      return this.check(_minLength(n2, params));
     },
     nonempty(params) {
       return this.check(_minLength(1, params));
     },
-    max(n, params) {
-      return this.check(_maxLength(n, params));
+    max(n2, params) {
+      return this.check(_maxLength(n2, params));
     },
-    length(n, params) {
-      return this.check(_length(n, params));
+    length(n2, params) {
+      return this.check(_length(n2, params));
     },
     unwrap() {
       return this.element;
@@ -21021,13 +21021,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path23 = ref.slice(1).split("/").filter(Boolean);
-  if (path23.length === 0) {
+  const path30 = ref.slice(1).split("/").filter(Boolean);
+  if (path30.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path23[0] === defsKey) {
-    const key = path23[1];
+  if (path30[0] === defsKey) {
+    const key = path30[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -23068,6 +23068,360 @@ var StdioServerTransport = class {
   }
 };
 
+// ../core/dist/index.js
+var dist_exports = {};
+__export(dist_exports, {
+  ABOUT_K: () => ABOUT_K,
+  AGREEMENT_LISTS: () => AGREEMENT_LISTS,
+  ANSWER_MAX_WORDS: () => ANSWER_MAX_WORDS,
+  API_MODEL_IDS: () => API_MODEL_IDS,
+  ASK_CARD_CHARS: () => ASK_CARD_CHARS,
+  ASK_CHEAP_K: () => ASK_CHEAP_K,
+  ASK_CHEAP_MODEL: () => ASK_CHEAP_MODEL,
+  ASK_CHEAP_SESSION_CHARS: () => ASK_CHEAP_SESSION_CHARS,
+  ASK_CHEAP_TOP_EXCHANGES: () => ASK_CHEAP_TOP_EXCHANGES,
+  ASK_CONCURRENCY: () => ASK_CONCURRENCY,
+  ASK_K: () => ASK_K,
+  ASK_MAX_USD: () => ASK_MAX_USD,
+  ASK_MODEL: () => ASK_MODEL,
+  ASK_SCAN: () => ASK_SCAN,
+  ASK_SESSION_CHARS: () => ASK_SESSION_CHARS,
+  ASK_TOP_EXCHANGES: () => ASK_TOP_EXCHANGES,
+  Budget: () => Budget,
+  BudgetError: () => BudgetError,
+  CALIBRATION_WINDOW: () => CALIBRATION_WINDOW,
+  CALL_PROFILES: () => CALL_PROFILES,
+  CARD_MODEL: () => CARD_MODEL,
+  CARD_OUTCOMES: () => CARD_OUTCOMES,
+  CARD_SCHEMA: () => CARD_SCHEMA,
+  CHARS_PER_TOKEN: () => CHARS_PER_TOKEN,
+  CHUNK_CHARS: () => CHUNK_CHARS,
+  CITATION_RE: () => CITATION_RE,
+  CLAUDE_DEFAULT_CLEANUP_DAYS: () => CLAUDE_DEFAULT_CLEANUP_DAYS,
+  CORROBORATION: () => CORROBORATION,
+  COVERAGE_COSINE: () => COVERAGE_COSINE,
+  Card: () => Card,
+  DEDUPE_COSINE: () => DEDUPE_COSINE,
+  DEFAULT_BUDGET: () => DEFAULT_BUDGET,
+  DEFAULT_TIMEOUT_MS: () => DEFAULT_TIMEOUT_MS,
+  EVIDENCE_COSINE: () => EVIDENCE_COSINE,
+  EVIDENCE_WINDOWS: () => EVIDENCE_WINDOWS,
+  EVIDENCE_WINDOW_CHARS: () => EVIDENCE_WINDOW_CHARS,
+  GHOST_SYSTEM: () => GHOST_SYSTEM,
+  GRAFT_SYSTEM: () => GRAFT_SYSTEM,
+  GRAFT_WRITE_PATH_NOTE: () => GRAFT_WRITE_PATH_NOTE,
+  GraftError: () => GraftError,
+  HARNESSES: () => HARNESSES,
+  HARNESS_OVERHEAD_USD: () => HARNESS_OVERHEAD_USD,
+  IMPLAUSIBLE_TOKEN_FACTOR: () => IMPLAUSIBLE_TOKEN_FACTOR,
+  INDENT: () => INDENT,
+  LINKED_TO_SQL: () => LINKED_TO_SQL,
+  LISTS: () => LISTS,
+  LOCAL_SOCKET_VERBS: () => LOCAL_SOCKET_VERBS,
+  Llm: () => Llm,
+  LlmError: () => LlmError,
+  MASK_RE: () => MASK_RE,
+  MAX_CALIBRATION_RATIO: () => MAX_RATIO,
+  MAX_CLAIMS: () => MAX_CLAIMS,
+  MAX_CLAIM_CHARS: () => MAX_CLAIM_CHARS,
+  MAX_FILES: () => MAX_FILES,
+  MAX_SUMMARY_WORDS: () => MAX_SUMMARY_WORDS,
+  MAX_TAGS: () => MAX_TAGS,
+  MAX_TAG_LENGTH: () => MAX_TAG_LENGTH,
+  MAX_TITLE_WORDS: () => MAX_TITLE_WORDS,
+  MAX_TOPICS: () => MAX_TOPICS,
+  MAX_UNIT_CHARS: () => MAX_UNIT_CHARS,
+  MEASURED_PRECISION: () => MEASURED_PRECISION,
+  MIN_BUDGET: () => MIN_BUDGET,
+  MIN_CALIBRATION_CALLS: () => MIN_CALLS,
+  MIN_EXCHANGES: () => MIN_EXCHANGES,
+  MIN_GHOST_PROMPTS: () => MIN_GHOST_PROMPTS,
+  MIN_QUOTE_CHARS: () => MIN_QUOTE_CHARS,
+  MIN_UNIT_CHARS: () => MIN_UNIT_CHARS,
+  MODEL_ALIASES: () => MODEL_ALIASES,
+  MODEL_CALL_VERBS: () => MODEL_CALL_VERBS,
+  NoBackendError: () => NoBackendError,
+  NoSqliteError: () => NoSqliteError,
+  OFFLINE_VERBS: () => OFFLINE_VERBS,
+  OPEN_THREAD_LABEL: () => OPEN_THREAD_LABEL,
+  OUTPUT_CHARS_PER_CALL: () => OUTPUT_CHARS_PER_CALL,
+  PER_SESSION: () => PER_SESSION,
+  POTSHERD_CLEANUP_DAYS: () => POTSHERD_CLEANUP_DAYS,
+  PRICES: () => PRICES,
+  PROMPTS_ONLY: () => PROMPTS_ONLY,
+  PROMPT_OVERHEAD_CHARS: () => PROMPT_OVERHEAD_CHARS,
+  QUOTE_CHARS: () => QUOTE_CHARS,
+  READER_CARD_NOTE: () => READER_CARD_NOTE,
+  READER_GHOST_NOTE: () => READER_GHOST_NOTE,
+  READER_SYSTEM: () => READER_SYSTEM,
+  REENTRANCY_ENV: () => REENTRANCY_ENV,
+  ReentrancyError: () => ReentrancyError,
+  SECRET_TYPES: () => SECRET_TYPES,
+  SEQ_HEADER_CHARS: () => SEQ_HEADER_CHARS,
+  SIDECHAIN_DIR: () => SIDECHAIN_DIR,
+  SLICE_CHARS: () => SLICE_CHARS,
+  SLICE_CHUNK_CHARS: () => SLICE_CHUNK_CHARS,
+  SLICE_THRESHOLD_CHARS: () => SLICE_THRESHOLD_CHARS,
+  STRICT_MIN_EVIDENCE: () => STRICT_MIN_EVIDENCE,
+  STRONG_FLOOR: () => STRONG_FLOOR,
+  SUGGEST_DEFAULT_LIMIT: () => DEFAULT_LIMIT,
+  SYNTH_SYSTEM: () => SYNTH_SYSTEM,
+  TARGET_SECONDS: () => TARGET_SECONDS,
+  TARGET_USD: () => TARGET_USD,
+  TIMEOUT_RETRIES: () => TIMEOUT_RETRIES,
+  Theme: () => Theme,
+  UNCOVERED_FRACTION: () => UNCOVERED_FRACTION,
+  VERIFY_DEFINITIONS: () => VERIFY_DEFINITIONS,
+  VERIFY_SCRIPT_PATH: () => VERIFY_SCRIPT_PATH,
+  VERIFY_SCRIPT_URL: () => VERIFY_SCRIPT_URL,
+  VERIFY_SNIPPET: () => VERIFY_SNIPPET,
+  VERSION: () => VERSION,
+  WEAK_FLOOR: () => WEAK_FLOOR,
+  WEIGHTS: () => WEIGHTS,
+  WEIGHT_AGREEMENT: () => WEIGHT_AGREEMENT,
+  WEIGHT_BASE: () => WEIGHT_BASE,
+  WEIGHT_STRENGTH: () => WEIGHT_STRENGTH,
+  accuracyNote: () => accuracyNote,
+  accuracyShort: () => accuracyShort,
+  adapterSpecs: () => adapterSpecs,
+  addCounts: () => addCounts,
+  addElisions: () => addElisions,
+  allTags: () => allTags,
+  applyTags: () => applyTags,
+  approxDuration: () => approxDuration,
+  asSeqList: () => asSeqList,
+  ask: () => ask,
+  atLeastConfident: () => atLeastConfident,
+  audit: () => audit,
+  availability: () => availability,
+  backupPath: () => backupPath,
+  bestMatch: () => bestMatch,
+  buildPrompt: () => buildPrompt,
+  cachedEmbedder: () => cachedEmbedder,
+  calibrate: () => calibrate,
+  callProfile: () => callProfile,
+  cardEmbeddingText: () => cardEmbeddingText,
+  cardItems: () => cardItems,
+  cardMarkdown: () => cardMarkdown,
+  cardOnlyBody: () => cardOnlyBody,
+  cardPath: () => cardPath,
+  cardRuns: () => cardRuns,
+  cardSentinel: () => sentinel_exports,
+  cardTranscript: () => cardTranscript,
+  cheapNote: () => cheapNote,
+  clampWords: () => clampWords,
+  claude: () => claude_exports,
+  claudeAdapter: () => claudeAdapter,
+  clipQuote: () => clipQuote,
+  clipSafe: () => clipSafe,
+  codex: () => codex_exports,
+  codexAdapter: () => codexAdapter,
+  codexVersion: () => version_exports,
+  collectAudit: () => collectAudit,
+  collectSource: () => collectSource,
+  compactNumber: () => compact,
+  compareToEstimate: () => compareToEstimate,
+  computeAudit: () => computeAudit,
+  confidenceLabel: () => label,
+  confirmOpenThreads: () => confirmOpenThreads,
+  consent: () => consent_exports,
+  containsMask: () => containsMask,
+  copilot: () => copilot_exports,
+  copilotAdapter: () => copilotAdapter,
+  copyToClipboard: () => copyToClipboard,
+  cosine: () => cosine,
+  countTokens: () => countTokens,
+  counterFor: () => counterFor,
+  countsJson: () => countsJson,
+  coveredTerms: () => coveredTerms,
+  cursor: () => cursor_exports,
+  cursorAdapter: () => cursorAdapter,
+  db: () => db_exports,
+  decisionEvidence: () => decisionEvidence,
+  dedupeCard: () => dedupeCard,
+  detectBackend: () => detectBackend,
+  displayTitleOf: () => displayTitleOf,
+  effectiveConcurrency: () => effectiveConcurrency,
+  elideBinary: () => elideBinary,
+  elideExchange: () => elideExchange,
+  elideMiddle: () => elideMiddle2,
+  embeddings: () => embeddings_exports,
+  emptyCard: () => emptyCard,
+  emptyCounts: () => emptyCounts,
+  emptyElisions: () => emptyElisions,
+  emptySpend: () => emptySpend,
+  enforceBudget: () => enforceBudget,
+  ensureGraftDir: () => ensureGraftDir,
+  escapeHtml: () => esc2,
+  estimate: () => estimate,
+  excerptText: () => excerptText,
+  excerptUnits: () => excerptUnits,
+  exportCards: () => exportCards,
+  extractCalls: () => extractCalls,
+  extractCard: () => extractCard,
+  fallbackCard: () => fallbackCard,
+  fallbackTitle: () => fallbackTitle,
+  filterAnswer: () => filterAnswer,
+  fitLine: () => fitLine,
+  format: () => format_exports,
+  fromGhostRow: () => fromGhostRow,
+  fromSessionRow: () => fromSessionRow,
+  ftsQuery: () => ftsQuery,
+  gemini: () => gemini_exports,
+  geminiAdapter: () => geminiAdapter,
+  ghostClaimGate: () => ghostClaimGate,
+  ghostProjectSlug: () => ghostProjectSlug,
+  graft: () => graft,
+  graftDir: () => graftDir,
+  graftJson: () => graftJson,
+  graftPath: () => graftPath,
+  idTag: () => idTag,
+  indexAll: () => indexAll,
+  ingestGhosts: () => ingestGhosts,
+  ingestSession: () => ingestSession,
+  insidePotsherdCall: () => insidePotsherdCall,
+  isAdapter: () => isAdapter,
+  isAlias: () => isAlias,
+  isPinned: () => isPinned,
+  isStale: () => isStale2,
+  lastAgentMessage: () => lastAgentMessage,
+  linkSessions: () => linkSessions,
+  linkedSessionIds: () => linkedSessionIds,
+  listSessions: () => listSessions,
+  loadGhostTranscript: () => loadGhostTranscript,
+  loadSessionTranscript: () => loadSessionTranscript,
+  loadVectors: () => loadVectors,
+  lock: () => lock_exports,
+  looksLikeJsonc: () => looksLikeJsonc,
+  makeGate: () => makeGate,
+  marker: () => marker,
+  markers: () => markers_exports,
+  maskFor: () => maskFor,
+  maskSafeCut: () => maskSafeCut,
+  matchSpan: () => matchSpan,
+  maxConfidence: () => maxConfidence,
+  measureCoverage: () => measureCoverage,
+  mergeSupplement: () => mergeSupplement,
+  minimalCard: () => minimalCard,
+  modelClass: () => modelClass,
+  normaliseCard: () => normaliseCard,
+  normaliseQuote: () => normaliseQuote,
+  normalizeTag: () => normalizeTag,
+  noteWidth: () => noteWidth,
+  onPath: () => onPath,
+  openGate: () => openGate,
+  openThreadCandidates: () => openThreadCandidates,
+  opencode: () => opencode_exports,
+  opencodeAdapter: () => opencodeAdapter,
+  parseJsonish: () => parseJsonish,
+  parseTagArgs: () => parseTagArgs,
+  parser: () => parser_exports,
+  paths: () => paths_exports,
+  pi: () => pi_exports,
+  piAdapter: () => piAdapter,
+  pinSession: () => pinSession,
+  pinnedSessionIds: () => pinnedSessionIds,
+  planCards: () => planCards,
+  projectName: () => projectName,
+  quotableText: () => quotableText,
+  quoteOccursIn: () => quoteOccursIn,
+  rankedWindows: () => rankedWindows,
+  readArchiveState: () => readArchiveState,
+  readCalibration: () => readCalibration,
+  readCard: () => readCard,
+  readCleanupStatus: () => readCleanupStatus,
+  readHistory: () => readHistory,
+  readIndexState: () => readIndexState,
+  readPriorCard: () => readPriorCard,
+  readSessionsIndexes: () => readSessionsIndexes,
+  readSettingsFile: () => readSettingsFile,
+  readerLine: () => readerLine,
+  recall: () => recall,
+  recordCardRun: () => recordCardRun,
+  redact: () => redact,
+  redactExchange: () => redactExchange,
+  redactOutgoing: () => redactOutgoing,
+  redactText: () => redactText,
+  redaction: () => redact_exports,
+  redactionLine: () => redactionLine,
+  redactionRow: () => redactionRow,
+  relativeStrength: () => relativeStrength,
+  renderAsk: () => renderAsk,
+  renderAuditCard: () => renderAuditCard,
+  renderCardRun: () => renderCardRun,
+  renderEstimate: () => renderEstimate,
+  renderFind: () => renderFind,
+  renderGraft: () => renderGraft,
+  renderLs: () => renderLs,
+  renderRescueReceipt: () => renderRescueReceipt,
+  renderResumeMenu: () => renderResumeMenu,
+  renderShow: () => renderShow,
+  renderShowHtml: () => renderShowHtml,
+  renderShowMarkdown: () => renderShowMarkdown,
+  renderStats: () => renderStats,
+  renderSuggestions: () => renderSuggestions,
+  renderSweepList: () => renderSweepList,
+  renderUnit: () => renderUnit,
+  renderVerify: () => renderVerify,
+  rescue: () => rescue,
+  resolveCitations: () => resolveCitations,
+  resolveHookCommand: () => resolveHookCommand,
+  resolveModel: () => resolveModel,
+  resolveSession: () => resolveSession,
+  resolveTarget: () => resolveTarget,
+  resumeCommand: () => resumeCommand,
+  runCards: () => runCards,
+  safeCut: () => safeCut,
+  safeSlug: () => safeSlug,
+  scanClaudeDisk: () => scanClaudeDisk,
+  scanFile: () => scanFile,
+  search: () => search_exports,
+  secretDigest: () => secretDigest,
+  sessionLinks: () => sessionLinks,
+  sessionMeta: () => sessionMeta,
+  sessionStats: () => stats,
+  sessionTags: () => sessionTags,
+  setup: () => setup_exports,
+  sha256File: () => sha256File,
+  showSession: () => showSession,
+  sliceUnits: () => sliceUnits,
+  slugToPathGuess: () => slugToPathGuess,
+  snippetFor: () => snippetFor,
+  snippetLine: () => snippetLine,
+  sourceLine: () => sourceLine,
+  sqliteAvailable: () => sqliteAvailable,
+  stack: () => stack_exports,
+  statesDecision: () => statesDecision,
+  storedRecordTypes: () => storedRecordTypes,
+  storedRedactionCounts: () => storedRedactionCounts,
+  stripAnsi: () => stripAnsi,
+  suggestLinks: () => suggestLinks,
+  supplementCard: () => supplementCard,
+  table: () => table,
+  tagify: () => tagify,
+  tagsForSessions: () => tagsForSessions,
+  tally: () => tally,
+  toAscii: () => toAscii,
+  tokensForChars: () => tokensForChars,
+  tokensForText: () => tokensForText,
+  transcriptBlock: () => transcriptBlock,
+  unifiedDiff: () => unifiedDiff,
+  unitHeader: () => unitHeader,
+  unitText: () => unitText,
+  unlinkSessions: () => unlinkSessions,
+  unpinSession: () => unpinSession,
+  unresolvedEvidence: () => unresolvedEvidence,
+  validateCard: () => validateCard,
+  vecAvailable: () => vecAvailable,
+  vecStatus: () => vecStatus,
+  vectorState: () => vectorState,
+  verifyCard: () => verifyCard,
+  verifyInfo: () => verifyInfo,
+  windows: () => windows,
+  writeCard: () => writeCard,
+  writeIndexState: () => writeIndexState
+});
+
 // ../core/dist/paths.js
 var paths_exports = {};
 __export(paths_exports, {
@@ -23290,8 +23644,8 @@ __export(format_exports, {
   wrap: () => wrap
 });
 var MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-function num(n) {
-  return Math.round(n).toLocaleString("en-US");
+function num(n2) {
+  return Math.round(n2).toLocaleString("en-US");
 }
 function pct(part, whole) {
   if (whole <= 0)
@@ -23344,9 +23698,9 @@ function money(usd) {
     return `$${usd.toFixed(3)}`;
   return `$${usd.toFixed(2)}`;
 }
-function bytes(n) {
+function bytes(n2) {
   const units = ["B", "KB", "MB", "GB", "TB"];
-  let v = n;
+  let v = n2;
   let i = 0;
   while (v >= 1024 && i < units.length - 1) {
     v /= 1024;
@@ -23359,29 +23713,29 @@ var ELLIPSIS = "\u2026";
 function ellipsisOf(e) {
   return typeof e === "string" ? e : e.ellip;
 }
-function elideMiddle(s, max, ellipsis = ELLIPSIS) {
+function elideMiddle(s, max2, ellipsis = ELLIPSIS) {
   const ellip = ellipsisOf(ellipsis);
-  if (s.length <= max)
+  if (s.length <= max2)
     return s;
-  if (max <= ellip.length)
-    return ellip.slice(0, max);
-  const keep = max - ellip.length;
+  if (max2 <= ellip.length)
+    return ellip.slice(0, max2);
+  const keep = max2 - ellip.length;
   const right = Math.ceil(keep / 2);
   const left = keep - right;
   return s.slice(0, left) + ellip + s.slice(s.length - right);
 }
-function elide(s, max, ellipsis = ELLIPSIS) {
-  return clip(s.replace(/\s+/g, " ").trim(), max, ellipsis);
+function elide(s, max2, ellipsis = ELLIPSIS) {
+  return clip(s.replace(/\s+/g, " ").trim(), max2, ellipsis);
 }
-function clip(s, max, ellipsis = ELLIPSIS) {
-  if (s.length <= max)
+function clip(s, max2, ellipsis = ELLIPSIS) {
+  if (s.length <= max2)
     return s;
   const ellip = ellipsisOf(ellipsis);
-  if (max <= ellip.length)
-    return ellip.slice(0, max);
-  return s.slice(0, max - ellip.length).trimEnd() + ellip;
+  if (max2 <= ellip.length)
+    return ellip.slice(0, max2);
+  return s.slice(0, max2 - ellip.length).trimEnd() + ellip;
 }
-function joinFit(items, max, sepChar = " \xB7 ", ellipsis = ELLIPSIS) {
+function joinFit(items, max2, sepChar = " \xB7 ", ellipsis = ELLIPSIS) {
   if (items.length === 0)
     return "";
   const ellip = ellipsisOf(ellipsis);
@@ -23389,22 +23743,22 @@ function joinFit(items, max, sepChar = " \xB7 ", ellipsis = ELLIPSIS) {
   let shown = 0;
   for (const item of items) {
     const next = out ? out + sepChar + item : item;
-    if (next.length > max)
+    if (next.length > max2)
       break;
     out = next;
     shown++;
   }
   if (shown === 0)
-    return elide(items[0], max, ellip);
+    return elide(items[0], max2, ellip);
   if (shown < items.length) {
     const withEllip = out + sepChar + ellip;
-    if (withEllip.length <= max)
+    if (withEllip.length <= max2)
       return withEllip;
   }
   return out;
 }
 function wrap(s, width) {
-  const max = Math.max(8, width);
+  const max2 = Math.max(8, width);
   const out = [];
   for (const paragraph of s.replace(/\r/g, "").split("\n")) {
     if (paragraph.trim() === "") {
@@ -23415,15 +23769,15 @@ function wrap(s, width) {
     for (const word of paragraph.split(/[ \t]+/).filter(Boolean)) {
       if (!line) {
         line = word;
-      } else if (line.length + 1 + word.length <= max) {
+      } else if (line.length + 1 + word.length <= max2) {
         line += " " + word;
       } else {
         out.push(line);
         line = word;
       }
-      while (line.length > max) {
-        out.push(line.slice(0, max));
-        line = line.slice(max);
+      while (line.length > max2) {
+        out.push(line.slice(0, max2));
+        line = line.slice(max2);
       }
     }
     if (line)
@@ -23431,8 +23785,8 @@ function wrap(s, width) {
   }
   return out;
 }
-function plural(n, one2, many = one2 + "s") {
-  return n === 1 ? one2 : many;
+function plural(n2, one2, many = one2 + "s") {
+  return n2 === 1 ? one2 : many;
 }
 function iso(d = /* @__PURE__ */ new Date()) {
   const dt = toDate(d);
@@ -23610,11 +23964,11 @@ function wrap2(db) {
         }
       };
     },
-    loadExtension(path23) {
+    loadExtension(path30) {
       db.enableLoadExtension?.(true);
       if (!db.loadExtension)
         throw new Error("this sqlite cannot load extensions");
-      db.loadExtension(path23);
+      db.loadExtension(path30);
     },
     get inTransaction() {
       return depth > 0;
@@ -23657,8 +24011,8 @@ function loadVec(db) {
   let status;
   try {
     db.loadExtension(found.path);
-    const row = db.prepare("SELECT vec_version() AS v").get();
-    status = { available: true, path: found.path, ...row?.v ? { version: row.v } : {} };
+    const row2 = db.prepare("SELECT vec_version() AS v").get();
+    status = { available: true, path: found.path, ...row2?.v ? { version: row2.v } : {} };
   } catch (err) {
     status = {
       available: false,
@@ -23708,8 +24062,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS vec_ghost_prompts USING vec0(
 }
 function vecTablesExist(db) {
   try {
-    const row = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'vec_exchanges'`).get();
-    return row.n > 0;
+    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'vec_exchanges'`).get();
+    return row2.n > 0;
   } catch {
     return false;
   }
@@ -24113,36 +24467,160 @@ function latestSchemaVersion() {
 }
 function count(db, table2) {
   try {
-    const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table2}`).get();
-    return row.n;
+    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM ${table2}`).get();
+    return row2.n;
   } catch {
     return 0;
   }
 }
 
 // ../core/dist/lock.js
-var STALE_MS = 5 * 6e4;
-
-// ../core/dist/resolve-bin.js
+var lock_exports = {};
+__export(lock_exports, {
+  LockBusyError: () => LockBusyError,
+  acquire: () => acquire,
+  withLock: () => withLock,
+  withLockAsync: () => withLockAsync
+});
 import fs2 from "node:fs";
 import path3 from "node:path";
 import process6 from "node:process";
-function onPath(name = "potsherd", env = process6.env) {
+var STALE_MS = 5 * 6e4;
+var LockBusyError = class extends Error {
+  holder;
+  constructor(holder, lockPath) {
+    super(holder ? `another potsherd is running (pid ${holder.pid}, ${holder.op}, since ${holder.at}). if that is wrong, remove ${lockPath}` : `another potsherd is running. if that is wrong, remove ${lockPath}`);
+    this.holder = holder;
+    this.name = "LockBusyError";
+  }
+};
+function acquire(op, opts = {}) {
+  const root = opts.root ?? potsherdDir();
+  const lockPath = path3.join(root, ".lock");
+  const deadline = Date.now() + (opts.wait ?? 0);
+  fs2.mkdirSync(root, { recursive: true, mode: 448 });
+  for (; ; ) {
+    try {
+      fs2.mkdirSync(lockPath);
+      const info = {
+        pid: process6.pid,
+        op,
+        at: (/* @__PURE__ */ new Date()).toISOString(),
+        host: process6.env.HOSTNAME ?? ""
+      };
+      fs2.writeFileSync(path3.join(lockPath, "owner.json"), JSON.stringify(info), { mode: 384 });
+      let released = false;
+      return {
+        path: lockPath,
+        release() {
+          if (released)
+            return;
+          released = true;
+          try {
+            fs2.rmSync(lockPath, { recursive: true, force: true });
+          } catch {
+          }
+        }
+      };
+    } catch (err) {
+      if (err.code !== "EEXIST")
+        throw err;
+      const holder = readOwner(lockPath);
+      if (isStale(lockPath, holder)) {
+        try {
+          fs2.rmSync(lockPath, { recursive: true, force: true });
+        } catch {
+        }
+        continue;
+      }
+      if (Date.now() >= deadline)
+        throw new LockBusyError(holder, lockPath);
+      sleepSync(100);
+    }
+  }
+}
+function withLock(op, fn, opts = {}) {
+  const lock = acquire(op, opts);
+  try {
+    return fn();
+  } finally {
+    lock.release();
+  }
+}
+async function withLockAsync(op, fn, opts = {}) {
+  const lock = acquire(op, opts);
+  try {
+    return await fn();
+  } finally {
+    lock.release();
+  }
+}
+function readOwner(lockPath) {
+  try {
+    return JSON.parse(fs2.readFileSync(path3.join(lockPath, "owner.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function isStale(lockPath, holder) {
+  if (holder && holder.pid && (!holder.host || holder.host === (process6.env.HOSTNAME ?? ""))) {
+    if (!pidAlive(holder.pid))
+      return true;
+  }
+  try {
+    return Date.now() - fs2.statSync(lockPath).mtimeMs > STALE_MS;
+  } catch {
+    return true;
+  }
+}
+function pidAlive(pid) {
+  try {
+    process6.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// ../core/dist/consent.js
+var consent_exports = {};
+__export(consent_exports, {
+  GUARD_ARGS: () => GUARD_ARGS,
+  GUARD_COMMAND: () => GUARD_COMMAND,
+  applyProposal: () => applyProposal,
+  guardCommandFor: () => guardCommandFor,
+  guardInstalled: () => guardInstalled,
+  installedGuardCommand: () => installedGuardCommand,
+  manualInstructions: () => manualInstructions,
+  proposeCleanupPeriod: () => proposeCleanupPeriod,
+  proposeGuardHook: () => proposeGuardHook,
+  settingsExists: () => settingsExists
+});
+import fs5 from "node:fs";
+
+// ../core/dist/resolve-bin.js
+import fs3 from "node:fs";
+import path4 from "node:path";
+import process7 from "node:process";
+function onPath(name = "potsherd", env = process7.env) {
   const raw = env["PATH"];
   if (!raw)
     return null;
-  const exts = process6.platform === "win32" ? (env["PATHEXT"] ?? ".EXE;.CMD;.BAT").split(";") : [""];
-  for (const dir of raw.split(path3.delimiter)) {
+  const exts = process7.platform === "win32" ? (env["PATHEXT"] ?? ".EXE;.CMD;.BAT").split(";") : [""];
+  for (const dir of raw.split(path4.delimiter)) {
     if (!dir)
       continue;
     for (const ext of exts) {
-      const candidate = path3.join(dir, name + ext);
+      const candidate = path4.join(dir, name + ext);
       try {
-        const st = fs2.statSync(candidate);
+        const st = fs3.statSync(candidate);
         if (st.isFile()) {
-          if (process6.platform === "win32")
+          if (process7.platform === "win32")
             return candidate;
-          fs2.accessSync(candidate, fs2.constants.X_OK);
+          fs3.accessSync(candidate, fs3.constants.X_OK);
           return candidate;
         }
       } catch {
@@ -24151,19 +24629,1065 @@ function onPath(name = "potsherd", env = process6.env) {
   }
   return null;
 }
+function resolveHookCommand(args, entry2) {
+  const found = onPath("potsherd");
+  if (found)
+    return { command: `potsherd ${args}`, via: "path", file: found };
+  const self = entry2 && fs3.existsSync(entry2) ? path4.resolve(entry2) : null;
+  if (self) {
+    return { command: `node "${self}" ${args}`, via: "absolute", file: self };
+  }
+  return { command: `potsherd ${args}`, via: "path" };
+}
+
+// ../core/dist/claude/settings.js
+import fs4 from "node:fs";
+import path5 from "node:path";
+var CLAUDE_DEFAULT_CLEANUP_DAYS = 30;
+var POTSHERD_CLEANUP_DAYS = 3650;
+function readSettingsFile(p) {
+  if (!fs4.existsSync(p))
+    return { path: p, exists: false };
+  let text;
+  try {
+    text = fs4.readFileSync(p, "utf8");
+  } catch (err) {
+    return { path: p, exists: true, parseError: `unreadable: ${err.message}` };
+  }
+  const file2 = { path: p, exists: true, text, jsonc: looksLikeJsonc(text) };
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      file2.json = parsed;
+    } else {
+      file2.parseError = "top level is not an object";
+    }
+  } catch (err) {
+    file2.parseError = err.message;
+  }
+  return file2;
+}
+function readCleanupStatus(dir) {
+  const cp = claudePaths(dir);
+  const managed = readSettingsFile(managedSettingsPath());
+  const local = readSettingsFile(cp.localSettings);
+  const user = readSettingsFile(cp.settings);
+  let effective = CLAUDE_DEFAULT_CLEANUP_DAYS;
+  let source = "default";
+  let declared = null;
+  for (const [src, f] of [["user", user], ["local", local], ["managed", managed]]) {
+    const v = f.json?.["cleanupPeriodDays"];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      effective = v;
+      source = src;
+      if (src === "user")
+        declared = v;
+    }
+  }
+  if (typeof user.json?.["cleanupPeriodDays"] === "number") {
+    declared = user.json["cleanupPeriodDays"];
+  }
+  let editable = true;
+  let reason;
+  if (managed.exists && typeof managed.json?.["cleanupPeriodDays"] === "number") {
+    editable = false;
+    reason = `an enterprise-managed policy at ${managed.path} sets cleanupPeriodDays; a user setting cannot override it`;
+  } else if (user.exists && user.jsonc) {
+    editable = false;
+    reason = `${user.path} contains comments, so rewriting it as JSON would drop them`;
+  } else if (user.exists && user.parseError) {
+    editable = false;
+    reason = `${user.path} is not valid JSON (${user.parseError})`;
+  }
+  return { effective, declared, source, files: { managed, local, user }, editable, reason };
+}
+function looksLikeJsonc(text) {
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (c === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (c === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString)
+      continue;
+    if (c === "/" && (text[i + 1] === "/" || text[i + 1] === "*"))
+      return true;
+  }
+  return false;
+}
+function stringifySettings(json2) {
+  return JSON.stringify(json2, null, 2) + "\n";
+}
+function backupPath(p, now = /* @__PURE__ */ new Date()) {
+  const stamp = now.toISOString().replace(/[:.]/g, "-").replace(/-\d{3}Z$/, "Z");
+  return `${p}.potsherd-bak-${stamp}`;
+}
+function writeSettingsWithBackup(p, json2, now = /* @__PURE__ */ new Date()) {
+  let backup = null;
+  if (fs4.existsSync(p)) {
+    backup = backupPath(p, now);
+    fs4.copyFileSync(p, backup);
+  } else {
+    fs4.mkdirSync(path5.dirname(p), { recursive: true });
+  }
+  fs4.writeFileSync(p, stringifySettings(json2), { mode: 384 });
+  return { backup };
+}
+function unifiedDiff(before, after, label3) {
+  const a = before.split("\n");
+  const b = after.split("\n");
+  const out = [`--- ${label3}`, `+++ ${label3}`];
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start])
+    start++;
+  let endA = a.length - 1;
+  let endB = b.length - 1;
+  while (endA >= start && endB >= start && a[endA] === b[endB]) {
+    endA--;
+    endB--;
+  }
+  const ctx = 3;
+  const from = Math.max(0, start - ctx);
+  const toA = Math.min(a.length - 1, endA + ctx);
+  const toB = Math.min(b.length - 1, endB + ctx);
+  out.push(`@@ -${from + 1},${toA - from + 1} +${from + 1},${toB - from + 1} @@`);
+  for (let i = from; i < start; i++)
+    out.push(" " + a[i]);
+  for (let i = start; i <= endA; i++)
+    out.push("-" + a[i]);
+  for (let i = start; i <= endB; i++)
+    out.push("+" + b[i]);
+  for (let i = endA + 1; i <= toA; i++)
+    out.push(" " + a[i]);
+  return out.join("\n");
+}
 
 // ../core/dist/consent.js
 var GUARD_ARGS = "rescue --yes --quiet --no-settings";
 var GUARD_COMMAND = `potsherd ${GUARD_ARGS}`;
+var GUARD_MATCHER = "startup|resume";
+var GUARD_MARKER = GUARD_ARGS;
+function proposeCleanupPeriod(dir, days = POTSHERD_CLEANUP_DAYS, status) {
+  const st = status ?? readCleanupStatus(dir);
+  const p = claudePaths(dir).settings;
+  const before = st.files.user.text ?? "{}\n";
+  if (!st.editable) {
+    return {
+      path: p,
+      before,
+      after: before,
+      diff: "",
+      safe: false,
+      reason: st.reason ?? "settings.json cannot be edited safely",
+      noop: false
+    };
+  }
+  const json2 = st.files.user.json ? structuredClone(st.files.user.json) : {};
+  if (json2["cleanupPeriodDays"] === days) {
+    return { path: p, before, after: before, diff: "", safe: true, noop: true };
+  }
+  json2["cleanupPeriodDays"] = days;
+  const after = stringifySettings(json2);
+  return {
+    path: p,
+    before,
+    after,
+    diff: unifiedDiff(before, after, shortPath(p)),
+    safe: true,
+    noop: false
+  };
+}
+function proposeGuardHook(dir, opts = {}) {
+  const st = readCleanupStatus(dir);
+  const p = claudePaths(dir).settings;
+  const before = st.files.user.text ?? "{}\n";
+  if (st.files.user.exists && (st.files.user.jsonc || st.files.user.parseError)) {
+    return {
+      path: p,
+      before,
+      after: before,
+      diff: "",
+      safe: false,
+      reason: st.files.user.jsonc ? `${p} contains comments, so rewriting it as JSON would drop them` : `${p} is not valid JSON (${st.files.user.parseError})`,
+      noop: false
+    };
+  }
+  const json2 = st.files.user.json ? structuredClone(st.files.user.json) : {};
+  const hooks = json2["hooks"] ??= {};
+  const list = Array.isArray(hooks["SessionStart"]) ? [...hooks["SessionStart"]] : [];
+  const isOurs = (e) => (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(GUARD_MARKER));
+  const already = list.some(isOurs);
+  if (opts.remove) {
+    if (!already)
+      return { path: p, before, after: before, diff: "", safe: true, noop: true };
+    const kept = list.filter((e) => !isOurs(e));
+    if (kept.length)
+      hooks["SessionStart"] = kept;
+    else
+      delete hooks["SessionStart"];
+    if (Object.keys(hooks).length === 0)
+      delete json2["hooks"];
+  } else {
+    if (already)
+      return { path: p, before, after: before, diff: "", safe: true, noop: true };
+    list.push({
+      matcher: GUARD_MATCHER,
+      hooks: [{ type: "command", command: opts.command ?? GUARD_COMMAND, timeout: 10 }]
+    });
+    hooks["SessionStart"] = list;
+  }
+  const after = stringifySettings(json2);
+  return {
+    path: p,
+    before,
+    after,
+    diff: unifiedDiff(before, after, shortPath(p)),
+    safe: true,
+    noop: false
+  };
+}
+function guardCommandFor(entry2) {
+  return resolveHookCommand(GUARD_ARGS, entry2);
+}
+function guardInstalled(dir) {
+  return installedGuardCommand(dir) !== null;
+}
+function installedGuardCommand(dir) {
+  const st = readCleanupStatus(dir);
+  const hooks = st.files.user.json?.["hooks"];
+  const list = hooks?.["SessionStart"];
+  if (!Array.isArray(list))
+    return null;
+  for (const entry2 of list) {
+    for (const h of entry2.hooks ?? []) {
+      if (typeof h.command === "string" && h.command.includes(GUARD_MARKER))
+        return h.command;
+    }
+  }
+  return null;
+}
+function applyProposal(proposal, now = /* @__PURE__ */ new Date()) {
+  if (!proposal.safe)
+    throw new Error(proposal.reason ?? "refusing to write settings");
+  if (proposal.noop)
+    return { written: false, backup: null };
+  const parsed = JSON.parse(proposal.after);
+  if (!parsed || typeof parsed !== "object")
+    throw new Error("refusing to write non-object settings");
+  const { backup } = writeSettingsWithBackup(proposal.path, parsed, now);
+  return { written: true, backup };
+}
+function manualInstructions(proposal, what, days = POTSHERD_CLEANUP_DAYS) {
+  const lines = [`potsherd did not edit ${shortPath(proposal.path)}: ${proposal.reason}`, ""];
+  if (what === "cleanup") {
+    lines.push("to keep your sessions, add this key by hand:", "", `  "cleanupPeriodDays": ${days}`);
+  } else {
+    lines.push('to install the guard by hand, add to "hooks":', "");
+    lines.push(...JSON.stringify({ SessionStart: [{ matcher: GUARD_MATCHER, hooks: [{ type: "command", command: GUARD_COMMAND, timeout: 10 }] }] }, null, 2).split("\n").map((l) => "  " + l));
+  }
+  return lines;
+}
+function shortPath(p) {
+  const h = process.env.HOME ?? "";
+  return h && p.startsWith(h) ? "~" + p.slice(h.length) : p;
+}
+function settingsExists(dir) {
+  return fs5.existsSync(claudePaths(dir).settings);
+}
 
 // ../core/dist/theme.js
+import process8 from "node:process";
+var CSI = "\x1B[";
+var Theme = class {
+  color;
+  ascii;
+  width;
+  constructor(opts = {}) {
+    this.color = opts.color ?? detectColor();
+    this.ascii = opts.ascii ?? detectAscii();
+    this.width = opts.width ?? detectWidth();
+  }
+  wrap(code, s) {
+    return this.color ? `${CSI}${code}m${s}${CSI}0m` : s;
+  }
+  /** The single most important number on the screen. Exactly one per card. */
+  accent(s) {
+    return this.wrap("38;5;209", s);
+  }
+  /** Urgency: something is about to be lost. */
+  warn(s) {
+    return this.wrap("38;5;214", s);
+  }
+  /** Done, saved, safe. */
+  ok(s) {
+    return this.wrap("38;5;71", s);
+  }
+  /** Secondary text: units, notes, sources. */
+  dim(s) {
+    return this.wrap("2", s);
+  }
+  bold(s) {
+    return this.wrap("1", s);
+  }
+  /** Pick a glyph, with an ASCII fallback for --ascii / non-unicode terminals. */
+  g(unicode, fallback) {
+    return this.ascii ? fallback : unicode;
+  }
+  get arrow() {
+    return this.g("\u2192", "->");
+  }
+  get mid() {
+    return this.g("\xB7", ".");
+  }
+  get sep() {
+    return this.g("\xB7", "|");
+  }
+  get ellip() {
+    return this.g("\u2026", "...");
+  }
+  get star() {
+    return this.g("\u2605", "*");
+  }
+  get le() {
+    return this.g("\u2264", "<=");
+  }
+  get bullet() {
+    return this.g("\u2022", "-");
+  }
+  /** The em dash that stands in for "no number here". */
+  get dash() {
+    return this.g("\u2014", "-");
+  }
+  /**
+   * Fold one rendered line to pure ASCII, when `--ascii` is on.
+   *
+   * Applied at the very end, after the line has been fitted to the terminal
+   * width, so **every substitution is exactly one character wide or narrower**.
+   * That is the whole design constraint: `…` → `...` here would push a line
+   * that just fitted 80 columns to 82. The three-character ellipsis comes from
+   * {@link ellip}, which the width arithmetic sees; this is only the net.
+   */
+  asciiLine(s) {
+    return this.ascii ? toAscii(s) : s;
+  }
+  /** Visible width, ignoring ANSI escapes. */
+  static len(s) {
+    return stripAnsi(s).length;
+  }
+};
+var ASCII_FOLD = {
+  "\u2026": ".",
+  "\xB7": ".",
+  "\u2022": "*",
+  "\u2027": ".",
+  "\u2219": ".",
+  "\u2014": "-",
+  "\u2013": "-",
+  "\u2012": "-",
+  "\u2212": "-",
+  "\u2015": "-",
+  "\u2192": ">",
+  "\u21D2": ">",
+  "\u2190": "<",
+  "\u21D0": "<",
+  "\u2191": "^",
+  "\u2193": "v",
+  "\u2264": "<",
+  "\u2265": ">",
+  "\u2260": "!",
+  "\xB1": "~",
+  "\xD7": "x",
+  "\xF7": "/",
+  "\u2605": "*",
+  "\u2606": "*",
+  "\u2713": "v",
+  "\u2714": "v",
+  "\u2717": "x",
+  "\u2718": "x",
+  "\u2039": "<",
+  "\u203A": ">",
+  "\xAB": "<",
+  "\xBB": ">",
+  "\u201C": '"',
+  "\u201D": '"',
+  "\u201E": '"',
+  "\u2018": "'",
+  "\u2019": "'",
+  "\u201A": "'",
+  "\u2588": "#",
+  "\u2587": "#",
+  "\u2593": "#",
+  "\u2592": "+",
+  "\u2591": ".",
+  "\u25A0": "#",
+  "\u25A1": ".",
+  "\u2502": "|",
+  "\u2500": "-",
+  "\u250C": "+",
+  "\u2510": "+",
+  "\u2514": "+",
+  "\u2518": "+",
+  "\u251C": "+",
+  "\u2524": "+",
+  "\u252C": "+",
+  "\u2534": "+",
+  "\u253C": "+",
+  "\xB0": "o",
+  "\xA7": "S",
+  "\xB6": "P",
+  "\xA0": " ",
+  "\u2007": " ",
+  "\u2009": " ",
+  "\u202F": " ",
+  "\uFEFF": ""
+};
+function toAscii(s) {
+  if (!/[^\x00-\x7F]/.test(s))
+    return s;
+  let out = "";
+  for (const ch of s) {
+    if (ch.charCodeAt(0) < 128 && ch.length === 1) {
+      out += ch;
+      continue;
+    }
+    const mapped = ASCII_FOLD[ch];
+    if (mapped !== void 0) {
+      out += mapped;
+      continue;
+    }
+    const bare = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    out += bare.length === 1 && !/[^\x00-\x7F]/.test(bare) ? bare : "?";
+  }
+  return out;
+}
 var ANSI_RE = new RegExp("\\u001b\\[[0-9;]*m", "g");
+function stripAnsi(s) {
+  return s.replace(ANSI_RE, "");
+}
+function detectColor() {
+  if (process8.env.NO_COLOR !== void 0 && process8.env.NO_COLOR !== "")
+    return false;
+  if (process8.env.FORCE_COLOR && process8.env.FORCE_COLOR !== "0")
+    return true;
+  if (process8.env.TERM === "dumb")
+    return false;
+  return Boolean(process8.stdout.isTTY);
+}
+function detectAscii() {
+  if (process8.env.POTSHERD_ASCII === "1")
+    return true;
+  const enc = `${process8.env.LC_ALL ?? process8.env.LC_CTYPE ?? process8.env.LANG ?? ""}`;
+  if (enc && !/utf-?8/i.test(enc))
+    return true;
+  return false;
+}
+function detectWidth() {
+  const cols = process8.stdout.columns;
+  if (!cols || cols < 40)
+    return 80;
+  return Math.min(cols, 100);
+}
+
+// ../core/dist/render.js
+var INDENT = "  ";
+var LABEL_W = 25;
+var VALUE_W = 7;
+var GAP = 3;
+function noteWidth(t) {
+  const labelW = t.width >= 74 ? LABEL_W : Math.max(16, LABEL_W - (74 - t.width));
+  return Math.max(0, t.width - INDENT.length - labelW - VALUE_W - GAP);
+}
+var Card = class {
+  t;
+  lines = [];
+  constructor(t) {
+    this.t = t;
+  }
+  /**
+   * The one place a line enters a card, so `--ascii` cannot be forgotten by a
+   * caller. The fold is width-preserving (see {@link Theme.asciiLine}), so it
+   * runs after the line has already been fitted.
+   */
+  push(line) {
+    this.lines.push(this.t.asciiLine(line));
+  }
+  /**
+   * `potsherd audit · ~/.claude · 21 aug 2026`. Middle parts are paths, so
+   * they elide in the middle when the terminal is narrow: the last segment of
+   * a path identifies it, the middle rarely does.
+   */
+  heading(verb, ...parts) {
+    const head = `potsherd ${verb}`;
+    const rest = parts.filter(Boolean);
+    const sep = ` ${this.t.sep} `;
+    let budget = this.t.width - head.length - sep.length * rest.length;
+    const shown = rest.map((p) => {
+      const share = Math.max(8, Math.floor(budget / Math.max(1, rest.length)));
+      const out = p.length > share ? elideMiddle(p, share, this.t.ellip) : p;
+      budget -= out.length;
+      return out;
+    });
+    this.push(this.t.dim([head, ...shown].join(sep)));
+    return this;
+  }
+  blank() {
+    this.lines.push("");
+    return this;
+  }
+  raw(line = "") {
+    this.push(line);
+    return this;
+  }
+  /** An indented prose line, clipped (never wrapped) to the terminal width. */
+  text(s, tone2 = "none") {
+    const max2 = Math.max(20, this.t.width - INDENT.length);
+    this.push(INDENT + this.tone(clip(s, max2, this.t), tone2));
+    return this;
+  }
+  row(r) {
+    const labelW = this.labelWidth();
+    const noteW = Math.max(0, this.t.width - INDENT.length - labelW - VALUE_W - GAP);
+    const label3 = (r.label.length > labelW ? elide(r.label, labelW, this.t) : r.label).padEnd(labelW);
+    const rawValue = r.value ?? "";
+    const value = rawValue.length > VALUE_W ? rawValue : rawValue.padStart(VALUE_W);
+    const note = r.note ? clip(r.note, noteW, this.t) : "";
+    const coloured = this.tone(value, r.tone);
+    const line = `${INDENT}${label3}${coloured}${note ? "   " + this.noteTone(note, r.tone) : ""}`;
+    this.push(line.trimEnd());
+    return this;
+  }
+  rows(rs) {
+    for (const r of rs)
+      this.row(r);
+    return this;
+  }
+  /** Every verb's last line is the next verb. */
+  next(command, why2) {
+    this.push(`${INDENT}${this.t.dim("run")}  ${command}  ${this.t.dim(why2)}`);
+    return this;
+  }
+  /**
+   * A line that must never be truncated. Give the variants longest first; the
+   * first one that fits at this width is printed whole. Only if none fits is
+   * the shortest one clipped, and that is a bug in the phrasing, not here.
+   */
+  fit(...variants) {
+    const max2 = Math.max(20, this.t.width - INDENT.length);
+    for (const v of variants) {
+      if (v.length <= max2) {
+        this.push(INDENT + v);
+        return this;
+      }
+    }
+    this.push(INDENT + clip(variants[variants.length - 1] ?? "", max2, this.t));
+    return this;
+  }
+  /**
+   * The last line of every card is the fix, and plans/05 requires it to stay
+   * complete: half a command cannot be typed. The explanation is what gives
+   * ground at 60 columns — pass the long one first and shorter ones after —
+   * and the command itself is printed bare rather than clipped.
+   */
+  fix(command, ...whys) {
+    return this.fit(...whys.map((w) => `run  ${command}  ${w}`), `run  ${command}`);
+  }
+  toString() {
+    return this.lines.join("\n");
+  }
+  print(out = process.stdout) {
+    out.write(this.toString() + "\n");
+  }
+  labelWidth() {
+    return this.t.width >= 74 ? LABEL_W : Math.max(16, LABEL_W - (74 - this.t.width));
+  }
+  /** Exposed so callers can pre-fit a note (a project list, say) themselves. */
+  noteWidth() {
+    return noteWidth(this.t);
+  }
+  tone(s, tone2) {
+    switch (tone2) {
+      case "accent":
+        return this.t.accent(s);
+      case "warn":
+        return this.t.warn(s);
+      case "ok":
+        return this.t.ok(s);
+      case "dim":
+        return this.t.dim(s);
+      default:
+        return s;
+    }
+  }
+  noteTone(s, tone2) {
+    if (tone2 === "accent")
+      return this.t.accent(s);
+    if (tone2 === "warn")
+      return this.t.warn(s);
+    return this.t.dim(s);
+  }
+};
+function fitLine(t, ...variants) {
+  const max2 = Math.max(20, t.width - INDENT.length);
+  for (const v of variants) {
+    if (Theme.len(v) <= max2)
+      return t.asciiLine(INDENT + v);
+  }
+  return t.asciiLine(INDENT + clip(variants[variants.length - 1] ?? "", max2, t));
+}
+var MIN_HEAD = 6;
+function cellText(c) {
+  if (c === void 0)
+    return "";
+  return typeof c === "string" ? c : c.text + (c.keep ?? "");
+}
+function fitCell(t, c, w) {
+  const full = cellText(c);
+  if (Theme.len(full) <= w)
+    return full;
+  if (typeof c === "object" && c.keep) {
+    const room = w - Theme.len(c.keep);
+    if (room >= MIN_HEAD) {
+      const head = elide(c.text, room, t);
+      return head + " ".repeat(Math.max(0, room - Theme.len(head))) + c.keep;
+    }
+  }
+  return elide(full, w, t);
+}
+function table(t, rows, opts = {}) {
+  if (rows.length === 0)
+    return [];
+  const gap = opts.gap ?? 2;
+  const indent = opts.indent ?? INDENT;
+  const cols = Math.max(...rows.map((r) => r.length));
+  const widths = [];
+  for (let c = 0; c < cols; c++) {
+    const content = Math.max(...rows.map((r) => Theme.len(cellText(r[c]))));
+    const cap2 = opts.max?.[c];
+    widths[c] = cap2 !== void 0 ? Math.min(content, cap2) : content;
+  }
+  const grow = Math.min(Math.max(opts.grow ?? cols - 1, 0), cols - 1);
+  const budget = t.width - indent.length - gap * (cols - 1);
+  const fixed = widths.reduce((a, b, i) => i === grow ? a : a + b, 0);
+  const growMax = Math.max(8, budget - fixed);
+  widths[grow] = Math.min(widths[grow] ?? 0, growMax);
+  const total = () => widths.reduce((a, b) => a + b, 0);
+  for (let c = cols - 1; c >= 0 && total() > budget; c--) {
+    if (c === grow)
+      continue;
+    const over = total() - budget;
+    widths[c] = Math.max(3, (widths[c] ?? 0) - over);
+  }
+  if (total() > budget) {
+    widths[grow] = Math.max(3, (widths[grow] ?? 0) - (total() - budget));
+  }
+  return rows.map((r) => t.asciiLine((indent + r.map((cell, c) => {
+    const w = widths[c] ?? 0;
+    const clipped = fitCell(t, cell, w);
+    const pad3 = " ".repeat(Math.max(0, w - Theme.len(clipped)));
+    return opts.align?.[c] === "right" ? pad3 + clipped : clipped + pad3;
+  }).join(" ".repeat(gap))).trimEnd()));
+}
+
+// ../core/dist/archive-state.js
+import fs6 from "node:fs";
+function readArchiveState(root = potsherdDir()) {
+  const file2 = dbPath(root);
+  if (!fs6.existsSync(file2))
+    return null;
+  let db;
+  try {
+    db = open({ root, file: file2, readonly: true });
+  } catch {
+    return null;
+  }
+  try {
+    const last2 = db.prepare("SELECT ran_at, bytes FROM rescue_log ORDER BY id DESC LIMIT 1").get();
+    const bytes2 = db.prepare("SELECT COALESCE(SUM(bytes), 0) AS n FROM archive_files").get();
+    return {
+      dbPath: file2,
+      ghosts: count(db, "ghosts"),
+      ghostPrompts: count(db, "ghost_prompts"),
+      archivedFiles: count(db, "archive_files"),
+      archivedBytes: bytes2.n,
+      rescues: count(db, "rescue_log"),
+      lastRescueAt: last2?.ran_at ?? null
+    };
+  } catch {
+    return null;
+  } finally {
+    db.close();
+  }
+}
 
 // ../core/dist/claude/scan.js
+import fs7 from "node:fs";
+import path6 from "node:path";
 var HEAD_BYTES = 64 * 1024;
 var TAIL_BYTES = 64 * 1024;
 var TAIL_ESCALATED_BYTES = 1024 * 1024;
 var SIDECHAIN_DIR = "subagents";
+function scanClaudeDisk(dir, opts = {}) {
+  const started = Date.now();
+  const cp = claudePaths(dir);
+  const projectsDir = cp.projects;
+  const out = {
+    projectsDir,
+    exists: fs7.existsSync(projectsDir),
+    projects: [],
+    sessions: [],
+    sidechains: [],
+    totalBytes: 0,
+    scanMs: 0
+  };
+  if (!out.exists) {
+    out.scanMs = Date.now() - started;
+    return out;
+  }
+  for (const entry2 of readdirSafe(projectsDir, { withFileTypes: true })) {
+    if (!entry2.isDirectory())
+      continue;
+    const slug = entry2.name;
+    const projDir = path6.join(projectsDir, slug);
+    const memoryDir = path6.join(projDir, "memory");
+    const memoryFiles = fs7.existsSync(memoryDir) ? readdirSafe(memoryDir).filter((f) => f.endsWith(".md")).length : 0;
+    out.projects.push({
+      slug,
+      dir: projDir,
+      hasSessionsIndex: fs7.existsSync(path6.join(projDir, "sessions-index.json")),
+      hasMemory: memoryFiles > 0,
+      memoryFiles
+    });
+    for (const child of readdirSafe(projDir, { withFileTypes: true })) {
+      if (child.isFile() && child.name.endsWith(".jsonl")) {
+        const f = scanFile(path6.join(projDir, child.name), slug, {
+          sessionId: child.name.slice(0, -".jsonl".length),
+          isSidechain: false,
+          titles: opts.titles !== false,
+          content: opts.content !== false
+        });
+        out.sessions.push(f);
+        out.totalBytes += f.bytes;
+      } else if (child.isDirectory()) {
+        const nested = child.name === SIDECHAIN_DIR;
+        const subDir = nested ? path6.join(projDir, child.name) : path6.join(projDir, child.name, SIDECHAIN_DIR);
+        if (!fs7.existsSync(subDir))
+          continue;
+        for (const sub of readdirSafe(subDir)) {
+          if (!sub.endsWith(".jsonl"))
+            continue;
+          const fileId = sub.slice(0, -".jsonl".length);
+          const f = scanFile(path6.join(subDir, sub), slug, {
+            // With no enclosing session directory the parent session is
+            // whatever the records say; the filename is only an agent name.
+            sessionId: nested ? fileId : child.name,
+            fileId,
+            isSidechain: true,
+            titles: false,
+            content: opts.content !== false
+          });
+          out.sidechains.push(f);
+          out.totalBytes += f.bytes;
+        }
+      }
+    }
+  }
+  out.sessions.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+  out.scanMs = Date.now() - started;
+  return out;
+}
+function scanFile(file2, slug, opts) {
+  const rec = {
+    sessionId: opts.sessionId,
+    fileId: opts.fileId ?? opts.sessionId,
+    sourcePath: file2,
+    projectSlug: slug,
+    project: slugToPathGuess(slug),
+    projectFromRecord: false,
+    bytes: 0,
+    mtime: /* @__PURE__ */ new Date(0),
+    firstTs: null,
+    lastTs: null,
+    title: null,
+    entrypoint: null,
+    version: null,
+    gitBranch: null,
+    isSidechain: opts.isSidechain,
+    agentName: null,
+    typesSeen: {}
+  };
+  let fd;
+  try {
+    const st = fs7.statSync(file2);
+    rec.bytes = st.size;
+    rec.mtime = st.mtime;
+    if (opts.content === false)
+      return rec;
+    fd = fs7.openSync(file2, "r");
+    const headText = readAt(fd, 0, Math.min(HEAD_BYTES, st.size));
+    applyRecords(rec, splitLines(headText, { dropLast: st.size > HEAD_BYTES }));
+    if (st.size > HEAD_BYTES) {
+      let tailSize = Math.min(TAIL_BYTES, st.size);
+      let tailText = readAt(fd, st.size - tailSize, tailSize);
+      applyRecords(rec, splitLines(tailText, { dropFirst: true }));
+      if (opts.titles && !rec.title && st.size > TAIL_BYTES) {
+        tailSize = Math.min(TAIL_ESCALATED_BYTES, st.size);
+        tailText = readAt(fd, st.size - tailSize, tailSize);
+        applyRecords(rec, splitLines(tailText, { dropFirst: true }));
+      }
+    }
+  } catch (err) {
+    rec.error = err.message;
+  } finally {
+    if (fd !== void 0) {
+      try {
+        fs7.closeSync(fd);
+      } catch {
+      }
+    }
+  }
+  return rec;
+}
+function readAt(fd, position, length) {
+  if (length <= 0)
+    return "";
+  const buf = Buffer.allocUnsafe(length);
+  const read = fs7.readSync(fd, buf, 0, length, position);
+  return buf.subarray(0, read).toString("utf8");
+}
+function splitLines(text, o) {
+  const lines = text.split("\n");
+  if (o.dropFirst)
+    lines.shift();
+  if (o.dropLast)
+    lines.pop();
+  return lines;
+}
+function applyRecords(rec, lines) {
+  for (const line of lines) {
+    const s = line.trim();
+    if (!s || s[0] !== "{")
+      continue;
+    let r;
+    try {
+      r = JSON.parse(s);
+    } catch {
+      continue;
+    }
+    const type = typeof r["type"] === "string" ? r["type"] : "unknown";
+    rec.typesSeen[type] = (rec.typesSeen[type] ?? 0) + 1;
+    const ts = typeof r["timestamp"] === "string" ? r["timestamp"] : null;
+    if (ts) {
+      if (!rec.firstTs || ts < rec.firstTs)
+        rec.firstTs = ts;
+      if (!rec.lastTs || ts > rec.lastTs)
+        rec.lastTs = ts;
+    }
+    if (type === "ai-title" && typeof r["aiTitle"] === "string") {
+      rec.title = r["aiTitle"];
+    }
+    if (type === "agent-name" && typeof r["agentName"] === "string") {
+      rec.agentName = r["agentName"];
+    }
+    if (!rec.projectFromRecord && typeof r["cwd"] === "string" && r["cwd"]) {
+      rec.project = r["cwd"];
+      rec.projectFromRecord = true;
+    }
+    if (!rec.entrypoint && typeof r["entrypoint"] === "string") {
+      rec.entrypoint = r["entrypoint"];
+    }
+    if (!rec.version && typeof r["version"] === "string")
+      rec.version = r["version"];
+    if (!rec.gitBranch && typeof r["gitBranch"] === "string") {
+      rec.gitBranch = r["gitBranch"];
+    }
+    if (r["isSidechain"] === true)
+      rec.isSidechain = true;
+  }
+}
+function slugToPathGuess(slug) {
+  if (!slug.startsWith("-"))
+    return slug;
+  return "/" + slug.slice(1).replace(/-/g, "/");
+}
+function readdirSafe(dir, o) {
+  try {
+    return o ? fs7.readdirSync(dir, o) : fs7.readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+// ../core/dist/claude/history.js
+import fs8 from "node:fs";
+import readline from "node:readline";
+async function readHistory(dir, opts = {}) {
+  const started = Date.now();
+  const p = claudePaths(dir).history;
+  const scan2 = {
+    path: p,
+    exists: fs8.existsSync(p),
+    withPrompts: Boolean(opts.withPrompts),
+    lines: 0,
+    malformed: 0,
+    orphanPrompts: 0,
+    sessions: /* @__PURE__ */ new Map(),
+    firstTs: null,
+    lastTs: null,
+    bytes: 0,
+    scanMs: 0
+  };
+  if (!scan2.exists) {
+    scan2.scanMs = Date.now() - started;
+    return scan2;
+  }
+  scan2.bytes = fs8.statSync(p).size;
+  const maxChars = opts.maxPromptChars ?? 8e3;
+  const rl = readline.createInterface({
+    input: fs8.createReadStream(p, { encoding: "utf8" }),
+    crlfDelay: Infinity
+  });
+  for await (const line of rl) {
+    const s = line.trim();
+    if (!s)
+      continue;
+    scan2.lines++;
+    let r;
+    try {
+      r = JSON.parse(s);
+    } catch {
+      scan2.malformed++;
+      continue;
+    }
+    const sessionId = typeof r["sessionId"] === "string" ? r["sessionId"] : "";
+    const ts = typeof r["timestamp"] === "number" ? r["timestamp"] : 0;
+    const text = typeof r["display"] === "string" ? r["display"] : "";
+    const project = typeof r["project"] === "string" ? r["project"] : "";
+    if (ts) {
+      if (scan2.firstTs === null || ts < scan2.firstTs)
+        scan2.firstTs = ts;
+      if (scan2.lastTs === null || ts > scan2.lastTs)
+        scan2.lastTs = ts;
+    }
+    if (!sessionId) {
+      scan2.orphanPrompts++;
+      continue;
+    }
+    let sess = scan2.sessions.get(sessionId);
+    if (!sess) {
+      sess = {
+        sessionId,
+        project,
+        firstTs: ts || Number.MAX_SAFE_INTEGER,
+        lastTs: ts,
+        promptCount: 0,
+        firstPrompt: "",
+        prompts: []
+      };
+      scan2.sessions.set(sessionId, sess);
+    }
+    sess.promptCount++;
+    if (project && !sess.project)
+      sess.project = project;
+    if (ts) {
+      if (ts < sess.firstTs)
+        sess.firstTs = ts;
+      if (ts > sess.lastTs)
+        sess.lastTs = ts;
+    }
+    if (!sess.firstPrompt && text)
+      sess.firstPrompt = text.slice(0, maxChars);
+    if (opts.withPrompts && text) {
+      sess.prompts.push({ ts, text: text.length > maxChars ? text.slice(0, maxChars) : text });
+    }
+  }
+  for (const sess of scan2.sessions.values()) {
+    if (sess.firstTs === Number.MAX_SAFE_INTEGER)
+      sess.firstTs = sess.lastTs;
+    if (opts.withPrompts)
+      sess.prompts.sort((a, b) => a.ts - b.ts);
+  }
+  scan2.scanMs = Date.now() - started;
+  return scan2;
+}
+
+// ../core/dist/claude/sessions-index.js
+import fs9 from "node:fs";
+import path7 from "node:path";
+function readSessionsIndexes(dir) {
+  const projectsDir = claudePaths(dir).projects;
+  const out = { files: [], entries: /* @__PURE__ */ new Map(), malformed: [] };
+  let slugs;
+  try {
+    slugs = fs9.readdirSync(projectsDir);
+  } catch {
+    return out;
+  }
+  for (const slug of slugs) {
+    const p = path7.join(projectsDir, slug, "sessions-index.json");
+    if (!fs9.existsSync(p))
+      continue;
+    out.files.push(p);
+    let parsed;
+    try {
+      parsed = JSON.parse(fs9.readFileSync(p, "utf8"));
+    } catch {
+      out.malformed.push(p);
+      continue;
+    }
+    const entries = parsed?.entries;
+    if (!Array.isArray(entries)) {
+      out.malformed.push(p);
+      continue;
+    }
+    for (const raw of entries) {
+      if (!raw || typeof raw !== "object")
+        continue;
+      const e = raw;
+      const sessionId = typeof e["sessionId"] === "string" ? e["sessionId"] : "";
+      if (!sessionId)
+        continue;
+      if (out.entries.has(sessionId))
+        continue;
+      out.entries.set(sessionId, {
+        sessionId,
+        slug,
+        indexPath: p,
+        fullPath: str(e["fullPath"]),
+        fileMtime: numOr(e["fileMtime"]),
+        firstPrompt: str(e["firstPrompt"]),
+        summary: str(e["summary"]),
+        messageCount: numOr(e["messageCount"]),
+        created: str(e["created"]),
+        modified: str(e["modified"]),
+        gitBranch: str(e["gitBranch"]),
+        projectPath: str(e["projectPath"]),
+        isSidechain: e["isSidechain"] === true
+      });
+    }
+  }
+  return out;
+}
+function str(v) {
+  return typeof v === "string" && v ? v : void 0;
+}
+function numOr(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : void 0;
+}
+
+// ../core/dist/rescue.js
+import fs12 from "node:fs";
+import path10 from "node:path";
+import crypto from "node:crypto";
 
 // ../core/dist/tags.js
 var MAX_TAG_LENGTH = 32;
@@ -24238,9 +25762,73 @@ function applyTags(db, sessionId, change) {
   }
   return { sessionId, tags: sessionTags(db, sessionId), added, removed, unchanged };
 }
+function isPinned(db, sessionId) {
+  const row2 = db.prepare("SELECT pinned_at FROM pins WHERE session_id = ?").get(sessionId);
+  return { pinned: Boolean(row2), pinnedAt: row2?.pinned_at ?? null };
+}
+function pinSession(db, sessionId, at = iso()) {
+  const existing = isPinned(db, sessionId);
+  if (existing.pinned) {
+    return { sessionId, pinned: true, pinnedAt: existing.pinnedAt, changed: false };
+  }
+  db.prepare("INSERT OR REPLACE INTO pins (session_id, pinned_at) VALUES (?, ?)").run(sessionId, at);
+  return { sessionId, pinned: true, pinnedAt: at, changed: true };
+}
+function unpinSession(db, sessionId) {
+  const existing = isPinned(db, sessionId);
+  if (!existing.pinned)
+    return { sessionId, pinned: false, pinnedAt: null, changed: false };
+  db.prepare("DELETE FROM pins WHERE session_id = ?").run(sessionId);
+  return { sessionId, pinned: false, pinnedAt: existing.pinnedAt, changed: true };
+}
+function pinnedSessionIds(db) {
+  return db.prepare("SELECT session_id FROM pins ORDER BY pinned_at DESC").all().map((r) => r.session_id);
+}
 var LINKED_TO_SQL = (column) => `EXISTS (SELECT 1 FROM links l
              WHERE (l.a_session_id = ${column} AND l.b_session_id = ?)
                 OR (l.b_session_id = ${column} AND l.a_session_id = ?))`;
+function linkSessions(db, a, b, note, at = iso()) {
+  const existing = db.prepare(`SELECT a_session_id, b_session_id, note, created_at FROM links
+        WHERE (a_session_id = ? AND b_session_id = ?) OR (a_session_id = ? AND b_session_id = ?)`).get(a, b, b, a);
+  if (existing) {
+    const kept = note ?? existing.note;
+    if (kept !== existing.note) {
+      db.prepare("UPDATE links SET note = ? WHERE a_session_id = ? AND b_session_id = ?").run(kept, existing.a_session_id, existing.b_session_id);
+    }
+    return {
+      a: existing.a_session_id,
+      b: existing.b_session_id,
+      note: kept,
+      createdAt: existing.created_at,
+      created: false,
+      reversed: existing.a_session_id !== a
+    };
+  }
+  db.prepare("INSERT INTO links (a_session_id, b_session_id, note, created_at) VALUES (?, ?, ?, ?)").run(a, b, note ?? null, at);
+  return { a, b, note: note ?? null, createdAt: at, created: true, reversed: false };
+}
+function unlinkSessions(db, a, b) {
+  const info = db.prepare(`DELETE FROM links
+        WHERE (a_session_id = ? AND b_session_id = ?) OR (a_session_id = ? AND b_session_id = ?)`).run(a, b, b, a);
+  return info.changes > 0;
+}
+function sessionLinks(db, sessionId) {
+  const rows = db.prepare(`SELECT b_session_id AS other, note, created_at, 'out' AS direction FROM links
+         WHERE a_session_id = ?
+       UNION ALL
+       SELECT a_session_id AS other, note, created_at, 'in' AS direction FROM links
+         WHERE b_session_id = ?
+       ORDER BY created_at DESC, other`).all(sessionId, sessionId);
+  return rows.map((r) => ({
+    sessionId: r.other,
+    note: r.note,
+    createdAt: r.created_at,
+    direction: r.direction
+  }));
+}
+function linkedSessionIds(db, sessionId) {
+  return sessionLinks(db, sessionId).map((l) => l.sessionId);
+}
 function unique(list) {
   return [...new Set(list)];
 }
@@ -24475,6 +26063,35 @@ function rrfScore(rank, k = RRF_K) {
 }
 
 // ../core/dist/redact.js
+var redact_exports = {};
+__export(redact_exports, {
+  ELISION_RE: () => ELISION_RE,
+  ENTROPY_MIN_LENGTH: () => ENTROPY_MIN_LENGTH,
+  ENTROPY_THRESHOLD: () => ENTROPY_THRESHOLD,
+  MASK_RE: () => MASK_RE,
+  MIN_PAYLOAD: () => MIN_PAYLOAD,
+  RULES: () => RULES,
+  SECRET_TYPES: () => SECRET_TYPES,
+  addCounts: () => addCounts,
+  addElisions: () => addElisions,
+  containsMask: () => containsMask,
+  countsJson: () => countsJson,
+  elideBinary: () => elideBinary,
+  elideExchange: () => elideExchange,
+  emptyCounts: () => emptyCounts,
+  emptyElisions: () => emptyElisions,
+  maskFor: () => maskFor,
+  nameLooksLikeSecret: () => nameLooksLikeSecret,
+  redact: () => redact,
+  redactExchange: () => redactExchange,
+  redactText: () => redactText,
+  redactionLine: () => redactionLine,
+  redactionRow: () => redactionRow,
+  secretDigest: () => secretDigest,
+  shannonEntropy: () => shannonEntropy,
+  tally: () => tally,
+  valueLooksLikeSecret: () => valueLooksLikeSecret
+});
 import { createHash } from "node:crypto";
 
 // ../core/dist/redact-rules.js
@@ -24494,15 +26111,15 @@ var SECRET_TYPES = [
   "entropy"
 ];
 function shannonEntropy(s) {
-  const n = s.length;
-  if (n === 0)
+  const n2 = s.length;
+  if (n2 === 0)
     return 0;
-  const counts = /* @__PURE__ */ new Map();
+  const counts2 = /* @__PURE__ */ new Map();
   for (const ch of s)
-    counts.set(ch, (counts.get(ch) ?? 0) + 1);
+    counts2.set(ch, (counts2.get(ch) ?? 0) + 1);
   let h = 0;
-  for (const c of counts.values()) {
-    const p = c / n;
+  for (const c of counts2.values()) {
+    const p = c / n2;
     h -= p * Math.log2(p);
   }
   return h;
@@ -24913,6 +26530,12 @@ var RULES = [
 function emptyElisions() {
   return { binaryParts: 0, charsElided: 0 };
 }
+function addElisions(a, b) {
+  return {
+    binaryParts: a.binaryParts + b.binaryParts,
+    charsElided: a.charsElided + b.charsElided
+  };
+}
 var MIN_PAYLOAD = 512;
 var ELISION_RE = /‹elided:[^›]{1,120}›/g;
 var BASE64_MAGIC = [
@@ -25011,10 +26634,10 @@ function elideBinary(text, tally2 = emptyElisions()) {
     if (s.start < cursor)
       continue;
     out.push(text.slice(cursor, s.start));
-    const n = s.end - s.start;
-    out.push(`\u2039elided:${s.mime}:${n} bytes\u203A`);
+    const n2 = s.end - s.start;
+    out.push(`\u2039elided:${s.mime}:${n2} bytes\u203A`);
     tally2.binaryParts += 1;
-    tally2.charsElided += n;
+    tally2.charsElided += n2;
     cursor = s.end;
   }
   out.push(text.slice(cursor));
@@ -25043,13 +26666,19 @@ var MASK_RE = new RegExp(`${OPEN}redacted:[a-z-]+:[0-9a-f]{8}${CLOSE}`, "g");
 function secretDigest(secret) {
   return createHash("sha256").update(secret, "utf8").digest("hex").slice(0, 8);
 }
+function maskFor(type, secret) {
+  return `${OPEN}redacted:${type}:${secretDigest(secret)}${CLOSE}`;
+}
+function containsMask(text) {
+  return new RegExp(MASK_RE.source).test(text);
+}
 function redact(text) {
   if (typeof text !== "string" || text.length === 0)
     return { text: text ?? "", hits: [] };
   const claimed = new Uint8Array(text.length);
   const spans = [];
-  for (const span2 of protectedSpans(text))
-    claim(claimed, span2);
+  for (const span3 of protectedSpans(text))
+    claim(claimed, span3);
   for (const rule of RULES) {
     for (const m of rule.scan(text)) {
       if (m.start < 0 || m.end > text.length || m.end <= m.start)
@@ -25075,6 +26704,9 @@ function redact(text) {
   }
   out.push(text.slice(cursor));
   return { text: out.join(""), hits };
+}
+function redactText(text) {
+  return redact(text).text;
 }
 function redactExchange(ex) {
   const hits = [];
@@ -25116,6 +26748,27 @@ function addCounts(a, b) {
   for (const t of SECRET_TYPES)
     out.byType[t] = (a.byType[t] ?? 0) + (b.byType[t] ?? 0);
   return out;
+}
+function countsJson(c) {
+  const out = { total: c.total };
+  for (const t of SECRET_TYPES)
+    if ((c.byType[t] ?? 0) > 0)
+      out[t] = c.byType[t] ?? 0;
+  return out;
+}
+function redactionRow(c, t = new Theme(), noteWidth2 = 43) {
+  const parts = SECRET_TYPES.filter((k) => (c.byType[k] ?? 0) > 0).sort((a, b) => (c.byType[b] ?? 0) - (c.byType[a] ?? 0)).map((k) => `${k} ${num(c.byType[k] ?? 0)}`);
+  const note = parts.length === 0 ? "nothing matched \u2014 index holds no secrets" : joinFit(parts, noteWidth2, ` ${t.mid} `, t.ellip);
+  return {
+    label: "secrets masked",
+    value: num(c.total),
+    note,
+    tone: c.total > 0 ? "ok" : "dim"
+  };
+}
+function redactionLine(c, t = new Theme()) {
+  const row2 = redactionRow(c, t, Math.max(20, t.width - 30));
+  return `${row2.label.padEnd(22)}${(row2.value ?? "").padStart(7)}   ${t.dim(row2.note ?? "")}`;
 }
 function protectedSpans(text) {
   const spans = [];
@@ -25174,19 +26827,19 @@ function maskAt(spans, at) {
   return void 0;
 }
 function offMask(spans, at, prefer, keep) {
-  const span2 = maskAt(spans, at);
-  if (!span2)
+  const span3 = maskAt(spans, at);
+  if (!span3)
     return at;
-  const back = span2.start;
-  const forward = span2.end;
+  const back = span3.start;
+  const forward = span3.end;
   const dropsMatch = (to) => keep !== void 0 && (prefer === "back" ? to < keep.end : to > keep.start);
   const first = prefer === "back" ? back : forward;
   const second = prefer === "back" ? forward : back;
   return dropsMatch(first) ? second : first;
 }
-function leadSnippet(text, max = SNIPPET_CHARS) {
-  const collapsed = collapse(text.substring(0, max));
-  return collapsed + (text.length > max ? "\u2026" : "");
+function leadSnippet(text, max2 = SNIPPET_CHARS) {
+  const collapsed = collapse(text.substring(0, max2));
+  return collapsed + (text.length > max2 ? "\u2026" : "");
 }
 var WORD_RE = /[\p{L}\p{N}][\p{L}\p{N}_'-]*/gu;
 function wordSpans(text) {
@@ -25270,12 +26923,12 @@ function sentenceStartNear(text, at, reach) {
     best++;
   return best;
 }
-function clipToWords(text, max, ellip = "\u2026") {
-  if (text.length <= max)
+function clipToWords(text, max2, ellip = "\u2026") {
+  if (text.length <= max2)
     return text;
-  if (max <= ellip.length)
-    return ellip.slice(0, max);
-  const room = max - ellip.length;
+  if (max2 <= ellip.length)
+    return ellip.slice(0, max2);
+  const room = max2 - ellip.length;
   let cut2 = room;
   const floor = Math.max(0, room - Math.ceil(room / 3));
   while (cut2 > floor && !/\s/.test(text[cut2] ?? " "))
@@ -25285,53 +26938,53 @@ function clipToWords(text, max, ellip = "\u2026") {
   cut2 = offMask(maskSpans(text), cut2, "back");
   return text.slice(0, cut2).trimEnd() + ellip;
 }
-function matchSnippet(text, query, max = SNIPPET_CHARS) {
+function matchSnippet(text, query, max2 = SNIPPET_CHARS) {
   const needle = query.trim().toLowerCase();
   if (!needle)
-    return { text: leadSnippet(text, max) };
+    return { text: leadSnippet(text, max2) };
   const at = text.toLowerCase().indexOf(needle);
   if (at === -1)
-    return { text: leadSnippet(text, max) };
+    return { text: leadSnippet(text, max2) };
   const spans = wordSpans(text);
   const masks = maskSpans(text);
-  const half = Math.max(0, Math.floor((max - needle.length) / 2));
+  const half = Math.max(0, Math.floor((max2 - needle.length) / 2));
   let rawStart = Math.max(0, at - half);
   rawStart = Math.min(rawStart, at);
   rawStart = snapStart(spans, rawStart, masks);
-  const rawEnd = snapEnd(text, spans, Math.min(text.length, rawStart + max), masks);
+  const rawEnd = snapEnd(text, spans, Math.min(text.length, rawStart + max2), masks);
   const needleSpan = { start: at, end: at + needle.length };
   const sliceEnd = offMask(masks, Math.max(rawEnd, at + needle.length), "back", needleSpan);
   const slice = text.slice(rawStart, sliceEnd);
   const lead = rawStart > 0 ? "\u2026" : "";
-  const tail = rawStart + slice.length < text.length ? "\u2026" : "";
+  const tail2 = rawStart + slice.length < text.length ? "\u2026" : "";
   const collapsed = collapse(slice);
   const found = collapsed.toLowerCase().indexOf(needle);
-  const out = lead + collapsed + tail;
+  const out = lead + collapsed + tail2;
   return found === -1 ? { text: out } : { text: out, match: { start: lead.length + found, end: lead.length + found + needle.length } };
 }
-function denseSnippet(text, tokens, max = SNIPPET_CHARS) {
+function denseSnippet(text, tokens, max2 = SNIPPET_CHARS) {
   if (!text)
     return { text: "" };
   const wanted = [...new Set(tokens.map((t) => t.toLowerCase()).filter(Boolean))];
   const spans = wordSpans(text);
   const masks = maskSpans(text);
   if (wanted.length === 0 || spans.length === 0)
-    return cleanLead(text, spans, max, masks);
+    return cleanLead(text, spans, max2, masks);
   const hits = [];
-  for (const span2 of spans) {
+  for (const span3 of spans) {
     let best = null;
     for (const token of wanted) {
-      if (!wordMatchesToken(span2.word, token))
+      if (!wordMatchesToken(span3.word, token))
         continue;
       if (best === null || token.length > best.length)
         best = token;
     }
     if (best !== null)
-      hits.push({ span: span2, token: best });
+      hits.push({ span: span3, token: best });
   }
   if (hits.length === 0)
-    return cleanLead(text, spans, max, masks);
-  if (text.length <= max) {
+    return cleanLead(text, spans, max2, masks);
+  if (text.length <= max2) {
     const pick3 = hits.reduce((a, b) => b.token.length > a.token.length ? b : a);
     return cut(text, 0, text.length, pick3.span);
   }
@@ -25339,14 +26992,14 @@ function denseSnippet(text, tokens, max = SNIPPET_CHARS) {
   const considered = hits.slice(0, 120);
   for (let i = 0; i < considered.length; i++) {
     const first = considered[i];
-    let start = snapStart(spans, Math.max(0, Math.min(first.span.start - LEAD_CONTEXT, text.length - max)), masks);
+    let start = snapStart(spans, Math.max(0, Math.min(first.span.start - LEAD_CONTEXT, text.length - max2)), masks);
     if (start > first.span.start)
       start = first.span.start;
     const sentence = sentenceStartNear(text, first.span.start, SENTENCE_REACH);
-    if (sentence >= 0 && sentence <= first.span.start && first.span.start - sentence <= max / 2) {
+    if (sentence >= 0 && sentence <= first.span.start && first.span.start - sentence <= max2 / 2) {
       start = sentence;
     }
-    let end = snapEnd(text, spans, Math.min(text.length, start + max), masks);
+    let end = snapEnd(text, spans, Math.min(text.length, start + max2), masks);
     if (end <= first.span.end)
       end = Math.min(text.length, first.span.end);
     start = offMask(masks, start, "forward", first.span);
@@ -25366,32 +27019,32 @@ function denseSnippet(text, tokens, max = SNIPPET_CHARS) {
     });
   }
   if (candidates.length === 0)
-    return cleanLead(text, spans, max, masks);
+    return cleanLead(text, spans, max2, masks);
   const clean = candidates.filter((c) => !c.boilerplate);
   const pool = clean.length > 0 ? clean : candidates;
   pool.sort((a, b) => b.distinct - a.distinct || b.density - a.density || a.start - b.start);
   const chosen = pool[0];
   return cut(text, chosen.start, chosen.end, chosen.pick);
 }
-function cleanLead(text, spans, max, masks = []) {
+function cleanLead(text, spans, max2, masks = []) {
   let start = 0;
-  if (isMostlyBoilerplate(text.slice(0, max))) {
-    for (let at = max; at < text.length; at += max) {
+  if (isMostlyBoilerplate(text.slice(0, max2))) {
+    for (let at = max2; at < text.length; at += max2) {
       const from = snapStart(spans, at, masks);
-      if (!isMostlyBoilerplate(text.slice(from, from + max))) {
+      if (!isMostlyBoilerplate(text.slice(from, from + max2))) {
         start = from;
         break;
       }
     }
   }
-  const end = snapEnd(text, spans, Math.min(text.length, start + max), masks);
+  const end = snapEnd(text, spans, Math.min(text.length, start + max2), masks);
   const lead = start > 0 ? "\u2026" : "";
-  const tail = end < text.length ? "\u2026" : "";
-  return { text: lead + collapse(text.slice(start, end)) + tail };
+  const tail2 = end < text.length ? "\u2026" : "";
+  return { text: lead + collapse(text.slice(start, end)) + tail2 };
 }
 function cut(text, start, end, pick3) {
   const lead = start > 0 ? "\u2026" : "";
-  const tail = end < text.length ? "\u2026" : "";
+  const tail2 = end < text.length ? "\u2026" : "";
   const body = collapse(text.slice(start, end));
   const before = text.slice(start, pick3.start).replace(/\s+/g, " ").replace(/^\s+/, "");
   const at = before.length;
@@ -25399,31 +27052,53 @@ function cut(text, start, end, pick3) {
   if (body.slice(at, at + word.length).toLowerCase() !== word.toLowerCase()) {
     const found = body.toLowerCase().indexOf(word.toLowerCase());
     if (found === -1)
-      return { text: lead + body + tail };
+      return { text: lead + body + tail2 };
     return {
-      text: lead + body + tail,
+      text: lead + body + tail2,
       match: { start: lead.length + found, end: lead.length + found + word.length }
     };
   }
   return {
-    text: lead + body + tail,
+    text: lead + body + tail2,
     match: { start: lead.length + at, end: lead.length + at + word.length }
   };
 }
 
 // ../core/dist/embeddings.js
-import fs3 from "node:fs";
+var embeddings_exports = {};
+__export(embeddings_exports, {
+  BGE_QUERY_PREFIX: () => BGE_QUERY_PREFIX,
+  EMBEDDING_DIMENSIONS: () => EMBEDDING_DIMENSIONS,
+  EMBEDDING_VERSION: () => EMBEDDING_VERSION,
+  MODEL_DOWNLOAD_BYTES: () => MODEL_DOWNLOAD_BYTES,
+  MODEL_DTYPE: () => MODEL_DTYPE,
+  MODEL_ID: () => MODEL_ID,
+  embedThreads: () => embedThreads,
+  embeddingToBlob: () => embeddingToBlob,
+  ensureModel: () => ensureModel,
+  exchangeText: () => exchangeText,
+  generateEmbedding: () => generateEmbedding,
+  generateExchangeEmbedding: () => generateExchangeEmbedding,
+  generateExchangeEmbeddings: () => generateExchangeEmbeddings,
+  generateQueryEmbedding: () => generateQueryEmbedding,
+  initEmbeddings: () => initEmbeddings,
+  isModelCached: () => isModelCached,
+  resetEmbeddings: () => resetEmbeddings,
+  withQueryPrefix: () => withQueryPrefix
+});
+import fs10 from "node:fs";
 import os2 from "node:os";
-import path4 from "node:path";
-import process7 from "node:process";
+import path8 from "node:path";
+import process9 from "node:process";
 var EMBEDDING_VERSION = 1;
 var MODEL_ID = "Xenova/bge-small-en-v1.5";
 var MODEL_DTYPE = "q8";
+var EMBEDDING_DIMENSIONS = 384;
 var MODEL_DOWNLOAD_BYTES = 34014426;
 var BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
 var MAX_INPUT_CHARS = 2e3;
 function embedThreads() {
-  const override = Number(process7.env["POTSHERD_EMBED_THREADS"]);
+  const override = Number(process9.env["POTSHERD_EMBED_THREADS"]);
   if (Number.isFinite(override) && override >= 1)
     return Math.floor(override);
   const logical = os2.availableParallelism?.() ?? os2.cpus().length ?? 2;
@@ -25431,19 +27106,23 @@ function embedThreads() {
 }
 var pipelinePromise = null;
 function isModelCached(cacheDir = modelsDir()) {
-  const dir = path4.join(cacheDir, ...MODEL_ID.split("/"), "onnx");
+  const dir = path8.join(cacheDir, ...MODEL_ID.split("/"), "onnx");
   try {
-    return fs3.readdirSync(dir).some((f) => f.endsWith(".onnx") && fs3.statSync(path4.join(dir, f)).size > 1e6);
+    return fs10.readdirSync(dir).some((f) => f.endsWith(".onnx") && fs10.statSync(path8.join(dir, f)).size > 1e6);
   } catch {
     return false;
   }
 }
+async function initEmbeddings(options = {}) {
+  await getPipeline(options);
+}
+var ensureModel = initEmbeddings;
 async function getPipeline(options = {}) {
   if (pipelinePromise)
     return pipelinePromise;
   pipelinePromise = (async () => {
     const cacheDir = options.cacheDir ?? modelsDir();
-    fs3.mkdirSync(cacheDir, { recursive: true });
+    fs10.mkdirSync(cacheDir, { recursive: true });
     const transformers = await import("@huggingface/transformers");
     const env = transformers.env;
     env.allowLocalModels = true;
@@ -25471,6 +27150,9 @@ async function getPipeline(options = {}) {
     pipelinePromise = null;
     throw error51;
   }
+}
+function resetEmbeddings() {
+  pipelinePromise = null;
 }
 async function generateEmbedding(text, options = {}) {
   const pipe2 = await getPipeline(options);
@@ -25502,19 +27184,38 @@ Tools: ${toolNames.join(", ")}`;
 async function generateExchangeEmbedding(userText, assistantText, toolNames, options = {}) {
   return generateEmbedding(exchangeText(userText, assistantText, toolNames), options);
 }
+async function generateExchangeEmbeddings(items, options = {}) {
+  if (items.length === 0)
+    return [];
+  const texts = items.map((i) => exchangeText(i.userText, i.assistantText, i.toolNames).substring(0, MAX_INPUT_CHARS));
+  const pipe2 = await getPipeline(options);
+  const output = await pipe2(texts, { pooling: "mean", normalize: true });
+  const data = output.data;
+  if (data.length !== texts.length * EMBEDDING_DIMENSIONS) {
+    const out2 = [];
+    for (const text of texts)
+      out2.push(await generateEmbedding(text, options));
+    return out2;
+  }
+  const out = [];
+  for (let i = 0; i < texts.length; i += 1) {
+    out.push(Array.from(data.slice(i * EMBEDDING_DIMENSIONS, (i + 1) * EMBEDDING_DIMENSIONS)));
+  }
+  return out;
+}
 function embeddingToBlob(embedding) {
   return Buffer.from(new Float32Array(embedding).buffer);
 }
 
 // ../core/dist/ignore.js
-import fs4 from "node:fs";
-import path5 from "node:path";
+import fs11 from "node:fs";
+import path9 from "node:path";
 var IGNORE_KEY = "ignore";
 function readIgnoreConfig(root = potsherdDir()) {
   const file2 = configPath(root);
   let text;
   try {
-    text = fs4.readFileSync(file2, "utf8");
+    text = fs11.readFileSync(file2, "utf8");
   } catch {
     return { list: [], rest: {}, file: file2 };
   }
@@ -25557,11 +27258,11 @@ function writeIgnoreList(root, list) {
   }
   const next = { ...current.rest, [IGNORE_KEY]: clean };
   const file2 = current.file;
-  fs4.mkdirSync(path5.dirname(file2), { recursive: true, mode: 448 });
+  fs11.mkdirSync(path9.dirname(file2), { recursive: true, mode: 448 });
   const tmp = `${file2}.tmp-${String(process.pid)}`;
-  fs4.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}
+  fs11.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}
 `, { mode: 384 });
-  fs4.renameSync(tmp, file2);
+  fs11.renameSync(tmp, file2);
   return clean;
 }
 function addIgnored(root, project) {
@@ -25617,7 +27318,7 @@ function rootForDb(db) {
     const file2 = main2?.file;
     if (!file2)
       return null;
-    return path5.dirname(file2);
+    return path9.dirname(file2);
   } catch {
     return null;
   }
@@ -25663,16 +27364,181 @@ function countIgnoredSessions(db, projects) {
     return 0;
   const marks = projects.map(() => "?").join(", ");
   try {
-    const row = db.prepare(`SELECT (SELECT COUNT(*) FROM sessions
+    const row2 = db.prepare(`SELECT (SELECT COUNT(*) FROM sessions
                    WHERE is_sidechain = 0 AND project IN (${marks}))
               + (SELECT COUNT(*) FROM ghosts WHERE project IN (${marks})) AS n`).get(...projects, ...projects);
-    return row?.n ?? 0;
+    return row2?.n ?? 0;
   } catch {
     return 0;
   }
 }
 function emptyIgnoreReport(entries = []) {
   return { entries: [...entries], projects: [], hidden: 0 };
+}
+
+// ../core/dist/calibration.js
+var MIN_CALLS = 5;
+var CALIBRATION_WINDOW = 5;
+var MAX_RATIO = 5;
+var MIN_RATIO = 1 / MAX_RATIO;
+function recordCardRun(db, run2) {
+  const ranAt = run2.ranAt ?? (/* @__PURE__ */ new Date()).toISOString();
+  const timeRatio = ratio(run2.actualSeconds, run2.predictedSeconds);
+  const usdRatio = ratio(run2.actualUsd, run2.predictedUsd);
+  const info = db.prepare(`INSERT INTO card_runs
+         (ran_at, backend, model, concurrency, targets,
+          predicted_calls, predicted_seconds, predicted_usd,
+          actual_calls, actual_seconds, actual_usd,
+          time_ratio, usd_ratio, complete)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(ranAt, run2.backend, run2.model, run2.concurrency, run2.targets, run2.predictedCalls, run2.predictedSeconds, run2.predictedUsd, run2.actualCalls, run2.actualSeconds, run2.actualUsd, timeRatio, usdRatio, run2.complete ? 1 : 0);
+  return { ...run2, ranAt, id: Number(info.lastInsertRowid), timeRatio, usdRatio };
+}
+function readCalibration(db, o = {}) {
+  let rows;
+  try {
+    rows = db.prepare(`SELECT time_ratio, usd_ratio, ran_at
+           FROM card_runs
+          WHERE complete = 1
+            AND actual_calls >= ?
+            AND predicted_seconds > 0
+            AND predicted_usd > 0
+            ${o.backend ? "AND backend = ?" : ""}
+          ORDER BY ran_at DESC, id DESC
+          LIMIT ?`).all(...o.backend ? [MIN_CALLS, o.backend, o.window ?? CALIBRATION_WINDOW] : [MIN_CALLS, o.window ?? CALIBRATION_WINDOW]);
+  } catch {
+    return null;
+  }
+  if (rows.length === 0)
+    return null;
+  const cal = {
+    timeRatio: clamp(median(rows.map((r) => r.time_ratio))),
+    usdRatio: clamp(median(rows.map((r) => r.usd_ratio))),
+    samples: rows.length
+  };
+  const last2 = rows[0]?.ran_at;
+  return last2 ? { ...cal, lastRanAt: last2 } : cal;
+}
+function cardRuns(db, limit = 20) {
+  try {
+    const rows = db.prepare(`SELECT * FROM card_runs ORDER BY ran_at DESC, id DESC LIMIT ?`).all(limit);
+    return rows.map((r) => ({
+      id: Number(r["id"]),
+      ranAt: String(r["ran_at"]),
+      backend: String(r["backend"]),
+      model: String(r["model"]),
+      concurrency: Number(r["concurrency"]),
+      targets: Number(r["targets"]),
+      predictedCalls: Number(r["predicted_calls"]),
+      predictedSeconds: Number(r["predicted_seconds"]),
+      predictedUsd: Number(r["predicted_usd"]),
+      actualCalls: Number(r["actual_calls"]),
+      actualSeconds: Number(r["actual_seconds"]),
+      actualUsd: Number(r["actual_usd"]),
+      timeRatio: Number(r["time_ratio"]),
+      usdRatio: Number(r["usd_ratio"]),
+      complete: Number(r["complete"]) === 1
+    }));
+  } catch {
+    return [];
+  }
+}
+function accuracyNote(run2) {
+  const t = ratio(run2.actualSeconds, run2.predictedSeconds);
+  const u = ratio(run2.actualUsd, run2.predictedUsd);
+  return `the estimate was ${describe3(t)} on time and ${describe3(u)} on cost`;
+}
+function accuracyShort(run2) {
+  const t = describe3(ratio(run2.actualSeconds, run2.predictedSeconds));
+  const u = describe3(ratio(run2.actualUsd, run2.predictedUsd));
+  return `${t} on time, ${u} on cost`;
+}
+function describe3(r) {
+  if (r >= 0.9 && r <= 1.1)
+    return "right";
+  return r > 1 ? `${r.toFixed(1)}x under` : `${(1 / r).toFixed(1)}x over`;
+}
+function ratio(actual, predicted) {
+  if (!(predicted > 0) || !(actual > 0))
+    return 1;
+  return actual / predicted;
+}
+function clamp(r) {
+  if (!Number.isFinite(r) || r <= 0)
+    return 1;
+  return Math.min(MAX_RATIO, Math.max(MIN_RATIO, r));
+}
+function median(xs) {
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+function compareToEstimate(e, actual) {
+  return {
+    timeRatio: ratio(actual.seconds, e.seconds),
+    usdRatio: ratio(actual.usd, e.usd)
+  };
+}
+var RANK = { none: 0, weak: 1, strong: 2 };
+function atLeastConfident(a, b) {
+  return RANK[a] >= RANK[b];
+}
+function maxConfidence(a, b) {
+  return RANK[a] >= RANK[b] ? a : b;
+}
+var WEIGHT_BASE = 0.6;
+var WEIGHT_STRENGTH = 0.25;
+var WEIGHT_AGREEMENT = 0.15;
+var AGREEMENT_LISTS = 3;
+var WEAK_FLOOR = 0.5;
+var STRONG_FLOOR = 0.75;
+function calibrate(e) {
+  const coverage = e.terms > 0 ? clamp01(e.covered / e.terms) : 1;
+  const strength = clamp01(e.strength);
+  const agreement = clamp01((e.lists - 1) / (AGREEMENT_LISTS - 1));
+  const score = clamp01(coverage * (WEIGHT_BASE + WEIGHT_STRENGTH * strength + WEIGHT_AGREEMENT * agreement));
+  return { score, confidence: label(score), coverage, strength, agreement };
+}
+function label(score) {
+  if (score >= STRONG_FLOOR)
+    return "strong";
+  if (score >= WEAK_FLOOR)
+    return "weak";
+  return "none";
+}
+function relativeStrength(raw, best, kind) {
+  if (kind === "flat")
+    return 1;
+  if (!Number.isFinite(raw) || !Number.isFinite(best))
+    return 0;
+  if (kind === "bm25") {
+    const b = Math.abs(best);
+    if (!(b > 0))
+      return 1;
+    return clamp01(Math.abs(raw) / b);
+  }
+  if (!(best > 0))
+    return 0;
+  return clamp01(Math.max(0, raw) / best);
+}
+function clamp01(x) {
+  if (!Number.isFinite(x))
+    return 0;
+  return Math.min(1, Math.max(0, x));
+}
+function coveredTerms(terms, text) {
+  if (terms.length === 0 || !text)
+    return 0;
+  const words = new Set(wordSpans(text).map((w) => w.word));
+  let n2 = 0;
+  for (const t of terms) {
+    for (const w of words) {
+      if (wordMatchesToken(w, t)) {
+        n2++;
+        break;
+      }
+    }
+  }
+  return n2;
 }
 
 // ../core/dist/recall.js
@@ -25921,16 +27787,16 @@ function bestSnippet(userText, assistantText, query, tokens) {
 }
 function countRows(db, name) {
   try {
-    const row = db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get();
-    return row.n;
+    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get();
+    return row2.n;
   } catch {
     return 0;
   }
 }
 function tableExists(db, name) {
   try {
-    const row = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = ?`).get(name);
-    return row.n > 0;
+    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = ?`).get(name);
+    return row2.n > 0;
   } catch {
     return false;
   }
@@ -26062,10 +27928,10 @@ function vecCards(db, embedding, filters, depth) {
         WHERE embedding MATCH ? ORDER BY distance LIMIT ?`).all(embeddingToBlob(embedding), wanted);
   if (near.length === 0)
     return [];
-  const order = new Map(near.map((n, i) => [n.session_id, i]));
-  const similarity = new Map(near.map((n) => [n.session_id, l2DistanceToCosineSimilarity(n.distance)]));
+  const order = new Map(near.map((n2, i) => [n2.session_id, i]));
+  const similarity = new Map(near.map((n2) => [n2.session_id, l2DistanceToCosineSimilarity(n2.distance)]));
   const placeholders = near.map(() => "?").join(",");
-  const ids = near.map((n) => n.session_id);
+  const ids = near.map((n2) => n2.session_id);
   const rows = [];
   if (sessionCardsInScope(filters)) {
     const f = buildSessionFilters(filters);
@@ -26137,8 +28003,8 @@ function vecExchanges(db, embedding, filters, depth) {
         WHERE embedding MATCH ? ORDER BY distance LIMIT ?`).all(embeddingToBlob(embedding), wanted);
   if (near.length === 0)
     return [];
-  const order = new Map(near.map((n, i) => [n.id, i]));
-  const similarity = new Map(near.map((n) => [n.id, l2DistanceToCosineSimilarity(n.distance)]));
+  const order = new Map(near.map((n2, i) => [n2.id, i]));
+  const similarity = new Map(near.map((n2) => [n2.id, l2DistanceToCosineSimilarity(n2.distance)]));
   const f = buildExchangeFilters(filters);
   const placeholders = near.map(() => "?").join(",");
   const rows = db.prepare(`SELECT e.id AS id, e.session_id AS session_id, e.seq AS seq, e.ts AS ts,
@@ -26147,7 +28013,7 @@ function vecExchanges(db, embedding, filters, depth) {
          FROM exchanges e
          JOIN sessions s ON s.id = e.session_id
         WHERE e.id IN (${placeholders})
-          ${f.sql}`).all(...near.map((n) => n.id), ...f.params);
+          ${f.sql}`).all(...near.map((n2) => n2.id), ...f.params);
   return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)).slice(0, depth).map((r) => ({
     key: `e:${r.id}`,
     kind: "exchange",
@@ -26167,15 +28033,15 @@ function vecGhostPrompts(db, embedding, filters, depth) {
         WHERE embedding MATCH ? ORDER BY distance LIMIT ?`).all(embeddingToBlob(embedding), wanted);
   if (near.length === 0)
     return [];
-  const order = new Map(near.map((n, i) => [n.id, i]));
-  const similarity = new Map(near.map((n) => [n.id, l2DistanceToCosineSimilarity(n.distance)]));
+  const order = new Map(near.map((n2, i) => [n2.id, i]));
+  const similarity = new Map(near.map((n2) => [n2.id, l2DistanceToCosineSimilarity(n2.distance)]));
   const f = buildGhostFilters(filters);
   const placeholders = near.map(() => "?").join(",");
   const rows = db.prepare(`SELECT p.id AS id, p.session_id AS session_id, p.seq AS seq, p.ts AS ts, p.text AS text
          FROM ghost_prompts p
          JOIN ghosts g ON g.session_id = p.session_id
         WHERE p.id IN (${placeholders})
-          ${f.sql}`).all(...near.map((n) => n.id), ...f.params);
+          ${f.sql}`).all(...near.map((n2) => n2.id), ...f.params);
   return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)).slice(0, depth).map((r) => ({
     key: `gp:${r.id}`,
     kind: "ghost",
@@ -26248,6 +28114,7 @@ async function recall(db, query, requested = {}, options = {}) {
   const perSession = Math.max(1, options.perSession ?? PER_SESSION);
   const baseWeights = { ...WEIGHTS, ...options.weights };
   const corroboration = options.corroboration ?? CORROBORATION;
+  const minConfidence = options.minConfidence ?? "none";
   const depth = Math.max(options.candidates ?? Math.max(limit * 10, 60), limit);
   const ghosts = filters.status === "ghost" ? "only" : filters.ghosts ?? "include";
   const sidechains = filters.sidechains ?? "include";
@@ -26270,6 +28137,9 @@ async function recall(db, query, requested = {}, options = {}) {
     ghostsOnly: ghosts === "only",
     indexedGhosts: countGhosts(db),
     ignored,
+    confidence: "none",
+    minConfidence,
+    belowFloor: 0,
     ms: Date.now() - started
   });
   const vecMode = options.vectors ?? "auto";
@@ -26406,15 +28276,41 @@ async function recall(db, query, requested = {}, options = {}) {
     });
   }
   const ranked = [...fused.values()].sort((a, b) => b.score - a.score || (a.seq ?? 0) - (b.seq ?? 0));
+  const bestRaw = /* @__PURE__ */ new Map();
+  for (const [name, hits] of Object.entries(lists)) {
+    if (hits.length === 0)
+      continue;
+    const kind = rawKind(name);
+    if (kind === "flat")
+      continue;
+    let best = hits[0].raw;
+    for (const h of hits)
+      best = kind === "bm25" ? Math.min(best, h.raw) : Math.max(best, h.raw);
+    bestRaw.set(name, best);
+  }
+  const strengthOf = (from) => {
+    let best = 0;
+    for (const f of from) {
+      const kind = rawKind(f.list);
+      best = Math.max(best, relativeStrength(f.raw, bestRaw.get(f.list) ?? 0, kind));
+    }
+    return best;
+  };
   const conversationOf = conversationKeys(db, ranked.map((h) => h.sessionId));
   const perSessionCount = /* @__PURE__ */ new Map();
   const kept = [];
   for (const hit of ranked) {
     const conversation = conversationOf(hit.sessionId);
-    const n = perSessionCount.get(conversation) ?? 0;
-    if (n >= perSession)
+    const n2 = perSessionCount.get(conversation) ?? 0;
+    if (n2 >= perSession)
       continue;
-    perSessionCount.set(conversation, n + 1);
+    perSessionCount.set(conversation, n2 + 1);
+    const calibration = calibrate({
+      covered: coveredTerms(quotableTokens, `${hit.userText} ${hit.assistantText ?? ""}`),
+      terms: quotableTokens.length,
+      strength: strengthOf(hit.from),
+      lists: new Set(hit.from.map((f) => f.list)).size
+    });
     kept.push({
       kind: hit.kind,
       sessionId: hit.sessionId,
@@ -26426,7 +28322,9 @@ async function recall(db, query, requested = {}, options = {}) {
       snippet: bestSnippet(hit.userText, hit.assistantText, query, quotableTokens),
       isSidechain: hit.isSidechain,
       score: hit.score,
-      from: hit.from
+      from: hit.from,
+      calibration,
+      confidence: calibration.confidence
     });
   }
   const order = [];
@@ -26461,12 +28359,31 @@ async function recall(db, query, requested = {}, options = {}) {
       seenText.add(key);
       return true;
     });
-    sessions.push({ ...m, score: sessionScore(hits, corroboration), hits });
+    const blockText = [m.displayTitle, m.title ?? ""].concat(hits.map((h) => `${h.userText} ${h.assistantText ?? ""}`)).join(" ");
+    const calibration = calibrate({
+      covered: coveredTerms(quotableTokens, blockText),
+      terms: quotableTokens.length,
+      strength: Math.max(0, ...hits.map((h) => h.calibration.strength)),
+      lists: new Set(hits.flatMap((h) => h.from.map((f) => f.list))).size
+    });
+    sessions.push({
+      ...m,
+      score: sessionScore(hits, corroboration),
+      calibration,
+      confidence: calibration.confidence,
+      hits
+    });
     if (sessions.length >= limit * 3)
       break;
   }
+  const built = sessions.length;
+  const surviving = sessions.filter((s) => atLeastConfident(s.confidence, minConfidence));
+  const belowFloor = built - surviving.length;
+  sessions.length = 0;
+  sessions.push(...surviving);
   sessions.sort((a, b) => b.score - a.score);
   sessions.length = Math.min(sessions.length, limit);
+  const confidence = sessions.reduce((best, s) => maxConfidence(best, s.confidence), "none");
   const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => b.score - a.score);
   return {
     query,
@@ -26481,8 +28398,16 @@ async function recall(db, query, requested = {}, options = {}) {
     ghostsOnly: ghosts === "only",
     indexedGhosts: sessions.length === 0 ? countGhosts(db) : null,
     ignored,
+    confidence,
+    minConfidence,
+    belowFloor,
     ms: Date.now() - started
   };
+}
+function rawKind(list) {
+  if (list === "titles")
+    return "flat";
+  return list.startsWith("vec_") ? "cosine" : "bm25";
 }
 function conversationKeys(db, ids) {
   const distinct = [...new Set(ids)];
@@ -26604,7 +28529,7 @@ function sessionScore(hits, cap2 = CORROBORATION) {
     return 0;
   const sorted = [...hits].sort((a, b) => b.score - a.score);
   const best = sorted[0].score;
-  const rest = sorted.slice(1).reduce((n, h) => n + h.score, 0);
+  const rest = sorted.slice(1).reduce((n2, h) => n2 + h.score, 0);
   return best + Math.min(rest / 2, best * cap2);
 }
 function titled(db, tokens, filters, depth, reports) {
@@ -26630,6 +28555,208 @@ function firstLine2(s) {
 }
 
 // ../core/dist/rescue.js
+var HARNESS = "claude";
+async function rescue(opts = {}) {
+  const root = opts.root ?? potsherdDir();
+  return withLockAsync("rescue", () => rescueUnlocked(opts, root), { root, wait: 1e4 });
+}
+async function rescueUnlocked(opts, root) {
+  const started = Date.now();
+  const now = opts.now ?? /* @__PURE__ */ new Date();
+  const src = claudeDir(opts.claudeDir);
+  const cp = claudePaths(src);
+  const dest = path10.join(archiveDir(root), HARNESS);
+  const result = {
+    ranAt: now.toISOString(),
+    dryRun: Boolean(opts.dryRun),
+    claudeDir: src,
+    archiveDir: dest,
+    filesConsidered: 0,
+    filesCopied: 0,
+    filesSkipped: 0,
+    filesFailed: [],
+    bytesCopied: 0,
+    bytesArchived: 0,
+    sessionsArchived: 0,
+    sessionsInArchive: 0,
+    sidechainsArchived: 0,
+    memoryFilesArchived: 0,
+    sessionIndexesArchived: 0,
+    historyArchived: false,
+    ghostsBuilt: 0,
+    ghostsUpdated: 0,
+    ghostPrompts: 0,
+    promptsRecovered: 0,
+    ghostsWithTitles: 0,
+    durationMs: 0,
+    warnings: []
+  };
+  const disk = scanClaudeDisk(src, { titles: false, content: false });
+  if (!disk.exists) {
+    result.warnings.push(`no projects directory at ${cp.projects}`);
+  }
+  const db = opts.dryRun ? open({ root, file: ":memory:" }) : open({ root });
+  try {
+    if (!opts.ghostsOnly) {
+      copyPass(db, disk.projectsDir, cp.history, dest, result, opts);
+    }
+    await ghostPass(db, src, disk, result, opts);
+    if (!opts.dryRun) {
+      db.prepare(`INSERT INTO rescue_log (ran_at, harness, sessions_copied, files_copied, files_skipped,
+           ghosts_built, prompts_recovered, bytes, duration_ms, settings_changed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(result.ranAt, HARNESS, result.sessionsArchived, result.filesCopied, result.filesSkipped, result.ghostsBuilt, result.promptsRecovered, result.bytesCopied, Date.now() - started, null);
+    }
+  } finally {
+    db.close();
+  }
+  result.durationMs = Date.now() - started;
+  return result;
+}
+function copyPass(db, projectsDir, historyPath, dest, result, opts) {
+  const files = collectSourceFiles(projectsDir);
+  if (fs12.existsSync(historyPath)) {
+    files.unshift({ abs: historyPath, rel: "history.jsonl", kind: "history" });
+  }
+  if (files.length === 0)
+    return;
+  const known = /* @__PURE__ */ new Map();
+  for (const row2 of db.prepare("SELECT source_path, sha256, bytes, source_mtime FROM archive_files").all()) {
+    known.set(row2.source_path, row2);
+  }
+  const upsert = db.prepare(`INSERT INTO archive_files (source_path, archive_path, sha256, bytes, source_mtime, copied_at, harness)
+     VALUES (@source_path, @archive_path, @sha256, @bytes, @source_mtime, @copied_at, @harness)
+     ON CONFLICT(source_path) DO UPDATE SET
+       archive_path = excluded.archive_path, sha256 = excluded.sha256, bytes = excluded.bytes,
+       source_mtime = excluded.source_mtime, copied_at = excluded.copied_at`);
+  let done = 0;
+  for (const f of files) {
+    result.filesConsidered++;
+    done++;
+    opts.onProgress?.({ phase: "copy", done, total: files.length, label: path10.basename(f.rel) });
+    const target = path10.join(dest, f.rel);
+    let stat;
+    try {
+      stat = fs12.statSync(f.abs);
+    } catch (err) {
+      result.filesFailed.push({ path: f.abs, error: err.message });
+      continue;
+    }
+    result.bytesArchived += stat.size;
+    const prev = known.get(f.abs);
+    if (prev && prev.bytes === stat.size && prev.source_mtime === Math.floor(stat.mtimeMs) && fs12.existsSync(target)) {
+      result.filesSkipped++;
+      countKind(result, f.kind, false);
+      continue;
+    }
+    let sha;
+    try {
+      sha = sha256File(f.abs);
+    } catch (err) {
+      result.filesFailed.push({ path: f.abs, error: err.message });
+      continue;
+    }
+    if (fs12.existsSync(target) && safeSize(target) === stat.size && sha256File(target) === sha) {
+      result.filesSkipped++;
+      countKind(result, f.kind, false);
+      if (!opts.dryRun) {
+        upsert.run({
+          source_path: f.abs,
+          archive_path: target,
+          sha256: sha,
+          bytes: stat.size,
+          source_mtime: Math.floor(stat.mtimeMs),
+          copied_at: result.ranAt,
+          harness: HARNESS
+        });
+      }
+      continue;
+    }
+    if (!opts.dryRun) {
+      try {
+        fs12.mkdirSync(path10.dirname(target), { recursive: true, mode: 448 });
+        const tmp = `${target}.potsherd-tmp`;
+        fs12.copyFileSync(f.abs, tmp);
+        fs12.chmodSync(tmp, 384);
+        fs12.utimesSync(tmp, stat.atime, stat.mtime);
+        fs12.renameSync(tmp, target);
+        upsert.run({
+          source_path: f.abs,
+          archive_path: target,
+          sha256: sha,
+          bytes: stat.size,
+          source_mtime: Math.floor(stat.mtimeMs),
+          copied_at: result.ranAt,
+          harness: HARNESS
+        });
+      } catch (err) {
+        result.filesFailed.push({ path: f.abs, error: err.message });
+        continue;
+      }
+    }
+    result.filesCopied++;
+    result.bytesCopied += stat.size;
+    countKind(result, f.kind, true);
+  }
+}
+function collectSourceFiles(projectsDir) {
+  const out = [];
+  const slugs = readdirSafe2(projectsDir, true);
+  for (const slugEntry of slugs) {
+    if (!slugEntry.isDirectory())
+      continue;
+    const slug = slugEntry.name;
+    const dir = path10.join(projectsDir, slug);
+    for (const e of readdirSafe2(dir, true)) {
+      if (e.isFile()) {
+        if (e.name.endsWith(".jsonl")) {
+          out.push({ abs: path10.join(dir, e.name), rel: path10.join(slug, e.name), kind: "session" });
+        } else if (e.name === "sessions-index.json") {
+          out.push({ abs: path10.join(dir, e.name), rel: path10.join(slug, e.name), kind: "index" });
+        }
+      } else if (e.isDirectory()) {
+        if (e.name === "memory") {
+          for (const m of readdirSafe2(path10.join(dir, "memory"))) {
+            out.push({
+              abs: path10.join(dir, "memory", m),
+              rel: path10.join(slug, "memory", m),
+              kind: "memory"
+            });
+          }
+        } else {
+          const nested = e.name === SIDECHAIN_DIR;
+          const subDir = nested ? path10.join(dir, e.name) : path10.join(dir, e.name, SIDECHAIN_DIR);
+          const relDir = nested ? path10.join(slug, e.name) : path10.join(slug, e.name, SIDECHAIN_DIR);
+          for (const s of readdirSafe2(subDir)) {
+            if (!s.endsWith(".jsonl"))
+              continue;
+            out.push({
+              abs: path10.join(subDir, s),
+              rel: path10.join(relDir, s),
+              kind: "sidechain"
+            });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+function countKind(result, kind, copied) {
+  if (kind === "session")
+    result.sessionsInArchive++;
+  if (!copied)
+    return;
+  if (kind === "session")
+    result.sessionsArchived++;
+  else if (kind === "sidechain")
+    result.sidechainsArchived++;
+  else if (kind === "memory")
+    result.memoryFilesArchived++;
+  else if (kind === "index")
+    result.sessionIndexesArchived++;
+  else if (kind === "history")
+    result.historyArchived = true;
+}
 var TITLE_STOPWORDS = /* @__PURE__ */ new Set([
   "clear",
   "continue",
@@ -26644,9 +28771,9 @@ var GHOST_TITLE_MAX_CHARS = 60;
 function collapse2(text) {
   return (text ?? "").replace(/\s+/g, " ").trim();
 }
-function cutToCodePoints(text, max) {
+function cutToCodePoints(text, max2) {
   const points = Array.from(text);
-  return points.length <= max ? text : points.slice(0, max).join("");
+  return points.length <= max2 ? text : points.slice(0, max2).join("");
 }
 function isSubstantivePrompt(text) {
   const clean = titleText(text);
@@ -26667,25 +28794,871 @@ function firstSubstantivePrompt(texts) {
       return titleText(t);
   return null;
 }
+function ghostTitle(summary2, substantive, project, sessionId) {
+  if (summary2)
+    return summary2;
+  if (substantive)
+    return cutToCodePoints(substantive, GHOST_TITLE_MAX_CHARS);
+  return fallbackTitle(project, sessionId, HARNESS);
+}
+function isWrittenTitle(title, project, sessionId) {
+  const clean = collapse2(title);
+  return clean !== "" && clean !== fallbackTitle(project, sessionId, HARNESS);
+}
+function ghostFingerprint(historyPath, disk) {
+  let hs;
+  try {
+    hs = fs12.statSync(historyPath);
+  } catch {
+    return null;
+  }
+  const parts = [`algo:${String(GHOST_ALGO_VERSION)}`, `history:${hs.size}:${Math.floor(hs.mtimeMs)}`];
+  const ids = disk.sessions.map((s) => s.sessionId).sort();
+  parts.push(`sessions:${ids.length}:${crypto.createHash("sha256").update(ids.join("\n")).digest("hex")}`);
+  for (const proj of (disk.projects ?? []).filter((p) => p.hasSessionsIndex)) {
+    const p = path10.join(proj.dir, "sessions-index.json");
+    try {
+      const st = fs12.statSync(p);
+      parts.push(`index:${p}:${st.size}:${Math.floor(st.mtimeMs)}`);
+    } catch {
+      parts.push(`index:${p}:gone`);
+    }
+  }
+  return crypto.createHash("sha256").update(parts.sort().join("\n")).digest("hex");
+}
+var GHOST_ALGO_VERSION = 2;
+var GHOST_FINGERPRINT_KEY = "claude:ghosts";
+function ghostTotals(db) {
+  const g = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(prompt_count), 0) AS prompts FROM ghosts").get();
+  const rows = db.prepare("SELECT COUNT(*) AS n FROM ghost_prompts").get();
+  const named2 = db.prepare("SELECT session_id, project, title FROM ghosts").all();
+  let titled2 = 0;
+  for (const r of named2) {
+    if (isWrittenTitle(r.title, r.project, r.session_id))
+      titled2++;
+  }
+  return { ghosts: g.n, prompts: g.prompts, promptRows: rows.n, withTitles: titled2 };
+}
+async function ghostPass(db, src, disk, result, opts) {
+  const fingerprint = opts.dryRun ? null : ghostFingerprint(claudePaths(src).history, disk);
+  if (fingerprint) {
+    const seen = db.prepare("SELECT value FROM sync_state WHERE key = ?").get(GHOST_FINGERPRINT_KEY);
+    const totals = ghostTotals(db);
+    if (seen?.value === fingerprint && totals.ghosts > 0) {
+      result.ghostsUpdated = totals.ghosts;
+      result.promptsRecovered = totals.prompts;
+      result.ghostPrompts = totals.promptRows;
+      result.ghostsWithTitles = totals.withTitles;
+      return;
+    }
+  }
+  const history = await readHistory(src, { withPrompts: true });
+  if (!history.exists) {
+    result.warnings.push("no history.jsonl \u2014 nothing to rebuild ghosts from");
+    return;
+  }
+  const index = readSessionsIndexes(src);
+  const onDisk = new Set(disk.sessions.map((s) => s.sessionId));
+  const existing = /* @__PURE__ */ new Map();
+  for (const row2 of db.prepare("SELECT session_id, prompt_count FROM ghosts").all()) {
+    existing.set(row2.session_id, row2.prompt_count);
+  }
+  const upsertGhost = db.prepare(`INSERT INTO ghosts (session_id, harness, project, first_ts, last_ts, prompt_count,
+        first_prompt, title, message_count, git_branch, source)
+     VALUES (@session_id, @harness, @project, @first_ts, @last_ts, @prompt_count,
+        @first_prompt, @title, @message_count, @git_branch, @source)
+     ON CONFLICT(session_id) DO UPDATE SET
+       project = excluded.project, first_ts = excluded.first_ts, last_ts = excluded.last_ts,
+       prompt_count = excluded.prompt_count, first_prompt = excluded.first_prompt,
+       title = excluded.title,
+       message_count = COALESCE(excluded.message_count, ghosts.message_count),
+       git_branch = COALESCE(excluded.git_branch, ghosts.git_branch),
+       source = excluded.source`);
+  const clearPrompts = db.prepare("DELETE FROM ghost_prompts WHERE session_id = ?");
+  const insertPrompt = db.prepare(`INSERT INTO ghost_prompts (id, session_id, seq, ts, text, redacted)
+     VALUES (?, ?, ?, ?, ?, 0)`);
+  const ghosts = [...history.sessions.values()].filter((s) => !onDisk.has(s.sessionId));
+  let done = 0;
+  const run2 = db.transaction(() => {
+    for (const g of ghosts) {
+      done++;
+      if (done % 25 === 0) {
+        opts.onProgress?.({ phase: "ghosts", done, total: ghosts.length });
+      }
+      const idx = index.entries.get(g.sessionId);
+      const source = idx ? "both" : "history";
+      const summary2 = collapse2(idx?.summary) || null;
+      const project = g.project || idx?.projectPath || null;
+      const substantive = firstSubstantivePrompt([
+        ...g.prompts.map((p) => p.text),
+        g.firstPrompt,
+        idx?.firstPrompt
+      ]);
+      const title = ghostTitle(summary2, substantive, project, g.sessionId);
+      const row2 = {
+        session_id: g.sessionId,
+        harness: HARNESS,
+        project,
+        first_ts: g.firstTs ? new Date(g.firstTs).toISOString() : null,
+        last_ts: g.lastTs ? new Date(g.lastTs).toISOString() : null,
+        prompt_count: g.promptCount,
+        // The *substantive* prompt, or nothing. The verbatim prompt stream,
+        // slash commands and all, is `ghost_prompts` — which is what `show`
+        // renders and what `ghost_prompts_fts` searches — so nothing is lost
+        // by keeping the denormalised copy free of `/resume`. Null here means
+        // "this session typed nothing that names it", which is exactly when
+        // `title` is the `<project>-<id8>` fallback.
+        first_prompt: substantive,
+        title,
+        message_count: idx?.messageCount ?? null,
+        git_branch: idx?.gitBranch ?? null,
+        source
+      };
+      const had = existing.has(g.sessionId);
+      if (!opts.dryRun) {
+        upsertGhost.run(row2);
+        clearPrompts.run(g.sessionId);
+        let seq = 0;
+        for (const p of g.prompts) {
+          insertPrompt.run(`${g.sessionId}:${seq}`, g.sessionId, seq, p.ts ? new Date(p.ts).toISOString() : null, p.text);
+          seq++;
+        }
+      }
+      if (had)
+        result.ghostsUpdated++;
+      else
+        result.ghostsBuilt++;
+      if (summary2 || substantive)
+        result.ghostsWithTitles++;
+      result.ghostPrompts += g.prompts.length;
+      result.promptsRecovered += g.promptCount;
+    }
+  });
+  run2();
+  if (!opts.dryRun) {
+    const orphanRun = db.transaction(() => {
+      for (const [id, e] of index.entries) {
+        if (onDisk.has(id) || history.sessions.has(id) || e.isSidechain)
+          continue;
+        const summary2 = collapse2(e.summary) || null;
+        const project = e.projectPath ?? null;
+        const substantive = firstSubstantivePrompt([e.firstPrompt]);
+        upsertGhost.run({
+          session_id: id,
+          harness: HARNESS,
+          project,
+          first_ts: e.created ?? null,
+          last_ts: e.modified ?? null,
+          prompt_count: 0,
+          first_prompt: substantive,
+          title: ghostTitle(summary2, substantive, project, id),
+          message_count: e.messageCount ?? null,
+          git_branch: e.gitBranch ?? null,
+          source: "sessions-index"
+        });
+        if (existing.has(id))
+          result.ghostsUpdated++;
+        else
+          result.ghostsBuilt++;
+        if (summary2 || substantive)
+          result.ghostsWithTitles++;
+      }
+    });
+    orphanRun();
+    if (fingerprint) {
+      db.prepare(`INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(GHOST_FINGERPRINT_KEY, fingerprint, result.ranAt);
+    }
+  }
+}
+function sha256File(p) {
+  const hash2 = crypto.createHash("sha256");
+  const fd = fs12.openSync(p, "r");
+  try {
+    const buf = Buffer.allocUnsafe(1 << 20);
+    for (; ; ) {
+      const read = fs12.readSync(fd, buf, 0, buf.length, null);
+      if (read <= 0)
+        break;
+      hash2.update(buf.subarray(0, read));
+    }
+  } finally {
+    fs12.closeSync(fd);
+  }
+  return hash2.digest("hex");
+}
+function safeSize(p) {
+  try {
+    return fs12.statSync(p).size;
+  } catch {
+    return -1;
+  }
+}
+function readdirSafe2(dir, withTypes) {
+  try {
+    return withTypes ? fs12.readdirSync(dir, { withFileTypes: true }) : fs12.readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+// ../core/dist/audit.js
+var DAY_MS = 864e5;
+async function collectAudit(dir, now = /* @__PURE__ */ new Date(), opts = {}) {
+  const root = claudeDir(dir);
+  const disk = scanClaudeDisk(root, { titles: true });
+  const history = await readHistory(root, { withPrompts: true });
+  const index = readSessionsIndexes(root);
+  const cleanup = readCleanupStatus(root);
+  const archive = readArchiveState(opts.potsherdDir);
+  return { disk, history, index, cleanup, archive, claudeDir: root, now };
+}
+async function audit(dir, now = /* @__PURE__ */ new Date(), opts = {}) {
+  const started = Date.now();
+  const input = await collectAudit(dir, now, opts);
+  const report = computeAudit(input);
+  report.timings.totalMs = Date.now() - started;
+  return report;
+}
+function computeAudit(input) {
+  const { disk, history, index, cleanup, archive, claudeDir: root, now } = input;
+  const cp = claudePaths(root);
+  const warnings = [];
+  const onDiskIds = new Set(disk.sessions.map((s) => s.sessionId));
+  const everIds = new Set(onDiskIds);
+  for (const id of history.sessions.keys())
+    everIds.add(id);
+  for (const [id, e] of index.entries)
+    if (!e.isSidechain)
+      everIds.add(id);
+  const deletedIds = /* @__PURE__ */ new Set();
+  for (const id of everIds)
+    if (!onDiskIds.has(id))
+      deletedIds.add(id);
+  let promptsLost = 0;
+  let promptsSurviving = 0;
+  let deletedOnlyStubs = 0;
+  for (const [id, sess] of history.sessions) {
+    if (deletedIds.has(id)) {
+      promptsLost += sess.promptCount;
+      if (!sess.prompts.some((p) => isSubstantivePrompt(p.text)))
+        deletedOnlyStubs += 1;
+    } else
+      promptsSurviving += sess.promptCount;
+  }
+  const byProject = /* @__PURE__ */ new Map();
+  const projectOfSession = /* @__PURE__ */ new Map();
+  for (const [id, sess] of history.sessions) {
+    const proj = sess.project || "unknown";
+    projectOfSession.set(id, proj);
+    const agg = byProject.get(proj) ?? { total: 0, alive: 0, prompts: 0, lastTs: null };
+    agg.total++;
+    if (onDiskIds.has(id))
+      agg.alive++;
+    else
+      agg.prompts += sess.promptCount;
+    if (sess.lastTs && (agg.lastTs === null || sess.lastTs > agg.lastTs))
+      agg.lastTs = sess.lastTs;
+    byProject.set(proj, agg);
+  }
+  for (const s of disk.sessions) {
+    const proj = s.project;
+    const agg = byProject.get(proj) ?? { total: 0, alive: 0, prompts: 0, lastTs: null };
+    if (!projectOfSession.has(s.sessionId))
+      agg.total++;
+    agg.alive++;
+    byProject.set(proj, agg);
+  }
+  const projectsWiped = rollUpWipedProjects(byProject);
+  const period = cleanup.effective;
+  const nextSweep = disk.sessions.map((s) => ({
+    id: s.sessionId,
+    title: s.title,
+    project: s.project,
+    daysLeft: period - Math.floor((now.getTime() - s.mtime.getTime()) / DAY_MS),
+    bytes: s.bytes,
+    mtime: s.mtime.toISOString()
+  })).sort((a, b) => a.daysLeft - b.daysLeft);
+  if (!disk.exists)
+    warnings.push(`no projects directory at ${cp.projects}`);
+  if (!history.exists)
+    warnings.push(`no history.jsonl at ${cp.history} \u2014 ghosts cannot be rebuilt`);
+  if (history.malformed > 0) {
+    const n2 = history.malformed;
+    warnings.push(`${n2} malformed ${n2 === 1 ? "line" : "lines"} in history.jsonl (skipped)`);
+  }
+  for (const bad of index.malformed)
+    warnings.push(`unreadable sessions-index.json: ${bad}`);
+  for (const s of [...disk.sessions, ...disk.sidechains]) {
+    if (s.error)
+      warnings.push(`unreadable transcript ${s.sourcePath}: ${s.error}`);
+  }
+  const recordTypes = {};
+  for (const s of [...disk.sessions, ...disk.sidechains]) {
+    for (const [type, n2] of Object.entries(s.typesSeen)) {
+      recordTypes[type] = (recordTypes[type] ?? 0) + n2;
+    }
+  }
+  const pathsRead = [
+    cp.projects,
+    cp.history,
+    ...index.files,
+    cleanup.files.user.path,
+    cleanup.files.local.path,
+    cleanup.files.managed.path
+  ];
+  return {
+    measuredAt: now.toISOString(),
+    claudeDir: root,
+    claudeDirExists: disk.exists || history.exists,
+    sessionsEver: everIds.size,
+    onDisk: onDiskIds.size,
+    deleted: deletedIds.size,
+    promptsLost,
+    promptsSurviving,
+    deletedWithoutSubstantivePrompt: history.withPrompts ? deletedOnlyStubs : null,
+    historySessions: history.sessions.size,
+    historyOnDisk: [...history.sessions.keys()].filter((id) => onDiskIds.has(id)).length,
+    historyPrompts: promptsLost + promptsSurviving,
+    historyFirstTs: history.firstTs ? new Date(history.firstTs).toISOString() : null,
+    historyLastTs: history.lastTs ? new Date(history.lastTs).toISOString() : null,
+    projectsWiped,
+    projectsWithSessions: countProjectsWithSessions(disk),
+    projectDirs: disk.projects.length,
+    nextSweep,
+    nextSweepWithin7Days: nextSweep.filter((s) => s.daysLeft <= 7).length,
+    nextSweepWithinOneDay: nextSweep.filter((s) => s.daysLeft <= 1).length,
+    cleanupPeriodDays: cleanup.declared,
+    cleanupPeriodEffective: cleanup.effective,
+    cleanupPeriodSource: cleanup.source,
+    cleanupEditable: cleanup.editable,
+    ...cleanup.reason ? { cleanupReason: cleanup.reason } : {},
+    onDiskFiles: disk.sessions.length,
+    sidechainFiles: disk.sidechains.length,
+    bytes: disk.totalBytes,
+    sdkSessions: disk.sessions.filter((s) => s.entrypoint === "sdk-ts").length,
+    titledSessions: disk.sessions.filter((s) => Boolean(s.title)).length,
+    memoryFiles: disk.projects.reduce((a, p) => a + p.memoryFiles, 0),
+    sessionsIndexFiles: index.files.length,
+    archive,
+    recordTypes,
+    pathsRead,
+    timings: { scanMs: disk.scanMs, historyMs: history.scanMs, totalMs: 0 },
+    warnings
+  };
+}
+function rollUpWipedProjects(byProject) {
+  const alive = [];
+  const wiped = [];
+  for (const [project, agg] of byProject) {
+    if (agg.total === 0)
+      continue;
+    (agg.alive > 0 ? alive : wiped).push(project);
+  }
+  const isUnder = (child, parent) => child !== parent && child.startsWith(parent.endsWith("/") ? parent : parent + "/");
+  const all = [...alive, ...wiped];
+  const isContainer = (p) => all.filter((o) => isUnder(o, p)).length >= 2;
+  const shields = alive.filter((a) => !isContainer(a));
+  const parents = wiped.filter((w) => !isContainer(w));
+  const merged = /* @__PURE__ */ new Map();
+  for (const project of wiped) {
+    if (shields.some((a) => isUnder(project, a)))
+      continue;
+    let owner = project;
+    for (const other of parents) {
+      if (isUnder(project, other) && other.length > (owner === project ? 0 : owner.length)) {
+        owner = other;
+      }
+    }
+    const agg = byProject.get(project);
+    const existing = merged.get(owner);
+    if (existing) {
+      existing.sessions += agg.total;
+      existing.prompts += agg.prompts;
+      if (agg.lastTs && (existing.lastTs === null || agg.lastTs > existing.lastTs)) {
+        existing.lastTs = agg.lastTs;
+      }
+    } else {
+      merged.set(owner, {
+        project: owner,
+        name: basename(owner),
+        sessions: agg.total,
+        prompts: agg.prompts,
+        lastTs: agg.lastTs
+      });
+    }
+  }
+  return [...merged.values()].sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name));
+}
+function countProjectsWithSessions(disk) {
+  const slugs = /* @__PURE__ */ new Set();
+  for (const s of disk.sessions)
+    slugs.add(s.projectSlug);
+  return slugs.size;
+}
+function basename(p) {
+  const parts = p.replace(/[/\\]+$/, "").split(/[/\\]/);
+  return parts[parts.length - 1] || p;
+}
+
+// ../core/dist/render/audit-card.js
+function renderAuditCard(r, t = new Theme()) {
+  const card = new Card(t);
+  card.heading("audit", tildify(r.claudeDir), date5(r.measuredAt)).blank();
+  if (!r.claudeDirExists) {
+    card.text(`no Claude Code data at ${tildify(r.claudeDir)}.`).blank().text("if Claude Code stores its data elsewhere, point potsherd at it:").raw(`  potsherd audit --claude-dir <path>`).blank();
+    return card.toString();
+  }
+  const rows = [];
+  rows.push({
+    label: "sessions ever started",
+    value: num(r.sessionsEver),
+    note: historyRange(r, t)
+  });
+  rows.push({ label: "still on disk", value: num(r.onDisk) });
+  rows.push({
+    // Name the culprit only while it is still the culprit. Once the user has
+    // raised cleanupPeriodDays, "deleted by 3650-day sweep" would be a lie
+    // about sessions the 30-day default took months ago.
+    label: r.cleanupPeriodEffective === 30 ? "deleted by 30-day sweep" : "already deleted",
+    value: num(r.deleted),
+    note: r.deleted > 0 ? pct(r.deleted, r.sessionsEver) : "",
+    tone: r.deleted > 0 ? "accent" : "none"
+  });
+  rows.push({ label: "prompts lost", value: num(r.promptsLost) });
+  if ((r.deletedWithoutSubstantivePrompt ?? 0) > 0) {
+    rows.push({
+      label: "only commands and stubs",
+      value: num(r.deletedWithoutSubstantivePrompt),
+      note: `of the ${num(r.deleted)} deleted`
+    });
+  }
+  if (r.projectsWiped.length > 0) {
+    const width = Math.max(12, noteWidth(t));
+    rows.push({
+      label: "projects wiped entirely",
+      value: num(r.projectsWiped.length),
+      note: joinFit(r.projectsWiped.map((p) => p.name), width, ` ${t.sep} `, t.ellip)
+    });
+  }
+  card.rows(rows).blank();
+  const sweepRows = [];
+  const doomed = r.nextSweepWithin7Days;
+  const soon = r.nextSweepWithinOneDay;
+  sweepRows.push({
+    label: "next sweep will delete",
+    value: num(doomed),
+    note: doomed ? `sessions in ${t.le} 7 days` + (soon ? `   (${num(soon)} within one day)` : "") : "nothing in the next 7 days",
+    tone: doomed > 0 ? "warn" : "ok"
+  });
+  sweepRows.push({
+    label: "cleanupPeriodDays",
+    // A settings value, not a quantity: no thousands separator.
+    value: r.cleanupPeriodDays === null ? "unset" : String(r.cleanupPeriodDays),
+    note: r.cleanupPeriodDays === null ? `${t.arrow} ${r.cleanupPeriodEffective} (default)` : r.cleanupPeriodSource !== "user" ? `${t.arrow} ${r.cleanupPeriodEffective} (${r.cleanupPeriodSource})` : r.cleanupPeriodEffective >= 365 ? "the sweep is effectively off" : ""
+  });
+  card.rows(sweepRows).blank();
+  if (r.warnings.length) {
+    for (const w of r.warnings.slice(0, 3))
+      card.text(t.dim(`note: ${w}`));
+    if (r.warnings.length > 3)
+      card.text(t.dim(`note: ${r.warnings.length - 3} more (see --json)`));
+    card.blank();
+  }
+  closing(card, r, t);
+  return card.toString();
+}
+function closing(card, r, t) {
+  if (r.onDisk === 0 && r.deleted === 0) {
+    card.text("no sessions found yet. run Claude Code once, then audit again.");
+    return;
+  }
+  const rescued = r.archive;
+  if (!rescued || rescued.rescues === 0) {
+    if (r.deleted > 0) {
+      card.text(r.deleted === 1 ? "the prompts from that one session are recoverable from history.jsonl." : `the prompts from all ${num(r.deleted)} are recoverable from history.jsonl.`);
+      card.fix("potsherd rescue", "to archive what is left and rebuild the ghosts.", "to archive what is left.");
+    } else {
+      card.text("nothing has been deleted yet.");
+      card.fix("potsherd rescue", "to archive what you have before the sweep runs.", "to archive what you have.");
+    }
+    return;
+  }
+  const missing = r.deleted - rescued.ghosts;
+  card.text(`${num(rescued.ghosts)} ghosts rebuilt ${t.sep} ${bytes(rescued.archivedBytes)} archived ${t.sep} last rescue ${rescued.lastRescueAt ? date5(rescued.lastRescueAt) : "unknown"}`);
+  if (missing > 0) {
+    const n2 = `${num(missing)} ${plural(missing, "session")}`;
+    card.fix("potsherd rescue", `${t.arrow} ${n2} ${plural(missing, "is", "are")} not archived yet.`, `${t.arrow} ${n2} still missing.`);
+    return;
+  }
+  if (r.cleanupPeriodEffective < 365) {
+    card.fix("potsherd rescue --yes", "to stop the sweep taking any more.", "to stop the sweep.");
+    return;
+  }
+  card.fix("potsherd guard", "to take a copy at every startup, automatically.", "to copy at every startup.");
+}
+function historyRange(r, t) {
+  if (!r.historyFirstTs || !r.historyLastTs)
+    return "";
+  const a = monthYear(r.historyFirstTs);
+  const b = monthYear(r.historyLastTs);
+  return a === b ? a : `${a} ${t.arrow} ${b}`;
+}
+function renderSweepList(r, t = new Theme(), limit = 10) {
+  if (r.nextSweep.length === 0)
+    return "";
+  const card = new Card(t);
+  card.blank().text("sessions the sweep takes next:");
+  for (const s of r.nextSweep.slice(0, limit)) {
+    const when2 = s.daysLeft <= 0 ? "at next startup" : s.daysLeft === 1 ? "in 1 day" : `in ${s.daysLeft} days`;
+    const label3 = s.title ?? `${basename2(s.project)}-${s.id.slice(0, 8)}`;
+    card.raw(`    ${t.warn(pad(when2, 16))}${elide(label3, Math.max(20, t.width - 24))}`);
+  }
+  if (r.nextSweep.length > limit) {
+    card.raw(`    ${t.dim(`${r.nextSweep.length - limit} more`)}`);
+  }
+  return card.toString();
+}
+function pad(s, w) {
+  return s.length >= w ? s : s + " ".repeat(w - s.length);
+}
+function basename2(p) {
+  const parts = p.replace(/[/\\]+$/, "").split(/[/\\]/);
+  return parts[parts.length - 1] || p;
+}
+
+// ../core/dist/render/verify.js
+import process10 from "node:process";
+var VERIFY_SCRIPT_PATH = "scripts/verify-audit.py";
+var VERIFY_SCRIPT_URL = "https://github.com/HulkInTherapy/potsherd/blob/main/scripts/verify-audit.py";
+var VERIFY_SNIPPET = `python3 - <<'PY'
+import glob, json, os, re
+root = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
+proj = os.path.join(root, "projects")
+
+# a session is a transcript directly inside a project dir. subagent transcripts
+# live in a subagents/ directory and belong to their parent session, so they are
+# never counted as sessions.
+on_disk = {os.path.basename(p)[:-6] for p in glob.glob(os.path.join(proj, "*", "*.jsonl"))
+           if "subagents" not in p.split(os.sep)}
+
+STOP = {"clear", "continue", "ok", "yes", "hi", "y", "n"}
+
+# Pasted screenshots, tool-result envelopes, bare absolute paths and content
+# hashes are real text in a prompt and name nothing, so they are taken off
+# before a prompt is judged to have named its session.
+#
+# This list is a deliberate duplicate of the tool's own: the whole point of
+# this script is that it shares no code with the thing it checks, so it has to
+# restate the rule rather than import it. It has to restate it CORRECTLY --
+# it drifted once, in the very commit that introduced the strip, and the two
+# disagreed by three on a real archive, on the number that commit had just
+# added. A test pins them together against a session whose only prompt is a
+# pasted screenshot, which is the case a tidy demo corpus can never produce.
+BOILERPLATE = [
+    r"\\[Image:[^\\]]*\\]?",
+    r"\\[Pasted text[^\\]]*\\]?",
+    r"\\[Request interrupted[^\\]]*\\]?",
+    r"</?(?:system-reminder|local-command-stdout|local-command-stderr"
+    r"|command-name|command-message|command-args|tool_use_error"
+    r"|user-prompt-submit-hook)>",
+    r"Caveat: The messages below were generated[^\\n]*",
+    r"\\bdata:[a-z/+.-]+;base64,[A-Za-z0-9+/=]+",
+    r"(?:[A-Za-z]:)?(?:/[\\w.@+-]+){2,}/?",
+    r"\\b[0-9a-f]{16,}\\b",
+]
+
+def strip_furniture(text):
+    out = text or ""
+    for pat in BOILERPLATE:
+        out = re.sub(pat, " ", out, flags=re.I)
+    return out
+
+def names(text):
+    "does this prompt name the session it opened?"
+    c = " ".join(strip_furniture(text).split())
+    return bool(c) and not c.startswith("/") and len(c) >= 8 and c.lower() not in STOP
+
+prompts, named = {}, set()
+try:
+    with open(os.path.join(root, "history.jsonl"), encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue                       # a torn line is skipped, never fatal
+            sid = rec.get("sessionId")
+            if sid:
+                prompts[sid] = prompts.get(sid, 0) + 1
+                if names(rec.get("display")):
+                    named.add(sid)
+except OSError:
+    pass
+
+indexed = set()
+for p in glob.glob(os.path.join(proj, "*", "sessions-index.json")):
+    try:
+        with open(p, encoding="utf-8") as fh:
+            entries = json.load(fh).get("entries", [])
+    except (OSError, ValueError):
+        continue
+    indexed |= {e["sessionId"] for e in entries
+                if e.get("sessionId") and not e.get("isSidechain")}
+
+ever = on_disk | set(prompts) | indexed        # sessions ever started
+gone = ever - on_disk                          # deleted
+# of the deleted, the ones that recorded something and nothing that names them.
+# a deleted session with no history line at all recorded nothing rather than
+# something unnameable, so the s-in-prompts test is part of the question.
+stubs = sum(1 for s in gone if s in prompts and s not in named)
+print("sessions ever started   %7d" % len(ever))
+print("still on disk           %7d" % len(on_disk))
+print("deleted                 %7d" % len(gone))
+print("prompts lost            %7d" % sum(prompts.get(s, 0) for s in gone))
+if stubs:
+    print("only commands and stubs %7d" % stubs)
+PY`;
+var VERIFY_DEFINITIONS = {
+  sessionsEver: "distinct session ids in any of history.jsonl, the transcripts on disk, or a sessions-index.json",
+  onDisk: "of those, the ones with a transcript file today",
+  deleted: "sessions ever started \u2212 still on disk",
+  promptsLost: "lines in history.jsonl whose sessionId is deleted",
+  deletedWithoutSubstantivePrompt: "deleted sessions with history lines but no prompt that names them: nothing that is not a slash command, is at least 8 characters, and is not one of clear, continue, ok, yes, hi, y, n"
+};
+function snippetFor(claudeDir2, o = {}) {
+  const env = o.env ?? process10.env;
+  const dflt = env["CLAUDE_CONFIG_DIR"];
+  const home2 = env["HOME"] ?? "";
+  const isDefault = claudeDir2 === dflt || home2 !== "" && claudeDir2 === `${home2}/.claude`.replace(/\/+/g, "/");
+  if (isDefault)
+    return VERIFY_SNIPPET;
+  return VERIFY_SNIPPET.replace("python3 - <<'PY'", `CLAUDE_CONFIG_DIR=${JSON.stringify(claudeDir2)} python3 - <<'PY'`);
+}
+function verifyInfo(claudeDir2, o = {}) {
+  return {
+    claudeDir: claudeDir2,
+    scriptPath: VERIFY_SCRIPT_PATH,
+    scriptUrl: VERIFY_SCRIPT_URL,
+    snippet: snippetFor(claudeDir2, o),
+    definitions: VERIFY_DEFINITIONS
+  };
+}
+function renderVerify(claudeDir2, t = new Theme()) {
+  const card = new Card(t);
+  card.heading("audit --verify", claudeDir2, date5(/* @__PURE__ */ new Date())).blank();
+  card.text("nobody should have to trust potsherd to check potsherd. this recomputes");
+  card.text("every number on the audit card with the python standard library and");
+  card.text("nothing else \u2014 no potsherd, no database, no checkout needed. paste it:");
+  card.blank();
+  for (const line of snippetFor(claudeDir2).split("\n"))
+    card.raw(line);
+  card.blank();
+  card.text("the definitions it implements:");
+  card.blank();
+  card.rows([
+    { label: "sessions ever started", value: "", note: "in history, on disk, or in a sessions-index" },
+    { label: "still on disk", value: "", note: "of those, the ones with a transcript today" },
+    { label: "deleted", value: "", note: `sessions ever ${t.g("\u2212", "-")} still on disk` },
+    { label: "prompts lost", value: "", note: "history lines whose sessionId is deleted" },
+    {
+      label: "only commands and stubs",
+      value: "",
+      note: "of those, with no prompt that names them"
+    }
+  ]);
+  card.blank();
+  card.text(`the same code, with --json and --claude-dir: ${VERIFY_SCRIPT_PATH}`);
+  card.fit(VERIFY_SCRIPT_URL, "https://github.com/HulkInTherapy/potsherd");
+  card.blank();
+  card.text("if the two ever disagree, the python is right and potsherd has a bug.");
+  card.fix("potsherd audit --json", "to compare them number for number.", "and compare.");
+  return card.toString();
+}
+
+// ../core/dist/render/rescue-receipt.js
+function renderRescueReceipt(r, t = new Theme(), extras = { settingsChanged: null }) {
+  const card = new Card(t);
+  const verb = r.dryRun ? "rescue --dry-run" : "rescue";
+  card.heading(verb, tildify(r.archiveDir), date5(r.ranAt)).blank();
+  const ghostsTouched = r.ghostsBuilt + r.ghostsUpdated;
+  card.rows([
+    {
+      label: r.dryRun ? "files to copy" : "files copied",
+      value: num(r.filesCopied),
+      note: r.filesCopied ? bytes(r.bytesCopied) : "nothing new since last rescue",
+      tone: r.filesCopied ? "ok" : "none"
+    },
+    {
+      label: "already archived",
+      value: num(r.filesSkipped),
+      note: bytes(r.bytesArchived) + " total on disk"
+    },
+    {
+      // "sessions 0" on a second run reads as "the archive holds no sessions".
+      // Both halves are spelled out instead: newly archived, then the total.
+      label: "sessions archived",
+      value: num(r.sessionsArchived),
+      note: sessionNote(r)
+    },
+    {
+      label: "ghosts rebuilt",
+      value: num(r.ghostsBuilt),
+      note: ghostNote(r)
+    },
+    {
+      label: "prompts recovered",
+      value: num(r.promptsRecovered),
+      note: promptNote(r, ghostsTouched, t),
+      tone: r.promptsRecovered ? "accent" : "none"
+    }
+  ]);
+  card.blank();
+  card.rows([sweepRow(t, extras)]);
+  if (r.filesFailed.length) {
+    card.blank();
+    card.text(t.warn(`${num(r.filesFailed.length)} files could not be read:`));
+    for (const fail of r.filesFailed.slice(0, 3)) {
+      card.text(t.dim(`  ${elideMiddle(fail.path, t.width - 8, t.ellip)} \u2014 ${fail.error}`));
+    }
+  }
+  for (const w of r.warnings.slice(0, 2))
+    card.text(t.dim(`note: ${w}`));
+  card.blank();
+  if (r.dryRun) {
+    card.fit("nothing was written. run  potsherd rescue  to do it for real.", "nothing was written. run  potsherd rescue  for real.");
+    return card.toString();
+  }
+  card.text(`archive: ${elideMiddle(tildify(r.archiveDir), Math.max(24, t.width - 11), t.ellip)}`);
+  closing2(card, extras);
+  return card.toString();
+}
+function closing2(card, e) {
+  if (e.settingsRefused) {
+    const days = e.settingsTo ?? 3650;
+    card.fit(`potsherd cannot edit settings.json. add  "cleanupPeriodDays": ${days}  by hand.`, `add  "cleanupPeriodDays": ${days}  to settings.json by hand.`, `add  "cleanupPeriodDays": ${days}  by hand.`);
+    return;
+  }
+  const sweepOff = e.settingsChanged === true || (e.settingsEffective ?? 30) >= 365;
+  if (!sweepOff) {
+    card.fix("potsherd rescue --yes", "to stop the sweep deleting any more.", "to stop the sweep.");
+  } else if (!e.guardInstalled) {
+    card.fix("potsherd guard", "to take a copy at every startup, automatically.", "to copy at every startup.");
+  } else {
+    card.fix("potsherd audit", "to confirm nothing is due for deletion.", "to check nothing is due.");
+  }
+}
+function n(count2, one2, many = one2 + "s") {
+  return `${num(count2)} ${plural(count2, one2, many)}`;
+}
+function sessionNote(r) {
+  const bits = [];
+  if (r.sessionsInArchive)
+    bits.push(`${num(r.sessionsInArchive)} in the archive`);
+  if (r.sidechainsArchived)
+    bits.push(n(r.sidechainsArchived, "sidechain"));
+  if (r.memoryFilesArchived)
+    bits.push(n(r.memoryFilesArchived, "memory note"));
+  if (r.sessionIndexesArchived)
+    bits.push(n(r.sessionIndexesArchived, "index", "indexes"));
+  if (r.historyArchived)
+    bits.push("history.jsonl");
+  return bits.join(" \xB7 ");
+}
+function ghostNote(r) {
+  if (!r.ghostsBuilt && !r.ghostsUpdated)
+    return "";
+  if (!r.ghostsBuilt)
+    return `${num(r.ghostsUpdated)} in the archive, none new`;
+  return r.ghostsUpdated ? `${num(r.ghostsUpdated)} refreshed` : "";
+}
+function promptNote(r, ghostsTouched, t) {
+  const bits = [];
+  if (ghostsTouched)
+    bits.push(`from ${n(ghostsTouched, "ghost")}`);
+  if (r.ghostsWithTitles) {
+    bits.push(r.ghostsWithTitles === 1 ? "1 with a title" : `${num(r.ghostsWithTitles)} with titles`);
+  }
+  return bits.join(` ${t.sep} `);
+}
+function sweepRow(t, e) {
+  if (e.settingsChanged === true) {
+    return {
+      label: "the sweep",
+      value: "off",
+      note: `cleanupPeriodDays ${e.settingsFrom ?? "unset"} ${t.arrow} ${e.settingsTo}`,
+      tone: "ok"
+    };
+  }
+  const days = e.settingsEffective ?? e.settingsFrom ?? 30;
+  const off = days >= 365;
+  if (e.settingsChanged === false) {
+    return {
+      label: "the sweep",
+      value: off ? "off" : "on",
+      note: off ? `cleanupPeriodDays ${days}` : `still ${days} days \u2014 rescue again before it runs`,
+      tone: off ? "ok" : "warn"
+    };
+  }
+  return {
+    label: "the sweep",
+    value: off ? "off" : "on",
+    note: off ? `cleanupPeriodDays ${days}` : e.settingsRefused ? "settings.json left untouched" : e.settingsSkippedReason ?? "not asked (--no-settings)",
+    tone: off ? "ok" : "warn"
+  };
+}
+
+// ../core/dist/adapters/types.js
+var HARNESSES = [
+  "claude",
+  "codex",
+  "cursor",
+  "pi",
+  "gemini",
+  "opencode",
+  "copilot"
+];
+function isAdapter(a) {
+  return !("supported" in a) || a.supported !== false;
+}
 
 // ../core/dist/adapters/claude.js
-import fs7 from "node:fs";
-import path7 from "node:path";
+var claude_exports = {};
+__export(claude_exports, {
+  IGNORED_RECORD_TYPES: () => IGNORED_RECORD_TYPES,
+  archiveSourceDir: () => archiveSourceDir,
+  claudeAdapter: () => claudeAdapter,
+  discover: () => discover,
+  doctorLine: () => doctorLine,
+  isClaudeWorktree: () => isClaudeWorktree,
+  isNovelRecordType: () => isNovelRecordType,
+  owningProjectPath: () => owningProjectPath,
+  parse: () => parse3,
+  readTranscriptVersion: () => readTranscriptVersion,
+  recordTypeStats: () => recordTypeStats,
+  sourceDir: () => sourceDir
+});
+import fs15 from "node:fs";
+import path12 from "node:path";
+
+// ../core/dist/doctor-line.js
+function formatDoctorLine(o) {
+  return `${o.harness.padEnd(12)}${o.status.padEnd(10)}${tildify(o.dir).padEnd(28)}  ${o.note}`;
+}
 
 // ../core/dist/parser/claude.js
-import fs6 from "node:fs";
-import path6 from "node:path";
-import crypto from "node:crypto";
+import fs14 from "node:fs";
+import path11 from "node:path";
+import crypto2 from "node:crypto";
 
 // ../core/dist/parser/jsonl.js
-import fs5 from "node:fs";
+import fs13 from "node:fs";
 var LF = 10;
 async function* readJsonlLines(filePath, options = {}) {
   const start = options.start ?? 0;
   let offset = start;
   let lineNumber = options.startLine ?? 0;
   let held = Buffer.alloc(0);
-  const stream = fs5.createReadStream(filePath, { start });
+  const stream = fs13.createReadStream(filePath, { start });
   for await (const chunk of stream) {
     held = held.length === 0 ? chunk : Buffer.concat([held, chunk]);
     let idx = held.indexOf(LF);
@@ -26733,7 +29706,7 @@ function extractTextFromContent(content) {
     return content;
   if (!Array.isArray(content))
     return "";
-  return content.filter((block) => isRecord(block) && typeof block.text === "string").map((block) => block.text).join("\n");
+  return content.filter((block2) => isRecord(block2) && typeof block2.text === "string").map((block2) => block2.text).join("\n");
 }
 function extractTypedText(content, blockType = "text") {
   if (typeof content === "string")
@@ -26818,7 +29791,7 @@ var HANDLED_TYPES = /* @__PURE__ */ new Set([
   "system"
 ]);
 async function parseClaudeTranscript(filePath, options = {}) {
-  const absolute2 = path6.resolve(filePath);
+  const absolute2 = path11.resolve(filePath);
   const fromOffset = options.fromOffset ?? 0;
   const unknownTypes = {};
   let malformedLines = 0;
@@ -26932,8 +29905,8 @@ async function parseClaudeTranscript(filePath, options = {}) {
         continue;
       }
       if (current) {
-        for (const block of results) {
-          const id = typeof block.tool_use_id === "string" ? block.tool_use_id : void 0;
+        for (const block2 of results) {
+          const id = typeof block2.tool_use_id === "string" ? block2.tool_use_id : void 0;
           if (!id)
             continue;
           const at = current.byToolUseId.get(id);
@@ -26942,10 +29915,10 @@ async function parseClaudeTranscript(filePath, options = {}) {
           const call2 = current.toolCalls[at];
           if (!call2)
             continue;
-          const out = stringifyToolOutput(block.content);
+          const out = stringifyToolOutput(block2.content);
           if (out !== void 0)
             call2.result = out;
-          if (block.is_error === true)
+          if (block2.is_error === true)
             call2.isError = true;
         }
         if (results.length === 0 && text2.trim()) {
@@ -26964,14 +29937,14 @@ ${text2}` : text2;
       current.assistantTexts.push(text);
       assistantTurns += 1;
     }
-    for (const block of toolUseBlocks(content)) {
-      const name = typeof block.name === "string" ? block.name : "unknown";
-      const call2 = { name, input: stringifyToolInput(block.input) };
+    for (const block2 of toolUseBlocks(content)) {
+      const name = typeof block2.name === "string" ? block2.name : "unknown";
+      const call2 = { name, input: stringifyToolInput(block2.input) };
       current.toolCalls.push(call2);
       toolCallCount += 1;
-      if (typeof block.id === "string")
-        current.byToolUseId.set(block.id, current.toolCalls.length - 1);
-      for (const f of filesFromToolInput(block.input))
+      if (typeof block2.id === "string")
+        current.byToolUseId.set(block2.id, current.toolCalls.length - 1);
+      for (const f of filesFromToolInput(block2.input))
         current.files.push(f);
     }
   }
@@ -27003,16 +29976,16 @@ ${text2}` : text2;
 function resolveSessionId(absolute2, options, recordSessionId, sidechainFlag) {
   if (options.sessionId)
     return options.sessionId;
-  const base = path6.basename(absolute2, ".jsonl");
+  const base2 = path11.basename(absolute2, ".jsonl");
   const isSidechain = options.isSidechain ?? sidechainFlag ?? false;
   if (isSidechain) {
     const parent = options.parentSessionId ?? recordSessionId;
-    return parent ? `${parent}:${base}` : base;
+    return parent ? `${parent}:${base2}` : base2;
   }
-  return recordSessionId ?? base;
+  return recordSessionId ?? base2;
 }
 function deriveProjectSlug(absolute2) {
-  const parts = absolute2.split(path6.sep);
+  const parts = absolute2.split(path11.sep);
   for (let i = parts.length - 2; i >= 0; i -= 1) {
     const part = parts[i];
     if (!part)
@@ -27028,7 +30001,7 @@ function deriveProjectSlug(absolute2) {
 var UUID_DIR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function statBytes(absolute2) {
   try {
-    return fs6.statSync(absolute2).size;
+    return fs14.statSync(absolute2).size;
   } catch {
     return 0;
   }
@@ -27051,7 +30024,7 @@ function toolResultBlocks(content) {
   return content.filter((b) => isRecord(b) && b.type === "tool_result");
 }
 function exchangeId(sessionId, seq) {
-  return crypto.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
+  return crypto2.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
 }
 
 // ../core/dist/adapters/claude.js
@@ -27059,7 +30032,7 @@ function sourceDir(claudeConfigDir) {
   return claudePaths(claudeDir(claudeConfigDir)).projects;
 }
 function archiveSourceDir(root) {
-  return path7.join(archiveDir(root ?? potsherdDir()), "claude");
+  return path12.join(archiveDir(root ?? potsherdDir()), "claude");
 }
 function discover(options = {}) {
   const live = walkProjects(sourceDir(options.claudeDir), "live");
@@ -27071,7 +30044,7 @@ function discover(options = {}) {
     for (const found of walkProjects(archiveRoot, "archived")) {
       if (byRel.has(found.rel))
         continue;
-      found.originalPath = path7.join(sourceDir(options.claudeDir), found.rel);
+      found.originalPath = path12.join(sourceDir(options.claudeDir), found.rel);
       byRel.set(found.rel, found);
     }
   }
@@ -27100,6 +30073,37 @@ async function parse3(source, options = {}) {
     orphanContinuations: folded.orphans
   };
 }
+function doctorLine(options = {}) {
+  const dir = sourceDir(options.claudeDir);
+  let found = [];
+  try {
+    found = discover(options);
+  } catch {
+    found = [];
+  }
+  const exists = fs15.existsSync(dir);
+  const sidechains = found.filter((f) => f.isSidechain).length;
+  const archived = found.filter((f) => f.status === "archived").length;
+  const sessions = found.length - sidechains;
+  const parts = [`${sessions} session${sessions === 1 ? "" : "s"}`];
+  if (sidechains > 0)
+    parts.push(`${sidechains} sidechains`);
+  if (archived > 0)
+    parts.push(`${archived} from the archive`);
+  return formatDoctorLine({
+    harness: "claude",
+    status: exists || found.length > 0 ? "ready" : "absent",
+    dir,
+    note: exists || found.length > 0 ? parts.join(" \xB7 ") : "Claude Code not installed"
+  });
+}
+var claudeAdapter = {
+  harness: "claude",
+  displayName: "Claude Code",
+  sourceDir: () => sourceDir(),
+  discover: () => discover(),
+  parse: (source, options) => parse3(source, options)
+};
 var CLAUDE_WORKTREES = /[/\\]\.claude[/\\]worktrees[/\\][^/\\]+(?:[/\\].*)?$/;
 function owningProjectPath(project) {
   if (!project)
@@ -27120,20 +30124,20 @@ function owningProject(session) {
 }
 function walkProjects(projectsDir, status) {
   const out = [];
-  for (const slugEntry of readdirSafe(projectsDir, true)) {
+  for (const slugEntry of readdirSafe3(projectsDir, true)) {
     if (!slugEntry.isDirectory())
       continue;
     const slug = slugEntry.name;
-    const dir = path7.join(projectsDir, slug);
-    for (const entry2 of readdirSafe(dir, true)) {
+    const dir = path12.join(projectsDir, slug);
+    for (const entry2 of readdirSafe3(dir, true)) {
       if (entry2.isFile()) {
         if (!entry2.name.endsWith(".jsonl"))
           continue;
         push(out, {
-          file: path7.join(dir, entry2.name),
-          rel: path7.join(slug, entry2.name),
+          file: path12.join(dir, entry2.name),
+          rel: path12.join(slug, entry2.name),
           slug,
-          sessionId: basename(entry2.name),
+          sessionId: basename3(entry2.name),
           isSidechain: false,
           status
         });
@@ -27144,16 +30148,16 @@ function walkProjects(projectsDir, status) {
       if (entry2.name === "memory")
         continue;
       const flat = entry2.name === SIDECHAIN_DIR;
-      const subDir = flat ? path7.join(dir, entry2.name) : path7.join(dir, entry2.name, SIDECHAIN_DIR);
-      const relDir = flat ? path7.join(slug, entry2.name) : path7.join(slug, entry2.name, SIDECHAIN_DIR);
-      for (const name of readdirSafe(subDir)) {
+      const subDir = flat ? path12.join(dir, entry2.name) : path12.join(dir, entry2.name, SIDECHAIN_DIR);
+      const relDir = flat ? path12.join(slug, entry2.name) : path12.join(slug, entry2.name, SIDECHAIN_DIR);
+      for (const name of readdirSafe3(subDir)) {
         if (!name.endsWith(".jsonl"))
           continue;
         push(out, {
-          file: path7.join(subDir, name),
-          rel: path7.join(relDir, name),
+          file: path12.join(subDir, name),
+          rel: path12.join(relDir, name),
           slug,
-          sessionId: flat ? basename(name) : `${entry2.name}:${basename(name)}`,
+          sessionId: flat ? basename3(name) : `${entry2.name}:${basename3(name)}`,
           isSidechain: true,
           ...flat ? {} : { parentSessionId: entry2.name },
           status
@@ -27253,31 +30257,74 @@ var IGNORED = new Set(IGNORED_RECORD_TYPES);
 function isNovelRecordType(type) {
   return !IGNORED.has(type);
 }
-function basename(fileName) {
+function recordTypeStats(results) {
+  const rows = /* @__PURE__ */ new Map();
+  for (const result of results) {
+    const version2 = result.version ?? "unknown";
+    for (const [type, count2] of Object.entries(result.unknownTypes)) {
+      const key = `${version2}\0${type}`;
+      const row2 = rows.get(key);
+      if (row2) {
+        row2.count += count2;
+        row2.files += 1;
+      } else {
+        rows.set(key, {
+          harness: "claude",
+          version: version2,
+          type,
+          count: count2,
+          files: 1,
+          novel: isNovelRecordType(type)
+        });
+      }
+    }
+  }
+  return [...rows.values()].sort((a, b) => Number(b.novel) - Number(a.novel) || b.count - a.count || (a.version < b.version ? -1 : a.version > b.version ? 1 : 0) || (a.type < b.type ? -1 : 1));
+}
+function basename3(fileName) {
   return fileName.slice(0, -".jsonl".length);
 }
 function statSafe(file2) {
   try {
-    return fs7.statSync(file2);
+    return fs15.statSync(file2);
   } catch {
     return null;
   }
 }
-function readdirSafe(dir, withFileTypes) {
+function readdirSafe3(dir, withFileTypes) {
   try {
-    return withFileTypes ? fs7.readdirSync(dir, { withFileTypes: true }) : fs7.readdirSync(dir);
+    return withFileTypes ? fs15.readdirSync(dir, { withFileTypes: true }) : fs15.readdirSync(dir);
   } catch {
     return [];
   }
 }
 
 // ../core/dist/adapters/codex.js
-import fs9 from "node:fs";
-import path9 from "node:path";
+var codex_exports = {};
+__export(codex_exports, {
+  DEFAULT_MAX_MESSAGE_BYTES: () => DEFAULT_MAX_MESSAGE_BYTES,
+  DEFAULT_MAX_VALUE_BYTES: () => DEFAULT_MAX_VALUE_BYTES,
+  clearSessionIndexCache: () => clearSessionIndexCache,
+  codexAdapter: () => codexAdapter,
+  codexDir: () => codexDir,
+  codexDoctor: () => codexDoctor,
+  codexEntrypoint: () => codexEntrypoint,
+  codexPaths: () => codexPaths,
+  discover: () => discover2,
+  doctorLine: () => doctorLine2,
+  filesFromCodexToolInput: () => filesFromCodexToolInput,
+  parse: () => parse4,
+  readCodexHeader: () => readCodexHeader,
+  readSessionIndex: () => readSessionIndex,
+  renderCodexDoctorLine: () => renderCodexDoctorLine,
+  sessionIdFromRolloutPath: () => sessionIdFromRolloutPath
+});
+import fs17 from "node:fs";
+import path14 from "node:path";
 
 // ../core/dist/parser/codex.js
-import fs8 from "node:fs";
-import path8 from "node:path";
+import fs16 from "node:fs";
+import path13 from "node:path";
 var TOOL_CALL_TYPES = /* @__PURE__ */ new Set([
   "function_call",
   "custom_tool_call",
@@ -27299,7 +30346,7 @@ var HANDLED_ENVELOPES = /* @__PURE__ */ new Set([
   "compacted"
 ]);
 async function parseCodexTranscript(filePath, options = {}) {
-  const absolute2 = path8.resolve(filePath);
+  const absolute2 = path13.resolve(filePath);
   const fromOffset = options.fromOffset ?? 0;
   const humanPrompts = await collectHumanPrompts(absolute2, fromOffset);
   const unknownTypes = {};
@@ -27450,7 +30497,7 @@ async function parseCodexTranscript(filePath, options = {}) {
   }
   finalize2();
   const id = resolvedId();
-  const projectSlug = options.projectSlug ?? (cwd ? path8.basename(cwd) : "unknown");
+  const projectSlug = options.projectSlug ?? (cwd ? path13.basename(cwd) : "unknown");
   const bytes2 = options.bytes ?? statBytes2(absolute2);
   const session = {
     id,
@@ -27490,20 +30537,28 @@ function normalise(text) {
   return text.trim();
 }
 function sessionIdFromPath(filePath) {
-  const base = path8.basename(filePath, ".jsonl");
-  const matches = base.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
+  const base2 = path13.basename(filePath, ".jsonl");
+  const matches = base2.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
   const last2 = matches?.[matches.length - 1];
-  return last2 ?? base;
+  return last2 ?? base2;
 }
 function statBytes2(absolute2) {
   try {
-    return fs8.statSync(absolute2).size;
+    return fs16.statSync(absolute2).size;
   } catch {
     return 0;
   }
 }
 
 // ../core/dist/codex/version.js
+var version_exports = {};
+__export(version_exports, {
+  MIN_CODEX_VERSION: () => MIN_CODEX_VERSION,
+  codexVersionRequirementMessage: () => codexVersionRequirementMessage,
+  compareSemver: () => compareSemver,
+  parseCodexCliVersion: () => parseCodexCliVersion,
+  versionMeetsMinimum: () => versionMeetsMinimum
+});
 var MIN_CODEX_VERSION = "0.130.0";
 function parseCodexCliVersion(output) {
   return output.match(/\b(\d+\.\d+\.\d+)\b/)?.[1];
@@ -27524,15 +30579,22 @@ function compareSemver(a, b) {
 function versionMeetsMinimum(version2, minimum = MIN_CODEX_VERSION) {
   return compareSemver(version2, minimum) >= 0;
 }
+function codexVersionRequirementMessage(versionOutput) {
+  const version2 = parseCodexCliVersion(versionOutput);
+  if (!version2) {
+    return `codex support needs codex-cli >= ${MIN_CODEX_VERSION}; could not read a version from: ${versionOutput.trim() || "(empty output)"}`;
+  }
+  return `codex support needs codex-cli >= ${MIN_CODEX_VERSION}; found ${version2}. run  codex update  and retry.`;
+}
 
 // ../core/dist/adapters/codex.js
 var ROLLOUT_FILE = /^rollout-.*\.jsonl$/i;
 var UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 var MAX_WALK_DEPTH = 8;
 function sessionIdFromRolloutPath(filePath) {
-  const base = path9.basename(filePath, ".jsonl");
-  const matches = base.match(UUID);
-  return matches?.[matches.length - 1] ?? base;
+  const base2 = path14.basename(filePath, ".jsonl");
+  const matches = base2.match(UUID);
+  return matches?.[matches.length - 1] ?? base2;
 }
 function discover2(options = {}) {
   const paths = codexPaths(codexDir(options.codexHome));
@@ -27547,12 +30609,12 @@ function walk(dir, status, depth, out) {
     return;
   let entries;
   try {
-    entries = fs9.readdirSync(dir, { withFileTypes: true });
+    entries = fs17.readdirSync(dir, { withFileTypes: true });
   } catch {
     return;
   }
   for (const entry2 of entries) {
-    const full = path9.join(dir, entry2.name);
+    const full = path14.join(dir, entry2.name);
     if (entry2.isDirectory()) {
       walk(full, status, depth + 1, out);
       continue;
@@ -27563,7 +30625,7 @@ function walk(dir, status, depth, out) {
       continue;
     let stat;
     try {
-      stat = fs9.statSync(full);
+      stat = fs17.statSync(full);
     } catch {
       continue;
     }
@@ -27586,7 +30648,7 @@ function readSessionIndex(options = {}) {
   const out = /* @__PURE__ */ new Map();
   let text;
   try {
-    text = fs9.readFileSync(file2, "utf8");
+    text = fs17.readFileSync(file2, "utf8");
   } catch {
     return out;
   }
@@ -27612,7 +30674,7 @@ function sessionIndexCached(codexHome) {
   const file2 = codexPaths(codexDir(codexHome)).sessionIndex;
   let mtimeMs = -1;
   try {
-    mtimeMs = fs9.statSync(file2).mtimeMs;
+    mtimeMs = fs17.statSync(file2).mtimeMs;
   } catch {
   }
   const hit = indexCache.get(file2);
@@ -27621,6 +30683,9 @@ function sessionIndexCached(codexHome) {
   const entries = readSessionIndex({ ...codexHome ? { codexHome } : {} });
   indexCache.set(file2, { mtimeMs, entries });
   return entries;
+}
+function clearSessionIndexCache() {
+  indexCache.clear();
 }
 async function readCodexHeader(filePath) {
   for await (const line of readJsonlLines(filePath)) {
@@ -27632,16 +30697,16 @@ async function readCodexHeader(filePath) {
     const payload = parsed["payload"];
     if (!isRecord(payload))
       return void 0;
-    const str = (key) => typeof payload[key] === "string" ? payload[key] : void 0;
+    const str2 = (key) => typeof payload[key] === "string" ? payload[key] : void 0;
     const timestamp = typeof parsed["timestamp"] === "string" ? parsed["timestamp"] : void 0;
     const header = {
-      ...str("session_id") ?? str("id") ? { sessionId: str("session_id") ?? str("id") } : {},
-      ...str("cwd") ? { cwd: str("cwd") } : {},
-      ...str("originator") ? { originator: str("originator") } : {},
-      ...str("source") ? { source: str("source") } : {},
-      ...str("cli_version") ? { cliVersion: str("cli_version") } : {},
-      ...str("model_provider") ? { modelProvider: str("model_provider") } : {},
-      ...str("timestamp") ?? timestamp ? { startedAt: str("timestamp") ?? timestamp } : {}
+      ...str2("session_id") ?? str2("id") ? { sessionId: str2("session_id") ?? str2("id") } : {},
+      ...str2("cwd") ? { cwd: str2("cwd") } : {},
+      ...str2("originator") ? { originator: str2("originator") } : {},
+      ...str2("source") ? { source: str2("source") } : {},
+      ...str2("cli_version") ? { cliVersion: str2("cli_version") } : {},
+      ...str2("model_provider") ? { modelProvider: str2("model_provider") } : {},
+      ...str2("timestamp") ?? timestamp ? { startedAt: str2("timestamp") ?? timestamp } : {}
     };
     return header;
   }
@@ -27676,13 +30741,13 @@ function elideBinary2(text, tally2) {
     return `\u2039elided:${mime ?? "application/octet-stream"}:${match.length} bytes\u203A`;
   });
 }
-function cap(text, max, tally2) {
-  if (text.length <= max)
+function cap(text, max2, tally2) {
+  if (text.length <= max2)
     return text;
-  const dropped = text.length - max;
+  const dropped = text.length - max2;
   tally2.truncatedValues += 1;
   tally2.charsElided += dropped;
-  return `${text.slice(0, max)}
+  return `${text.slice(0, max2)}
 \u2039elided:oversize:${dropped} bytes\u203A`;
 }
 var PATCH_FILE = /\*\*\* (?:Add|Update|Delete) File: ([^\n"\\]+)/g;
@@ -27772,14 +30837,148 @@ async function parse4(source, options = {}) {
 function pickSlug(session, cwd) {
   if (session.projectSlug && session.projectSlug !== "unknown")
     return session.projectSlug;
-  return path9.basename(cwd) || "unknown";
+  return path14.basename(cwd) || "unknown";
+}
+var codexAdapter = {
+  harness: "codex",
+  displayName: "Codex CLI",
+  sourceDir: () => codexPaths().sessions,
+  discover: () => discover2(),
+  parse: (source, options) => parse4(source, options ?? {})
+};
+async function codexDoctor(options = {}) {
+  const paths = codexPaths(codexDir(options.codexHome));
+  const sources = discover2(options);
+  const entries = readSessionIndex(options);
+  const versions = {};
+  const unsupported = /* @__PURE__ */ new Set();
+  const unreadable = [];
+  let titled2 = 0;
+  let bytes2 = 0;
+  let archived = 0;
+  for (const source of sources) {
+    bytes2 += source.bytes;
+    if (source.status === "archived")
+      archived += 1;
+    const header = await readCodexHeader(source.path);
+    if (!header) {
+      unreadable.push(source.path);
+      continue;
+    }
+    const id = header.sessionId ?? source.sessionId;
+    if (entries.get(id)?.threadName)
+      titled2 += 1;
+    const raw = header.cliVersion;
+    if (raw) {
+      versions[raw] = (versions[raw] ?? 0) + 1;
+      const semver = parseCodexCliVersion(raw);
+      if (semver && !versionMeetsMinimum(semver))
+        unsupported.add(raw);
+    }
+  }
+  return {
+    harness: "codex",
+    displayName: "Codex CLI",
+    sourceDir: paths.sessions,
+    present: fs17.existsSync(paths.root),
+    sessions: sources.length,
+    archived,
+    bytes: bytes2,
+    titled: titled2,
+    versions,
+    unsupportedVersions: [...unsupported].sort(),
+    unreadable
+  };
+}
+function renderCodexDoctorLine(report) {
+  if (!report.present) {
+    return `codex     not installed        ${tildify(report.sourceDir)}`;
+  }
+  if (report.sessions === 0) {
+    return `codex     0 sessions           ${tildify(report.sourceDir)}`;
+  }
+  const parts = [
+    `${report.sessions} session${report.sessions === 1 ? "" : "s"}`,
+    formatBytes(report.bytes),
+    `${report.titled} titled`
+  ];
+  if (report.archived > 0)
+    parts.push(`${report.archived} archived`);
+  const versions = Object.keys(report.versions).sort();
+  if (versions.length > 0)
+    parts.push(`cli ${versions.join(", ")}`);
+  if (report.unsupportedVersions.length > 0) {
+    parts.push(`${report.unsupportedVersions.join(", ")} < ${MIN_CODEX_VERSION}, unsupported`);
+  }
+  if (report.unreadable.length > 0) {
+    parts.push(`${report.unreadable.length} unreadable header${report.unreadable.length === 1 ? "" : "s"}`);
+  }
+  return `codex     ${parts.join(" \xB7 ")}   ${tildify(report.sourceDir)}`;
+}
+function doctorLine2(report) {
+  if (!report.present) {
+    return formatDoctorLine({
+      harness: "codex",
+      status: "absent",
+      dir: report.sourceDir,
+      note: "Codex CLI not installed"
+    });
+  }
+  const parts = [`${report.sessions} session${report.sessions === 1 ? "" : "s"}`];
+  if (report.sessions > 0)
+    parts.push(formatBytes(report.bytes));
+  if (report.titled > 0)
+    parts.push(`${report.titled} titled`);
+  if (report.archived > 0)
+    parts.push(`${report.archived} archived`);
+  const versions = Object.keys(report.versions).sort();
+  if (versions.length > 0)
+    parts.push(`cli ${versions.join(", ")}`);
+  if (report.unsupportedVersions.length > 0) {
+    parts.push(`${report.unsupportedVersions.join(", ")} < ${MIN_CODEX_VERSION}`);
+  }
+  if (report.unreadable.length > 0)
+    parts.push(`${report.unreadable.length} unreadable`);
+  return formatDoctorLine({
+    harness: "codex",
+    status: "ready",
+    dir: report.sourceDir,
+    note: parts.join(" \xB7 ")
+  });
+}
+function formatBytes(n2) {
+  if (n2 < 1024)
+    return `${n2} B`;
+  if (n2 < 1024 * 1024)
+    return `${(n2 / 1024).toFixed(1)} KB`;
+  return `${(n2 / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // ../core/dist/adapters/cursor.js
-import fs10 from "node:fs";
-import path10 from "node:path";
+var cursor_exports = {};
+__export(cursor_exports, {
+  CURSOR_DOCTOR_NOTE: () => CURSOR_DOCTOR_NOTE,
+  SIDECHAIN_DIR: () => SIDECHAIN_DIR3,
+  TRANSCRIPTS_DIR: () => TRANSCRIPTS_DIR,
+  classifyProjectSlug: () => classifyProjectSlug,
+  cursorAdapter: () => cursorAdapter,
+  cursorDir: () => cursorDir,
+  cursorProjectsDir: () => cursorProjectsDir,
+  cursorSlug: () => cursorSlug,
+  discover: () => discover3,
+  doctorLine: () => doctorLine3,
+  filesFromCursorInput: () => filesFromCursorInput,
+  parse: () => parse5,
+  parseCursorTimestamp: () => parseCursorTimestamp,
+  readPrompt: () => readPrompt,
+  recoverCwd: () => recoverCwd,
+  toolName: () => toolName
+});
+import fs18 from "node:fs";
+import path15 from "node:path";
 var TRANSCRIPTS_DIR = "agent-transcripts";
 var SIDECHAIN_DIR3 = "subagents";
+var CURSOR_DOCTOR_NOTE = "cursor: no timestamps on assistant turns (session times come from file mtime), no tool results recorded at all, and title/model/git-branch are unavailable \u2014 they live in VS Code's workspaceStorage, which potsherd does not read.";
 function cursorSlug(cwd) {
   return cwd.replace(/^[/\\]+/, "").replace(/[/\\_]/g, "-");
 }
@@ -27793,25 +30992,25 @@ function classifyProjectSlug(slug) {
 function discover3(dirOverride) {
   const root = cursorProjectsDir(dirOverride);
   const out = [];
-  for (const slug of readdirSafe2(root, "dir")) {
-    const transcripts = path10.join(root, slug, TRANSCRIPTS_DIR);
-    for (const sessionId of readdirSafe2(transcripts, "dir")) {
-      const sessionDir = path10.join(transcripts, sessionId);
-      for (const file2 of readdirSafe2(sessionDir, "file")) {
+  for (const slug of readdirSafe4(root, "dir")) {
+    const transcripts = path15.join(root, slug, TRANSCRIPTS_DIR);
+    for (const sessionId of readdirSafe4(transcripts, "dir")) {
+      const sessionDir = path15.join(transcripts, sessionId);
+      for (const file2 of readdirSafe4(sessionDir, "file")) {
         if (!file2.endsWith(".jsonl"))
           continue;
-        const source = statSource(path10.join(sessionDir, file2), slug, {
+        const source = statSource(path15.join(sessionDir, file2), slug, {
           sessionId: basenameId(file2),
           isSidechain: false
         });
         if (source)
           out.push(source);
       }
-      const sidechains = path10.join(sessionDir, SIDECHAIN_DIR3);
-      for (const file2 of readdirSafe2(sidechains, "file")) {
+      const sidechains = path15.join(sessionDir, SIDECHAIN_DIR3);
+      for (const file2 of readdirSafe4(sidechains, "file")) {
         if (!file2.endsWith(".jsonl"))
           continue;
-        const source = statSource(path10.join(sidechains, file2), slug, {
+        const source = statSource(path15.join(sidechains, file2), slug, {
           sessionId: basenameId(file2),
           isSidechain: true,
           parentSessionId: sessionId
@@ -27826,10 +31025,10 @@ function discover3(dirOverride) {
 function basenameId(file2) {
   return file2.slice(0, -".jsonl".length);
 }
-function readdirSafe2(dir, want) {
+function readdirSafe4(dir, want) {
   let entries;
   try {
-    entries = fs10.readdirSync(dir, { withFileTypes: true });
+    entries = fs18.readdirSync(dir, { withFileTypes: true });
   } catch {
     return [];
   }
@@ -27845,7 +31044,7 @@ function readdirSafe2(dir, want) {
 function statSource(file2, projectSlug, rest) {
   let st;
   try {
-    st = fs10.statSync(file2);
+    st = fs18.statSync(file2);
   } catch {
     return null;
   }
@@ -27966,27 +31165,27 @@ async function parse5(source, options = {}) {
         bump("block:(not an object)");
         continue;
       }
-      const block = raw;
-      if (block.type === "text") {
-        if (typeof block.text === "string" && block.text)
-          open2.assistantTexts.push(block.text);
+      const block2 = raw;
+      if (block2.type === "text") {
+        if (typeof block2.text === "string" && block2.text)
+          open2.assistantTexts.push(block2.text);
         continue;
       }
-      if (block.type === "tool_use") {
+      if (block2.type === "tool_use") {
         toolCallCount += 1;
         open2.toolCalls.push({
-          name: toolName(block.name),
-          input: stringifyToolInput(block.input)
+          name: toolName(block2.name),
+          input: stringifyToolInput(block2.input)
           // `result` is deliberately absent: cursor persists no tool output.
           // See CURSOR_DOCTOR_NOTE. `isError` is unknowable for the same reason.
         });
-        for (const f of filesFromCursorInput(block.input))
+        for (const f of filesFromCursorInput(block2.input))
           open2.files.push(f);
-        for (const p of absolutePaths(block.input))
+        for (const p of absolutePaths(block2.input))
           cwdCandidates.push(p);
         continue;
       }
-      bump(`block:${typeof block.type === "string" ? block.type : String(block.type)}`);
+      bump(`block:${typeof block2.type === "string" ? block2.type : String(block2.type)}`);
     }
   }
   flush();
@@ -28059,7 +31258,7 @@ function parseCursorTimestamp(raw) {
   const month = MONTHS2.indexOf(m[1].toLowerCase());
   if (month < 0)
     return void 0;
-  const day = Number(m[2]);
+  const day2 = Number(m[2]);
   const year = Number(m[3]);
   let hour = Number(m[4]);
   const minute = Number(m[5]);
@@ -28069,13 +31268,13 @@ function parseCursorTimestamp(raw) {
     hour = 0;
   if (meridiem === "p")
     hour += 12;
-  if (day < 1 || day > 31 || minute > 59 || second > 59 || hour > 23)
+  if (day2 < 1 || day2 > 31 || minute > 59 || second > 59 || hour > 23)
     return void 0;
   const offsetHours = m[8] ? Number(m[8]) : 0;
   const offsetMinutes = m[9] ? Number(m[9]) : 0;
   const sign = m[8]?.startsWith("-") ? -1 : 1;
   const offset = offsetHours * 60 + sign * offsetMinutes;
-  const ms = Date.UTC(year, month, day, hour, minute, second) - offset * 6e4;
+  const ms = Date.UTC(year, month, day2, hour, minute, second) - offset * 6e4;
   if (!Number.isFinite(ms))
     return void 0;
   return new Date(ms).toISOString();
@@ -28155,7 +31354,7 @@ function recoverCwd(projectSlug, candidates) {
         hits.set(dir, (hits.get(dir) ?? 0) + 1);
         break;
       }
-      const parent = path10.dirname(dir);
+      const parent = path15.dirname(dir);
       if (parent === dir)
         break;
       dir = parent;
@@ -28190,11 +31389,54 @@ function joinText(content, bump, role) {
 function isoFromMs(ms) {
   return new Date(ms).toISOString();
 }
+function doctorLine3(dirOverride) {
+  const dir = cursorProjectsDir(dirOverride);
+  let found = [];
+  try {
+    found = discover3(dirOverride);
+  } catch {
+    found = [];
+  }
+  const exists = fs18.existsSync(dir);
+  const sidechains = found.filter((f) => f.isSidechain).length;
+  const sessions = found.length - sidechains;
+  const parts = [`${sessions} session${sessions === 1 ? "" : "s"}`];
+  if (sidechains > 0)
+    parts.push(`${sidechains} sidechains`);
+  parts.push("no titles, no tool results");
+  return formatDoctorLine({
+    harness: "cursor",
+    status: exists || found.length > 0 ? "ready" : "absent",
+    dir,
+    note: exists || found.length > 0 ? parts.join(" \xB7 ") : "Cursor not installed"
+  });
+}
+var cursorAdapter = {
+  harness: "cursor",
+  displayName: "Cursor",
+  sourceDir: () => cursorDir(),
+  discover: () => discover3(),
+  parse: parse5
+};
 
 // ../core/dist/adapters/pi.js
-import fs11 from "node:fs";
-import path11 from "node:path";
-import crypto2 from "node:crypto";
+var pi_exports = {};
+__export(pi_exports, {
+  DISPLAY_NAME: () => DISPLAY_NAME,
+  default: () => pi_default,
+  discover: () => discover4,
+  doctorLine: () => doctorLine4,
+  exchangeId: () => exchangeId2,
+  parse: () => parse6,
+  piAdapter: () => piAdapter,
+  piDir: () => piDir,
+  sessionIdFromFilename: () => sessionIdFromFilename,
+  sourceDir: () => sourceDir2,
+  unslugifyPi: () => unslugifyPi
+});
+import fs19 from "node:fs";
+import path16 from "node:path";
+import crypto3 from "node:crypto";
 var HANDLED_TYPES2 = /* @__PURE__ */ new Set([
   "session",
   "message",
@@ -28208,35 +31450,49 @@ var HANDLED_TYPES2 = /* @__PURE__ */ new Set([
   "custom_message"
 ]);
 var HANDLED_ROLES = /* @__PURE__ */ new Set(["user", "assistant", "toolResult"]);
+var DISPLAY_NAME = "pi";
 function sourceDir2(override) {
   return piSessionsDir(override);
+}
+function doctorLine4(override) {
+  const dir = sourceDir2(override);
+  let sessions = 0;
+  try {
+    sessions = discover4(override).length;
+  } catch {
+    sessions = 0;
+  }
+  const exists = fs19.existsSync(dir);
+  const status = exists ? "ready" : "absent";
+  const note = exists ? `${sessions} session${sessions === 1 ? "" : "s"}` : "pi not installed";
+  return formatDoctorLine({ harness: "pi", status, dir, note });
 }
 function discover4(override) {
   const root = sourceDir2(override);
   const out = [];
   let slugs;
   try {
-    slugs = fs11.readdirSync(root, { withFileTypes: true });
+    slugs = fs19.readdirSync(root, { withFileTypes: true });
   } catch {
     return out;
   }
   for (const slug of slugs) {
     if (!slug.isDirectory())
       continue;
-    const dir = path11.join(root, slug.name);
+    const dir = path16.join(root, slug.name);
     let files;
     try {
-      files = fs11.readdirSync(dir);
+      files = fs19.readdirSync(dir);
     } catch {
       continue;
     }
     for (const file2 of files) {
       if (!file2.endsWith(".jsonl"))
         continue;
-      const full = path11.join(dir, file2);
+      const full = path16.join(dir, file2);
       let stat;
       try {
-        stat = fs11.statSync(full);
+        stat = fs19.statSync(full);
       } catch {
         continue;
       }
@@ -28258,13 +31514,13 @@ function discover4(override) {
   return out;
 }
 function sessionIdFromFilename(file2) {
-  const base = path11.basename(file2, ".jsonl");
-  const at = base.lastIndexOf("_");
-  return at === -1 ? base : base.slice(at + 1);
+  const base2 = path16.basename(file2, ".jsonl");
+  const at = base2.lastIndexOf("_");
+  return at === -1 ? base2 : base2.slice(at + 1);
 }
 async function parse6(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path11.resolve(typeof source === "string" ? source : source.path);
+  const absolute2 = path16.resolve(typeof source === "string" ? source : source.path);
   const unknownTypes = {};
   let malformedLines = 0;
   let endOffset = 0;
@@ -28316,14 +31572,14 @@ async function parse6(source, options = {}) {
   }
   const sessionId = options.sessionId ?? (header && typeof header.id === "string" && header.id ? header.id : sessionIdFromFilename(absolute2));
   const mainline = linearise(nodes, byId);
-  const onMainline = new Set(mainline.map((n) => n.id));
+  const onMainline = new Set(mainline.map((n2) => n2.id));
   const branches = branchChains(nodes, onMainline);
-  const counts = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
+  const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
   const exchanges = [];
   let seq = 0;
-  seq = buildExchanges(mainline, sessionId, false, seq, exchanges, counts);
+  seq = buildExchanges(mainline, sessionId, false, seq, exchanges, counts2);
   for (const chain of branches) {
-    seq = buildExchanges(chain, sessionId, true, seq, exchanges, counts);
+    seq = buildExchanges(chain, sessionId, true, seq, exchanges, counts2);
   }
   let model;
   let title;
@@ -28341,7 +31597,7 @@ async function parse6(source, options = {}) {
       title = node.record.name;
     }
   }
-  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path11.basename(path11.dirname(absolute2));
+  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path16.basename(path16.dirname(absolute2));
   const headerCwd = header && typeof header.cwd === "string" ? header.cwd : void 0;
   const startedAt = header && typeof header.timestamp === "string" ? header.timestamp : nodes[0]?.ts ?? "";
   let endedAt = startedAt;
@@ -28365,9 +31621,9 @@ async function parse6(source, options = {}) {
     isSidechain: false,
     ...parentSession ? { parentSessionId: sessionIdFromFilename(parentSession) } : {},
     counts: {
-      userPrompts: counts.userPrompts,
-      assistantTurns: counts.assistantTurns,
-      toolCalls: counts.toolCalls,
+      userPrompts: counts2.userPrompts,
+      assistantTurns: counts2.assistantTurns,
+      toolCalls: counts2.toolCalls,
       bytes: options.bytes ?? src?.bytes ?? statBytes3(absolute2)
     },
     status: options.status ?? src?.status ?? "live"
@@ -28405,7 +31661,7 @@ function branchChains(nodes, onMainline) {
   }
   return chains;
 }
-function buildExchanges(chain, sessionId, isSidechain, startSeq, out, counts) {
+function buildExchanges(chain, sessionId, isSidechain, startSeq, out, counts2) {
   let seq = startSeq;
   let current = null;
   const finalize2 = () => {
@@ -28455,24 +31711,24 @@ function buildExchanges(chain, sessionId, isSidechain, startSeq, out, counts) {
       continue;
     if (role === "user") {
       finalize2();
-      counts.userPrompts += 1;
+      counts2.userPrompts += 1;
       open2(node.ts, node.parentId).userText = extractTypedText(message2.content);
       continue;
     }
     const b = current ?? open2(node.ts, node.parentId);
     if (role === "assistant") {
-      counts.assistantTurns += 1;
+      counts2.assistantTurns += 1;
       const text = extractTypedText(message2.content);
       if (text.trim())
         b.assistantTexts.push(text);
-      for (const block of toolCallBlocks(message2.content)) {
-        const name2 = typeof block.name === "string" ? block.name : "unknown";
-        const call2 = { name: name2, input: stringifyToolInput(block.arguments) };
+      for (const block2 of toolCallBlocks(message2.content)) {
+        const name2 = typeof block2.name === "string" ? block2.name : "unknown";
+        const call2 = { name: name2, input: stringifyToolInput(block2.arguments) };
         b.toolCalls.push(call2);
-        counts.toolCalls += 1;
-        if (typeof block.id === "string")
-          b.byToolCallId.set(block.id, b.toolCalls.length - 1);
-        for (const f of filesFromToolInput(block.arguments))
+        counts2.toolCalls += 1;
+        if (typeof block2.id === "string")
+          b.byToolCallId.set(block2.id, b.toolCalls.length - 1);
+        for (const f of filesFromToolInput(block2.arguments))
           b.files.push(f);
       }
       continue;
@@ -28497,7 +31753,7 @@ function buildExchanges(chain, sessionId, isSidechain, startSeq, out, counts) {
       ...result !== void 0 ? { result } : {},
       ...message2.isError === true ? { isError: true } : {}
     });
-    counts.toolCalls += 1;
+    counts2.toolCalls += 1;
   }
   finalize2();
   return seq;
@@ -28513,21 +31769,50 @@ function unslugifyPi(slug) {
 }
 function statBytes3(absolute2) {
   try {
-    return fs11.statSync(absolute2).size;
+    return fs19.statSync(absolute2).size;
   } catch {
     return 0;
   }
 }
 function exchangeId2(sessionId, seq) {
-  return crypto2.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
+  return crypto3.createHash("sha256").update(`${sessionId}:${seq}`).digest("hex").slice(0, 32);
 }
+var piAdapter = {
+  harness: "pi",
+  displayName: DISPLAY_NAME,
+  sourceDir: () => sourceDir2(),
+  discover: () => discover4(),
+  parse: (src, opts) => parse6(src, opts ?? {})
+};
+var pi_default = piAdapter;
 
 // ../core/dist/adapters/gemini.js
-import fs12 from "node:fs";
-import path12 from "node:path";
-import crypto3 from "node:crypto";
-var DISPLAY_NAME = "Gemini CLI";
+var gemini_exports = {};
+__export(gemini_exports, {
+  CHATS_DIR: () => CHATS_DIR,
+  DISPLAY_NAME: () => DISPLAY_NAME2,
+  GEMINI_DOCTOR_NOTE: () => GEMINI_DOCTOR_NOTE,
+  GEMINI_FORMAT_UNVERIFIED: () => GEMINI_FORMAT_UNVERIFIED,
+  default: () => gemini_default,
+  discover: () => discover5,
+  doctorLine: () => doctorLine5,
+  geminiAdapter: () => geminiAdapter,
+  geminiDir: () => geminiDir,
+  geminiTmpDir: () => geminiTmpDir,
+  isHumanTurn: () => isHumanTurn,
+  parse: () => parse7,
+  projectHashes: () => projectHashes,
+  recoverCwd: () => recoverCwd2,
+  sessionIdFromFilename: () => sessionIdFromFilename2,
+  sourceDir: () => sourceDir3
+});
+import fs20 from "node:fs";
+import path17 from "node:path";
+import crypto4 from "node:crypto";
+var DISPLAY_NAME2 = "Gemini CLI";
 var CHATS_DIR = "chats";
+var GEMINI_FORMAT_UNVERIFIED = true;
+var GEMINI_DOCTOR_NOTE = "gemini: format unverified \u2014 this adapter was written from documentation, not from a real checkpoint, so record coverage is a best guess until someone runs it on one. Checkpoints carry no per-turn timestamps (session times come from file mtime) and the project directory is a hash, so the working directory is only recovered when a path in the transcript hashes to it.";
 var HANDLED_PART_KEYS = /* @__PURE__ */ new Set(["text", "functionCall", "functionResponse"]);
 var HANDLED_ROLES2 = /* @__PURE__ */ new Set(["user", "model", "assistant", "system", "tool"]);
 var HISTORY_KEYS = ["history", "messages", "contents", "turns"];
@@ -28539,27 +31824,27 @@ function discover5(override) {
   const out = [];
   let hashes;
   try {
-    hashes = fs12.readdirSync(root, { withFileTypes: true });
+    hashes = fs20.readdirSync(root, { withFileTypes: true });
   } catch {
     return out;
   }
   for (const hash2 of hashes) {
     if (!hash2.isDirectory())
       continue;
-    const dir = path12.join(root, hash2.name, CHATS_DIR);
+    const dir = path17.join(root, hash2.name, CHATS_DIR);
     let files;
     try {
-      files = fs12.readdirSync(dir);
+      files = fs20.readdirSync(dir);
     } catch {
       continue;
     }
     for (const file2 of files) {
       if (!file2.endsWith(".json"))
         continue;
-      const full = path12.join(dir, file2);
+      const full = path17.join(dir, file2);
       let stat;
       try {
-        stat = fs12.statSync(full);
+        stat = fs20.statSync(full);
       } catch {
         continue;
       }
@@ -28581,17 +31866,17 @@ function discover5(override) {
   return out;
 }
 function sessionIdFromFilename2(file2, projectHash) {
-  const base = path12.basename(file2, ".json").replace(/^checkpoint-/, "") || "checkpoint";
-  return `${projectHash.slice(0, 12)}-${base}`;
+  const base2 = path17.basename(file2, ".json").replace(/^checkpoint-/, "") || "checkpoint";
+  return `${projectHash.slice(0, 12)}-${base2}`;
 }
 async function parse7(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path12.resolve(typeof source === "string" ? source : source.path);
+  const absolute2 = path17.resolve(typeof source === "string" ? source : source.path);
   const unknownTypes = {};
   let malformedLines = 0;
   let raw = "";
   try {
-    raw = fs12.readFileSync(absolute2, "utf8");
+    raw = fs20.readFileSync(absolute2, "utf8");
   } catch {
     raw = "";
   }
@@ -28607,13 +31892,13 @@ async function parse7(source, options = {}) {
   const { turns, meta: meta3 } = unwrap(doc);
   if (doc !== void 0 && turns.length === 0 && !meta3)
     malformedLines += 1;
-  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path12.basename(path12.dirname(path12.dirname(absolute2)));
+  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path17.basename(path17.dirname(path17.dirname(absolute2)));
   const sessionId = options.sessionId ?? (meta3 && typeof meta3.sessionId === "string" && meta3.sessionId.trim() ? meta3.sessionId : sessionIdFromFilename2(absolute2, projectSlug));
   const mtimeMs = options.mtimeMs ?? src?.mtimeMs ?? statMtime(absolute2);
   const fileTime = new Date(mtimeMs).toISOString();
-  const counts = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
+  const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
   const cwdCandidates = [];
-  const exchanges = buildExchanges2(turns, sessionId, fileTime, counts, unknownTypes, cwdCandidates);
+  const exchanges = buildExchanges2(turns, sessionId, fileTime, counts2, unknownTypes, cwdCandidates);
   const metaString = (key) => {
     if (!meta3)
       return void 0;
@@ -28640,9 +31925,9 @@ async function parse7(source, options = {}) {
     ...model ? { model } : {},
     isSidechain: false,
     counts: {
-      userPrompts: counts.userPrompts,
-      assistantTurns: counts.assistantTurns,
-      toolCalls: counts.toolCalls,
+      userPrompts: counts2.userPrompts,
+      assistantTurns: counts2.assistantTurns,
+      toolCalls: counts2.toolCalls,
       bytes: options.bytes ?? src?.bytes ?? endOffset
     },
     status: options.status ?? src?.status ?? "live"
@@ -28661,7 +31946,7 @@ function unwrap(doc) {
   }
   return { turns: [], meta: doc };
 }
-function buildExchanges2(turns, sessionId, fileTime, counts, unknownTypes, cwdCandidates) {
+function buildExchanges2(turns, sessionId, fileTime, counts2, unknownTypes, cwdCandidates) {
   const out = [];
   let seq = 0;
   let current = null;
@@ -28711,7 +31996,7 @@ function buildExchanges2(turns, sessionId, fileTime, counts, unknownTypes, cwdCa
     const parts = partsOf(turn, unknownTypes);
     if (isHumanTurn(role, parts)) {
       finalize2();
-      counts.userPrompts += 1;
+      counts2.userPrompts += 1;
       const b2 = open2();
       for (const p of parts) {
         if (typeof p.text === "string" && p.text)
@@ -28722,7 +32007,7 @@ function buildExchanges2(turns, sessionId, fileTime, counts, unknownTypes, cwdCa
     const b = current ?? open2();
     const isModel = role === "model" || role === "assistant";
     if (isModel)
-      counts.assistantTurns += 1;
+      counts2.assistantTurns += 1;
     for (const p of parts) {
       if (typeof p.text === "string" && p.text.trim())
         b.assistantTexts.push(p.text);
@@ -28731,7 +32016,7 @@ function buildExchanges2(turns, sessionId, fileTime, counts, unknownTypes, cwdCa
         const name2 = typeof call2.name === "string" ? call2.name : "unknown";
         const args = call2.args ?? call2.arguments;
         b.toolCalls.push({ name: name2, input: stringifyToolInput(args) });
-        counts.toolCalls += 1;
+        counts2.toolCalls += 1;
         b.byName.set(name2, b.toolCalls.length - 1);
         for (const f of filesFromToolInput(args)) {
           b.files.push(f);
@@ -28762,7 +32047,7 @@ function buildExchanges2(turns, sessionId, fileTime, counts, unknownTypes, cwdCa
         ...result !== void 0 ? { result } : {},
         ...isError ? { isError: true } : {}
       });
-      counts.toolCalls += 1;
+      counts2.toolCalls += 1;
     }
   }
   finalize2();
@@ -28786,8 +32071,8 @@ function partsOf(turn, unknownTypes) {
       if (HANDLED_PART_KEYS.has(key))
         continue;
       const k = `part:${key}`;
-      const counts = unknownTypes;
-      counts[k] = (counts[k] ?? 0) + 1;
+      const counts2 = unknownTypes;
+      counts2[k] = (counts2[k] ?? 0) + 1;
     }
     out.push(p);
   }
@@ -28801,9 +32086,9 @@ function isHumanTurn(role, parts) {
   return parts.some((p) => !isRecord(p.functionResponse));
 }
 function projectHashes(cwd) {
-  const sha = (s) => crypto3.createHash("sha256").update(s).digest("hex");
+  const sha = (s) => crypto4.createHash("sha256").update(s).digest("hex");
   const trimmed = cwd.length > 1 ? cwd.replace(/[/\\]+$/, "") : cwd;
-  return uniq([sha(cwd), sha(trimmed), sha(trimmed + path12.sep)]);
+  return uniq([sha(cwd), sha(trimmed), sha(trimmed + path17.sep)]);
 }
 function recoverCwd2(projectHash, candidates) {
   if (!/^[0-9a-f]{16,}$/i.test(projectHash))
@@ -28811,15 +32096,15 @@ function recoverCwd2(projectHash, candidates) {
   const seen = /* @__PURE__ */ new Set();
   const dirs = [];
   for (const c of candidates) {
-    if (!path12.isAbsolute(c))
+    if (!path17.isAbsolute(c))
       continue;
-    let dir = path12.dirname(path12.resolve(c));
+    let dir = path17.dirname(path17.resolve(c));
     for (let i = 0; i < 40; i += 1) {
       if (seen.has(dir))
         break;
       seen.add(dir);
       dirs.push(dir);
-      const up = path12.dirname(dir);
+      const up = path17.dirname(dir);
       if (up === dir)
         break;
       dir = up;
@@ -28835,18 +32120,72 @@ function recoverCwd2(projectHash, candidates) {
 }
 function statMtime(absolute2) {
   try {
-    return fs12.statSync(absolute2).mtimeMs;
+    return fs20.statSync(absolute2).mtimeMs;
   } catch {
     return 0;
   }
 }
+function doctorLine5(override) {
+  const tmp = sourceDir3(override);
+  const root = geminiDir(override);
+  let found = [];
+  try {
+    found = discover5(override);
+  } catch {
+    found = [];
+  }
+  const installed = fs20.existsSync(root);
+  const tmpExists = fs20.existsSync(tmp);
+  let status;
+  let note;
+  if (found.length > 0) {
+    status = "ready";
+    note = `${found.length} checkpoint${found.length === 1 ? "" : "s"} \xB7 unverified format`;
+  } else if (installed || tmpExists) {
+    status = "empty";
+    note = tmpExists ? "Gemini CLI installed, no saved chats (use /chat save) \xB7 unverified format" : "Gemini CLI installed, no tmp/ yet \u2014 no chats saved \xB7 unverified format";
+  } else {
+    status = "absent";
+    note = "Gemini CLI not installed";
+  }
+  return formatDoctorLine({ harness: "gemini", status, dir: tmp, note });
+}
+var geminiAdapter = {
+  harness: "gemini",
+  displayName: DISPLAY_NAME2,
+  sourceDir: () => sourceDir3(),
+  discover: () => discover5(),
+  parse: (src, opts) => parse7(src, opts ?? {})
+};
+var gemini_default = geminiAdapter;
 
 // ../core/dist/adapters/opencode.js
-import fs13 from "node:fs";
-import path13 from "node:path";
-var DISPLAY_NAME2 = "opencode";
+var opencode_exports = {};
+__export(opencode_exports, {
+  DISPLAY_NAME: () => DISPLAY_NAME3,
+  OPENCODE_DOCTOR_NOTE: () => OPENCODE_DOCTOR_NOTE,
+  OPENCODE_FORMAT_UNVERIFIED: () => OPENCODE_FORMAT_UNVERIFIED,
+  columnsOf: () => columnsOf,
+  default: () => opencode_default,
+  describeStore: () => describeStore,
+  discover: () => discover6,
+  doctorLine: () => doctorLine6,
+  findStores: () => findStores,
+  isoOf: () => isoOf,
+  opencodeAdapter: () => opencodeAdapter,
+  opencodeDir: () => opencodeDir,
+  parse: () => parse8,
+  parseContent: () => parseContent,
+  quoteIdent: () => quoteIdent,
+  sourceDir: () => sourceDir4
+});
+import fs21 from "node:fs";
+import path18 from "node:path";
+var DISPLAY_NAME3 = "opencode";
 var DB_EXTENSIONS = [".db", ".sqlite", ".sqlite3"];
 var MAX_DEPTH = 3;
+var OPENCODE_FORMAT_UNVERIFIED = true;
+var OPENCODE_DOCTOR_NOTE = 'opencode: format unverified \u2014 this adapter was written from documentation, not from a real store, so its schema is discovered at runtime (pragma table_info) rather than assumed, and it degrades to "unsupported version" rather than half-parsing a store it does not recognise. The database is opened read-only.';
 var SESSION_COLUMNS = {
   id: ["id", "session_id", "sessionid", "sessionID", "uuid"],
   title: ["title", "name", "summary", "label"],
@@ -28871,7 +32210,7 @@ function sourceDir4(override) {
 function tableNames(db) {
   try {
     const rows = db.prepare(`select name from sqlite_master where type in ('table','view')`).all();
-    return rows.map((r) => r.name).filter((n) => !n.startsWith("sqlite_"));
+    return rows.map((r) => r.name).filter((n2) => !n2.startsWith("sqlite_"));
   } catch {
     return [];
   }
@@ -28955,19 +32294,19 @@ function findStores(override) {
       return;
     let entries;
     try {
-      entries = fs13.readdirSync(dir, { withFileTypes: true });
+      entries = fs21.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
-      const full = path13.join(dir, e.name);
+      const full = path18.join(dir, e.name);
       if (e.isDirectory()) {
         walk2(full, depth + 1);
         continue;
       }
       if (!e.isFile())
         continue;
-      if (DB_EXTENSIONS.includes(path13.extname(e.name).toLowerCase()))
+      if (DB_EXTENSIONS.includes(path18.extname(e.name).toLowerCase()))
         out.push(full);
     }
   };
@@ -28996,7 +32335,7 @@ function discoverIn(schema) {
   }
   let mtimeMs = 0;
   try {
-    mtimeMs = fs13.statSync(schema.dbPath).mtimeMs;
+    mtimeMs = fs21.statSync(schema.dbPath).mtimeMs;
   } catch {
     mtimeMs = 0;
   }
@@ -29026,7 +32365,7 @@ function discoverIn(schema) {
         sessionId: id,
         harness: "opencode",
         path: schema.dbPath,
-        projectSlug: directory ? path13.basename(directory) : "",
+        projectSlug: directory ? path18.basename(directory) : "",
         bytes: bytes2.get(id) ?? 0,
         mtimeMs,
         // opencode's `parent_id` marks a child session — a subagent
@@ -29045,7 +32384,7 @@ function discoverIn(schema) {
 }
 async function parse8(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
-  const dbPath2 = path13.resolve(typeof source === "string" ? source : source.path);
+  const dbPath2 = path18.resolve(typeof source === "string" ? source : source.path);
   const sessionId = options.sessionId ?? src?.sessionId ?? "";
   const unknownTypes = {};
   const empty = (reason) => {
@@ -29112,34 +32451,34 @@ async function parse8(source, options = {}) {
         messageRows = [];
       }
     }
-    const counts = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
+    const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
     let malformedLines = 0;
-    const { exchanges, contentBytes, firstTs, lastTs, model: turnModel } = buildExchanges3(messageRows, sessionId, counts, unknownTypes, () => {
+    const { exchanges, contentBytes, firstTs, lastTs, model: turnModel } = buildExchanges3(messageRows, sessionId, counts2, unknownTypes, () => {
       malformedLines += 1;
     });
-    const str = (key) => {
+    const str2 = (key) => {
       const v = sessionRow?.[key];
       return typeof v === "string" && v.trim() ? v : void 0;
     };
-    const directory = str("directory");
-    const parent = str("parent");
+    const directory = str2("directory");
+    const parent = str2("parent");
     const session = {
       id: sessionId,
       harness: "opencode",
       sourcePath: dbPath2,
       project: directory ?? "",
-      projectSlug: options.projectSlug ?? src?.projectSlug ?? (directory ? path13.basename(directory) : ""),
+      projectSlug: options.projectSlug ?? src?.projectSlug ?? (directory ? path18.basename(directory) : ""),
       startedAt: isoOf(sessionRow?.["created"]) ?? firstTs ?? "",
       endedAt: isoOf(sessionRow?.["updated"]) ?? lastTs ?? isoOf(sessionRow?.["created"]) ?? "",
-      ...str("title") ? { title: str("title") } : {},
+      ...str2("title") ? { title: str2("title") } : {},
       entrypoint: "cli",
-      ...str("model") ?? turnModel ? { model: str("model") ?? turnModel } : {},
+      ...str2("model") ?? turnModel ? { model: str2("model") ?? turnModel } : {},
       isSidechain: parent !== void 0 || (src?.isSidechain ?? false),
       ...parent ? { parentSessionId: parent } : {},
       counts: {
-        userPrompts: counts.userPrompts,
-        assistantTurns: counts.assistantTurns,
-        toolCalls: counts.toolCalls,
+        userPrompts: counts2.userPrompts,
+        assistantTurns: counts2.assistantTurns,
+        toolCalls: counts2.toolCalls,
         bytes: options.bytes ?? src?.bytes ?? contentBytes
       },
       status: options.status ?? src?.status ?? "live"
@@ -29152,7 +32491,7 @@ async function parse8(source, options = {}) {
 function col(name, alias) {
   return name ? `${quoteIdent(name)} as ${alias}` : `null as ${alias}`;
 }
-function buildExchanges3(rows, sessionId, counts, unknownTypes, onMalformed) {
+function buildExchanges3(rows, sessionId, counts2, unknownTypes, onMalformed) {
   const out = [];
   let seq = 0;
   let contentBytes = 0;
@@ -29185,39 +32524,39 @@ function buildExchanges3(rows, sessionId, counts, unknownTypes, onMalformed) {
     current = { seq, ts, userTexts: [], assistantTexts: [], toolCalls: [], files: [] };
     return current;
   };
-  for (const row of rows) {
-    const raw = row["content"];
+  for (const row2 of rows) {
+    const raw = row2["content"];
     const text = raw === null || raw === void 0 ? "" : String(raw);
     contentBytes += Buffer.byteLength(text, "utf8");
-    const ts = isoOf(row["created"]) ?? "";
+    const ts = isoOf(row2["created"]) ?? "";
     if (ts) {
       firstTs ??= ts;
       if (!lastTs || ts > lastTs)
         lastTs = ts;
     }
-    const role = String(row["role"] ?? "").toLowerCase();
+    const role = String(row2["role"] ?? "").toLowerCase();
     const parsed = parseContent(text, unknownTypes, onMalformed);
     if (parsed.model)
       model = parsed.model;
     if (USER_ROLES.has(role)) {
       finalize2();
-      counts.userPrompts += 1;
+      counts2.userPrompts += 1;
       const b2 = open2(ts);
       if (parsed.text)
         b2.userTexts.push(parsed.text);
-      absorbTools(b2, parsed, counts);
+      absorbTools(b2, parsed, counts2);
       continue;
     }
     const b = current ?? open2(ts);
     if (ASSISTANT_ROLES.has(role)) {
-      counts.assistantTurns += 1;
+      counts2.assistantTurns += 1;
     } else {
       const key = `role:${role || "(no role)"}`;
       unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
     }
     if (parsed.text)
       b.assistantTexts.push(parsed.text);
-    absorbTools(b, parsed, counts);
+    absorbTools(b, parsed, counts2);
   }
   finalize2();
   return {
@@ -29228,10 +32567,10 @@ function buildExchanges3(rows, sessionId, counts, unknownTypes, onMalformed) {
     ...model ? { model } : {}
   };
 }
-function absorbTools(b, parsed, counts) {
+function absorbTools(b, parsed, counts2) {
   for (const call2 of parsed.toolCalls) {
     b.toolCalls.push(call2.call);
-    counts.toolCalls += 1;
+    counts2.toolCalls += 1;
     for (const f of call2.files)
       b.files.push(f);
   }
@@ -29302,20 +32641,109 @@ function isoOf(value) {
   }
   if (typeof value !== "string" || !value.trim())
     return void 0;
-  const n = Number(value);
-  if (Number.isFinite(n) && /^\d+$/.test(value.trim()))
-    return isoOf(n);
+  const n2 = Number(value);
+  if (Number.isFinite(n2) && /^\d+$/.test(value.trim()))
+    return isoOf(n2);
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? void 0 : d.toISOString();
 }
 function errText(e) {
   return e instanceof Error ? e.message : String(e);
 }
+function doctorLine6(override) {
+  const dir = sourceDir4(override);
+  const installed = fs21.existsSync(dir);
+  if (!installed) {
+    return formatDoctorLine({
+      harness: "opencode",
+      status: "absent",
+      dir,
+      note: "opencode not installed"
+    });
+  }
+  const stores = findStores(override);
+  if (stores.length === 0) {
+    const hasStorage = fs21.existsSync(path18.join(dir, "storage"));
+    return formatDoctorLine({
+      harness: "opencode",
+      status: "empty",
+      dir,
+      note: hasStorage ? "opencode installed, no sqlite store \u2014 this install uses storage/ json, which potsherd does not read yet" : "opencode installed, no sessions yet \xB7 unverified format"
+    });
+  }
+  const failures = [];
+  let sessions = 0;
+  let readable = 0;
+  for (const store of stores) {
+    const described = describeStore(store);
+    if (!described.ok) {
+      failures.push(described.reason);
+      continue;
+    }
+    readable += 1;
+    try {
+      sessions += discoverIn(described.schema).length;
+    } catch {
+    }
+  }
+  if (readable === 0) {
+    return formatDoctorLine({
+      harness: "opencode",
+      status: "unsupported",
+      dir,
+      note: `${failures[0] ?? "unsupported version"} \xB7 unverified format`
+    });
+  }
+  if (sessions === 0) {
+    return formatDoctorLine({
+      harness: "opencode",
+      status: "empty",
+      dir,
+      note: "opencode installed, store readable, no sessions yet \xB7 unverified format"
+    });
+  }
+  const note = [`${sessions} session${sessions === 1 ? "" : "s"}`];
+  if (failures.length)
+    note.push(`${failures.length} store${failures.length === 1 ? "" : "s"} unsupported`);
+  note.push("unverified format");
+  return formatDoctorLine({
+    harness: "opencode",
+    status: "ready",
+    dir,
+    note: note.join(" \xB7 ")
+  });
+}
+var opencodeAdapter = {
+  harness: "opencode",
+  displayName: DISPLAY_NAME3,
+  sourceDir: () => sourceDir4(),
+  discover: () => discover6(),
+  parse: (src, opts) => parse8(src, opts ?? {})
+};
+var opencode_default = opencodeAdapter;
 
 // ../core/dist/adapters/copilot.js
-import fs14 from "node:fs";
-import path14 from "node:path";
-var DISPLAY_NAME3 = "Copilot CLI";
+var copilot_exports = {};
+__export(copilot_exports, {
+  COPILOT_DOCTOR_NOTE: () => COPILOT_DOCTOR_NOTE,
+  COPILOT_FORMAT_UNVERIFIED: () => COPILOT_FORMAT_UNVERIFIED,
+  DISPLAY_NAME: () => DISPLAY_NAME4,
+  copilotAdapter: () => copilotAdapter,
+  copilotDir: () => copilotDir,
+  copilotSessionStateDir: () => copilotSessionStateDir,
+  default: () => copilot_default,
+  discover: () => discover7,
+  doctorLine: () => doctorLine7,
+  isoOf: () => isoOf2,
+  parse: () => parse9,
+  scan: () => scan,
+  sessionIdFromPath: () => sessionIdFromPath2,
+  sourceDir: () => sourceDir5,
+  stateFileIn: () => stateFileIn
+});
+import fs22 from "node:fs";
+import path19 from "node:path";
+var DISPLAY_NAME4 = "Copilot CLI";
 var STATE_FILES = [
   "state.json",
   "session.json",
@@ -29324,6 +32752,8 @@ var STATE_FILES = [
   "state.jsonl",
   "messages.jsonl"
 ];
+var COPILOT_FORMAT_UNVERIFIED = true;
+var COPILOT_DOCTOR_NOTE = "copilot: format unverified \u2014 this adapter was written from documentation, not from a real session, so record coverage is a best guess until someone runs it on one. potsherd reads ~/.copilot only: Copilot's VS Code chats live in workspaceStorage, which is not one of the read-only inputs potsherd is allowed, so IDE sessions are not shown here.";
 var HISTORY_KEYS2 = ["messages", "history", "turns", "events", "state"];
 var USER_ROLES2 = /* @__PURE__ */ new Set(["user", "human", "prompt"]);
 var ASSISTANT_ROLES2 = /* @__PURE__ */ new Set(["assistant", "model", "agent", "copilot"]);
@@ -29340,12 +32770,12 @@ function scan(override) {
   const unreadable = [];
   let entries;
   try {
-    entries = fs14.readdirSync(root, { withFileTypes: true });
+    entries = fs22.readdirSync(root, { withFileTypes: true });
   } catch {
     return { sources, unreadable };
   }
   for (const entry2 of entries) {
-    const full = path14.join(root, entry2.name);
+    const full = path19.join(root, entry2.name);
     if (entry2.isDirectory()) {
       const state = stateFileIn(full);
       if (!state) {
@@ -29361,10 +32791,10 @@ function scan(override) {
     }
     if (!entry2.isFile())
       continue;
-    const ext = path14.extname(entry2.name).toLowerCase();
+    const ext = path19.extname(entry2.name).toLowerCase();
     if (ext !== ".json" && ext !== ".jsonl")
       continue;
-    const src = sourceFor(full, path14.basename(entry2.name, ext));
+    const src = sourceFor(full, path19.basename(entry2.name, ext));
     if (src)
       sources.push(src);
   }
@@ -29374,9 +32804,9 @@ function scan(override) {
 }
 function stateFileIn(dir) {
   for (const name of STATE_FILES) {
-    const candidate = path14.join(dir, name);
+    const candidate = path19.join(dir, name);
     try {
-      if (fs14.statSync(candidate).isFile())
+      if (fs22.statSync(candidate).isFile())
         return candidate;
     } catch {
     }
@@ -29386,7 +32816,7 @@ function stateFileIn(dir) {
 function sourceFor(file2, sessionId) {
   let stat;
   try {
-    stat = fs14.statSync(file2);
+    stat = fs22.statSync(file2);
   } catch {
     return void 0;
   }
@@ -29408,12 +32838,12 @@ function sourceFor(file2, sessionId) {
 }
 async function parse9(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path14.resolve(typeof source === "string" ? source : source.path);
+  const absolute2 = path19.resolve(typeof source === "string" ? source : source.path);
   const unknownTypes = {};
   let malformedLines = 0;
   let raw = "";
   try {
-    raw = fs14.readFileSync(absolute2, "utf8");
+    raw = fs22.readFileSync(absolute2, "utf8");
   } catch {
     raw = "";
   }
@@ -29423,9 +32853,9 @@ async function parse9(source, options = {}) {
   const sessionId = options.sessionId ?? (meta3 && typeof meta3["sessionId"] === "string" && meta3["sessionId"].trim() ? meta3["sessionId"] : src?.sessionId ?? sessionIdFromPath2(absolute2));
   const mtimeMs = options.mtimeMs ?? src?.mtimeMs ?? statMtime2(absolute2);
   const fileTime = mtimeMs ? new Date(mtimeMs).toISOString() : "";
-  const counts = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
-  const built = buildExchanges4(turns, sessionId, fileTime, counts, unknownTypes);
-  const str = (...keys) => {
+  const counts2 = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
+  const built = buildExchanges4(turns, sessionId, fileTime, counts2, unknownTypes);
+  const str2 = (...keys) => {
     if (!meta3)
       return void 0;
     for (const key of keys) {
@@ -29435,12 +32865,12 @@ async function parse9(source, options = {}) {
     }
     return void 0;
   };
-  const startedAt = str("startTime", "startedAt", "createdAt") ?? built.firstTs ?? fileTime;
-  const endedAt = str("lastUpdated", "updatedAt", "endedAt") ?? built.lastTs ?? fileTime;
-  const cwd = str("cwd", "workingDirectory", "projectRoot", "directory");
-  const title = str("title", "name", "summary");
-  const model = str("model", "modelId") ?? built.model;
-  const gitBranch = str("gitBranch", "branch");
+  const startedAt = str2("startTime", "startedAt", "createdAt") ?? built.firstTs ?? fileTime;
+  const endedAt = str2("lastUpdated", "updatedAt", "endedAt") ?? built.lastTs ?? fileTime;
+  const cwd = str2("cwd", "workingDirectory", "projectRoot", "directory");
+  const title = str2("title", "name", "summary");
+  const model = str2("model", "modelId") ?? built.model;
+  const gitBranch = str2("gitBranch", "branch");
   const session = {
     id: sessionId,
     harness: "copilot",
@@ -29450,7 +32880,7 @@ async function parse9(source, options = {}) {
     // empty string because copilot's session-state directory is keyed by
     // session, not by project — and an empty string is not nullish, so `??`
     // would let it beat a slug we can actually derive from the cwd.
-    projectSlug: options.projectSlug || src?.projectSlug || (cwd ? path14.basename(cwd) : ""),
+    projectSlug: options.projectSlug || src?.projectSlug || (cwd ? path19.basename(cwd) : ""),
     startedAt,
     endedAt: endedAt < startedAt ? startedAt : endedAt,
     ...title ? { title } : {},
@@ -29459,9 +32889,9 @@ async function parse9(source, options = {}) {
     ...model ? { model } : {},
     isSidechain: false,
     counts: {
-      userPrompts: counts.userPrompts,
-      assistantTurns: counts.assistantTurns,
-      toolCalls: counts.toolCalls,
+      userPrompts: counts2.userPrompts,
+      assistantTurns: counts2.assistantTurns,
+      toolCalls: counts2.toolCalls,
       bytes: options.bytes ?? src?.bytes ?? endOffset
     },
     status: options.status ?? src?.status ?? "live"
@@ -29469,17 +32899,17 @@ async function parse9(source, options = {}) {
   return { session, exchanges: built.exchanges, unknownTypes, endOffset, malformedLines };
 }
 function sessionIdFromPath2(file2) {
-  const ext = path14.extname(file2);
-  const base = path14.basename(file2, ext);
-  if (STATE_FILES.includes(path14.basename(file2))) {
-    return path14.basename(path14.dirname(file2));
+  const ext = path19.extname(file2);
+  const base2 = path19.basename(file2, ext);
+  if (STATE_FILES.includes(path19.basename(file2))) {
+    return path19.basename(path19.dirname(file2));
   }
-  return base;
+  return base2;
 }
 function readDocument(file2, raw) {
   if (!raw.trim())
     return { turns: [], malformed: 0 };
-  if (path14.extname(file2).toLowerCase() === ".jsonl") {
+  if (path19.extname(file2).toLowerCase() === ".jsonl") {
     const turns = [];
     let meta3;
     let malformed = 0;
@@ -29524,7 +32954,7 @@ function readDocument(file2, raw) {
   }
   return { turns: [], meta: doc, malformed: 0 };
 }
-function buildExchanges4(turns, sessionId, fileTime, counts, unknownTypes) {
+function buildExchanges4(turns, sessionId, fileTime, counts2, unknownTypes) {
   const out = [];
   let seq = 0;
   let firstTs;
@@ -29581,12 +33011,12 @@ function buildExchanges4(turns, sessionId, fileTime, counts, unknownTypes) {
     const blocks = blocksOf(turn);
     if (USER_ROLES2.has(role) && !onlyToolResults(blocks)) {
       finalize2();
-      counts.userPrompts += 1;
+      counts2.userPrompts += 1;
       const b2 = open2(ts);
       absorb(
         b2,
         blocks,
-        counts,
+        counts2,
         unknownTypes,
         /* asUser */
         true
@@ -29595,7 +33025,7 @@ function buildExchanges4(turns, sessionId, fileTime, counts, unknownTypes) {
     }
     const b = current ?? open2(ts);
     if (ASSISTANT_ROLES2.has(role)) {
-      counts.assistantTurns += 1;
+      counts2.assistantTurns += 1;
     } else if (!USER_ROLES2.has(role) && !TOOL_ROLES.has(role)) {
       const key = `role:${role || "(no role)"}`;
       unknownTypes[key] = (unknownTypes[key] ?? 0) + 1;
@@ -29603,7 +33033,7 @@ function buildExchanges4(turns, sessionId, fileTime, counts, unknownTypes) {
     absorb(
       b,
       blocks,
-      counts,
+      counts2,
       unknownTypes,
       /* asUser */
       false
@@ -29617,11 +33047,11 @@ function buildExchanges4(turns, sessionId, fileTime, counts, unknownTypes) {
     ...model ? { model } : {}
   };
 }
-function absorb(b, blocks, counts, unknownTypes, asUser) {
-  for (const block of blocks) {
-    const type = String(block["type"] ?? "").toLowerCase();
-    if (type === "text" || !type && typeof block["text"] === "string") {
-      const text = typeof block["text"] === "string" ? block["text"] : "";
+function absorb(b, blocks, counts2, unknownTypes, asUser) {
+  for (const block2 of blocks) {
+    const type = String(block2["type"] ?? "").toLowerCase();
+    if (type === "text" || !type && typeof block2["text"] === "string") {
+      const text = typeof block2["text"] === "string" ? block2["text"] : "";
       if (!text)
         continue;
       if (asUser)
@@ -29631,13 +33061,13 @@ function absorb(b, blocks, counts, unknownTypes, asUser) {
       continue;
     }
     if (type === "tool_call" || type === "tool-call" || type === "function_call" || type === "tool_use") {
-      const fn = isRecord(block["function"]) ? block["function"] : {};
-      const name = String(block["name"] ?? fn["name"] ?? block["tool"] ?? "unknown");
-      const rawArgs = block["arguments"] ?? fn["arguments"] ?? block["input"] ?? block["args"];
+      const fn = isRecord(block2["function"]) ? block2["function"] : {};
+      const name = String(block2["name"] ?? fn["name"] ?? block2["tool"] ?? "unknown");
+      const rawArgs = block2["arguments"] ?? fn["arguments"] ?? block2["input"] ?? block2["args"];
       const args = typeof rawArgs === "string" ? safeParseJson(rawArgs) : rawArgs;
       b.toolCalls.push({ name, input: stringifyToolInput(args) });
-      counts.toolCalls += 1;
-      const id = block["id"] ?? block["tool_call_id"] ?? block["toolCallId"];
+      counts2.toolCalls += 1;
+      const id = block2["id"] ?? block2["tool_call_id"] ?? block2["toolCallId"];
       if (typeof id === "string" && id)
         b.byId.set(id, b.toolCalls.length - 1);
       else
@@ -29647,10 +33077,10 @@ function absorb(b, blocks, counts, unknownTypes, asUser) {
       continue;
     }
     if (type === "tool_result" || type === "tool-result" || type === "function_response" || type === "tool_response") {
-      const name = String(block["name"] ?? block["tool"] ?? "unknown");
-      const id = block["tool_call_id"] ?? block["toolCallId"] ?? block["id"];
-      const result = stringifyToolOutput(block["content"] ?? block["output"] ?? block["result"] ?? block["response"]);
-      const isError = block["is_error"] === true || block["isError"] === true || void 0;
+      const name = String(block2["name"] ?? block2["tool"] ?? "unknown");
+      const id = block2["tool_call_id"] ?? block2["toolCallId"] ?? block2["id"];
+      const result = stringifyToolOutput(block2["content"] ?? block2["output"] ?? block2["result"] ?? block2["response"]);
+      const isError = block2["is_error"] === true || block2["isError"] === true || void 0;
       const key2 = typeof id === "string" && id ? id : `name:${name}`;
       const at = b.byId.get(key2);
       if (at !== void 0) {
@@ -29670,7 +33100,7 @@ function absorb(b, blocks, counts, unknownTypes, asUser) {
         ...result !== void 0 ? { result } : {},
         ...isError ? { isError: true } : {}
       });
-      counts.toolCalls += 1;
+      counts2.toolCalls += 1;
       continue;
     }
     const key = `block:${type || "(no type)"}`;
@@ -29722,16 +33152,54 @@ function isoOf2(value) {
 }
 function statMtime2(absolute2) {
   try {
-    return fs14.statSync(absolute2).mtimeMs;
+    return fs22.statSync(absolute2).mtimeMs;
   } catch {
     return 0;
   }
 }
+function doctorLine7(override) {
+  const dir = sourceDir5(override);
+  const root = copilotDir(override);
+  let found = { sources: [], unreadable: [] };
+  try {
+    found = scan(override);
+  } catch {
+    found = { sources: [], unreadable: [] };
+  }
+  const installed = fs22.existsSync(root);
+  const stateExists = fs22.existsSync(dir);
+  let status;
+  let note;
+  if (found.sources.length > 0) {
+    const parts = [`${found.sources.length} session${found.sources.length === 1 ? "" : "s"}`];
+    if (found.unreadable.length) {
+      parts.push(`${found.unreadable.length} unreadable`);
+    }
+    parts.push("unverified format");
+    status = "ready";
+    note = parts.join(" \xB7 ");
+  } else if (installed || stateExists) {
+    status = "empty";
+    note = stateExists ? "Copilot CLI installed, session-state/ holds no sessions \xB7 unverified format" : "Copilot CLI installed, but it has written no session-state/ \xB7 unverified format";
+  } else {
+    status = "absent";
+    note = "Copilot CLI not installed";
+  }
+  return formatDoctorLine({ harness: "copilot", status, dir, note });
+}
+var copilotAdapter = {
+  harness: "copilot",
+  displayName: DISPLAY_NAME4,
+  sourceDir: () => sourceDir5(),
+  discover: () => discover7(),
+  parse: (src, opts) => parse9(src, opts ?? {})
+};
+var copilot_default = copilotAdapter;
 
 // ../core/dist/ingest.js
-import crypto4 from "node:crypto";
-import fs15 from "node:fs";
-import path15 from "node:path";
+import crypto5 from "node:crypto";
+import fs23 from "node:fs";
+import path20 from "node:path";
 function adapterSpecs(o = {}) {
   return [
     {
@@ -29778,7 +33246,7 @@ function adapterSpecs(o = {}) {
       // `plans/research/formats.md`, which marks its gemini section
       // **unmeasured**, and against synthetic fixtures. See the adapter header.
       harness: "gemini",
-      displayName: DISPLAY_NAME,
+      displayName: DISPLAY_NAME2,
       sourceDir: sourceDir3(o.geminiDir),
       discover: () => discover5(o.geminiDir),
       parse: (source) => parse7(source),
@@ -29791,7 +33259,7 @@ function adapterSpecs(o = {}) {
       // at runtime (`03 §10`), never hard-coded, and it degrades to
       // "unsupported version" rather than half-parsing. See the adapter header.
       harness: "opencode",
-      displayName: DISPLAY_NAME2,
+      displayName: DISPLAY_NAME3,
       sourceDir: sourceDir4(o.opencodeDir),
       discover: () => discover6(o.opencodeDir),
       parse: (source) => parse8(source),
@@ -29806,7 +33274,7 @@ function adapterSpecs(o = {}) {
       // `workspaceStorage`, which the cursor ruling (`04-DECISIONS.md`,
       // 21 aug) keeps out of bounds. See the adapter header.
       harness: "copilot",
-      displayName: DISPLAY_NAME3,
+      displayName: DISPLAY_NAME4,
       sourceDir: sourceDir5(o.copilotDir),
       discover: () => discover7(o.copilotDir),
       parse: (source) => parse9(source),
@@ -29817,7 +33285,7 @@ function adapterSpecs(o = {}) {
 }
 function ingestSession(db, parsed, options = {}) {
   const session = parsed.session;
-  const counts = emptyCounts();
+  const counts2 = emptyCounts();
   let redactedExchanges = 0;
   let toolCallCount = 0;
   const elisions = emptyElisions();
@@ -29827,7 +33295,7 @@ function ingestSession(db, parsed, options = {}) {
     const { exchange: clean, hits } = redactExchange(lean);
     elisions.binaryParts += e.binaryParts;
     elisions.charsElided += e.charsElided;
-    tally(hits, counts);
+    tally(hits, counts2);
     if (clean.redacted)
       redactedExchanges += 1;
     toolCallCount += clean.toolCalls.length;
@@ -29850,7 +33318,7 @@ function ingestSession(db, parsed, options = {}) {
     exchanges: redacted.length,
     toolCalls: toolCallCount,
     redactedExchanges,
-    counts,
+    counts: counts2,
     elisions
   };
 }
@@ -29918,12 +33386,12 @@ function clearExchanges(db, sessionId) {
     return;
   const unindex = db.prepare(`INSERT INTO exchanges_fts (exchanges_fts, rowid, user_text, assistant_text)
      VALUES ('delete', ?, ?, ?)`);
-  for (const row of rows)
-    unindex.run(row.rowid, row.user_text, row.assistant_text);
+  for (const row2 of rows)
+    unindex.run(row2.rowid, row2.user_text, row2.assistant_text);
   if (vecAvailable(db) && vecTablesExist(db)) {
     const dropVec = db.prepare("DELETE FROM vec_exchanges WHERE id = ?");
-    for (const row of rows)
-      dropVec.run(row.id);
+    for (const row2 of rows)
+      dropVec.run(row2.id);
   }
   db.prepare("DELETE FROM exchanges WHERE session_id = ?").run(sessionId);
 }
@@ -29943,7 +33411,7 @@ function insertExchange(db, e) {
 }
 var GHOST_INDEX_KEY = "index:ghosts";
 function ingestGhosts(db, options = {}) {
-  const fingerprint = ghostFingerprint(db);
+  const fingerprint = ghostFingerprint2(db);
   if (!options.full) {
     const seen = readIndexState(db, GHOST_INDEX_KEY);
     if (seen && seen === fingerprint) {
@@ -29959,7 +33427,7 @@ function ingestGhosts(db, options = {}) {
       };
     }
   }
-  const counts = emptyCounts();
+  const counts2 = emptyCounts();
   let redactedPrompts = 0;
   const ghosts = db.prepare("SELECT rowid, session_id, first_prompt, title FROM ghosts").all();
   const prompts = db.prepare("SELECT rowid, id, text, redacted FROM ghost_prompts").all();
@@ -29969,8 +33437,8 @@ function ingestGhosts(db, options = {}) {
     const updateGhost = db.prepare("UPDATE ghosts SET first_prompt = ?, title = ? WHERE rowid = ?");
     const indexGhost = db.prepare("INSERT INTO ghosts_fts (rowid, first_prompt, title) VALUES (?, ?, ?)");
     for (const g of ghosts) {
-      const first = maskField(g.first_prompt, counts);
-      const title = maskField(g.title, counts);
+      const first = maskField(g.first_prompt, counts2);
+      const title = maskField(g.title, counts2);
       if (first !== g.first_prompt || title !== g.title)
         updateGhost.run(first, title, g.rowid);
       indexGhost.run(g.rowid, first, title);
@@ -29981,51 +33449,84 @@ function ingestGhosts(db, options = {}) {
       const result = redact(p.text);
       const fired = result.hits.length > 0 ? 1 : 0;
       if (fired) {
-        tally(result.hits, counts);
+        tally(result.hits, counts2);
         redactedPrompts += 1;
       }
       if (result.text !== p.text || p.redacted !== fired)
         updatePrompt.run(result.text, fired, p.rowid);
       indexPrompt.run(p.rowid, result.text);
     }
-    writeIndexState(db, GHOST_INDEX_KEY, ghostFingerprint(db));
+    writeIndexState(db, GHOST_INDEX_KEY, ghostFingerprint2(db));
   });
   run2();
   return {
     ghosts: ghosts.length,
     prompts: prompts.length,
     redactedPrompts,
-    counts,
+    counts: counts2,
     unchanged: false
   };
 }
-function maskField(value, counts) {
+function maskField(value, counts2) {
   if (!value)
     return value;
   const result = redact(value);
   if (result.hits.length > 0)
-    tally(result.hits, counts);
+    tally(result.hits, counts2);
   return result.text;
 }
-function ghostFingerprint(db) {
-  const row = db.prepare(`SELECT (SELECT COUNT(*) FROM ghosts) AS g,
+function ghostFingerprint2(db) {
+  const row2 = db.prepare(`SELECT (SELECT COUNT(*) FROM ghosts) AS g,
               (SELECT COALESCE(SUM(LENGTH(COALESCE(first_prompt,'')) + LENGTH(COALESCE(title,''))), 0) FROM ghosts) AS gl,
               (SELECT COUNT(*) FROM ghost_prompts) AS p,
               (SELECT COALESCE(SUM(LENGTH(text)), 0) FROM ghost_prompts) AS pl,
               (SELECT COUNT(*) FROM ghosts_fts) AS gf,
               (SELECT COUNT(*) FROM ghost_prompts_fts) AS pf`).get();
-  return `${row.g}:${row.gl}:${row.p}:${row.pl}:${row.gf}:${row.pf}`;
+  return `${row2.g}:${row2.gl}:${row2.p}:${row2.pl}:${row2.gf}:${row2.pf}`;
+}
+function storedRedactionCounts(db) {
+  const counts2 = emptyCounts();
+  const scan2 = (text) => {
+    if (!text)
+      return;
+    const rx = new RegExp(MASK_RE.source, "g");
+    let m;
+    while ((m = rx.exec(text)) !== null) {
+      const type = m[0].split(":")[1];
+      if (!type)
+        continue;
+      counts2.byType[type] = (counts2.byType[type] ?? 0) + 1;
+      counts2.total += 1;
+    }
+  };
+  for (const row2 of db.prepare("SELECT user_text, assistant_text FROM exchanges WHERE redacted = 1").iterate()) {
+    scan2(row2.user_text);
+    scan2(row2.assistant_text);
+  }
+  for (const row2 of db.prepare(`SELECT t.input, t.result FROM tool_calls t
+       JOIN exchanges e ON e.id = t.exchange_id WHERE e.redacted = 1`).iterate()) {
+    scan2(row2.input);
+    scan2(row2.result);
+  }
+  for (const row2 of db.prepare("SELECT text FROM ghost_prompts WHERE redacted = 1").iterate()) {
+    scan2(row2.text);
+  }
+  for (const row2 of db.prepare("SELECT first_prompt, title FROM ghosts").iterate()) {
+    scan2(row2.first_prompt);
+    scan2(row2.title);
+  }
+  return counts2;
 }
 function readIndexState(db, key) {
-  const row = db.prepare("SELECT value FROM sync_state WHERE key = ?").get(key);
-  return row?.value;
+  const row2 = db.prepare("SELECT value FROM sync_state WHERE key = ?").get(key);
+  return row2?.value;
 }
 function writeIndexState(db, key, value) {
   db.prepare(`INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(key, value, (/* @__PURE__ */ new Date()).toISOString());
 }
 function sourceFingerprint(sources) {
-  const hash2 = crypto4.createHash("sha256");
+  const hash2 = crypto5.createHash("sha256");
   for (const s of [...sources].sort((a, b) => a.path < b.path ? -1 : 1)) {
     hash2.update(`${s.path}:${s.bytes}:${Math.floor(s.mtimeMs)}
 `);
@@ -30090,7 +33591,7 @@ async function indexHarness(db, spec, options, recordTypes) {
     harness: spec.harness,
     displayName: spec.displayName,
     sourceDir: spec.sourceDir,
-    present: fs15.existsSync(spec.sourceDir),
+    present: fs23.existsSync(spec.sourceDir),
     discovered: 0,
     parsed: 0,
     skipped: 0,
@@ -30130,8 +33631,8 @@ async function indexHarness(db, spec, options, recordTypes) {
     return { harness_: report, redaction };
   }
   const known = /* @__PURE__ */ new Map();
-  for (const row of db.prepare("SELECT id, source_mtime, source_offset FROM sessions WHERE harness = ?").all(spec.harness)) {
-    known.set(row.id, { mtime: row.source_mtime, offset: row.source_offset });
+  for (const row2 of db.prepare("SELECT id, source_mtime, source_offset FROM sessions WHERE harness = ?").all(spec.harness)) {
+    known.set(row2.id, { mtime: row2.source_mtime, offset: row2.source_offset });
   }
   let done = 0;
   for (const source of sources) {
@@ -30141,7 +33642,7 @@ async function indexHarness(db, spec, options, recordTypes) {
       harness: spec.harness,
       done,
       total: sources.length,
-      note: path15.basename(source.path)
+      note: path20.basename(source.path)
     });
     const seen = known.get(source.sessionId);
     if (!options.full && seen && seen.mtime !== null && seen.mtime === Math.floor(source.mtimeMs) && seen.offset === source.bytes) {
@@ -30170,10 +33671,10 @@ async function indexHarness(db, spec, options, recordTypes) {
     writeSessionRecordTypes(db, parsed.session.id, spec, version2, parsed.unknownTypes);
     for (const [type, count2] of Object.entries(parsed.unknownTypes)) {
       const key = `${spec.harness}\0${version2}\0${type}`;
-      const row = recordTypes.get(key);
-      if (row) {
-        row.count += count2;
-        row.files += 1;
+      const row2 = recordTypes.get(key);
+      if (row2) {
+        row2.count += count2;
+        row2.files += 1;
       } else {
         recordTypes.set(key, {
           harness: spec.harness,
@@ -30256,8 +33757,8 @@ async function embedExchanges(db, options, vec) {
     let vectors;
     try {
       vectors = [];
-      for (const row of chunk) {
-        vectors.push(await generateExchangeEmbedding(row.user_text, row.assistant_text, void 0, embedOptions));
+      for (const row2 of chunk) {
+        vectors.push(await generateExchangeEmbedding(row2.user_text, row2.assistant_text, void 0, embedOptions));
       }
     } catch (err) {
       report.available = false;
@@ -30266,13 +33767,13 @@ async function embedExchanges(db, options, vec) {
       return report;
     }
     const write = db.transaction(() => {
-      chunk.forEach((row, n) => {
-        const vector = vectors[n];
+      chunk.forEach((row2, n2) => {
+        const vector = vectors[n2];
         if (!vector)
           return;
-        dropVec.run(row.id);
-        insertVec.run(row.id, embeddingToBlob(vector));
-        stamp.run(EMBEDDING_VERSION, row.id);
+        dropVec.run(row2.id);
+        insertVec.run(row2.id, embeddingToBlob(vector));
+        stamp.run(EMBEDDING_VERSION, row2.id);
         report.embedded += 1;
       });
     });
@@ -30290,10 +33791,10 @@ function pendingGhostPrompts(db) {
   try {
     if (!ghostVecTable(db))
       return 0;
-    const row = db.prepare(`SELECT COUNT(*) AS n FROM ghost_prompts
+    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM ghost_prompts
           WHERE (embedding_version IS NULL OR embedding_version != ?)
             AND length(trim(text)) > 3`).get(EMBEDDING_VERSION);
-    return row.n;
+    return row2.n;
   } catch {
     return 0;
   }
@@ -30321,20 +33822,20 @@ async function embedGhostPrompts(db, embedOptions) {
     let vectors;
     try {
       vectors = [];
-      for (const row of chunk) {
-        vectors.push(await generateExchangeEmbedding(row.text, "", void 0, embedOptions));
+      for (const row2 of chunk) {
+        vectors.push(await generateExchangeEmbedding(row2.text, "", void 0, embedOptions));
       }
     } catch {
       return embedded;
     }
     const write = db.transaction(() => {
-      chunk.forEach((row, n) => {
-        const vector = vectors[n];
+      chunk.forEach((row2, n2) => {
+        const vector = vectors[n2];
         if (!vector)
           return;
-        dropVec.run(row.id);
-        insertVec.run(row.id, embeddingToBlob(vector));
-        stamp.run(EMBEDDING_VERSION, row.id);
+        dropVec.run(row2.id);
+        insertVec.run(row2.id, embeddingToBlob(vector));
+        stamp.run(EMBEDDING_VERSION, row2.id);
         embedded += 1;
       });
     });
@@ -30354,12 +33855,35 @@ function writeSessionRecordTypes(db, sessionId, spec, version2, unknownTypes) {
   });
   write();
 }
+function storedRecordTypes(db) {
+  try {
+    const rows = db.prepare(`SELECT harness, version, type,
+                SUM(count) AS count, COUNT(*) AS files, MAX(novel) AS novel
+           FROM session_record_types
+          GROUP BY harness, version, type
+          ORDER BY count DESC`).all();
+    return rows.map((r) => ({
+      harness: r.harness,
+      version: r.version,
+      type: r.type,
+      count: r.count,
+      files: r.files,
+      novel: r.novel === 1
+    }));
+  } catch {
+    return [];
+  }
+}
 function firstLine3(s) {
   return (s.split("\n")[0] ?? s).trim();
 }
 function sum(xs, f) {
   return xs.reduce((a, x) => a + f(x), 0);
 }
+
+// ../core/dist/cards/write.js
+import fs25 from "node:fs";
+import path21 from "node:path";
 
 // ../core/dist/cards/ghost.js
 var PROMPTS_ONLY = "prompts-only";
@@ -30400,18 +33924,296 @@ var GHOST_SYSTEM = [
   "- Cite evidence with the seq numbers from the [seq N] headers. Never invent one.",
   "- files are paths the prompts name."
 ].join("\n");
+var ASKS = [
+  /\?\s*$/,
+  // The negative lookahead earns its keep: "do not use redis" opens with `do`
+  // and is the opposite of a question.
+  /^(?!(do not|don'?t|does not|doesn'?t)\b)(should|shall|could|can|would|do|does|did|is|are|was|were|will|which|what|why|how|who|when|any)\b/i,
+  /\b(should (we|i|it|they)|do you think|what do you think|wdyt|any (preference|thoughts|ideas)|or should|thoughts\?)\b/i,
+  /\b(wondering|not sure) (if|whether|which|what)\b/i
+];
+var DECIDES = [
+  // "let's go with X" — but not "let's see", which is the opposite of a decision.
+  /\blet'?s\s+(?!(see|think|check|look|find|figure|try to (see|understand))\b)[a-z]/i,
+  /\bwe'?(ll|re going (to|with)|re gonna)\b/i,
+  /\b(we|i)\s+(will|decided|have decided|went with|are going with|settled on)\b/i,
+  /\b(going with|go with|went with|settled on|sticking with|stick with)\b/i,
+  /\b(switch(ing|ed)? to|mov(e|ing|ed) to|migrat(e|ing|ed) to|revert(ing)? to|fall(ing)? back to)\b/i,
+  // The "X not Y" form: the alternatives are named and one of them is chosen.
+  /\b(use|using|drop|remove|delete|disable|enable|replace|keep|add|write|run)\b[^.!?]*\b(instead of|rather than|not\b)/i,
+  /\b(instead of|rather than)\b[^.!?]*\b(use|do|go|keep|write|run)\b/i,
+  /\b(don'?t|do not|stop|no more|no longer|never)\s+(use|using|bother|do|add|write|run|touch|change)\b/i,
+  /\b(drop|ditch|scrap|kill|remove|delete|revert|undo) (the|that|it|this)\b/i,
+  /\bfrom now on\b/i,
+  /\b(final answer|final decision|decision is|decided on|the plan is)\b/i,
+  /\b(go ahead (and|with)|yes,? (let'?s|do|use|go)|approved|confirmed)\b/i
+];
+function sentences(text) {
+  return text.replace(/^\s*(user|assistant)\s*:\s*/i, "").split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
+}
+function statesDecision(text) {
+  for (const sentence of sentences(text)) {
+    if (ASKS.some((r) => r.test(sentence)))
+      continue;
+    if (DECIDES.some((r) => r.test(sentence)))
+      return true;
+  }
+  return false;
+}
+var ghostClaimGate = ({ kind, supporting }) => {
+  if (kind !== "decision")
+    return null;
+  for (const unit of supporting) {
+    if (statesDecision(unit.text))
+      return null;
+  }
+  return "asked-not-decided";
+};
+function decisionEvidence(claim2, units) {
+  const bySeq = new Map(units.map((u) => [u.seq, u]));
+  return claim2.evidence_seq.map((s) => bySeq.get(s)).filter((u) => Boolean(u) && statesDecision(u.text));
+}
 
 // ../core/dist/cards/sentinel.js
+var sentinel_exports = {};
+__export(sentinel_exports, {
+  ERROR_MARKER: () => ERROR_MARKER,
+  formatErrorSentinel: () => formatErrorSentinel,
+  hasRealCard: () => hasRealCard,
+  isErroredSentinel: () => isErroredSentinel,
+  shouldQueueForCard: () => shouldQueueForCard
+});
+import fs24 from "node:fs";
 var ERROR_MARKER = "__ERRORED__";
 var ERROR_MARKER_PREFIX = `${ERROR_MARKER}
 `;
+var DEFAULT_RETRY_MS = 36e5;
+function formatErrorSentinel(error51) {
+  const message2 = error51 instanceof Error ? error51.message : String(error51);
+  return `${ERROR_MARKER}
+${(/* @__PURE__ */ new Date()).toISOString()}
+${message2}
+`;
+}
+function isErroredSentinel(content) {
+  return content.startsWith(ERROR_MARKER_PREFIX);
+}
+function getErrorRetryMs() {
+  const raw = process.env.POTSHERD_CARD_ERROR_RETRY_HOURS;
+  if (!raw)
+    return DEFAULT_RETRY_MS;
+  const hours = Number.parseFloat(raw);
+  return Number.isFinite(hours) && hours > 0 ? hours * 36e5 : DEFAULT_RETRY_MS;
+}
+function hasRealCard(cardPath2) {
+  let content;
+  try {
+    content = fs24.readFileSync(cardPath2, "utf-8");
+  } catch {
+    return false;
+  }
+  if (content.length === 0)
+    return false;
+  return !isErroredSentinel(content);
+}
+function shouldQueueForCard(cardPath2) {
+  let content;
+  try {
+    content = fs24.readFileSync(cardPath2, "utf-8");
+  } catch (error51) {
+    return error51.code === "ENOENT";
+  }
+  if (!isErroredSentinel(content))
+    return false;
+  try {
+    return Date.now() - fs24.statSync(cardPath2).mtimeMs >= getErrorRetryMs();
+  } catch {
+    return false;
+  }
+}
 
 // ../core/dist/cards/write.js
+function cardEmbeddingText(card) {
+  return [card.title, card.summary, card.topics.join(", ")].filter((s) => s.trim()).join("\n");
+}
+function cardPath(root, harness, slug, id) {
+  return path21.join(cardsDir(root), harness, safeSlug(slug), `${id}.md`);
+}
+function safeSlug(slug) {
+  const segments = (slug ?? "").split(/[/\\]+/).map((part) => part.trim()).filter((part) => part.length > 0 && part !== "." && part !== "..");
+  const s = segments.join("-");
+  return s.length > 0 ? s.slice(0, 120) : "unknown";
+}
+function yamlString(s) {
+  return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, " ")}"`;
+}
+function yamlList(items, indent = "  ") {
+  if (items.length === 0)
+    return " []";
+  return `
+${items.map((i) => `${indent}- ${yamlString(i)}`).join("\n")}`;
+}
+function yamlClaims(claims, indent = "  ") {
+  if (claims.length === 0)
+    return " []";
+  return `
+${claims.map((c) => {
+    const lines = [`${indent}- what: ${yamlString(c.what)}`];
+    if (c.why?.trim())
+      lines.push(`${indent}  why: ${yamlString(c.why.trim())}`);
+    lines.push(`${indent}  evidence_seq: [${c.evidence_seq.join(", ")}]`);
+    return lines.join("\n");
+  }).join("\n")}`;
+}
+function cardMarkdown(record2) {
+  const c = record2.card;
+  const front = [
+    "---",
+    `id: ${yamlString(record2.sessionId)}`,
+    `title: ${yamlString(c.title)}`,
+    `harness: ${yamlString(record2.harness)}`,
+    `project: ${yamlString(record2.project ?? "")}`,
+    `outcome: ${yamlString(c.outcome)}`,
+    `source: ${yamlString(record2.source)}`,
+    `tags:${yamlList(c.tags)}`,
+    `topics:${yamlList(c.topics)}`,
+    `files:${yamlList(c.files)}`,
+    `decisions:${yamlClaims(c.decisions)}`,
+    `open_threads:${yamlClaims(c.open_threads)}`,
+    `verified:`,
+    `  kept: ${record2.verified.kept}`,
+    `  dropped: ${record2.verified.dropped}`,
+    ...record2.coverage !== void 0 ? [`coverage: ${record2.coverage.toFixed(2)}`] : [],
+    ...record2.degraded ? ["degraded: true"] : [],
+    `model: ${yamlString(record2.model)}`,
+    `cost: ${record2.costUsd.toFixed(4)}`,
+    `created_at: ${yamlString(record2.createdAt)}`,
+    "---"
+  ].join("\n");
+  const body = ["", `# ${c.title || record2.sessionId.slice(0, 8)}`, ""];
+  if (record2.source === PROMPTS_ONLY) {
+    body.push("> **prompts only.** Claude Code deleted this transcript; the card was written from the", "> prompts `history.jsonl` kept. Nothing here describes what the assistant said or did,", "> and the outcome is unknowable.", "");
+  }
+  if (c.summary)
+    body.push(c.summary, "");
+  if (c.decisions.length > 0) {
+    body.push("## decisions", "");
+    for (const d of c.decisions) {
+      body.push(`- **${d.what}**${d.why ? ` \u2014 ${d.why}` : ""}  \`seq ${d.evidence_seq.join(", ")}\``);
+    }
+    body.push("");
+  }
+  if (c.open_threads.length > 0) {
+    body.push("## open threads", "");
+    for (const o of c.open_threads) {
+      body.push(`- ${o.what}  \`seq ${o.evidence_seq.join(", ")}\``);
+    }
+    body.push("");
+  }
+  if (c.files.length > 0) {
+    body.push("## files", "", ...c.files.map((f) => `- \`${f}\``), "");
+  }
+  body.push("---", "", `${record2.verified.kept} claim${record2.verified.kept === 1 ? "" : "s"} kept, ${record2.verified.dropped} dropped for want of evidence in the ${record2.source === PROMPTS_ONLY ? "prompts" : "transcript"}.` + (record2.degraded ? "  The model never returned valid JSON; this card is title and summary only." : ""), "", `\`potsherd show ${record2.sessionId.slice(0, 8)}\``, "");
+  return `${front}
+${body.join("\n")}`;
+}
+function writeCard(db, root, record2, embedding) {
+  const c = record2.card;
+  const topics = JSON.stringify(c.topics);
+  const decisions = JSON.stringify(c.decisions);
+  const openThreads = JSON.stringify(c.open_threads);
+  const tags = JSON.stringify(c.tags);
+  const files = JSON.stringify(c.files);
+  const md = cardMarkdown(record2);
+  const verified = JSON.stringify({
+    kept: record2.verified.kept,
+    dropped: record2.verified.dropped,
+    ...record2.coverage !== void 0 ? { coverage: Number(record2.coverage.toFixed(3)) } : {},
+    ...record2.degraded ? { degraded: true } : {}
+  });
+  const write = db.transaction(() => {
+    const old = db.prepare(`SELECT rowid, title, summary, topics, decisions, open_threads
+           FROM cards WHERE session_id = ?`).get(record2.sessionId);
+    if (old) {
+      db.prepare(`INSERT INTO cards_fts (cards_fts, rowid, title, summary, topics, decisions, open_threads)
+         VALUES ('delete', ?, ?, ?, ?, ?, ?)`).run(old.rowid, old.title, old.summary, old.topics, old.decisions, old.open_threads);
+    }
+    db.prepare(`INSERT INTO cards (session_id, title, summary, topics, decisions, files, outcome,
+                          open_threads, suggested_tags, model, verified, cost_usd, created_at,
+                          card_md, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id) DO UPDATE SET
+         title = excluded.title, summary = excluded.summary, topics = excluded.topics,
+         decisions = excluded.decisions, files = excluded.files, outcome = excluded.outcome,
+         open_threads = excluded.open_threads, suggested_tags = excluded.suggested_tags,
+         model = excluded.model, verified = excluded.verified, cost_usd = excluded.cost_usd,
+         created_at = excluded.created_at, card_md = excluded.card_md, source = excluded.source`).run(record2.sessionId, c.title, c.summary, topics, decisions, files, c.outcome, openThreads, tags, record2.model, verified, record2.costUsd, record2.createdAt, md, record2.source);
+    const row2 = db.prepare("SELECT rowid FROM cards WHERE session_id = ?").get(record2.sessionId);
+    db.prepare(`INSERT INTO cards_fts (rowid, title, summary, topics, decisions, open_threads)
+       VALUES (?, ?, ?, ?, ?, ?)`).run(row2.rowid, c.title, c.summary, topics, decisions, openThreads);
+    if (embedding && embedding.length === EMBEDDING_DIMENSIONS && vecAvailable(db) && vecCardsExist(db)) {
+      try {
+        db.prepare("DELETE FROM vec_cards WHERE session_id = ?").run(record2.sessionId);
+        db.prepare("INSERT INTO vec_cards (session_id, embedding) VALUES (?, ?)").run(record2.sessionId, embeddingToBlob(embedding));
+      } catch {
+      }
+    }
+  });
+  write();
+  const file2 = cardPath(root, record2.harness, record2.projectSlug, record2.sessionId);
+  fs25.mkdirSync(path21.dirname(file2), { recursive: true });
+  fs25.writeFileSync(file2, md, { mode: 384 });
+  return file2;
+}
+function vecCardsExist(db) {
+  try {
+    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'vec_cards'`).get();
+    return row2.n > 0;
+  } catch {
+    return false;
+  }
+}
+function exportCards(root, dest) {
+  const from = cardsDir(root);
+  const result = { files: 0, bytes: 0, dest, skipped: 0 };
+  if (!fs25.existsSync(from))
+    return result;
+  const walk2 = (dir, rel) => {
+    for (const entry2 of fs25.readdirSync(dir, { withFileTypes: true })) {
+      const source = path21.join(dir, entry2.name);
+      const relative = path21.join(rel, entry2.name);
+      if (entry2.isDirectory()) {
+        walk2(source, relative);
+        continue;
+      }
+      if (!entry2.isFile() || !entry2.name.endsWith(".md"))
+        continue;
+      let content;
+      try {
+        content = fs25.readFileSync(source, "utf-8");
+      } catch {
+        result.skipped += 1;
+        continue;
+      }
+      if (content.length === 0 || isErroredSentinel(content)) {
+        result.skipped += 1;
+        continue;
+      }
+      const target = path21.join(dest, relative);
+      fs25.mkdirSync(path21.dirname(target), { recursive: true });
+      fs25.writeFileSync(target, content, { mode: 384 });
+      result.files += 1;
+      result.bytes += Buffer.byteLength(content);
+    }
+  };
+  walk2(from, "");
+  return result;
+}
 function readCard(db, sessionId) {
-  const row = db.prepare(`SELECT title, summary, topics, decisions, files, outcome, open_threads,
+  const row2 = db.prepare(`SELECT title, summary, topics, decisions, files, outcome, open_threads,
               suggested_tags, verified, source, model, created_at, cost_usd
          FROM cards WHERE session_id = ?`).get(sessionId);
-  if (!row)
+  if (!row2)
     return null;
   const parse10 = (json2, fallback) => {
     if (!json2)
@@ -30422,23 +34224,46 @@ function readCard(db, sessionId) {
       return fallback;
     }
   };
-  const verified = parse10(row.verified, null);
+  const verified = parse10(row2.verified, null);
   return {
     card: {
-      title: row.title ?? "",
-      summary: row.summary ?? "",
-      topics: parse10(row.topics, []),
-      decisions: parse10(row.decisions, []),
-      files: parse10(row.files, []),
-      outcome: row.outcome ?? "unknown",
-      open_threads: parse10(row.open_threads, []),
-      tags: parse10(row.suggested_tags, [])
+      title: row2.title ?? "",
+      summary: row2.summary ?? "",
+      topics: parse10(row2.topics, []),
+      decisions: parse10(row2.decisions, []),
+      files: parse10(row2.files, []),
+      outcome: row2.outcome ?? "unknown",
+      open_threads: parse10(row2.open_threads, []),
+      tags: parse10(row2.suggested_tags, [])
     },
     verified: verified && typeof verified.kept === "number" && typeof verified.dropped === "number" ? verified : null,
-    source: row.source,
-    model: row.model,
-    createdAt: row.created_at,
-    costUsd: row.cost_usd
+    source: row2.source,
+    model: row2.model,
+    createdAt: row2.created_at,
+    costUsd: row2.cost_usd
+  };
+}
+function readPriorCard(db, sessionId) {
+  const row2 = db.prepare(`SELECT title, summary, topics, decisions, files, outcome, open_threads, suggested_tags
+         FROM cards WHERE session_id = ?`).get(sessionId);
+  if (!row2)
+    return null;
+  const parse10 = (json2, fallback) => {
+    try {
+      return JSON.parse(json2);
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    title: row2.title ?? "",
+    summary: row2.summary ?? "",
+    topics: parse10(row2.topics, []),
+    decisions: parse10(row2.decisions, []),
+    files: parse10(row2.files, []),
+    outcome: row2.outcome ?? "unknown",
+    open_threads: parse10(row2.open_threads, []),
+    tags: parse10(row2.suggested_tags, [])
   };
 }
 
@@ -30473,8 +34298,8 @@ function withTags(db, rows) {
   if (rows.length === 0)
     return rows;
   const tags = tagsForSessions(db, rows.map((r) => r.id));
-  for (const row of rows)
-    row.tags = tags.get(row.id) ?? [];
+  for (const row2 of rows)
+    row2.tags = tags.get(row2.id) ?? [];
   return rows;
 }
 function ghostsInScope(filters) {
@@ -30682,6 +34507,207 @@ function parseFiles(json2) {
   }
 }
 
+// ../core/dist/stats.js
+import fs26 from "node:fs";
+function stats(db, options = {}) {
+  const root = potsherdDir(options.root);
+  const entries = options.all ? [] : [...options.ignore ?? readIgnoreList(root)];
+  const ignoredProjects = ignoredProjectsInIndex(db, entries);
+  const ignoredMarks = ignoredProjects.map(() => "?").join(", ");
+  const notIgnored = (column) => ignoredProjects.length === 0 ? "" : `WHERE (${column} IS NULL OR ${column} NOT IN (${ignoredMarks}))`;
+  const ignoredParams = ignoredProjects;
+  const ignored = {
+    entries: options.all ? [...options.ignore ?? readIgnoreList(root)] : entries,
+    projects: ignoredProjects,
+    hidden: countIgnoredSessions(db, ignoredProjects)
+  };
+  const andNotIgnored = (column) => ignoredProjects.length === 0 ? "" : `AND (${column} IS NULL OR ${column} NOT IN (${ignoredMarks}))`;
+  const sessionRows = db.prepare(`SELECT s.harness AS harness,
+              SUM(s.is_sidechain = 0) AS sessions,
+              SUM(s.is_sidechain = 1) AS sidechains,
+              SUM(s.user_prompts)     AS prompts,
+              SUM(s.bytes)            AS bytes,
+              -- Scoped to the sessions the "sessions" value counts.
+              --
+              -- SUM(s.title IS NOT NULL) summed over sidechains too. That was
+              -- invisible while no subagent transcript ever carried a title,
+              -- and 8.2 gave every one of them a title derived from its first
+              -- prompt: the reference corpus's note went from
+              -- "31 sessions - 197 subagents - 21 titled" to "225 titled",
+              -- a count larger than the number it qualifies.
+              SUM(s.is_sidechain = 0 AND s.title IS NOT NULL) AS titled,
+              SUM(s.status = 'live')   AS live,
+              SUM(s.status = 'archived') AS archived,
+              MIN(s.started_at)        AS first_ts,
+              MAX(COALESCE(s.ended_at, s.started_at)) AS last_ts,
+              (SELECT COUNT(*) FROM exchanges e JOIN sessions s2 ON s2.id = e.session_id
+                 WHERE s2.harness = s.harness ${andNotIgnored("s2.project")}) AS exchanges,
+              (SELECT COUNT(*) FROM tool_calls tc JOIN exchanges e2 ON e2.id = tc.exchange_id
+                 JOIN sessions s3 ON s3.id = e2.session_id
+                WHERE s3.harness = s.harness ${andNotIgnored("s3.project")}) AS tool_calls
+         FROM sessions s ${notIgnored("s.project")} GROUP BY s.harness`).all(...ignoredParams, ...ignoredParams, ...ignoredParams);
+  const ghostRows = db.prepare(`SELECT g.harness AS harness, COUNT(*) AS ghosts, SUM(g.prompt_count) AS prompts,
+              MIN(g.first_ts) AS first_ts, MAX(COALESCE(g.last_ts, g.first_ts)) AS last_ts,
+              (SELECT COUNT(*) FROM ghost_prompts p JOIN ghosts g2 ON g2.session_id = p.session_id
+                 WHERE g2.harness = g.harness ${andNotIgnored("g2.project")}) AS prompt_rows
+         FROM ghosts g ${notIgnored("g.project")} GROUP BY g.harness`).all(...ignoredParams, ...ignoredParams);
+  const byHarness = /* @__PURE__ */ new Map();
+  const blank = (harness) => ({
+    harness,
+    sessions: 0,
+    sidechains: 0,
+    ghosts: 0,
+    exchanges: 0,
+    toolCalls: 0,
+    prompts: 0,
+    ghostPrompts: 0,
+    bytes: 0,
+    titled: 0,
+    live: 0,
+    archived: 0,
+    firstTs: null,
+    lastTs: null
+  });
+  for (const r of sessionRows) {
+    const h = byHarness.get(r.harness) ?? blank(r.harness);
+    h.sessions = r.sessions ?? 0;
+    h.sidechains = r.sidechains ?? 0;
+    h.exchanges = r.exchanges ?? 0;
+    h.toolCalls = r.tool_calls ?? 0;
+    h.prompts = r.prompts ?? 0;
+    h.bytes = r.bytes ?? 0;
+    h.titled = r.titled ?? 0;
+    h.live = r.live ?? 0;
+    h.archived = r.archived ?? 0;
+    h.firstTs = min(h.firstTs, r.first_ts);
+    h.lastTs = max(h.lastTs, r.last_ts);
+    byHarness.set(r.harness, h);
+  }
+  for (const r of ghostRows) {
+    const h = byHarness.get(r.harness) ?? blank(r.harness);
+    h.ghosts = r.ghosts ?? 0;
+    h.ghostPrompts = r.prompt_rows ?? 0;
+    h.prompts += r.prompts ?? 0;
+    h.firstTs = min(h.firstTs, r.first_ts);
+    h.lastTs = max(h.lastTs, r.last_ts);
+    byHarness.set(r.harness, h);
+  }
+  const order = new Map(HARNESSES.map((h, i) => [h, i]));
+  const harnesses = [...byHarness.values()].sort((a, b) => (order.get(a.harness) ?? 99) - (order.get(b.harness) ?? 99));
+  const totals = harnesses.reduce((acc, h) => ({
+    sessions: acc.sessions + h.sessions,
+    sidechains: acc.sidechains + h.sidechains,
+    ghosts: acc.ghosts + h.ghosts,
+    exchanges: acc.exchanges + h.exchanges,
+    toolCalls: acc.toolCalls + h.toolCalls,
+    prompts: acc.prompts + h.prompts,
+    ghostPrompts: acc.ghostPrompts + h.ghostPrompts,
+    bytes: acc.bytes + h.bytes,
+    titled: acc.titled + h.titled,
+    live: acc.live + h.live,
+    archived: acc.archived + h.archived,
+    firstTs: min(acc.firstTs, h.firstTs),
+    lastTs: max(acc.lastTs, h.lastTs)
+  }), {
+    sessions: 0,
+    sidechains: 0,
+    ghosts: 0,
+    exchanges: 0,
+    toolCalls: 0,
+    prompts: 0,
+    ghostPrompts: 0,
+    bytes: 0,
+    titled: 0,
+    live: 0,
+    archived: 0,
+    firstTs: null,
+    lastTs: null
+  });
+  const redactedExchanges = countOf(db, "SELECT COUNT(*) AS n FROM exchanges WHERE redacted = 1");
+  const redactedPrompts = countOf(db, "SELECT COUNT(*) AS n FROM ghost_prompts WHERE redacted = 1");
+  return {
+    harnesses,
+    totals,
+    redaction: safeRedaction(db),
+    redactedExchanges,
+    redactedPrompts,
+    freshness: freshness(db, root, options.freshness !== false),
+    ignored,
+    ranAt: (/* @__PURE__ */ new Date()).toISOString(),
+    root
+  };
+}
+function freshness(db, root, stat) {
+  const rows = stat ? db.prepare(`SELECT source_path, source_mtime, status, archived_path FROM sessions
+            WHERE source_path IS NOT NULL`).all() : [];
+  let stale = 0;
+  let missing = 0;
+  let archived = 0;
+  for (const r of rows) {
+    if (r.status === "archived" || r.archived_path)
+      archived++;
+    try {
+      const st = fs26.statSync(r.source_path);
+      if (r.source_mtime !== null && Math.floor(st.mtimeMs) !== r.source_mtime)
+        stale++;
+    } catch {
+      missing++;
+    }
+  }
+  const vecOk = vecTablesExist(db);
+  const status = vecOk ? vecStatus(db) : { available: false, reason: "sqlite-vec did not load" };
+  const vectors = vecOk ? countOf(db, "SELECT COUNT(*) AS n FROM vec_exchanges") : 0;
+  const pending = countOf(db, "SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version IS NULL");
+  const file2 = dbPath(root);
+  let dbBytes = 0;
+  try {
+    dbBytes = fs26.statSync(file2).size;
+  } catch {
+    dbBytes = 0;
+  }
+  return {
+    lastIndexedAt: db.prepare("SELECT MAX(indexed_at) AS v FROM sessions").get()?.v ?? null,
+    indexed: countOf(db, "SELECT COUNT(*) AS n FROM sessions"),
+    stale,
+    missing,
+    archived,
+    vectors,
+    vectorsPending: pending,
+    vecAvailable: Boolean(status.available),
+    ...status.available ? {} : { vecReason: status.reason ?? "unavailable" },
+    dbBytes,
+    dbPath: file2
+  };
+}
+function countOf(db, sql) {
+  try {
+    return db.prepare(sql).get().n;
+  } catch {
+    return 0;
+  }
+}
+function safeRedaction(db) {
+  try {
+    return storedRedactionCounts(db);
+  } catch {
+    return emptyCounts();
+  }
+}
+function min(a, b) {
+  if (!a)
+    return b;
+  if (!b)
+    return a;
+  return a < b ? a : b;
+}
+function max(a, b) {
+  if (!a)
+    return b;
+  if (!b)
+    return a;
+  return a > b ? a : b;
+}
+
 // ../core/dist/search/explain.js
 function explain(result, k = result.k ?? RRF_K) {
   const relaxed = new Set(result.relaxedLists ?? []);
@@ -30702,7 +34728,7 @@ function explain(result, k = result.k ?? RRF_K) {
 function explainSession(s, place, k, relaxed, result) {
   const hits = [...s.hits].sort((a, b) => b.score - a.score).map((h) => explainHit(h, k, relaxed, result));
   const best = hits.length > 0 ? hits[0].score : 0;
-  const rest = hits.slice(1).reduce((n, h) => n + h.score, 0);
+  const rest = hits.slice(1).reduce((n2, h) => n2 + h.score, 0);
   const cap2 = best * CORROBORATION;
   return {
     id: s.id,
@@ -30729,7 +34755,7 @@ function explainHit(hit, k, relaxed, result) {
       share: hit.score > 0 ? contribution / hit.score : 0
     };
   }).sort((a, b) => b.contribution - a.contribution);
-  const accounted = lists.reduce((n, l) => n + l.contribution, 0);
+  const accounted = lists.reduce((n2, l) => n2 + l.contribution, 0);
   return {
     kind: hit.kind,
     label: labelOf(hit),
@@ -30768,7 +34794,7 @@ function solveWeights(hits, k = RRF_K) {
   const known = () => {
     const out2 = /* @__PURE__ */ new Map();
     for (const [list, values] of samples)
-      out2.set(list, median(values));
+      out2.set(list, median2(values));
     return out2;
   };
   for (let pass = 0; pass < 3; pass++) {
@@ -30777,7 +34803,7 @@ function solveWeights(hits, k = RRF_K) {
       const unknown2 = hit.from.filter((f) => !w.has(f.list));
       if (unknown2.length !== 1)
         continue;
-      const accounted = hit.from.filter((f) => w.has(f.list)).reduce((n, f) => n + w.get(f.list) * rrfScore(f.rank, k), 0);
+      const accounted = hit.from.filter((f) => w.has(f.list)).reduce((n2, f) => n2 + w.get(f.list) * rrfScore(f.rank, k), 0);
       const target = unknown2[0];
       add(target.list, (hit.score - accounted) * (k + target.rank));
     }
@@ -30794,7 +34820,7 @@ function solveWeights(hits, k = RRF_K) {
   }
   return out;
 }
-function median(values) {
+function median2(values) {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
@@ -30818,7 +34844,810 @@ function marginOf(sessions) {
   };
 }
 
+// ../core/dist/render/find.js
+function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), opts = {}) {
+  if (opts.explain && result.sessions.length > 0)
+    return renderExplain(result, t);
+  const lines = [];
+  lines.push(t.dim(headline(result, t)));
+  lines.push("");
+  if (result.sessions.length === 0) {
+    lines.push(INDENT + clip(result.belowFloor > 0 ? `nothing in the index answers ${JSON.stringify(result.query)}.` : `nothing in the index matches ${JSON.stringify(result.query)}.`, t.width - 2, t));
+    lines.push("");
+    lines.push(...withheldNote(result, t));
+    if (!result.vectors.available && result.vectors.reason) {
+      lines.push(INDENT + t.dim(clip(`text search only ${t.dash} ${result.vectors.reason}`, t.width - 2, t)));
+    }
+    if (result.ghostsOnly && result.indexedGhosts === 0) {
+      lines.push(INDENT + t.dim("no ghosts indexed yet") + "  " + t.dim(`${t.sep} run  potsherd rescue`));
+      lines.push(...ignoreNote(result, t));
+      return lines.join("\n");
+    }
+    lines.push(...ignoreNote(result, t));
+    lines.push(nextVerbOnEmpty(result, t));
+    return lines.join("\n");
+  }
+  result.sessions.forEach((s, i) => {
+    if (i > 0)
+      lines.push("");
+    lines.push(...block(s, result, t, now));
+  });
+  lines.push("");
+  const notes = footer(result, t);
+  if (notes)
+    lines.push(INDENT + t.dim(notes));
+  if (!result.vectors.used && result.vectors.reason) {
+    for (const line of wrap(`text search only ${t.dash} ${result.vectors.reason}`, t.width - INDENT.length)) {
+      lines.push(INDENT + t.dim(line));
+    }
+  }
+  lines.push(...ignoreNote(result, t));
+  lines.push(nextVerb(t));
+  return lines.join("\n");
+}
+function withheldNote(result, t) {
+  const n2 = result.belowFloor;
+  if (n2 <= 0)
+    return [];
+  const what = `${num(n2)} ${plural(n2, "session")} matched some of those words and none of them enough`;
+  const flag = "--min-confidence none";
+  const wide = `${what}  ${t.sep}  ${flag}`;
+  const out = [];
+  if (Theme.len(INDENT + wide) <= t.width) {
+    out.push(INDENT + t.dim(wide));
+  } else {
+    for (const line of wrap(what, t.width - INDENT.length))
+      out.push(INDENT + t.dim(line));
+    out.push(INDENT + t.dim(`${flag}  shows them anyway`));
+  }
+  out.push("");
+  return out;
+}
+function nextVerbOnEmpty(result, t) {
+  if (result.belowFloor > 0) {
+    const long2 = "with two or three distinctive words, or  potsherd ls";
+    const wide2 = INDENT + t.dim("run") + "  potsherd find  " + t.dim(long2);
+    return Theme.len(wide2) <= t.width ? wide2 : INDENT + t.dim("run") + "  potsherd find  " + t.dim("with fewer words");
+  }
+  const long = "to see what is indexed, or  potsherd index  to add more";
+  const wide = INDENT + t.dim("run") + "  potsherd ls  " + t.dim(long);
+  return Theme.len(wide) <= t.width ? wide : INDENT + t.dim("run") + "  potsherd ls  " + t.dim("or  potsherd index");
+}
+function ignoreNote(result, t) {
+  const n2 = result.ignored.hidden;
+  if (n2 <= 0)
+    return [];
+  const p = result.ignored.projects.length;
+  const what = `not searching ${num(n2)} ${plural(n2, "session")} in ${num(p)} ignored ${plural(p, "project")}`;
+  const wide = `${what}  ${t.sep}  --all`;
+  const text = Theme.len(INDENT + wide) <= t.width ? wide : what;
+  return wrap(text, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
+}
+function nextVerb(t) {
+  const long = "to read one, or  potsherd ask <words>";
+  const wide = INDENT + t.dim("run") + "  potsherd show <id8>  " + t.dim(long);
+  return Theme.len(wide) <= t.width ? wide : INDENT + t.dim("run") + "  potsherd show <id8>  " + t.dim("or  potsherd ask <words>");
+}
+function headline(r, t) {
+  const fixed = [];
+  if (r.sessions.length === 0) {
+    fixed.push("no match");
+  } else {
+    fixed.push(`${num(r.sessions.length)} ${plural(r.sessions.length, "session")}`);
+    fixed.push(r.confidence);
+  }
+  fixed.push(r.vectors.used ? "bm25 + vectors" : "bm25");
+  fixed.push(duration3(r.ms));
+  const sep = ` ${t.sep} `;
+  const rest = fixed.join(sep);
+  const room = Math.max(12, t.width - Theme.len(rest) - sep.length);
+  const verb = elide(`potsherd find ${JSON.stringify(r.query)}`, room, t);
+  return clip([verb, rest].join(sep), t.width, t);
+}
+function block(s, r, t, now) {
+  const lines = [];
+  const width = t.width - INDENT.length;
+  const right = [s.harness, statusWord(s)].join(` ${t.sep} `);
+  const titleRoom = Math.max(12, width - right.length - 2);
+  const title = markerFor(s, t) + elide(s.displayTitle, titleRoom - markerLen(s), t);
+  lines.push(INDENT + title + " ".repeat(Math.max(1, width - Theme.len(title) - right.length)) + tone(right, s, t));
+  const meta3 = [s.projectName];
+  const when2 = s.startedAt ?? s.endedAt;
+  if (when2)
+    meta3.push(shortDate(when2, now));
+  meta3.push(s.kind === "ghost" ? `${num(s.prompts)} prompts recovered` : `${num(s.exchanges)} ${plural(s.exchanges, "exchange")}`);
+  if (s.gitBranch)
+    meta3.push(s.gitBranch);
+  if (s.agentName)
+    meta3.push(s.agentName);
+  const score = `${s.confidence}  ${s.score.toFixed(4)}`;
+  const metaLine = clip(meta3.join(` ${t.sep} `), Math.max(10, width - score.length - 2), t);
+  lines.push(INDENT + t.dim(metaLine) + " ".repeat(Math.max(1, width - metaLine.length - score.length)) + t.dim(score));
+  const quotable = s.hits.filter((h) => h.kind !== "title" && h.snippet.text.trim().length > 0);
+  const ordered = quotableOrder(quotable);
+  const evidence = ordered.filter((h) => h.snippet.match);
+  for (const hit of withMember(evidence.length > 0 ? evidence : ordered, s)) {
+    const mark = memberMark(s, hit, t);
+    const rendered = snippetLine(hit, t, width - 2 - Theme.len(mark));
+    if (rendered)
+      lines.push(INDENT + "  " + mark + rendered);
+  }
+  if (s.hits.length > 0 && !quotable.some((h) => h.snippet.match)) {
+    lines.push(INDENT + "  " + t.dim(clip(unmatchedReason(s, r), width - 2, t)));
+  }
+  lines.push(INDENT + "  " + t.dim(action(s, t, width - 2)));
+  return lines;
+}
+function quotableOrder(hits) {
+  return hits.map((hit, i) => ({ hit, i })).sort((a, b) => {
+    const am = a.hit.snippet.match ? 0 : 1;
+    const bm = b.hit.snippet.match ? 0 : 1;
+    if (am !== bm)
+      return am - bm;
+    const ab = isMostlyBoilerplate(a.hit.snippet.text) ? 1 : 0;
+    const bb = isMostlyBoilerplate(b.hit.snippet.text) ? 1 : 0;
+    if (ab !== bb)
+      return ab - bb;
+    return a.i - b.i;
+  }).map((x) => x.hit);
+}
+function withMember(pool, s) {
+  const top = pool.slice(0, 2);
+  if (top.some((h) => h.sessionId !== s.id))
+    return top;
+  const other = pool.find((h) => h.sessionId !== s.id);
+  if (!other)
+    return top;
+  return top.length < 2 ? [...top, other] : [top[0], other];
+}
+function memberMark(s, hit, t) {
+  if (hit.sessionId === s.id)
+    return "";
+  const who = hit.isSidechain ? `${t.g("\u21B3", ">")} subagent ${idTag(hit.sessionId)}` : `${t.g("\u2191", "^")} parent ${idTag(hit.sessionId)}`;
+  return t.dim(`${who} `);
+}
+function unmatchedReason(s, r) {
+  if (s.hits.some((h) => h.kind === "card")) {
+    return "the session card matched; the transcript does not use those words";
+  }
+  if (s.hits.some((h) => h.kind === "title")) {
+    return "the session title matched; the body does not use those words";
+  }
+  if (r.vectors.used)
+    return "no words in common \u2014 this one matched on meaning";
+  if (r.relaxed)
+    return "matched some of those words, not all of them";
+  return "matched elsewhere in the session than the lines shown";
+}
+function snippetLine(hit, t, width) {
+  const text = hit.snippet.text.replace(/\s+/g, " ").trim();
+  if (!text)
+    return "";
+  const masks = maskSpans(text);
+  const m = widenToMask(hit.snippet.match, masks);
+  if (!m || m.end > text.length)
+    return t.dim(clipToWords(text, width, t.ellip));
+  let start = 0;
+  let end = text.length;
+  let lead = "";
+  let trail = "";
+  if (text.length > width) {
+    const room = width - 2 * t.ellip.length;
+    const half = Math.max(0, Math.floor((room - (m.end - m.start)) / 2));
+    start = Math.max(0, Math.min(m.start - half, text.length - room));
+    end = Math.min(text.length, start + room);
+    ({ start, end } = wordEdges(text, start, end, m, masks));
+    lead = start > 0 ? t.ellip : "";
+    trail = end < text.length ? t.ellip : "";
+  }
+  const head = text.slice(start, Math.max(m.start, start));
+  const hit_ = text.slice(Math.max(m.start, start), Math.max(Math.min(m.end, end), start));
+  const tail2 = text.slice(Math.max(Math.min(m.end, end), start), end);
+  return t.dim(lead + head) + t.accent(hit_) + t.dim(tail2 + trail);
+}
+function widenToMask(m, masks) {
+  if (!m)
+    return m;
+  const span3 = maskAt(masks, m.start) ?? maskAt(masks, m.end);
+  if (!span3)
+    return m;
+  return { start: Math.min(m.start, span3.start), end: Math.max(m.end, span3.end) };
+}
+function wordEdges(text, start, end, m, masks = []) {
+  let s = start;
+  let e = end;
+  if (s > 0 && !/\s/.test(text[s - 1] ?? " ")) {
+    let at = s;
+    while (at < m.start && !/\s/.test(text[at - 1] ?? " "))
+      at++;
+    if (at <= m.start)
+      s = at;
+  }
+  if (e < text.length && !/\s/.test(text[e] ?? " ")) {
+    let at = e;
+    while (at > m.end && !/\s/.test(text[at] ?? " "))
+      at--;
+    if (at >= m.end)
+      e = at;
+  }
+  while (s < e && /\s/.test(text[s] ?? ""))
+    s++;
+  while (e > s && /\s/.test(text[e - 1] ?? ""))
+    e--;
+  s = offMask(masks, s, "forward", m);
+  e = offMask(masks, e, "back", m);
+  return { start: s, end: Math.max(e, s) };
+}
+function action(s, t, width) {
+  if (s.resume)
+    return clip(`run  ${s.resume}`, width, t);
+  const show = `potsherd show ${idTag(s.id)}`;
+  if (s.status === "ghost") {
+    const long = `assistant side not recoverable ${t.sep} ${show}`;
+    return long.length <= width ? long : show;
+  }
+  if (s.status === "archived") {
+    const long = `only potsherd has this transcript ${t.sep} ${show}`;
+    return long.length <= width ? long : show;
+  }
+  return `run  ${show}`;
+}
+function statusWord(s) {
+  if (s.status === "ghost")
+    return "ghost";
+  if (s.isSidechain)
+    return "sidechain";
+  return s.status;
+}
+function tone(right, s, t) {
+  return s.status === "ghost" ? t.accent(right) : t.dim(right);
+}
+function markerFor(s, t) {
+  if (s.pinned)
+    return `${t.star} `;
+  if (s.isSidechain)
+    return `${t.g("\u21B3", ">")} `;
+  return "";
+}
+function markerLen(s) {
+  return s.pinned || s.isSidechain ? 2 : 0;
+}
+function footer(r, t) {
+  const parts = [];
+  const ghosts = r.sessions.filter((s) => s.status === "ghost").length;
+  const sidechains = r.sessions.filter((s) => s.isSidechain || s.hits.some((h) => h.isSidechain && h.sessionId !== s.id)).length;
+  if (ghosts)
+    parts.push(`${num(ghosts)} ghost ${plural(ghosts, "hit")}`);
+  if (sidechains)
+    parts.push(`${num(sidechains)} from subagents`);
+  if (r.relaxed)
+    parts.push("relaxed to any-word matching");
+  if (parts.length === 0)
+    return "";
+  return joinFit(parts, t.width - INDENT.length, ` ${t.sep} `, t);
+}
+function renderExplain(result, t = new Theme()) {
+  const e = explain(result);
+  const width = t.width - INDENT.length;
+  const lines = [];
+  lines.push(t.dim(headline(result, t)));
+  lines.push("");
+  lines.push(INDENT + t.dim(joinFit(explainNotes(e, result), width, ` ${t.sep} `, t)));
+  lines.push("");
+  for (const s of e.sessions) {
+    lines.push(...sessionLedger(s, t, width));
+    lines.push("");
+  }
+  lines.push(...tail(e, t, width));
+  return lines.join("\n");
+}
+function explainNotes(e, r) {
+  const ran = e.lists.filter((l) => l.candidates > 0).length;
+  const notes = [
+    `rrf 1/(k+rank), k=${e.k}`,
+    `${num(ran)}/${num(e.lists.length)} lists matched`
+  ];
+  if (r.relaxed)
+    notes.push("lighter weight = that list relaxed");
+  if (e.weights.some((w) => w.relaxed))
+    notes.push("~ = that list relaxed");
+  return notes;
+}
+function sessionLedger(s, t, width) {
+  const lines = [];
+  const place = `${s.place}`;
+  const score = s.score.toFixed(4);
+  const id = idTag(s.id);
+  const room = Math.max(8, width - place.length - score.length - id.length - 6);
+  const title = elide(s.title, room, t);
+  const left = `${place}  ${t.accent(score)}  ${title}`;
+  const pad3 = Math.max(1, width - Theme.len(left) - id.length);
+  lines.push(INDENT + left + " ".repeat(pad3) + t.dim(id));
+  for (const hit of s.hits)
+    lines.push(...hitLedger(hit, t, width));
+  const formula = `${score} = ${s.best.toFixed(4)} best` + (s.hits.length > 1 ? ` + ${s.corroboration.toFixed(4)} corroboration${s.capped ? " (capped)" : ""}` : "");
+  lines.push(INDENT + "   " + t.dim(clip(formula, width - 3, t)));
+  return lines;
+}
+function hitLedger(hit, t, width) {
+  const lines = [];
+  const score = hit.score.toFixed(4);
+  const label3 = elide(hit.label, Math.max(8, width - 3 - score.length - 2), t);
+  const pad3 = Math.max(1, width - 3 - Theme.len(label3) - score.length);
+  lines.push(INDENT + "   " + label3 + " ".repeat(pad3) + t.dim(score));
+  for (const l of hit.lists)
+    lines.push(INDENT + "     " + detailRow(l, t, width - 5));
+  return lines;
+}
+function detailRow(l, t, width) {
+  const times = t.g("\xD7", "x");
+  const name = l.list.padEnd(LIST_COL);
+  const rank = `r${l.rank}`.padEnd(4);
+  const weight = `${times}${l.weight.toFixed(2)}${l.relaxed ? "~" : ""}`.padEnd(7);
+  const contribution = l.contribution.toFixed(4);
+  const share = `${Math.round(l.share * 100)}%`.padStart(4);
+  const raw = rawColumn(l).padEnd(12);
+  const wide = `${name} ${rank} ${raw} ${weight} ${contribution} ${share}`;
+  const narrow = `${name} ${rank} ${weight} ${contribution} ${share}`;
+  const line = Theme.len(wide) <= width ? wide : narrow;
+  return t.dim(clip(line, width, t));
+}
+var LIST_COL = 17;
+function rawColumn(l) {
+  if (l.list === "vec_exchanges" || l.list === "vec_cards" || l.list === "vec_ghost_prompts")
+    return `cos ${l.raw.toFixed(2)}`;
+  if (l.list === "titles")
+    return "title match";
+  return `bm25 ${l.raw.toFixed(2)}`;
+}
+function tail(e, t, width) {
+  const lines = [];
+  if (e.margin && e.sessions.length >= 2) {
+    const m = e.margin;
+    const gap = `#1 leads #2 by ${m.by.toFixed(4)}`;
+    const because = m.reason === "corroboration" ? `${num(m.firstHits)} hits against ${num(m.secondHits)}, not a better one` : m.list && m.firstRank !== null && m.secondRank !== null ? `${m.list} ranked them ${m.firstRank} and ${m.secondRank}` : m.list ? `${m.list} found #1 and not #2` : "";
+    lines.push(INDENT + t.dim(joinFit([gap, because].filter(Boolean), width, ` ${t.sep} `, t)));
+  }
+  const slowest = [...e.lists].sort((a, b) => b.ms - a.ms)[0];
+  if (slowest) {
+    lines.push(INDENT + t.dim(joinFit([`slowest list ${slowest.list} ${duration3(slowest.ms)}`, "the same numbers are in --json"], width, ` ${t.sep} `, t)));
+  }
+  return lines;
+}
+
+// ../core/dist/render/ls.js
+function renderLs(result, t = new Theme(), now = /* @__PURE__ */ new Date()) {
+  const lines = [];
+  lines.push(t.dim(headline2(result, t, now)));
+  lines.push("");
+  if (result.sessions.length === 0) {
+    lines.push(INDENT + "nothing matches those filters.");
+    lines.push("");
+    lines.push(fitLine(t, `${t.dim("run")}  potsherd ls  ${t.dim("for everything potsherd has indexed.")}`, `${t.dim("run")}  potsherd ls`));
+    return lines.join("\n");
+  }
+  const header = ["when", "harness", "project", "title", "status"].map((h) => t.dim(h));
+  const rows = [header, ...result.sessions.map((s) => row(s, t, now))];
+  lines.push(...table(t, rows, {
+    gap: 2,
+    // The title is the column worth every spare character; `status` is five
+    // — or twelve, on a listing that contains a carded ghost. `table()`
+    // sizes a column to its content, so the extra four characters are taken
+    // from the title only on the listings that have something to say with
+    // them.
+    grow: 3,
+    max: [11, 7, 15, void 0, 12],
+    // Dates are values, and values right-align (plans/05): `7 aug` under
+    // `20 aug` reads as a column of days, not as ragged text.
+    align: ["right"]
+  }));
+  lines.push("");
+  lines.push(INDENT + t.dim(summary(result, t)));
+  for (const line of ignoreNote2(result, t))
+    lines.push(line);
+  lines.push(fitLine(t, `${t.dim("run")}  potsherd show <id8>  ${t.dim("to read one, or  potsherd find <words>")}`, `${t.dim("run")}  potsherd show <id8>  ${t.dim("to read one")}`, `${t.dim("run")}  potsherd show <id8>`));
+  return lines.join("\n");
+}
+function headline2(r, t, now) {
+  const parts = ["potsherd ls"];
+  const fl = r.filters;
+  if (fl.project)
+    parts.push(shortProject(fl.project));
+  if (fl.harness)
+    parts.push(fl.harness);
+  if (fl.since)
+    parts.push(`since ${shortDate(fl.since, now)}`);
+  if (fl.until)
+    parts.push(`until ${shortDate(fl.until, now)}`);
+  if (fl.branch)
+    parts.push(fl.branch);
+  if (fl.tag)
+    parts.push(`#${fl.tag}`);
+  if (fl.pinned)
+    parts.push("pinned");
+  if (fl.linkedTo)
+    parts.push(`linked to ${fl.linkedTo.slice(0, 8)}`);
+  if (fl.untitled)
+    parts.push("untitled");
+  if (fl.status)
+    parts.push(fl.status);
+  parts.push(r.total === r.sessions.length ? `${num(r.total)} ${plural(r.total, "session")}` : `${num(r.sessions.length)} of ${num(r.total)}`);
+  return clip(parts.join(` ${t.sep} `), t.width);
+}
+function shortProject(p) {
+  const parts = p.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
+function marker(s, t) {
+  if (s.pinned)
+    return `${t.star} `;
+  if (s.isSidechain)
+    return `${t.g("\u21B3", ">")} `;
+  return "";
+}
+function tagCell(s) {
+  return s.tags.length > 0 ? "  " + s.tags.map((tag) => `#${tag}`).join(" ") : "";
+}
+function row(s, t, now) {
+  const when2 = s.endedAt ?? s.startedAt;
+  const kids = s.subagents > 0 ? `  ${t.g("\u21B3", ">")}${num(s.subagents)}` : "";
+  return [
+    when2 ? shortDate(when2, now) : "\u2014",
+    s.harness,
+    s.projectName,
+    // `keep`: the title gives ground before the tags do. See `TableCell`.
+    { text: marker(s, t) + s.displayTitle + kids, keep: tagCell(s) },
+    statusCell(s, t)
+  ];
+}
+function statusCell(s, t) {
+  if (s.status === "ghost") {
+    return t.accent(s.cardSource === "prompts-only" ? "prompts-only" : "ghost");
+  }
+  if (s.status === "archived")
+    return "archived";
+  return t.dim("live");
+}
+function ignoreNote2(r, t) {
+  const n2 = r.ignored.hidden;
+  if (n2 <= 0)
+    return [];
+  const p = r.ignored.projects.length;
+  const what = `hiding ${num(n2)} ${plural(n2, "row")} in ${num(p)} ignored ${plural(p, "project")}`;
+  const wide = `${INDENT}${t.dim(what)}  ${t.dim(t.sep)}  ${t.dim("potsherd ls --all")}`;
+  const narrow = `${INDENT}${t.dim(what)}  ${t.dim(t.sep)} ${t.dim("--all")}`;
+  return [Theme.len(wide) <= t.width ? wide : narrow];
+}
+function summary(r, t) {
+  const parts = [];
+  const top = r.total - r.ghosts - r.sidechains;
+  if (top > 0)
+    parts.push(`${num(top)} ${plural(top, "session")}`);
+  if (r.sidechains > 0)
+    parts.push(`${num(r.sidechains)} sidechains`);
+  if (r.rolledUp > 0)
+    parts.push(`${num(r.rolledUp)} subagents inside them`);
+  if (r.ghosts > 0)
+    parts.push(`${num(r.ghosts)} ${plural(r.ghosts, "ghost")}, prompts only`);
+  const carded = r.sessions.filter((s) => s.cardSource === "prompts-only").length;
+  if (carded > 0)
+    parts.push(`${num(carded)} carded from prompts alone`);
+  return joinFit(parts, t.width - INDENT.length, ` ${t.sep} `, t.ellip);
+}
+function renderResumeMenu(result, t = new Theme(), now = /* @__PURE__ */ new Date()) {
+  const lines = [];
+  const resumable = result.sessions.filter((s) => s.resume);
+  const stranded = result.sessions.length - resumable.length;
+  lines.push(comment(t, `potsherd ls --resume-menu ${t.sep} ${num(resumable.length)} of ${num(result.total)} ${plural(result.total, "session")} ${t.sep} ${date5(now)}`, `potsherd ls --resume-menu ${t.sep} ${num(resumable.length)} resumable`));
+  lines.push(comment(t, "titles are potsherd's: it does not write into another tool's directory.", "potsherd never writes into ~/.claude."));
+  if (resumable.length === 0) {
+    lines.push(comment(t, "nothing here can be resumed \u2014 a deleted transcript has nothing to reopen."));
+    lines.push(comment(t, "run  potsherd show <id8>  to read one anyway"));
+    return lines.join("\n");
+  }
+  for (const s of resumable) {
+    const command = s.resume;
+    const title = titleFor(s, t);
+    const budget = t.width - command.length - 4;
+    if (budget >= 12) {
+      lines.push(`${command}  ${t.dim(`# ${elide(title, budget, t)}`)}`);
+    } else {
+      lines.push(comment(t, title));
+      lines.push(command);
+    }
+  }
+  if (stranded > 0) {
+    lines.push(comment(t, `${num(stranded)} more ${plural(stranded, "session has", "sessions have")} no transcript to reopen (ghosts, subagents).`, `${num(stranded)} more cannot be resumed.`));
+  }
+  lines.push(comment(t, "run  potsherd show <id8>  to read one instead of resuming it"));
+  return lines.join("\n");
+}
+function titleFor(s, t) {
+  const kids = s.subagents > 0 ? ` ${t.g("\u21B3", ">")}${num(s.subagents)}` : "";
+  const tags = s.tags.length > 0 ? " " + s.tags.map((tag) => `#${tag}`).join(" ") : "";
+  return (s.pinned ? `${t.star} ` : "") + s.displayTitle + kids + tags;
+}
+function comment(t, ...variants) {
+  for (const v of variants) {
+    if (Theme.len(v) + 2 <= t.width)
+      return t.dim(`# ${v}`);
+  }
+  const last2 = variants[variants.length - 1] ?? "";
+  return t.dim(`# ${clip(last2, Math.max(4, t.width - 2), t)}`);
+}
+
+// ../core/dist/render/show.js
+function renderShow(r, t = new Theme(), now = /* @__PURE__ */ new Date()) {
+  const lines = [];
+  const s = r.session;
+  const width = Math.max(40, t.width);
+  const body = width - 5;
+  lines.push(t.dim(clip(`potsherd show ${t.sep} ${s.displayTitle}`, width)));
+  lines.push("");
+  const meta3 = [s.harness, s.status === "ghost" ? t.accent("ghost") : s.status, s.projectName];
+  const when2 = s.startedAt ?? s.endedAt;
+  if (when2)
+    meta3.push(shortDateTime(when2, now));
+  if (s.gitBranch)
+    meta3.push(s.gitBranch);
+  if (s.isSidechain)
+    meta3.push(`sidechain${s.agentName ? ` ${t.sep} ${s.agentName}` : ""}`);
+  lines.push(INDENT + meta3.join(` ${t.sep} `));
+  lines.push(INDENT + t.dim(clip(s.id, width - 2)));
+  const total = r.total;
+  const range = r.from === 1 && r.to >= total ? `${num(total)} ${plural(total, r.ghostPrompts ? "prompt" : "exchange")}` : `${num(r.from)}\u2013${num(r.to)} of ${num(total)}`;
+  lines.push(INDENT + t.dim(range + (s.pinned ? `  ${t.star} pinned` : "")));
+  if (s.cardSource === "prompts-only") {
+    const note = clip("\u2014 written from these prompts; the assistant side is gone", width - 22);
+    lines.push(INDENT + t.dim("card") + `  ${t.accent("prompts-only")}` + t.dim(`  ${note}`));
+  }
+  if (s.resume) {
+    lines.push(INDENT + t.dim("run") + `  ${s.resume}`);
+  } else if (s.status === "ghost") {
+    for (const l of wrap("the assistant side of this session is not recoverable.", width - 2)) {
+      lines.push(INDENT + t.dim(l));
+    }
+  }
+  if (r.card)
+    lines.push(...cardBlock(r.card, t, width));
+  if (r.ghostPrompts) {
+    r.ghostPrompts.forEach((p, i) => {
+      lines.push("");
+      lines.push(INDENT + label2(t, r.from + i, p.ts, "you", now));
+      lines.push(...prose(p.text, body, t, false));
+    });
+    lines.push("");
+    lines.push(fitLine(t, `${t.dim("run")}  potsherd find <words>  ${t.dim("to search every prompt, deleted or not")}`, `${t.dim("run")}  potsherd find <words>  ${t.dim("deleted prompts included")}`, `${t.dim("run")}  potsherd find <words>`));
+    return lines.join("\n");
+  }
+  r.exchanges.forEach((e, i) => {
+    lines.push("");
+    lines.push(INDENT + label2(t, r.from + i, e.ts, "you", now, e));
+    lines.push(...prose(e.userText, body, t, false));
+    if (e.assistantText.trim()) {
+      lines.push(INDENT + "  " + t.dim(s.harness));
+      lines.push(...prose(e.assistantText, body, t, true));
+    }
+    const notes = [];
+    if (e.toolCalls.length)
+      notes.push(toolNote(e, t));
+    if (e.filesTouched.length) {
+      notes.push(`files  ${joinFit(e.filesTouched.map(base), body - 8, ` ${t.mid} `, t.ellip)}`);
+    }
+    for (const n2 of notes)
+      lines.push(INDENT + "  " + t.dim(clip(n2, body)));
+  });
+  if (r.children.length) {
+    lines.push("");
+    lines.push(INDENT + t.dim(`${num(r.children.length)} subagent ${plural(r.children.length, "transcript")}:  ` + joinFit(r.children.map((c) => `${c.agentName ?? "agent"} ${idTag(c.id)}`), width - 30, ` ${t.mid} `, t.ellip)));
+  }
+  lines.push("");
+  lines.push(fitLine(t, `${t.dim("run")}  potsherd show ${idTag(s.id)} --md  ${t.dim("for markdown")}`, `${t.dim("run")}  potsherd show ${idTag(s.id)} --md`));
+  return lines.join("\n");
+}
+function cardBlock(stored, t, width) {
+  const c = stored.card;
+  const out = [];
+  const body = Math.max(24, width - 8);
+  const section = (name) => {
+    out.push("");
+    out.push(INDENT + t.dim(name));
+  };
+  if (c.summary.trim()) {
+    section("summary");
+    for (const l of wrap(c.summary.trim(), body))
+      out.push(INDENT + "  " + l);
+  }
+  const claimIndent = INDENT + "    ";
+  const avail = Math.max(16, width - claimIndent.length);
+  const claims = (name, list2) => {
+    if (list2.length === 0)
+      return;
+    section(name);
+    for (const claim2 of list2) {
+      const cite = claim2.evidence_seq.length ? `[${claim2.evidence_seq.map(String).join(", ")}]` : "";
+      const wrapped = wrap(claim2.what.trim(), avail);
+      const last2 = wrapped[wrapped.length - 1] ?? "";
+      const inline = cite !== "" && last2.length + 1 + cite.length <= avail;
+      wrapped.forEach((l, i) => {
+        const bullet = i === 0 ? `${t.bullet} ` : "  ";
+        const tail2 = inline && i === wrapped.length - 1 ? ` ${t.dim(cite)}` : "";
+        out.push(INDENT + "  " + bullet + l + tail2);
+      });
+      if (cite !== "" && !inline)
+        out.push(claimIndent + t.dim(cite));
+      const why2 = (claim2.why ?? "").trim();
+      if (why2) {
+        for (const l of wrap(why2, Math.max(16, avail - 2))) {
+          out.push(claimIndent + "  " + t.dim(l));
+        }
+      }
+    }
+  };
+  claims("decisions", c.decisions);
+  claims("open threads", c.open_threads);
+  const list = (name, items) => {
+    if (items.length === 0)
+      return;
+    section(name);
+    const sep = ` ${t.mid} `;
+    let line = "";
+    for (const raw of items) {
+      const item = raw.length > body ? elideMiddle(raw, body, t) : raw;
+      if (line === "") {
+        line = item;
+      } else if (line.length + sep.length + item.length <= body) {
+        line += sep + item;
+      } else {
+        out.push(INDENT + "  " + line + ` ${t.mid}`);
+        line = item;
+      }
+    }
+    if (line !== "")
+      out.push(INDENT + "  " + line);
+  };
+  list("files", c.files);
+  list("tags", [.../* @__PURE__ */ new Set([...c.topics, ...c.tags])]);
+  const v = stored.verified;
+  const bits = [];
+  if (v)
+    bits.push(`verified  ${num(v.kept)} kept ${t.sep} ${num(v.dropped)} dropped`);
+  bits.push(`outcome ${c.outcome}`);
+  if (stored.source)
+    bits.push(stored.source);
+  if (stored.model)
+    bits.push(stored.model);
+  out.push("");
+  for (const l of wrap(bits.join(`  ${t.sep}  `), width - 4))
+    out.push(INDENT + t.dim(l));
+  out.push("");
+  out.push(INDENT + t.dim("-".repeat(Math.max(8, Math.min(width - 4, 40)))));
+  return out;
+}
+function label2(t, n2, ts, who, now, e) {
+  const parts = [String(n2).padStart(3), ts ? shortDateTime(ts, now) : "", who];
+  if (e?.isSidechain)
+    parts.push("sidechain");
+  if (e?.redacted)
+    parts.push("redacted");
+  return t.dim(parts.filter(Boolean).join("  "));
+}
+function prose(text, width, t, dim) {
+  const clean = text.replace(/\r/g, "").trim();
+  if (!clean)
+    return [INDENT + "  " + t.dim("(empty)")];
+  const out = wrap(clean, width).map((l) => INDENT + "  " + (dim ? t.dim(l) : l));
+  return out.length ? out : [INDENT + "  " + t.dim("(empty)")];
+}
+function toolNote(e, t) {
+  const byName = /* @__PURE__ */ new Map();
+  for (const c of e.toolCalls) {
+    const seen = byName.get(c.name) ?? { n: 0, errors: 0 };
+    seen.n++;
+    if (c.isError)
+      seen.errors++;
+    byName.set(c.name, seen);
+  }
+  const parts = [...byName.entries()].map(([name, v]) => `${name}${v.n > 1 ? `(${v.n})` : ""}${v.errors ? "!" : ""}`);
+  return `tools  ${parts.join(` ${t.mid} `)}`;
+}
+function base(p) {
+  const parts = p.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
+function renderShowMarkdown(r) {
+  const s = r.session;
+  const out = [];
+  out.push(`# ${s.displayTitle}`);
+  out.push("");
+  out.push(`- session: \`${s.id}\``);
+  out.push(`- harness: ${s.harness}`);
+  out.push(`- project: ${s.project ?? "\u2014"}`);
+  out.push(`- status: ${s.status}${s.isSidechain ? " (sidechain)" : ""}`);
+  if (s.cardSource)
+    out.push(`- card source: ${s.cardSource}`);
+  if (s.startedAt)
+    out.push(`- started: ${s.startedAt}`);
+  if (s.gitBranch)
+    out.push(`- branch: ${s.gitBranch}`);
+  if (s.resume)
+    out.push(`- resume: \`${s.resume}\``);
+  out.push("");
+  if (r.card) {
+    const c = r.card.card;
+    out.push("## card");
+    out.push("");
+    if (c.summary.trim()) {
+      out.push(c.summary.trim());
+      out.push("");
+    }
+    const claims = (name, list) => {
+      if (list.length === 0)
+        return;
+      out.push(`**${name}**`);
+      out.push("");
+      for (const claim2 of list) {
+        const cite = claim2.evidence_seq.length ? ` [${claim2.evidence_seq.join(", ")}]` : "";
+        const why2 = (claim2.why ?? "").trim();
+        out.push(`- ${claim2.what.trim()}${cite}${why2 ? ` \u2014 _${why2}_` : ""}`);
+      }
+      out.push("");
+    };
+    claims("decisions", c.decisions);
+    claims("open threads", c.open_threads);
+    if (c.files.length) {
+      out.push(`_files: ${c.files.join(", ")}_`);
+      out.push("");
+    }
+    const tags = [.../* @__PURE__ */ new Set([...c.topics, ...c.tags])];
+    if (tags.length) {
+      out.push(`_tags: ${tags.join(", ")}_`);
+      out.push("");
+    }
+    const v = r.card.verified;
+    out.push(`_verified: ${v ? `${v.kept} kept, ${v.dropped} dropped` : "not recorded"} \xB7 outcome ${c.outcome} \xB7 from ${r.card.source}${r.card.model ? ` \xB7 ${r.card.model}` : ""}_`);
+    out.push("");
+  }
+  if (r.ghostPrompts) {
+    out.push("> Rebuilt from `history.jsonl`. The assistant side is not recoverable.");
+    out.push("");
+    r.ghostPrompts.forEach((p, i) => {
+      out.push(`## ${r.from + i}${p.ts ? ` \u2014 ${p.ts}` : ""}`);
+      out.push("");
+      out.push(p.text);
+      out.push("");
+    });
+    return out.join("\n");
+  }
+  r.exchanges.forEach((e, i) => {
+    out.push(`## ${r.from + i}${e.ts ? ` \u2014 ${e.ts}` : ""}`);
+    out.push("");
+    out.push("**you**");
+    out.push("");
+    out.push(e.userText);
+    out.push("");
+    if (e.assistantText.trim()) {
+      out.push(`**${s.harness}**`);
+      out.push("");
+      out.push(e.assistantText);
+      out.push("");
+    }
+    if (e.toolCalls.length) {
+      out.push(`_tools: ${e.toolCalls.map((c) => c.name).join(", ")}_`);
+      out.push("");
+    }
+    if (e.filesTouched.length) {
+      out.push(`_files: ${e.filesTouched.join(", ")}_`);
+      out.push("");
+    }
+  });
+  return out.join("\n");
+}
+
 // ../core/dist/render/show-html.js
+function esc2(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 var CSS = `
 :root{--bg:#fbfaf8;--fg:#22201d;--dim:#6b6660;--rule:#e4e0d9;--accent:#c05621;
 --warn:#b7791f;--code:#f2efe9;--card:#fff}
@@ -30860,6 +35689,261 @@ padding:.08em .6em;font-size:.75rem;margin:0 .3rem .3rem 0}
 footer{color:var(--dim);font-size:.78rem;margin-top:4rem;border-top:1px solid var(--rule);
 padding-top:1rem}
 `.trim();
+function renderShowHtml(r, version2) {
+  const s = r.session;
+  const out = [];
+  const p = (line) => void out.push(line);
+  p("<!doctype html>");
+  p('<html lang="en"><head>');
+  p('<meta charset="utf-8">');
+  p('<meta name="viewport" content="width=device-width,initial-scale=1">');
+  p(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">`);
+  p(`<title>${esc2(s.displayTitle)}</title>`);
+  p(`<style>${CSS}</style>`);
+  p("</head><body><main>");
+  p(`<h1>${esc2(s.displayTitle)}</h1>`);
+  const meta3 = [
+    `<code>${esc2(s.id)}</code>`,
+    esc2(s.harness),
+    esc2(s.project ?? "\u2014"),
+    esc2(s.status) + (s.isSidechain ? " (subagent)" : "")
+  ];
+  if (s.startedAt)
+    meta3.push(esc2(s.startedAt));
+  if (s.gitBranch)
+    meta3.push(esc2(s.gitBranch));
+  p(`<p class="meta">${meta3.join(" &middot; ")}</p>`);
+  if (r.card) {
+    const c = r.card.card;
+    p("<h2>card</h2>");
+    p('<div class="card">');
+    if (c.summary.trim())
+      p(`<p>${esc2(c.summary.trim())}</p>`);
+    const claims = (name, list) => {
+      if (list.length === 0)
+        return;
+      p(`<h3>${esc2(name)}</h3>`);
+      p("<ul>");
+      for (const claim2 of list) {
+        const cite = claim2.evidence_seq.length ? ` <span class="cite">[${esc2(claim2.evidence_seq.join(", "))}]</span>` : "";
+        const why2 = (claim2.why ?? "").trim();
+        p(`<li>${esc2(claim2.what.trim())}${cite}` + (why2 ? ` <span class="why">\u2014 ${esc2(why2)}</span>` : "") + "</li>");
+      }
+      p("</ul>");
+    };
+    claims("decisions", c.decisions);
+    claims("open threads", c.open_threads);
+    const tags = [.../* @__PURE__ */ new Set([...c.topics, ...c.tags])];
+    if (tags.length)
+      p(tags.map((x) => `<span class="tag">${esc2(x)}</span>`).join(""));
+    if (c.files.length) {
+      p(`<p class="tools">files: ${c.files.map((x) => esc2(x)).join(", ")}</p>`);
+    }
+    const v = r.card.verified;
+    p(`<p class="receipt">verified: ${v ? `${v.kept} kept, ${v.dropped} dropped` : "not recorded"} &middot; outcome ${esc2(c.outcome)} &middot; from ${esc2(r.card.source)}${r.card.model ? ` &middot; ${esc2(r.card.model)}` : ""}</p>`);
+    p("</div>");
+  }
+  if (r.ghostPrompts) {
+    p("<h2>prompts</h2>");
+    p('<p class="note">Rebuilt from <code>history.jsonl</code> after Claude Code deleted the transcript. These are the prompts only \u2014 the assistant side is not recoverable.</p>');
+    r.ghostPrompts.forEach((prompt, i) => {
+      p('<section class="ex">');
+      p(`<p class="who"><span class="n">${r.from + i}</span>${prompt.ts ? ` &middot; ${esc2(prompt.ts)}` : ""} &middot; you</p>`);
+      p(`<pre>${esc2(prompt.text)}</pre>`);
+      p("</section>");
+    });
+  } else {
+    p("<h2>transcript</h2>");
+    r.exchanges.forEach((e, i) => {
+      p('<section class="ex">');
+      p(`<p class="who"><span class="n">${r.from + i}</span>${e.ts ? ` &middot; ${esc2(e.ts)}` : ""}${e.redacted ? " &middot; redacted" : ""}${e.isSidechain ? " &middot; subagent" : ""} &middot; you</p>`);
+      p(`<pre>${esc2(e.userText)}</pre>`);
+      if (e.assistantText.trim()) {
+        p(`<p class="who" style="margin-top:1rem">${esc2(s.harness)}</p>`);
+        p(`<pre>${esc2(e.assistantText)}</pre>`);
+      }
+      if (e.toolCalls.length) {
+        p(`<p class="tools">tools: ${e.toolCalls.map((c) => esc2(c.name)).join(", ")}</p>`);
+      }
+      if (e.filesTouched.length) {
+        p(`<p class="tools">files: ${e.filesTouched.map((x) => esc2(x)).join(", ")}</p>`);
+      }
+      p("</section>");
+    });
+  }
+  p(`<footer>exchanges ${r.from}&ndash;${r.to} of ${r.total} &middot; written by potsherd ${esc2(version2)} &middot; no network, no script, no tracking</footer>`);
+  p("</main></body></html>");
+  return out.join("\n") + "\n";
+}
+
+// ../core/dist/render/stats.js
+function renderStats(r, t = new Theme()) {
+  const card = new Card(t);
+  card.heading("stats", tildify(r.root), date5(r.ranAt)).blank();
+  if (r.harnesses.length === 0) {
+    card.text("nothing indexed yet.").blank().fix("potsherd index", "to read every transcript on this machine.");
+    return card.toString();
+  }
+  const header = ["harness", "sessions", "subagents", "ghosts", "exchanges", "bytes", "span"];
+  const rows = [
+    header.map((h) => t.dim(h)),
+    ...r.harnesses.map((h) => harnessRow(h, t))
+  ];
+  for (const line of table(t, rows, {
+    gap: 2,
+    grow: 6,
+    align: ["left", "right", "right", "right", "right", "right", "left"]
+  })) {
+    card.raw(line);
+  }
+  card.blank();
+  const tot = r.totals;
+  card.rows([
+    {
+      label: "sessions",
+      value: num(tot.sessions),
+      note: `${num(tot.sidechains)} subagents ${t.sep} ${num(tot.titled)} titled ${t.sep} ${num(tot.archived)} archived`
+    },
+    {
+      label: "exchanges",
+      value: num(tot.exchanges),
+      note: `${num(tot.toolCalls)} tool ${plural(tot.toolCalls, "call")} ${t.sep} ${num(r.redactedExchanges)} redacted`
+    },
+    {
+      label: "ghosts",
+      value: num(tot.ghosts),
+      note: tot.ghosts > 0 ? `${num(tot.ghostPrompts)} prompts recovered ${t.sep} no assistant side` : "none \u2014 run  potsherd rescue",
+      tone: tot.ghosts > 0 ? "accent" : "dim"
+    },
+    redactionRow(r.redaction, t, card.noteWidth())
+  ]);
+  card.blank();
+  const fr = r.freshness;
+  card.rows([
+    {
+      label: "indexed",
+      value: fr.lastIndexedAt ? shortDate(fr.lastIndexedAt, new Date(r.ranAt)) : "\u2014",
+      note: freshnessNote(r, t),
+      tone: fr.stale > 0 || fr.missing > 0 ? "warn" : "ok"
+    },
+    {
+      label: "vectors",
+      value: fr.vecAvailable ? num(fr.vectors) : "\u2014",
+      // `vecAvailable` says sqlite-vec LOADED, not that anything is embedded.
+      // Before 8.6 the two were nearly the same, because `index` embedded by
+      // default; after it, a fresh install loads the extension and has zero
+      // vectors, and this line said `hybrid search on` while the `find` beside
+      // it in the same docs/screens/ directory said `text search only`. Two
+      // committed screens of one corpus contradicting each other.
+      note: fr.vecAvailable ? fr.vectors > 0 ? `bge-small ${t.sep} ${num(fr.vectorsPending)} pending ${t.sep} hybrid search on` : `bge-small ${t.sep} ${num(fr.vectorsPending)} pending ${t.sep} index --embed to build them` : clip(`${fr.vecReason ?? "unavailable"} ${t.sep} text search only`, card.noteWidth()),
+      tone: fr.vecAvailable ? "ok" : "dim"
+    },
+    {
+      label: "database",
+      value: bytes(fr.dbBytes),
+      // Elide in the middle: the file name is what identifies a path, and the
+      // middle of `/private/tmp/…/potsherd.db` never does.
+      note: elideMiddle(tildify(fr.dbPath), card.noteWidth(), t.ellip),
+      tone: "dim"
+    }
+  ]);
+  if (r.ignored.hidden > 0) {
+    const n2 = r.ignored.hidden;
+    const p = r.ignored.projects.length;
+    const what = `not counting ${num(n2)} ${plural(n2, "session")} in ${num(p)} ignored ${plural(p, "project")}`;
+    const wide = `${what}  ${t.sep}  potsherd stats --all`;
+    card.blank();
+    card.text(t.dim(Theme.len(INDENT + wide) <= t.width ? wide : `${what}  ${t.sep} --all`));
+  }
+  card.blank();
+  card.fix("potsherd ls", "to read the archive by title, newest first.", "to read it by title.");
+  return card.toString();
+}
+function harnessRow(h, t) {
+  return [
+    h.harness,
+    num(h.sessions),
+    h.sidechains ? num(h.sidechains) : t.dim("\u2014"),
+    h.ghosts ? num(h.ghosts) : t.dim("\u2014"),
+    num(h.exchanges),
+    bytes(h.bytes),
+    span(h, t)
+  ];
+}
+function span(h, t) {
+  if (!h.firstTs || !h.lastTs)
+    return t.dim("\u2014");
+  const from = monthYear(h.firstTs);
+  const to = monthYear(h.lastTs);
+  return t.dim(from === to ? from : `${from} ${t.arrow} ${to}`);
+}
+function freshnessNote(r, t) {
+  const fr = r.freshness;
+  const parts = [];
+  parts.push(`${num(fr.indexed)} ${plural(fr.indexed, "transcript")}`);
+  if (fr.stale > 0)
+    parts.push(`${num(fr.stale)} changed since \u2014 run potsherd index`);
+  if (fr.missing > 0)
+    parts.push(`${num(fr.missing)} source ${plural(fr.missing, "file")} gone`);
+  if (fr.stale === 0 && fr.missing === 0)
+    parts.push("up to date");
+  return parts.join(` ${t.sep} `);
+}
+
+// ../core/dist/parser/index.js
+var parser_exports = {};
+__export(parser_exports, {
+  detectHarness: () => detectHarness,
+  exchangeId: () => exchangeId,
+  extractTextFromContent: () => extractTextFromContent,
+  extractTypedText: () => extractTypedText,
+  filesFromToolInput: () => filesFromToolInput,
+  isRecord: () => isRecord,
+  parseClaudeTranscript: () => parseClaudeTranscript,
+  parseCodexTranscript: () => parseCodexTranscript,
+  parseJsonLine: () => parseJsonLine,
+  parseTranscript: () => parseTranscript,
+  readJsonlLines: () => readJsonlLines,
+  safeParseJson: () => safeParseJson,
+  sessionIdFromPath: () => sessionIdFromPath,
+  stringifyToolInput: () => stringifyToolInput,
+  stringifyToolOutput: () => stringifyToolOutput,
+  uniq: () => uniq
+});
+
+// ../core/dist/parser/detect.js
+async function detectHarness(filePath) {
+  for await (const line of readJsonlLines(filePath)) {
+    const parsed = parseJsonLine(line.text);
+    if (!isRecord(parsed))
+      continue;
+    if (isRecord(parsed.payload) && (parsed.type === "session_meta" || parsed.type === "turn_context" || parsed.type === "response_item" || parsed.type === "event_msg" || parsed.type === "compacted")) {
+      return "codex";
+    }
+    if (typeof parsed.type === "string") {
+      if (parsed.type === "session" && typeof parsed.cwd === "string" && typeof parsed.id === "string") {
+        return "pi";
+      }
+      if (typeof parsed.sessionId === "string" || typeof parsed.uuid === "string")
+        return "claude";
+      return "claude";
+    }
+    if (typeof parsed.role === "string")
+      return "cursor";
+    return null;
+  }
+  return null;
+}
+
+// ../core/dist/parser/index.js
+async function parseTranscript(filePath, options = {}) {
+  const harness = await detectHarness(filePath);
+  if (harness === "codex")
+    return parseCodexTranscript(filePath, options);
+  if (harness === "claude")
+    return parseClaudeTranscript(filePath, options);
+  return null;
+}
 
 // ../core/dist/search/index.js
 var search_exports = {};
@@ -30979,7 +36063,7 @@ function parseWhen(value, now = /* @__PURE__ */ new Date()) {
   if (!raw)
     return null;
   const v = raw.toLowerCase().replace(/\s+/g, " ");
-  return absolute(raw, v) ?? span(v, now) ?? named(v, now) ?? monthPhrase(v, now) ?? weekday(v, now) ?? null;
+  return absolute(raw, v) ?? span2(v, now) ?? named(v, now) ?? monthPhrase(v, now) ?? weekday(v, now) ?? null;
 }
 function absolute(raw, v) {
   if (/^\d{4}-\d{2}-\d{2}[T ]/.test(raw)) {
@@ -30987,11 +36071,11 @@ function absolute(raw, v) {
       return null;
     return { start: raw, end: raw, label: raw };
   }
-  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
-  if (day) {
-    const y = Number(day[1]);
-    const mo = Number(day[2]);
-    const d = Number(day[3]);
+  const day2 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (day2) {
+    const y = Number(day2[1]);
+    const mo = Number(day2[2]);
+    const d = Number(day2[3]);
     if (!validYmd(y, mo, d))
       return null;
     return utcRange(Date.UTC(y, mo - 1, d), Date.UTC(y, mo - 1, d + 1), v);
@@ -31019,26 +36103,26 @@ function validYmd(y, mo, d) {
   const probe = new Date(Date.UTC(y, mo - 1, d));
   return probe.getUTCMonth() === mo - 1 && probe.getUTCDate() === d;
 }
-function span(v, now) {
+function span2(v, now) {
   const m = /^(?:last |past |the last |the past )?(\d+)\s*([a-z]+)(?: ago)?$/.exec(v) ?? /^(\d+)([a-z])$/.exec(v);
   if (!m)
     return null;
-  const n = Number(m[1]);
+  const n2 = Number(m[1]);
   const unit = UNIT_ALIASES[m[2] ?? ""];
-  if (!unit || !Number.isFinite(n) || n <= 0 || n > 1e4)
+  if (!unit || !Number.isFinite(n2) || n2 <= 0 || n2 > 1e4)
     return null;
   const start = new Date(now);
   if (unit === "h")
-    start.setHours(start.getHours() - n);
+    start.setHours(start.getHours() - n2);
   else if (unit === "d")
-    start.setDate(start.getDate() - n);
+    start.setDate(start.getDate() - n2);
   else if (unit === "w")
-    start.setDate(start.getDate() - n * 7);
+    start.setDate(start.getDate() - n2 * 7);
   else if (unit === "m")
-    start.setMonth(start.getMonth() - n);
+    start.setMonth(start.getMonth() - n2);
   else
-    start.setFullYear(start.getFullYear() - n);
-  return { start: start.toISOString(), end: now.toISOString(), label: `the last ${n}${unit}` };
+    start.setFullYear(start.getFullYear() - n2);
+  return { start: start.toISOString(), end: now.toISOString(), label: `the last ${n2}${unit}` };
 }
 function named(v, now) {
   const y = now.getFullYear();
@@ -31071,8 +36155,8 @@ function named(v, now) {
 }
 var WEEK = 7 * 24 * 60 * 60 * 1e3;
 function mondayOf(d) {
-  const day = (d.getDay() + 6) % 7;
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - day);
+  const day2 = (d.getDay() + 6) % 7;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - day2);
 }
 function monthPhrase(v, now) {
   const m = /^(?:in |during )?([a-z]{3,9})(?: (\d{4}))?$/.exec(v);
@@ -31085,8 +36169,8 @@ function monthPhrase(v, now) {
   let year = m[2] ? Number(m[2]) : now.getFullYear();
   if (!m[2] && idx > now.getMonth())
     year -= 1;
-  const label = `${MONTHS3[idx]} ${year}`;
-  return localRange(new Date(year, idx, 1), new Date(year, idx + 1, 1), label);
+  const label3 = `${MONTHS3[idx]} ${year}`;
+  return localRange(new Date(year, idx, 1), new Date(year, idx + 1, 1), label3);
 }
 function weekday(v, now) {
   const m = /^(last |this |on )?([a-z]{3,9})$/.exec(v);
@@ -31104,36 +36188,84 @@ function weekday(v, now) {
   return localRange(start, new Date(+start + 24 * 60 * 60 * 1e3), `${WEEKDAYS[idx]} ${dayLabel(start)}`);
 }
 function dayLabel(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
-function pad(n) {
-  return String(n).padStart(2, "0");
+function pad2(n2) {
+  return String(n2).padStart(2, "0");
 }
-function localRange(start, endExclusive, label) {
+function localRange(start, endExclusive, label3) {
   return {
     start: start.toISOString(),
     end: new Date(+endExclusive - 1).toISOString(),
-    label
+    label: label3
   };
 }
-function utcRange(startMs, endExclusiveMs, label) {
+function utcRange(startMs, endExclusiveMs, label3) {
   return {
     start: new Date(startMs).toISOString(),
     end: new Date(endExclusiveMs - 1).toISOString(),
-    label
+    label: label3
   };
 }
 
 // ../core/dist/markers.js
+var markers_exports = {};
+__export(markers_exports, {
+  EXCLUSION_MARKERS: () => EXCLUSION_MARKERS,
+  POTSHERD_CARD_MARKER: () => POTSHERD_CARD_MARKER,
+  SUMMARIZER_CONTEXT_MARKER: () => SUMMARIZER_CONTEXT_MARKER,
+  hasExclusionMarker: () => hasExclusionMarker
+});
+var SUMMARIZER_CONTEXT_MARKER = "Context: This summary will be shown in a list to help users and Claude choose which conversations are relevant";
 var POTSHERD_CARD_MARKER = "<INSTRUCTIONS-TO-POTSHERD>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-POTSHERD>";
+var EXCLUSION_MARKERS = [
+  "<INSTRUCTIONS-TO-EPISODIC-MEMORY>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-EPISODIC-MEMORY>",
+  "Only use NO_INSIGHTS_FOUND",
+  SUMMARIZER_CONTEXT_MARKER,
+  POTSHERD_CARD_MARKER
+];
+function hasExclusionMarker(text) {
+  return EXCLUSION_MARKERS.some((marker2) => text.includes(marker2));
+}
 
 // ../core/dist/llm.js
 import { createRequire as createRequire3 } from "node:module";
 import { spawn } from "node:child_process";
-import fs16 from "node:fs";
+import fs27 from "node:fs";
 import os3 from "node:os";
-import path16 from "node:path";
-import process8 from "node:process";
+import path22 from "node:path";
+import process11 from "node:process";
+var MODEL_CALL_VERBS = ["card", "ask", "graft"];
+var OFFLINE_VERBS = [
+  "audit",
+  "rescue",
+  "guard",
+  "index",
+  "ls",
+  "show",
+  "stats",
+  "tag",
+  "pin",
+  "unpin",
+  "link",
+  // `setup` writes MCP stanzas into other tools' config files, which is a
+  // consent-gated *local* write and not a model call. It belongs on this list
+  // for the same reason `unpin` does: `doctor --privacy` answers by omission
+  // otherwise, and an answer by omission is not one.
+  "setup",
+  // `stack` only detects which memory tools are installed: it stats directories
+  // and reads two of its own files. No model, no socket.
+  "stack",
+  // `ignore` / `unignore` read and write one file, `~/.potsherd/config.json`,
+  // and nothing else. They are on this list for the reason `unpin` and `setup`
+  // are: `doctor --privacy` answers by omission otherwise, and a verb missing
+  // from every list on that receipt is a verb the receipt has not accounted
+  // for. The file they write is named in the `writes:` block above.
+  "ignore",
+  "unignore",
+  "doctor"
+];
+var LOCAL_SOCKET_VERBS = ["find", "export"];
 var MODEL_ALIASES = ["haiku", "sonnet", "opus"];
 var CARD_MODEL = "haiku";
 var ASK_MODEL = "sonnet";
@@ -31213,8 +36345,88 @@ var CALL_PROFILES = {
     basis: "not measured \u2014 assumed to behave like the agent sdk"
   }
 };
+function callProfile(backend) {
+  return CALL_PROFILES[backend ?? "agent-sdk"] ?? CALL_PROFILES["agent-sdk"];
+}
 var HARNESS_OVERHEAD_USD = CALL_PROFILES["agent-sdk"].baseUsd;
+function effectiveConcurrency(n2, profile) {
+  const c = Math.max(1, Math.floor(n2));
+  return 1 + (c - 1) * profile.parallelEfficiency;
+}
 var CHUNK_CHARS = 4e4;
+var OUTPUT_CHARS_PER_CALL = 1400;
+var PROMPT_OVERHEAD_CHARS = 2e3;
+function estimate(input) {
+  const model = input.model ?? CARD_MODEL;
+  const cls = modelClass(model);
+  const price = PRICES[cls];
+  const profile = callProfile(input.backend);
+  const chunk = Math.max(1e3, input.chunkChars ?? CHUNK_CHARS);
+  const outChars = input.outputCharsPerCall ?? OUTPUT_CHARS_PER_CALL;
+  const overhead = input.promptOverheadChars ?? PROMPT_OVERHEAD_CHARS;
+  const concurrency = Math.max(1, Math.floor(input.concurrency ?? 1));
+  const chargeable = input.chargeable ?? (input.backend ? input.backend === "api" : true);
+  const priceScale = price.inputPerMTok / PRICES[CARD_MODEL].inputPerMTok;
+  const perSession = [];
+  let calls = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let promptChars = 0;
+  for (const s of input.sessions) {
+    const chunks = Math.max(1, Math.ceil(Math.max(0, s.chars) / chunk));
+    const n2 = s.calls ?? (chunks === 1 ? 1 : chunks + 1);
+    const reduceChars = chunks === 1 ? 0 : chunks * outChars;
+    const chars = Math.max(0, s.chars) + n2 * overhead + reduceChars;
+    const inTok = tokensForChars(chars);
+    const outTok = profile.outputTokensPerCall !== null ? n2 * profile.outputTokensPerCall : tokensForChars(n2 * outChars);
+    perSession.push({
+      id: s.id,
+      calls: n2,
+      inputTokens: inTok,
+      outputTokens: outTok,
+      usd: callUsd(n2, chars, inTok, outTok, profile, price, priceScale)
+    });
+    calls += n2;
+    inputTokens += inTok;
+    outputTokens += outTok;
+    promptChars += chars;
+  }
+  const cal = input.calibration;
+  const usdRatio = cal && cal.samples > 0 ? cal.usdRatio : 1;
+  const timeRatio = cal && cal.samples > 0 ? cal.timeRatio : 1;
+  const rawUsd = calls === 0 ? 0 : callUsd(calls, promptChars, inputTokens, outputTokens, profile, price, priceScale);
+  const usd = rawUsd * usdRatio;
+  const serialMs = calls * profile.baseMs + promptChars / 1e3 * profile.msPerKChar;
+  const eff = effectiveConcurrency(concurrency, profile);
+  const seconds = calls === 0 ? 0 : serialMs / 1e3 / eff * timeRatio;
+  return {
+    sessions: input.sessions.length,
+    calls,
+    inputTokens,
+    outputTokens,
+    usd,
+    usdLow: usd * profile.spread.usdLow,
+    usdHigh: usd * profile.spread.usdHigh,
+    seconds,
+    secondsLow: seconds * profile.spread.timeLow,
+    secondsHigh: seconds * profile.spread.timeHigh,
+    model,
+    modelClass: cls,
+    ...input.backend ? { backend: input.backend } : {},
+    chargeable,
+    basis: profile.basis,
+    measured: profile.measured,
+    effectiveConcurrency: eff,
+    ...cal && cal.samples > 0 ? { calibration: cal } : {},
+    perSession
+  };
+}
+function callUsd(calls, chars, inputTokens, outputTokens, profile, price, priceScale) {
+  if (profile.usdPerMChar === null) {
+    return inputTokens / 1e6 * price.inputPerMTok + outputTokens / 1e6 * price.outputPerMTok + calls * profile.baseUsd * priceScale;
+  }
+  return (calls * profile.baseUsd + chars / 1e6 * profile.usdPerMChar) * priceScale;
+}
 function emptySpend() {
   return { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0, ms: 0, estimatedInputCalls: 0 };
 }
@@ -31331,11 +36543,11 @@ var Budget = class {
       this.spent.estimatedInputCalls += 1;
   }
 };
-function fmtUsd(n) {
-  return n < 0.01 && n > 0 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+function fmtUsd(n2) {
+  return n2 < 0.01 && n2 > 0 ? `$${n2.toFixed(4)}` : `$${n2.toFixed(2)}`;
 }
 var REENTRANCY_ENV = "POTSHERD_LLM_GUARD";
-function insidePotsherdCall(env = process8.env) {
+function insidePotsherdCall(env = process11.env) {
   return env[REENTRANCY_ENV] === "1";
 }
 var ReentrancyError = class extends Error {
@@ -31385,8 +36597,8 @@ function resolvable(specifier) {
   }
 }
 function availability(o = {}) {
-  const env = o.env ?? process8.env;
-  const which = o.which ?? ((n) => onPath(n, env));
+  const env = o.env ?? process11.env;
+  const which = o.which ?? ((n2) => onPath(n2, env));
   const key = env["ANTHROPIC_API_KEY"];
   const canResolve = o.resolvable ?? resolvable;
   return {
@@ -31399,15 +36611,15 @@ function availability(o = {}) {
   };
 }
 function detectBackend(o = {}) {
-  const env = o.env ?? process8.env;
+  const env = o.env ?? process11.env;
   const avail = availability(o);
   const requested = o.model ?? env["POTSHERD_MODEL"] ?? CARD_MODEL;
   const forced = o.backend ?? env["POTSHERD_LLM_BACKEND"];
-  const choose = (backend, why, bin) => ({
+  const choose = (backend, why2, bin) => ({
     backend,
     model: resolveModel(requested, backend),
     requested,
-    why,
+    why: why2,
     ...bin ? { bin } : {},
     chargeable: backend === "api",
     availability: avail
@@ -31457,13 +36669,13 @@ var LlmError = class extends Error {
   }
 };
 function makeScratch(tmpRoot) {
-  return fs16.mkdtempSync(path16.join(tmpRoot ?? os3.tmpdir(), "potsherd-llm-"));
+  return fs27.mkdtempSync(path22.join(tmpRoot ?? os3.tmpdir(), "potsherd-llm-"));
 }
 function dropScratch(dir) {
   if (!dir)
     return;
   try {
-    fs16.rmSync(dir, { recursive: true, force: true });
+    fs27.rmSync(dir, { recursive: true, force: true });
   } catch {
   }
 }
@@ -31689,7 +36901,7 @@ function run(bin, args, o) {
         return;
       settled = true;
       child.kill("SIGKILL");
-      reject(new LlmError(`${path16.basename(bin)} did not answer within ${Math.round(o.timeoutMs / 1e3)}s`, `POTSHERD_LLM_TIMEOUT_MS=${DEFAULT_TIMEOUT_MS * 2} potsherd card \u2026`, void 0, { timedOut: true }));
+      reject(new LlmError(`${path22.basename(bin)} did not answer within ${Math.round(o.timeoutMs / 1e3)}s`, `POTSHERD_LLM_TIMEOUT_MS=${DEFAULT_TIMEOUT_MS * 2} potsherd card \u2026`, void 0, { timedOut: true }));
     }, o.timeoutMs);
     const onAbort = () => {
       if (settled)
@@ -31707,7 +36919,7 @@ function run(bin, args, o) {
         return;
       settled = true;
       clearTimeout(timer);
-      reject(new LlmError(`could not run ${bin}: ${errMessage(err)}`, `which ${path16.basename(bin)}`, err));
+      reject(new LlmError(`could not run ${bin}: ${errMessage(err)}`, `which ${path22.basename(bin)}`, err));
     });
     child.on("close", (code) => {
       if (settled)
@@ -31716,7 +36928,7 @@ function run(bin, args, o) {
       clearTimeout(timer);
       o.signal?.removeEventListener("abort", onAbort);
       if (code !== 0) {
-        reject(new LlmError(`${path16.basename(bin)} exited ${code}${stderr.trim() ? `: ${stderr.trim().split("\n").slice(-1)[0]}` : ""}`, `${path16.basename(bin)} --version`));
+        reject(new LlmError(`${path22.basename(bin)} exited ${code}${stderr.trim() ? `: ${stderr.trim().split("\n").slice(-1)[0]}` : ""}`, `${path22.basename(bin)} --version`));
         return;
       }
       resolve({ stdout, stderr, code: code ?? 0 });
@@ -31764,7 +36976,7 @@ var Llm = class _Llm {
    * none and {@link ReentrancyError} when potsherd spawned this process.
    */
   static open(opts = {}) {
-    const env = opts.env ?? process8.env;
+    const env = opts.env ?? process11.env;
     if (insidePotsherdCall(env) && !opts.transport)
       throw new ReentrancyError();
     if (opts.transport) {
@@ -31878,8 +37090,8 @@ ${prompt.text}`;
         return await this.transport.send(req);
       } catch (err) {
         last2 = err;
-        const timedOut2 = err instanceof LlmError && err.timedOut;
-        if (!timedOut2 || outer?.aborted || attempt === TIMEOUT_RETRIES)
+        const timedOut = err instanceof LlmError && err.timedOut;
+        if (!timedOut || outer?.aborted || attempt === TIMEOUT_RETRIES)
           throw err;
       }
     }
@@ -31891,7 +37103,7 @@ ${prompt.text}`;
    * throwing away the run (`phase-2` risks: "json drift").
    */
   async json(req) {
-    const base = `${req.prompt}
+    const base2 = `${req.prompt}
 
 ${JSON_RULE}
 
@@ -31900,7 +37112,7 @@ ${req.schema}`;
     let last2 = null;
     let firstError = "";
     for (let attempt = 1; attempt <= 2; attempt++) {
-      const prompt = attempt === 1 ? base : `${base}
+      const prompt = attempt === 1 ? base2 : `${base2}
 
 Your previous reply could not be parsed as JSON (${firstError}). Reply again with only the JSON object.`;
       const { prompt: _p, ...rest } = req;
@@ -31999,8 +37211,8 @@ assistant: ${assistant}`;
   return assistant ? `assistant: ${assistant}` : "";
 }
 function unitHeader(unit) {
-  const day = unit.ts ? unit.ts.slice(0, 10) : "";
-  return day ? `[seq ${unit.seq} \xB7 ${day}]` : `[seq ${unit.seq}]`;
+  const day2 = unit.ts ? unit.ts.slice(0, 10) : "";
+  return day2 ? `[seq ${unit.seq} \xB7 ${day2}]` : `[seq ${unit.seq}]`;
 }
 function renderUnit(unit, maxChars) {
   const body = maxChars !== void 0 ? elideMiddle2(unit.text, maxChars) : unit.text;
@@ -32077,12 +37289,263 @@ function ghostProjectSlug(project) {
   return p.replace(/[^A-Za-z0-9]/g, "-");
 }
 
-// ../core/dist/calibration.js
-var MAX_RATIO = 5;
-var MIN_RATIO = 1 / MAX_RATIO;
+// ../core/dist/cards/plan.js
+var MIN_EXCHANGES = 3;
+var MIN_GHOST_PROMPTS = 5;
+var SEQ_HEADER_CHARS = 24;
+function planCards(db, options = {}) {
+  const filters = options.filters ?? {};
+  const targets = [];
+  const skipped = { tooShort: 0, alreadyCarded: 0 };
+  let considered = 0;
+  if ((filters.ghosts ?? "include") !== "only" && filters.status !== "ghost") {
+    const f = buildSessionFilters(filters);
+    const rows = db.prepare(`SELECT s.id, s.harness, s.title, s.project, s.project_slug, s.is_sidechain, s.source_mtime,
+                COALESCE(s.ended_at, s.started_at) AS ts,
+                (SELECT COUNT(*) FROM exchanges e WHERE e.session_id = s.id) AS exchanges,
+                (SELECT COALESCE(SUM(length(e.user_text) + length(e.assistant_text)), 0)
+                   FROM exchanges e WHERE e.session_id = s.id) AS chars,
+                (SELECT COUNT(*) FROM cards c WHERE c.session_id = s.id) AS carded,
+                (SELECT c.created_at FROM cards c WHERE c.session_id = s.id) AS card_created_at
+           FROM sessions s
+          WHERE 1=1 ${f.sql}
+          ORDER BY COALESCE(s.ended_at, s.started_at) DESC`).all(...f.params);
+    for (const r of rows) {
+      considered++;
+      if (r.exchanges < MIN_EXCHANGES) {
+        skipped.tooShort++;
+        continue;
+      }
+      const stale = isStale2(r.card_created_at, r.source_mtime);
+      if (r.carded > 0 && !stale && !options.force) {
+        skipped.alreadyCarded++;
+        continue;
+      }
+      targets.push({
+        id: r.id,
+        kind: "session",
+        harness: r.harness,
+        title: r.title,
+        project: r.project,
+        projectSlug: r.project_slug,
+        units: r.exchanges,
+        chars: r.chars + r.exchanges * SEQ_HEADER_CHARS,
+        carded: r.carded > 0,
+        stale,
+        isSidechain: r.is_sidechain === 1,
+        ts: r.ts
+      });
+    }
+  }
+  if (ghostsInScope2(filters)) {
+    const f = buildGhostFilters(filters);
+    const rows = db.prepare(`SELECT g.session_id, g.harness, g.title, g.project,
+                COALESCE(g.last_ts, g.first_ts) AS ts,
+                (SELECT COUNT(*) FROM ghost_prompts p WHERE p.session_id = g.session_id) AS prompts,
+                (SELECT COALESCE(SUM(length(p.text)), 0)
+                   FROM ghost_prompts p WHERE p.session_id = g.session_id) AS chars,
+                (SELECT COUNT(*) FROM cards c WHERE c.session_id = g.session_id) AS carded
+           FROM ghosts g
+          WHERE 1=1 ${f.sql}
+          ORDER BY COALESCE(g.last_ts, g.first_ts) DESC`).all(...f.params);
+    for (const r of rows) {
+      considered++;
+      if (r.prompts < MIN_GHOST_PROMPTS) {
+        skipped.tooShort++;
+        continue;
+      }
+      if (r.carded > 0 && !options.force) {
+        skipped.alreadyCarded++;
+        continue;
+      }
+      targets.push({
+        id: r.session_id,
+        kind: "ghost",
+        harness: r.harness,
+        title: r.title,
+        project: r.project,
+        // Ghosts have no `project_slug` column — the transcript that carried
+        // one is what the sweep deleted — so it is re-derived from the path
+        // `rescue` recovered, with Claude Code's own encoding, and lands in
+        // the same mirror directory as that project's surviving sessions.
+        projectSlug: ghostProjectSlug(r.project),
+        units: r.prompts,
+        chars: r.chars + r.prompts * SEQ_HEADER_CHARS,
+        carded: r.carded > 0,
+        stale: false,
+        isSidechain: false,
+        ts: r.ts
+      });
+    }
+  }
+  targets.sort((a, b) => (b.ts ?? "").localeCompare(a.ts ?? "") || a.id.localeCompare(b.id));
+  const capped = options.limit !== void 0 ? targets.slice(0, Math.max(0, options.limit)) : targets;
+  const sessions = capped.map((t) => ({ id: t.id, chars: t.chars }));
+  const model = options.model ?? CARD_MODEL;
+  const calibration = options.calibration === void 0 ? readCalibration(db, options.backend ? { backend: options.backend } : {}) : options.calibration;
+  return {
+    targets: capped,
+    skipped,
+    considered,
+    sessions: capped.filter((t) => t.kind === "session").length,
+    ghosts: capped.filter((t) => t.kind === "ghost").length,
+    estimate: estimate({
+      sessions,
+      model,
+      ...options.backend ? { backend: options.backend } : {},
+      ...options.chargeable !== void 0 ? { chargeable: options.chargeable } : {},
+      ...options.concurrency !== void 0 ? { concurrency: options.concurrency } : {},
+      ...calibration ? { calibration } : {}
+    }),
+    model,
+    ...options.backend ? { backend: options.backend } : {}
+  };
+}
+function isStale2(cardCreatedAt, sourceMtime) {
+  if (!cardCreatedAt)
+    return true;
+  if (sourceMtime === null || sourceMtime === void 0)
+    return false;
+  const created = Date.parse(cardCreatedAt);
+  if (Number.isNaN(created))
+    return true;
+  return sourceMtime > created;
+}
+function ghostsInScope2(filters) {
+  if (filters.status === "ghost")
+    return true;
+  if ((filters.ghosts ?? "include") === "exclude")
+    return false;
+  if ((filters.sidechains ?? "include") === "only")
+    return false;
+  if (filters.file)
+    return false;
+  if (filters.status)
+    return false;
+  return true;
+}
 
 // ../core/dist/render/estimate.js
 var TARGET_SECONDS = 15 * 60;
+var TARGET_USD = 2;
+function renderEstimate(plan, t = new Theme(), o = {}) {
+  const card = new Card(t);
+  const e = plan.estimate;
+  card.heading(o.dryRun === false ? "card" : "card --dry-run", ...o.root ? [tildify(o.root)] : [], date5(o.ranAt ?? /* @__PURE__ */ new Date())).blank();
+  if (plan.targets.length === 0) {
+    card.text(plan.considered === 0 ? "nothing indexed yet, so there is nothing to card." : `nothing to card: ${num(plan.skipped.alreadyCarded)} already carded, ${num(plan.skipped.tooShort)} too short.`).blank();
+    if (plan.considered === 0) {
+      card.fix("potsherd index", "to read every transcript on this machine.", "to read them.");
+    } else {
+      card.fix("potsherd card --all --force", "to rebuild every card anyway.", "to rebuild them.");
+    }
+    return card.toString();
+  }
+  const skippedNote = [
+    plan.skipped.alreadyCarded ? `${num(plan.skipped.alreadyCarded)} already carded` : "",
+    plan.skipped.tooShort ? `${num(plan.skipped.tooShort)} too short` : ""
+  ].filter(Boolean).join(` ${t.sep} `);
+  card.rows([
+    {
+      label: "sessions to card",
+      value: num(plan.sessions),
+      note: skippedNote || `of ${num(plan.considered)} in scope`
+    },
+    ...plan.ghosts ? [
+      {
+        label: "ghosts to card",
+        value: num(plan.ghosts),
+        note: "prompts only \u2014 the sessions Claude Code deleted"
+      }
+    ] : [],
+    {
+      label: "model calls",
+      value: num(e.calls),
+      note: `${e.model} ${t.sep} ${o.backendNote ?? e.backend ?? "not selected"}`
+    }
+  ]);
+  card.blank();
+  const money2 = `~${approxMoney(e.usd)}`;
+  const time3 = `~${approxDuration(e.seconds)}`;
+  const overTime = e.secondsLow > TARGET_SECONDS;
+  const overMoney = e.usdLow > TARGET_USD;
+  const timeRange = `${approxDuration(e.secondsLow)}${t.g("\u2013", "-")}${approxDuration(e.secondsHigh)}`;
+  const moneyRange = `${approxMoney(e.usdLow)}${t.g("\u2013", "-")}${approxMoney(e.usdHigh)}`;
+  card.rows([
+    {
+      label: "input tokens",
+      value: compact(e.inputTokens),
+      note: `est. ${t.sep} chars ${t.g("\xF7", "/")} ${CHARS_PER_TOKEN} of the redacted text`
+    },
+    {
+      label: "output tokens",
+      value: compact(e.outputTokens),
+      note: `est. ${t.sep} ${num(perCallOutput(e))} a call, measured`
+    },
+    {
+      label: "estimated time",
+      value: time3,
+      tone: e.chargeable ? overTime ? "warn" : "none" : overTime ? "warn" : "accent",
+      note: `est. ${timeRange} ${t.sep} target ${duration3(TARGET_SECONDS * 1e3)}`
+    },
+    {
+      label: e.chargeable ? "estimated cost" : "equivalent cost",
+      value: money2,
+      tone: e.chargeable ? overMoney ? "warn" : "accent" : "dim",
+      note: e.chargeable ? `est. ${moneyRange} ${t.sep} target ${money(TARGET_USD)}` : `$0 charged ${t.sep} ${moneyRange} on an api key`
+    },
+    ...o.maxUsd !== void 0 ? [
+      {
+        label: "hard ceiling",
+        value: money(o.maxUsd),
+        tone: e.usd > o.maxUsd ? "warn" : "dim",
+        note: e.usd > o.maxUsd ? "the run will stop part-way and say how far it got" : "--max-usd, checked before every call"
+      }
+    ] : []
+  ]);
+  card.blank();
+  for (const line of basisLines(e, t))
+    card.text(line, "dim");
+  card.blank();
+  if (o.dryRun === false) {
+    card.text("this is what the run will do.");
+  } else {
+    card.text("nothing was called, and nothing was written.");
+    card.blank();
+    card.fix(`potsherd card ${o.limit !== void 0 ? `--limit ${o.limit}` : "--all"}${o.maxUsd !== void 0 ? ` --max-usd ${o.maxUsd}` : ""}`, "to write these cards for real.", "to write them.");
+  }
+  return card.toString();
+}
+function approxDuration(seconds) {
+  if (seconds >= 120)
+    return duration3(Math.round(seconds / 60) * 6e4);
+  return duration3(Math.round(seconds / 5) * 5e3);
+}
+function perCallOutput(e) {
+  return e.calls > 0 ? Math.round(e.outputTokens / e.calls) : 0;
+}
+function approxMoney(usd) {
+  if (usd >= 10)
+    return `$${Math.round(usd)}`;
+  if (usd >= 1)
+    return `$${(Math.round(usd * 10) / 10).toFixed(1)}`;
+  return money(usd);
+}
+function basisLines(e, t) {
+  const first = e.measured ? `time and cost are estimates, fitted to ${e.basis}.` : `time and cost are estimates: ${e.basis}.`;
+  const cal = e.calibration;
+  const second = cal && cal.samples > 0 ? `corrected ${t.g("\xD7", "x")}${cal.timeRatio.toFixed(1)} on time and ${t.g("\xD7", "x")}${cal.usdRatio.toFixed(1)} on cost from ${cal.samples} finished ${plural(cal.samples, "run")} here.` : "no finished run on this machine yet has corrected them.";
+  return [first, second];
+}
+function compact(n2) {
+  if (n2 >= 1e6)
+    return `${(n2 / 1e6).toFixed(n2 >= 1e7 ? 0 : 1)}M`;
+  if (n2 >= 1e4)
+    return `${Math.round(n2 / 1e3)}k`;
+  if (n2 >= 1e3)
+    return `${(n2 / 1e3).toFixed(1)}k`;
+  return String(n2);
+}
 
 // ../core/dist/cards/schema.js
 var CARD_OUTCOMES = [
@@ -32097,6 +37560,8 @@ var MAX_SUMMARY_WORDS = 60;
 var MAX_TOPICS = 8;
 var MAX_TAGS = 5;
 var MAX_FILES = 20;
+var MAX_CLAIMS = 8;
+var MAX_CLAIM_CHARS = 240;
 var CARD_SCHEMA = `{
   "title": "string, at most ${MAX_TITLE_WORDS} words, no trailing punctuation",
   "summary": "string, at most ${MAX_SUMMARY_WORDS} words, past tense, what happened",
@@ -32107,14 +37572,458 @@ var CARD_SCHEMA = `{
   "open_threads": [{"what": "string", "evidence_seq": [31]}],
   "tags": ["lowercase-hyphenated", "at most ${MAX_TAGS}"]
 }`;
+function asString(v) {
+  if (typeof v === "string")
+    return v.trim();
+  if (typeof v === "number" || typeof v === "boolean")
+    return String(v);
+  return "";
+}
+function asStringList(v, max2) {
+  const raw = Array.isArray(v) ? v : typeof v === "string" && v.trim() ? [v] : [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const item of raw) {
+    const s = asString(typeof item === "object" && item !== null ? item["name"] ?? item["path"] ?? item["topic"] ?? item["what"] : item);
+    if (!s)
+      continue;
+    const key = s.toLowerCase();
+    if (seen.has(key))
+      continue;
+    seen.add(key);
+    out.push(s);
+    if (out.length >= max2)
+      break;
+  }
+  return out;
+}
+function asSeqList(v) {
+  const raw = Array.isArray(v) ? v : v === void 0 || v === null ? [] : [v];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const item of raw) {
+    let n2;
+    if (typeof item === "number")
+      n2 = item;
+    else if (typeof item === "string") {
+      const m = /-?\d+/.exec(item);
+      n2 = m ? Number(m[0]) : Number.NaN;
+    } else
+      continue;
+    if (!Number.isFinite(n2))
+      continue;
+    n2 = Math.trunc(n2);
+    if (n2 < 0)
+      continue;
+    if (seen.has(n2))
+      continue;
+    seen.add(n2);
+    out.push(n2);
+  }
+  return out;
+}
+function asClaimList(v, max2) {
+  const raw = Array.isArray(v) ? v : [];
+  const out = [];
+  for (const item of raw) {
+    if (typeof item === "string") {
+      const what = clampChars(item.trim());
+      if (what)
+        out.push({ what, evidence_seq: [] });
+    } else if (item && typeof item === "object") {
+      const rec = item;
+      const what = clampChars(asString(rec["what"] ?? rec["decision"] ?? rec["thread"] ?? rec["text"]));
+      if (!what)
+        continue;
+      const why2 = asString(rec["why"] ?? rec["reason"] ?? "");
+      out.push({
+        what,
+        ...why2 ? { why: clampChars(why2) } : {},
+        evidence_seq: asSeqList(rec["evidence_seq"] ?? rec["evidence"] ?? rec["seq"])
+      });
+    }
+    if (out.length >= max2)
+      break;
+  }
+  return out;
+}
+function clampChars(s) {
+  return s.length <= MAX_CLAIM_CHARS ? s : `${s.slice(0, MAX_CLAIM_CHARS - 1).trimEnd()}\u2026`;
+}
+function clampWords(s, max2) {
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length <= max2)
+    return words.join(" ");
+  return `${words.slice(0, max2).join(" ")}\u2026`;
+}
+function asOutcome(v) {
+  const s = asString(v).toLowerCase();
+  for (const o of CARD_OUTCOMES)
+    if (s === o)
+      return o;
+  for (const o of CARD_OUTCOMES)
+    if (o !== "unknown" && s.includes(o))
+      return o;
+  return "unknown";
+}
+function validateCard(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return null;
+  const rec = value;
+  for (const key of ["card", "result", "output", "data"]) {
+    const inner = rec[key];
+    if (inner && typeof inner === "object" && !Array.isArray(inner) && !rec["title"] && !rec["summary"]) {
+      return validateCard(inner);
+    }
+  }
+  const title = asString(rec["title"]);
+  const summary2 = asString(rec["summary"] ?? rec["description"]);
+  if (!title && !summary2)
+    return null;
+  return normaliseCard({
+    title,
+    summary: summary2,
+    topics: asStringList(rec["topics"], MAX_TOPICS),
+    decisions: asClaimList(rec["decisions"], MAX_CLAIMS),
+    files: asStringList(rec["files"] ?? rec["files_touched"], MAX_FILES),
+    outcome: asOutcome(rec["outcome"]),
+    open_threads: asClaimList(rec["open_threads"] ?? rec["openThreads"], MAX_CLAIMS),
+    tags: asStringList(rec["tags"] ?? rec["suggested_tags"], MAX_TAGS)
+  });
+}
+function normaliseCard(card) {
+  return {
+    title: clampWords(card.title.replace(/[.\s]+$/, ""), MAX_TITLE_WORDS),
+    summary: clampWords(card.summary, MAX_SUMMARY_WORDS),
+    topics: card.topics.slice(0, MAX_TOPICS),
+    decisions: card.decisions.slice(0, MAX_CLAIMS),
+    files: card.files.slice(0, MAX_FILES),
+    outcome: card.outcome,
+    open_threads: card.open_threads.slice(0, MAX_CLAIMS),
+    tags: card.tags.map(tagify).filter(Boolean).slice(0, MAX_TAGS)
+  };
+}
+function tagify(tag) {
+  return tag.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
+}
+function minimalCard(title, summary2) {
+  return normaliseCard({
+    title,
+    summary: summary2,
+    topics: [],
+    decisions: [],
+    files: [],
+    outcome: "unknown",
+    open_threads: [],
+    tags: []
+  });
+}
+function emptyCard() {
+  return minimalCard("", "");
+}
+
+// ../core/dist/cards/vectors.js
+function cachedEmbedder(options = {}) {
+  const cache = /* @__PURE__ */ new Map();
+  const stats2 = { computed: 0, hits: 0, ms: 0 };
+  const backing = options.embed ?? ((t) => generateEmbedding(t, options.embeddings ?? {}));
+  const embed = (text) => {
+    const key = text.trim();
+    const seen = cache.get(key);
+    if (seen) {
+      stats2.hits += 1;
+      return seen;
+    }
+    const started = Date.now();
+    const promise2 = backing(key).then((v) => {
+      stats2.computed += 1;
+      stats2.ms += Date.now() - started;
+      return v;
+    });
+    cache.set(key, promise2);
+    return promise2;
+  };
+  return {
+    embed,
+    prime(text, vector) {
+      cache.set(text.trim(), Promise.resolve([...vector]));
+    },
+    get stats() {
+      return { ...stats2 };
+    }
+  };
+}
+function cosine(a, b) {
+  const n2 = Math.min(a.length, b.length);
+  if (n2 === 0)
+    return 0;
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < n2; i++) {
+    const x = a[i];
+    const y = b[i];
+    dot += x * y;
+    na += x * x;
+    nb += y * y;
+  }
+  if (na === 0 || nb === 0)
+    return 0;
+  const c = dot / (Math.sqrt(na) * Math.sqrt(nb));
+  return Math.max(-1, Math.min(1, c));
+}
+function bestMatch(probe, against) {
+  let score = -1;
+  let index = -1;
+  against.forEach((v, i) => {
+    const c = cosine(probe, v);
+    if (c > score) {
+      score = c;
+      index = i;
+    }
+  });
+  return { score: against.length === 0 ? 0 : score, index };
+}
+function windows(text, size = 1800) {
+  const t = text.trim();
+  if (t.length <= size)
+    return t ? [t] : [];
+  const stride = Math.max(1, Math.floor(size * 0.75));
+  const all = [];
+  for (let i = 0; i < t.length && all.length < MAX_WINDOWS_SCANNED; i += stride) {
+    all.push(t.slice(i, i + size));
+    if (i + size >= t.length)
+      break;
+  }
+  return all;
+}
+var MAX_WINDOWS_SCANNED = 256;
+var WORD = /[a-z0-9][a-z0-9._/-]{2,}/g;
+function rankedWindows(text, probe, size = 1800, max2 = 4) {
+  const all = windows(text, size);
+  if (all.length <= max2)
+    return all;
+  const wanted = new Set(probe.toLowerCase().match(WORD) ?? []);
+  if (wanted.size === 0)
+    return all.slice(0, max2);
+  const scored = all.map((w, i) => {
+    const words = new Set(w.toLowerCase().match(WORD) ?? []);
+    let hits = 0;
+    for (const token of wanted)
+      if (words.has(token))
+        hits += 1;
+    return { w, i, score: hits / wanted.size };
+  });
+  scored.sort((a, b) => b.score - a.score || a.i - b.i);
+  const out = scored.slice(0, max2).map((s) => s.w);
+  if (!out.includes(all[0]))
+    out[out.length - 1] = all[0];
+  return [...new Set(out)];
+}
+
+// ../core/dist/cards/coverage.js
+var COVERAGE_COSINE = 0.6;
+var UNCOVERED_FRACTION = 0.25;
+function cardItems(card) {
+  const items = [];
+  if (card.title.trim())
+    items.push(card.title.trim());
+  if (card.summary.trim())
+    items.push(card.summary.trim());
+  for (const t of card.topics)
+    if (t.trim())
+      items.push(t.trim());
+  for (const d of card.decisions) {
+    const text = d.why ? `${d.what} \u2014 ${d.why}` : d.what;
+    if (text.trim())
+      items.push(text.trim());
+  }
+  for (const o of card.open_threads)
+    if (o.what.trim())
+      items.push(o.what.trim());
+  return [...new Set(items)];
+}
+async function measureCoverage(units, card, embed) {
+  const live = units.filter((u) => u.text.trim().length > 0);
+  const items = cardItems(card);
+  if (live.length === 0) {
+    return { total: 0, covered: 0, uncovered: [], fraction: 0, needsSupplement: false, best: [] };
+  }
+  if (items.length === 0) {
+    return {
+      total: live.length,
+      covered: 0,
+      uncovered: live.map((u) => u.seq),
+      fraction: 1,
+      needsSupplement: true,
+      best: live.map(() => 0)
+    };
+  }
+  const itemVectors = await Promise.all(items.map((i) => embed(i)));
+  const best = [];
+  const uncovered = [];
+  for (const unit of live) {
+    const vector = unit.embedding ?? await embed(unit.text);
+    const top = bestMatch(vector, itemVectors).score;
+    best.push(top);
+    if (top < COVERAGE_COSINE)
+      uncovered.push(unit.seq);
+  }
+  const fraction = uncovered.length / live.length;
+  return {
+    total: live.length,
+    covered: live.length - uncovered.length,
+    uncovered,
+    fraction,
+    needsSupplement: fraction > UNCOVERED_FRACTION,
+    best
+  };
+}
+function mergeSupplement(base2, extra) {
+  const seen = (list) => new Set(list.map((s) => s.toLowerCase().trim()));
+  const topics = [...base2.topics];
+  const topicSeen = seen(topics);
+  for (const t of extra.topics) {
+    if (topics.length >= MAX_TOPICS)
+      break;
+    if (topicSeen.has(t.toLowerCase().trim()))
+      continue;
+    topicSeen.add(t.toLowerCase().trim());
+    topics.push(t);
+  }
+  const files = [...base2.files];
+  const fileSeen = seen(files);
+  for (const f of extra.files) {
+    if (files.length >= MAX_FILES)
+      break;
+    if (fileSeen.has(f.toLowerCase().trim()))
+      continue;
+    fileSeen.add(f.toLowerCase().trim());
+    files.push(f);
+  }
+  const tags = [...base2.tags];
+  const tagSeen = seen(tags);
+  for (const t of extra.tags) {
+    if (tags.length >= MAX_TAGS)
+      break;
+    if (tagSeen.has(t.toLowerCase().trim()))
+      continue;
+    tagSeen.add(t.toLowerCase().trim());
+    tags.push(t);
+  }
+  return {
+    title: base2.title || extra.title,
+    summary: base2.summary || extra.summary,
+    topics,
+    decisions: [...base2.decisions, ...extra.decisions].slice(0, MAX_CLAIMS * 3),
+    files,
+    outcome: base2.outcome !== "unknown" ? base2.outcome : extra.outcome,
+    open_threads: [...base2.open_threads, ...extra.open_threads].slice(0, MAX_CLAIMS * 3),
+    tags
+  };
+}
+
+// ../core/dist/cards/dedupe.js
+var DEDUPE_COSINE = 0.8;
+function betterClaim(a, b) {
+  if (a.evidence_seq.length !== b.evidence_seq.length) {
+    return a.evidence_seq.length > b.evidence_seq.length ? a : b;
+  }
+  const aWhy = (a.why ?? "").trim().length;
+  const bWhy = (b.why ?? "").trim().length;
+  if (aWhy > 0 !== bWhy > 0)
+    return aWhy > 0 ? a : b;
+  return a.what.length <= b.what.length ? a : b;
+}
+async function dedupeClaims(claims, embed, threshold, removed) {
+  const kept = [];
+  for (const claim2 of claims) {
+    const vector = await embed(claim2.what);
+    let merged = false;
+    for (const slot of kept) {
+      if (cosine(vector, slot.vector) < threshold)
+        continue;
+      const winner = betterClaim(slot.claim, claim2);
+      const loser = winner === slot.claim ? claim2 : slot.claim;
+      removed.push(loser.what);
+      slot.claim = {
+        ...winner,
+        evidence_seq: [.../* @__PURE__ */ new Set([...winner.evidence_seq, ...loser.evidence_seq])].sort((x, y) => x - y)
+      };
+      merged = true;
+      break;
+    }
+    if (!merged)
+      kept.push({ claim: claim2, vector });
+  }
+  return kept.map((s) => s.claim);
+}
+async function dedupeStrings(items, embed, threshold, removed) {
+  const kept = [];
+  for (const item of items) {
+    if (!item.trim())
+      continue;
+    const vector = await embed(item);
+    const twin = kept.find((s) => cosine(vector, s.vector) >= threshold);
+    if (twin) {
+      removed.push(item);
+      if (item.length < twin.text.length)
+        twin.text = item;
+      continue;
+    }
+    kept.push({ text: item, vector });
+  }
+  return kept.map((s) => s.text);
+}
+async function dedupeCard(card, embed, threshold = DEDUPE_COSINE) {
+  const removedTexts = [];
+  const decisions = await dedupeClaims(card.decisions, embed, threshold, removedTexts);
+  const open_threads = await dedupeClaims(card.open_threads, embed, threshold, removedTexts);
+  const topics = await dedupeStrings(card.topics, embed, threshold, removedTexts);
+  const files = [...new Set(card.files.map((f) => f.trim()).filter(Boolean))];
+  return {
+    card: { ...card, decisions, open_threads, topics, files },
+    report: { removed: removedTexts.length, removedTexts }
+  };
+}
 
 // ../core/dist/cards/slice.js
+var SLICE_THRESHOLD_CHARS = 6e4;
 var SLICE_CHUNK_CHARS = CHUNK_CHARS;
 var MAX_UNIT_CHARS = Math.floor(SLICE_CHUNK_CHARS / 2);
+function sliceUnits(units, options = {}) {
+  const list = units.filter((u) => u.text.trim().length > 0);
+  if (list.length === 0)
+    return [];
+  const threshold = options.thresholdChars ?? SLICE_THRESHOLD_CHARS;
+  const chunkChars = Math.max(1e3, options.chunkChars ?? SLICE_CHUNK_CHARS);
+  const total = list.reduce((n2, u) => n2 + Math.min(u.text.length, MAX_UNIT_CHARS), 0);
+  if (total <= threshold)
+    return [list];
+  const chunks = [];
+  let current = [];
+  let size = 0;
+  for (const unit of list) {
+    const cost = Math.min(unit.text.length, MAX_UNIT_CHARS);
+    if (current.length > 0 && size + cost > chunkChars) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(unit);
+    size += cost;
+  }
+  if (current.length > 0)
+    chunks.push(current);
+  return chunks;
+}
+function extractCalls(chunks) {
+  return chunks <= 1 ? 1 : chunks + 1;
+}
 
 // ../core/dist/cards/gate.js
 function makeGate(limit) {
-  const n = Math.max(1, Math.floor(limit));
+  const n2 = Math.max(1, Math.floor(limit));
   let inFlight = 0;
   const waiting = [];
   const release = () => {
@@ -32124,7 +38033,7 @@ function makeGate(limit) {
       next();
   };
   return async function gate(fn) {
-    if (inFlight >= n) {
+    if (inFlight >= n2) {
       await new Promise((resolve) => waiting.push(resolve));
     }
     inFlight += 1;
@@ -32135,6 +38044,7 @@ function makeGate(limit) {
     }
   };
 }
+var openGate = (fn) => fn();
 
 // ../core/dist/cards/extract.js
 var SYSTEM = [
@@ -32154,8 +38064,694 @@ var SYSTEM = [
   '- summary is past tense, about this session only, and never says "the user asked me to".',
   "- files are paths the session actually touched or discussed."
 ].join("\n");
+function systemFor(transcript) {
+  return transcript.kind === "ghost" ? GHOST_SYSTEM : SYSTEM;
+}
+function unitNoun(transcript, n2) {
+  const noun = transcript.kind === "ghost" ? "prompt" : "exchange";
+  return `${n2} ${noun}${n2 === 1 ? "" : "s"}`;
+}
+function emptyExtractSpend() {
+  return { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0, ms: 0 };
+}
+function addSpend(into, r) {
+  into.calls += r.attempts ?? 1;
+  into.inputTokens += r.inputTokens;
+  into.outputTokens += r.outputTokens;
+  into.usd += r.usd;
+  into.ms += r.ms;
+}
+function transcriptBlock(units, tag = "transcript") {
+  return [
+    `<${tag}>`,
+    units.map((u) => renderUnit(u, MAX_UNIT_CHARS)).join("\n\n"),
+    `</${tag}>`
+  ].join("\n");
+}
+function blockTag(transcript) {
+  return transcript.kind === "ghost" ? "prompts" : "transcript";
+}
+function fallbackCard(transcript) {
+  const first = transcript.units.find((u) => u.text.trim().length > 0);
+  const opening = (first?.text ?? "").replace(/^user:\s*/i, "").replace(/\s+/g, " ").trim();
+  const title = transcript.title?.trim() || opening || `session ${transcript.id.slice(0, 8)}`;
+  const summary2 = opening ? `Could not be summarised; the session opened with: ${opening}` : "Could not be summarised from this transcript.";
+  return minimalCard(title, summary2);
+}
+function priorBlock(prior) {
+  if (!prior)
+    return "";
+  return [
+    "",
+    "A card was written for this session before, and the transcript has grown since.",
+    "Reconcile it: KEEP what the transcript still supports, UPDATE what has changed,",
+    "DROP what it no longer says. Do not carry a claim forward on the strength of the",
+    "old card alone \u2014 re-cite it from the transcript above or leave it out.",
+    "",
+    "<prior-card>",
+    JSON.stringify({
+      title: prior.title,
+      summary: prior.summary,
+      topics: prior.topics,
+      decisions: prior.decisions,
+      open_threads: prior.open_threads,
+      outcome: prior.outcome
+    }, null, 1),
+    "</prior-card>"
+  ].join("\n");
+}
+async function extractCard(llm, transcript, options = {}) {
+  const spend = emptyExtractSpend();
+  const chunks = sliceUnits(transcript.units, options);
+  const fallback = fallbackCard(transcript);
+  if (chunks.length === 0) {
+    return { card: fallback, chunks: 0, spend, parsed: false, model: llm.model };
+  }
+  const gate = options.gate ?? openGate;
+  const call2 = async (label3, prompt2) => {
+    const r = await gate(() => llm.json({
+      prompt: prompt2,
+      system: systemFor(transcript),
+      schema: CARD_SCHEMA,
+      fallback,
+      validate: validateCard,
+      label: label3,
+      maxOutputTokens: options.maxOutputTokens ?? 2048,
+      ...options.signal ? { signal: options.signal } : {}
+    }));
+    addSpend(spend, r);
+    options.onCall?.({ label: label3, usd: r.usd, ms: r.ms, parsed: r.parsed });
+    return { card: r.value, parsed: r.parsed };
+  };
+  if (chunks.length === 1) {
+    const seqs = seqRange(chunks[0]);
+    const prompt2 = [
+      transcript.kind === "ghost" ? `Write the memory card for this deleted session from its surviving prompts (${unitNoun(transcript, chunks[0].length)}, seq ${seqs}). There is no assistant side.` : `Write the memory card for this session (${unitNoun(transcript, chunks[0].length)}, seq ${seqs}).`,
+      "",
+      transcriptBlock(chunks[0], blockTag(transcript)),
+      priorBlock(options.prior)
+    ].join("\n");
+    const { card, parsed: parsed2 } = await call2(`extract ${transcript.id.slice(0, 8)}`, prompt2);
+    return { card, chunks: 1, spend, parsed: parsed2, model: llm.model };
+  }
+  const mapped = await Promise.all(chunks.map((chunk, i) => {
+    const prompt2 = [
+      `This is part ${i + 1} of ${chunks.length} of one long session (${unitNoun(transcript, chunk.length)}, seq ${seqRange(chunk)}).`,
+      "Write the card for THIS PART only. Do not guess at what the other parts contain.",
+      "The seq numbers are the whole session's, so cite them exactly as shown.",
+      "",
+      transcriptBlock(chunk, blockTag(transcript))
+    ].join("\n");
+    return call2(`extract ${transcript.id.slice(0, 8)} ${i + 1}/${chunks.length}`, prompt2);
+  }));
+  const partials = mapped.map((m) => m.card);
+  let parsed = mapped.every((m) => m.parsed);
+  const prompt = [
+    `Below are ${partials.length} partial cards, one per part of a single long session.`,
+    "Merge them into ONE card for the whole session. Keep every evidence_seq exactly as",
+    "written \u2014 they are the whole session's numbers and they are what makes the card",
+    "checkable. Drop duplicates, keep the specific phrasing over the vague one, and write",
+    "a title and summary that describe the session as a whole rather than its last part.",
+    priorBlock(options.prior),
+    "",
+    "<partial-cards>",
+    JSON.stringify(partials, null, 1),
+    "</partial-cards>"
+  ].join("\n");
+  const reduced = await call2(`reduce ${transcript.id.slice(0, 8)}`, prompt);
+  if (!reduced.parsed)
+    parsed = false;
+  return { card: reduced.card, chunks: chunks.length, spend, parsed, model: llm.model };
+}
+async function supplementCard(llm, transcript, uncoveredSeqs, card, options = {}) {
+  const spend = emptyExtractSpend();
+  const wanted = new Set(uncoveredSeqs);
+  const units = transcript.units.filter((u) => wanted.has(u.seq) && u.text.trim());
+  if (units.length === 0) {
+    return { card: minimalCard("", ""), spend, parsed: true };
+  }
+  const chunk = sliceUnits(units, { ...options, thresholdChars: 0 })[0] ?? units;
+  const noun = transcript.kind === "ghost" ? "prompts" : "exchanges";
+  const prompt = [
+    `These ${noun} are from a session that already has a card, and the card says nothing`,
+    "about them. Return a card containing ONLY what is new here: topics, decisions, open",
+    "threads, files and tags the existing card is missing. Leave title and summary empty.",
+    `If these ${noun} really contain nothing worth recording, return empty arrays.`,
+    "",
+    "<existing-card>",
+    JSON.stringify({ topics: card.topics, decisions: card.decisions.map((d) => d.what) }, null, 1),
+    "</existing-card>",
+    "",
+    transcriptBlock(chunk, blockTag(transcript))
+  ].join("\n");
+  const gate = options.gate ?? openGate;
+  const r = await gate(() => llm.json({
+    prompt,
+    system: systemFor(transcript),
+    schema: CARD_SCHEMA,
+    fallback: minimalCard("", ""),
+    // The supplement has no title and no summary by design, so the card
+    // validator — which needs one of them — would reject every good answer.
+    validate: (v) => validateCard(withPlaceholderTitle(v)),
+    label: `supplement ${transcript.id.slice(0, 8)}`,
+    maxOutputTokens: options.maxOutputTokens ?? 1536,
+    ...options.signal ? { signal: options.signal } : {}
+  }));
+  addSpend(spend, r);
+  options.onCall?.({ label: "supplement", usd: r.usd, ms: r.ms, parsed: r.parsed });
+  return { card: { ...r.value, title: "", summary: "" }, spend, parsed: r.parsed };
+}
+function withPlaceholderTitle(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return value;
+  const rec = value;
+  if (typeof rec["title"] === "string" && rec["title"].trim())
+    return value;
+  if (typeof rec["summary"] === "string" && rec["summary"].trim())
+    return value;
+  return { ...rec, title: "supplement" };
+}
+function seqRange(units) {
+  if (units.length === 0)
+    return "\u2014";
+  const first = units[0].seq;
+  const last2 = units[units.length - 1].seq;
+  return first === last2 ? String(first) : `${first}\u2013${last2}`;
+}
+
+// ../core/dist/cards/verify.js
+var EVIDENCE_COSINE = 0.6;
+var EVIDENCE_WINDOW_CHARS = 1800;
+var EVIDENCE_WINDOWS = 4;
+async function verifyCard(card, units, embed, options = {}) {
+  const threshold = options.cosine ?? EVIDENCE_COSINE;
+  const bySeq = /* @__PURE__ */ new Map();
+  for (const u of units)
+    bySeq.set(u.seq, u);
+  const drops = [];
+  const scores = [];
+  let kept = 0;
+  const check2 = async (claim2, kind) => {
+    const cited = claim2.evidence_seq;
+    const resolved = cited.filter((s) => bySeq.has(s));
+    if (cited.length === 0) {
+      drops.push({ kind, what: claim2.what, reason: "no-citation", cited, resolved, best: 0 });
+      return null;
+    }
+    if (resolved.length === 0) {
+      drops.push({ kind, what: claim2.what, reason: "unresolved-seq", cited, resolved, best: 0 });
+      return null;
+    }
+    const probe = await embed(claim2.what);
+    let best = -1;
+    const supporting = [];
+    for (const seq of resolved) {
+      const unit = bySeq.get(seq);
+      let top = -1;
+      for (const w of rankedWindows(unit.text, claim2.what, options.windowChars ?? EVIDENCE_WINDOW_CHARS, options.maxWindows ?? EVIDENCE_WINDOWS)) {
+        const c = cosine(probe, await embed(w));
+        if (c > top)
+          top = c;
+      }
+      if (top > best)
+        best = top;
+      if (top >= threshold)
+        supporting.push(seq);
+    }
+    scores.push(best);
+    if (supporting.length === 0) {
+      drops.push({ kind, what: claim2.what, reason: "no-match", cited, resolved, best });
+      return null;
+    }
+    const gated = options.claimGate?.({
+      claim: claim2,
+      kind,
+      supporting: supporting.map((s) => bySeq.get(s)),
+      best
+    });
+    if (gated) {
+      drops.push({ kind, what: claim2.what, reason: gated, cited, resolved: supporting, best });
+      return null;
+    }
+    kept += 1;
+    return { ...claim2, evidence_seq: supporting };
+  };
+  const decisions = [];
+  for (const d of card.decisions) {
+    const ok = await check2(d, "decision");
+    if (ok)
+      decisions.push(ok);
+  }
+  const threads = [];
+  for (const o of card.open_threads) {
+    const ok = await check2(o, "open_thread");
+    if (ok)
+      threads.push(ok);
+  }
+  return {
+    card: { ...card, decisions, open_threads: threads },
+    verified: { kept, dropped: drops.length },
+    drops,
+    scores
+  };
+}
+function unresolvedEvidence(card, units) {
+  const have = new Set(units.map((u) => u.seq));
+  const bad = [];
+  for (const claim2 of [...card.decisions, ...card.open_threads]) {
+    for (const seq of claim2.evidence_seq) {
+      if (!have.has(seq))
+        bad.push({ claim: claim2.what, seq });
+    }
+  }
+  return bad;
+}
+
+// ../core/dist/cards/pipeline.js
+async function cardTranscript(llm, transcript, options = {}) {
+  const started = Date.now();
+  const embedder = options.embedder ?? cachedEmbedder({
+    ...options.embed ? { embed: options.embed } : {},
+    ...options.embeddings ? { embeddings: options.embeddings } : {}
+  });
+  for (const unit of transcript.units) {
+    if (unit.embedding)
+      embedder.prime(unit.text, unit.embedding);
+  }
+  const extracted = await extractCard(llm, transcript, {
+    ...options.prior ? { prior: options.prior } : {},
+    ...options.signal ? { signal: options.signal } : {},
+    ...options.gate ? { gate: options.gate } : {}
+  });
+  options.onStep?.("extract", `${extracted.chunks} chunk(s), ${extracted.spend.calls} call(s)`);
+  let card = extracted.card;
+  const spend = { ...extracted.spend };
+  const degraded = !extracted.parsed;
+  let coverageBefore = null;
+  let coverage = null;
+  let supplemented = false;
+  if (options.coverage !== false) {
+    coverageBefore = await measureCoverage(transcript.units, card, embedder.embed);
+    coverage = coverageBefore;
+    options.onStep?.("coverage", `${coverageBefore.covered}/${coverageBefore.total} covered`);
+    if (coverageBefore.needsSupplement && coverageBefore.uncovered.length > 0) {
+      const extra = await supplementCard(llm, transcript, coverageBefore.uncovered, card, {
+        ...options.signal ? { signal: options.signal } : {},
+        ...options.gate ? { gate: options.gate } : {}
+      });
+      spend.calls += extra.spend.calls;
+      spend.inputTokens += extra.spend.inputTokens;
+      spend.outputTokens += extra.spend.outputTokens;
+      spend.usd += extra.spend.usd;
+      spend.ms += extra.spend.ms;
+      card = mergeSupplement(card, extra.card);
+      supplemented = true;
+      coverage = await measureCoverage(transcript.units, card, embedder.embed);
+      options.onStep?.("supplement", `${coverageBefore.uncovered.length} uncovered \u2192 ${coverage.uncovered.length}`);
+    }
+  }
+  const verified = await verifyCard(card, transcript.units, embedder.embed, {
+    ...options.verifyCosine !== void 0 ? { cosine: options.verifyCosine } : {},
+    ...transcript.kind === "ghost" ? { claimGate: ghostClaimGate } : {}
+  });
+  card = verified.card;
+  options.onStep?.("verify", `${verified.verified.kept} kept, ${verified.verified.dropped} dropped`);
+  const deduped = await dedupeCard(card, embedder.embed, options.dedupeCosine);
+  card = normaliseCard(deduped.card);
+  options.onStep?.("dedupe", `${deduped.report.removed} removed`);
+  if (!card.title.trim()) {
+    card = normaliseCard({ ...card, title: transcript.title ?? transcript.id.slice(0, 8) });
+  }
+  if (transcript.kind === "ghost" && card.outcome !== "unknown") {
+    card = { ...card, outcome: "unknown" };
+  }
+  const written = card.decisions.length + card.open_threads.length;
+  return {
+    transcript,
+    card,
+    chunks: extracted.chunks,
+    verified: { kept: written, dropped: verified.verified.dropped },
+    drops: verified.drops,
+    coverage,
+    coverageBefore,
+    supplemented,
+    dedupeRemoved: deduped.report.removed,
+    spend,
+    degraded,
+    model: extracted.model,
+    ms: Date.now() - started,
+    unresolved: unresolvedEvidence(card, transcript.units)
+  };
+}
+
+// ../core/dist/cards/run.js
+import fs28 from "node:fs";
+import path23 from "node:path";
+async function runCards(db, llm, options) {
+  const started = Date.now();
+  const kinds = new Set(options.kinds ?? ["session", "ghost"]);
+  const queue = options.targets.filter((t) => kinds.has(t.kind));
+  const deferred = options.targets.length - queue.length;
+  const concurrency = Math.max(1, Math.floor(options.concurrency ?? 6));
+  const report = {
+    written: 0,
+    failed: 0,
+    deferred,
+    verified: { kept: 0, dropped: 0 },
+    dropsByReason: {
+      "no-citation": 0,
+      "unresolved-seq": 0,
+      "no-match": 0,
+      "asked-not-decided": 0
+    },
+    calls: 0,
+    usd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    inputTokensEstimated: false,
+    unresolved: 0,
+    supplemented: 0,
+    degraded: 0,
+    ms: 0,
+    cards: [],
+    errors: []
+  };
+  const embedOptions = options.embeddings ?? { cacheDir: modelsDir(options.root) };
+  const embedder = cachedEmbedder({
+    ...options.embed ? { embed: options.embed } : {},
+    embeddings: embedOptions
+  });
+  const gate = makeGate(concurrency);
+  const abort = new AbortController();
+  const onOuter = () => abort.abort();
+  options.signal?.addEventListener("abort", onOuter, { once: true });
+  let next = 0;
+  let done = 0;
+  const worker = async () => {
+    for (; ; ) {
+      if (abort.signal.aborted)
+        return;
+      const index = next++;
+      if (index >= queue.length)
+        return;
+      const target = queue[index];
+      llm.budget.progress(done, queue.length);
+      options.onProgress?.({ phase: "start", target, done, total: queue.length });
+      try {
+        const transcript = loadTranscript(db, target);
+        if (!transcript || transcript.units.length === 0) {
+          report.failed += 1;
+          report.errors.push({ id: target.id, message: "no transcript rows for this session" });
+          options.onProgress?.({
+            phase: "failed",
+            target,
+            done,
+            total: queue.length,
+            detail: "no transcript rows"
+          });
+          done += 1;
+          continue;
+        }
+        const prior = target.carded ? readPriorCard(db, target.id) : null;
+        const result = await cardTranscript(llm, transcript, {
+          ...prior ? { prior } : {},
+          embedder,
+          ...options.embed ? { embed: options.embed } : {},
+          embeddings: embedOptions,
+          signal: abort.signal,
+          gate
+        });
+        const file2 = await persist(db, options, transcript, result, embedder.embed, llm.model);
+        absorb2(report, result, target, file2);
+        done += 1;
+        options.onProgress?.({
+          phase: "done",
+          target,
+          done,
+          total: queue.length,
+          detail: result.card.title,
+          usd: result.spend.usd
+        });
+      } catch (err) {
+        if (err instanceof BudgetError) {
+          report.aborted = {
+            message: err.message,
+            fix: err.fix,
+            done: err.detail.done,
+            total: err.detail.total
+          };
+          abort.abort();
+          return;
+        }
+        if (abort.signal.aborted && report.aborted)
+          return;
+        const message2 = err instanceof Error ? err.message : String(err);
+        report.failed += 1;
+        report.errors.push({ id: target.id, message: message2 });
+        writeSentinel(options.root, target, err);
+        done += 1;
+        options.onProgress?.({ phase: "failed", target, done, total: queue.length, detail: message2 });
+      }
+    }
+  };
+  try {
+    const workers = Math.min(concurrency * 2, queue.length);
+    await Promise.all(Array.from({ length: workers }, worker));
+  } finally {
+    options.signal?.removeEventListener("abort", onOuter);
+  }
+  const spend = llm.spend;
+  report.calls = spend.calls;
+  report.usd = spend.usd;
+  report.inputTokens = spend.inputTokens;
+  report.outputTokens = spend.outputTokens;
+  report.inputTokensEstimated = spend.estimatedInputCalls > 0;
+  report.ms = Date.now() - started;
+  report.cards.sort((a, b) => b.dropped - a.dropped || a.id.localeCompare(b.id));
+  return report;
+}
+function loadTranscript(db, target) {
+  if (target.kind === "ghost")
+    return loadGhostTranscript(db, target.id);
+  return loadSessionTranscript(db, target.id);
+}
+async function persist(db, options, transcript, result, embed, model) {
+  const text = cardEmbeddingText(result.card);
+  let embedding;
+  try {
+    embedding = text.trim() ? await embed(text) : void 0;
+  } catch {
+    embedding = void 0;
+  }
+  const record2 = {
+    sessionId: transcript.id,
+    harness: transcript.harness,
+    projectSlug: transcript.projectSlug,
+    project: transcript.project,
+    card: result.card,
+    verified: result.verified,
+    model: result.model || model,
+    costUsd: result.spend.usd,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    source: sourceOf(transcript),
+    ...result.degraded ? { degraded: true } : {},
+    ...result.coverage ? { coverage: 1 - result.coverage.fraction } : {}
+  };
+  return writeCard(db, options.root, record2, embedding);
+}
+function sourceOf(transcript) {
+  return transcript.kind === "ghost" ? PROMPTS_ONLY : "transcript";
+}
+function absorb2(report, result, target, file2) {
+  report.written += 1;
+  report.verified.kept += result.verified.kept;
+  report.verified.dropped += result.verified.dropped;
+  for (const d of result.drops)
+    report.dropsByReason[d.reason] += 1;
+  report.unresolved += result.unresolved.length;
+  if (result.supplemented)
+    report.supplemented += 1;
+  if (result.degraded)
+    report.degraded += 1;
+  report.cards.push({
+    id: target.id,
+    kind: target.kind,
+    title: result.card.title,
+    outcome: result.card.outcome,
+    source: sourceOf(result.transcript),
+    decisions: result.card.decisions.length,
+    openThreads: result.card.open_threads.length,
+    kept: result.verified.kept,
+    dropped: result.verified.dropped,
+    coverage: result.coverage ? 1 - result.coverage.fraction : null,
+    supplemented: result.supplemented,
+    degraded: result.degraded,
+    calls: result.spend.calls,
+    usd: result.spend.usd,
+    ms: result.ms,
+    path: file2
+  });
+}
+function writeSentinel(root, target, error51) {
+  try {
+    const file2 = cardPath(root, target.harness, projectSlugOf(target), target.id);
+    fs28.mkdirSync(path23.dirname(file2), { recursive: true });
+    fs28.writeFileSync(file2, formatErrorSentinel(error51), { mode: 384 });
+  } catch {
+  }
+}
+function projectSlugOf(target) {
+  return target.projectSlug;
+}
+
+// ../core/dist/render/card-run.js
+function renderCardRun(report, t = new Theme(), o = {}) {
+  const card = new Card(t);
+  const chargeable = o.chargeable ?? true;
+  card.heading("card", ...o.root ? [tildify(o.root)] : [], date5(o.ranAt ?? /* @__PURE__ */ new Date())).blank();
+  if (report.aborted) {
+    card.rows([
+      { label: "cards written", value: num(report.written), note: `of ${num(report.aborted.total)} in scope` },
+      { label: chargeable ? "cost" : "equivalent cost", value: money(report.usd), tone: "dim", note: "before the ceiling stopped it" }
+    ]);
+    card.blank();
+    card.text(report.aborted.message, "warn");
+    card.blank();
+    card.fix(report.aborted.fix, "to carry on from where it stopped.", "to carry on.");
+    return card.toString();
+  }
+  if (report.written === 0 && report.failed === 0) {
+    card.text("nothing was carded.").blank();
+    card.fix("potsherd card --dry-run --all", "to see what is in scope.", "to see the scope.");
+    return card.toString();
+  }
+  const overTime = report.ms / 1e3 > TARGET_SECONDS;
+  const overMoney = report.usd > TARGET_USD;
+  card.rows([
+    {
+      label: "cards written",
+      value: num(report.written),
+      note: [
+        report.failed ? `${num(report.failed)} failed` : "",
+        report.deferred ? `${num(report.deferred)} ghosts deferred to T2.3` : "",
+        report.supplemented ? `${num(report.supplemented)} supplemented` : ""
+      ].filter(Boolean).join(` ${t.sep} `) || "every session in scope"
+    },
+    {
+      label: "claims kept",
+      value: num(report.verified.kept),
+      // "the cards hold", not "verify passed": dedupe runs after verify, so
+      // the two numbers differ and only one of them is on disk (T2.7 D7).
+      note: "decisions and open threads the cards hold"
+    },
+    {
+      label: "claims dropped",
+      value: num(report.verified.dropped),
+      tone: report.verified.dropped === 0 ? "warn" : "accent",
+      note: report.verified.dropped === 0 ? "nothing was filtered \u2014 check the verify step ran" : dropNote(report, t)
+    },
+    ...report.unresolved ? [
+      {
+        label: "unresolved seq",
+        value: num(report.unresolved),
+        tone: "warn",
+        note: "cards citing exchanges that do not exist \u2014 this is a bug"
+      }
+    ] : [],
+    ...report.degraded ? [
+      {
+        label: "minimal cards",
+        value: num(report.degraded),
+        tone: "warn",
+        note: "the model never returned valid json; title and summary only"
+      }
+    ] : []
+  ]);
+  card.blank();
+  card.rows([
+    {
+      label: "model calls",
+      value: num(report.calls),
+      note: `${o.model ?? "haiku"} ${t.sep} ${o.backendNote ?? "agent-sdk"}`
+    },
+    {
+      label: "wall time",
+      value: duration3(report.ms),
+      tone: overTime ? "warn" : chargeable ? "none" : "accent",
+      note: overTime ? `over the ${duration3(TARGET_SECONDS * 1e3)} target${o.concurrency ? ` at concurrency ${o.concurrency}` : ""}` : `target ${duration3(TARGET_SECONDS * 1e3)}${o.concurrency ? ` ${t.sep} concurrency ${o.concurrency}` : ""}`
+    },
+    {
+      label: chargeable ? "cost" : "equivalent cost",
+      value: money(report.usd),
+      tone: chargeable ? overMoney ? "warn" : "accent" : "dim",
+      note: chargeable ? overMoney ? `over the ${money(TARGET_USD)} target` : `target ${money(TARGET_USD)}` : `$0 charged ${t.sep} what this would have cost on an api key`
+    },
+    {
+      label: "input tokens",
+      value: compact(report.inputTokens),
+      tone: "dim",
+      // The agent sdk's `usage.input_tokens` excludes cache tokens, so it
+      // reported 1,980 for a 198-call run. When it is not believable the
+      // number here is ours, and the note says so rather than letting an
+      // estimate pass for a measurement (T2.6).
+      note: report.inputTokensEstimated ? `est. ${t.sep} chars ${t.g("\xF7", "/")} 3.6, not counted by the sdk` : `measured ${t.sep} reported by the backend`
+    },
+    ...o.predicted ? [
+      {
+        label: "the estimate said",
+        value: duration3(o.predicted.seconds * 1e3),
+        tone: "dim",
+        note: accuracyShort({
+          predictedSeconds: o.predicted.seconds,
+          actualSeconds: report.ms / 1e3,
+          predictedUsd: o.predicted.usd,
+          actualUsd: report.usd
+        })
+      }
+    ] : []
+  ]);
+  const show = o.show ?? 6;
+  const listed = report.cards.slice(0, show);
+  if (listed.length > 0) {
+    card.blank();
+    card.text(listed.length < report.cards.length ? `${listed.length} of ${report.cards.length} cards, most-filtered first:` : "the cards:");
+    card.blank();
+    for (const line of table(t, listed.map((c) => [
+      c.title || c.id.slice(0, 8),
+      c.outcome,
+      `${c.decisions}d ${c.openThreads}o`,
+      c.dropped ? `-${c.dropped}` : t.g("\xB7", "."),
+      c.coverage === null ? t.g("\xB7", ".") : `${Math.round(c.coverage * 100)}%`
+    ]), { grow: 0, align: ["left", "left", "right", "right", "right"] })) {
+      card.raw(line);
+    }
+  }
+  if (report.errors.length > 0) {
+    card.blank();
+    card.text(`${num(report.errors.length)} failed:`, "warn");
+    for (const e of report.errors.slice(0, 3)) {
+      card.text(`  ${e.id.slice(0, 8)}  ${clip(e.message, Math.max(20, t.width - 16), t)}`, "dim");
+    }
+  }
+  card.blank();
+  card.fix("potsherd ls", "to read them as titles instead of uuids.", "to read them.");
+  return card.toString();
+}
+function dropNote(report, t) {
+  const parts = [
+    report.dropsByReason["no-match"] ? `${report.dropsByReason["no-match"]} unsupported` : "",
+    report.dropsByReason["unresolved-seq"] ? `${report.dropsByReason["unresolved-seq"]} bad seq` : "",
+    report.dropsByReason["no-citation"] ? `${report.dropsByReason["no-citation"]} uncited` : "",
+    // Ghosts only, and worth its own word: these claims *were* in the prompts.
+    // They were dropped because the prompt asked about the choice instead of
+    // making it (`cards/ghost.ts`).
+    report.dropsByReason["asked-not-decided"] ? `${report.dropsByReason["asked-not-decided"]} asked, not decided` : ""
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(` ${t.sep} `) : "no evidence in the cited exchanges";
+}
 
 // ../core/dist/open-threads.js
+var OPEN_THREAD_LABEL = "possible open thread";
 var MENTION_COSINE = 0.35;
 var MIN_ANCHOR_TOKENS = 2;
 var MIN_PROJECT_OVERLAP = 3;
@@ -32319,9 +38915,9 @@ function parseClaims(raw) {
     const what = typeof rec["what"] === "string" ? rec["what"].trim() : "";
     if (!what)
       continue;
-    const why = typeof rec["why"] === "string" ? rec["why"].trim() : "";
-    const seqs = Array.isArray(rec["evidence_seq"]) ? rec["evidence_seq"].filter((n) => Number.isInteger(n) && n >= 0) : [];
-    out.push({ what, why, seqs: [...seqs].sort((x, y) => x - y) });
+    const why2 = typeof rec["why"] === "string" ? rec["why"].trim() : "";
+    const seqs = Array.isArray(rec["evidence_seq"]) ? rec["evidence_seq"].filter((n2) => Number.isInteger(n2) && n2 >= 0) : [];
+    out.push({ what, why: why2, seqs: [...seqs].sort((x, y) => x - y) });
   }
   return out;
 }
@@ -32349,19 +38945,19 @@ function genericTokens(rows) {
   if (rows.length < GENERIC_DF_MIN_CARDS)
     return generic;
   const df = /* @__PURE__ */ new Map();
-  for (const row of rows) {
+  for (const row2 of rows) {
     const here = /* @__PURE__ */ new Set();
-    for (const t of parseStrings(row.topics))
+    for (const t of parseStrings(row2.topics))
       for (const tok of contentTokens(t))
         here.add(tok);
-    for (const f of parseStrings(row.files))
+    for (const f of parseStrings(row2.files))
       for (const tok of pathTokens(f, /* @__PURE__ */ new Set()))
         here.add(tok);
     for (const tok of here)
       df.set(tok, (df.get(tok) ?? 0) + 1);
   }
-  for (const [tok, n] of df)
-    if (n / rows.length > GENERIC_DF)
+  for (const [tok, n2] of df)
+    if (n2 / rows.length > GENERIC_DF)
       generic.add(tok);
   return generic;
 }
@@ -32369,14 +38965,14 @@ function loadCards(db) {
   const rows = db.prepare(CARDS_SQL).all();
   const generic = genericTokens(rows);
   const out = [];
-  for (const row of rows) {
-    const project = (row.project ?? "").trim();
+  for (const row2 of rows) {
+    const project = (row2.project ?? "").trim();
     if (!project)
       continue;
-    const topics = parseStrings(row.topics);
-    const files = parseStrings(row.files);
-    const decisions = parseClaims(row.decisions);
-    const threads = parseClaims(row.open_threads);
+    const topics = parseStrings(row2.topics);
+    const files = parseStrings(row2.files);
+    const decisions = parseClaims(row2.decisions);
+    const threads = parseClaims(row2.open_threads);
     const tokens = /* @__PURE__ */ new Set();
     for (const t of topics)
       for (const tok of contentTokens(t, generic))
@@ -32385,12 +38981,12 @@ function loadCards(db) {
       for (const tok of pathTokens(f, generic))
         tokens.add(tok);
     out.push({
-      sessionId: row.session_id,
+      sessionId: row2.session_id,
       project,
-      ts: row.ts ?? "",
+      ts: row2.ts ?? "",
       // `cards/write.ts` stamps `prompts-only` for a ghost; anything else had
       // an assistant side.
-      ghost: row.source !== "transcript",
+      ghost: row2.source !== "transcript",
       topics,
       files,
       decisions,
@@ -32461,11 +39057,11 @@ function openThreadCandidates(db, sessionIds, o = {}) {
         const seqs = [];
         let ts = a.ts;
         for (const s of d.seqs) {
-          const row = seqExists2.get(sessionId, s);
-          if (!row)
+          const row2 = seqExists2.get(sessionId, s);
+          if (!row2)
             continue;
-          if (seqs.length === 0 && row.ts)
-            ts = row.ts;
+          if (seqs.length === 0 && row2.ts)
+            ts = row2.ts;
           seqs.push(s);
         }
         if (seqs.length === 0)
@@ -32722,6 +39318,9 @@ function matchSpan(quote, text) {
   const end = hay.to[at + q.text.length - 1];
   return { start, end };
 }
+function quoteOccursIn(quote, text) {
+  return matchSpan(quote, text) !== null;
+}
 function quotableText(unitText2) {
   return unitText2.replace(/^user:[ \t]*/, "").replace(/\n\nassistant:[ \t]*/, "\n");
 }
@@ -32729,22 +39328,22 @@ var ELIDED_MIDDLE = /characters elided\]/;
 function wordCount(text) {
   return text.trim() === "" ? 0 : text.trim().split(/\s+/).length;
 }
-function trimToWordBudget(sentences, maxWords = ANSWER_MAX_WORDS) {
+function trimToWordBudget(sentences2, maxWords = ANSWER_MAX_WORDS) {
   const kept = [];
   const trimmed = [];
   let words = 0;
-  for (const s of sentences) {
+  for (const s of sentences2) {
     if (trimmed.length > 0) {
       trimmed.push(s.text);
       continue;
     }
-    const n = wordCount(s.text);
-    if (kept.length > 0 && words + n > maxWords) {
+    const n2 = wordCount(s.text);
+    if (kept.length > 0 && words + n2 > maxWords) {
       trimmed.push(s.text);
       continue;
     }
     kept.push(s);
-    words += n;
+    words += n2;
   }
   return { kept, trimmed };
 }
@@ -32784,12 +39383,12 @@ function filterAnswer(proposedSentences, proposedEvidence, sources) {
       continue;
     }
     const body = quotableText(unit.text);
-    const span2 = matchSpan(p.quote, body);
-    if (!span2) {
+    const span3 = matchSpan(p.quote, body);
+    if (!span3) {
       note("not-a-quote");
       continue;
     }
-    const exact = body.slice(span2.start, span2.end);
+    const exact = body.slice(span3.start, span3.end);
     if (ELIDED_MIDDLE.test(exact)) {
       note("not-a-quote");
       continue;
@@ -32856,19 +39455,19 @@ function filterAnswer(proposedSentences, proposedEvidence, sources) {
     remap.set(oldIndex, i + 1);
     return { ...survivors.get(oldIndex), index: i + 1 };
   });
-  const sentences = within.map((s) => ({
+  const sentences2 = within.map((s) => ({
     text: s.text,
     cites: dedupe(s.cites.map((c) => remap.get(c))).sort((a, b) => a - b)
   }));
-  return { sentences, dropped, trimmed: budget.trimmed, evidence, drops };
+  return { sentences: sentences2, dropped, trimmed: budget.trimmed, evidence, drops };
 }
 function dedupe(ns) {
   const seen = /* @__PURE__ */ new Set();
   const out = [];
-  for (const n of ns) {
-    if (Number.isInteger(n) && !seen.has(n)) {
-      seen.add(n);
-      out.push(n);
+  for (const n2 of ns) {
+    if (Number.isInteger(n2) && !seen.has(n2)) {
+      seen.add(n2);
+      out.push(n2);
     }
   }
   return out;
@@ -32944,14 +39543,14 @@ var SpendMeter = class {
       ms: 0,
       estimatedInputCalls: 0
     };
-    for (const [budget, base] of this.bases) {
+    for (const [budget, base2] of this.bases) {
       const now = budget.spend;
-      out.calls += now.calls - base.calls;
-      out.inputTokens += now.inputTokens - base.inputTokens;
-      out.outputTokens += now.outputTokens - base.outputTokens;
-      out.usd += now.usd - base.usd;
-      out.ms += now.ms - base.ms;
-      out.estimatedInputCalls += now.estimatedInputCalls - base.estimatedInputCalls;
+      out.calls += now.calls - base2.calls;
+      out.inputTokens += now.inputTokens - base2.inputTokens;
+      out.outputTokens += now.outputTokens - base2.outputTokens;
+      out.usd += now.usd - base2.usd;
+      out.ms += now.ms - base2.ms;
+      out.estimatedInputCalls += now.estimatedInputCalls - base2.estimatedInputCalls;
     }
     return out;
   }
@@ -33046,12 +39645,12 @@ async function ask(db, question, o = {}) {
       }
     })));
     const answered = outputs.map((out, i) => ({ out, t: targets[i] })).filter((x) => Boolean(x.out?.found));
-    const base = (extra) => empty({ searched: targets.length, readers: readers.filter(Boolean), ...extra });
+    const base2 = (extra) => empty({ searched: targets.length, readers: readers.filter(Boolean), ...extra });
     if (answered.length === 0) {
-      return base({ refused: strict, refusal: strict ? "no-answer" : null });
+      return base2({ refused: strict, refusal: strict ? "no-answer" : null });
     }
     if (meter.total.usd >= maxUsd) {
-      return base({ refused: true, refusal: "budget" });
+      return base2({ refused: true, refusal: "budget" });
     }
     o.onProgress?.({ step: "synthesize", done: 0, total: 1, spend: meter.total });
     const ownSynth = o.llm ?? openLlm(o.model ?? (cheap ? ASK_CHEAP_MODEL : ASK_MODEL), budget, o);
@@ -33062,7 +39661,7 @@ async function ask(db, question, o = {}) {
     } catch (err) {
       if (!(err instanceof BudgetError))
         throw err;
-      return base({ refused: true, refusal: "budget" });
+      return base2({ refused: true, refusal: "budget" });
     } finally {
       if (!o.llm)
         await ownSynth.close().catch(() => {
@@ -33083,11 +39682,11 @@ async function ask(db, question, o = {}) {
         spend: meter.total
       });
     }
-    const sentences = refused ? [] : filtered.sentences;
+    const sentences2 = refused ? [] : filtered.sentences;
     return {
       question: q,
-      answer: sentences.map((s) => s.text).join(" "),
-      sentences,
+      answer: sentences2.map((s) => s.text).join(" "),
+      sentences: sentences2,
       dropped: filtered.dropped,
       trimmed: refused ? [] : filtered.trimmed,
       evidence: refused ? [] : filtered.evidence,
@@ -33369,10 +39968,295 @@ async function tryOpenThreads(db, targets, llm, budget, o) {
   }
 }
 
+// ../core/dist/render/ask.js
+var QUOTE_CHARS = 90;
+function readerLine(r, done, total, t = new Theme(), spend) {
+  const verdict = (r.error ? "failed" : r.found ? "found" : "nothing").padEnd(7);
+  const counter = `${String(done).padStart(String(total).length)}/${total}`;
+  const sep = ` ${t.sep} `;
+  const colon = r.sessionId.lastIndexOf(":");
+  const id = (colon === -1 ? r.id8 : `${r.sessionId.slice(0, 8)}${t.g("\u21B3", ">")}${r.id8}`).padEnd(11);
+  const took = duration3(r.ms).padStart(6);
+  const cost = spend ? `${money(spend.usd)}${spend.estimated ? " est." : ""}` : "";
+  const head = `reader ${counter}${sep}${id}${sep}${verdict}${sep}${took}`;
+  const room = t.width - INDENT.length;
+  const withCost = cost && head.length + sep.length + cost.length <= room;
+  const plain = withCost ? `${head}${sep}${cost}` : head;
+  if (plain.length > room)
+    return t.asciiLine(INDENT + clip(plain, room, t));
+  const paint = r.error ? t.warn : r.found ? t.ok : t.dim;
+  const coloured = t.dim(`reader ${counter}`) + t.dim(sep) + id + t.dim(sep) + paint.call(t, verdict) + t.dim(sep) + t.dim(took) + (withCost ? t.dim(sep) + t.dim(cost) : "");
+  return t.asciiLine(INDENT + coloured);
+}
+function cheapNote(r, t) {
+  const read = `${num(r.searched || r.matching)} ${plural(r.searched || r.matching, "session")}`;
+  const room = t.width - INDENT.length;
+  const warn = `${read}, and it can miss`;
+  const full = `--cheap ${t.sep} about half the cost, not faster ${t.sep} ${warn}`;
+  const mid = `--cheap ${t.sep} ${warn}`;
+  const bare = `--cheap ${t.sep} it can miss`;
+  const line = full.length <= room ? full : mid.length <= room ? mid : bare;
+  return INDENT + t.dim(clip(line, room, t));
+}
+var ASK_ROWS = 24;
+var ASK_MIN_ANSWER_LINES = 3;
+function renderAsk(r, t = new Theme(), now = /* @__PURE__ */ new Date(), opts = {}) {
+  const lines = [];
+  const width = t.width - INDENT.length;
+  if (r.refused) {
+    lines.push(t.dim(headline3(r, t)));
+    lines.push("");
+    lines.push(...refusal(r, t));
+    lines.push(...footer2(r, t, opts, null));
+    return lines.join("\n");
+  }
+  if (r.sentences.length === 0) {
+    lines.push(t.dim(headline3(r, t)));
+    lines.push("");
+    lines.push(...nothing(r, t));
+    lines.push(...footer2(r, t, opts, null));
+    return lines.join("\n");
+  }
+  const b = fit(r, t, now, opts);
+  lines.push(t.dim(headline3(r, t)));
+  lines.push("");
+  lines.push("ANSWER");
+  for (const line of wrap(answerText(b.sentences, t), width))
+    lines.push(INDENT + line);
+  lines.push("");
+  lines.push("EVIDENCE");
+  for (const e of b.evidence)
+    lines.push(...evidenceLine(e, t, now));
+  lines.push("");
+  if (b.threads.length > 0) {
+    lines.push("OPEN THREADS");
+    for (const o of b.threads)
+      lines.push(...threadLines(o, t, now, b.notes));
+    lines.push("");
+  }
+  lines.push(...footer2(r, t, opts, b));
+  return lines.join("\n");
+}
+function fit(r, t, now, opts) {
+  const rows = opts.rows ?? ASK_ROWS;
+  const width = t.width - INDENT.length;
+  let sentences2 = [...r.sentences];
+  let threads = [...r.openThreads];
+  let trimmedHere = 0;
+  let notes = true;
+  const evidenceFor = (kept) => {
+    const cited = new Set(kept.flatMap((s) => s.cites));
+    return r.evidence.filter((e) => cited.has(e.index));
+  };
+  const height = (kept, ev, th, held, cut2, withNotes) => {
+    let n2 = 2;
+    n2 += 1 + wrap(answerText(kept, t), width).length + 1;
+    n2 += 1 + ev.reduce((a, e) => a + evidenceLine(e, t, now).length, 0) + 1;
+    if (th.length > 0)
+      n2 += 1 + th.reduce((a, o) => a + threadLines(o, t, now, withNotes).length, 0) + 1;
+    n2 += footer2(r, t, opts, {
+      sentences: kept,
+      evidence: ev,
+      threads: th,
+      trimmedHere: cut2,
+      threadsHeld: held,
+      notes: withNotes,
+      over: false
+    }).length;
+    return n2;
+  };
+  const budget = () => ({
+    sentences: sentences2,
+    evidence: evidenceFor(sentences2),
+    threads,
+    trimmedHere,
+    threadsHeld: r.openThreads.length - threads.length,
+    notes,
+    over: false
+  });
+  if (rows <= 0)
+    return budget();
+  const tooTall = () => {
+    const b2 = budget();
+    return height(b2.sentences, b2.evidence, b2.threads, b2.threadsHeld, b2.trimmedHere, b2.notes) > rows;
+  };
+  if (tooTall())
+    notes = false;
+  while (tooTall() && threads.length > 1)
+    threads = threads.slice(0, -1);
+  while (tooTall() && sentences2.length > 1) {
+    const candidate = sentences2.slice(0, -1);
+    if (wrap(answerText(candidate, t), width).length < ASK_MIN_ANSWER_LINES)
+      break;
+    sentences2 = candidate;
+    trimmedHere += 1;
+  }
+  while (tooTall() && threads.length > 0)
+    threads = threads.slice(0, -1);
+  const b = budget();
+  b.over = height(b.sentences, b.evidence, b.threads, b.threadsHeld, b.trimmedHere, b.notes) > rows;
+  return b;
+}
+function headline3(r, t) {
+  const parts = [`potsherd ask ${JSON.stringify(r.question)}`];
+  return clip(parts.join(` ${t.sep} `), t.width, t);
+}
+function counts(r, t) {
+  const answered = r.readers.filter((x) => x.found).length;
+  const parts = [
+    `${num(r.searched)} of ${num(r.matching)} ${plural(r.matching, "session")} read`,
+    `${num(answered)} answered`,
+    duration3(r.ms)
+  ];
+  if (r.spend.calls > 0) {
+    parts.push(`${money(r.spend.usd)}${r.estimated ? " est." : ""}`);
+  }
+  return clip(INDENT + parts.join(` ${t.sep} `), t.width, t);
+}
+function answerText(sentences2, t) {
+  return sentences2.map((s) => `${s.text} ${s.cites.map((c) => t.accent(`[${c}]`)).join("")}`).join(" ");
+}
+function evidenceLine(e, t, now) {
+  const label3 = `[${e.index}]`;
+  const where = `${e.project}/${e.id8}`;
+  const when2 = e.ts ? shortDateTime(e.ts, now) : t.dash;
+  const marks = [];
+  if (e.isGhost)
+    marks.push("ghost");
+  if (e.isSidechain)
+    marks.push("subagent");
+  const head = `${label3} ${where}  ${when2}${marks.length ? `  ${marks.join(" ")}` : ""}`;
+  const room = t.width - Theme.len(head) - 6;
+  const quote = clipQuote(e.quote, Math.min(QUOTE_CHARS, room), t);
+  if (room >= 32) {
+    return [INDENT + head + "  " + t.dim(`"${quote}"`)];
+  }
+  const wide = clipQuote(e.quote, Math.min(QUOTE_CHARS, t.width - INDENT.length - 6), t);
+  return [INDENT + head, INDENT + "    " + t.dim(`"${wide}"`)];
+}
+function threadLines(o, t, now, notes = true) {
+  const width = t.width - INDENT.length;
+  const head = `${t.warn(OPEN_THREAD_LABEL)} ${t.sep} decided in ${projectName(o.project)}, not seen in ${projectName(o.otherProject)}`;
+  const out = [INDENT + clip(head, t.width, t)];
+  for (const line of wrap(o.what, width - 4))
+    out.push(INDENT + "    " + line);
+  const seqs = o.evidenceSeqs.length ? `@${o.evidenceSeqs.join(",")}` : "";
+  const src = `${projectName(o.project)}/${o.id8}${seqs}  ${o.ts ? shortDateTime(o.ts, now) : t.dash}`;
+  out.push(INDENT + "    " + t.dim(clip(src, width - 4, t)));
+  const note = o.note.trim();
+  if (notes && note)
+    out.push(INDENT + "    " + t.dim(clip(note, width - 4, t)));
+  return out;
+}
+function refusal(r, t) {
+  const out = [
+    INDENT + clip(`no grounded answer in ${num(r.searched)} ${plural(r.searched, "session")} searched`, t.width - 2, t),
+    ""
+  ];
+  const answered = r.readers.filter((x) => x.found).length;
+  out.push(INDENT + t.dim(clip(why(r, answered, t), t.width - 2, t)));
+  if (r.refusal === "budget") {
+    out.push(INDENT + t.dim(clip("raise --max-usd to let the synthesizer run, or lower --k", t.width - 2, t)));
+  }
+  out.push("");
+  return out;
+}
+function why(r, answered, t) {
+  switch (r.refusal) {
+    case "budget":
+      return `stopped at the cost ceiling ${t.sep} the readers alone spent ${money(r.spend.usd)}${r.estimated ? " est." : ""} and the synthesizer never ran.`;
+    case "no-match":
+      return "nothing in the index matches the question.";
+    case "no-answer":
+      return "no session read addressed the question.";
+    case "strict":
+      return answered === 0 ? "no session read addressed the question." : `${num(answered)} ${plural(answered, "session")} answered, and fewer than ${STRICT_MIN_EVIDENCE} quotes survived the citation check.`;
+    default:
+      return "nothing survived the citation check.";
+  }
+}
+function nothing(r, t) {
+  const out = [];
+  if (r.searched === 0) {
+    out.push(INDENT + clip(`nothing in the index matches ${JSON.stringify(r.question)}.`, t.width - 2, t));
+    out.push("");
+    out.push(INDENT + t.dim("run") + "  potsherd find  " + t.dim("to check the shortlist, or  potsherd index"));
+    out.push("");
+    return out;
+  }
+  out.push(INDENT + clip(`no grounded answer in ${num(r.searched)} ${plural(r.searched, "session")} searched`, t.width - 2, t));
+  out.push("");
+  const failed = r.readers.filter((x) => x.error);
+  const allFailed = r.readers.length > 0 && failed.length === r.readers.length;
+  out.push(INDENT + t.dim(allFailed ? `no reader could run, so nothing was read: ${clip(failed[0]?.error ?? "the backend did not answer", t.width - 30, t)}` : r.dropped.length > 0 ? `every sentence was dropped for want of a citation that resolves (${num(r.dropped.length)}).` : "the readers found nothing that answers the question."));
+  out.push("");
+  return out;
+}
+function footer2(r, t, opts, b) {
+  const out = [];
+  out.push(counts(r, t));
+  if (r.cheap)
+    out.push(cheapNote(r, t));
+  if (r.dropped.length > 0 && r.sentences.length > 0) {
+    out.push(INDENT + t.dim(`${num(r.dropped.length)} ${plural(r.dropped.length, "sentence")} dropped ${t.sep} no citation that resolves`));
+  }
+  const trimmed = r.trimmed.length + (b?.trimmedHere ?? 0);
+  if (trimmed > 0) {
+    const rule = b && b.trimmedHere > 0 ? `answer held to the ${num(opts.rows ?? ASK_ROWS)}-row screen` : `answer held to ${num(ANSWER_MAX_WORDS)} words`;
+    out.push(INDENT + t.dim(`${num(trimmed)} ${plural(trimmed, "sentence")} trimmed ${t.sep} ${rule}`));
+  }
+  if (b && b.threadsHeld > 0) {
+    out.push(INDENT + t.dim(`${num(b.threadsHeld)} more open ${plural(b.threadsHeld, "thread")} ${t.sep} --json for all`));
+  }
+  const failed = r.readers.filter((x) => x.error).length;
+  if (failed > 0) {
+    out.push(INDENT + t.dim(`${num(failed)} ${plural(failed, "reader")} did not answer ${t.sep} not counted as searched`));
+  }
+  if (r.matching > r.searched) {
+    const unread = r.matching - r.searched;
+    out.push(INDENT + t.dim(`${num(unread)} matching ${plural(unread, "session")} not read ${t.sep} raise --k to widen`));
+  }
+  const next = opts.next ?? (r.evidence[0] ? `potsherd graft ${r.evidence[0].id8}` : null);
+  if (next) {
+    const gloss = opts.next ? "" : "  to carry it into the agent you are in";
+    const line = INDENT + "run  " + next + gloss;
+    out.push(Theme.len(line) <= t.width ? INDENT + t.dim("run") + "  " + next + t.dim(gloss) : INDENT + t.dim("run") + "  " + clip(next, t.width - INDENT.length - 5, t));
+  }
+  return out;
+}
+function clipQuote(s, max2, t = new Theme()) {
+  const ellip = typeof t === "string" ? t : t.ellip;
+  const flat = s.replace(/\s+/g, " ").trim();
+  const limit = Math.max(1, Math.floor(max2));
+  if (flat.length <= limit)
+    return flat;
+  if (limit <= ellip.length)
+    return ellip.slice(0, limit);
+  const cut2 = maskSafeCut(flat, limit - ellip.length);
+  return flat.slice(0, cut2).trimEnd() + ellip;
+}
+function maskSafeCut(s, want) {
+  if (want <= 0)
+    return 0;
+  for (const re of [MASK_RE, ELISION_RE]) {
+    const rx = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    let m;
+    while ((m = rx.exec(s)) !== null) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (want > start && want < end)
+        return start;
+      if (start >= want)
+        break;
+    }
+  }
+  return want;
+}
+
 // ../core/dist/graft.js
-import fs17 from "node:fs";
-import path17 from "node:path";
-import process9 from "node:process";
+import fs29 from "node:fs";
+import path24 from "node:path";
+import process12 from "node:process";
 import { spawnSync } from "node:child_process";
 var DEFAULT_BUDGET = 1200;
 var ABOUT_K = 6;
@@ -33390,15 +40274,15 @@ function expandCitationGroups(line) {
   });
 }
 function sourceLine(o) {
-  const n = o.exchanges;
+  const n2 = o.exchanges;
   const noun = o.isGhost ? "prompt" : "exchange";
-  return `source: ${o.harness} ${o.sessionId} \xB7 ${n} ${noun}${n === 1 ? "" : "s"} \xB7 ${o.date}`;
+  return `source: ${o.harness} ${o.sessionId} \xB7 ${n2} ${noun}${n2 === 1 ? "" : "s"} \xB7 ${o.date}`;
 }
 async function countTokens(text, o = {}) {
   const fallback = { tokens: tokensForText(text), estimated: true };
   if (o.backend !== "api")
     return fallback;
-  const env = o.env ?? process9.env;
+  const env = o.env ?? process12.env;
   const apiKey = env["ANTHROPIC_API_KEY"];
   if (!apiKey)
     return fallback;
@@ -33409,9 +40293,9 @@ async function countTokens(text, o = {}) {
       model: o.model ?? "claude-haiku-4-5",
       messages: [{ role: "user", content: text }]
     });
-    const n = counted.input_tokens;
-    if (typeof n === "number" && n > 0)
-      return { tokens: n, estimated: false };
+    const n2 = counted.input_tokens;
+    if (typeof n2 === "number" && n2 > 0)
+      return { tokens: n2, estimated: false };
     return fallback;
   } catch {
     return fallback;
@@ -33552,11 +40436,11 @@ function citationResolves(db, id8, seq, expected) {
     return seqExists(db, expected, seq);
   }
   const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
-  const row = db.prepare(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\'
+  const row2 = db.prepare(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\'
        UNION ALL
        SELECT session_id AS id FROM ghosts WHERE session_id LIKE ? ESCAPE '\\'
        LIMIT 8`).all(`${escaped}%`, `${escaped}%`);
-  return row.some((r) => seqExists(db, r.id, seq));
+  return row2.some((r) => seqExists(db, r.id, seq));
 }
 function seqExists(db, sessionId, seq) {
   const ex = db.prepare("SELECT 1 AS ok FROM exchanges WHERE session_id = ? AND seq = ? LIMIT 1").get(sessionId, seq);
@@ -33803,25 +40687,26 @@ function cardOnlyBody(src) {
   }
   return out;
 }
-function graftDir(cwd = process9.cwd()) {
-  return path17.join(cwd, ".potsherd");
+function graftDir(cwd = process12.cwd()) {
+  return path24.join(cwd, ".potsherd");
 }
-function graftPath(id8, cwd = process9.cwd()) {
-  return path17.join(graftDir(cwd), `graft-${id8}.md`);
+function graftPath(id8, cwd = process12.cwd()) {
+  return path24.join(graftDir(cwd), `graft-${id8}.md`);
 }
+var GRAFT_WRITE_PATH_NOTE = "./.potsherd/graft-<id8>.md  (the current directory, when you run graft)";
 var GITIGNORE_BODY = [
   "# written by `potsherd graft`. these are briefs cut from your own past",
   "# sessions; they are yours, but they are not source, so they are ignored.",
   "*",
   ""
 ].join("\n");
-function ensureGraftDir(cwd = process9.cwd()) {
+function ensureGraftDir(cwd = process12.cwd()) {
   const dir = graftDir(cwd);
-  fs17.mkdirSync(dir, { recursive: true });
-  const ignore = path17.join(dir, ".gitignore");
-  if (fs17.existsSync(ignore))
+  fs29.mkdirSync(dir, { recursive: true });
+  const ignore = path24.join(dir, ".gitignore");
+  if (fs29.existsSync(ignore))
     return { dir, wroteGitignore: false };
-  fs17.writeFileSync(ignore, GITIGNORE_BODY, { mode: 384 });
+  fs29.writeFileSync(ignore, GITIGNORE_BODY, { mode: 384 });
   return { dir, wroteGitignore: true };
 }
 var CLIP_TOOLS = [
@@ -33854,7 +40739,7 @@ async function graft(db, target, o = {}) {
   const started = Date.now();
   const budget = Math.max(MIN_BUDGET, Math.floor(o.budget ?? DEFAULT_BUDGET));
   const about = o.about?.trim() || null;
-  const cwd = o.cwd ?? process9.cwd();
+  const cwd = o.cwd ?? process12.cwd();
   const write = o.write !== false;
   const resolved = await resolveTarget(db, target, o.root ? { root: o.root } : {});
   const src = await collectSource(db, resolved.sessionId, {
@@ -33899,11 +40784,11 @@ async function graft(db, target, o = {}) {
   const bodyLines = via === "model" ? raw.split("\n") : cardOnlyBody(src);
   const pass = resolveCitations(db, bodyLines.join("\n"), { sessionId: src.sessionId });
   const head = buildHead(src, { about, via, reason, budget });
-  const tail = buildTail(src, pass);
+  const tail2 = buildTail(src, pass);
   const budgeted = await enforceBudget({
     head,
     body: pass.text.split("\n").filter((l, i, a) => !(l.trim() === "" && a[i - 1]?.trim() === "")),
-    tail,
+    tail: tail2,
     budget,
     count: count2
   });
@@ -33912,13 +40797,13 @@ async function graft(db, target, o = {}) {
   if (write) {
     const dir = ensureGraftDir(cwd);
     wroteGitignore = dir.wroteGitignore;
-    fs17.writeFileSync(outPath, budgeted.brief, { mode: 384 });
+    fs29.writeFileSync(outPath, budgeted.brief, { mode: 384 });
   } else {
     outPath = "";
   }
-  let clip2 = null;
+  let clip3 = null;
   if (o.clip)
-    clip2 = (o.clipboard ?? copyToClipboard)(budgeted.brief);
+    clip3 = (o.clipboard ?? copyToClipboard)(budgeted.brief);
   return {
     sessionId: resolved.sessionId,
     id8: src.id8,
@@ -33932,7 +40817,7 @@ async function graft(db, target, o = {}) {
     estimated: budgeted.estimated,
     brief: budgeted.brief,
     path: outPath,
-    clipped: clip2?.ok ?? false,
+    clipped: clip3?.ok ?? false,
     citations: pass.citations,
     spend,
     ms: Date.now() - started,
@@ -33942,7 +40827,7 @@ async function graft(db, target, o = {}) {
     title: src.title,
     trimmed: budgeted.trimmed,
     droppedLines: pass.droppedLines,
-    clip: clip2,
+    clip: clip3,
     wroteGitignore
   };
 }
@@ -33969,22 +40854,108 @@ function buildHead(src, o) {
   return head;
 }
 function buildTail(src, pass) {
-  const tail = ["---", ""];
+  const tail2 = ["---", ""];
   const bad = pass.citations.filter((c) => !c.resolves).length;
   if (bad > 0) {
-    tail.push(`_${bad} citation${bad === 1 ? "" : "s"} named an exchange this index does not have, and ${bad === 1 ? "it was" : "they were"} dropped._`, "");
+    tail2.push(`_${bad} citation${bad === 1 ? "" : "s"} named an exchange this index does not have, and ${bad === 1 ? "it was" : "they were"} dropped._`, "");
   }
-  tail.push(sourceLine({
+  tail2.push(sourceLine({
     harness: src.harness,
     sessionId: src.sessionId,
     exchanges: src.exchanges,
     date: src.date,
     isGhost: src.isGhost
   }));
-  return tail;
+  return tail2;
 }
 
 // ../core/dist/render/graft.js
+function renderGraft(r, t = new Theme()) {
+  const card = new Card(t);
+  const resolved = r.citations.filter((c) => c.resolves).length;
+  const total = r.citations.length;
+  const bad = total - resolved;
+  card.heading("graft", `${r.harness} ${r.id8}`, r.date).blank();
+  card.text(elide(r.title, Math.max(20, t.width - 4)));
+  if (r.about)
+    card.text(t.dim(`about  ${r.about}`));
+  card.blank();
+  const budgetNote = `of ${r.budget} budget${r.estimated ? "  \xB7  est. (chars/3.6)" : "  \xB7  counted"}`;
+  card.row({
+    label: "tokens",
+    value: num(r.tokens),
+    note: budgetNote,
+    tone: r.tokens <= r.budget ? "accent" : "warn"
+  });
+  card.row({
+    label: "citations",
+    value: `${resolved}/${total}`,
+    note: total === 0 ? "nothing in this brief is cited" : bad > 0 ? `${bad} named an exchange the index has not got` : "distinct, and all resolve",
+    tone: total === 0 || bad > 0 ? "warn" : "none"
+  });
+  card.row({
+    label: "exchanges",
+    value: num(r.exchanges),
+    note: r.isGhost ? "prompts only \u2014 the assistant side is gone" : r.project || "",
+    tone: r.isGhost ? "warn" : "none"
+  });
+  if (r.trimmed > 0) {
+    card.row({
+      label: "trimmed to fit",
+      value: `${r.trimmed}`,
+      note: `line${r.trimmed === 1 ? "" : "s"} dropped from the end`,
+      tone: "dim"
+    });
+  }
+  if (r.droppedLines.length > 0) {
+    card.row({
+      label: "dropped, uncited",
+      value: `${r.droppedLines.length}`,
+      note: "no citation on them resolved",
+      tone: "warn"
+    });
+  }
+  card.row({
+    label: r.via === "model" ? "wrote" : "wrote, unsummarised",
+    value: "",
+    note: r.path ? tildify(r.path) : "not written",
+    tone: "dim"
+  });
+  if (r.via === "card-only" && r.reason)
+    card.text(t.dim(`no model call \u2014 ${r.reason}`));
+  if (r.spend.calls > 0) {
+    card.row({
+      label: "model",
+      value: duration3(r.spend.ms),
+      // **T4.7a G2.** `render/ask.ts:109`, `render/ask.ts:212` and
+      // `cli/commands/ask.ts:101` all guard money with `r.estimated`; this was
+      // the one site in the product that printed a dollar figure bare — two
+      // rows under a `tokens` row that labels *itself* `est. (chars/3.6)`.
+      // On the subscription path that figure is an api-equivalent estimate and
+      // not money anybody was charged, and `05`'s honesty contract is explicit:
+      // *estimates are labelled `est.`*. Seen unlabelled on three real runs.
+      note: `${r.spend.calls} call${r.spend.calls === 1 ? "" : "s"}` + (r.spend.usd > 0 ? `  \xB7  ${money(r.spend.usd)}${r.estimated ? " est." : ""}` : ""),
+      tone: "dim"
+    });
+  }
+  if (r.clip) {
+    card.blank();
+    if (r.clip.ok)
+      card.text(t.ok(`copied to the clipboard with ${r.clip.tool}`));
+    else
+      card.text(t.dim(r.clip.note ?? "the clipboard could not be written"));
+  }
+  card.blank();
+  card.raw(t.dim("\u2500".repeat(Math.max(8, Math.min(t.width, 72)))));
+  card.blank();
+  const out = [card.toString()];
+  out.push(r.brief.replace(/\n+$/, ""));
+  out.push("");
+  const next = new Card(t);
+  next.fix(`potsherd show ${r.id8}`, "read the session this came from, end to end", "read the whole session");
+  out.push(next.toString());
+  return out.join("\n");
+}
 function graftJson(r) {
   return {
     sessionId: r.sessionId,
@@ -34007,23 +40978,93 @@ function graftJson(r) {
 }
 
 // ../core/dist/setup.js
-import path18 from "node:path";
-import process10 from "node:process";
-var MCP_ENTRY_RELATIVE = path18.join("packages", "mcp", "dist", "index.js");
-var MCP_PACKAGE_RELATIVE = path18.join("node_modules", "@potsherd", "mcp", "dist", "index.js");
+var setup_exports = {};
+__export(setup_exports, {
+  CLIENTS: () => CLIENTS,
+  CLIENT_IDS: () => CLIENT_IDS,
+  MCP_BIN: () => MCP_BIN,
+  MCP_ENTRY_RELATIVE: () => MCP_ENTRY_RELATIVE,
+  MCP_PACKAGE_RELATIVE: () => MCP_PACKAGE_RELATIVE,
+  SERVER_NAME: () => SERVER_NAME,
+  TOML_TABLE_RE: () => TOML_TABLE_RE,
+  applySetupPlan: () => applySetupPlan,
+  claudeJsonPath: () => claudeJsonPath,
+  clientSpec: () => clientSpec,
+  commandOf: () => commandOf,
+  commandRunnable: () => commandRunnable,
+  detectAll: () => detectAll,
+  detectClient: () => detectClient,
+  findMcpEntry: () => findMcpEntry,
+  manualSteps: () => manualSteps,
+  opencodeConfigDir: () => opencodeConfigDir,
+  planClient: () => planClient,
+  planClients: () => planClients,
+  resolveMcpServer: () => resolveMcpServer,
+  setupWritePaths: () => setupWritePaths,
+  snippetFor: () => snippetFor2,
+  tomlHasInlineServers: () => tomlHasInlineServers,
+  tomlServers: () => tomlServers,
+  tomlTable: () => tomlTable,
+  tomlValue: () => tomlValue,
+  tomlWithout: () => tomlWithout
+});
+import fs30 from "node:fs";
+import path25 from "node:path";
+import process13 from "node:process";
+var SERVER_NAME = "potsherd";
+var MCP_BIN = "potsherd-mcp";
+var MCP_ENTRY_RELATIVE = path25.join("packages", "mcp", "dist", "index.js");
+var MCP_PACKAGE_RELATIVE = path25.join("node_modules", "@potsherd", "mcp", "dist", "index.js");
+function resolveMcpServer(entry2 = process13.argv[1], env = process13.env) {
+  const found = onPath(MCP_BIN, env);
+  if (found)
+    return { command: MCP_BIN, args: [], via: "path", file: found, exists: true };
+  const local = findMcpEntry(entry2);
+  if (local.file) {
+    return {
+      command: process13.execPath,
+      args: [local.file],
+      via: local.exists ? "local" : "assumed",
+      file: local.file,
+      exists: local.exists
+    };
+  }
+  return { command: MCP_BIN, args: [], via: "assumed", exists: false };
+}
+function findMcpEntry(entry2) {
+  const start = entry2 && fs30.existsSync(entry2) ? path25.dirname(path25.resolve(entry2)) : process13.cwd();
+  let dir = start;
+  let workspace = null;
+  for (let i = 0; i < 8; i++) {
+    for (const rel of [MCP_ENTRY_RELATIVE, MCP_PACKAGE_RELATIVE]) {
+      const candidate = path25.join(dir, rel);
+      if (fs30.existsSync(candidate))
+        return { file: candidate, exists: true };
+    }
+    if (!dir.split(path25.sep).includes("node_modules") && fs30.existsSync(path25.join(dir, "package.json")) && fs30.existsSync(path25.join(dir, "packages"))) {
+      workspace = dir;
+      break;
+    }
+    const up = path25.dirname(dir);
+    if (up === dir)
+      break;
+    dir = up;
+  }
+  return { file: workspace ? path25.join(workspace, MCP_ENTRY_RELATIVE) : null, exists: false };
+}
 function stdio(res) {
   return { command: res.command, args: [...res.args] };
 }
-function opencodeConfigDir(env = process10.env) {
+function opencodeConfigDir(env = process13.env) {
   const xdg = env["XDG_CONFIG_HOME"];
-  const base = xdg && xdg.trim() ? path18.resolve(expandTilde(xdg.trim())) : path18.join(home(), ".config");
-  return path18.join(base, "opencode");
+  const base2 = xdg && xdg.trim() ? path25.resolve(expandTilde(xdg.trim())) : path25.join(home(), ".config");
+  return path25.join(base2, "opencode");
 }
-function claudeJsonPath(dir, env = process10.env) {
+function claudeJsonPath(dir, env = process13.env) {
   const override = dir ?? (env["CLAUDE_CONFIG_DIR"]?.trim() || void 0);
   if (override)
-    return path18.join(claudeDir(override), ".claude.json");
-  return path18.join(home(), ".claude.json");
+    return path25.join(claudeDir(override), ".claude.json");
+  return path25.join(home(), ".claude.json");
 }
 var CLIENTS = [
   {
@@ -34046,7 +41087,7 @@ var CLIENTS = [
     bins: ["codex"],
     verified: "config",
     evidenceNote: "read from a real ~/.codex/config.toml on this machine, which already carries two [mcp_servers.*] tables",
-    configPath: () => path18.join(codexDir(), "config.toml"),
+    configPath: () => path25.join(codexDir(), "config.toml"),
     homeDir: () => codexDir(),
     entry: (res) => stdio(res)
   },
@@ -34057,7 +41098,7 @@ var CLIENTS = [
     bins: ["cursor", "cursor-agent"],
     verified: "config",
     evidenceNote: "read from a real ~/.cursor/mcp.json on this machine",
-    configPath: () => path18.join(cursorDir(), "mcp.json"),
+    configPath: () => path25.join(cursorDir(), "mcp.json"),
     homeDir: () => cursorDir(),
     jsonPath: ["mcpServers"],
     entry: (res) => stdio(res),
@@ -34070,7 +41111,7 @@ var CLIENTS = [
     bins: ["gemini"],
     verified: "docs",
     evidenceNote: "documentation only: no gemini on this machine, and no settings.json to read",
-    configPath: () => path18.join(geminiDir(), "settings.json"),
+    configPath: () => path25.join(geminiDir(), "settings.json"),
     homeDir: () => geminiDir(),
     jsonPath: ["mcpServers"],
     entry: (res) => stdio(res)
@@ -34082,7 +41123,7 @@ var CLIENTS = [
     bins: ["opencode"],
     verified: "docs",
     evidenceNote: "documentation only: no opencode on this machine, and no opencode.json to read",
-    configPath: (env) => path18.join(opencodeConfigDir(env), "opencode.json"),
+    configPath: (env) => path25.join(opencodeConfigDir(env), "opencode.json"),
     homeDir: (env) => opencodeConfigDir(env),
     jsonPath: ["mcp"],
     // opencode is the one schema here that is not `mcpServers`: the map is
@@ -34097,7 +41138,7 @@ var CLIENTS = [
     bins: ["copilot"],
     verified: "docs",
     evidenceNote: "documentation only: ~/.copilot exists here but holds no mcp-config.json, and copilot is not on PATH",
-    configPath: () => path18.join(copilotDir(), "mcp-config.json"),
+    configPath: () => path25.join(copilotDir(), "mcp-config.json"),
     homeDir: () => copilotDir(),
     jsonPath: ["mcpServers"],
     entry: (res) => ({ type: "local", ...stdio(res), tools: ["*"] })
@@ -34109,18 +41150,339 @@ var CLIENTS = [
     bins: ["pi"],
     verified: "docs",
     evidenceNote: "documentation only, and the weakest of the seven: no pi on this machine, and the real ~/.pi/agent/settings.json here carries no MCP key to read",
-    configPath: () => path18.join(piDir(), "agent", "settings.json"),
+    configPath: () => path25.join(piDir(), "agent", "settings.json"),
     homeDir: () => piDir(),
     jsonPath: ["mcpServers"],
     entry: (res) => stdio(res)
   }
 ];
 var CLIENT_IDS = CLIENTS.map((c) => c.id);
+function clientSpec(id) {
+  const spec = CLIENTS.find((c) => c.id === id);
+  if (!spec)
+    throw new Error(`unknown client: ${id}`);
+  return spec;
+}
+function detectClient(spec, opts = {}) {
+  const env = opts.env ?? process13.env;
+  const p = spec.id === "claude" ? claudeJsonPath(opts.claudeDir, env) : spec.configPath(env);
+  const dir = spec.homeDir(env);
+  const bin = spec.bins.map((b) => onPath(b, env)).find((x) => Boolean(x)) ?? null;
+  const configExists = fs30.existsSync(p);
+  const dirExists = Boolean(dir && fs30.existsSync(dir));
+  const read = readServers(spec, p);
+  const registered = Object.prototype.hasOwnProperty.call(read.servers, SERVER_NAME);
+  const evidence = bin ? "binary" : configExists ? "config" : dirExists ? "directory" : "none";
+  return {
+    client: spec.id,
+    label: spec.label,
+    path: p,
+    bin,
+    bins: [...spec.bins],
+    configExists,
+    dirExists,
+    present: evidence !== "none",
+    evidence,
+    registered,
+    registeredCommand: registered ? commandOf(read.servers[SERVER_NAME]) : null,
+    others: Object.keys(read.servers).filter((k) => k !== SERVER_NAME).sort(),
+    verified: spec.verified,
+    evidenceNote: spec.evidenceNote
+  };
+}
+function detectAll(opts = {}) {
+  return CLIENTS.map((spec) => detectClient(spec, opts));
+}
+function commandOf(entry2) {
+  if (!entry2 || typeof entry2 !== "object")
+    return null;
+  const e = entry2;
+  if (Array.isArray(e["command"]))
+    return e["command"].map(String).join(" ");
+  if (typeof e["command"] === "string") {
+    const args = Array.isArray(e["args"]) ? e["args"].map(String) : [];
+    return [e["command"], ...args].join(" ");
+  }
+  return null;
+}
+function commandRunnable(command) {
+  if (!command)
+    return null;
+  const bin = command.trim().split(/\s+/)[0] ?? "";
+  if (!bin)
+    return false;
+  if (bin.includes("/") || bin.includes("\\")) {
+    if (!fs30.existsSync(bin))
+      return false;
+  } else if (onPath(bin) === null) {
+    return false;
+  }
+  const script = command.trim().split(/\s+/).slice(1).find((a) => a.includes(path25.sep));
+  if (script)
+    return fs30.existsSync(script);
+  return true;
+}
+function readServers(spec, p) {
+  if (!fs30.existsSync(p))
+    return { servers: {}, text: null };
+  let text;
+  try {
+    text = fs30.readFileSync(p, "utf8");
+  } catch (err) {
+    return { servers: {}, text: null, blocked: `${p} is unreadable (${err.message})` };
+  }
+  if (spec.format === "toml")
+    return { servers: tomlServers(text), text };
+  if (looksLikeJsonc(text)) {
+    return { servers: {}, text, blocked: `${p} contains comments, so rewriting it as JSON would drop them` };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    return { servers: {}, text, blocked: `${p} is not valid JSON (${err.message})` };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { servers: {}, text, blocked: `${p} does not hold a JSON object` };
+  }
+  const json2 = parsed;
+  const node = getIn(json2, spec.jsonPath ?? []);
+  if (node !== void 0 && (typeof node !== "object" || node === null || Array.isArray(node))) {
+    return {
+      servers: {},
+      text,
+      json: json2,
+      blocked: `${p} already has a "${(spec.jsonPath ?? []).join(".")}" that is not an object`
+    };
+  }
+  return { servers: node ?? {}, text, json: json2 };
+}
+function getIn(obj, keys) {
+  let cur = obj;
+  for (const k of keys) {
+    if (!cur || typeof cur !== "object")
+      return void 0;
+    cur = cur[k];
+  }
+  return cur;
+}
+function setIn(obj, keys, value) {
+  let cur = obj;
+  for (const k of keys.slice(0, -1)) {
+    const next = cur[k];
+    if (!next || typeof next !== "object" || Array.isArray(next))
+      cur[k] = {};
+    cur = cur[k];
+  }
+  const last2 = keys[keys.length - 1];
+  if (last2 !== void 0)
+    cur[last2] = value;
+}
+var TOML_TABLE_RE = /^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*(?:"([^"]+)"|'([^']+)'|([^\]]+?))[ \t]*\][ \t]*$/;
+var TOML_INLINE_RE = /^[ \t]*mcp_servers[ \t]*=/;
+function tomlServerName(line) {
+  const m = TOML_TABLE_RE.exec(line);
+  if (!m)
+    return null;
+  const quoted = m[1] ?? m[2];
+  if (quoted !== void 0)
+    return quoted;
+  const bare = m[3];
+  if (bare === void 0)
+    return null;
+  return bare.split(".")[0] ?? bare;
+}
+function tomlServers(text) {
+  const out = {};
+  for (const line of text.split("\n")) {
+    const name = tomlServerName(line);
+    if (name)
+      out[name] = {};
+  }
+  return out;
+}
+function tomlHasInlineServers(text) {
+  return text.split("\n").some((l) => TOML_INLINE_RE.test(l));
+}
+function tomlValue(value) {
+  if (Array.isArray(value))
+    return `[${value.map((v) => tomlValue(v)).join(", ")}]`;
+  if (typeof value === "boolean" || typeof value === "number")
+    return String(value);
+  return JSON.stringify(String(value));
+}
+function tomlTable(name, entry2) {
+  const lines = [`[mcp_servers.${name}]`];
+  for (const [k, v] of Object.entries(entry2))
+    lines.push(`${k} = ${tomlValue(v)}`);
+  return lines.join("\n") + "\n";
+}
+function tomlWithout(text, name) {
+  const out = [];
+  let skipping = false;
+  for (const line of text.split("\n")) {
+    const found = tomlServerName(line);
+    if (found !== null) {
+      skipping = found === name;
+      if (skipping)
+        continue;
+    } else if (skipping && /^[ \t]*\[/.test(line)) {
+      skipping = false;
+    }
+    if (!skipping)
+      out.push(line);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+function planClient(spec, opts = {}) {
+  const env = opts.env ?? process13.env;
+  const detection = detectClient(spec, {
+    ...opts.claudeDir ? { claudeDir: opts.claudeDir } : {},
+    env
+  });
+  const resolution = opts.resolution ?? resolveMcpServer(opts.entry, env);
+  const p = detection.path;
+  const read = readServers(spec, p);
+  const before = read.text ?? "";
+  const entry2 = spec.entry(resolution);
+  const base2 = {
+    path: p,
+    before,
+    client: spec.id,
+    label: spec.label,
+    format: spec.format,
+    keeps: detection.others,
+    snippet: snippetFor2(spec, entry2),
+    detection,
+    resolution
+  };
+  if (read.blocked) {
+    return { ...base2, after: before, diff: "", safe: false, reason: read.blocked, noop: false, action: "none" };
+  }
+  if (spec.format === "toml" && read.text && tomlHasInlineServers(read.text)) {
+    return {
+      ...base2,
+      after: before,
+      diff: "",
+      safe: false,
+      reason: `${p} declares mcp_servers as an inline table, which potsherd will not extend without a TOML parser`,
+      noop: false,
+      action: "none"
+    };
+  }
+  const present = detection.registered;
+  if (opts.remove && !present) {
+    return { ...base2, after: before, diff: "", safe: true, noop: true, action: "none" };
+  }
+  const after = opts.remove ? removeStanza(spec, read, before) : addStanza(spec, read, before, entry2);
+  if (after === before) {
+    return { ...base2, after, diff: "", safe: true, noop: true, action: "none" };
+  }
+  return {
+    ...base2,
+    after,
+    diff: unifiedDiff(before, after, tildify(p)),
+    safe: true,
+    noop: false,
+    action: opts.remove ? "remove" : present ? "update" : "add"
+  };
+}
+function planClients(ids, opts = {}) {
+  const wanted = new Set(ids);
+  return CLIENTS.filter((c) => wanted.has(c.id)).map((spec) => planClient(spec, opts));
+}
+function addStanza(spec, read, before, entry2) {
+  if (spec.format === "toml") {
+    if (!before.trim())
+      return tomlTable(SERVER_NAME, entry2);
+    const body = Object.prototype.hasOwnProperty.call(read.servers, SERVER_NAME) ? tomlWithout(before, SERVER_NAME) : before;
+    const sep = body.endsWith("\n\n") ? "" : body.endsWith("\n") ? "\n" : "\n\n";
+    return body + sep + tomlTable(SERVER_NAME, entry2);
+  }
+  const json2 = read.json ? structuredClone(read.json) : { ...spec.seed ?? {} };
+  setIn(json2, [...spec.jsonPath ?? [], SERVER_NAME], entry2);
+  return stringifySettings(json2);
+}
+function removeStanza(spec, read, before) {
+  if (spec.format === "toml")
+    return tomlWithout(before, SERVER_NAME);
+  if (!read.json)
+    return before;
+  const json2 = structuredClone(read.json);
+  const holder = getIn(json2, spec.jsonPath ?? []);
+  if (holder && typeof holder === "object") {
+    delete holder[SERVER_NAME];
+  }
+  return stringifySettings(json2);
+}
+function snippetFor2(spec, entry2) {
+  if (spec.format === "toml")
+    return tomlTable(SERVER_NAME, entry2);
+  const doc = {};
+  setIn(doc, [...spec.jsonPath ?? [], SERVER_NAME], entry2);
+  return JSON.stringify(doc, null, 2) + "\n";
+}
+function applySetupPlan(plan, now = /* @__PURE__ */ new Date()) {
+  if (!plan.safe)
+    throw new Error(plan.reason ?? "refusing to write this config");
+  if (plan.noop)
+    return { written: false, backup: null };
+  if (plan.format === "json")
+    return applyProposal(plan, now);
+  let backup = null;
+  if (fs30.existsSync(plan.path)) {
+    backup = backupPath(plan.path, now);
+    fs30.copyFileSync(plan.path, backup);
+  } else {
+    fs30.mkdirSync(path25.dirname(plan.path), { recursive: true });
+  }
+  fs30.writeFileSync(plan.path, plan.after, { mode: 384 });
+  return { written: true, backup };
+}
+function manualSteps(plan) {
+  const lines = [];
+  if (plan.reason)
+    lines.push(`potsherd did not edit ${tildify(plan.path)}: ${plan.reason}`, "");
+  lines.push(`add this to ${tildify(plan.path)} by hand:`, "");
+  for (const l of plan.snippet.trimEnd().split("\n"))
+    lines.push("  " + l);
+  return lines;
+}
+function setupWritePaths(env = process13.env) {
+  return CLIENTS.map((spec) => spec.id === "claude" ? claudeJsonPath(void 0, env) : spec.configPath(env));
+}
 
 // ../core/dist/stack.js
-import path19 from "node:path";
-import process11 from "node:process";
+var stack_exports = {};
+__export(stack_exports, {
+  CLAIM_SOURCE: () => CLAIM_SOURCE,
+  FAILURES: () => FAILURES,
+  POTSHERD: () => POTSHERD,
+  TOOLS: () => TOOLS,
+  VERIFIED_ON: () => VERIFIED_ON,
+  claimLegend: () => claimLegend,
+  coverageGlyph: () => coverageGlyph,
+  detectTools: () => detectTools,
+  episodicIndexPath: () => episodicIndexPath,
+  overlaps: () => overlaps,
+  recommend: () => recommend,
+  stackReport: () => stackReport,
+  toolSpec: () => toolSpec
+});
+import { existsSync } from "node:fs";
+import path26 from "node:path";
+import process14 from "node:process";
+var FAILURES = [
+  { n: 1, label: "context rot", when: "during a session", solved: true },
+  { n: 2, label: "cold start", when: "next day, same repo", solved: true },
+  { n: 3, label: "archive amnesia", when: "weeks later, any project", solved: false },
+  { n: 4, label: "re-entry", when: "after you found it", solved: false }
+];
 var VERIFIED_ON = "22 aug 2026";
+var CLAIM_SOURCE = "docs/memory-stack.md";
+function claimLegend(verifiedOn = VERIFIED_ON) {
+  return `claim: potsherd's row was measured by running potsherd on this machine. every other row was read from that project's own documentation on ${verifiedOn} and was never run here. sources and fetch dates: ${CLAIM_SOURCE}`;
+}
 var POTSHERD = {
   id: "potsherd",
   label: "potsherd",
@@ -34146,7 +41508,7 @@ var TOOLS = [
     verified: "docs",
     evidenceNote: "README and the GitHub licence API, read " + VERIFIED_ON + "; not installed here, so nothing was exercised",
     source: "https://github.com/thedotmack/claude-mem (README + api.github.com/repos)",
-    markers: () => [path19.join(home(), ".claude-mem")],
+    markers: () => [path26.join(home(), ".claude-mem")],
     coverage: ["no", "yes", "no", "no"],
     note: "five hooks, injects at SessionStart. its README documents no import of transcripts from before install.",
     capturesLive: true,
@@ -34165,9 +41527,9 @@ var TOOLS = [
     // the phase brief and `03 §10` both assumed. Both are checked, because a
     // detector that only knows the wrong path reports "absent" on a machine
     // where the tool is running.
-    markers: (env = process11.env) => [
-      path19.join(home(), ".agentmemory"),
-      process11.platform === "darwin" ? path19.join(home(), "Library", "Application Support", "agentmemory") : path19.join(env["XDG_DATA_HOME"]?.trim() ? expandTilde(env["XDG_DATA_HOME"].trim()) : path19.join(home(), ".local", "share"), "agentmemory")
+    markers: (env = process14.env) => [
+      path26.join(home(), ".agentmemory"),
+      process14.platform === "darwin" ? path26.join(home(), "Library", "Application Support", "agentmemory") : path26.join(env["XDG_DATA_HOME"]?.trim() ? expandTilde(env["XDG_DATA_HOME"].trim()) : path26.join(home(), ".local", "share"), "agentmemory")
     ],
     coverage: ["no", "yes", "partial", "partial"],
     note: "the only one here that backfills: `import-jsonl` reads ~/.claude/projects. only what the sweep left.",
@@ -34183,8 +41545,8 @@ var TOOLS = [
     evidenceNote: "README and the GitHub licence API, read " + VERIFIED_ON + "; not installed here. needs postgres or its embedded pg0, so detection is weak",
     source: "https://github.com/vectorize-io/hindsight (README + api.github.com/repos)",
     markers: () => [
-      path19.join(home(), ".hindsight"),
-      path19.join(home(), ".pg0")
+      path26.join(home(), ".hindsight"),
+      path26.join(home(), ".pg0")
     ],
     coverage: ["no", "yes", "no", "partial"],
     note: "retain/recall per bank, one bank per project. no documented import of old transcripts.",
@@ -34217,7 +41579,7 @@ var TOOLS = [
     verified: "docs",
     evidenceNote: "README and the GitHub licence API, read " + VERIFIED_ON + "; not installed here. it is per-repo, so a home-directory marker is the weakest signal on this list",
     source: "https://github.com/Autoloops/greplica (README + api.github.com/repos)",
-    markers: () => [path19.join(home(), ".greplica")],
+    markers: () => [path26.join(home(), ".greplica")],
     coverage: ["no", "partial", "no", "partial"],
     note: 'one knowledge graph per repo. cannot answer "which project was that in".',
     capturesLive: true,
@@ -34231,7 +41593,7 @@ var TOOLS = [
     verified: "docs",
     evidenceNote: "README and the GitHub licence API, read " + VERIFIED_ON + "; not installed here. its vault path is fixed, which makes the marker a strong one",
     source: "https://github.com/m3talux/superbrain (README + api.github.com/repos)",
-    markers: () => [path19.join(home(), ".superbrain")],
+    markers: () => [path26.join(home(), ".superbrain")],
     coverage: ["no", "yes", "no", "no"],
     note: "obsidian vault at ~/.superbrain/vault, injects a brief at start. capture-only from install.",
     capturesLive: true,
@@ -34246,8 +41608,8 @@ var TOOLS = [
     evidenceNote: "the files themselves were found on this machine, and the behaviour read from code.claude.com/docs/en/memory on " + VERIFIED_ON,
     source: "https://code.claude.com/docs/en/memory",
     markers: () => [
-      path19.join(claudeDir(), "CLAUDE.md"),
-      path19.join(claudeDir(), "projects")
+      path26.join(claudeDir(), "CLAUDE.md"),
+      path26.join(claudeDir(), "projects")
     ],
     // The one row on this table with a documented immunity to the 30-day
     // sweep: *"Claude Code deletes old session transcripts after the
@@ -34260,37 +41622,299 @@ var TOOLS = [
     injectsAtStart: true
   }
 ];
-function episodicIndexPath(env = process11.env) {
+function episodicIndexPath(env = process14.env) {
   const xdg = env["XDG_CONFIG_HOME"];
-  const base = xdg && xdg.trim() ? path19.resolve(expandTilde(xdg.trim())) : path19.join(home(), ".config");
-  return path19.join(base, "superpowers", "conversation-index", "db.sqlite");
+  const base2 = xdg && xdg.trim() ? path26.resolve(expandTilde(xdg.trim())) : path26.join(home(), ".config");
+  return path26.join(base2, "superpowers", "conversation-index", "db.sqlite");
+}
+function toolSpec(id) {
+  const spec = TOOLS.find((t) => t.id === id);
+  if (!spec)
+    throw new Error(`unknown tool: ${id}`);
+  return spec;
+}
+function detectTools(env = process14.env) {
+  return TOOLS.map((spec) => {
+    const markers = spec.markers(env);
+    const found = markers.filter((m) => safeExists(m));
+    return {
+      spec,
+      present: found.length > 0,
+      found: found.map((m) => tildify(m)),
+      looked: markers.map((m) => tildify(m))
+    };
+  });
+}
+function safeExists(p) {
+  try {
+    return existsSync(p);
+  } catch {
+    return false;
+  }
+}
+function overlaps(detections) {
+  const present = detections.filter((d) => d.present).map((d) => d.spec);
+  const out = [];
+  const capturing = present.filter((s) => s.capturesLive);
+  if (capturing.length > 1) {
+    out.push({
+      kind: "double-capture",
+      tools: capturing.map((s) => s.label),
+      cost: `${capturing.length} tools write a record of the same session, in ${capturing.length} stores.`,
+      fix: "keep one. the rest add hook latency to every tool call and no new recall."
+    });
+  }
+  const injecting = present.filter((s) => s.injectsAtStart);
+  if (injecting.length > 1) {
+    out.push({
+      kind: "double-inject",
+      tools: injecting.map((s) => s.label),
+      cost: "each one spends context at session start, from the same budget as your work.",
+      fix: "keep one injector. pull beats push: the others can stay as on-demand search."
+    });
+  }
+  return out;
+}
+function recommend(detections) {
+  const present = new Map(detections.filter((d) => d.present).map((d) => [d.spec.id, d.spec]));
+  const best = (ids) => {
+    for (const id of ids) {
+      const s = present.get(id);
+      if (s)
+        return s;
+    }
+    return null;
+  };
+  const coldStart = best(["claude-mem", "agentmemory", "superbrain", "auto-memory"]);
+  const rows = [
+    {
+      failure: FAILURES[0],
+      use: "your harness",
+      why: "compaction, subagents and a long window. nothing to install; potsherd is not in the session."
+    },
+    {
+      failure: FAILURES[1],
+      use: coldStart ? coldStart.label : "CLAUDE.md",
+      why: coldStart ? "already installed here, and it owns this row. potsherd refuses it on purpose." : "nothing here covers this. Claude Code auto memory is on by default and costs nothing."
+    },
+    {
+      failure: FAILURES[2],
+      use: "potsherd",
+      why: "the archive, the ghosts of what the sweep took, and search across every project."
+    },
+    {
+      failure: FAILURES[3],
+      use: "potsherd",
+      why: "graft: put a session you found into the agent you are talking to now."
+    }
+  ];
+  const actions = [];
+  const over = overlaps(detections);
+  const inject = over.find((o) => o.kind === "double-inject");
+  if (inject)
+    actions.push(`pick one of ${inject.tools.join(", ")} to inject at start; turn the others off.`);
+  if (!present.has("potsherd"))
+    actions.push("run potsherd rescue before the next 30-day sweep does.");
+  if (present.has("agentmemory")) {
+    actions.push("agentmemory import-jsonl only sees what the sweep left. run potsherd audit for the rest.");
+  }
+  return { rows, actions };
+}
+function stackReport(env = process14.env) {
+  const detections = detectTools(env);
+  return {
+    verifiedOn: VERIFIED_ON,
+    claimLegend: claimLegend(),
+    claimSource: CLAIM_SOURCE,
+    failures: FAILURES,
+    detections,
+    overlaps: overlaps(detections),
+    recommendation: recommend(detections),
+    installed: detections.filter((d) => d.present && d.spec.id !== "potsherd").length,
+    unverified: detections.filter((d) => d.spec.verified === "docs").length
+  };
+}
+function coverageGlyph(c, ascii = false) {
+  switch (c) {
+    case "yes":
+      return ascii ? "v" : "\u2713";
+    case "partial":
+      return ascii ? "~" : "~";
+    case "no":
+      return ascii ? "." : "\xB7";
+    default:
+      return "?";
+  }
+}
+
+// ../core/dist/link-suggest.js
+var MEASURED_PRECISION = {
+  raised: 8,
+  absent: 8,
+  worthLow: 1,
+  worthHigh: 2,
+  note: "measured in phase 4 on the reference corpus, on the same rule pass this uses. expect most of these to be wrong."
+};
+var DEFAULT_LIMIT = 5;
+function suggestLinks(db, o = {}) {
+  const limit = Math.max(0, o.limit ?? DEFAULT_LIMIT);
+  const cards = countCards(db);
+  if (limit === 0 || cards === 0) {
+    return {
+      suggestions: [],
+      precision: MEASURED_PRECISION,
+      considered: 0,
+      alreadyLinked: 0,
+      cards
+    };
+  }
+  const ids = o.sessionIds ?? cardedSessionIds(db);
+  if (ids.length === 0) {
+    return { suggestions: [], precision: MEASURED_PRECISION, considered: 0, alreadyLinked: 0, cards };
+  }
+  const candidates = openThreadCandidates(db, ids, { limit: Math.min(limit * 4, 40) });
+  const linked = db.prepare(`SELECT 1 FROM links
+       WHERE (a_session_id = ? AND b_session_id = ?)
+          OR (a_session_id = ? AND b_session_id = ?) LIMIT 1`);
+  const suggestions = [];
+  let alreadyLinked = 0;
+  const seen = /* @__PURE__ */ new Set();
+  for (const c of candidates) {
+    const b = c.otherSessionIds[0];
+    if (!b)
+      continue;
+    const key = c.sessionId < b ? `${c.sessionId}|${b}` : `${b}|${c.sessionId}`;
+    if (seen.has(key))
+      continue;
+    seen.add(key);
+    if (isLinked(linked, c.sessionId, b)) {
+      alreadyLinked++;
+      continue;
+    }
+    suggestions.push(toSuggestion(c, b));
+    if (suggestions.length >= limit)
+      break;
+  }
+  return {
+    suggestions,
+    precision: MEASURED_PRECISION,
+    considered: candidates.length,
+    alreadyLinked,
+    cards
+  };
+}
+function toSuggestion(c, b) {
+  const b8 = b.slice(0, 8);
+  return {
+    a: c.sessionId,
+    a8: c.id8,
+    aProject: c.project,
+    aTs: c.ts,
+    b,
+    b8,
+    bProject: c.otherProject,
+    overlap: { files: c.overlap.files, topics: c.overlap.topics },
+    what: c.what,
+    score: c.score,
+    command: `potsherd link ${c.id8} ${b8}`
+  };
+}
+function isLinked(stmt, a, b) {
+  return stmt.get(a, b, b, a) !== void 0;
+}
+function countCards(db) {
+  const row2 = db.prepare("SELECT COUNT(*) AS n FROM cards").get();
+  return row2?.n ?? 0;
+}
+function cardedSessionIds(db) {
+  const rows = db.prepare("SELECT session_id FROM cards ORDER BY rowid DESC").all();
+  return rows.map((r) => r.session_id);
+}
+function renderSuggestions(r, t, wrap3) {
+  const L = [];
+  const p = r.precision;
+  const worth = p.worthLow === p.worthHigh ? `${p.worthLow}` : `${p.worthLow}-${p.worthHigh}`;
+  L.push("");
+  L.push(`potsherd link --suggest ${t.sep} ${r.suggestions.length} of ${r.considered} candidates ${t.sep} ${r.cards} cards`);
+  L.push("");
+  if (r.cards === 0) {
+    L.push("  no cards in the index, so there is nothing to compare.");
+    L.push("");
+    L.push(`  ${t.dim("run")}  ${t.bold("potsherd card")}   ${t.dim("build cards, then ask again")}`);
+    L.push("");
+    return L;
+  }
+  if (r.suggestions.length === 0) {
+    L.push("  nothing to propose. no decision in one project overlapped another");
+    L.push("  project closely enough to be worth your attention.");
+    if (r.alreadyLinked > 0) {
+      L.push("");
+      L.push(t.dim(`  ${r.alreadyLinked} candidate(s) were pairs you have already linked.`));
+    }
+    L.push("");
+    L.push(`  ${t.dim("run")}  ${t.bold("potsherd ask")}   ${t.dim("the same overlap, as an answer")}`);
+    L.push("");
+    return L;
+  }
+  for (const l of wrap3("proposals. nothing was written; you accept each one by hand.", t.width - 4)) {
+    L.push(t.dim(`  ${l}`));
+  }
+  L.push("");
+  let n2 = 0;
+  for (const s of r.suggestions) {
+    n2++;
+    const fixed = 3 + 8 + 2 + 4 + 2 + 8 + 2 + 2;
+    const proj = Math.max(8, Math.floor((t.width - fixed) / 2));
+    L.push(`  ${n2}  ${s.a8}  ${clip2(s.aProject, proj)}  ${t.arrow}  ${s.b8}  ${clip2(s.bProject, proj)}`);
+    const shares = [...s.overlap.files, ...s.overlap.topics].slice(0, 4).join(` ${t.sep} `);
+    if (shares)
+      L.push(...field("shares", shares, t, wrap3));
+    L.push(...field("from", `"${s.what}"`, t, wrap3));
+    L.push(`     ${t.dim("accept  ")}${s.command}`);
+    L.push("");
+  }
+  const measured = `measured: on the reference corpus this same rule raised ${p.raised} candidates. ${p.absent} of ${p.raised} were genuinely absent from the other project, but only ${worth} of ${p.raised} were worth raising. expect most of these to be wrong.`;
+  for (const l of wrap3(measured, t.width - 4))
+    L.push(t.warn(`  ${l}`));
+  L.push("");
+  L.push(`  ${t.dim("run")}  ${t.bold("potsherd show <id8>")}   ${t.dim("read one before you accept it")}`);
+  L.push("");
+  return L;
+}
+function field(label3, value, t, wrap3) {
+  const w = 8;
+  const lines = wrap3(value, Math.max(24, t.width - 5 - w));
+  return lines.map((l, i) => `     ${t.dim(i === 0 ? label3.padEnd(w) : " ".repeat(w))}${l}`);
+}
+function clip2(s, max2) {
+  return s.length <= max2 ? s : "\u2026" + s.slice(s.length - (max2 - 1));
 }
 
 // ../core/dist/version.js
 var VERSION = "1.1.0";
 
 // src/context.ts
-import fs19 from "node:fs";
+import fs32 from "node:fs";
 import os4 from "node:os";
-import path20 from "node:path";
-import process13 from "node:process";
+import path27 from "node:path";
+import process16 from "node:process";
 
 // ../cli/src/filters.ts
-import fs18 from "node:fs";
+import fs31 from "node:fs";
 
 // ../cli/src/output.ts
-import process12 from "node:process";
-import * as readline from "node:readline/promises";
+import process15 from "node:process";
+import * as readline2 from "node:readline/promises";
 function silenceBrokenPipe(stream) {
   stream.on("error", (err) => {
     if (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED") {
-      process12.exit(0);
+      process15.exit(0);
     }
     throw err;
   });
 }
-silenceBrokenPipe(process12.stdout);
-silenceBrokenPipe(process12.stderr);
+silenceBrokenPipe(process15.stdout);
+silenceBrokenPipe(process15.stderr);
 var UserError = class extends Error {
   constructor(message2, fix, code = 1) {
     super(message2);
@@ -34406,9 +42030,9 @@ function resolveProject(db, needle) {
   const want = needle.toLowerCase();
   const exact = projects.filter((p) => p.project.toLowerCase() === want);
   if (exact.length === 1) return exact[0].project;
-  const base = projects.filter((p) => last(p.project).toLowerCase() === want);
-  if (base.length === 1) return base[0].project;
-  if (base.length > 1) throw ambiguous(needle, base.map((p) => p.project));
+  const base2 = projects.filter((p) => last(p.project).toLowerCase() === want);
+  if (base2.length === 1) return base2[0].project;
+  if (base2.length > 1) throw ambiguous(needle, base2.map((p) => p.project));
   const partial2 = projects.filter((p) => p.project.toLowerCase().includes(want));
   if (partial2.length === 1) return partial2[0].project;
   if (partial2.length > 1) throw ambiguous(needle, partial2.map((p) => p.project));
@@ -34432,7 +42056,7 @@ function last(p) {
 function openIndex(o) {
   const root = paths_exports.potsherdDir(o.potsherdDir);
   const file2 = paths_exports.dbPath(root);
-  if (!fs18.existsSync(file2)) {
+  if (!fs31.existsSync(file2)) {
     throw new UserError(
       `nothing indexed yet \u2014 no database at ${paths_exports.tildify(file2)}`,
       "potsherd index"
@@ -34442,11 +42066,11 @@ function openIndex(o) {
 }
 function parseLimit(value, fallback) {
   if (value === void 0 || value === null || value === "") return fallback;
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 1) {
+  const n2 = Number(value);
+  if (!Number.isFinite(n2) || n2 < 1) {
     throw new UserError(`--limit takes a positive number \u2014 not "${String(value)}"`, `potsherd ls --limit ${fallback}`);
   }
-  return Math.floor(n);
+  return Math.floor(n2);
 }
 
 // src/errors.ts
@@ -34466,10 +42090,10 @@ try:  ${fix}` : message2;
 // src/context.ts
 var ASK_TIMEOUT_MS = 24e4;
 function makeContext(o = {}) {
-  const env = o.env ?? process13.env;
+  const env = o.env ?? process16.env;
   return {
     ...o.potsherdDir ? { potsherdDir: o.potsherdDir } : {},
-    graftCwd: resolveGraftCwd(o.cwd ?? process13.cwd(), env),
+    graftCwd: resolveGraftCwd(o.cwd ?? process16.cwd(), env),
     askTimeoutMs: positiveMs(env["POTSHERD_MCP_ASK_TIMEOUT_MS"], ASK_TIMEOUT_MS),
     env
   };
@@ -34492,20 +42116,20 @@ async function withIndexAsync(ctx, fn) {
 }
 function resolveGraftCwd(cwd, env) {
   const explicit = env["POTSHERD_GRAFT_CWD"]?.trim();
-  if (explicit) return path20.resolve(explicit);
-  return plausibleProjectDir(cwd) ? path20.resolve(cwd) : null;
+  if (explicit) return path27.resolve(explicit);
+  return plausibleProjectDir(cwd) ? path27.resolve(cwd) : null;
 }
 function plausibleProjectDir(dir) {
   let resolved;
   try {
-    resolved = fs19.realpathSync(path20.resolve(dir));
+    resolved = fs32.realpathSync(path27.resolve(dir));
   } catch {
     return false;
   }
   const forbidden = new Set(
-    [path20.parse(resolved).root, homeDir(), tmpDir()].filter(Boolean).map((d) => {
+    [path27.parse(resolved).root, homeDir(), tmpDir()].filter(Boolean).map((d) => {
       try {
-        return fs19.realpathSync(d);
+        return fs32.realpathSync(d);
       } catch {
         return d;
       }
@@ -34513,8 +42137,8 @@ function plausibleProjectDir(dir) {
   );
   if (forbidden.has(resolved)) return false;
   try {
-    if (!fs19.statSync(resolved).isDirectory()) return false;
-    fs19.accessSync(resolved, fs19.constants.W_OK);
+    if (!fs32.statSync(resolved).isDirectory()) return false;
+    fs32.accessSync(resolved, fs32.constants.W_OK);
   } catch {
     return false;
   }
@@ -34535,8 +42159,8 @@ function tmpDir() {
   }
 }
 function positiveMs(raw, fallback) {
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+  const n2 = Number(raw);
+  return Number.isFinite(n2) && n2 > 0 ? Math.floor(n2) : fallback;
 }
 
 // ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v3/helpers/util.js
@@ -34898,8 +42522,8 @@ function getErrorMap2() {
 
 // ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path23, errorMaps, issueData } = params;
-  const fullPath = [...path23, ...issueData.path || []];
+  const { data, path: path30, errorMaps, issueData } = params;
+  const fullPath = [...path30, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -35014,11 +42638,11 @@ var errorUtil;
 
 // ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path23, key) {
+  constructor(parent, value, path30, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path23;
+    this._path = path30;
     this._key = key;
   }
   get path() {
@@ -35955,24 +43579,24 @@ var ZodString2 = class _ZodString2 extends ZodType2 {
     return !!this._def.checks.find((ch) => ch.kind === "base64url");
   }
   get minLength() {
-    let min = null;
+    let min2 = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "min") {
-        if (min === null || ch.value > min)
-          min = ch.value;
+        if (min2 === null || ch.value > min2)
+          min2 = ch.value;
       }
     }
-    return min;
+    return min2;
   }
   get maxLength() {
-    let max = null;
+    let max2 = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "max") {
-        if (max === null || ch.value < max)
-          max = ch.value;
+        if (max2 === null || ch.value < max2)
+          max2 = ch.value;
       }
     }
-    return max;
+    return max2;
   }
 };
 ZodString2.create = (params) => {
@@ -36176,43 +43800,43 @@ var ZodNumber2 = class _ZodNumber extends ZodType2 {
     });
   }
   get minValue() {
-    let min = null;
+    let min2 = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "min") {
-        if (min === null || ch.value > min)
-          min = ch.value;
+        if (min2 === null || ch.value > min2)
+          min2 = ch.value;
       }
     }
-    return min;
+    return min2;
   }
   get maxValue() {
-    let max = null;
+    let max2 = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "max") {
-        if (max === null || ch.value < max)
-          max = ch.value;
+        if (max2 === null || ch.value < max2)
+          max2 = ch.value;
       }
     }
-    return max;
+    return max2;
   }
   get isInt() {
     return !!this._def.checks.find((ch) => ch.kind === "int" || ch.kind === "multipleOf" && util.isInteger(ch.value));
   }
   get isFinite() {
-    let max = null;
-    let min = null;
+    let max2 = null;
+    let min2 = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "finite" || ch.kind === "int" || ch.kind === "multipleOf") {
         return true;
       } else if (ch.kind === "min") {
-        if (min === null || ch.value > min)
-          min = ch.value;
+        if (min2 === null || ch.value > min2)
+          min2 = ch.value;
       } else if (ch.kind === "max") {
-        if (max === null || ch.value < max)
-          max = ch.value;
+        if (max2 === null || ch.value < max2)
+          max2 = ch.value;
       }
     }
-    return Number.isFinite(min) && Number.isFinite(max);
+    return Number.isFinite(min2) && Number.isFinite(max2);
   }
 };
 ZodNumber2.create = (params) => {
@@ -36367,24 +43991,24 @@ var ZodBigInt2 = class _ZodBigInt extends ZodType2 {
     });
   }
   get minValue() {
-    let min = null;
+    let min2 = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "min") {
-        if (min === null || ch.value > min)
-          min = ch.value;
+        if (min2 === null || ch.value > min2)
+          min2 = ch.value;
       }
     }
-    return min;
+    return min2;
   }
   get maxValue() {
-    let max = null;
+    let max2 = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "max") {
-        if (max === null || ch.value < max)
-          max = ch.value;
+        if (max2 === null || ch.value < max2)
+          max2 = ch.value;
       }
     }
-    return max;
+    return max2;
   }
 };
 ZodBigInt2.create = (params) => {
@@ -36501,24 +44125,24 @@ var ZodDate2 = class _ZodDate extends ZodType2 {
     });
   }
   get minDate() {
-    let min = null;
+    let min2 = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "min") {
-        if (min === null || ch.value > min)
-          min = ch.value;
+        if (min2 === null || ch.value > min2)
+          min2 = ch.value;
       }
     }
-    return min != null ? new Date(min) : null;
+    return min2 != null ? new Date(min2) : null;
   }
   get maxDate() {
-    let max = null;
+    let max2 = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "max") {
-        if (max === null || ch.value < max)
-          max = ch.value;
+        if (max2 === null || ch.value < max2)
+          max2 = ch.value;
       }
     }
-    return max != null ? new Date(max) : null;
+    return max2 != null ? new Date(max2) : null;
   }
 };
 ZodDate2.create = (params) => {
@@ -38068,23 +45692,23 @@ var ZodEffects = class extends ZodType2 {
     }
     if (effect.type === "transform") {
       if (ctx.common.async === false) {
-        const base = this._def.schema._parseSync({
+        const base2 = this._def.schema._parseSync({
           data: ctx.data,
           path: ctx.path,
           parent: ctx
         });
-        if (!isValid(base))
+        if (!isValid(base2))
           return INVALID;
-        const result = effect.transform(base.value, checkCtx);
+        const result = effect.transform(base2.value, checkCtx);
         if (result instanceof Promise) {
           throw new Error(`Asynchronous transform encountered during synchronous parse operation. Use .parseAsync instead.`);
         }
         return { status: status.value, value: result };
       } else {
-        return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((base) => {
-          if (!isValid(base))
+        return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((base2) => {
+          if (!isValid(base2))
             return INVALID;
-          return Promise.resolve(effect.transform(base.value, checkCtx)).then((result) => ({
+          return Promise.resolve(effect.transform(base2.value, checkCtx)).then((result) => ({
             status: status.value,
             value: result
           }));
@@ -38546,11 +46170,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path23) {
-  if (path23.length === 0) {
+function getDotPath(path30) {
+  if (path30.length === 0) {
     return "object root";
   }
-  return path23.reduce((acc, seg, index) => {
+  return path30.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -39474,19 +47098,19 @@ function parseNullableDef(def, refs) {
     };
   }
   if (refs.target === "openApi3") {
-    const base2 = parseDef(def.innerType._def, {
+    const base3 = parseDef(def.innerType._def, {
       ...refs,
       currentPath: [...refs.currentPath]
     });
-    if (base2 && "$ref" in base2)
-      return { allOf: [base2], nullable: true };
-    return base2 && { ...base2, nullable: true };
+    if (base3 && "$ref" in base3)
+      return { allOf: [base3], nullable: true };
+    return base3 && { ...base3, nullable: true };
   }
-  const base = parseDef(def.innerType._def, {
+  const base2 = parseDef(def.innerType._def, {
     ...refs,
     currentPath: [...refs.currentPath, "anyOf", "0"]
   });
-  return base && { anyOf: [base, { type: "null" }] };
+  return base2 && { anyOf: [base2, { type: "null" }] };
 }
 
 // ../../node_modules/.pnpm/zod-to-json-schema@3.25.2_zod@4.4.3/node_modules/zod-to-json-schema/dist/esm/parsers/number.js
@@ -40890,8 +48514,8 @@ var Protocol = class {
 function isPlainObject2(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-function mergeCapabilities(base, additional) {
-  const result = { ...base };
+function mergeCapabilities(base2, additional) {
+  const result = { ...base2 };
   for (const key in additional) {
     const k = key;
     const addValue = additional[k];
@@ -41948,11 +49572,11 @@ var McpServer = class {
       return EMPTY_COMPLETION_RESULT;
     }
     const promptShape = getObjectShape(prompt.argsSchema);
-    const field = promptShape?.[request.params.argument.name];
-    if (!isCompletable(field)) {
+    const field2 = promptShape?.[request.params.argument.name];
+    if (!isCompletable(field2)) {
       return EMPTY_COMPLETION_RESULT;
     }
-    const completer = getCompleter(field);
+    const completer = getCompleter(field2);
     if (!completer) {
       return EMPTY_COMPLETION_RESULT;
     }
@@ -42225,8 +49849,8 @@ var McpServer = class {
     };
     this._registeredPrompts[name] = registeredPrompt;
     if (argsSchema) {
-      const hasCompletable = Object.values(argsSchema).some((field) => {
-        const inner = field instanceof ZodOptional ? field._def?.innerType : field;
+      const hasCompletable = Object.values(argsSchema).some((field2) => {
+        const inner = field2 instanceof ZodOptional ? field2._def?.innerType : field2;
         return isCompletable(inner);
       });
       if (hasCompletable) {
@@ -42435,9 +50059,9 @@ function promptArgumentsFromSchema(schema) {
   const shape = getObjectShape(schema);
   if (!shape)
     return [];
-  return Object.entries(shape).map(([name, field]) => {
-    const description = getSchemaDescription(field);
-    const isOptional = isSchemaOptional(field);
+  return Object.entries(shape).map(([name, field2]) => {
+    const description = getSchemaDescription(field2);
+    const isOptional = isSchemaOptional(field2);
     return {
       name,
       description,
@@ -42474,48 +50098,31 @@ var EMPTY_COMPLETION_RESULT = {
 };
 
 // src/descriptions.ts
-var FIND_DESCRIPTION = `USE THIS BEFORE telling the user you do not remember, do not have access to earlier sessions, or that something was never discussed \u2014 it searches every coding-agent session already on this machine.
+var RECALL_DESCRIPTION = `USE THIS BEFORE telling the user you do not remember, do not have access to earlier sessions, or that something was never discussed \u2014 it searches every coding-agent session already on this machine, and it is the ONLY potsherd tool you need to reach for first.
 
-Reach for it the moment the user says "last time", "before", "we discussed", "why did we", "what did we decide", "that thing we tried", or names a decision without saying when. Also use it before re-solving a problem that sounds familiar: the answer is often already in a session from months ago.
+Reach for it the moment the user says "last time", "before", "we discussed", "why did we", "what did we decide", "that thing we tried", "pick up where we left off", "what was I working on", or names a decision without saying when. Also use it before re-solving a problem that sounds familiar: the answer is often already in a session from months ago.
 
-It searches Claude Code, Codex, Cursor and pi transcripts, including subagent transcripts and sessions the harness has already deleted, and returns ranked sessions with quoted snippets, session ids and dates. Hand a session id to potsherd_read to read the actual exchanges.
+TRUST ITS SILENCE. Every reply carries confidence \u2014 strong, weak or none \u2014 and a none comes back with ZERO rows and a "no match" note. That is a real answer: the archive does not contain this, and saying so is better than widening into a guess. Never fill an empty result from the repository in front of you.
+
+want: "hits" (the default) returns ranked threads with snippets, dates and a ready-made citation line for each. want: "context" returns the matching exchanges themselves \u2014 seq, timestamp and text, selected from across a long session rather than its opening \u2014 when you intend to quote rather than to choose. scope narrows by project, date, tag or harness; leave it out on the first call, because the answer is usually in a DIFFERENT project than the one you are in.
 
 Keyword and semantic search over the user's own history. No network, no model call, no cost. Do NOT use it to search the web, and do NOT use it to search the files in the current repository \u2014 it reads conversations, not code.`;
-var READ_DESCRIPTION = `USE THIS AFTER potsherd_find or potsherd_ls has given you a session id and you need the exact words rather than a snippet \u2014 quoting what was actually said is the difference between recalling a decision and inventing one.
+var READ_DESCRIPTION = `USE THIS AFTER potsherd_recall has given you a thread and you need the exact words rather than a snippet \u2014 quoting what was actually said is the difference between recalling a decision and inventing one.
 
-Reads one session in order, a page at a time. start_line and end_line are 1-based inclusive exchange numbers, not characters; omit them for the first page. The reply carries the total number of exchanges and the next start_line, so keep calling with the next page until you have what you need instead of asking for a thousand exchanges at once.
+It reads a THREAD: the whole fork/resume chain, in order, a page at a time. from and to are 1-based inclusive exchange numbers across the thread, not characters and not one session's numbering; omit them for the first page. The reply carries the thread's total, the next from, and every link the chain is made of, so keep paging instead of asking for a thousand exchanges at once.
 
-Every exchange carries a seq number. Cite it as <id8>@<seq> whenever you repeat something you read here, so the user can go and check you.
+Every exchange carries its seq, its timestamp and the session it came from. Cite it as <id8>@<seq>, and copy the ready-made line from the reply's citations[] when you list sources \u2014 a source line you composed yourself, a file path, or a dash is refused as a citation by code, not by convention.
 
-Do NOT invent or guess a session id \u2014 get one from potsherd_find or potsherd_ls. Do NOT use this to read files on disk.`;
-var ASK_DESCRIPTION = `USE THIS ONLY when potsherd_find plus potsherd_read cannot answer the question, because this one is slow and it costs money: it takes 40 to 180 seconds (about 100 seconds typically) and spends roughly $0.06 to $0.12 of model budget per question. Tell the user it is running before you call it.
+This is the tool that means you never need filesystem access to read a transcript. Do NOT invent or guess a thread id \u2014 get one from potsherd_recall. Do NOT use this to read files on disk; it reads conversations, not code.`;
+var GRAFT_DESCRIPTION = `USE THIS when the user wants to carry work forward from an earlier thread into this one \u2014 "pick up where we left off", "remind me what we did on X", "I'm restarting that project", "what was the state of this".
 
-It reads the best-matching sessions in parallel and returns an answer in which every sentence carries a citation that was checked against the transcript in code. Sentences whose citations did not resolve are deleted before you ever see them, so what comes back is grounded or it is absent.
+It compresses one past thread into a short cited brief under a token budget and returns the brief as text. Read that brief and then continue the work with it in mind: it is written to be dropped straight into your context, and it names the session and exchange every claim came from. Every source line in it has been resolved against the index in code; lines whose citations did not resolve are removed before you see them, and the reply lists what was refused.
 
-Use it for "why did we", "what did we decide about", "how did we end up with", "what was the reasoning" \u2014 questions whose answer is spread across several sessions. Use potsherd_find instead for "where did we", "find the session about", "when did I work on" \u2014 anything one search and one read can settle.
-
-Set strict to true when a wrong answer would be worse than no answer: it refuses rather than infers. Do NOT call it twice for the same question, and do NOT call it when there is no model backend configured \u2014 it will tell you so immediately rather than hanging.`;
-var GRAFT_DESCRIPTION = `USE THIS when the user wants to carry work forward from an earlier session into this one \u2014 "pick up where we left off", "remind me what we did on X", "I'm restarting that project", "what was the state of this".
-
-It compresses one past session into a short cited brief under a token budget and returns the brief as text. Read that brief and then continue the work with it in mind: it is written to be dropped straight into your context, and it names the session and exchange every claim came from.
-
-Give it a session id from potsherd_find or potsherd_ls, and set about to narrow the brief to one topic when the session covered several. budget is the token ceiling for the brief itself, not for the call.
+Give it a thread from potsherd_recall, or \u2014 when you have no id yet \u2014 the user's own words, and it will find the best-matching thread itself. Set about to narrow the brief to one topic when the thread covered several. budget is the token ceiling for the brief, not for the call.
 
 IT WRITES TO THE USER'S PROJECT. It saves the brief as ./.potsherd/graft-<id>.md, creating ./.potsherd/ and a .gitignore inside it if they are not there, so the user can reread it later \u2014 the reply tells you the exact path, or tells you nothing was written. That is the only thing it writes, and the only potsherd write outside ~/.potsherd; it changes nothing else on disk.
 
-It works with no model backend at all \u2014 the brief is then assembled from the stored card, is labelled unsummarised, and is still cited. Do NOT use it to summarise the current session, and do NOT use it as a search: it re-enters one session you have already chosen.`;
-var LS_DESCRIPTION = `USE THIS when the user wants to browse rather than search \u2014 when they name a period, a project or a label instead of a keyword. "What was I working on last week", "show me my pinned sessions", "everything tagged postgres", "what have I done in this repo".
-
-Lists sessions newest first with titles, projects, dates, tags and the exact command that resumes each one, including sessions the harness deleted, which nothing else on this machine can show. Every filter composes: project and tag and since together mean all three.
-
-It has NO query parameter and does not search text. If the user gave you words to look for rather than a period or a label, use potsherd_find instead.`;
-var TAG_DESCRIPTION = `USE THIS when the user asks to label, tag, group, categorise or un-tag a session so it can be found again later \u2014 "tag that one postgres", "call this the pooler session", "drop the infra tag off it".
-
-THIS IS THE ONLY POTSHERD TOOL THAT WRITES TO THE INDEX. Four of the six read and nothing else; potsherd_graft is the other writer, and it writes a file into the project rather than the index. It adds and removes tags on a single session in one transaction and returns the tags that session carries afterwards, so you can report the result rather than assume it.
-
-It changes nothing else: not the transcript, not the index, not the session's title. Tags are lower-cased and may hold letters, digits and - . _ / only.
-
-Do NOT call it to record notes of your own, and do NOT tag on the user's behalf because it seems useful \u2014 call it when the user asked for a tag. Call potsherd_tag with neither add nor remove to read the current tags without writing.`;
+It works with no model backend at all \u2014 the brief is then assembled from the stored card, is labelled unsummarised, and is still cited. Do NOT use it to summarise the current session, and do NOT use it instead of potsherd_recall when you are still looking for which thread you want.`;
 
 // src/result.ts
 function jsonResult(value) {
@@ -42535,281 +50142,193 @@ async function guarded(fn) {
   }
 }
 
-// src/tools/shapes.ts
-var TRI_STATE = external_exports.enum(["include", "only", "exclude"]).optional();
-function whenField(what) {
-  return external_exports.string().optional().describe(`${what}. Takes 30d, 2w, "last week", "in july", or 2026-08-01`);
+// src/tools/sources.ts
+var SEP = " \xB7 ";
+var ID8 = /^[0-9a-f]{8}/i;
+function mintCitation(f) {
+  const id8 = f.sessionId.slice(0, 8);
+  const project = f.project?.split("/").filter(Boolean).pop() || "(no project)";
+  const count2 = f.kind === "ghost" ? "ghost, prompts only" : `${String(f.exchanges)} exchange${f.exchanges === 1 ? "" : "s"}`;
+  return [id8, project, f.harness, count2, f.date ?? "undated"].join(SEP);
 }
-var SESSION_REF = external_exports.string().min(1).describe(
-  "a session id, or the first eight characters of one as potsherd_find and potsherd_ls print them"
-);
-
-// src/tools/find.ts
-var findInput = {
-  query: external_exports.string().min(1).describe("the words to look for, as the user would say them"),
-  project: external_exports.string().optional().describe('only this project \u2014 a directory name like "event-bus", not a path'),
-  harness: external_exports.enum(["claude", "codex", "cursor", "pi", "gemini", "opencode", "copilot"]).optional().describe("only sessions from this coding agent"),
-  since: whenField("only sessions at or after this"),
-  until: whenField("only sessions at or before this"),
-  tag: external_exports.string().optional().describe("only sessions carrying this tag"),
-  sidechains: TRI_STATE.describe(
-    "subagent transcripts: include (default), only, or exclude. Most of the actual work is in these"
-  ),
-  ghosts: TRI_STATE.describe(
-    "sessions the harness deleted, rebuilt from history: include (default), only, or exclude"
-  ),
-  pinned: external_exports.boolean().optional().describe("only sessions the user pinned"),
-  limit: external_exports.number().int().min(1).max(100).optional().describe("sessions to return. Default 10")
-};
-async function runFind(ctx, args) {
-  const query = args.query?.trim();
-  if (!query) {
-    throw new UserError("find needs something to look for", 'potsherd find "pgbouncer"');
-  }
-  return withIndexAsync(ctx, async (db, root) => {
-    const filters = parseFilters(db, toFlags(args));
-    const limit = parseLimit(args.limit, 10);
-    const result = await recall(db, query, filters, { limit, root, vectors: "auto" });
-    return {
-      query: result.query,
-      filters,
-      vectors: result.vectors,
-      ignored: result.ignored,
-      lists: result.lists,
-      relaxed: result.relaxed,
-      ms: result.ms,
-      // The contract's four named fields, straight off `RecallResult`.
-      k: result.k,
-      weights: result.weights,
-      relaxedLists: result.relaxedLists,
-      hits: result.hits.map(hitJson),
-      sessions: result.sessions.map((s) => ({
-        id: s.id,
-        kind: s.kind,
-        harness: s.harness,
-        title: s.title,
-        displayTitle: s.displayTitle,
-        project: s.project,
-        startedAt: s.startedAt,
-        endedAt: s.endedAt,
-        status: s.status,
-        isSidechain: s.isSidechain,
-        parentSessionId: s.parentSessionId,
-        agentName: s.agentName,
-        gitBranch: s.gitBranch,
-        pinned: s.pinned,
-        prompts: s.prompts,
-        exchanges: s.exchanges,
-        resume: s.resume,
-        score: s.score,
-        hits: s.hits.map(hitJson)
-      }))
+function citationFacts(db, sessionId) {
+  const shown = showSession(db, sessionId, { from: 1, to: 1 });
+  if (!shown) return null;
+  const s = shown.session;
+  return {
+    sessionId: s.id,
+    kind: s.kind,
+    harness: s.harness,
+    project: s.project,
+    exchanges: s.exchanges,
+    prompts: s.prompts,
+    // `endedAt` is the content-true end; `startedAt` is what F4 caught being
+    // inherited from a fork point. Prefer the former and fall back only when
+    // there is nothing else.
+    date: day(s.endedAt ?? s.startedAt)
+  };
+}
+function day(ts) {
+  if (!ts) return null;
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(ts.trim());
+  return m ? m[1] : ts.trim().slice(0, 10) || null;
+}
+var COUNT_FIELD = /(^|\s)(exchanges?|prompts? only)\s*$/i;
+var SOURCE_LABEL = /^\s*sources?\s*:\s*/i;
+function sourceFieldOf(line) {
+  if (/^\s/.test(line)) return null;
+  const fields = line.split(SEP);
+  if (fields.length < 3) return null;
+  if (!fields.some((f) => COUNT_FIELD.test(f.trim()))) return null;
+  const head = fields[0].replace(SOURCE_LABEL, "").trim();
+  if (!head) return null;
+  const last2 = head.split(/\s+/).pop() ?? "";
+  return last2.trim() || null;
+}
+var DASHES = /^[-–—_.\s?]*$/u;
+function verifySources(db, text) {
+  const lines = text.split("\n");
+  const rows = [];
+  const drop = /* @__PURE__ */ new Set();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const field2 = sourceFieldOf(line);
+    if (field2 === null) continue;
+    let sessionId = null;
+    let reason = null;
+    if (DASHES.test(field2)) {
+      reason = "no-id";
+    } else if (!ID8.test(field2)) {
+      reason = "not-an-id";
+    } else {
+      const found = resolveSession(db, field2.toLowerCase());
+      if (!found) reason = "unresolved";
+      else if (found.ambiguous) reason = "ambiguous";
+      else sessionId = found.id;
+    }
+    let carried = 0;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].trim() === "" || !/^\s/.test(lines[j])) break;
+      carried++;
+    }
+    const row2 = {
+      line,
+      at: i,
+      field: field2,
+      sessionId,
+      resolves: reason === null,
+      reason,
+      carried
     };
-  });
-}
-function hitJson(h) {
+    rows.push(row2);
+    if (reason !== null) {
+      drop.add(i);
+      for (let j = 1; j <= carried; j++) drop.add(i + j);
+    }
+  }
+  const refused = rows.filter((r) => !r.resolves);
+  const kept = rows.filter((r) => r.resolves);
   return {
-    kind: h.kind,
-    sessionId: h.sessionId,
-    isSidechain: h.isSidechain,
-    id: h.id ?? null,
-    seq: h.seq ?? null,
-    ts: h.ts ?? null,
-    score: h.score,
-    from: h.from,
-    snippet: h.snippet.text,
-    match: h.snippet.match ?? null
+    found: rows.length > 0,
+    rows,
+    kept,
+    refused,
+    text: lines.filter((_, i) => !drop.has(i)).join("\n"),
+    note: refused.length === 0 ? null : refusalNote(refused)
   };
 }
-function toFlags(args) {
-  return {
-    ...args.project ? { project: args.project } : {},
-    ...args.harness ? { harness: args.harness } : {},
-    ...args.since ? { since: args.since } : {},
-    ...args.until ? { until: args.until } : {},
-    ...args.tag ? { tag: args.tag } : {},
-    ...args.sidechains ? { sidechains: args.sidechains } : {},
-    ...args.ghosts ? { ghosts: args.ghosts } : {},
-    ...args.pinned ? { pinned: true } : {}
-  };
-}
-function registerFind(server, ctx) {
-  server.registerTool(
-    "potsherd_find",
-    {
-      title: "Search past coding sessions",
-      description: FIND_DESCRIPTION,
-      inputSchema: findInput,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false
-      }
-    },
-    async (args) => guarded(async () => jsonResult(await runFind(ctx, args)))
-  );
+function refusalNote(refused) {
+  const n2 = refused.length;
+  const what = refused.slice(0, 3).map((r) => `"${r.field}" (${r.reason ?? "refused"})`).join(", ");
+  return `${String(n2)} source line${n2 === 1 ? "" : "s"} refused: ${what}` + (n2 > 3 ? `, and ${String(n2 - 3)} more` : "") + ". A source line is a session id that resolves against the index, not a file path and not a dash. Copy the citation potsherd_recall or potsherd_read gave you.";
 }
 
-// src/tools/ask.ts
-var ASK_MAX_K = 12;
-var askFilters = external_exports.object({
-  project: external_exports.string().optional().describe("only this project"),
-  harness: external_exports.enum(["claude", "codex", "cursor", "pi", "gemini", "opencode", "copilot"]).optional().describe("only sessions from this coding agent"),
-  since: whenField("only sessions at or after this"),
-  until: whenField("only sessions at or before this"),
-  tag: external_exports.string().optional().describe("only sessions carrying this tag"),
-  sidechains: TRI_STATE.describe("subagent transcripts: include (default), only, exclude"),
-  ghosts: TRI_STATE.describe("deleted sessions: include (default), only, exclude"),
-  pinned: external_exports.boolean().optional().describe("only pinned sessions")
-}).optional().describe("narrow which sessions may be read, in the same words potsherd_find takes");
-var askInput = {
-  question: external_exports.string().min(1).describe("the question, as the user asked it"),
-  k: external_exports.number().int().min(1).max(ASK_MAX_K).optional().describe(
-    `sessions to read. Default ${ASK_K}. Each one is a model call, so this is the dial that decides how long the answer takes`
-  ),
-  strict: external_exports.boolean().optional().describe("refuse rather than answer when fewer than two quotes survive the citation check"),
-  filters: askFilters
-};
-async function runAsk(ctx, args, o = {}) {
-  const question = args.question?.trim();
-  if (!question) {
-    throw new UserError(
-      "ask needs a question",
-      'potsherd ask "how did we handle pgbouncer with prepared statements?"'
-    );
-  }
-  try {
-    detectBackend({ env: ctx.env });
-  } catch (err) {
-    if (err instanceof NoBackendError) throw new UserError(err.message, err.fix);
-    throw err;
-  }
-  const started = Date.now();
-  const deadline = AbortSignal.timeout(ctx.askTimeoutMs);
-  const signal = o.signal ? AbortSignal.any([o.signal, deadline]) : deadline;
-  const filterArgs = args.filters ?? {};
-  try {
-    const result = await withIndexAsync(ctx, async (db, root) => {
-      const filters = parseFilters(db, toFlags(filterArgs));
-      return ask(db, question, {
-        filters,
-        root,
-        k: args.k ?? ASK_K,
-        strict: Boolean(args.strict),
-        signal,
-        onProgress: (p) => {
-          if (p.step !== "read") return;
-          o.onProgress?.({
-            done: p.done,
-            total: p.total,
-            message: `read ${p.done}/${p.total} \xB7 $${p.spend.usd.toFixed(4)}${p.spend.estimatedInputCalls > 0 ? " est." : ""}`
-          });
-        }
-      });
-    });
-    if (deadline.aborted) throw timedOut(ctx, started);
-    return result;
-  } catch (err) {
-    if (deadline.aborted) throw timedOut(ctx, started);
-    throw err;
-  }
+// src/tools/thread.ts
+var CORE_THREAD_RESOLVER = "resolveThread";
+var THREAD_ID_FIELD = "threadId";
+function coreResolver() {
+  const fn = dist_exports[CORE_THREAD_RESOLVER];
+  return typeof fn === "function" ? fn : null;
 }
-function timedOut(ctx, started) {
-  const s = Math.round((Date.now() - started) / 1e3);
-  return new UserError(
-    `ask gave up after ${s}s (limit ${Math.round(ctx.askTimeoutMs / 1e3)}s). It reads k sessions with one model call each and something is not answering. Nothing was written and no answer is being guessed at.`,
-    "potsherd_find with the same words, then potsherd_read \u2014 or raise POTSHERD_MCP_ASK_TIMEOUT_MS"
-  );
+function threadIdOf(row2) {
+  if (!row2 || typeof row2 !== "object") return null;
+  const v = row2[THREAD_ID_FIELD];
+  return typeof v === "string" && v.length > 0 ? v : null;
 }
-function registerAsk(server, ctx) {
-  server.registerTool(
-    "potsherd_ask",
-    {
-      title: "Ask your own history a question (slow: ~100s)",
-      description: ASK_DESCRIPTION,
-      inputSchema: askInput,
-      annotations: {
-        // It reads. It spends money, which is not what `readOnlyHint` is about
-        // — that field is about the *environment*, and `ask` changes nothing in
-        // it. The cost is disclosed where a model will actually read it: the
-        // first sentence of the description.
-        readOnlyHint: true,
-        destructiveHint: false,
-        // Two identical questions are two different model runs.
-        idempotentHint: false,
-        // It calls a model over the network.
-        openWorldHint: true
-      }
-    },
-    async (args, extra) => guarded(
-      async () => jsonResult(
-        await runAsk(ctx, args, {
-          signal: extra.signal,
-          onProgress: progressSink(extra)
-        })
-      )
-    )
-  );
-}
-function progressSink(extra) {
-  const progressToken = extra._meta?.["progressToken"];
-  if (progressToken === void 0) return void 0;
-  return (p) => {
-    void extra.sendNotification({
-      method: "notifications/progress",
-      params: { progressToken, progress: p.done, total: p.total, message: p.message }
-    }).catch(() => {
-    });
-  };
-}
-
-// ../cli/src/session-ref.ts
-function mustResolve(db, ref, verb) {
+function resolveThreadRef(db, ref, verb = "read") {
   const needle = ref?.trim() ?? "";
   if (!needle) {
-    throw new UserError(`${verb} needs a session id`, `potsherd ${verb} 4c9339e0`);
-  }
-  const found = resolveSession(db, needle);
-  if (!found) {
     throw new UserError(
-      `no session in the index starts with "${needle}"`,
-      "potsherd ls    # the ids are the first eight characters of  potsherd ls --json"
+      `${verb} needs a thread \u2014 the first eight characters of any session id in it`,
+      'potsherd_recall {"query":"<what you are looking for>"}    # every row carries one'
     );
   }
-  if (found.ambiguous) {
-    const shown = found.ambiguous.slice(0, 5).map((c) => `${c.id}  ${displayTitleOf(c.title, c.project, c.id)}`).join("\n        ");
+  const fn = coreResolver();
+  let ids = null;
+  let threadId = "";
+  let via = "session-only";
+  if (fn) {
+    const t = fn(db, needle);
+    if (t && t.sessionIds.length > 0) {
+      ids = t.sessionIds;
+      threadId = t.threadId;
+      via = "core";
+    }
+  }
+  if (!ids) {
+    const found = resolveSession(db, needle);
+    if (!found) {
+      throw new UserError(
+        `no thread in the index starts with "${needle}"`,
+        'potsherd_recall {"query":"<what you are looking for>"}    # the ids come from there'
+      );
+    }
+    if (found.ambiguous) {
+      throw new UserError(
+        `"${needle}" matches ${found.ambiguous.length} threads: ${found.ambiguous.slice(0, 5).map((c) => c.id).join(", ")}`,
+        `potsherd_read {"thread":"${found.ambiguous[0].id}"}`
+      );
+    }
+    ids = [found.id];
+    threadId = found.id;
+  }
+  const links = [];
+  let offset = 1;
+  for (const id of ids) {
+    const probe = showSession(db, id, { from: 1, to: 1 });
+    if (!probe) continue;
+    const total = probe.total;
+    links.push({
+      sessionId: id,
+      id8: id.slice(0, 8),
+      kind: probe.session.kind,
+      total,
+      offset,
+      startedAt: probe.session.startedAt,
+      endedAt: probe.session.endedAt
+    });
+    offset += total;
+  }
+  if (links.length === 0) {
     throw new UserError(
-      `"${needle}" matches ${found.ambiguous.length} sessions:
-        ${shown}`,
-      `potsherd ${verb} ${found.ambiguous[0].id}`
+      `thread ${threadId.slice(0, 8)} is in the index but has no body`,
+      "potsherd index --full"
     );
   }
-  return { id: found.id, kind: found.kind, title: titleOf(db, found.id, found.kind) };
-}
-function titleOf(db, id, kind) {
-  if (kind === "ghost") {
-    const row2 = db.prepare(
-      `SELECT g.title AS title, g.project AS project,
-                (SELECT p.text FROM ghost_prompts p WHERE p.session_id = g.session_id
-                   AND p.text NOT LIKE '/%' AND length(trim(p.text)) > 3
-                 ORDER BY p.seq LIMIT 1) AS best_prompt
-           FROM ghosts g WHERE g.session_id = ?`
-    ).get(id);
-    const text = row2?.title ?? row2?.best_prompt ?? null;
-    return displayTitleOf(text ? text.replace(/\s+/g, " ").slice(0, 120) : null, row2?.project ?? null, id);
-  }
-  const row = db.prepare(
-    `SELECT COALESCE((SELECT c.title FROM cards c WHERE c.session_id = s.id), s.title) AS title,
-              s.project AS project, s.harness AS harness
-         FROM sessions s WHERE s.id = ?`
-  ).get(id);
-  return displayTitleOf(row?.title ?? null, row?.project ?? null, id);
+  return {
+    threadId,
+    links,
+    total: links.reduce((n2, l) => n2 + l.total, 0),
+    via,
+    note: via === "core" ? null : "this build of potsherd does not model fork/resume chains yet, so this thread is the one session you named. If the work continued under another id, it is not in this reply."
+  };
 }
 
 // src/tools/graft.ts
 var graftInput = {
-  session: SESSION_REF,
+  thread: external_exports.string().min(1).describe(
+    "a thread \u2014 the first eight characters of any session id in the chain \u2014 OR words to find one by, when you do not have an id yet"
+  ),
   about: external_exports.string().optional().describe("narrow the brief to one topic, when the session covered several"),
   budget: external_exports.number().int().min(MIN_BUDGET).optional().describe(`token ceiling for the brief itself. Default ${DEFAULT_BUDGET}`)
 };
@@ -42824,10 +50343,9 @@ async function runGraft(ctx, args) {
   let llm = null;
   try {
     return await withIndexAsync(ctx, async (db, root) => {
-      const found = mustResolve(db, args.session, "graft");
       llm = openLlm2(ctx.env);
       const write = ctx.graftCwd !== null;
-      const report = await graft(db, found.id, {
+      const report = await graft(db, args.thread, {
         ...args.about ? { about: args.about } : {},
         budget,
         llm,
@@ -42835,8 +50353,34 @@ async function runGraft(ctx, args) {
         write,
         ...ctx.graftCwd ? { cwd: ctx.graftCwd } : {}
       });
+      const checked = verifySources(db, report.brief);
+      let thread = null;
+      try {
+        const t = resolveThreadRef(db, report.sessionId, "graft");
+        thread = {
+          id: t.threadId,
+          id8: t.threadId.slice(0, 8),
+          via: t.via,
+          note: t.note,
+          links: t.links.length,
+          exchanges: t.total,
+          grafted: report.exchanges,
+          partial: t.total > report.exchanges
+        };
+      } catch {
+        thread = null;
+      }
       return {
         ...graftJson(report),
+        thread,
+        brief: checked.text,
+        sourcesChecked: true,
+        refusedSources: checked.refused.map((r) => ({
+          line: r.line,
+          field: r.field,
+          reason: r.reason
+        })),
+        refusedNote: checked.note,
         // `graftJson` carries `path: ''` when nothing was written. `null` is
         // what a JSON consumer can branch on without knowing that.
         path: report.path || null,
@@ -42872,7 +50416,7 @@ function registerGraft(server, ctx) {
   server.registerTool(
     "potsherd_graft",
     {
-      title: "Bring a past session into this one",
+      title: "Bring a past thread into this one",
       description: GRAFT_DESCRIPTION,
       inputSchema: graftInput,
       annotations: {
@@ -42917,133 +50461,185 @@ function registerGraft(server, ctx) {
   );
 }
 
-// src/tools/ls.ts
-var lsInput = {
+// src/tools/shapes.ts
+var TRI_STATE = external_exports.enum(["include", "only", "exclude"]).optional();
+function whenField(what) {
+  return external_exports.string().optional().describe(`${what}. Takes 30d, 2w, "last week", "in july", or 2026-08-01`);
+}
+var THREAD_REF = external_exports.string().min(1).describe(
+  "a thread: the first eight characters of ANY session id in the fork/resume chain, as potsherd_recall prints them. The whole chain is returned, not just the link you named"
+);
+var WANT = external_exports.enum(["hits", "context"]).optional().describe(
+  "hits (default) \u2014 ranked threads with snippets, confidence and a citation line each. context \u2014 the matching windows themselves, seq + ts + text, ready to quote"
+);
+var SCOPE = external_exports.object({
   project: external_exports.string().optional().describe('only this project \u2014 a directory name like "event-bus", not a path'),
+  harness: external_exports.enum(["claude", "codex", "cursor", "pi", "gemini", "opencode", "copilot"]).optional().describe("only sessions from this coding agent"),
+  since: whenField("only sessions at or after this"),
+  until: whenField("only sessions at or before this"),
   tag: external_exports.string().optional().describe("only sessions carrying this tag"),
-  pinned: external_exports.boolean().optional().describe("only sessions the user pinned"),
+  sidechains: TRI_STATE.describe(
+    "subagent transcripts: include (default), only, or exclude. Most of the actual work is in these"
+  ),
   ghosts: TRI_STATE.describe(
     "sessions the harness deleted, rebuilt from history: include (default), only, or exclude"
   ),
-  since: whenField("only sessions at or after this"),
-  limit: external_exports.number().int().min(1).max(200).optional().describe("rows to return. Default 15")
-};
-function runLs(ctx, args) {
-  return withIndex(ctx, (db, root) => {
-    const filters = parseFilters(db, toFlags(args));
-    const limit = parseLimit(args.limit, 15);
-    const result = listSessions(db, filters, { limit, root });
-    return {
-      total: result.total,
-      shown: result.sessions.length,
-      ghosts: result.ghosts,
-      sidechains: result.sidechains,
-      rolledUp: result.rolledUp,
-      // `--json` parity: what `ls --json` carries, this carries. A hidden row
-      // an agent cannot know about is the same lie to a model as to a person.
-      ignored: result.ignored,
-      filters,
-      sessions: result.sessions.map((s) => ({
-        id: s.id,
-        kind: s.kind,
-        harness: s.harness,
-        title: s.title,
-        displayTitle: s.displayTitle,
-        cardTitle: s.cardTitle,
-        cardSource: s.cardSource,
-        project: s.project,
-        projectName: s.projectName,
-        startedAt: s.startedAt,
-        endedAt: s.endedAt,
-        status: s.status,
-        isSidechain: s.isSidechain,
-        parentSessionId: s.parentSessionId,
-        agentName: s.agentName,
-        gitBranch: s.gitBranch,
-        pinned: s.pinned,
-        tags: s.tags,
-        prompts: s.prompts,
-        exchanges: s.exchanges,
-        bytes: s.bytes,
-        resume: s.resume
-      }))
-    };
-  });
+  pinned: external_exports.boolean().optional().describe("only sessions the user pinned"),
+  limit: external_exports.number().int().min(1).max(100).optional().describe("threads to return. Default 10")
+}).optional().describe(
+  "narrow the search. Leave it out on the first call: the archive's whole value is that the answer is usually in a DIFFERENT project than the one you are in"
+);
+var CONFIDENCE_FIELD = "confidence";
+var MIN_CONFIDENCE_FIELD = "minConfidence";
+var BELOW_FLOOR_FIELD = "belowFloor";
+var CALIBRATION_FIELD = "calibration";
+var AGENT_FLOOR = "weak";
+function confidenceOf(row2) {
+  return readConfidence(row2, CONFIDENCE_FIELD);
 }
-function registerLs(server, ctx) {
-  server.registerTool(
-    "potsherd_ls",
-    {
-      title: "List past sessions",
-      description: LS_DESCRIPTION,
-      inputSchema: lsInput,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false
-      }
-    },
-    async (args) => guarded(async () => jsonResult(runLs(ctx, args)))
-  );
+function minConfidenceOf(result) {
+  return readConfidence(result, MIN_CONFIDENCE_FIELD);
+}
+function belowFloorOf(result) {
+  if (!result || typeof result !== "object") return null;
+  const v = result[BELOW_FLOOR_FIELD];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+function calibrationOf(row2) {
+  if (!row2 || typeof row2 !== "object") return null;
+  return row2[CALIBRATION_FIELD] ?? null;
+}
+function readConfidence(o, field2) {
+  if (!o || typeof o !== "object") return null;
+  const v = o[field2];
+  return v === "strong" || v === "weak" || v === "none" ? v : null;
 }
 
 // src/tools/read.ts
 var READ_PAGE = 25;
 var READ_MAX_SPAN = 200;
 var readInput = {
-  session: SESSION_REF,
-  start_line: external_exports.number().int().min(1).optional().describe(`first exchange to return, 1-based and inclusive. Default 1`),
-  end_line: external_exports.number().int().min(1).optional().describe(
-    `last exchange to return, 1-based and inclusive. Default start_line + ${READ_PAGE - 1}; at most ${READ_MAX_SPAN} exchanges per call`
+  thread: THREAD_REF,
+  from: external_exports.number().int().min(1).optional().describe("first exchange in the thread to return, 1-based and inclusive. Default 1"),
+  to: external_exports.number().int().min(1).optional().describe(
+    `last exchange to return, 1-based and inclusive. Default from + ${READ_PAGE - 1}; at most ${READ_MAX_SPAN} exchanges per call`
   )
 };
 function runRead(ctx, args) {
   return withIndex(ctx, (db) => {
-    const found = mustResolve(db, args.session, "read");
-    const from = Math.max(1, args.start_line ?? 1);
-    const requestedTo = args.end_line ?? from + READ_PAGE - 1;
+    const thread = resolveThreadRef(db, args.thread, "read");
+    const from = Math.max(1, args.from ?? 1);
+    const requestedTo = args.to ?? from + READ_PAGE - 1;
     if (requestedTo < from) {
       throw new UserError(
-        `end_line (${requestedTo}) is before start_line (${from})`,
-        `potsherd show ${found.id.slice(0, 8)} --from ${from} --to ${from + READ_PAGE - 1}`
+        `to (${requestedTo}) is before from (${from})`,
+        `potsherd_read {"thread":"${thread.threadId.slice(0, 8)}","from":${from},"to":${from + READ_PAGE - 1}}`
       );
     }
-    const to = Math.min(requestedTo, from + READ_MAX_SPAN - 1);
-    const result = showSession(db, found.id, { from, to });
-    if (!result) {
-      throw new UserError(
-        `session ${found.id} is in the index but has no body`,
-        "potsherd index --full"
-      );
+    const to = Math.min(requestedTo, from + READ_MAX_SPAN - 1, thread.total);
+    const exchanges = [];
+    const ghostPrompts = [];
+    const citations = [];
+    const children = [];
+    let card = null;
+    for (const link of thread.links) {
+      const span3 = overlap(link, from, to);
+      if (!span3) continue;
+      const shown2 = showSession(db, link.sessionId, { from: span3.localFrom, to: span3.localTo });
+      if (!shown2) continue;
+      const facts = citationFacts(db, link.sessionId);
+      const citation = facts ? mintCitation(facts) : mintCitation({
+        sessionId: link.sessionId,
+        kind: link.kind,
+        harness: "claude",
+        project: null,
+        exchanges: link.total,
+        prompts: link.total,
+        date: (link.endedAt ?? link.startedAt)?.slice(0, 10) ?? null
+      });
+      citations.push({ sessionId: link.sessionId, id8: link.id8, citation });
+      if (!card && shown2.card) card = shown2.card;
+      for (const c of shown2.children) children.push(c);
+      for (const e of shown2.exchanges) {
+        exchanges.push({
+          position: link.offset + (e.seq - 1),
+          sessionId: link.sessionId,
+          id8: link.id8,
+          // Session-local, because that is what `<id8>@<seq>` means everywhere
+          // else in this product. Cite with this, never with `position`.
+          seq: e.seq,
+          ts: e.ts,
+          cite: `${link.id8}@${String(e.seq)}`,
+          citation,
+          userText: e.userText,
+          assistantText: e.assistantText,
+          filesTouched: e.filesTouched,
+          toolCalls: e.toolCalls,
+          isSidechain: e.isSidechain,
+          redacted: e.redacted
+        });
+      }
+      for (const p of shown2.ghostPrompts ?? []) {
+        ghostPrompts.push({
+          position: link.offset + (p.seq - 1),
+          sessionId: link.sessionId,
+          id8: link.id8,
+          seq: p.seq,
+          ts: p.ts,
+          cite: `${link.id8}@${String(p.seq)}`,
+          citation,
+          text: p.text,
+          assistantSide: "unrecoverable"
+        });
+      }
     }
-    const shown = result.exchanges.length || (result.ghostPrompts?.length ?? 0);
-    const hasMore = result.to < result.total;
+    const shown = exchanges.length + ghostPrompts.length;
+    const hasMore = to < thread.total;
     return {
-      session: result.session,
-      from: result.from,
-      to: result.to,
-      total: result.total,
-      // The contract's own words, echoed back so a client never has to guess
-      // whether its window was honoured or clamped.
-      start_line: result.from,
-      end_line: result.to,
+      thread: {
+        id: thread.threadId,
+        id8: thread.threadId.slice(0, 8),
+        via: thread.via,
+        note: thread.note,
+        links: thread.links
+      },
+      from,
+      to,
+      total: thread.total,
       shown,
       hasMore,
-      nextStartLine: hasMore ? result.to + 1 : null,
+      nextFrom: hasMore ? to + 1 : null,
       truncated: requestedTo > to,
-      exchanges: result.exchanges,
-      ghostPrompts: result.ghostPrompts ?? null,
-      children: result.children,
-      card: result.card
+      /**
+       * The only lines that count as sources for anything read here.
+       *
+       * `sources.ts` refuses a `SOURCES` row whose id8 does not resolve; these
+       * are the rows that do, written by code from the index. Copy one.
+       */
+      citations,
+      citationRule: "A source line is one of the strings in `citations`, copied. A line you composed \u2014 a file path, a dash, an id you did not get from potsherd \u2014 is refused as a citation.",
+      exchanges,
+      ghostPrompts: ghostPrompts.length > 0 ? ghostPrompts : null,
+      ghostNote: ghostPrompts.length > 0 ? "these are PROMPTS ONLY. The assistant side was deleted by the harness sweep and is not recoverable. You may say what was asked. You may not say what was answered." : null,
+      children,
+      card
     };
   });
+}
+function overlap(link, from, to) {
+  const start = link.offset;
+  const end = link.offset + link.total - 1;
+  if (to < start || from > end) return null;
+  return {
+    localFrom: Math.max(from, start) - start + 1,
+    localTo: Math.min(to, end) - start + 1
+  };
 }
 function registerRead(server, ctx) {
   server.registerTool(
     "potsherd_read",
     {
-      title: "Read one past session",
+      title: "Read a past thread",
       description: READ_DESCRIPTION,
       inputSchema: readInput,
       annotations: {
@@ -43057,107 +50653,285 @@ function registerRead(server, ctx) {
   );
 }
 
-// src/tools/tag.ts
-var tagInput = {
-  session: SESSION_REF,
-  add: external_exports.array(external_exports.string()).optional().describe("tags to add. Letters, digits and - . _ / only; lower-cased on the way in"),
-  remove: external_exports.array(external_exports.string()).optional().describe("tags to take off")
+// src/tools/recall.ts
+var CHARS_PER_TOKEN2 = 4;
+var DEFAULT_CONTEXT_BUDGET = 6e3;
+var recallInput = {
+  query: external_exports.string().min(1).describe(
+    "what to look for. Two to four distinctive nouns beat a whole sentence: the index is keyword-first and a long question dilutes into stopwords"
+  ),
+  scope: SCOPE,
+  want: WANT,
+  budget: external_exports.number().int().min(200).optional().describe(
+    `want: "context" only \u2014 token ceiling on the windows returned. Default ${DEFAULT_CONTEXT_BUDGET}`
+  )
 };
-function runTag(ctx, args) {
-  return withIndex(ctx, (db) => {
-    const found = mustResolve(db, args.session, "tag");
-    const session = { id: found.id, kind: found.kind, title: found.title };
-    const ops = [
-      ...(args.add ?? []).map((t) => `+${String(t).replace(/^\+/, "")}`),
-      ...(args.remove ?? []).map((t) => `-${String(t).replace(/^-/, "")}`)
-    ];
-    if (ops.length === 0) {
-      return {
-        session,
-        tags: sessionTags(db, found.id),
-        added: [],
-        removed: [],
-        unchanged: [],
-        rejected: [],
-        wrote: false
-      };
+async function runRecall(ctx, args) {
+  const query = args.query?.trim();
+  if (!query) {
+    throw new UserError(
+      "recall needs something to look for",
+      'potsherd_recall {"query":"pgbouncer transaction pooling"}'
+    );
+  }
+  const want = args.want ?? "hits";
+  const scope = args.scope ?? {};
+  return withIndexAsync(ctx, async (db, root) => {
+    const filters = parseFilters(db, toFlags(scope));
+    const limit = parseLimit(scope.limit, 10);
+    const options = {
+      limit,
+      root,
+      vectors: "auto",
+      [MIN_CONFIDENCE_FIELD]: AGENT_FLOOR
+    };
+    const result = await recall(db, query, filters, options);
+    const confidence = confidenceOf(result);
+    const calibrated = confidence !== null;
+    const minConfidence = minConfidenceOf(result);
+    const belowFloor = belowFloorOf(result);
+    const noMatch = confidence === "none";
+    const sessions = noMatch ? [] : result.sessions;
+    const hits = noMatch ? [] : result.hits;
+    const threads = groupThreads(sessions);
+    const envelope = {
+      query: result.query,
+      want,
+      scope: filters,
+      // ---------------------------------------------------------- the cliff
+      confidence,
+      calibrated,
+      minConfidence,
+      /**
+       * Rows the floor withheld.
+       *
+       * Reported rather than hidden, because "nothing matched" and "eleven
+       * things matched and none of them well enough to show you" are different
+       * answers and the agent should be able to say which one it got.
+       */
+      belowFloor,
+      noMatch,
+      /**
+       * `05`'s honesty contract, and audit item 9: *tell me what you can't do,
+       * at the top.* One line, on every reply, saying what this search was
+       * actually able to do — read off `result.vectors`, which is core's own
+       * single source of truth for it.
+       */
+      capability: capabilityLine(result.vectors),
+      vectors: result.vectors,
+      note: noMatch ? "no match. The archive does not contain this" + (belowFloor ? `, though ${String(belowFloor)} rows were withheld below the ${String(minConfidence ?? AGENT_FLOOR)} floor` : "") + ". Say so \u2014 do not widen into a guess, and do not answer from the repository in front of you." : calibrated ? null : 'this build of potsherd does not calibrate its scores yet, so "confidence" is null rather than a measurement. Treat a low-scoring row as unproven.',
+      ignored: result.ignored,
+      lists: result.lists,
+      relaxed: result.relaxed,
+      relaxedLists: result.relaxedLists,
+      k: result.k,
+      weights: result.weights,
+      ms: result.ms,
+      threads
+    };
+    if (want === "context") {
+      const budget = Math.max(200, Math.floor(args.budget ?? DEFAULT_CONTEXT_BUDGET));
+      const { windows: windows2, truncated, tokens } = windowsFrom(sessions, budget);
+      envelope["windows"] = windows2;
+      envelope["windowBudget"] = budget;
+      envelope["windowTokens"] = tokens;
+      envelope["windowsTruncated"] = truncated;
+      envelope["readMore"] = windows2.length === 0 ? null : "these windows are discontiguous and relevance-selected. potsherd_read the thread for the exchanges around any of them.";
+    } else {
+      envelope["hits"] = hits.map((h) => hitJson(h, sessions));
     }
-    const { add, remove, rejected } = parseTagArgs(ops);
-    if (rejected.length > 0 && add.length === 0 && remove.length === 0) {
-      throw new UserError(
-        `nothing usable in ${rejected.map((r) => `"${r}"`).join(", ")} \u2014 a tag is letters, digits, - . _ or /`,
-        `potsherd tag ${found.id.slice(0, 8)} +postgres -mysql`
-      );
+    return envelope;
+  });
+}
+function groupThreads(sessions) {
+  const order = [];
+  const byThread = /* @__PURE__ */ new Map();
+  for (const s of sessions) {
+    const key = threadIdOf(s) ?? s.id;
+    if (!byThread.has(key)) {
+      byThread.set(key, []);
+      order.push(key);
     }
-    const result = applyTags(db, found.id, { add, remove });
+    byThread.get(key).push(s);
+  }
+  return order.map((key) => {
+    const members = byThread.get(key);
+    const lead = members[0];
+    const exchanges = members.reduce((n2, m) => n2 + m.exchanges, 0);
+    const prompts = members.reduce((n2, m) => n2 + m.prompts, 0);
+    const started = members.map((m) => m.startedAt).filter(Boolean).sort()[0] ?? null;
+    const ended = members.map((m) => m.endedAt).filter(Boolean).sort().pop() ?? null;
     return {
-      session,
-      tags: result.tags,
-      added: result.added,
-      removed: result.removed,
-      unchanged: result.unchanged,
-      rejected,
-      wrote: result.added.length > 0 || result.removed.length > 0
+      thread: key,
+      id8: key.slice(0, 8),
+      threadOf: threadIdOf(lead) === null ? "session" : "chain",
+      links: members.map((m) => ({ sessionId: m.id, id8: m.id.slice(0, 8), exchanges: m.exchanges })),
+      confidence: confidenceOf(lead),
+      calibration: calibrationOf(lead),
+      kind: lead.kind,
+      harness: lead.harness,
+      title: lead.title,
+      displayTitle: lead.displayTitle,
+      // `project` is the short name the pretty view shows, not the absolute
+      // path `--json` used to hand back (audit F9: an agent parsing JSON got a
+      // strictly worse object than a human reading the terminal).
+      project: lead.projectName,
+      projectPath: lead.project,
+      startedAt: started,
+      endedAt: ended,
+      status: lead.status,
+      isSidechain: lead.isSidechain,
+      parentSessionId: lead.parentSessionId,
+      agentName: lead.agentName,
+      pinned: lead.pinned,
+      prompts,
+      exchanges,
+      resume: lead.resume,
+      score: lead.score,
+      /** Minted here. Copy it; do not compose one. See `sources.ts`. */
+      citation: mintCitation({
+        sessionId: key,
+        kind: lead.kind,
+        harness: lead.harness,
+        project: lead.projectName,
+        exchanges,
+        prompts,
+        date: (ended ?? started)?.slice(0, 10) ?? null
+      })
     };
   });
 }
-function registerTag(server, ctx) {
+function hitJson(h, sessions) {
+  const owner = sessions.find((s) => s.id === h.sessionId);
+  return {
+    thread: (owner ? threadIdOf(owner) : null) ?? h.sessionId,
+    sessionId: h.sessionId,
+    id8: h.sessionId.slice(0, 8),
+    kind: h.kind,
+    isSidechain: h.isSidechain,
+    seq: h.seq ?? null,
+    ts: h.ts ?? null,
+    confidence: confidenceOf(h),
+    calibration: calibrationOf(h),
+    score: h.score,
+    from: h.from,
+    snippet: h.snippet.text,
+    match: h.snippet.match ?? null,
+    // A card is a routing aid, never evidence (audit F6, plan §B8). Named on
+    // the row so a model cannot quote one as a transcript.
+    evidence: h.kind === "card" || h.kind === "title" ? "not-a-transcript" : "transcript"
+  };
+}
+function windowsFrom(sessions, budgetTokens) {
+  const queues = sessions.map((s) => ({ s, hits: [...s.hits] }));
+  const windows2 = [];
+  let chars = 0;
+  const ceiling = budgetTokens * CHARS_PER_TOKEN2;
+  let truncated = false;
+  for (let round = 0; ; round++) {
+    let any2 = false;
+    for (const q of queues) {
+      const h = q.hits[round];
+      if (!h) continue;
+      any2 = true;
+      if (h.kind === "card" || h.kind === "title") continue;
+      const text = [h.userText, h.assistantText].filter(Boolean).join("\n\n").trim();
+      if (!text) continue;
+      if (chars + text.length > ceiling) {
+        truncated = true;
+        continue;
+      }
+      chars += text.length;
+      windows2.push({
+        thread: threadIdOf(q.s) ?? q.s.id,
+        sessionId: h.sessionId,
+        id8: h.sessionId.slice(0, 8),
+        seq: h.seq ?? null,
+        ts: h.ts ?? null,
+        kind: h.kind,
+        isSidechain: h.isSidechain,
+        confidence: confidenceOf(h),
+        calibration: calibrationOf(h),
+        citation: mintCitation({
+          sessionId: h.sessionId,
+          kind: q.s.kind,
+          harness: q.s.harness,
+          project: q.s.projectName,
+          exchanges: q.s.exchanges,
+          prompts: q.s.prompts,
+          date: (q.s.endedAt ?? q.s.startedAt)?.slice(0, 10) ?? null
+        }),
+        text
+      });
+    }
+    if (!any2) break;
+  }
+  return {
+    windows: windows2,
+    truncated,
+    // `est.` — chars divided by CHARS_PER_TOKEN, not a tokeniser's count.
+    tokens: Math.ceil(chars / CHARS_PER_TOKEN2)
+  };
+}
+function capabilityLine(v) {
+  if (v.used) return `keyword + semantic search${v.vectors ? ` \xB7 ${String(v.vectors)} vectors` : ""}`;
+  if (!v.available)
+    return `SEMANTIC SEARCH UNAVAILABLE \u2014 results are keyword-only${v.reason ? ` (${v.reason})` : ""}`;
+  return `keyword search answered this one${v.reason ? ` (${v.reason})` : ""}`;
+}
+function toFlags(scope) {
+  const s = scope;
+  return {
+    ...s.project ? { project: s.project } : {},
+    ...s.harness ? { harness: s.harness } : {},
+    ...s.since ? { since: s.since } : {},
+    ...s.until ? { until: s.until } : {},
+    ...s.tag ? { tag: s.tag } : {},
+    ...s.sidechains ? { sidechains: s.sidechains } : {},
+    ...s.ghosts ? { ghosts: s.ghosts } : {},
+    ...s.pinned ? { pinned: true } : {}
+  };
+}
+function registerRecall(server, ctx) {
   server.registerTool(
-    "potsherd_tag",
+    "potsherd_recall",
     {
-      title: "Tag a session (the only tool that writes to the index)",
-      description: TAG_DESCRIPTION,
-      inputSchema: tagInput,
+      title: "Search past coding sessions",
+      description: RECALL_DESCRIPTION,
+      inputSchema: recallInput,
       annotations: {
-        // One of the two `readOnlyHint: false` tools on this server —
-        // `potsherd_graft` is the other, because it creates a file in the
-        // user's project. A client that colours write tools differently, or
-        // asks before running them, is reading this field and it must be
-        // honest.
-        readOnlyHint: false,
-        // It adds and removes labels. Nothing it touches is unrecoverable and
-        // the same call twice leaves the same tags.
+        readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false
       }
     },
-    async (args) => guarded(async () => jsonResult(runTag(ctx, args)))
+    async (args) => guarded(async () => jsonResult(await runRecall(ctx, args)))
   );
 }
 
 // src/server.ts
-var TOOLS2 = [
-  "potsherd_find",
-  "potsherd_read",
-  "potsherd_ask",
-  "potsherd_graft",
-  "potsherd_ls",
-  "potsherd_tag"
-];
-var WRITE_TOOLS = ["potsherd_graft", "potsherd_tag"];
+var TOOLS2 = ["potsherd_recall", "potsherd_read", "potsherd_graft"];
+var WRITE_TOOLS = ["potsherd_graft"];
 function createServer(ctx) {
   const server = new McpServer(
     { name: "potsherd", version: VERSION, title: "potsherd" },
     {
       capabilities: { tools: {} },
-      instructions: "potsherd indexes every coding-agent session on this machine \u2014 Claude Code, Codex, Cursor, pi \u2014 including subagent transcripts and sessions the harness has already deleted. Search it BEFORE telling the user you have no memory of earlier work: potsherd_find for words, potsherd_ls for a period or a label, potsherd_read for the exact exchanges, potsherd_graft to carry a past session into this one, and potsherd_ask (slow, ~100s) only when the first four cannot answer. Four of the six only read. The two that write say so in their readOnlyHint: potsherd_tag changes labels in the index, and potsherd_graft creates ./.potsherd/graft-<id8>.md in the current project \u2014 it is the only tool that writes outside ~/.potsherd."
+      instructions: 'potsherd indexes every coding-agent session on this machine \u2014 Claude Code, Codex, Cursor, pi \u2014 including subagent transcripts and sessions the harness has already deleted. Search it BEFORE telling the user you have no memory of earlier work. Three tools, in the order you use them: potsherd_recall to find a thread (and to be told, in one word, whether the archive actually holds it \u2014 a "none" comes back with zero rows and that is a real answer), potsherd_read to page the thread and quote it exactly, potsherd_graft to carry a whole thread into this conversation as a brief. Citations are minted by potsherd, not composed by you: copy the citation line a reply gives you. A source line whose id does not resolve against the index is refused in code. Two of the three only read. potsherd_graft creates ./.potsherd/graft-<id8>.md in the current project and says so in its readOnlyHint \u2014 the only potsherd write outside ~/.potsherd. Everything else potsherd does \u2014 tag, pin, link, card, ls, stats, doctor \u2014 is a command the user runs in their own terminal.'
     }
   );
-  registerFind(server, ctx);
+  registerRecall(server, ctx);
   registerRead(server, ctx);
-  registerAsk(server, ctx);
   registerGraft(server, ctx);
-  registerLs(server, ctx);
-  registerTag(server, ctx);
   return server;
 }
 
 // src/selftest.ts
-import fs20 from "node:fs";
+import fs33 from "node:fs";
 import os5 from "node:os";
-import path21 from "node:path";
-import process14 from "node:process";
+import path28 from "node:path";
+import process17 from "node:process";
 import { fileURLToPath } from "node:url";
 
 // ../../node_modules/.pnpm/@modelcontextprotocol+sdk@1.30.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/client.js
@@ -43898,12 +51672,12 @@ async function call(client, name, args) {
 
 // src/selftest.ts
 var DEFAULT_WIDTH = 80;
-async function selftest(out = process14.stderr, width = DEFAULT_WIDTH) {
+async function selftest(out = process17.stderr, width = DEFAULT_WIDTH) {
   const started = Date.now();
-  const tmp = fs20.mkdtempSync(path21.join(os5.tmpdir(), "potsherd-mcp-selftest-"));
-  const root = path21.join(tmp, "potsherd");
-  const project = path21.join(tmp, "project");
-  fs20.mkdirSync(project, { recursive: true });
+  const tmp = fs33.mkdtempSync(path28.join(os5.tmpdir(), "potsherd-mcp-selftest-"));
+  const root = path28.join(tmp, "potsherd");
+  const project = path28.join(tmp, "project");
+  fs33.mkdirSync(project, { recursive: true });
   const say = (s) => {
     out.write(s + "\n");
   };
@@ -43916,9 +51690,9 @@ async function selftest(out = process14.stderr, width = DEFAULT_WIDTH) {
     say(`potsherd mcp selftest \xB7 v${VERSION}`);
     say("");
     const fixture = fixtureClaudeDir();
-    const shortPath = (p) => format_exports.elideMiddle(paths_exports.tildify(p), width - 10);
-    say(`  corpus  ${shortPath(fixture)}`);
-    say(`  index   ${shortPath(root)}`);
+    const shortPath2 = (p) => format_exports.elideMiddle(paths_exports.tildify(p), width - 10);
+    say(`  corpus  ${shortPath2(fixture)}`);
+    say(`  index   ${shortPath2(root)}`);
     say("");
     const report = await indexAll({
       root,
@@ -43934,7 +51708,7 @@ async function selftest(out = process14.stderr, width = DEFAULT_WIDTH) {
       report.totals.sessions > 0,
       `indexed ${report.totals.sessions} sessions, ${report.totals.exchanges} exchanges from the fixture corpus`
     );
-    const env = { ...process14.env };
+    const env = { ...process17.env };
     delete env["PATH"];
     delete env["ANTHROPIC_API_KEY"];
     delete env["POTSHERD_LLM_BACKEND"];
@@ -43950,15 +51724,15 @@ async function selftest(out = process14.stderr, width = DEFAULT_WIDTH) {
       const walk2 = (dir, rel = "") => {
         let entries;
         try {
-          entries = fs20.readdirSync(dir, { withFileTypes: true });
+          entries = fs33.readdirSync(dir, { withFileTypes: true });
         } catch {
           return;
         }
         for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-          const at = path21.join(dir, e.name);
+          const at = path28.join(dir, e.name);
           const key = rel ? `${rel}/${e.name}` : e.name;
           if (e.isDirectory()) walk2(at, key);
-          else files.push(`${key}:${String(fs20.statSync(at).size)}`);
+          else files.push(`${key}:${String(fs33.statSync(at).size)}`);
         }
       };
       walk2(project);
@@ -43988,77 +51762,73 @@ async function selftest(out = process14.stderr, width = DEFAULT_WIDTH) {
       const listed = await client.listTools();
       const names = listed.tools.map((t) => t.name);
       check2(
-        names.length === 6 && TOOLS2.every((t, i) => names[i] === t),
-        `6 tools, in order: ${names.join(", ")}`
+        names.length === TOOLS2.length && TOOLS2.every((t, i) => names[i] === t),
+        `${String(TOOLS2.length)} tools, in order: ${names.join(", ")}`
       );
       check2(
         listed.tools.every((t) => (t.description ?? "").length > 200),
         "every tool description is an instruction, not a label"
       );
       say("");
-      const find = await call2(client, "potsherd_find", {
+      const found = await call2(client, "potsherd_recall", {
         query: "combining keyword and vector search into one ranked list",
-        limit: 3
+        scope: { limit: 3 }
       });
-      const sessions = find["sessions"] ?? [];
+      const threads = found["threads"] ?? [];
       check2(
-        sessions[0]?.id.startsWith("cbcfda7e") === true,
-        `potsherd_find  ranked ${sessions[0]?.id.slice(0, 8) ?? "(nothing)"} first of ${sessions.length} \xB7 rrf k=${String(find["k"])} \xB7 ${String(find["ms"])}ms`
+        threads[0]?.thread.startsWith("cbcfda7e") === true,
+        `potsherd_recall ranked ${threads[0]?.thread.slice(0, 8) ?? "(nothing)"} first of ${threads.length} \xB7 rrf k=${String(found["k"])} \xB7 ${String(found["ms"])}ms`
       );
       check2(
-        Array.isArray(find["hits"]) && find["weights"] !== void 0,
-        "potsherd_find  carries hits[], k, weights and relaxedLists as the contract pins them"
+        typeof found["confidence"] !== "undefined" && typeof found["noMatch"] === "boolean",
+        `potsherd_recall carries the cliff: confidence=${String(found["confidence"])} calibrated=${String(found["calibrated"])} noMatch=${String(found["noMatch"])}`
       );
-      const target = sessions[0]?.id ?? "";
+      check2(
+        typeof threads[0]?.citation === "string" && threads[0].citation.includes(" \xB7 "),
+        `potsherd_recall minted a citation rather than leaving one to be composed: ${threads[0]?.citation ?? "(none)"}`
+      );
+      check2(
+        typeof found["capability"] === "string" && String(found["capability"]).length > 0,
+        `potsherd_recall says what it could do: ${String(found["capability"])}`
+      );
+      const context = await call2(client, "potsherd_recall", {
+        query: "combining keyword and vector search into one ranked list",
+        want: "context",
+        budget: 1500
+      });
+      const windows2 = context["windows"] ?? [];
+      check2(
+        windows2.length > 0 && windows2.every((w) => typeof w.text === "string" && w.text.length > 0),
+        `potsherd_recall want:context returned ${windows2.length} windows, ${String(context["windowTokens"])} est. tokens of ${String(context["windowBudget"])}`
+      );
+      const target = threads[0]?.thread ?? "";
       const page1 = await call2(client, "potsherd_read", {
-        session: target.slice(0, 8),
-        start_line: 1,
-        end_line: 2
+        thread: target.slice(0, 8),
+        from: 1,
+        to: 2
       });
       const ex1 = page1["exchanges"] ?? [];
       check2(
-        ex1.length === 2 && page1["total"] !== void 0,
-        `potsherd_read  page 1 gave exchanges ${ex1.map((e) => e.seq).join(", ")} of ${String(page1["total"])}`
+        ex1.length === 2 && page1["total"] !== void 0 && ex1.every((e) => typeof e.seq === "number"),
+        `potsherd_read  page 1 gave exchanges ${ex1.map((e) => e.seq).join(", ")} of ${String(page1["total"])} \xB7 thread via ${String(page1["thread"].via)}`
       );
       const page2 = await call2(client, "potsherd_read", {
-        session: target.slice(0, 8),
-        start_line: Number(page1["nextStartLine"] ?? 3),
-        end_line: Number(page1["nextStartLine"] ?? 3) + 1
+        thread: target.slice(0, 8),
+        from: Number(page1["nextFrom"] ?? 3),
+        to: Number(page1["nextFrom"] ?? 3) + 1
       });
       const ex2 = page2["exchanges"] ?? [];
       check2(
         ex2.length > 0 && ex2[0].seq > ex1[ex1.length - 1].seq,
         `potsherd_read  page 2 continued at seq ${ex2[0]?.seq}, no overlap`
       );
-      const ls = await call2(client, "potsherd_ls", { limit: 5 });
+      const cites = page1["citations"] ?? [];
       check2(
-        Number(ls["total"]) > 0 && Array.isArray(ls["sessions"]),
-        `potsherd_ls    ${String(ls["shown"])} of ${String(ls["total"])} sessions, newest first`
-      );
-      const tagged = await call2(client, "potsherd_tag", {
-        session: target.slice(0, 8),
-        add: ["selftest", "Fusion"]
-      });
-      const tags = tagged["tags"] ?? [];
-      check2(
-        tags.includes("selftest") && tags.includes("fusion"),
-        `potsherd_tag   wrote [${tags.join(", ")}] (and normalised "Fusion")`
-      );
-      const byTag = await call2(client, "potsherd_ls", { tag: "selftest" });
-      check2(
-        Number(byTag["total"]) === 1,
-        "potsherd_tag   the tag it wrote is the tag potsherd_ls finds"
-      );
-      const untagged = await call2(client, "potsherd_tag", {
-        session: target.slice(0, 8),
-        remove: ["selftest", "fusion"]
-      });
-      check2(
-        (untagged["tags"] ?? []).length === 0,
-        "potsherd_tag   removed them again, leaving the corpus as it found it"
+        cites.length > 0 && ex1.every((e) => typeof e.position === "number"),
+        `potsherd_read  every row carries seq + ts + a minted citation: ${cites[0]?.citation ?? "(none)"}`
       );
       const grafted = await call2(client, "potsherd_graft", {
-        session: target.slice(0, 8),
+        thread: target.slice(0, 8),
         budget: 400
       });
       const brief = String(grafted["brief"] ?? "");
@@ -44068,24 +51838,44 @@ async function selftest(out = process14.stderr, width = DEFAULT_WIDTH) {
         `potsherd_graft ${String(grafted["tokens"])} tokens of ${String(grafted["budget"])} budget, via ${String(grafted["via"])} (no backend), ${(grafted["citations"] ?? []).length} citations`
       );
       check2(
-        typeof graftPath2 === "string" && fs20.existsSync(graftPath2),
-        `potsherd_graft wrote ${graftPath2 ? path21.relative(tmp, graftPath2) : "(nothing)"} under the temp project, not the cwd`
+        typeof graftPath2 === "string" && fs33.existsSync(graftPath2),
+        `potsherd_graft wrote ${graftPath2 ? path28.relative(tmp, graftPath2) : "(nothing)"} under the temp project, not the cwd`
       );
-      const askAt = Date.now();
-      const askErr = await callRaw2(client, "potsherd_ask", {
-        question: "how did we combine the two ranked lists?",
-        k: 2
-      });
-      const askText = textOf(askErr);
       check2(
-        askErr.isError === true && /claude|codex|ANTHROPIC_API_KEY/i.test(askText),
-        `potsherd_ask   no backend \u2192 tool error in ${Date.now() - askAt}ms, not after ~100s: ` + askText.split("\n")[0]
+        grafted["sourcesChecked"] === true && (grafted["refusedSources"] ?? []).length === 0 && brief.includes("source:"),
+        `potsherd_graft ran the source check in code: ${(grafted["refusedSources"] ?? []).length} refused, ${String(grafted["brief"].split("\n").length)} brief lines kept`
       );
+      say("");
+      {
+        const db = db_exports.open({ file: paths_exports.dbPath(root), readonly: true });
+        try {
+          const block2 = [
+            "SOURCES",
+            `${target.slice(0, 8)} \xB7 fixture \xB7 claude \xB7 12 exchanges \xB7 2026-01-01`,
+            '  "a quote that is carried by a citation that resolves"',
+            "HANDOFF.md \xA73 \xB7 potsherd \xB7 claude \xB7 \u2014 exchanges \xB7 \u2014",
+            '  "a claim the repository could support and the archive cannot"',
+            "\u2014 \xB7 potsherd \xB7 claude \xB7 \u2014 exchanges \xB7 2026-06-03",
+            '  "the project started on 3 June"'
+          ].join("\n");
+          const verdict = verifySources(db, block2);
+          check2(
+            verdict.refused.length === 2 && verdict.kept.length === 1,
+            `verifySources  refused ${verdict.refused.length} fabricated source lines, kept ${verdict.kept.length} real one`
+          );
+          check2(
+            !verdict.text.includes("HANDOFF.md") && !verdict.text.includes("3 June"),
+            "verifySources  the refused rows and the quotes under them are gone from the text"
+          );
+        } finally {
+          db.close();
+        }
+      }
       say("");
       const observed = [...witnessed].sort();
       const declared = [...WRITE_TOOLS].sort();
       check2(
-        observed.length === declared.length && observed.every((n, i) => n === declared[i]),
+        observed.length === declared.length && observed.every((n2, i) => n2 === declared[i]),
         `WRITE_TOOLS is what was observed to write: [${declared.join(", ")}]` + (observed.join(",") === declared.join(",") ? "" : ` \u2014 but watched [${observed.join(", ")}]`)
       );
       for (const t of listed.tools) {
@@ -44097,12 +51887,12 @@ async function selftest(out = process14.stderr, width = DEFAULT_WIDTH) {
       }
       say("");
       const bad = [
-        ["a malformed argument", "potsherd_find", { query: 42 }],
-        ["a missing session", "potsherd_read", { session: "ffffffff" }],
-        ["an unreadable index", "potsherd_ls", {}]
+        ["a malformed argument", "potsherd_recall", { query: 42 }],
+        ["a missing thread", "potsherd_read", { thread: "ffffffff" }],
+        ["an unreadable index", "potsherd_recall", { query: "anything at all" }]
       ];
       for (const [what, tool, args] of bad) {
-        const ctxBefore = tool === "potsherd_ls" ? breakIndex(root) : null;
+        const ctxBefore = what === "an unreadable index" ? breakIndex(root) : null;
         const r = await callRaw(client, tool, args);
         if (ctxBefore) fixIndex(root, ctxBefore);
         check2(
@@ -44110,8 +51900,11 @@ async function selftest(out = process14.stderr, width = DEFAULT_WIDTH) {
           `${what} \u2192 tool error, server still up: ${textOf(r).split("\n")[0]}`
         );
       }
-      const after = await call(client, "potsherd_ls", { limit: 1 });
-      check2(Number(after["total"]) > 0, "the server answered again after three failures");
+      const after = await call(client, "potsherd_recall", { query: "ranked list", scope: { limit: 1 } });
+      check2(
+        Array.isArray(after["threads"]),
+        "the server answered again after three failures"
+      );
     } finally {
       await close();
     }
@@ -44126,23 +51919,23 @@ async function selftest(out = process14.stderr, width = DEFAULT_WIDTH) {
     say(`  selftest could not finish: ${err?.message ?? String(err)}`);
     return 1;
   } finally {
-    fs20.rmSync(tmp, { recursive: true, force: true });
+    fs33.rmSync(tmp, { recursive: true, force: true });
   }
 }
 function breakIndex(root) {
   const file2 = paths_exports.dbPath(root);
-  const saved = fs20.readFileSync(file2);
-  fs20.rmSync(file2, { force: true });
+  const saved = fs33.readFileSync(file2);
+  fs33.rmSync(file2, { force: true });
   return saved;
 }
 function fixIndex(root, saved) {
-  fs20.writeFileSync(paths_exports.dbPath(root), saved, { mode: 384 });
+  fs33.writeFileSync(paths_exports.dbPath(root), saved, { mode: 384 });
 }
 function fixtureClaudeDir() {
-  const here = path21.dirname(fileURLToPath(import.meta.url));
-  for (let dir = here, i = 0; i < 8; i++, dir = path21.dirname(dir)) {
-    const candidate = path21.join(dir, "evals", "fixture", "claude");
-    if (fs20.existsSync(candidate)) return candidate;
+  const here = path28.dirname(fileURLToPath(import.meta.url));
+  for (let dir = here, i = 0; i < 8; i++, dir = path28.dirname(dir)) {
+    const candidate = path28.join(dir, "evals", "fixture", "claude");
+    if (fs33.existsSync(candidate)) return candidate;
   }
   throw new Error(
     "evals/fixture/claude not found. --selftest indexes the synthetic corpus and must never be pointed at a real ~/.claude."
@@ -44150,7 +51943,7 @@ function fixtureClaudeDir() {
 }
 
 // src/index.ts
-var USAGE = `potsherd-mcp \u2014 potsherd as an MCP stdio server (six tools)
+var USAGE = `potsherd-mcp \u2014 potsherd as an MCP stdio server (${String(TOOLS2.length)} tools)
 
   potsherd-mcp                     speak MCP on stdin/stdout
   potsherd-mcp --selftest          build a throwaway index and prove each tool answers
@@ -44163,46 +51956,46 @@ environment
                                    Default: the directory the server was launched
                                    in, when that is a plausible project; otherwise
                                    nothing is written and the brief is returned inline.
-  POTSHERD_MCP_ASK_TIMEOUT_MS      how long potsherd_ask may run. Default 240000.
+  POTSHERD_MCP_ASK_TIMEOUT_MS      how long a long-running tool may run. Default 240000.
 
 .mcp.json
   { "mcpServers": { "potsherd": { "command": "node", "args": ["<this file>"] } } }
 `;
-async function main(argv = process15.argv.slice(2)) {
+async function main(argv = process18.argv.slice(2)) {
   if (argv.includes("--help") || argv.includes("-h")) {
-    process15.stdout.write(USAGE);
+    process18.stdout.write(USAGE);
     return 0;
   }
   if (argv.includes("--version") || argv.includes("-V")) {
-    process15.stdout.write(`${VERSION}
+    process18.stdout.write(`${VERSION}
 `);
     return 0;
   }
   if (argv.includes("--selftest")) {
     const w = Number(flagValue(argv, "--width"));
-    return selftest(process15.stdout, Number.isFinite(w) && w > 0 ? Math.floor(w) : void 0);
+    return selftest(process18.stdout, Number.isFinite(w) && w > 0 ? Math.floor(w) : void 0);
   }
-  const potsherdDir2 = flagValue(argv, "--potsherd-dir") ?? process15.env["POTSHERD_DIR"];
+  const potsherdDir2 = flagValue(argv, "--potsherd-dir") ?? process18.env["POTSHERD_DIR"];
   const ctx = makeContext(potsherdDir2 ? { potsherdDir: potsherdDir2 } : {});
   const server = createServer(ctx);
   console.log = console.info = console.debug = (...a) => {
-    process15.stderr.write(a.map(String).join(" ") + "\n");
+    process18.stderr.write(a.map(String).join(" ") + "\n");
   };
-  process15.on("uncaughtException", (err) => {
-    process15.stderr.write(`potsherd-mcp: uncaught: ${err?.stack ?? String(err)}
+  process18.on("uncaughtException", (err) => {
+    process18.stderr.write(`potsherd-mcp: uncaught: ${err?.stack ?? String(err)}
 `);
   });
-  process15.on("unhandledRejection", (err) => {
-    process15.stderr.write(`potsherd-mcp: unhandled rejection: ${String(err)}
+  process18.on("unhandledRejection", (err) => {
+    process18.stderr.write(`potsherd-mcp: unhandled rejection: ${String(err)}
 `);
   });
   const transport = new StdioServerTransport();
   transport.onerror = (err) => {
     const parseError = /JSON|Unexpected|Unterminated|token/i.test(err.message);
-    process15.stderr.write(`potsherd-mcp: ${parseError ? "unparseable frame" : "transport error"}: ${err.message}
+    process18.stderr.write(`potsherd-mcp: ${parseError ? "unparseable frame" : "transport error"}: ${err.message}
 `);
     if (!parseError) return;
-    process15.stdout.write(
+    process18.stdout.write(
       JSON.stringify({
         jsonrpc: "2.0",
         id: null,
@@ -44215,15 +52008,15 @@ async function main(argv = process15.argv.slice(2)) {
     );
   };
   await server.connect(transport);
-  process15.stderr.write(
-    `potsherd-mcp ${VERSION} ready \xB7 6 tools \xB7 index ${potsherdDir2 ?? "~/.potsherd"}
+  process18.stderr.write(
+    `potsherd-mcp ${VERSION} ready \xB7 ${String(TOOLS2.length)} tools \xB7 index ${potsherdDir2 ?? "~/.potsherd"}
 `
   );
   await new Promise((resolve) => {
     server.server.onclose = () => resolve();
     for (const sig of ["SIGINT", "SIGTERM"]) {
-      process15.on(sig, () => {
-        void server.close().finally(() => process15.exit(0));
+      process18.on(sig, () => {
+        void server.close().finally(() => process18.exit(0));
       });
     }
   });
@@ -44240,25 +52033,25 @@ function flagValue(argv, flag) {
 function samePath(a, b) {
   const real = (p) => {
     try {
-      return fs21.realpathSync(p);
+      return fs34.realpathSync(p);
     } catch {
-      return path22.resolve(p);
+      return path29.resolve(p);
     }
   };
   return real(a) === real(b);
 }
-var entry = process15.argv[1] ? path22.resolve(process15.argv[1]) : "";
-var invokedDirectly = entry !== "" && (samePath(entry, fileURLToPath2(import.meta.url)) || path22.basename(entry) === "potsherd-mcp.js");
+var entry = process18.argv[1] ? path29.resolve(process18.argv[1]) : "";
+var invokedDirectly = entry !== "" && (samePath(entry, fileURLToPath2(import.meta.url)) || path29.basename(entry) === "potsherd-mcp.js");
 if (invokedDirectly) {
   main().then(
     // `process.exit`, not `process.exitCode`: stdin is still open on the
     // server path and would hold the event loop forever. See the shutdown
     // note in `main`.
-    (code) => process15.exit(code),
+    (code) => process18.exit(code),
     (err) => {
-      process15.stderr.write(`potsherd-mcp: ${err?.message ?? String(err)}
+      process18.stderr.write(`potsherd-mcp: ${err?.message ?? String(err)}
 `);
-      process15.exit(1);
+      process18.exit(1);
     }
   );
 }
