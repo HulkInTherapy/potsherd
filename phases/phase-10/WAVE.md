@@ -87,13 +87,21 @@ Two rules already written down, both broken in the same minute:
   committed because the `tail`, not the guard, was the last command in it.
 - **`09 §13.9` — a guard's stated limitation is an open item.** The `project-name` rule is an
   exact-substring list whose own header says *"exact is the whole weakness"*. It did not know
-  `Proteus`, so twelve occurrences walked through the rule that exists to catch them.
+  the name in question, so twelve occurrences walked through the rule that exists to catch them.
 
 Repaired: session ids became stable placeholders drawn from the guard's own hand-typed-literal class
 (≤ 3 distinct hex digits), project names became `<project-a>`…`<project-c>`, one-to-one so every
 claim that depends on two ids being the same or different still reads. A header note in the document
-says the substitution happened. The unredacted copy lives outside the repo. `Proteus`/`proteus` were
-added to `REAL_PROJECT_NAMES`, and `tests/open-threads.test.ts` gave up its `/Users/example/proteus`.
+says the substitution happened. The unredacted copy lives outside the repo. Both casings of the
+name were added to `REAL_PROJECT_NAMES`, and `tests/open-threads.test.ts` gave up the copy it held
+in an example path.
+
+**And then the guard caught this very file** — the paragraph above named the name while explaining
+that the guard had not known it. `09 §13.5`, verbatim: *the guard caught something in the commit
+that created it*. Worse, it was caught by a run whose **exit code I again did not read**, because I
+chained the commit after an `echo` rather than after the guard. Twice in one hour, the same rule.
+The standing fix is now mechanical rather than remembered: **the guard runs as the first clause of
+the `&&` chain that commits, never after anything that can succeed on its own.**
 
 History rewritten and force-pushed. **Verified from a fresh clone, not from this machine:** HEAD
 `595413c`, zero real ids in the audit, orphan commit absent. The orphan may stay addressable by

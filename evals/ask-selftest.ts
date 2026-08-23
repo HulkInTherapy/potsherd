@@ -401,6 +401,84 @@ const CASES: Case[] = [
     ),
   },
   {
+    // `quote-empty` had no case, and it is the quietest of the citation
+    // faults: every structural check passes. The session resolves, the seq is
+    // real, the index is 1-based and unique, the sentence cites something that
+    // exists. What is missing is the only part a reader can actually check.
+    // An EVIDENCE line with no quote is a citation that says "trust me",
+    // which is the exact shape `filterAnswer` exists to refuse.
+    name: 'an evidence line with no quote at all',
+    want: 'fail-a',
+    run: withGoldResult(
+      result({
+        answer: 'It held to three hundred and eighty a second.',
+        sentences: [{ text: 'It held to three hundred and eighty a second.', cites: [1] }],
+        evidence: [ev(RAMP, 1, '', 1)],
+      }),
+      STUB,
+    ),
+  },
+  {
+    // `quote-empty`, the half a `!quote` test would miss: whitespace. `norm()`
+    // is what decides whether a quote is a quote, so a line carrying three
+    // spaces is empty in every sense that matters and truthy in the only sense
+    // that does not. A check written as `if (!e.quote)` passes this and
+    // publishes an uncheckable citation.
+    name: 'an evidence quote that is only whitespace',
+    want: 'fail-a',
+    run: withGoldResult(
+      result({
+        answer: 'It held to three hundred and eighty a second.',
+        sentences: [{ text: 'It held to three hundred and eighty a second.', cites: [1] }],
+        evidence: [ev(RAMP, 1, '   \t  ', 1)],
+      }),
+      STUB,
+    ),
+  },
+  {
+    // `answer-missing` had no case. This is the fault that catches an answer
+    // and its own sentence list disagreeing: the sentence was KEPT — not
+    // dropped, not refused — and then never appears in the prose the user
+    // reads. Whatever the user is shown is therefore text no kept sentence
+    // accounts for, and the citation attached to the missing sentence points
+    // at evidence for a claim that was never made. It is the failure mode of a
+    // renderer or a filter that edits one of the two and not the other.
+    name: 'a kept sentence that never appears in the answer',
+    want: 'fail-a',
+    run: withGoldResult(
+      result({
+        answer: 'It held to three hundred and eighty a second.',
+        sentences: [
+          { text: 'It held to three hundred and eighty a second.', cites: [1] },
+          { text: 'The heap alone reaches the limit under load.', cites: [1] },
+        ],
+        evidence: [ev(RAMP, 1, 'It holds to three hundred and eighty a second.', 1)],
+      }),
+      STUB,
+    ),
+  },
+  {
+    // `answer-missing`, ordering half. Both sentences are present in the
+    // answer, so a naive `answer.includes(t)` per sentence passes — and the
+    // check is `indexOf(t, cursor)`, in order, on purpose. Citations are read
+    // top to bottom; a sentence list whose order does not match the prose
+    // sends a reader to the wrong `[n]` for the sentence in front of them.
+    name: 'kept sentences that appear in the answer out of order',
+    want: 'fail-a',
+    run: withGoldResult(
+      result({
+        answer:
+          'The heap alone reaches the limit under load. It held to three hundred and eighty a second.',
+        sentences: [
+          { text: 'It held to three hundred and eighty a second.', cites: [1] },
+          { text: 'The heap alone reaches the limit under load.', cites: [1] },
+        ],
+        evidence: [ev(RAMP, 1, 'It holds to three hundred and eighty a second.', 1)],
+      }),
+      STUB,
+    ),
+  },
+  {
     name: 'covering 6 of 10 gold',
     want: 'fail-b',
     run: () => {
