@@ -13,6 +13,7 @@ import { runLs } from './commands/ls.js';
 import { runShow } from './commands/show.js';
 import { runStats } from './commands/stats.js';
 import { runCard } from './commands/card.js';
+import { runNote } from './commands/note.js';
 import { runTag, splitTagOperands } from './commands/tag.js';
 import { runPin } from './commands/pin.js';
 import { runIgnore } from './commands/ignore.js';
@@ -45,6 +46,18 @@ const GLOBAL_ONLY =
   /^(--json|--no-color|--ascii|--width|--claude-dir|--potsherd-dir|--debug|\d+|\/.*|~.*)$/;
 
 /** Registered on the program *and* on every verb, so position never matters. */
+/**
+ * A repeatable option that keeps every occurrence.
+ *
+ * Commander's default for `.option('--x <v>')` is last-wins, which for a verb
+ * that *writes* means `--decided a --decided b` silently stores only `b`. The
+ * one verb in this CLI that cannot lose input is the one that adds to the
+ * archive, so its three text flags collect.
+ */
+function collect(value: string, previous?: readonly string[]): string[] {
+  return [...(previous ?? []), value];
+}
+
 function addGlobals(cmd: Command): Command {
   // An error inside a verb should point at that verb's help, not at the list
   // of twenty verbs: `potsherd setup --nosuch` used to answer "run potsherd
@@ -456,6 +469,48 @@ example:
     // the variadic argument is whatever the rewrite left behind, which for a
     // well-formed invocation is nothing.
     await run(() => runTag({ ...o, session, ops: [...tagOperands, ...tags] }), o);
+  });
+
+  // T10.8 — the one verb that writes. Registered next to `tag` because it is
+  // the same shape of thing: a small annotation the *caller* makes about work
+  // the machine recorded. It differs in one way that decides every flag below
+  // — a tag is a key and a note is prose — so nothing here is normalised and
+  // every text flag collects rather than overwriting.
+  const note = addGlobals(
+    program
+      .command('note')
+      .description('leave the two-line verdict on a thread — the one verb that writes')
+      .argument('<thread>', 'session or thread id, or the first 8 characters of one')
+      .option('--decided <text>', 'what this thread settled (repeatable)', collect)
+      .option('--open <text>', 'what it left open (repeatable)', collect)
+      .option('--next <text>', 'the next step (repeatable)', collect)
+      .option('--by <who>', 'who is writing it — recorded as stated, never guessed'),
+  ).addHelpText('after', `
+example:
+  potsherd note 22222222 --decided "the pooler stays in transaction mode"
+  potsherd note 22222222 --open "p99 unmeasured" --next "re-run the load test"
+  potsherd note 22222222                             # read the lane back
+  potsherd note 22222222 --json | jq -r '.notes[0].decided'
+
+the lane is append-only: a second note is a second row, the transcript is
+never touched, and nothing potsherd writes here can be cited as evidence.`);
+  note.action(async (session: string, opts: Record<string, unknown>) => {
+    const o = globals(program, note, opts);
+    // Every flag this verb registers is forwarded here. A flag registered and
+    // not forwarded is dropped in silence, which for a write verb means the
+    // user is told "appended" about text that was never stored.
+    await run(
+      () =>
+        runNote({
+          ...o,
+          session,
+          decided: (opts['decided'] as string[]) ?? [],
+          open: (opts['open'] as string[]) ?? [],
+          next: (opts['next'] as string[]) ?? [],
+          ...(opts['by'] ? { by: String(opts['by']) } : {}),
+        }),
+      o,
+    );
   });
 
   const pin = addGlobals(
@@ -943,7 +998,7 @@ const PATH6: [string, string, string][] = [
  */
 const REST: [string[], string][] = [
   [['index', 'show', 'stats', 'doctor'], 'the archive, and what is in it'],
-  [['card', 'tag', 'pin', 'unpin', 'link', 'guard'], 'what you add to it'],
+  [['note', 'card', 'tag', 'pin', 'unpin', 'link', 'guard'], 'what you add to it'],
   [['ignore', 'unignore'], 'projects you would rather not see'],
   [['setup', 'export', 'stack'], 'reaching your other tools'],
 ];

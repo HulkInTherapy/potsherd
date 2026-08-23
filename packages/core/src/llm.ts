@@ -135,6 +135,11 @@ export const OFFLINE_VERBS: readonly string[] = [
   'show',
   'stats',
   'tag',
+  // T10.8 — `note` writes, and writes only into `~/.potsherd/potsherd.db`. It
+  // is on this list for the reason `unpin` and `setup` are: a verb missing
+  // from every list is a verb `doctor --privacy` has not accounted for, and
+  // the one verb that writes is the last one that should go unaccounted for.
+  'note',
   'pin',
   'unpin',
   'link',

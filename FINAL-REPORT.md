@@ -27,7 +27,7 @@ own headline numbers, so nobody has to trust potsherd to check potsherd.
 
 ## 2. what exists
 
-**21 verbs:** `audit rescue guard index ls find show card tag pin unpin link
+**22 verbs:** `audit rescue guard index ls find show card note tag pin unpin link
 stats ask graft setup export stack ignore unignore doctor` (+ `help`).
 
 | surface | what it is |

@@ -79,7 +79,7 @@ Protect it above features.
 │   ├── packages/core/            adapters, parser, store, index, redact, cards, recall,
 │   │                             ask, graft, open-threads, stack, link-suggest, setup, llm,
 │   │                             sqlite-driver (the two-driver abstraction, new in 7)
-│   ├── packages/cli/             the `potsherd` binary — 21 verbs
+│   ├── packages/cli/             the `potsherd` binary — 22 verbs
 │   ├── packages/mcp/             stdio MCP server, exactly 6 tools
 │   ├── packages/bridges/         claude-mem · agentmemory · notes · markdown export
 │   ├── plugins/claude-code/      2 skills, 1 agent, 3 hooks, bin shims, marketplace manifest,

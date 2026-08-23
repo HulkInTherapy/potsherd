@@ -60,7 +60,7 @@ in this readme is typed in by hand. The demo corpus reproduces the counts, not
 the size — it holds about half a megabyte — so wherever a block below prints
 bytes, the bytes are the demo corpus's own and not the reference machine's.
 
-> **Status: v1.1.0. Nine phases shipped.** 21 verbs, a Claude Code plugin,
+> **Status: v1.1.0. Nine phases shipped.** 22 verbs, a Claude Code plugin,
 > an MCP server with three tools, adapters for seven coding agents, and bridges
 > into three other memory tools. 1,532 tests, green on macOS and Ubuntu across
 > Node 22 and 24 — and green again on Node's own SQLite, which is what makes a

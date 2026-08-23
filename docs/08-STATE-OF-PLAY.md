@@ -50,7 +50,7 @@ orchestrators and is a live privacy leak in a public repo.
 | 7 polish & release | the install story, the readme, 17 screens, 2 casts, `show --html`, `docs/release/`, `FINAL-REPORT.md` | **shipped v1.0.0** (7 defects) |
 | **8+** | **does not exist yet.** The master decides whether there is one, from `MASTER-REPORT.md` and `10-MASTER-VERIFICATION.md` | |
 
-**21 verbs ship today:** `audit rescue guard index ls find show card tag pin unpin link stats ask
+**22 verbs ship today:** `audit rescue guard index ls find show card note tag pin unpin link stats ask
 graft setup export stack ignore unignore doctor` (+ `help`).
 
 ### what it does on the reference machine, measured
