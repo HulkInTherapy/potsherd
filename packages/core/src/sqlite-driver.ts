@@ -173,6 +173,7 @@ interface NodeDatabase {
   close(): void;
   enableLoadExtension?(on: boolean): void;
   loadExtension?(path: string): void;
+  function?(name: string, options: Record<string, unknown>, impl: (...a: never[]) => unknown): void;
 }
 
 /**
@@ -322,6 +323,19 @@ function wrap(db: NodeDatabase): Db {
       db.enableLoadExtension?.(true);
       if (!db.loadExtension) throw new Error('this sqlite cannot load extensions');
       db.loadExtension(path);
+    },
+    // 5. **`function()` registers an application-defined function.** Both
+    //    drivers spell it the same way and both take the arity from
+    //    `impl.length`; only the forwarding was missing. `vec.ts` is the sole
+    //    caller and it is not optional there — `match()` and
+    //    `potsherd_vec_distance()` are what make `vec_exchanges` searchable
+    //    without a native extension, so a driver that cannot register them has
+    //    no vector search at all. It stays a shim method rather than a call-site
+    //    branch for the same reason as the other four: no query in the codebase
+    //    should know which driver it is on.
+    function(name: string, options: Record<string, unknown>, impl: (...a: never[]) => unknown): void {
+      if (!db.function) throw new Error('this sqlite cannot register functions');
+      db.function(name, options, impl);
     },
     get inTransaction(): boolean {
       return depth > 0;

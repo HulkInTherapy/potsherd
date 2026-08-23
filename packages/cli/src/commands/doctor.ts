@@ -9,6 +9,7 @@ import {
   countsJson,
   cursor as cursorAdapter,
   detectBackend,
+  embeddings,
   MODEL_CALL_VERBS,
   NoBackendError,
   LOCAL_SOCKET_VERBS,
@@ -76,11 +77,18 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     const db = store.open({ root, readonly: true });
     try {
       schema = store.schemaVersion(db);
-      // Before the counts: `vec_exchanges` is a virtual table and does not
-      // exist for a connection that has not loaded the extension, so counting
-      // it first would silently report zero vectors on a fully vectorised
-      // index. A read-only connection can still load an extension.
-      vec = vecStatus(db);
+      // Before the counts, and **with the root**, because that is the call
+      // that carries the numbers. `vecStatus(db, root)` is the one source of
+      // truth for the vectors line: `index` makes the same call and renders
+      // the same `row`, so the two can no longer disagree in print the way
+      // the agent audit (§2 F2) caught them doing — `doctor` saying
+      // `vectors —` in the same session `index` said `vectors 1,561`.
+      //
+      // They disagreed because this line used to be a `COUNT(*)` gated on
+      // whether a native extension had loaded into this particular
+      // connection, while `index` reported what its own pass had just done.
+      // Neither was the state of the index.
+      vec = vecStatus(db, root);
       for (const table of ['sessions', 'exchanges', 'tool_calls', 'ghosts', 'ghost_prompts', 'cards', 'tags', 'pins', 'links', 'archive_files', 'rescue_log', 'vec_exchanges']) {
         counts[table] = store.count(db, table);
       }
@@ -352,15 +360,20 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       // Two false halves in one sentence, in the receipt this project nominates
       // as its trust anchor, four lines under a comment warning against exactly
       // that. tests/cli.test.ts pins it against the hooks themselves now.
-      .text('no other network, except the one-off embedding-model download,')
-      .text('and only when you ask for it.');
+      .text('one other download, once per machine: the embedding runtime,')
+      .text('fetched by potsherd index without being asked.');
     for (const line of fmt.wrap(
-      'A plain `potsherd index` fetches nothing: text search is the ' +
-        'default, it needs no model, and it opens no socket at all. `potsherd index ' +
-        '--embed` is what asks for the model, and it names the download before it ' +
-        "starts — but `--quiet` and `--json` suppress that line. The plugin's " +
-        'SessionEnd hook runs `index --quiet` without `--embed`, so it downloads ' +
-        'nothing at all.',
+      `The first ${'`'}potsherd index${'`'} on a machine fetches from ${embeddings.runtimeHosts()} ` +
+        `— ${fmt.bytes(embeddings.ACQUIRE_BYTES)} of WebAssembly runtime and quantized model weights, ` +
+        `into ${paths.tildify(paths.modelsDir(root))}. Every file is pinned to a size and a ` +
+        'sha256 that ships in the source and is checked before it is kept. They are GET ' +
+        'requests for public files: no transcript, no path, no identifier and no count ' +
+        'leaves this machine, and nothing is installed into node_modules. It runs in a ' +
+        `background process so the verb returns as soon as text search is live, which ` +
+        `means ${'`'}--quiet${'`'} and ${'`'}--json${'`'} — and the plugin's SessionEnd hook, which ` +
+        `runs ${'`'}index --quiet${'`'} — do it silently. ${'`'}potsherd index --no-embed${'`'} does not ` +
+        `do it at all, and neither does any run on a machine with ${'`'}POTSHERD_OFFLINE${'`'} set; ` +
+        'text search is unaffected either way.',
       Math.max(20, t.width - 3),
     )) {
       card.raw(`  ${line}`);
@@ -409,7 +422,11 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
         sessions: counts['sessions'] ?? 0,
         exchanges: counts['exchanges'] ?? 0,
         toolCalls: counts['tool_calls'] ?? 0,
-        vectors: counts['vec_exchanges'] ?? 0,
+        // The same numbers the human view prints, from the same call
+        // (audit F9: `--json` parity). `vectors` stays a bare count so no
+        // existing consumer breaks; `vectorState` is the whole report.
+        vectors: vec.report?.embedded ?? counts['vec_exchanges'] ?? 0,
+        vectorState: vec.report ?? null,
         vec,
       },
       ignore: {
@@ -504,14 +521,12 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // `03` §5: doctor reports redaction counts by type. The numbers are read
     // back out of the index rather than remembered, so they cannot drift.
     redactionRow(redaction, t, card.noteWidth()),
-    {
-      label: 'vectors',
-      value: vec.available ? fmt.num(counts['vec_exchanges'] ?? 0) : t.dash,
-      note: vec.available
-        ? `sqlite-vec ${vec.version ?? 'loaded'} ${t.mid} bge-small, 384-d`
-        : `no vector index: ${vec.reason ?? 'sqlite-vec unavailable'} — text search still works`,
-      tone: vec.available ? 'ok' : 'dim',
-    },
+    // One row, one source (`vecStatus(db, root)`), and a note that drops whole
+    // clauses to fit rather than being clipped mid-word — the truncated
+    // `doctor` vectors line logged in `plans/04`. The first clause always says
+    // what is true on its own, so a 60-column terminal loses the elaboration
+    // and never the fact.
+    vectorsRow(vec, t, card.noteWidth()),
   ]);
 
   // Every record type, always. A parser that silently drops a type is how an
@@ -896,20 +911,61 @@ function sqliteNote(): string {
 /**
  * Why the schema number can legitimately be lower than the latest.
  *
- * `schemaVersion()` reports the highest *contiguous* migration, and migrations
- * 4 and 8 are the `sqlite-vec` ones, which are allowed to decline on a machine
- * without the extension. So `schema v3 of v8` on a working install is not a
- * failed migration; it is vector search being absent, and saying which is the
- * difference between a number that alarms and a number that informs.
+ * It used to be one reason: migrations 4 and 8 built the `vec0` virtual tables
+ * and declined on a machine without `sqlite-vec`, and since `schemaVersion()`
+ * reports the highest *contiguous* migration, one declining migration held the
+ * number down even though everything after it had applied. `schema v3 of v9`
+ * on a perfectly working install alarmed for no reason.
+ *
+ * Migration 10 removed that reason: the vectors live in ordinary tables now
+ * and nothing in the schema needs an extension, so 4 and 8 no longer decline
+ * and the only way to be behind is not to have opened the database for writing
+ * since upgrading. `doctor` never migrates — it opens read-only, deliberately,
+ * so it is safe to run while an index is in flight — so the fix is the verb
+ * that does open for writing.
+ *
+ * The one case that still declines is a database that was built when vec0 was
+ * real and is now on a machine that has lost the extension: sqlite can neither
+ * read nor drop those virtual tables. That is worth its own sentence, because
+ * it is the only one where the user has something to reinstall.
  */
 function schemaNote(schema: number, vec: VecStatus): string {
   if (schema >= store.latestSchemaVersion()) return '';
-  // Migrations 4 and 8 create the `vec0` tables and are allowed to decline on a
-  // machine without `sqlite-vec` — `schemaVersion()` reports the highest
-  // *contiguous* version, so one declining migration holds the number down
-  // even though everything after it applied. `schema v3 of v8` on a perfectly
-  // working install therefore alarms for no reason unless the line says which
-  // it is. A declining migration is not recorded, so the next writable open
-  // retries it, and `index` is the verb that does one.
-  return vec.available ? '  · run potsherd index' : '  · the rest needs sqlite-vec';
+  if (vec.reason && /vec0|extension/i.test(vec.reason)) {
+    return '  · a vec0 index this machine can no longer read';
+  }
+  return '  · run potsherd index';
+}
+
+/**
+ * The `vectors` row.
+ *
+ * Every word of it comes from {@link vecStatus} with a root — the same call
+ * `index` makes and the same call `find` will make for its warming line — so
+ * the three verbs cannot describe the same index differently. The note is
+ * joined to the card's own width by dropping whole clauses, which is what fixes
+ * the truncation `plans/04` logged: the reason a reader most needs is the first
+ * clause, and the first clause is the one that always survives.
+ */
+function vectorsRow(vec: VecStatus, t: Theme, noteWidth: number): {
+  label: string;
+  value: string;
+  note: string;
+  tone: 'ok' | 'warn' | 'dim';
+} {
+  const row = vec.row;
+  if (!row) {
+    return {
+      label: 'vectors',
+      value: t.dash,
+      note: fmt.clip(vec.reason ?? 'no index yet — run potsherd index', noteWidth, t),
+      tone: 'dim',
+    };
+  }
+  return {
+    label: 'vectors',
+    value: row.value === '\u2014' ? t.dash : row.value,
+    note: row.note(noteWidth, ` ${t.mid} `),
+    tone: row.tone,
+  };
 }

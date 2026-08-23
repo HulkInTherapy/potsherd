@@ -764,7 +764,7 @@ describe.skipIf(!hasModel)('recall: the vector half — T3.1', () => {
     const row = vdb
       .prepare(
         `SELECT COUNT(*) AS n FROM exchanges e
-           JOIN vec_exchanges_rowids v ON v.id = e.id
+           JOIN vec_exchanges v ON v.id = e.id
           WHERE e.is_sidechain = 1`,
       )
       .get() as { n: number };
@@ -843,7 +843,7 @@ describe.skipIf(!hasModel)('recall: ghost vectors survive a second index — T3.
     const vdb2 = store.open({ root });
     try {
       const ghostVectors = (): number =>
-        (vdb2.prepare('SELECT COUNT(*) AS n FROM vec_ghost_prompts_rowids').get() as { n: number }).n;
+        (vdb2.prepare('SELECT COUNT(*) AS n FROM vec_ghost_prompts').get() as { n: number }).n;
       const before = ghostVectors();
       expect(before).toBeGreaterThan(0);
 
@@ -878,7 +878,7 @@ describe.skipIf(!hasModel)('recall: ghost vectors survive a second index — T3.
         .get(NEW_GHOST) as { v: number | null };
       expect(stamped.v).not.toBeNull();
       const vectored = vdb2
-        .prepare('SELECT COUNT(*) AS n FROM vec_ghost_prompts_rowids WHERE id = ?')
+        .prepare('SELECT COUNT(*) AS n FROM vec_ghost_prompts WHERE id = ?')
         .get(NEW_GHOST) as { n: number };
       expect(vectored.n).toBe(1);
       expect(ghostVectors()).toBe(before + 1);
