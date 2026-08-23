@@ -368,6 +368,60 @@ export interface AskReaderOutput {
  */
 export type AskReaderFn = (input: AskReaderInput) => Promise<AskReaderOutput>;
 
+/**
+ * The other half of the seam: run the **synthesizer** somewhere else.
+ *
+ * {@link AskReaderFn} moved six calls off potsherd's backend and left one
+ * behind, and that one was the wall — the free path was free for six sevenths
+ * of its work and then demanded a model anyway. This type removes the last
+ * call, and with it the last reason potsherd needs model access of its own.
+ *
+ * What is handed over is a *prompt*. What comes back is checked: the return
+ * value goes through {@link validateSynth} and then through
+ * {@link filterAnswer}, against the live transcript bytes, exactly as the
+ * backend's reply does. There is no branch in `ask()` where a synthesized
+ * answer reaches a user without passing both, and that is what makes it safe
+ * to let an arbitrary host agent answer — the citation guarantee was never
+ * the model's to keep.
+ *
+ * The return value is `unknown` on purpose. A caller that has parsed JSON out
+ * of an agent's reply should not also have to know potsherd's internal shape;
+ * it hands over what it parsed and the validator decides. Anything that does
+ * not validate is treated as the same empty reply a malformed backend answer
+ * produces.
+ */
+export type AskSynthFn = (input: AskSynthInput) => Promise<unknown>;
+
+/** Everything a host agent needs in order to be the synthesizer. */
+export interface AskSynthInput {
+  question: string;
+  /** The user prompt, exactly as a backend would receive it. */
+  prompt: string;
+  /** The system prompt: {@link SYNTH_SYSTEM}. */
+  system: string;
+  /** The reply shape: {@link SYNTH_SCHEMA}. */
+  schema: string;
+  /**
+   * The sessions whose quotes may be cited, in shortlist order.
+   *
+   * Advisory — {@link filterAnswer} checks every quote against the live
+   * transcript regardless of what this says — but an agent that can see the
+   * citable set produces far fewer quotes that get deleted.
+   */
+  sessions: AskSynthSource[];
+}
+
+export interface AskSynthSource {
+  sessionId: string;
+  id8: string;
+  project: string;
+  harness: Harness;
+  isGhost: boolean;
+  isSidechain: boolean;
+  /** The seq numbers this session's quotes may name. */
+  seqs: number[];
+}
+
 // ---------------------------------------------------------------- options
 
 export type AskStep = 'shortlist' | 'read' | 'synthesize' | 'filter' | 'threads';
@@ -449,6 +503,16 @@ export interface AskOptions {
   readerLlm?: Llm;
   /** T4.4: run the readers somewhere else. See {@link AskReaderFn}. */
   readerFn?: AskReaderFn;
+  /**
+   * T10.2: run the **synthesizer** somewhere else. See {@link AskSynthFn}.
+   *
+   * With `readerFn` and `synthFn` both supplied, `ask()` contains no
+   * expression that can construct a backend, so a full round trip costs zero
+   * model calls. That is not a flag being honoured; it is the shape of the
+   * function. `tests/synthesis-seam.test.ts` proves it with a transport that
+   * throws if it is ever sent anything.
+   */
+  synthFn?: AskSynthFn;
   /** Off for tests that are measuring something else. */
   openThreads?: boolean;
   signal?: AbortSignal;
@@ -1025,7 +1089,14 @@ export const SYNTH_SYSTEM =
   'evidence is from a ghost session (prompts only), say that the assistant\'s side is not ' +
   'recoverable rather than implying it is known.';
 
-const SYNTH_SCHEMA =
+/**
+ * The shape the synthesizer must reply in.
+ *
+ * Exported because it is no longer only a model's instruction: on the host
+ * seam it is what {@link AskSynthInput} hands the agent that will answer, and
+ * the same {@link validateSynth} runs over what comes back either way.
+ */
+export const SYNTH_SCHEMA =
   '{"evidence":[{"n":1,"session_id":"<the session_id given with the quote>",' +
   '"seq":<number>,"quote":"<verbatim>"}],' +
   '"answer":[{"text":"<one sentence>","cites":[1,2]}]}';
@@ -1251,19 +1322,31 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
       return base({ refused: true, refusal: 'budget' });
     }
 
-    // ---- 4. synthesizer, one call.
+    // ---- 4. synthesizer, one call — or none.
+    //
+    // `o.synthFn` short-circuits the `openLlm` on the next line, and that is
+    // the whole of T10.2's zero-model path. It is deliberately an
+    // `if`-before-the-expression rather than a flag read inside `openLlm`:
+    // constructing an `Llm` is what throws `NoBackendError`, so a run that
+    // must never need a backend must never reach the constructor. With
+    // `readerFn` set too, there is no remaining expression in this function
+    // that can build one.
     o.onProgress?.({ step: 'synthesize', done: 0, total: 1, spend: meter.total });
-    const ownSynth =
-      o.llm ?? openLlm(o.model ?? (cheap ? ASK_CHEAP_MODEL : ASK_MODEL), budget, o);
-    meter.track(ownSynth);
+    const summaries = cardSummaries(db, targets);
+    const ownSynth = o.synthFn
+      ? null
+      : (o.llm ?? openLlm(o.model ?? (cheap ? ASK_CHEAP_MODEL : ASK_MODEL), budget, o));
+    if (ownSynth) meter.track(ownSynth);
     let proposed: SynthReply;
     try {
-      proposed = await synthesize(ownSynth, q, answered, cardSummaries(db, targets), o.signal);
+      proposed = o.synthFn
+        ? await hostSynthesize(o.synthFn, q, answered, summaries)
+        : await synthesize(ownSynth!, q, answered, summaries, o.signal);
     } catch (err) {
       if (!(err instanceof BudgetError)) throw err;
       return base({ refused: true, refusal: 'budget' });
     } finally {
-      if (!o.llm) await ownSynth.close().catch(() => {});
+      if (ownSynth && !o.llm) await ownSynth.close().catch(() => {});
     }
 
     // ---- 5. the filter. No model runs past this line.
@@ -1276,7 +1359,13 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
     // ---- 6. open threads, advisory, and never allowed to fail the verb.
     let openThreads: OpenThread[] = [];
     if (o.openThreads !== false && !refused) {
-      openThreads = await tryOpenThreads(db, targets, ownSynth === o.llm ? o.llm : null, budget, o);
+      openThreads = await tryOpenThreads(
+        db,
+        targets,
+        ownSynth && ownSynth === o.llm ? o.llm : null,
+        budget,
+        o,
+      );
       o.onProgress?.({
         step: 'threads',
         done: openThreads.length,
@@ -1611,18 +1700,26 @@ function validateReader(v: unknown): AskReaderOutput | null {
 
 // ----------------------------------------------------------- synthesizer
 
-interface SynthReply {
+/** What the synthesizer proposed, after {@link validateSynth} and before {@link filterAnswer}. */
+export interface SynthReply {
   evidence: ProposedEvidence[];
   answer: ProposedSentence[];
 }
 
-async function synthesize(
-  llm: Llm,
+/**
+ * The synthesizer's user prompt.
+ *
+ * Split out of {@link synthesize} so that **one** string is both what a
+ * backend is sent and what a host agent is handed. Two copies of this text
+ * would drift, and the drift would be invisible: the seam path would quietly
+ * be answering a slightly different question from the binary path, with the
+ * same citation filter behind both saying nothing was wrong.
+ */
+export function synthPrompt(
   question: string,
-  answered: readonly { out: AskReaderOutput; t: Target }[],
+  answered: readonly { out: AskReaderOutput; t: AskSynthSource }[],
   summaries: string,
-  signal?: AbortSignal,
-): Promise<SynthReply> {
+): string {
   const blocks = answered.map(({ out, t }) => {
     const quotes = out.quotes
       .map((qq) => `    seq ${qq.seq} ${qq.ts ?? ''} "${qq.text.replace(/\s+/g, ' ').trim()}"`)
@@ -1635,14 +1732,41 @@ async function synthesize(
       `  quotes:\n${quotes}`
     );
   });
+  return (
+    `Question: ${question}\n\n` +
+    `Readers:\n\n${blocks.join('\n\n')}\n\n` +
+    (summaries ? `Card summaries for these sessions:\n${summaries}\n\n` : '') +
+    'Use only the session_id values printed above. Copy each quote exactly as printed, ' +
+    'including its seq.'
+  );
+}
 
+/** The citable set for one shortlisted session, as a host agent sees it. */
+export function synthSource(t: Target | EvidenceSource): AskSynthSource {
+  return {
+    sessionId: t.sessionId,
+    id8: t.id8,
+    project: t.project,
+    harness: t.harness,
+    isGhost: t.isGhost,
+    isSidechain: t.isSidechain,
+    seqs: t.units.map((u) => u.seq),
+  };
+}
+
+async function synthesize(
+  llm: Llm,
+  question: string,
+  answered: readonly { out: AskReaderOutput; t: Target }[],
+  summaries: string,
+  signal?: AbortSignal,
+): Promise<SynthReply> {
   const r = await llm.json<SynthReply>({
-    prompt:
-      `Question: ${question}\n\n` +
-      `Readers:\n\n${blocks.join('\n\n')}\n\n` +
-      (summaries ? `Card summaries for these sessions:\n${summaries}\n\n` : '') +
-      'Use only the session_id values printed above. Copy each quote exactly as printed, ' +
-      'including its seq.',
+    prompt: synthPrompt(
+      question,
+      answered.map(({ out, t }) => ({ out, t: synthSource(t) })),
+      summaries,
+    ),
     system: SYNTH_SYSTEM,
     schema: SYNTH_SCHEMA,
     label: 'synthesizer',
@@ -1654,7 +1778,46 @@ async function synthesize(
   return r.value;
 }
 
-function validateSynth(v: unknown): SynthReply | null {
+/**
+ * The synthesizer, run by the host agent instead of by a backend.
+ *
+ * Everything that made the backend path trustworthy is still here and in the
+ * same order: the identical prompt (via {@link synthPrompt}), the identical
+ * validator, and the identical empty-reply fallback. What is gone is the call.
+ *
+ * A rejected promise is **not** caught. A dead reader is one session
+ * contributing nothing and the run goes on; a dead synthesizer is the answer,
+ * and swallowing it would print "the readers found nothing" about a corpus
+ * that had plenty — the exact false statement `03` §8 exists to prevent.
+ */
+async function hostSynthesize(
+  fn: AskSynthFn,
+  question: string,
+  answered: readonly { out: AskReaderOutput; t: Target }[],
+  summaries: string,
+): Promise<SynthReply> {
+  const sources = answered.map(({ out, t }) => ({ out, t: synthSource(t) }));
+  const raw = await fn({
+    question,
+    prompt: synthPrompt(question, sources, summaries),
+    system: SYNTH_SYSTEM,
+    schema: SYNTH_SCHEMA,
+    sessions: sources.map((s) => s.t),
+  });
+  return validateSynth(raw) ?? { evidence: [], answer: [] };
+}
+
+/**
+ * One reply, checked into shape — **the same function on both paths.**
+ *
+ * `llm.json` runs it over a backend's reply; `ask()` runs it over whatever an
+ * {@link AskSynthFn} hands back. A host agent therefore gets exactly the
+ * latitude a model gets and no more: fields it omitted are dropped, evidence
+ * without a session id or an integer seq is dropped before
+ * {@link filterAnswer} ever sees it, and a reply with neither evidence nor
+ * sentences is `null`, which both callers treat as the empty answer.
+ */
+export function validateSynth(v: unknown): SynthReply | null {
   if (typeof v !== 'object' || v === null) return null;
   const o = v as Record<string, unknown>;
   const evRaw = Array.isArray(o['evidence']) ? o['evidence'] : [];

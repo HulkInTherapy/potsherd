@@ -41,16 +41,23 @@ import { onPath } from './resolve-bin.js';
  *
  * ## Backends
  *
- * | backend | when | cost |
- * |---|---|---|
- * | `agent-sdk` | a `claude` binary exists (the default) | zero marginal — the user's own subscription |
- * | `codex`     | `codex exec`, when codex is the harness and there is no `claude` | zero marginal |
- * | `api`       | no `claude` binary **and** `ANTHROPIC_API_KEY` is set | metered |
+ * One ordering, {@link RESOLUTION_LADDER}, tried silently top to bottom:
  *
- * The API path is a **fallback only** (`04` Q4). It is never selected while a
- * `claude` binary exists, because the whole point of Q4 is that a Claude Code
- * user needs no key. The SDK and raw HTTP are never mixed: the api path is
- * `@anthropic-ai/sdk` and nothing else.
+ * | rung | id | what it is | cost |
+ * |---|---|---|---|
+ * | 1 | `host-seam`  | the coding agent potsherd is running inside; no transport at all | zero |
+ * | 2 | `claude-cli` | `claude -p`, the binary already on PATH | zero marginal |
+ * | 2 | `codex-cli`  | `codex exec`, preferred inside codex | zero marginal |
+ * | 3 | `agent-sdk`  | `@anthropic-ai/claude-agent-sdk`, **if it happens to be there** | zero marginal |
+ * | 3 | `api-key`    | `@anthropic-ai/sdk` + `ANTHROPIC_API_KEY` | metered |
+ *
+ * The API path is a **fallback only** (`04` Q4): a subscription user must
+ * never be billed for what their subscription covers. The SDK and raw HTTP
+ * are never mixed: the api path is `@anthropic-ai/sdk` and nothing else.
+ *
+ * Nothing on this ladder is ever asked of the user, and rung 4 — the one line
+ * naming an install — is the only sentence in the product allowed to suggest
+ * one.
  *
  * ## What is *not* here
  *
@@ -176,7 +183,13 @@ export const LOCAL_SOCKET_VERBS: readonly string[] = ['find', 'export'];
 
 // ------------------------------------------------------------------ models
 
-export type Backend = 'agent-sdk' | 'codex' | 'api';
+/**
+ * Every transport potsherd knows how to build.
+ *
+ * `claude-cli` is the one that makes the other three optional. See
+ * {@link RESOLUTION_LADDER}.
+ */
+export type Backend = 'agent-sdk' | 'claude-cli' | 'codex' | 'api';
 
 export type ModelAlias = 'haiku' | 'sonnet' | 'opus';
 
@@ -404,6 +417,22 @@ export const CALL_PROFILES: Record<Backend, CallProfile> = {
     measured: false,
     basis: 'not measured — api list price and an assumed latency',
   },
+  // The same binary the agent sdk drives, spawned directly, so it inherits
+  // that fit. **Not measured at card size** — the only real numbers on the
+  // reference machine are two probe calls (13.0 s and 8.7 s wall for a
+  // 30-character prompt), which say nothing about a 40,000-character one. The
+  // range is widened accordingly rather than the point estimate moved.
+  'claude-cli': {
+    baseMs: 46_200,
+    msPerKChar: 915,
+    baseUsd: 0.016,
+    usdPerMChar: 1.057,
+    outputTokensPerCall: 2_100,
+    parallelEfficiency: 0.8,
+    spread: { timeLow: 0.4, timeHigh: 3.0, usdLow: 0.7, usdHigh: 1.6 },
+    measured: false,
+    basis: 'est. — the agent-sdk fit for the same binary, spawned directly',
+  },
   // Likewise unverified: codex is not installed on the reference machine
   // (`CodexTransport`'s note says the same). It spawns a CLI like the agent
   // sdk does, so it inherits those timings and is priced from tokens.
@@ -416,7 +445,7 @@ export const CALL_PROFILES: Record<Backend, CallProfile> = {
     parallelEfficiency: 0.8,
     spread: { timeLow: 0.4, timeHigh: 3.0, usdLow: 0.7, usdHigh: 1.6 },
     measured: false,
-    basis: 'not measured — assumed to behave like the agent sdk',
+    basis: 'est. — argv verified at codex 0.149.0, timings assumed from the agent sdk',
   },
 };
 
@@ -985,6 +1014,155 @@ export interface Availability {
   agentSdk: boolean;
   /** `@anthropic-ai/sdk`, for the API-key path. */
   apiSdk: boolean;
+  /**
+   * The coding agent potsherd is running *inside*, when it is running inside
+   * one. Rung 1 of {@link RESOLUTION_LADDER}: that agent is already a model,
+   * already on the user's subscription, and already holds the conversation
+   * this question came out of.
+   */
+  host: HostAgent | null;
+  /** {@link host} is not null: rung 1 is reachable on this process. */
+  hostSeam: boolean;
+}
+
+/** The harnesses that can be the model themselves. */
+export type HostAgent = 'claude-code' | 'codex' | 'cursor';
+
+/**
+ * Which coding agent this process is running inside, from its environment.
+ *
+ * Each harness announces itself; none of these are potsherd's own variables
+ * and none of them are asked of the user. `POTSHERD_HARNESS` overrides, which
+ * is what a test and a wrapper script use.
+ */
+export function hostAgent(env: NodeJS.ProcessEnv = process.env): HostAgent | null {
+  const forced = env['POTSHERD_HARNESS'];
+  if (forced === 'claude-code' || forced === 'codex' || forced === 'cursor') return forced;
+  if (env['CLAUDECODE'] === '1' || (env['CLAUDE_CODE_ENTRYPOINT'] ?? '') !== '') return 'claude-code';
+  if (env['CODEX_HOME'] || env['CODEX_SANDBOX']) return 'codex';
+  if (env['CURSOR_AGENT'] || env['CURSOR_TRACE_ID']) return 'cursor';
+  return null;
+}
+
+// ------------------------------------------------------------- the ladder
+
+/** A rung's stable name. Printed in `--json` and in `why`. */
+export type RungId = 'host-seam' | 'claude-cli' | 'codex-cli' | 'agent-sdk' | 'api-key';
+
+export interface LadderRung {
+  id: RungId;
+  /** Which of the four numbered rungs this entry belongs to. */
+  rung: 1 | 2 | 3;
+  /**
+   * The transport this rung builds — `null` for rung 1, which builds none:
+   * the host agent *is* the model and potsherd's job there is to hand it a
+   * prompt and filter what comes back.
+   */
+  backend: Backend | null;
+  /** One line, for `why`, for `--json`, and for the receipt. */
+  label: string;
+  /** Reachable on this machine? */
+  ready: (a: Availability) => boolean;
+}
+
+/**
+ * **The order is the product.** `plans/phases/phase-10-agent-audit.md` §A1,
+ * read literally, and `tests/llm.test.ts` fails if it moves.
+ *
+ * The defect this replaces was one line: a `claude` binary sitting on PATH,
+ * plainly able to answer, and potsherd refusing because the only way it knew
+ * how to talk to that binary was through a 677 MB npm package. Three of the
+ * six headline verbs were dead on a default install because of it.
+ *
+ * So the ladder is ordered by *what the user already has*, not by what is
+ * most convenient to code against:
+ *
+ *   1. **the host agent** — potsherd is often running inside Claude Code,
+ *      Codex or Cursor. That agent is a model, on the user's own
+ *      subscription, holding the conversation the question came from. It
+ *      needs no install and knows more than anything potsherd could spawn.
+ *      This rung is taken through `ask --readers-out/--readers-in` and
+ *      `--synthesis-out/--filter-in`, which is why its `backend` is null:
+ *      there is nothing here to construct.
+ *   2. **the `claude` or `codex` binary, spawned** — every subscription user
+ *      has one. No SDK, no key, no download. The tie inside this rung goes to
+ *      the harness the user is actually in ({@link ladderFor}).
+ *   3. **the agent SDK or an API key, if they happen to be there** — used
+ *      when present, never required, never suggested at install.
+ *   4. nothing: {@link NoBackendError}, which is the only place an install
+ *      line may ever be printed.
+ *
+ * Rung 3 sits *below* rung 2 on purpose and it is the one placement worth
+ * arguing about. The SDK ships its own copy of the same harness; the binary
+ * on PATH is the user's own, at their own version, with their own auth. If
+ * the two disagree, the user's is the correct one. And putting the SDK first
+ * is what let a 677 MB optional dependency become load-bearing without anyone
+ * deciding that it should. `POTSHERD_LLM_BACKEND=agent-sdk` still forces it.
+ */
+export const RESOLUTION_LADDER: readonly LadderRung[] = [
+  {
+    id: 'host-seam',
+    rung: 1,
+    backend: null,
+    label: 'the host agent is the model',
+    ready: (a) => a.hostSeam,
+  },
+  {
+    id: 'claude-cli',
+    rung: 2,
+    backend: 'claude-cli',
+    label: 'the claude binary, spawned',
+    ready: (a) => a.claude !== null,
+  },
+  {
+    id: 'codex-cli',
+    rung: 2,
+    backend: 'codex',
+    label: 'the codex binary, spawned',
+    ready: (a) => a.codex !== null,
+  },
+  {
+    id: 'agent-sdk',
+    rung: 3,
+    backend: 'agent-sdk',
+    label: 'the agent sdk, already installed',
+    ready: (a) => a.claude !== null && a.agentSdk,
+  },
+  {
+    id: 'api-key',
+    rung: 3,
+    backend: 'api',
+    label: 'an api key, already set',
+    ready: (a) => a.apiKey && a.apiSdk,
+  },
+];
+
+/**
+ * The ladder as it applies to *this* machine.
+ *
+ * One reordering, and only one: inside codex, the codex binary comes before
+ * the claude binary. Both are rung 2 — the tie is between two equal rungs and
+ * the harness the user is sitting in breaks it. Nothing else moves, which is
+ * what {@link RESOLUTION_LADDER}'s test pins.
+ */
+export function ladderFor(a: Availability): readonly LadderRung[] {
+  if (a.host !== 'codex') return RESOLUTION_LADDER;
+  const codex = RESOLUTION_LADDER.find((r) => r.id === 'codex-cli');
+  if (!codex) return RESOLUTION_LADDER;
+  const rest = RESOLUTION_LADDER.filter((r) => r.id !== 'codex-cli');
+  const at = rest.findIndex((r) => r.id === 'claude-cli');
+  if (at < 0) return RESOLUTION_LADDER;
+  return [...rest.slice(0, at), codex, ...rest.slice(at)];
+}
+
+/** The highest rung this machine can reach, including rung 1. Null for none. */
+export function topRung(a: Availability): LadderRung | null {
+  return ladderFor(a).find((r) => r.ready(a)) ?? null;
+}
+
+/** The highest rung that builds a transport. Rung 1 is skipped: it builds none. */
+export function transportRung(a: Availability): LadderRung | null {
+  return ladderFor(a).find((r) => r.backend !== null && r.ready(a)) ?? null;
 }
 
 export interface DetectOptions {
@@ -1006,6 +1184,10 @@ export interface BackendChoice {
   requested: string;
   /** One line for `--json` and for the card: why this backend. */
   why: string;
+  /** Which of {@link RESOLUTION_LADDER}'s numbered rungs this is. */
+  rung: 1 | 2 | 3;
+  /** The rung's stable id, or null when `--backend` named something unknown. */
+  rungId: RungId | null;
   /** The binary, when the backend is a spawned one. */
   bin?: string;
   /** False on the subscription paths. */
@@ -1014,62 +1196,69 @@ export interface BackendChoice {
 }
 
 /**
- * No backend at all. Names **both** ways out, because a user with neither has
- * no way to guess which one applies to them.
+ * No rung of {@link RESOLUTION_LADDER} builds a transport here.
+ *
+ * Two situations, and telling them apart is the whole value of this message:
+ *
+ *   - **rung 1 is live and rungs 2–3 are not.** potsherd is inside a coding
+ *     agent and there is no binary, no SDK and no key. Nothing needs
+ *     installing: the agent reading this *is* the model, and the seam flags
+ *     are how it answers. The message is a route, not a requirement.
+ *   - **nothing at all.** Then, and only then, one install line — the last
+ *     rung of the ladder, and the only place in the product where an install
+ *     may be named. It names Claude Code, which is what a subscription user
+ *     already has, and never an npm package: the whole defect this class was
+ *     rewritten for was potsherd standing in front of a working `claude`
+ *     binary and demanding 677 MB before it would speak to it.
+ *
+ * Written with static helpers and one unconditional `super()` rather than a
+ * `super()` in each branch: with a parameter property, TypeScript emits
+ * `this.availability = …` at the top of the constructor, which is before a
+ * branched `super()` — and the whole class then throws "Must call super
+ * constructor in derived class before accessing 'this'". Four tests caught
+ * it; the message a user would have seen was that sentence.
  */
 export class NoBackendError extends Error {
   readonly name = 'NoBackendError';
   readonly fix: string;
   readonly availability: Availability;
+  /** The highest rung that *is* reachable, when one is. Null for none at all. */
+  readonly rung: RungId | null;
 
   constructor(availability: Availability) {
-    // Two different situations, and telling them apart is the whole value of
-    // this message. "You have no way to reach a model" and "you have Claude
-    // Code but not the npm package potsherd talks to it through" want
-    // completely different next commands, and the second is exactly what a
-    // plain `npm i -g potsherd` produces, on purpose — the two model SDKs and
-    // the embedding runtime are 677 MB of an install that is 17 MB without
-    // them.
-    //
-    // Written with a static helper and one unconditional `super()` rather than
-    // a `super()` in each branch: with a parameter property, TypeScript emits
-    // `this.availability = …` at the top of the constructor, which is before a
-    // branched `super()` — and the whole class then throws "Must call super
-    // constructor in derived class before accessing 'this'". Four tests caught
-    // it; the message a user would have seen was that sentence.
     super(NoBackendError.message(availability));
     this.availability = availability;
     this.fix = NoBackendError.fixFor(availability);
-  }
-
-  /** True when the *signal* is there and the module that does the talking is not. */
-  private static halfInstalled(a: Availability): string | null {
-    if (a.claude !== null && !a.agentSdk) return '@anthropic-ai/claude-agent-sdk';
-    if (a.apiKey && !a.apiSdk) return '@anthropic-ai/sdk';
-    return null;
+    this.rung = topRung(availability)?.id ?? null;
   }
 
   private static message(a: Availability): string {
-    const missing = NoBackendError.halfInstalled(a);
-    if (missing) {
+    if (a.hostSeam) {
       return (
-        `this potsherd cannot reach a model: ${missing} is not installed.\n` +
-        '        It is an optional dependency: it and the embedding runtime are 677 MB of an\n' +
-        '        install that is 17 MB without them.'
+        `no model backend on this machine — and none is needed: potsherd is running inside ${a.host}, ` +
+        'which is already a model on your own subscription.\n' +
+        '        Run the seam: potsherd emits the prompts, you answer them, potsherd filters the ' +
+        'citations in code.'
       );
     }
+    const key = a.apiKey
+      ? '\n        ANTHROPIC_API_KEY is set but the Anthropic SDK is not installed.'
+      : '';
     return (
-      'no way to reach a model: no `claude` binary on PATH, no `codex`, and ANTHROPIC_API_KEY is not set.\n' +
-      '        potsherd cards run on your Claude Code subscription (install Claude Code), ' +
-      'or on an Anthropic API key as a fallback.'
+      'no way to reach a model: no `claude` binary on PATH, no `codex`, and no coding agent ' +
+      'around this process.' +
+      key +
+      '\n        potsherd runs on the Claude Code subscription you already have — installing ' +
+      'Claude Code is enough.'
     );
   }
 
   private static fixFor(a: Availability): string {
-    const missing = NoBackendError.halfInstalled(a);
-    return missing
-      ? `npm install -g ${missing}`
-      : 'https://claude.com/product/claude-code  — or  export ANTHROPIC_API_KEY=…';
+    if (a.hostSeam) {
+      return 'potsherd ask "…" --readers-out r.json   # then --readers-in / --synthesis-out / --filter-in';
+    }
+    if (a.apiKey && !a.apiSdk) return 'npm install -g @anthropic-ai/sdk';
+    return 'https://claude.com/product/claude-code';
   }
 }
 
@@ -1090,36 +1279,31 @@ export function availability(o: DetectOptions = {}): Availability {
   const which = o.which ?? ((n: string) => onPath(n, env));
   const key = env['ANTHROPIC_API_KEY'];
   const canResolve = o.resolvable ?? resolvable;
+  const host = hostAgent(env);
   return {
     claude: which('claude'),
     codex: which('codex'),
     apiKey: typeof key === 'string' && key.trim().length > 0,
-    codexHarness:
-      env['POTSHERD_HARNESS'] === 'codex' ||
-      Boolean(env['CODEX_HOME']) ||
-      Boolean(env['CODEX_SANDBOX']),
+    codexHarness: host === 'codex',
     agentSdk: canResolve('@anthropic-ai/claude-agent-sdk'),
     apiSdk: canResolve('@anthropic-ai/sdk'),
+    host,
+    hostSeam: host !== null,
   };
 }
 
 /**
- * Which backend this machine gets, and why.
+ * Which backend this machine gets, which rung of the ladder that is, and why.
  *
- * The order is `04` Q4 read literally:
+ * There is exactly one ordering and it is {@link RESOLUTION_LADDER}; this
+ * function walks it and stops at the first rung that is both *ready* and
+ * *buildable*. Rung 1 is ready inside a coding agent and is never buildable —
+ * the host is reached through `ask`'s seam flags, not through a `Transport` —
+ * so a process inside Claude Code with a `claude` on PATH reports rung 2 and
+ * says in `why` that rung 1 is also live. Anything else would be this
+ * function claiming to have done something it cannot do from a subprocess.
  *
- *   1. an explicit `--backend` / `POTSHERD_LLM_BACKEND` wins, and is verified
- *   2. a `claude` binary → `agent-sdk`, always, even if a key is also set.
- *      The key is a *fallback*, not a preference, and a Claude Code user must
- *      never be billed for something their subscription covers.
- *   3. codex, when codex is the harness and there is no `claude`
- *   4. `ANTHROPIC_API_KEY` → `api`
- *   5. codex, when it is the only thing installed
- *   6. {@link NoBackendError}
- *
- * The `claude` binary is a *signal*, not the thing that gets run: the agent
- * sdk ships its own harness. What the binary on PATH proves is that this user
- * has Claude Code set up, which is what makes the subscription path viable.
+ * An explicit `--backend` / `POTSHERD_LLM_BACKEND` still wins over all of it.
  */
 export function detectBackend(o: DetectOptions = {}): BackendChoice {
   const env = o.env ?? process.env;
@@ -1127,39 +1311,57 @@ export function detectBackend(o: DetectOptions = {}): BackendChoice {
   const requested = o.model ?? env['POTSHERD_MODEL'] ?? CARD_MODEL;
   const forced = (o.backend ?? env['POTSHERD_LLM_BACKEND']) as Backend | undefined;
 
-  const choose = (backend: Backend, why: string, bin?: string): BackendChoice => ({
+  const choose = (
+    backend: Backend,
+    rung: LadderRung | null,
+    why: string,
+    bin?: string,
+  ): BackendChoice => ({
     backend,
     model: resolveModel(requested, backend),
     requested,
     why,
+    rung: rung?.rung ?? 3,
+    rungId: rung?.id ?? null,
     ...(bin ? { bin } : {}),
     chargeable: backend === 'api',
     availability: avail,
   });
 
+  const rungFor = (backend: Backend): LadderRung | null =>
+    RESOLUTION_LADDER.find((r) => r.backend === backend) ?? null;
+
   if (forced) {
-    if (forced === 'agent-sdk') return choose('agent-sdk', 'forced', avail.claude ?? undefined);
-    if (forced === 'codex') return choose('codex', 'forced', avail.codex ?? undefined);
-    if (forced === 'api') return choose('api', 'forced');
-    throw new NoBackendError(avail);
+    const rung = rungFor(forced);
+    if (!rung) throw new NoBackendError(avail);
+    const bin =
+      forced === 'agent-sdk' || forced === 'claude-cli'
+        ? (avail.claude ?? 'claude')
+        : forced === 'codex'
+          ? (avail.codex ?? 'codex')
+          : undefined;
+    return choose(forced, rung, 'forced', bin);
   }
 
-  // Each arm needs BOTH halves: the signal that this user has that thing set
-  // up, and the module that actually does the talking. `codex` is the
-  // exception — it is spawned as a subprocess and needs no npm package.
-  if (avail.claude && avail.agentSdk) {
-    return choose('agent-sdk', `claude on PATH (${avail.claude})`, avail.claude);
-  }
-  if (avail.codexHarness && avail.codex) {
-    return choose('codex', `codex is the harness and there is no claude`, avail.codex);
-  }
-  if (avail.apiKey && avail.apiSdk) {
-    return choose('api', 'no claude binary; ANTHROPIC_API_KEY is set');
-  }
-  if (avail.codex) {
-    return choose('codex', 'codex on PATH; no claude and no api key', avail.codex);
-  }
-  throw new NoBackendError(avail);
+  const rung = transportRung(avail);
+  if (!rung || !rung.backend) throw new NoBackendError(avail);
+
+  // The one thing `why` must carry that the rung alone does not: whether the
+  // rung *above* this one was also available and simply cannot be built from
+  // here. An agent reading `--json` needs to know it could have used the seam.
+  const seam = avail.hostSeam && rung.rung > 1 ? `; rung 1 (${avail.host}) is live too` : '';
+  const where =
+    rung.backend === 'api'
+      ? 'ANTHROPIC_API_KEY is set'
+      : rung.backend === 'codex'
+        ? `codex on PATH (${avail.codex})`
+        : `claude on PATH (${avail.claude})`;
+  return choose(
+    rung.backend,
+    rung,
+    `rung ${rung.rung} — ${rung.label}: ${where}${seam}`,
+    rung.backend === 'codex' ? (avail.codex ?? undefined) : (avail.claude ?? undefined),
+  );
 }
 
 // ---------------------------------------------------------------- transport
@@ -1211,14 +1413,27 @@ export class LlmError extends Error {
    * clock twice.
    */
   readonly timedOut: boolean;
+  /**
+   * What the child printed before it failed, when it was a spawned one.
+   *
+   * A CLI that fails by *answering* — `claude -p` exits non-zero and prints
+   * `{"is_error":true,"result":"Not logged in · Please run /login"}` on
+   * stdout — is a CLI whose exit code alone says nothing a user can act on.
+   * `potsherd: claude exited 1 / try: claude --version` was the message that
+   * came out of exactly that, and `claude --version` works fine, so the
+   * suggested fix confirmed the machine was healthy while the run stayed
+   * broken. The transport reads this and says the real sentence instead.
+   */
+  readonly stdout?: string;
   constructor(
     message: string,
     readonly fix?: string,
     readonly cause?: unknown,
-    options: { timedOut?: boolean } = {},
+    options: { timedOut?: boolean; stdout?: string } = {},
   ) {
     super(message);
     this.timedOut = options.timedOut ?? false;
+    if (options.stdout !== undefined) this.stdout = options.stdout;
   }
 }
 
@@ -1232,6 +1447,50 @@ export class LlmError extends Error {
  */
 function makeScratch(tmpRoot?: string): string {
   return fs.mkdtempSync(path.join(tmpRoot ?? os.tmpdir(), 'potsherd-llm-'));
+}
+
+/**
+ * The **one** directory potsherd ever spawns `claude -p` in, per tmp root.
+ *
+ * This is not a tidiness choice; it is the whole of what can be done about a
+ * real defect, and the shape of the fix is decided by what was measured.
+ *
+ * Claude Code creates `~/.claude/projects/<slug-of-cwd>/` for whatever
+ * directory it is run in. {@link makeScratch} makes a *fresh random* one per
+ * transport, so a `card --all` over the reference corpus — 39 calls — would
+ * leave 39 differently-named directories in the archive potsherd exists to
+ * read. A tool whose premise is "your archive is the record" must not write to
+ * the archive as a side effect of reading it.
+ *
+ * Three things were measured on the reference machine (23 aug 2026, Claude
+ * Code 2.1.241), and they bound the fix:
+ *
+ *   1. `--no-session-persistence` **works**: no transcript JSONL is written,
+ *      so nothing a subprocess call creates can ever appear in `potsherd ls`
+ *      or be indexed, carded or ranked. That is the harm that mattered.
+ *   2. What survives is an **empty** `projects/<slug>/memory/` directory. Two
+ *      probe runs produced two of them. It holds no content, but it is litter
+ *      in someone else's directory and there are as many as there are calls.
+ *   3. `CLAUDE_CONFIG_DIR` — the obvious lever, and potsherd already knows the
+ *      variable — **cannot be used**. Pointed at a scratch directory, empty or
+ *      seeded from the user's own `.claude.json`, `claude -p` answers
+ *      `Not logged in · Please run /login` and the run is dead. The
+ *      subscription credential is not in that directory and does not follow
+ *      it. Isolating the config dir would trade a stray empty folder for the
+ *      entire rung, which is not a trade worth making.
+ *
+ * So: a **fixed name**, created once, reused by every call, and deliberately
+ * **not removed on close** — because deleting the cwd does not un-create the
+ * `~/.claude/projects` entry that names it, and a fresh name next time would
+ * simply create a second one. One stable directory means one entry, ever,
+ * whose name says what made it.
+ */
+export const CLAUDE_CWD_NAME = 'potsherd-llm-cwd';
+
+function stableScratch(tmpRoot?: string): string {
+  const dir = path.join(tmpRoot ?? os.tmpdir(), CLAUDE_CWD_NAME);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 function dropScratch(dir: string | null): void {
@@ -1358,12 +1617,262 @@ class AgentSdkTransport implements Transport {
 }
 
 /**
+ * The flags {@link ClaudeCliTransport} passes, **verified against the real
+ * binary** (Claude Code 2.1.241, `claude --help`, 23 aug 2026) rather than
+ * assumed. Every one of them was read out of that help text; none is a guess.
+ *
+ * | flag | what it buys | the SDK option it mirrors |
+ * |---|---|---|
+ * | `--print` | non-interactive, answer to stdout, exit | — |
+ * | `--output-format json` | one result object: text, usage, cost, model | the `result` message |
+ * | `--tools ""` | **no tools at all** | `allowedTools: []` |
+ * | `--permission-mode dontAsk` | never blocks on a prompt | `permissionMode` |
+ * | `--no-session-persistence` | writes no transcript to disk | `persistSession: false` |
+ * | `--setting-sources ""` | no user/project/local settings, so no CLAUDE.md | `settingSources: []` |
+ * | `--system-prompt` | replaces the default system prompt | `systemPrompt` |
+ *
+ * `--tools ""` is the one that matters most and it is the same argument
+ * `AgentSdkTransport` makes for `allowedTools: []`: a summariser that can run
+ * Bash is a summariser that can be prompt-injected by the transcript it is
+ * summarising (`03` §11). The cwd is a scratch directory for the same reason
+ * `makeScratch` exists.
+ *
+ * **`--bare` is deliberately not used**, though it looks like exactly the
+ * right flag. Its help text says "Anthropic auth is strictly ANTHROPIC_API_KEY
+ * or apiKeyHelper (OAuth and keychain are never read)" — it would turn the one
+ * path that needs no key into a path that needs one, which is the opposite of
+ * this whole rung. It was tempting and it is wrong.
+ */
+export const CLAUDE_CLI_ARGS: readonly string[] = [
+  '--print',
+  '--output-format',
+  'json',
+  '--tools',
+  '',
+  '--permission-mode',
+  'dontAsk',
+  '--no-session-persistence',
+  '--setting-sources',
+  '',
+];
+
+/**
+ * `claude -p` — **rung 2, and the reason the other rungs are optional.**
+ *
+ * The binary is already on the PATH of every Claude Code user. It answers on
+ * their subscription, costs nothing marginal, needs no key, and needs no npm
+ * package at all. Before this transport existed, potsherd could see that
+ * binary sitting there and still refuse, because the only way it knew how to
+ * talk to it was through a 677 MB optional dependency — which is how three of
+ * six headline verbs came to be dead on a default install.
+ *
+ * Modelled on {@link CodexTransport} line for line, because that one had
+ * already proved the pattern: spawn, feed stdin, read stdout, honour the exit
+ * code, never hang. The differences are that the flags here are **verified**
+ * against a real binary (see {@link CLAUDE_CLI_ARGS}) and that the reply is
+ * structured, so usage and cost come back as numbers instead of guesses.
+ *
+ * `POTSHERD_CLAUDE_ARGS` mirrors `POTSHERD_CODEX_ARGS`: extra argv, split on
+ * spaces, appended after ours, for when a release moves a flag.
+ */
+class ClaudeCliTransport implements Transport {
+  readonly backend = 'claude-cli' as const;
+  private scratch: string | null = null;
+
+  constructor(private readonly opts: { env: NodeJS.ProcessEnv; bin: string; tmpRoot?: string }) {}
+
+  async send(req: SendRequest): Promise<SendResult> {
+    this.scratch ??= stableScratch(this.opts.tmpRoot);
+    const extra = (this.opts.env['POTSHERD_CLAUDE_ARGS'] ?? '').split(' ').filter(Boolean);
+    const args = [
+      ...CLAUDE_CLI_ARGS,
+      '--model',
+      req.model,
+      ...(req.system ? ['--system-prompt', req.system] : []),
+      ...extra,
+    ];
+
+    let out: { stdout: string; stderr: string; code: number };
+    try {
+      out = await run(this.opts.bin, args, {
+        input: req.prompt,
+        cwd: this.scratch,
+        env: { ...this.opts.env, [REENTRANCY_ENV]: '1' },
+        timeoutMs: req.timeoutMs,
+        ...(req.signal ? { signal: req.signal } : {}),
+      });
+    } catch (err) {
+      // `claude -p` fails by *answering*: it exits non-zero and prints its
+      // reason on stdout as a normal result object. Raising "claude exited 1,
+      // try claude --version" over the top of `Not logged in · Please run
+      // /login` tells the user to run a command that will succeed and teach
+      // them nothing. Measured on the reference machine while running potsherd
+      // under a relocated HOME, which is exactly how a user who has never
+      // logged in will meet it.
+      const reply = err instanceof LlmError ? parseClaudeCli(err.stdout ?? '') : null;
+      const said = reply?.said ?? reply?.text ?? '';
+      if (said) {
+        throw new LlmError(
+          `claude --print could not answer: ${said.split('\n')[0]}`,
+          /not logged in|\/login/i.test(said) ? 'claude   # sign in once, then retry' : 'claude -p "hello"',
+          err,
+        );
+      }
+      throw err;
+    }
+
+    const parsed = parseClaudeCli(out.stdout);
+    if (parsed.error) {
+      throw new LlmError(
+        `claude --print ended as ${parsed.error}`,
+        'claude -p "hello"   # check the subscription is active, then retry',
+      );
+    }
+    if (!parsed.text) {
+      throw new LlmError(
+        `claude --print produced no answer${out.stderr ? `: ${out.stderr.trim().split('\n').slice(-1)[0]}` : ''}`,
+        'claude -p "hello"   # check claude runs at all',
+      );
+    }
+    return {
+      text: parsed.text,
+      ...(parsed.model ? { model: parsed.model } : {}),
+      ...(parsed.inputTokens !== undefined ? { inputTokens: parsed.inputTokens } : {}),
+      ...(parsed.outputTokens !== undefined ? { outputTokens: parsed.outputTokens } : {}),
+      ...(parsed.usd !== undefined ? { usd: parsed.usd } : {}),
+    };
+  }
+
+  /**
+   * Nothing to clean up, on purpose. See {@link CLAUDE_CWD_NAME}: removing the
+   * cwd would not remove the `~/.claude/projects` entry named after it, and
+   * the next call would then mint a second one. Keeping it is what holds the
+   * footprint at one directory instead of one per call.
+   */
+  async close(): Promise<void> {
+    this.scratch = null;
+  }
+}
+
+export interface ClaudeCliReply {
+  text: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  usd?: number;
+  /** The `subtype` of a non-success result, when the run failed on purpose. */
+  error?: string;
+  /**
+   * The `result` field as printed, **whether or not the run succeeded**.
+   *
+   * Separate from {@link ClaudeCliReply.text}, which is deliberately empty on
+   * a failure so that no caller can mistake an error for an answer. This one
+   * exists for the error message: when `claude -p` fails, the sentence a user
+   * needs is the one the CLI already wrote, and `Not logged in · Please run
+   * /login` is worth infinitely more than `exited 1`.
+   */
+  said?: string;
+}
+
+/**
+ * The `--output-format json` result object, and a fallback for when it is not
+ * one.
+ *
+ * Lenient in exactly one direction, and for a measured reason: if a future
+ * release changes or drops `--output-format json`, `claude -p` still prints
+ * the answer as plain text on stdout, and an answer without a token count is
+ * worth far more than an exception. So a stdout that does not parse is taken
+ * as the answer itself — the same call {@link lastAgentMessage} makes for
+ * codex. What is *not* lenient: a parsed object saying `is_error` or a
+ * `subtype` other than `success` is a failure and is raised as one.
+ *
+ * The input count sums the three buckets the CLI reports — uncached,
+ * cache-write and cache-read — because every one of them is input the model
+ * read. `usage.input_tokens` alone is the uncached remainder, and on the
+ * measured probe it was **2** against a 3,025-token prompt. That is the same
+ * quantity-wearing-the-wrong-name that {@link IMPLAUSIBLE_TOKEN_FACTOR} exists
+ * to catch, and summing removes the need for it to fire here at all.
+ */
+export function parseClaudeCli(stdout: string): ClaudeCliReply {
+  const raw = stdout.trim();
+  if (!raw) return { text: '' };
+  let obj: Record<string, unknown> | null = null;
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (v && typeof v === 'object' && !Array.isArray(v)) obj = v as Record<string, unknown>;
+  } catch {
+    obj = null;
+  }
+  if (!obj) return { text: raw };
+
+  const said = typeof obj['result'] === 'string' ? obj['result'].trim() : '';
+  const subtype = typeof obj['subtype'] === 'string' ? obj['subtype'] : '';
+  if (obj['is_error'] === true || (subtype !== '' && subtype !== 'success')) {
+    return { text: '', error: subtype || 'an error', ...(said ? { said } : {}) };
+  }
+
+  const text = said;
+  const usage = asRecord(obj['usage']);
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const inputTokens = usage
+    ? num(usage['input_tokens']) +
+      num(usage['cache_creation_input_tokens']) +
+      num(usage['cache_read_input_tokens'])
+    : 0;
+  const outputTokens = usage ? num(usage['output_tokens']) : 0;
+  const modelUsage = asRecord(obj['modelUsage']);
+  const model = modelUsage ? Object.keys(modelUsage)[0] : undefined;
+  const usd = typeof obj['total_cost_usd'] === 'number' ? obj['total_cost_usd'] : undefined;
+
+  return {
+    text,
+    ...(model ? { model } : {}),
+    ...(inputTokens > 0 ? { inputTokens } : {}),
+    ...(outputTokens > 0 ? { outputTokens } : {}),
+    ...(usd !== undefined ? { usd } : {}),
+  };
+}
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+/**
  * `codex exec`, for a machine whose harness is codex.
  *
- * **Unverified on the reference machine** — codex is not installed there, so
- * what is tested is the plumbing (argv, stdin, stdout, exit code, timeout)
- * against a stub binary, not the real CLI's flags. `POTSHERD_CODEX_ARGS` is
- * the escape hatch if a codex release moves them.
+ * **The argv is verified; the round trip is not, and those are different
+ * claims.** This transport carried a blanket "unverified" label from phase 5
+ * on the grounds that codex was not installable on the reference machine. That
+ * turned out to be false: `@openai/codex@0.149.0` installs from npm in under a
+ * minute, and every flag below was then read out of the real
+ * `codex exec --help` — `exec`, `--skip-git-repo-check`, `-C/--cd`,
+ * `-m/--model`, and `-` for stdin ("instructions are read from stdin").
+ *
+ * What is still unverified is a real model round trip, which needs codex
+ * credentials this machine does not have. So the label is narrowed rather than
+ * dropped: the plumbing is tested against a stub binary and the flags are
+ * tested against a real `--help`, and nobody has yet watched codex answer a
+ * question. `POTSHERD_CODEX_ARGS` remains the escape hatch.
+ *
+ * Three flags were added once the real binary could be read, and each one
+ * fixes something the documentation-only version got wrong:
+ *
+ *   - **`--ephemeral`** — *"Run without persisting session files to disk"*.
+ *     Without it, every model call potsherd makes writes a session into the
+ *     archive potsherd indexes. That is the same defect
+ *     {@link CLAUDE_CWD_NAME} documents for the claude rung, and on this rung
+ *     there is a real flag for it.
+ *   - **`--ignore-user-config`** — *"Do not load `$CODEX_HOME/config.toml`;
+ *     auth still uses `CODEX_HOME`"*. The summariser stops inheriting whatever
+ *     is in the user's config, which is the same argument
+ *     `settingSources: []` makes on the claude rungs. The second half of that
+ *     sentence is why it is safe to pass and why `claude --bare`, which says
+ *     the opposite about auth, is not.
+ *   - **`-o/--output-last-message <FILE>`** — the final message, written to a
+ *     file. {@link lastAgentMessage} scrapes it out of stdout instead, which
+ *     works and is a guess about formatting; a file is the answer the CLI
+ *     means to give. The scraper stays as the fallback for a codex too old to
+ *     have the flag, or a run that writes nothing.
  */
 class CodexTransport implements Transport {
   readonly backend = 'codex' as const;
@@ -1376,25 +1885,37 @@ class CodexTransport implements Transport {
   async send(req: SendRequest): Promise<SendResult> {
     this.scratch ??= makeScratch(this.opts.tmpRoot);
     const extra = (this.opts.env['POTSHERD_CODEX_ARGS'] ?? '').split(' ').filter(Boolean);
+    const lastMessage = path.join(this.scratch, 'last-message.txt');
     const args = [
       'exec',
       '--skip-git-repo-check',
+      // Verified at 0.149.0: no session files on disk, so a model call cannot
+      // write into the archive potsherd reads.
+      '--ephemeral',
+      // Verified at 0.149.0: config.toml is not loaded, auth still is.
+      '--ignore-user-config',
       '--cd',
       this.scratch,
       '--model',
       req.model,
+      '--output-last-message',
+      lastMessage,
       ...extra,
       '-',
     ];
 
     const out = await run(this.opts.bin, args, {
       input: req.system ? `${req.system}\n\n${req.prompt}` : req.prompt,
+      cwd: this.scratch,
       env: { ...this.opts.env, [REENTRANCY_ENV]: '1' },
       timeoutMs: req.timeoutMs,
       ...(req.signal ? { signal: req.signal } : {}),
     });
 
-    const text = lastAgentMessage(out.stdout);
+    // The file first, the scraper second. `-o` is what the CLI means to hand
+    // over; `lastAgentMessage` is an inference from stdout's shape, and an
+    // inference should never win over a statement.
+    const text = readIfPresent(lastMessage) || lastAgentMessage(out.stdout);
     if (!text) {
       throw new LlmError(
         `codex exec produced no answer${out.stderr ? `: ${out.stderr.trim().split('\n').slice(-1)[0]}` : ''}`,
@@ -1407,6 +1928,15 @@ class CodexTransport implements Transport {
   async close(): Promise<void> {
     dropScratch(this.scratch);
     this.scratch = null;
+  }
+}
+
+/** The `--output-last-message` file, when codex wrote one. Never throws. */
+function readIfPresent(file: string): string {
+  try {
+    return fs.readFileSync(file, 'utf8').trim();
+  } catch {
+    return '';
   }
 }
 
@@ -1527,6 +2057,13 @@ interface RunOptions {
   env: NodeJS.ProcessEnv;
   timeoutMs: number;
   signal?: AbortSignal;
+  /**
+   * The child's working directory. Always a {@link makeScratch} directory when
+   * it is set, for the reason that function documents: a harness spawned in
+   * the user's project loads that project's `CLAUDE.md` into a summarisation
+   * prompt. `codex exec` takes `--cd` as well and gets both.
+   */
+  cwd?: string;
 }
 
 /** Spawn, feed stdin, collect stdout/stderr, and never hang. */
@@ -1536,7 +2073,11 @@ function run(
   o: RunOptions,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { env: o.env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, {
+      env: o.env as NodeJS.ProcessEnv,
+      ...(o.cwd ? { cwd: o.cwd } : {}),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -1580,6 +2121,8 @@ function run(
           new LlmError(
             `${path.basename(bin)} exited ${code}${stderr.trim() ? `: ${stderr.trim().split('\n').slice(-1)[0]}` : ''}`,
             `${path.basename(bin)} --version`,
+            undefined,
+            { stdout },
           ),
         );
         return;
@@ -1811,13 +2354,19 @@ export class Llm {
             ...(opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {}),
             ...(env['POTSHERD_CLAUDE_BIN'] ? { bin: env['POTSHERD_CLAUDE_BIN'] } : {}),
           })
-        : choice.backend === 'codex'
-          ? new CodexTransport({
+        : choice.backend === 'claude-cli'
+          ? new ClaudeCliTransport({
               env,
-              bin: choice.bin ?? 'codex',
+              bin: env['POTSHERD_CLAUDE_BIN'] || choice.bin || 'claude',
               ...(opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {}),
             })
-          : new ApiTransport({ env });
+          : choice.backend === 'codex'
+            ? new CodexTransport({
+                env,
+                bin: choice.bin ?? 'codex',
+                ...(opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {}),
+              })
+            : new ApiTransport({ env });
     return new Llm(transport, choice, opts, env);
   }
 

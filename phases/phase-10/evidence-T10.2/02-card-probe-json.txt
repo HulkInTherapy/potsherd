@@ -1,0 +1,10 @@
+{
+  "backend": "claude-cli",
+  "model": "claude-haiku-4-5-20251001",
+  "text": "ok",
+  "inputTokens": 29034,
+  "outputTokens": 43,
+  "usd": 0.058273000000000005,
+  "chargeable": false,
+  "ms": 7737
+}

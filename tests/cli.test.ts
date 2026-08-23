@@ -705,9 +705,37 @@ describe('potsherd card', () => {
   }
 
   /** A machine with no claude, no codex and no api key. */
+  /**
+   * A machine with **no** way to reach a model: no binary on PATH, no key,
+   * and — from T10.2 — no coding agent around the process either.
+   *
+   * The last of those is new and the fixture was silently wrong without it.
+   * `run()` spreads `process.env` into the child, and this suite is itself
+   * executed inside Claude Code, so `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT`
+   * leaked through and the child correctly reported that rung 1 of the ladder
+   * was live. The test's own sentence says "no claude, no codex and no key",
+   * so the fixture now clears the signal that says otherwise. {@link inAgent}
+   * covers the case it used to be testing by accident.
+   */
   function bare(): Record<string, string> {
     const empty = scratchRoot();
-    return { PATH: empty, ANTHROPIC_API_KEY: '', POTSHERD_LLM_BACKEND: '' };
+    return {
+      PATH: empty,
+      ANTHROPIC_API_KEY: '',
+      POTSHERD_LLM_BACKEND: '',
+      CLAUDECODE: '',
+      CLAUDE_CODE_ENTRYPOINT: '',
+      CODEX_HOME: '',
+      CODEX_SANDBOX: '',
+      CURSOR_AGENT: '',
+      CURSOR_TRACE_ID: '',
+      POTSHERD_HARNESS: '',
+    };
+  }
+
+  /** The same bare machine, but running inside a coding agent: rung 1 is live. */
+  function inAgent(): Record<string, string> {
+    return { ...bare(), CLAUDECODE: '1' };
   }
 
   it('--dry-run --all prints sessions, tokens, cost and minutes, and exits 0', () => {
@@ -752,13 +780,35 @@ describe('potsherd card', () => {
     expect(r.stdout).toMatch(/\$\d/);
   });
 
-  it('a real run with no backend names both options and exits non-zero', () => {
+  it('a real run with nothing at all names one install and exits non-zero', () => {
     const root = indexed();
     const r = run(['card', '--all', '--yes', '--potsherd-dir', root], bare());
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain('claude');
-    expect(r.stderr).toContain('ANTHROPIC_API_KEY');
+    // **One** line, naming the thing a subscription user already has. Not the
+    // api key: phase 10's ladder makes rung 3 "if already present", never
+    // suggested at install, and a product that answers "no model" with "get a
+    // credit card" has misunderstood who its users are.
+    expect(r.stderr).toContain('claude.com/product/claude-code');
+    // And never the 677 MB optional dependency, which is the whole of audit
+    // fix 2: a machine with a `claude` binary no longer needs it, so no
+    // user-facing message may ask for it.
+    expect(r.stderr).not.toContain('claude-agent-sdk');
     // No stack trace, ever.
+    expect(r.stderr).not.toContain('    at ');
+  });
+
+  it('inside a coding agent it routes to the seam, because nothing needs installing', () => {
+    const root = indexed();
+    const r = run(['card', '--all', '--yes', '--potsherd-dir', root], inAgent());
+    expect(r.code).not.toBe(0);
+    // The product law for this phase: if a capability needs a model, the
+    // subscription the user already has is the model. The agent reading this
+    // message *is* a model, so the message is a route and not a requirement.
+    expect(r.stderr).toMatch(/none is needed/);
+    expect(r.stderr).toContain('--readers-out');
+    expect(r.stderr).not.toContain('claude-agent-sdk');
+    expect(r.stderr).not.toContain('npm install');
     expect(r.stderr).not.toContain('    at ');
   });
 

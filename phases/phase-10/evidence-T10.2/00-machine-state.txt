@@ -1,0 +1,12 @@
+$ which claude
+/var/folders/x7/878s1bxj4c950snx6h2200k00000gn/T//cmux-cli-shims/1E14DF30-EEC1-4106-BA2A-64ED8342E44E/claude
+
+$ which codex; echo rc=$?
+codex not found
+rc=1
+
+$ echo "ANTHROPIC_API_KEY=[${ANTHROPIC_API_KEY:-UNSET}]"
+ANTHROPIC_API_KEY=[UNSET]
+
+$ node -e "require.resolve('@anthropic-ai/claude-agent-sdk')"
+Error: Cannot find module @anthropic-ai/claude-agent-sdk

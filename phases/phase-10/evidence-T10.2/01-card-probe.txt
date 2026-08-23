@@ -1,0 +1,7 @@
+$ potsherd card --probe   (no SDK, no ANTHROPIC_API_KEY)
+
+  ok  claude-cli · claude-haiku-4-5-20251001
+  reply     ok
+  cost      29028 in · 43 out · $0.0583 equivalent · 7.7s
+
+node packages/cli/bin/potsherd.js card --probe --potsherd-dir "$D"  1.45s user 0.64s system 26% cpu 7.829 total

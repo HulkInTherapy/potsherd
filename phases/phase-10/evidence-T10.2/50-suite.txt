@@ -1,0 +1,4 @@
+      Tests  1586 passed | 6 skipped (1592)
+   Start at  01:08:42
+   Duration  136.15s (transform 1.40s, setup 261ms, collect 3.81s, tests 131.61s, environment 0ms, prepare 53ms)
+

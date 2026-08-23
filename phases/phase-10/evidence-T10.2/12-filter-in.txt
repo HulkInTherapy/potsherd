@@ -1,0 +1,12 @@
+potsherd ask "how do we pin the pgbouncer prepared-statement setting?"
+
+ANSWER
+  The setting is pinned by putting statement_cache_size at 0 and running
+  pgbouncer in transaction pooling mode. [1]
+
+EVIDENCE
+  [1] potsherd-alpha/11111111  1 aug 14:30  "Set statement_cache_size to 0 and…"
+
+  1 of 1 session read · 1 answered · 2ms
+  run  potsherd graft 11111111  to carry it into the agent you are in
+env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR -u XDG_CONFIG_HOME -u NODE_PATH  nod  0.15s user 0.03s system 89% cpu 0.197 total

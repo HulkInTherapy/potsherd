@@ -1,0 +1,26 @@
+diff --git a/packages/cli/src/index.ts b/packages/cli/src/index.ts
+index 28099aa..db5af4b 100644
+--- a/packages/cli/src/index.ts
++++ b/packages/cli/src/index.ts
+@@ -353,7 +353,11 @@ filters, one example each — they compose, and all of them are AND:
+       // Code's native Agent tool, say — and hand the outputs back, so the
+       // synthesizer, the citation filter and --strict all run unchanged.
+       .option('--readers-out <path>', 'write what the readers would be given to this file; makes no model call')
+-      .option('--readers-in <path>', 'answer from reader outputs recorded in this file, filter and all'),
++      .option('--readers-in <path>', 'answer from reader outputs recorded in this file, filter and all')
++      // The other half, T10.2: the synthesizer moves onto the host agent too,
++      // so the whole verb runs with no model access of its own.
++      .option('--synthesis-out <path>', 'write the synthesis prompt to this file; makes no model call')
++      .option('--filter-in <path>', 'filter the answer recorded in this file and print it, cited'),
+   ).addHelpText('after', `
+ example:
+   potsherd ask "how did we handle pgbouncer with prepared statements?"
+@@ -387,6 +391,8 @@ exit codes:  0 answered  ·  1 nothing matched  ·  2 --strict refused`);
+           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
+           ...(opts['readersOut'] ? { readersOut: String(opts['readersOut']) } : {}),
+           ...(opts['readersIn'] ? { readersIn: String(opts['readersIn']) } : {}),
++          ...(opts['synthesisOut'] ? { synthesisOut: String(opts['synthesisOut']) } : {}),
++          ...(opts['filterIn'] ? { filterIn: String(opts['filterIn']) } : {}),
+         }),
+       o,
+     );

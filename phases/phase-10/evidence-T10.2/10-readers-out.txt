@@ -1,0 +1,10 @@
+  1 reader input → /var/folders/x7/878s1bxj4c950snx6h2200k00000gn/T/tmp.YjZb67L4cf/readers.json
+  of 1 matching session, k 6
+
+    11111111  potsherd-alpha  seq 1, 2
+
+  no model call was made (0). the excerpts are redacted, as sent.
+
+  run your readers, add an "outputs" array to the file, then:
+    potsherd ask "how do we pin the pgbouncer prepared-statement setting?" --readers-in /var/folders/x7/878s1bxj4c950snx6h2200k00000gn/T/tmp.YjZb67L4cf/readers.json
+env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR -u XDG_CONFIG_HOME -u NODE_PATH  nod  0.21s user 0.07s system 47% cpu 0.576 total

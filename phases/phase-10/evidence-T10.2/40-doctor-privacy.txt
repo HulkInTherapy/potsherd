@@ -1,0 +1,14 @@
+$ potsherd doctor --privacy   (this machine: rung 2)
+      mcp server, itself a shim over an http backend on localhost. nothing
+      leaves this machine, and without the flag neither opens anything at all.
+
+  who receives them:
+    your own Claude subscription, via
+    /var/folders/x7/878s1...2A-64ED8342E44E/claude
+    the same binary and the same account you already use by hand.
+    potsherd holds no key, no token and no account of its own.
+    the call runs with no tools, in an empty scratch directory, and
+    its session is never written to ~/.claude/projects.
+
+  no other network, except the one-off embedding-model download,
+  and only when you ask for it.
