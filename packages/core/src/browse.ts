@@ -161,10 +161,10 @@ const ROLLUP = `AND (s.is_sidechain = 0
  *
  * An earlier link of a fork/resume chain does not take a row: its work is
  * counted on the chain's newest link, which is also the one `claude --resume`
- * continues. Before this, the reference archive's `ls --project proteus`
- * printed *"Give Proteus its first real job and record it"* **twice**, on two
- * consecutive lines, dated one day apart — one file with 119 exchanges and one
- * with 4, and nothing on the screen to say they were the same work.
+ * continues. Before this, one project on the reference archive listed the same
+ * title **twice**, on two consecutive lines, dated one day apart — one file
+ * with 119 exchanges and one with 4, and nothing on the screen to say they
+ * were the same work.
  *
  * **A link is only folded into a head that is actually on this screen**, and
  * the filters are therefore repeated inside the `EXISTS`. Without that clause

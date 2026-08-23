@@ -1111,9 +1111,16 @@ export function buildPrompt(src: GraftSource, o: { about?: string | null; budget
       : `- Every bullet ends with a citation: a literal open bracket, ${src.id8}, an at sign, the seq number, a close bracket. ` +
         `Write the actual number. A bullet you send with the word "seq" still in it will be deleted.`,
     `- Two sources on one bullet are written as two separate bracket pairs, never inside one pair.`,
+    // The wording is split, not generalised. "The ONLY legal seq numbers are"
+    // is the sentence a one-transcript brief has always carried, and the shape
+    // of a prompt is a thing tests pin and models have been observed against:
+    // a chain is a new case and gets a new sentence, rather than every brief
+    // ever written getting a changed one.
     legal.length
-      ? `- The ONLY legal citations are: ${legal.join(', ')}. A bullet you cannot cite from that list is a bullet you must not write.`
-      : `- You have nothing to cite. Write nothing but the single line: NONE.`,
+      ? chained
+        ? `- The ONLY legal citations are: ${legal.join(', ')}. A bullet you cannot cite from that list is a bullet you must not write.`
+        : `- The ONLY legal seq numbers are: ${legal.join(', ')}. A bullet you cannot cite from that list is a bullet you must not write.`
+      : `- You have no seq numbers to cite. Write nothing but the single line: NONE.`,
     `- State decisions and open threads. Do not restate the title.`,
     src.isGhost
       ? `- Say nothing about what the assistant replied; only what the user asked for.`
