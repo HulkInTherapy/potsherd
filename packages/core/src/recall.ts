@@ -17,6 +17,12 @@ import {
   wordSpans,
   type MatchSnippet,
 } from './search/snippet.js';
+import {
+  KEYPHRASE_RULE,
+  NO_KEYPHRASE,
+  keyphrase as extractKeyphrase,
+  type Keyphrase,
+} from './keyphrase.js';
 import { vecStatus, vecTablesExist } from './vec.js';
 import {
   EMBEDDING_VERSION,
@@ -28,6 +34,7 @@ import { modelsDir, potsherdDir } from './paths.js';
 import { applyIgnore, countIgnoredSessions, type IgnoreReport } from './ignore.js';
 import {
   atLeastConfident,
+  KEY_TERMS_REQUIRED,
   ROUTING_CEILING,
   calibrate,
   coveredTerms,
@@ -432,6 +439,23 @@ export interface RecallResult {
    * were built, which is at most `limit * 3`.
    */
   belowFloor: number;
+  /**
+   * F8 — the distinctive words this query was narrowed to, and every content
+   * word it had. Empty `terms` means no narrowing happened: the query was
+   * already distinctive, or none of its words is in the index.
+   *
+   * Reported for the same reason `weights` and `relaxedLists` are: a ranking
+   * that silently searched for a *subset* of what the user typed owes the
+   * caller the subset.
+   */
+  keyphrase: Keyphrase;
+  /**
+   * The lists that were answered by the keyphrase pass rather than by the
+   * query as typed. A subset of {@link relaxedLists}, because narrowing to the
+   * distinctive words *is* a relaxation of the exact-AND pass and takes the
+   * same {@link RELAXED_PENALTY}.
+   */
+  keyphraseLists: ListName[];
   ms: number;
 }
 
@@ -583,6 +607,8 @@ export const CORROBORATION = 0.12;
  */
 const RELAXED_PENALTY = 0.6;
 
+
+
 /**
  * What {@link titleMatches} returns: the ranked titles, and *how much of the
  * query* the best of them actually covered.
@@ -729,7 +755,7 @@ const STOPWORDS = new Set([
  * Not filtered by length: `eu` and `k` are two characters and both are real
  * queries against this corpus.
  */
-const QUOTE_STOPWORDS = new Set([
+export const QUOTE_STOPWORDS: ReadonlySet<string> = new Set([
   ...STOPWORDS,
   'about', 'after', 'again', 'all', 'also', 'any', 'because', 'been', 'before',
   'being', 'but', 'can', 'could', 'did', 'do', 'does', 'down', 'each', 'even',
@@ -1507,6 +1533,24 @@ export async function recall(
   if (filters.until) validateISODate(filters.until, '--until');
 
   const fts = ftsQuery(query);
+  // F8 — the distinctive half of what was typed, extracted **here, in code**,
+  // from the index the search is about to run against. The caller still passes
+  // the user's own words; nothing about the query the agent sends changes.
+  //
+  // Computed once per search rather than once per list, because a keyphrase is
+  // a property of the question and not of the table: `exchanges_fts` and
+  // `ghost_prompts_fts` narrowing to different words would make two lists
+  // whose ranks RRF is about to compare answers to two different questions.
+  //
+  // It never throws — `documentFrequency` swallows a missing table per table —
+  // but the whole call is guarded anyway, because a search must not be able to
+  // fail on the way to being *narrowed*.
+  let key: Keyphrase = NO_KEYPHRASE;
+  try {
+    key = extractKeyphrase(db, fts.tokens, QUOTE_STOPWORDS);
+  } catch {
+    key = NO_KEYPHRASE;
+  }
   const listReports: RecallResult['lists'] = [];
   const empty = (vectors: VectorState): RecallResult => ({
     query,
@@ -1524,6 +1568,8 @@ export async function recall(
     confidence: 'none',
     minConfidence,
     belowFloor: 0,
+    keyphrase: key,
+    keyphraseLists: [],
     ms: Date.now() - started,
   });
 
@@ -1592,6 +1638,33 @@ export async function recall(
 
   let relaxed = false;
   const relaxedLists = new Set<ListName>();
+  const keyphraseLists = new Set<ListName>();
+
+  /**
+   * The keyphrase as an fts5 OR expression, or `''` when there is no narrowing
+   * to do.
+   *
+   * Built with the *same* quoting and the *same* {@link PREFIX_MIN} rule as
+   * {@link ftsQuery}'s own OR pass, so the only difference between the two
+   * passes is which words are in them. That is deliberate: if the keyphrase
+   * pass also changed how a word is matched, a measurement of it would be a
+   * measurement of two things.
+   *
+   * Empty when the keyphrase is not a **strict** subset of what the OR pass
+   * would have used anyway. This is what makes the short-query guarantee
+   * structural rather than a threshold: `find "pgbouncer"` has one content
+   * word, its keyphrase is that same word, the subset is not strict, and the
+   * expression is never built — so the ladder below is byte-for-byte the
+   * v1.1.0 ladder for every query that was already distinctive.
+   */
+  const quoteTerm = (t: string): string => `"${t.replace(/"/g, '""')}"`;
+  const distinctMeaningful = new Set(fts.tokens.filter((t) => !STOPWORDS.has(t))).size;
+  const keyOr =
+    key.terms.length > 0 && key.terms.length < distinctMeaningful
+      ? key.terms
+          .map((t) => (t.length >= PREFIX_MIN ? `${quoteTerm(t)}*` : quoteTerm(t)))
+          .join(' OR ')
+      : '';
 
   /**
    * Exact first, then relaxed — **per list**, not globally.
@@ -1612,11 +1685,28 @@ export async function recall(
     const t0 = Date.now();
     let hits: RawHit[] = [];
     let usedOr = false;
+    let usedKeyphrase = false;
+    const anyWord = (): RawHit[] =>
+      fts.or && fts.or !== fts.and ? fn(fts.or) : [];
     try {
       hits = fn(fts.and);
-      if (hits.length === 0 && fts.or && fts.or !== fts.and) {
+      // F8 — the second rung, and the first responder. It runs only when the
+      // words *as typed* found nothing, which is the exact case the audit
+      // measured: a long question whose AND pass is empty and whose OR pass
+      // then drifts to whatever session holds the most common words.
+      if (hits.length === 0 && keyOr && keyOr !== fts.and && keyOr !== fts.or) {
         usedOr = true;
-        hits = fn(fts.or);
+        usedKeyphrase = true;
+        hits = fn(keyOr);
+      }
+      // The third rung, unchanged, and the reason nothing is thrown away: when
+      // the distinctive words find nothing, every token the user typed is
+      // tried again, prefix-matched, exactly as before this rung existed.
+      if (hits.length === 0) {
+        const rest = anyWord();
+        if (fts.or && fts.or !== fts.and) usedOr = true;
+        usedKeyphrase = false;
+        hits = rest;
       }
     } catch {
       // A malformed external-content index or a missing table must not take
@@ -1625,6 +1715,7 @@ export async function recall(
     }
     if (usedOr) {
       relaxedLists.add(list);
+      if (usedKeyphrase) keyphraseLists.add(list);
       if (hits.length > 0) relaxed = true;
     }
     listReports.push({ list, candidates: hits.length, ms: Date.now() - t0 });
@@ -1720,6 +1811,13 @@ export async function recall(
   const meaningfulTokens = fts.tokens.filter((t) => !STOPWORDS.has(t));
   const quotableTokens =
     quotable.length > 0 ? quotable : meaningfulTokens.length > 0 ? meaningfulTokens : fts.tokens;
+
+  // F8's second half — the terms a row must be able to show before it may
+  // carry a label at all. The *most selective* of the query's distinctive
+  // terms, because `coveredTerms` counts every word the user typed as worth
+  // the same and the floor's promise is about the words that make the question
+  // what it is. See `calibration.ts`'s {@link KEY_TERMS_REQUIRED}.
+  const requiredTerms = key.terms.slice(0, KEY_TERMS_REQUIRED);
 
   // ---- reciprocal rank fusion
   const fused = new Map<string, RawHit & { score: number; from: RecallHit['from'] }>();
@@ -1827,11 +1925,18 @@ export async function recall(
     // Coverage is counted over the text this row can actually *show* — the
     // same string `bestSnippet` cuts from — so the label and the highlighted
     // words on the screen are two readings of one measurement.
+    const hitText = `${hit.userText} ${hit.assistantText ?? ''}`;
     const calibration = calibrate({
-      covered: coveredTerms(quotableTokens, `${hit.userText} ${hit.assistantText ?? ''}`),
+      covered: coveredTerms(quotableTokens, hitText),
       terms: quotableTokens.length,
       strength: strengthOf(hit.from),
       lists: new Set(hit.from.map((f) => f.list)).size,
+      // F8's second half. Coverage above is a uniform partition over every
+      // word the user typed; this says which of those words the question was
+      // actually *about*. A row that shows none of them is not an answer to
+      // it, whatever the other four numbers say. See `calibration.ts`.
+      keyCovered: coveredTerms(requiredTerms, hitText),
+      keyTerms: requiredTerms.length,
       // A card's text is a model's paragraph about the session, so full
       // coverage of the query inside it means the *summary* used those words
       // — which is the one thing an agent must not be allowed to read as "the
@@ -1945,6 +2050,8 @@ export async function recall(
     const calibration = calibrate({
       covered: coveredTerms(quotableTokens, blockText),
       terms: quotableTokens.length,
+      keyCovered: coveredTerms(requiredTerms, blockText),
+      keyTerms: requiredTerms.length,
       strength: Math.max(0, ...counted.map((h) => h.calibration.strength)),
       lists: new Set(counted.flatMap((h) => h.from.map((f) => f.list))).size,
       ...(lane === 'routing' ? { ceiling: ROUTING_CEILING } : {}),
@@ -2024,6 +2131,8 @@ export async function recall(
     confidence,
     minConfidence,
     belowFloor,
+    keyphrase: key,
+    keyphraseLists: [...keyphraseLists],
     ms: Date.now() - started,
   };
 }

@@ -25,6 +25,11 @@ import {
   type Db,
 } from '@potsherd/core';
 import { rmrf, tempDir } from './helpers.js';
+// `packages/core/src/index.ts` is another worker's file this phase and does not
+// re-export the keyphrase yet, so it is imported from the modules that own it.
+// `T10.9-REPORT.md` carries the barrel lines.
+import { KEYPHRASE_RULE } from '../packages/core/src/keyphrase.js';
+import { KEY_TERMS_REQUIRED } from '../packages/core/src/calibration.js';
 
 /**
  * L6 — `find`, `ls`, `show`, `stats`.
@@ -1189,5 +1194,174 @@ describe('cards are routing, never evidence (F6)', () => {
         }
       }
     }
+  });
+});
+
+// ------------------------------------------------- F8, the long-query defect
+
+/**
+ * T10.9 — the audit's own failing case, on the committed fixture, at
+ * `--no-vec` because that is the machine the audit ran on.
+ *
+ * F8, in the audit's words: *"BM25 punishes the phrasing the skill mandates."*
+ * `session-archaeologist.md` tells the agent to pass the user's own words, and
+ * with a bm25-only index that is the worst available strategy — the AND pass
+ * finds nothing, the OR pass relaxes to any-word matching, and the ranking
+ * drifts to whatever session holds the most common words.
+ *
+ * The audit measured a long question and its one-word version against the same
+ * index and the one-word version won decisively. Both halves of that
+ * comparison are here, so a regression in either direction is a red test
+ * rather than a paragraph in a report.
+ */
+describe('long queries — keyphrase extraction as bm25 first responder (F8)', () => {
+  /** The audit's shape: "where did we leave off on X, what is left to build". */
+  const LONG = 'where did we leave off on the pgbouncer work and what is left to build';
+  const SHORT = 'pgbouncer';
+
+  it('the one-word version was already right, and is untouched', async () => {
+    // ACCEPT 4. A short or already-distinctive query must not get worse. This
+    // one is structural rather than lucky: `pgbouncer` has one content word,
+    // so its keyphrase is that same word, the subset is not strict, and
+    // `recall()` never builds the second rung at all.
+    const r = await recall(db, SHORT, {}, { vectors: false });
+    expect(has(r, ID.pgbouncer)).toBe(true);
+    expect(ids(r)[0]!.startsWith(ID.pgbouncer)).toBe(true);
+    expect(r.sessions[0]!.confidence).toBe('strong');
+    expect(r.keyphrase.terms).toEqual(['pgbouncer']);
+    expect(r.keyphraseLists).toEqual([]);
+  });
+
+  it('the same is true of every already-distinctive query in this file', async () => {
+    // The guarantee generalised: a query whose keyphrase is not a *strict*
+    // subset of its own content words gets no keyphrase pass, so nothing about
+    // it can move.
+    for (const q of ['pgbouncer', 'timezone drift', 'icon', 'conntrack']) {
+      const r = await recall(db, q, {}, { vectors: false, minConfidence: 'none', limit: 20 });
+      expect(r.keyphraseLists, q).toEqual([]);
+    }
+  });
+
+  it('extracts the distinctive words of the long question, in code', async () => {
+    // ACCEPT 2 — the caller still passes the user's own words. Nothing about
+    // the query string changes; the narrowing happens inside `recall()`.
+    const r = await recall(db, LONG, {}, { vectors: false, minConfidence: 'none', limit: 20 });
+    expect(r.query).toBe(LONG);
+    expect(r.keyphrase.content).toEqual(['leave', 'pgbouncer', 'work', 'left', 'build']);
+    expect(r.keyphrase.terms[0]).toBe('pgbouncer');
+    expect(r.keyphrase.terms.length).toBe(Math.ceil(5 * KEYPHRASE_RULE.keepRatio));
+    // The words it dropped are the *common* ones. `build` is the commonest
+    // content word in the question and the one that decided the v1.1.0
+    // ranking; `pgbouncer` is the rarest and the one the question is about.
+    expect(r.keyphrase.terms).not.toContain('build');
+    expect(r.keyphrase.df.get('pgbouncer')!).toBeLessThan(r.keyphrase.df.get('build')!);
+  });
+
+  it('brings the right session back into the page it was absent from', async () => {
+    // ACCEPT 1, the artifact. Measured at `793c369` the two lists that knew
+    // the answer ranked it third and it did not appear in the top five at all;
+    // the page was led by a ghost about a build agent running out of inodes,
+    // which shares `build`, `left` and `leave` with the question and nothing
+    // else.
+    const r = await recall(db, LONG, {}, { vectors: false, minConfidence: 'none', limit: 20 });
+    const top5 = ids(r).slice(0, 5);
+    expect(top5.some((id) => id.startsWith(ID.pgbouncer))).toBe(true);
+    expect(r.keyphraseLists).toContain('exchanges_fts');
+  });
+
+  it('the full query is still what the answer is judged on', async () => {
+    // ACCEPT 3. The keyphrase decides which rows become candidates; every
+    // content word the user typed is still the denominator of `coverage`, so
+    // a row cannot be called a good answer for containing two of five words.
+    const r = await recall(db, LONG, {}, { vectors: false, minConfidence: 'none', limit: 20 });
+    const answer = r.sessions.find((sn) => sn.id.startsWith(ID.pgbouncer))!;
+    expect(answer.calibration.coverage).toBeLessThan(1);
+    expect(answer.calibration.coverage).toBeCloseTo(1 / r.keyphrase.content.length, 6);
+  });
+
+  it('a rare word is never the word that gets dropped', async () => {
+    // The property that makes the narrowing safe: the keyphrase is selected
+    // *by* rarity, so every term it drops is commoner than every term it
+    // keeps. A rare word that only appears in the long phrasing is by
+    // construction the first thing kept, not the first thing thrown away.
+    for (const q of [LONG, 'the pod kept getting killed even though the app was fine']) {
+      const r = await recall(db, q, {}, { vectors: false, minConfidence: 'none', limit: 20 });
+      const kept = r.keyphrase.terms.map((t) => r.keyphrase.df.get(t)!);
+      const dropped = r.keyphrase.content
+        .filter((t) => !r.keyphrase.terms.includes(t) && (r.keyphrase.df.get(t) ?? 0) > 0)
+        .map((t) => r.keyphrase.df.get(t)!);
+      if (kept.length > 0 && dropped.length > 0) {
+        expect(Math.max(...kept), q).toBeLessThanOrEqual(Math.min(...dropped));
+      }
+    }
+  });
+
+  it('falls all the way back when the distinctive words find nothing', async () => {
+    // The third rung, and the reason nothing is thrown away. A query whose
+    // keyphrase matches no row must still be answered by the any-word pass
+    // exactly as it was before this rung existed.
+    const r = await recall(db, 'vondrelic pashtomeer and the ledger reconciliation drift', {}, {
+      vectors: false,
+      minConfidence: 'none',
+      limit: 20,
+    });
+    expect(r.keyphraseLists).not.toContain('ghosts_fts');
+    expect(Array.isArray(r.sessions)).toBe(true);
+  });
+
+  it('never throws on a query that is all function words', async () => {
+    const r = await recall(db, 'what is it', {}, { vectors: false, minConfidence: 'none' });
+    expect(r.keyphrase.terms).toEqual([]);
+    expect(r.keyphraseLists).toEqual([]);
+  });
+});
+
+/**
+ * T10.9 — the second half of F8, and the gap `evals/queries.jsonl` caught.
+ *
+ * `bluetooth on the checkout page` describes a session the archive does not
+ * have: bluetooth belongs to a deleted devices thread, checkout to four web
+ * sessions, and nothing covers both. It returned two checkout sessions at
+ * `weak`, because `coveredTerms` is a uniform partition and two words of three
+ * clears {@link WEAK_FLOOR} even when the missing word is the only one that
+ * named the subject.
+ */
+describe('a row must show the distinctive word before it may be labelled (F8)', () => {
+  const CONTROL = 'bluetooth on the checkout page';
+
+  it('returns zero rows for a two-topic question the archive answers half of', async () => {
+    const r = await recall(db, CONTROL, {}, { vectors: false, minConfidence: 'weak' });
+    expect(r.sessions).toEqual([]);
+    // And it says how many it withheld, rather than claiming nothing matched.
+    expect(r.belowFloor).toBeGreaterThan(0);
+  });
+
+  it('requires the most selective term, and names it', async () => {
+    const r = await recall(db, CONTROL, {}, { vectors: false, minConfidence: 'none', limit: 20 });
+    expect(r.keyphrase.terms[0]).toBe('bluetooth');
+    expect(KEY_TERMS_REQUIRED).toBe(1);
+    const checkout = r.sessions.filter(
+      (sn) => !/bluetooth/i.test(`${sn.displayTitle} ${sn.hits.map((h) => h.userText).join(' ')}`),
+    );
+    expect(checkout.length).toBeGreaterThan(0);
+    for (const sn of checkout) expect(sn.confidence).toBe('none');
+  });
+
+  it('the refusal is the label, not the arithmetic', async () => {
+    // `--explain` has to keep reproducing: a row capped at `none` still prints
+    // the coverage it earned, and the cap says why the two disagree.
+    const r = await recall(db, CONTROL, {}, { vectors: false, minConfidence: 'none', limit: 20 });
+    const capped = r.sessions.filter((sn) => sn.calibration.ceiling === 'none');
+    expect(capped.length).toBeGreaterThan(0);
+    for (const sn of capped) expect(sn.calibration.score).toBeGreaterThan(0);
+  });
+
+  it('leaves a query whose distinctive word is present alone', async () => {
+    // The gate is a necessary condition and nothing else: the control that has
+    // always had to come back `strong` still does.
+    const r = await recall(db, 'pgbouncer transaction pooling', {}, { vectors: false });
+    expect(r.sessions.length).toBeGreaterThan(0);
+    expect(r.sessions[0]!.confidence).toBe('strong');
+    expect(r.sessions[0]!.calibration.ceiling).toBeUndefined();
   });
 });
