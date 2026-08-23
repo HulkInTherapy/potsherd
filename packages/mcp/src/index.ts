@@ -7,10 +7,10 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { VERSION } from '@potsherd/core';
 
 import { makeContext } from './context.js';
-import { createServer } from './server.js';
+import { createServer, TOOLS } from './server.js';
 import { selftest } from './selftest.js';
 
-const USAGE = `potsherd-mcp — potsherd as an MCP stdio server (six tools)
+const USAGE = `potsherd-mcp — potsherd as an MCP stdio server (${String(TOOLS.length)} tools)
 
   potsherd-mcp                     speak MCP on stdin/stdout
   potsherd-mcp --selftest          build a throwaway index and prove each tool answers
@@ -23,7 +23,7 @@ environment
                                    Default: the directory the server was launched
                                    in, when that is a plausible project; otherwise
                                    nothing is written and the brief is returned inline.
-  POTSHERD_MCP_ASK_TIMEOUT_MS      how long potsherd_ask may run. Default 240000.
+  POTSHERD_MCP_ASK_TIMEOUT_MS      how long a long-running tool may run. Default 240000.
 
 .mcp.json
   { "mcpServers": { "potsherd": { "command": "node", "args": ["<this file>"] } } }
@@ -116,7 +116,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
   await server.connect(transport);
   process.stderr.write(
-    `potsherd-mcp ${VERSION} ready · 6 tools · index ${potsherdDir ?? '~/.potsherd'}\n`,
+    `potsherd-mcp ${VERSION} ready · ${String(TOOLS.length)} tools · index ${potsherdDir ?? '~/.potsherd'}\n`,
   );
 
   /**
