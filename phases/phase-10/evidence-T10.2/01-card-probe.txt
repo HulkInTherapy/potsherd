@@ -1,0 +1,5 @@
+
+  ok  claude-cli · claude-haiku-4-5-20251001
+  reply     ok
+  cost      1942 in · 41 out · $0.0021 equivalent · 8.4s
+
