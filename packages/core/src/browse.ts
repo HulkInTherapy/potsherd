@@ -1,6 +1,11 @@
 import type { Db } from './db.js';
 import type { Harness, SessionStatus } from './adapters/types.js';
-import { buildGhostFilters, buildSessionFilters, type SearchFilters } from './search/filters.js';
+import {
+  buildGhostFilters,
+  buildSessionFilters,
+  type BoundClause,
+  type SearchFilters,
+} from './search/filters.js';
 import { applyIgnore, type IgnoreReport } from './ignore.js';
 import { tagsForSessions } from './tags.js';
 import { readCard, type StoredCard } from './cards/write.js';
@@ -11,6 +16,7 @@ import {
   type RecallSession,
   type SessionRow,
 } from './recall.js';
+import { threadOf, threadTotals } from './threads.js';
 
 /**
  * The browse side of L6: `ls` and `show`.
@@ -55,6 +61,31 @@ export interface BrowseSession
   cardSource: string | null;
   /** The user's own tags, sorted. Empty until `potsherd tag` writes one. */
   tags: string[];
+  /**
+   * The fork/resume chain this session is a link in, or null for the ordinary
+   * case of a session that is its own thread (`threads.ts`, audit F4).
+   *
+   * Present on both `ls` and `show`. On `ls` the row is the **thread**, not
+   * the file: its counts and its date range are the chain's, and the other
+   * links do not take rows of their own — the same bargain `ls` already makes
+   * for subagent transcripts, for the same reason. `--json` carries the member
+   * ids so a script can still address each transcript.
+   */
+  thread: SessionThread | null;
+}
+
+/** {@link BrowseSession.thread}. */
+export interface SessionThread {
+  /** The root: the session nothing was forked from. */
+  id: string;
+  /** Every link, root first. */
+  sessions: string[];
+  /** The newest link — the transcript `claude --resume` would continue. */
+  head: string;
+  /** True when this row is that link. `ls` only ever shows the head. */
+  isHead: boolean;
+  /** Exchanges across the whole chain, not this file alone. */
+  exchanges: number;
 }
 
 // ------------------------------------------------------------------- ls
@@ -87,6 +118,16 @@ export interface ListResult {
   /** Sidechains listed as rows of their own. */
   sidechains: number;
   /**
+   * Sessions folded into another row because they are earlier links of the
+   * same fork/resume chain (`threads.ts`).
+   *
+   * Counted and reported for the reason `rolledUp` is: a listing that quietly
+   * drops rows is lying about the archive. On the reference machine it is 2 —
+   * and those two rows were, before this, two identically-titled entries in
+   * `ls` that were one piece of work.
+   */
+  threaded: number;
+  /**
    * The ignore list and what it cost this listing.
    *
    * `hidden` is the number of rows that matched every other filter and were
@@ -114,6 +155,41 @@ export interface ListResult {
 const ROLLUP = `AND (s.is_sidechain = 0
        OR s.parent_session_id IS NULL
        OR NOT EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id))`;
+
+/**
+ * The thread is the unit (audit F4, `plans/phases/phase-10` §B5).
+ *
+ * An earlier link of a fork/resume chain does not take a row: its work is
+ * counted on the chain's newest link, which is also the one `claude --resume`
+ * continues. Before this, one project on the reference archive listed the same
+ * title **twice**, on two consecutive lines, dated one day apart — one file
+ * with 119 exchanges and one with 4, and nothing on the screen to say they
+ * were the same work.
+ *
+ * **A link is only folded into a head that is actually on this screen**, and
+ * the filters are therefore repeated inside the `EXISTS`. Without that clause
+ * `ls --until 15 aug` lost the chain entirely on the reference archive: the
+ * 119-exchange link from 12–19 august was folded away as a member, and the
+ * link it was folded into is dated the 20th and failed the filter. A listing
+ * that answers "nothing" because it folded a row into one it then discarded
+ * has hidden work, which is the failure this whole fix exists to undo. It is
+ * the same guarantee the sidechain rollup makes one line above, tightened from
+ * "the head is in the index" to "the head is in this result".
+ */
+function threadRollup(f: BoundClause): BoundClause {
+  // `buildSessionFilters` emits every predicate against the alias `s`, and the
+  // head is the same table under a different name, so the clause is the same
+  // clause re-aliased. The params are bound a second time in the same order.
+  const head = f.sql.replace(/\bs\./g, 'hs.');
+  return {
+    sql: `AND NOT EXISTS (
+       SELECT 1 FROM session_threads t
+        WHERE t.session_id = s.id AND t.head = 0
+          AND EXISTS (SELECT 1 FROM session_threads h JOIN sessions hs ON hs.id = h.session_id
+                       WHERE h.thread_id = t.thread_id AND h.head = 1 ${head}))`,
+    params: [...f.params],
+  };
+}
 
 const SESSION_COLUMNS = `s.id, s.harness, s.title, s.project, s.started_at, s.ended_at, s.status,
        s.is_sidechain, s.parent_session_id, s.agent_name, s.git_branch,
@@ -155,13 +231,57 @@ type GhostRowPlus = GhostRow & CardColumns;
  * so.
  */
 function withCardTitle(
-  s: Omit<BrowseSession, 'cardTitle' | 'cardSource' | 'tags'>,
+  s: Omit<BrowseSession, 'cardTitle' | 'cardSource' | 'tags' | 'thread'>,
   card: Partial<CardColumns> | null | undefined,
 ): BrowseSession {
   const clean = card?.card_title?.replace(/\s+/g, ' ').trim();
   const source = card?.card_source?.trim() || null;
-  if (!clean) return { ...s, cardTitle: null, cardSource: source, tags: [] };
-  return { ...s, title: clean, displayTitle: clean, cardTitle: clean, cardSource: source, tags: [] };
+  if (!clean) return { ...s, cardTitle: null, cardSource: source, tags: [], thread: null };
+  return {
+    ...s,
+    title: clean,
+    displayTitle: clean,
+    cardTitle: clean,
+    cardSource: source,
+    tags: [],
+    thread: null,
+  };
+}
+
+/**
+ * Hang the chain on the rows that are in one, and make the row the chain.
+ *
+ * Two things happen here and they are one decision. A row that is the head of
+ * a fork/resume chain gets the chain's **counts** and the chain's **range** —
+ * because that is what the user did, and 4 exchanges was never the truth about
+ * a session with 123 of them one hop away. And a row that is not the head is
+ * marked, so `show` can name the rest of the chain even though `ls` folded it.
+ *
+ * The date the row *sorts and prints* on is still `endedAt`, which is the
+ * chain's last activity and the session's own: dating the thread by its start
+ * would be re-introducing exactly the inherited date F4 is about.
+ */
+function withThreads(db: Db, rows: BrowseSession[]): BrowseSession[] {
+  for (const row of rows) {
+    if (row.kind !== 'session') continue;
+    const thread = threadOf(db, row.id);
+    if (thread.sessions.length < 2) continue;
+    const totals = threadTotals(db, thread);
+    row.thread = {
+      id: thread.id,
+      sessions: thread.sessions,
+      head: thread.head,
+      isHead: thread.head === row.id,
+      exchanges: totals.exchanges,
+    };
+    if (thread.head !== row.id) continue;
+    row.exchanges = totals.exchanges;
+    row.prompts = totals.prompts;
+    row.bytes = totals.bytes;
+    row.startedAt = totals.startedAt ?? row.startedAt;
+    row.endedAt = totals.endedAt ?? row.endedAt;
+  }
+  return rows;
 }
 
 /**
@@ -221,37 +341,50 @@ export function listSessions(
   let ghosts = 0;
   let sidechains = 0;
   let rolledUp = 0;
+  let threaded = 0;
 
   if (sessionsInScope(filters)) {
     const f = buildSessionFilters(filters);
     const rollup = (filters.sidechains ?? 'include') === 'include' ? ROLLUP : '';
+    const thread = threadRollup(f);
+    const both = `${rollup} ${thread.sql}`;
+    const bothParams = [...f.params, ...thread.params];
     // `want` rather than `limit`: each table is cut at the depth the merge
     // could possibly need, and the merge cuts again.
     const found = db
       .prepare(
-        `SELECT ${SESSION_COLUMNS} FROM sessions s WHERE 1=1 ${f.sql} ${rollup}
+        `SELECT ${SESSION_COLUMNS} FROM sessions s WHERE 1=1 ${f.sql} ${both}
           ORDER BY COALESCE(s.ended_at, s.started_at) DESC, s.id
           LIMIT ?`,
       )
-      .all(...f.params, want) as SessionRowPlus[];
+      .all(...bothParams, want) as SessionRowPlus[];
     for (const r of found) rows.push(withCardTitle(fromSessionRow(r), r));
 
     const counted = db
       .prepare(
         `SELECT COUNT(*) AS n, COALESCE(SUM(s.is_sidechain), 0) AS sidechains
-           FROM sessions s WHERE 1=1 ${f.sql} ${rollup}`,
+           FROM sessions s WHERE 1=1 ${f.sql} ${both}`,
       )
-      .get(...f.params) as { n: number; sidechains: number };
+      .get(...bothParams) as { n: number; sidechains: number };
     total += counted.n;
     sidechains = counted.sidechains;
     hidden += countHidden(db, filters, ignore.applied, rollup, 'sessions', counted.n);
+
+    // The two fold-ups are counted separately because they are different
+    // claims: `rolledUp` is "subagents of a session on this screen",
+    // `threaded` is "earlier links of a chain on this screen".
+    threaded = (
+      db
+        .prepare(`SELECT COUNT(*) AS n FROM sessions s WHERE 1=1 ${f.sql} ${rollup}`)
+        .get(...f.params) as { n: number }
+    ).n - counted.n;
 
     if (rollup) {
       rolledUp = (
         db
           .prepare(`SELECT COUNT(*) AS n FROM sessions s WHERE 1=1 ${f.sql}`)
           .get(...f.params) as { n: number }
-      ).n - counted.n;
+      ).n - counted.n - threaded;
     }
   }
 
@@ -274,12 +407,16 @@ export function listSessions(
     hidden += countHidden(db, filters, ignore.applied, '', 'ghosts', counted.n);
   }
 
+  // Threads are folded before the sort, because a head row's date is the
+  // chain's last activity and that is the key the whole listing is ordered on.
+  withThreads(db, rows);
   rows.sort((a, b) => when(b).localeCompare(when(a)) || a.id.localeCompare(b.id));
   return {
     sessions: withTags(db, rows.slice(offset, offset + limit)),
     total,
     ghosts,
     rolledUp,
+    threaded,
     sidechains,
     ignored: { entries: ignore.entries, projects: ignore.projects, hidden },
     filters,
@@ -306,11 +443,16 @@ function countHidden(
   const open: SearchFilters = { ...filters };
   delete open.excludeProjects;
   const f = table === 'sessions' ? buildSessionFilters(open) : buildGhostFilters(open);
+  // The thread fold has to be applied here too, and rebuilt from *these*
+  // filters: the clause carries bound parameters, and reusing the caller's
+  // string with this query's params is how a count silently answers a
+  // different question from the one the rows answered.
+  const thread = table === 'sessions' ? threadRollup(f) : { sql: '', params: [] };
   const sql =
     table === 'sessions'
-      ? `SELECT COUNT(*) AS n FROM sessions s WHERE 1=1 ${f.sql} ${rollup}`
+      ? `SELECT COUNT(*) AS n FROM sessions s WHERE 1=1 ${f.sql} ${rollup} ${thread.sql}`
       : `SELECT COUNT(*) AS n FROM ghosts g WHERE 1=1 ${f.sql}`;
-  const all = (db.prepare(sql).get(...f.params) as { n: number }).n;
+  const all = (db.prepare(sql).get(...f.params, ...thread.params) as { n: number }).n;
   return Math.max(0, all - shown);
 }
 
@@ -465,6 +607,21 @@ export function showSession(db: Db, id: string, options: ShowOptions = {}): Show
 
   if (sessionRow) {
     const session = withTags(db, [withCardTitle(fromSessionRow(sessionRow), sessionRow)])[0]!;
+    // The chain, on the row, without the row becoming the chain. `show` reads
+    // **one transcript** — asked for a session id, it shows that session's
+    // exchanges and no others — but it now says what the session is part of,
+    // so a reader who finds four exchanges can see where the other 119 are.
+    // `ls` is where the thread is the unit; here it is a fact about the file.
+    const chain = threadOf(db, id);
+    if (chain.sessions.length > 1) {
+      session.thread = {
+        id: chain.id,
+        sessions: chain.sessions,
+        head: chain.head,
+        isHead: chain.head === id,
+        exchanges: threadTotals(db, chain).exchanges,
+      };
+    }
     const total = session.exchanges;
     const { from, to } = window(total, options);
     const rows = db

@@ -797,6 +797,36 @@ describe('the last line is always the source line', () => {
     );
   });
 
+  // --- F4 (T10.3). A brief drawn from a fork/resume chain counts the chain,
+  // and the line has to say so: `241 exchanges` beside an id whose transcript
+  // holds four is the unattributable citation this line exists to prevent.
+  it('says how many transcripts the count spans, and only when it is more than one', () => {
+    expect(
+      sourceLine({ harness: 'claude', sessionId: 'x', exchanges: 123, date: 'd', sessions: 2 }),
+    ).toContain('· 123 exchanges across 2 sessions ·');
+    // One is the whole history of this line, so every brief ever written keeps
+    // the wording it had.
+    expect(
+      sourceLine({ harness: 'claude', sessionId: 'x', exchanges: 4, date: 'd', sessions: 1 }),
+    ).toBe(sourceLine({ harness: 'claude', sessionId: 'x', exchanges: 4, date: 'd' }));
+  });
+
+  it('a session nothing was forked from grafts as a thread of one', async () => {
+    const src = await collectSource(db, pgbouncerId, {});
+    expect(src.thread.sessions).toEqual([pgbouncerId]);
+    const llm = stub(`- a fact [${ID.pgbouncer}@${seqOf(pgbouncerId)}]`);
+    const r = await graft(db, pgbouncerId, { budget: DEFAULT_BUDGET, llm, cwd: workdir() });
+    await llm.close();
+    expect(r.sessions).toBe(1);
+    expect(r.threadId).toBe(pgbouncerId);
+    expect(r.brief).not.toContain('across');
+    // The prompt keeps the sentence it has always carried; the chain wording
+    // is a new case, not a rewrite of every brief.
+    expect(buildPrompt(src, { budget: DEFAULT_BUDGET })).toContain(
+      'The ONLY legal seq numbers are:',
+    );
+  });
+
   // --- D2 (T4.5). `03` §8 specifies this line as `· <n> exchanges ·`
   // unconditionally, and on a ghost that made the brief contradict itself three
   // lines apart: a prominent blockquote saying the assistant side was never

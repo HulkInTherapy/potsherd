@@ -45,6 +45,9 @@ import {
   firstSubstantivePrompt,
 } from './rescue.js';
 import { modelsDir, potsherdDir } from './paths.js';
+import { readJsonlLines, parseJsonLine } from './parser/jsonl.js';
+import { isRecord } from './parser/content.js';
+import { LINEAGE_HARNESSES, deriveThreads, redateFromContent, type ThreadReport } from './threads.js';
 
 /**
  * L1 + L4 — adapter output into the store.
@@ -268,6 +271,15 @@ export function ingestSession(
     upsertSession(db, session, parsed, options);
     clearExchanges(db, session.id);
     for (const exchange of redacted) insertExchange(db, exchange);
+    // **F4, the dating half.** `started_at` as the parser reports it is the
+    // timestamp of the first *record in the file*, and on a `--resume`
+    // transcript that record was written by a different session days earlier:
+    // `show` printed it as the header date and then printed the session's own
+    // first exchange, eight days later, four lines below. The rule lives in
+    // `threads.ts` because `graft` and `ls` and `find` all have to date a
+    // session the same way, and it runs **inside this transaction** so that no
+    // reader can ever observe a session whose header disagrees with its body.
+    redateFromContent(db, session.id);
     if (derivedTitle) {
       // The `WHERE` reads the row as it now stands rather than trusting the
       // parse: a session the harness titled on an earlier pass keeps that
@@ -720,6 +732,14 @@ export interface IndexReport {
   };
   recordTypes: RecordTypeRow[];
   redaction: RedactionCounts;
+  /**
+   * The fork/resume chains this index derived (`threads.ts`).
+   *
+   * Derived from the **stored** record ids of every session, not from the ones
+   * this run happened to re-read, so an incremental pass that opens one
+   * transcript reports the same chains as a cold `--full`.
+   */
+  threads: ThreadReport;
   ghosts: GhostSyncResult;
   embeddings: EmbeddingReport;
   vec: VecStatus;
@@ -787,6 +807,10 @@ export async function indexAll(options: IndexOptions = {}): Promise<IndexReport>
       harnesses.push(report.harness_);
     }
 
+    // After every harness and before the ghosts: the chain is a relation
+    // between transcripts, so it can only be derived once all of them are in.
+    const threads = deriveThreads(db);
+
     options.onProgress?.({ phase: 'ghosts' });
     const ghosts = ingestGhosts(db, { full: Boolean(options.full) });
     redaction = addCounts(redaction, ghosts.counts);
@@ -817,6 +841,7 @@ export async function indexAll(options: IndexOptions = {}): Promise<IndexReport>
           (a.type < b.type ? -1 : 1),
       ),
       redaction,
+      threads,
       ghosts,
       embeddings,
       vec: vecStatus(db),
@@ -938,6 +963,15 @@ async function indexHarness(
     report.malformedLines += parsed.malformedLines;
     redaction = addCounts(redaction, result.counts);
 
+    try {
+      await indexLineage(db, spec.harness, source, parsed.session.id);
+    } catch (err) {
+      // The chain is a convenience; the transcript is the product. A lineage
+      // pass that cannot read a file it has already parsed once is named and
+      // stepped over, exactly like an unknown record type.
+      report.errors.push(`lineage ${path.basename(source.path)}: ${(err as Error).message}`);
+    }
+
     const version = spec.version(parsed);
     // Two ledgers, deliberately: the map is what *this run* saw and goes on the
     // receipt; the table is what the *index* holds and is what `doctor` reads
@@ -966,6 +1000,86 @@ async function indexHarness(
   fillStoredCounts(db, report);
   report.ms = Date.now() - started;
   return { harness_: report, redaction };
+}
+
+// ----------------------------------------------------------- the lineage
+
+/**
+ * The record-identity fields a harness writes, verified by reading its own
+ * transcripts — never taken from a format document.
+ *
+ * `id` is the identity of a record: the thing a `--resume` copies unchanged,
+ * which is what makes two transcripts comparable at all. `declaredParent` is
+ * the field a copied record keeps pointing at the session that first wrote it.
+ *
+ * Claude Code: every conversational record carries `uuid`, and a resume
+ * rewrites `sessionId` to the new transcript while leaving `session_id` on the
+ * original. Measured on the reference archive: 1,738 uuids in the derived
+ * transcript, 1,660 of them also in its parent, and 1,387 records still naming
+ * the parent in `session_id`.
+ *
+ * Every other adapter is absent because nothing has been verified for it — not
+ * because it is known to have nothing. `threads.ts` reports the absence per
+ * harness rather than printing a chain nobody measured.
+ */
+const LINEAGE_FIELDS: Record<string, { id: string; declaredParent: string }> = {
+  claude: { id: 'uuid', declaredParent: 'session_id' },
+};
+
+/**
+ * Read one transcript for the two things the thread model needs.
+ *
+ * This is a **second pass** over the file, and it is worth saying why rather
+ * than folding it into the parser. `ParseResult` is the L0 adapter contract
+ * (`adapters/types.ts` §"Changing a field here is an architecture change"), and
+ * record identity is not part of what an adapter promises. So the pass that
+ * needs it does its own reading, over the same `readJsonlLines` the parser
+ * uses, and the adapter contract is unchanged.
+ *
+ * Measured cost on the reference archive: 2.8 s over 433 MB / 79,531 records,
+ * against a 16.4 s index — the read dominates, and `JSON.parse` costs 0.3 s of
+ * it over a regex, which is not a price worth paying in guesswork.
+ *
+ * Sidechains are skipped: a subagent transcript is spawned, never resumed, and
+ * scanning 280 of them for a relation they cannot have is work thrown away.
+ */
+async function indexLineage(
+  db: Db,
+  harness: Harness,
+  source: SessionSource,
+  sessionId: string,
+): Promise<void> {
+  if (!LINEAGE_HARNESSES.includes(harness)) return;
+  const fields = LINEAGE_FIELDS[harness];
+  if (!fields || source.isSidechain) return;
+
+  const ids: string[] = [];
+  const declared = new Map<string, number>();
+  for await (const line of readJsonlLines(source.path)) {
+    if (!line.terminated) break; // half-written tail, exactly as the parser does
+    const record = parseJsonLine(line.text);
+    if (!isRecord(record)) continue;
+    const id = record[fields.id];
+    if (typeof id === 'string' && id) ids.push(id);
+    const parent = record[fields.declaredParent];
+    if (typeof parent === 'string' && parent && parent !== sessionId) {
+      declared.set(parent, (declared.get(parent) ?? 0) + 1);
+    }
+  }
+
+  const write = db.transaction(() => {
+    db.prepare('DELETE FROM session_record_ids WHERE session_id = ?').run(sessionId);
+    db.prepare('DELETE FROM session_declared_parents WHERE session_id = ?').run(sessionId);
+    const insId = db.prepare(
+      'INSERT OR IGNORE INTO session_record_ids (session_id, record_id) VALUES (?, ?)',
+    );
+    for (const id of ids) insId.run(sessionId, id);
+    const insParent = db.prepare(
+      'INSERT OR REPLACE INTO session_declared_parents (session_id, parent_id, records) VALUES (?, ?, ?)',
+    );
+    for (const [parent, n] of declared) insParent.run(sessionId, parent, n);
+  });
+  write();
 }
 
 /**

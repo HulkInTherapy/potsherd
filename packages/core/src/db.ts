@@ -394,6 +394,76 @@ CREATE INDEX IF NOT EXISTS card_runs_backend ON card_runs(backend, ran_at);
     // open retries.
     run: migrateToPortableVectors,
   },
+  {
+    version: 11,
+    name: 'threads',
+    // The fork/resume chain, and the evidence it is derived from.
+    //
+    // `claude --resume <id>` writes a **new** transcript whose head is a copy
+    // of the old one. potsherd stored each file as an independent session with
+    // no pointer to the other, and the agent audit (F4) measured what that
+    // costs: a session with 123 exchanges of work grafts as 4, and `show`
+    // dates it eight days before the first exchange it prints on the same
+    // screen.
+    //
+    // Three tables, because the derivation has to survive an incremental run
+    // that opens one transcript out of 328:
+    //
+    //   `session_record_ids`       the harness's own record ids, per session.
+    //                              The evidence. Written by `ingest.ts` when a
+    //                              transcript is parsed, so a run that skips a
+    //                              file still has that file's ids to compare.
+    //   `session_declared_parents` the parent the records themselves name
+    //                              (claude's `session_id`, which survives the
+    //                              rewrite of `sessionId`). Kept whether or
+    //                              not it is corroborated, so `threads.ts` can
+    //                              report the ones it refused rather than
+    //                              silently dropping them.
+    //   `session_threads`          the derived chain. Rebuilt whole on every
+    //                              `index`; never hand-edited.
+    //
+    // `ON DELETE CASCADE` retires all three with their session, exactly like
+    // `session_record_types` (migration 5).
+    //
+    // The last two statements are migration 5's trick and are here for its
+    // reason: every session indexed before this migration has no record ids
+    // stored, so the incremental test would skip all of them for ever and the
+    // first chain would be derived from an empty table. Clearing the
+    // fingerprints makes the next `index` re-read each transcript once and
+    // fill the evidence in honestly. `index:ghosts` is left alone — ghosts
+    // have no transcript and nothing here concerns them.
+    up: `
+CREATE TABLE IF NOT EXISTS session_record_ids (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  record_id  TEXT NOT NULL,
+  PRIMARY KEY (session_id, record_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS session_record_ids_record ON session_record_ids(record_id);
+
+CREATE TABLE IF NOT EXISTS session_declared_parents (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  parent_id  TEXT NOT NULL,
+  records    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, parent_id)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS session_threads (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  thread_id  TEXT NOT NULL,
+  parent_id  TEXT,
+  head       INTEGER NOT NULL DEFAULT 0,
+  depth      INTEGER NOT NULL DEFAULT 0,
+  via        TEXT,
+  shared     INTEGER NOT NULL DEFAULT 0,
+  overlap    REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS session_threads_thread ON session_threads(thread_id);
+CREATE INDEX IF NOT EXISTS session_threads_head   ON session_threads(head);
+
+DELETE FROM sync_state WHERE key LIKE 'index:%' AND key <> 'index:ghosts';
+UPDATE sessions SET source_mtime = NULL;
+`,
+  },
 ];
 
 export function open(opts: OpenOptions = {}): Db {
