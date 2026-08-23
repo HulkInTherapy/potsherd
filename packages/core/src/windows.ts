@@ -183,7 +183,14 @@ export function windowCount(
   if (exchanges < WINDOW_MIN_EXCHANGES) return 1;
   const asked = Math.max(1, Math.floor(requested));
   const byMaterial = Math.floor(exchanges / WINDOW_MIN_EXCHANGES);
-  const byBudget = Math.floor(maxChars / (MIN_UNIT_CHARS + UNIT_HEADER_CHARS));
+  // Each window costs one exchange at the floor **plus the gap that announces
+  // it**, and the whole block costs a preamble and one trailing gap. Counting
+  // the markers here rather than only in `windowOverhead` is what keeps
+  // `--windows 11` from being nine windows and a 40-character overrun.
+  const byBudget = Math.floor(
+    (maxChars - WINDOW_PREAMBLE_CHARS - WINDOW_GAP_CHARS) /
+      (MIN_UNIT_CHARS + UNIT_HEADER_CHARS + WINDOW_GAP_CHARS),
+  );
   return Math.max(1, Math.min(asked, byMaterial, byBudget));
 }
 

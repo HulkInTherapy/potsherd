@@ -20,6 +20,7 @@ import {
   quoteOccursIn,
   type AskDrop,
   type AskReaderFn,
+  type AskReaderInput,
   type AskReaderOutput,
   type EvidenceSource,
   type ProposedEvidence,
@@ -27,6 +28,11 @@ import {
   type AskResult,
 } from '../packages/core/src/ask.js';
 import { matchSpan, quotableText } from '../packages/core/src/ask.js';
+import {
+  ASK_WINDOWS,
+  WINDOW_MIN_EXCHANGES,
+  windowCount,
+} from '../packages/core/src/windows.js';
 import { ASK_ROWS, QUOTE_CHARS, clipQuote, maskSafeCut, renderAsk } from '../packages/core/src/render/ask.js';
 import {
   OPEN_THREAD_LABEL,
@@ -1253,6 +1259,58 @@ describe('excerptUnits', () => {
     const text = excerptText(excerptUnits(transcript(4), [1], { maxChars: 100_000 }));
     expect(text).toContain('[seq 1');
     expect(text).toContain('[seq 2');
+  });
+
+  it('is still the path a short session takes, unchanged, after F5', () => {
+    // T10.5 acceptance 6. `windowCount()` returns 1 below the boundary and
+    // `ask` then calls this function, not `planWindows`. So the guarantee is
+    // not "we tried not to make short sessions worse", it is that the code
+    // that reads them is the code that read them before, and these four `it`s
+    // are its test. The boundary itself is pinned in `tests/windows.test.ts`.
+    expect(windowCount(WINDOW_MIN_EXCHANGES - 1, ASK_WINDOWS, ASK_SESSION_CHARS)).toBe(1);
+  });
+});
+
+// ================================================ F5 · the seam's new fields
+//
+// T10.5. `--readers-out` is how F5 was measured at all — it hands back the
+// exact reader inputs with zero model calls — so the two numbers that make a
+// window visible have to survive the round trip to the file, not only exist
+// in memory.
+
+describe('the reader seam carries the window shape', () => {
+  it('marks a short session as one window of its own length', async () => {
+    const { root, db } = seedDb();
+    const seen: AskReaderInput[] = [];
+    const readerFn: AskReaderFn = async (input) => {
+      seen.push(input);
+      return { found: false, quotes: [], answer_fragment: '' };
+    };
+    await ask(db, 'pgbouncer prepared statements', { root, readerFn, openThreads: false });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const input of seen) {
+      expect(input.windows).toBe(1);
+      expect(input.exchanges).toBeGreaterThan(0);
+      // No marker, no preamble: byte-identical to the pre-F5 block.
+      expect(input.excerpts).not.toContain('\u22ef');
+      expect(input.excerpts).not.toContain('separated window');
+    }
+    db.close();
+  });
+
+  it('records the window shape in the --readers-out file', async () => {
+    const { root, db } = seedDb();
+    const target = path.join(scratch(), 'readers.json');
+    await writeReadersFile(db, 'pgbouncer prepared statements', { root, k: 4 }, target);
+    const parsed = JSON.parse(fs.readFileSync(target, 'utf8')) as {
+      targets: { windows?: number; exchanges?: number; seqs: number[] }[];
+    };
+    expect(parsed.targets.length).toBeGreaterThan(0);
+    for (const t of parsed.targets) {
+      expect(t.windows).toBeDefined();
+      expect(t.exchanges).toBeDefined();
+    }
+    db.close();
   });
 });
 
