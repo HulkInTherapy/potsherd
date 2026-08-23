@@ -184,6 +184,47 @@ without persisting session files to disk"*. Handed to T10.2 with a test added to
 list: a subprocess model call must leave `~/.claude` and `~/.codex` untouched, proved by copying the
 trap rather than building a clean room.
 
+## T10.1 integrated, and its one unverifiable claim verified — favourably
+
+T10.1 shipped a genuine negative it refused to tune away: at the floor, **17 of 25 eval queries
+return an empty page and 3 of 7 rank-1 answers are lost**, with correct-vs-wrong calibration
+distributions (median 0.370 vs 0.264) that overlap almost completely. It measured and rejected IDF
+weighting and a cosine lane, with numbers for each, and named the one-line lever to turn the floor
+off. That is the report this project wants.
+
+It also flagged what it could not check (`§d5`): whether thresholds tuned on a **546 KB** demo corpus
+survive a **433 MB** archive. That check is the orchestrator's, and it is the reason integration code
+gets read rather than trusted. Measured on the real archive, frozen index, 332 transcripts:
+
+| query | class | result |
+|---|---|---|
+| `privacy guard` · `session card` · `ghost sessions rescue` | true topic | **strong**, 6 / 10 / 6 rows |
+| `npm publish provenance` · `eval recall gate` | true topic | **strong**, 4 / 10 rows |
+| `what did we decide about the privacy guard` | true topic, **natural language** | **strong**, 2 rows |
+| `mortgage escrow refinance appraisal` | absent | **no match** |
+| `sourdough hydration bulk ferment` | absent | **no match** |
+| `trombone embouchure brass mouthpiece` | absent | **no match** |
+| `vaccine cold chain refrigeration logistics` | absent | **no match** |
+| `wibble frotz zagnut quux` | nonsense | **no match** |
+
+**The separation is clean at scale, including for the natural-language query class T10.1 measured as
+inseparable.** `§d1`'s pessimism is a property of a 546 KB fixture in which stopword-heavy queries
+have almost nothing to match; it is not a property of an archive. The floor ships on.
+
+**And the control trap caught me a second time.** `kubernetes ingress payment service` returns
+2 rows at `strong` on the real archive — which looks like the cliff failing, and is not. Both rows
+are sessions in which *the audit typed that control string*, verbatim, all four words. Coverage is
+genuinely 4/4 and `strong` is genuinely the right label. I wrote *"a control that has been written
+down is no longer a control"* at the top of this file and then reused a written-down control to
+check somebody else's work six hours later. **The four absent-topic controls above were invented
+after the index was frozen and have never been typed on this machine**, which is the only property
+that makes a negative control mean anything.
+
+Integration owed four lines T10.1 could not write. The one that matters: `packages/mcp/src/tools/
+find.ts` now calls `recall()` with `minConfidence: 'weak'`, so the **agent-facing** door has the same
+cliff as the human one. Suite 1,536 → **1,566 green on 40 files**; the single red T10.1 reported was
+the MCP parity test and this patch is its fix. `pnpm evals` exit 0 with three confidence controls.
+
 ## status
 
 **Five workers running**, each in its own worktree with disjoint deliverables:
