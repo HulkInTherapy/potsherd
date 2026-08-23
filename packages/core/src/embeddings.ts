@@ -210,6 +210,30 @@ export function requiredFiles(): RuntimeFile[] {
   return [...runtimeFiles(), ...modelFiles()];
 }
 
+/**
+ * The hosts acquisition actually contacts, for `doctor --privacy` to name.
+ *
+ * Derived from the same two bases the downloader uses rather than written out
+ * a second time, so a receipt cannot describe a host potsherd does not use, or
+ * miss one it does. This project has shipped a false "no network" line once
+ * (`08` rule 1) and it is not doing it again.
+ */
+export function runtimeHosts(): string {
+  const hosts = [...new Set([runtimeBase(), modelBase()].map(hostOf))].filter(Boolean);
+  if (hosts.length === 0) return 'nowhere — every source is a local path';
+  if (hosts.length === 1) return hosts[0] as string;
+  return `${hosts.slice(0, -1).join(', ')} and ${hosts[hosts.length - 1] as string}`;
+}
+
+function hostOf(base: string): string {
+  try {
+    const u = new URL(base);
+    return u.protocol === 'file:' ? '' : u.host;
+  } catch {
+    return '';
+  }
+}
+
 /** What the whole first run downloads: 48.4 MB. For the line `index` prints. */
 export const ACQUIRE_BYTES = requiredFiles().reduce((n, f) => n + f.bytes, 0);
 /** The weights alone, kept for callers that only name the model. */

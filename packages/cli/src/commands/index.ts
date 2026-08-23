@@ -1,40 +1,57 @@
+import { spawn } from 'node:child_process';
 import process from 'node:process';
 import {
   Card,
   countsJson,
+  db as store,
   format as fmt,
   indexAll,
   lock,
   paths,
+  vecStatus,
   type Harness,
   type HarnessReport,
   type IndexReport,
   type RedactionCounts,
   type Row,
+  type VecStatus,
 } from '@potsherd/core';
+import type { Database as Db } from 'better-sqlite3';
 import { print, printJson, Progress, themeFrom, UserError, type GlobalOptions } from '../output.js';
+
+/**
+ * The environment variable that turns this verb into the background embedder.
+ *
+ * A variable rather than a flag because the flag list is the product's public
+ * surface and this is not a thing anyone should ever type. `index` sets it on
+ * the child it spawns; nothing else sets it, and if a user sets it by hand all
+ * they get is the same work done in the foreground with no output.
+ */
+const WORKER_ENV = 'POTSHERD_EMBED_WORKER';
 
 export interface IndexCommandOptions extends GlobalOptions {
   full?: boolean;
   incremental?: boolean;
   harness?: string;
   /**
-   * Tri-state, and every state is a different sentence (T8.E):
+   * Tri-state, and the middle state is the one that changed (phase 10 §A2).
    *
-   *   `undefined` — no flag. **Text only.** No model, no download, no network.
-   *                 The receipt ends with one line offering the upgrade.
-   *   `true`      — `--embed`. Fetch the model if it is not here yet and
-   *                 embed. The opt-in, and the only path that touches the
-   *                 network.
-   *   `false`     — `--no-embed`. Text only *and stop offering*: the upgrade
-   *                 line is not printed. Someone who has said no once — in a
-   *                 hook, in CI, on a metered connection — should not be sold
-   *                 to on every run, and that is the whole of what the flag
-   *                 still does now that it names the default. It is kept
-   *                 rather than removed because it is the documented spelling
-   *                 of "offline, and I mean it", and because `08` rule 8 asks
-   *                 a flag to either do something or go — this one does
-   *                 something you can see by diffing two receipts.
+   *   `undefined` — no flag, and **the default**. Text search is live when the
+   *                 verb returns; the embedding runtime is fetched and the
+   *                 vectors are built in a detached background process. The
+   *                 user is told, in one line, and is never asked.
+   *   `true`      — `--embed`. Do the same work in the **foreground**, with a
+   *                 progress bar, and do not return until it is finished. For
+   *                 anyone who wants to watch it, or to script "index, then
+   *                 search" without a wait loop.
+   *   `false`     — `--no-embed`. Text only, and nothing is spawned. The
+   *                 offline/CI/metered-connection switch. It turns a capability
+   *                 **off**; nothing has to be turned on.
+   *
+   * `--no-embed` used to be the default in all but name — no flag meant no
+   * vectors — which made semantic search an opt-in tier and half of `find`
+   * dead on arrival for everyone who never read the receipt's last line. That
+   * default is what this removes.
    */
   embed?: boolean;
   session?: string;
@@ -45,30 +62,31 @@ const INDEXABLE: readonly string[] = ['claude', 'codex', 'cursor', 'pi'];
 const NOT_YET: readonly string[] = ['gemini', 'opencode', 'copilot'];
 
 /**
- * `potsherd index` — every transcript on this machine, parsed, redacted and
- * searchable.
+ * `potsherd index` — every transcript on this machine, parsed, redacted,
+ * searchable, and on its way to being semantically searchable.
  *
- * Three promises this verb makes, in the order a user meets them:
+ * Four promises this verb makes, in the order a user meets them:
  *
  *   1. **It is incremental by default.** A second run that finds nothing
  *      changed does no work and says so in well under a second. `--full`
  *      re-reads everything.
- *   2. **It is offline by default** (T8.E, `08` §8.6). `potsherd index` with
- *      no flags parses, redacts and indexes — and stops. No model, no 32 MB
- *      download, no network at all. Measured on the frozen reference archive
- *      on 2026-08-22: 10.7 s text-only against 343 s (5m 43s) with
- *      embeddings, of which the download is a few seconds and the rest is
- *      1,294 exchanges through bge-small. `05` promises a stranger a walk
- *      that finishes while they are still watching; four hundred times the
- *      budget is not a default, it is an opt-in, and it is now spelled
- *      `--embed`. The receipt's last line offers it.
- *   3. **It never stalls silently.** The one-line progress bar names the file
- *      being read, and the first-run model download `--embed` triggers is
- *      announced *before* it starts, not discovered afterwards.
+ *   2. **It returns as soon as text search is live.** Measured on the
+ *      reference archive on 2026-08-23: 15.4 s for 332 transcripts, 1,678
+ *      exchanges, 433 MB. Nothing about vectors is allowed to move that
+ *      number, which is why the embedding pass is a detached child and not a
+ *      phase of this one.
+ *   3. **Semantic search arrives on its own.** The 48 MB wasm runtime and the
+ *      quantized model are fetched once, in the background, into
+ *      `~/.potsherd/models`; the vectors are built newest-first so the
+ *      sessions you were just in are searchable within the first minute. One
+ *      line says it is happening. Nothing asks, nothing blocks, and a machine
+ *      that is offline forever gets a working text index and an honest line.
  *   4. **It never leaves a secret in the index.** Redaction runs before the
  *      first row is written (`03` §5), and the receipt prints what was masked.
  */
 export async function runIndex(o: IndexCommandOptions): Promise<number> {
+  if (process.env[WORKER_ENV] === '1') return runEmbedWorker(o);
+
   const t = themeFrom(o);
   const root = paths.potsherdDir(o.potsherdDir);
   const showProgress = !o.json && !o.quiet && Boolean(process.stderr.isTTY);
@@ -82,8 +100,6 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
   const harnesses = parseHarnesses(o.harness);
 
   const bar = new Progress('indexing', showProgress);
-  const embedBar = new Progress('embedding', showProgress);
-  let announced = false;
 
   const report = await lock.withLockAsync(
     'index',
@@ -95,51 +111,172 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
         ...(harnesses ? { harnesses } : {}),
         ...(o.session ? { sessionId: o.session } : {}),
         full: Boolean(o.full),
-        // The flip. `undefined` and `false` both mean text-only; only an
-        // explicit `--embed` reaches for the model.
-        embed: o.embed === true,
-        onModelDownload: (bytes) => {
-          announced = true;
-          bar.done();
-          if (o.json || o.quiet) return;
-          // Said before the download starts, never after a silent stall. It
-          // only happens on the `--embed` path now — nothing potsherd does by
-          // default reaches the network — and the user is told which
-          // directory it lands in.
-          print(
-            `  first run: fetching the ${fmt.bytes(bytes)} embedding model into ` +
-              `${paths.tildify(paths.modelsDir(root))}  ${t.dim('(once)')}`,
-          );
-        },
+        // The parse pass never embeds. Whether it happens here, in a child, or
+        // not at all is decided below, once text search is already live.
+        embed: false,
         onProgress: (p) => {
           if (p.phase === 'parse') bar.update(p.done, p.total, `${p.harness}  ${p.note}`);
-          else if (p.phase === 'embed') embedBar.update(p.done, p.total);
-          else if (p.phase === 'model-download' && announced) {
-            embedBar.update(Math.round(p.fraction * 100), 100, 'downloading');
-          }
         },
       }),
     { root, wait: 2000 },
   );
   bar.done();
-  embedBar.done();
+
+  // The vectors half of the receipt, and the only place it is computed.
+  let vec = readVectors(root);
+  let spawned = false;
+
+  if (o.embed === true) {
+    // The foreground path: the same work, watched.
+    vec = await embedInForeground(root, showProgress);
+  } else if (o.embed !== false && (vec.report?.pending ?? 0) > 0) {
+    spawned = startBackgroundEmbedding(root, o);
+  }
 
   if (o.json) {
     printJson({
       ...report,
-      // Named for what it is: what *this pass* masked. The index-wide totals
-      // are `potsherd doctor --json`'s `redaction`, counted back out of the
-      // stored text rather than remembered from a run.
       redaction: countsJson(report.redaction),
       redactionScope: 'run',
+      // `--json` parity with the human view (audit F9): the same numbers, from
+      // the same call, named the same way.
+      vectors: vec.report ?? null,
+      vectorBackend: vec.backend ?? null,
+      embeddingInBackground: spawned,
       db: paths.dbPath(root),
     });
     return report.totals.failed ? 1 : 0;
   }
   if (o.quiet) return report.totals.failed ? 1 : 0;
 
-  print(renderIndexReceipt(report, t, root, { embed: o.embed }));
+  print(renderIndexReceipt(report, t, root, { embed: o.embed, vec, spawned }));
   return report.totals.failed ? 1 : 0;
+}
+
+// ------------------------------------------------------------ the embed pass
+
+/** The one read of the vector state, used by the receipt, `--json`, and both paths. */
+function readVectors(root: string): VecStatus {
+  let db: Db | null = null;
+  try {
+    db = store.open({ root });
+    return vecStatus(db, root);
+  } catch (err) {
+    return { available: false, reason: firstLine((err as Error)?.message ?? String(err)) };
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/**
+ * `--embed`: acquire and embed here, with a progress bar, and do not return
+ * until it is done.
+ *
+ * Two bars rather than one, because they are two different waits and a user
+ * staring at a stalled percentage deserves to know which. The download is
+ * announced before it starts — never discovered afterwards — and it names the
+ * directory it lands in.
+ */
+async function embedInForeground(root: string, showProgress: boolean): Promise<VecStatus> {
+  const fetchBar = new Progress('fetching', showProgress);
+  const embedBar = new Progress('embedding', showProgress);
+  let db: Db | null = null;
+  try {
+    db = store.open({ root });
+    const before = vecStatus(db, root);
+    await lock.withLockAsync(
+      'embed',
+      async () => {
+        await before.embed?.({
+          onProgress: (p) => {
+            if (p.phase === 'acquire') fetchBar.update(p.done, p.total, p.file);
+            else embedBar.update(p.done, p.total);
+          },
+        });
+      },
+      { root, wait: 5000 },
+    );
+    return vecStatus(db, root);
+  } catch (err) {
+    return { available: false, reason: firstLine((err as Error)?.message ?? String(err)) };
+  } finally {
+    fetchBar.done();
+    embedBar.done();
+    try {
+      db?.close();
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/**
+ * Start the detached child that does the embedding, and return whether it
+ * started.
+ *
+ * The contract this has to keep is that a foreground verb is **never** slowed
+ * or blocked by it: the child gets its own process group, its stdio goes
+ * nowhere, and the parent unrefs it and exits. If spawning fails — a locked-down
+ * environment, no executable path — that is not an error anybody needs to see:
+ * the next `index`, or `--embed`, does the same work, and until then `find`
+ * says `semantic search: warming` with a count that is not moving. Reporting a
+ * failure the user cannot act on would be noise, and the state is visible in
+ * `doctor`.
+ */
+function startBackgroundEmbedding(root: string, o: IndexCommandOptions): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    const child = spawn(
+      process.execPath,
+      [entry, 'index', '--quiet', '--potsherd-dir', root, ...(o.color === false ? ['--no-color'] : [])],
+      {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, [WORKER_ENV]: '1' },
+      },
+    );
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The background child. Parses nothing, prints nothing, and holds the lock so
+ * two of them never race.
+ *
+ * It exits 0 whatever happens, including when it cannot get the lock or cannot
+ * reach the network, because nothing is watching it and a non-zero exit from an
+ * unwatched process is a lie waiting to be found in a log.
+ */
+async function runEmbedWorker(o: IndexCommandOptions): Promise<number> {
+  const root = paths.potsherdDir(o.potsherdDir);
+  const cacheDir = paths.modelsDir(root);
+  let db: Db | null = null;
+  try {
+    db = store.open({ root });
+    const status = vecStatus(db, root);
+    await lock.withLockAsync('embed', async () => void (await status.embed?.({ cacheDir })), {
+      root,
+      wait: 0,
+    });
+  } catch {
+    // Locked by another worker, offline, or a database that moved. All three
+    // are answered the same way: leave it for the next run.
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* already gone */
+    }
+  }
+  return 0;
 }
 
 function parseHarnesses(raw?: string): Harness[] | undefined {
@@ -176,7 +313,7 @@ export function renderIndexReceipt(
   report: IndexReport,
   t: ReturnType<typeof themeFrom>,
   root: string,
-  o: { embed?: boolean } = {},
+  o: { embed?: boolean; vec?: VecStatus; spawned?: boolean } = {},
 ): string {
   const card = new Card(t);
   card.heading('index', paths.tildify(root), fmt.date(new Date(report.ranAt))).blank();
@@ -206,7 +343,7 @@ export function renderIndexReceipt(
     // "nothing matched — index holds no secrets" after an incremental run that
     // opened one file, on an index holding three masks. A run reports the run.
     maskedThisRunRow(report, t, card.noteWidth()),
-    embeddingRow(report, t, o.embed === false),
+    vectorsRow(o.vec, t, card.noteWidth(), o.embed === false),
   ]);
 
   card.blank();
@@ -252,31 +389,39 @@ export function renderIndexReceipt(
     }
   }
 
+  // The status line. A status, not an apology and not an offer: there is no
+  // command in it, because there is nothing for the reader to do. §A2 item 2.
+  const warming = warmingSentence(o.vec, o.spawned === true);
+  if (warming) card.blank().text(warming, 'dim');
+
   card.blank().fix(
     'potsherd doctor',
     'to see parse coverage, redaction counts and every path read.',
     'for parse coverage and every path read.',
   );
-
-  // The one line that offers the upgrade (`08` §8.6). Printed only when this
-  // run did not embed *and* the user has not already said no with
-  // `--no-embed`, and only when there is something to search — offering
-  // semantic search over an empty index is noise, not help.
-  //
-  // The two numbers are measured, not guessed: `fmt.bytes` renders
-  // `MODEL_DOWNLOAD_BYTES` (34,014,426) as 32 MB, and 5m 43s is
-  // `index --embed` on the frozen reference archive (1,294 exchanges) on
-  // 2026-08-22, rounded up. `~` is the estimate marker `05` asks for; a
-  // smaller archive is faster and a larger one is slower, roughly linearly.
-  if (o.embed === undefined && !report.embeddings.enabled && report.totals.exchanges > 0) {
-    card.fix(
-      'potsherd index --embed',
-      'for semantic search (32 MB model, ~6 min, once)',
-      'for semantic search (32 MB, ~6 min)',
-      'for semantic search',
-    );
-  }
   return card.toString();
+}
+
+/**
+ * The one line `index` prints about semantic search.
+ *
+ * It says what is happening, once, and never sells anything. The three cases
+ * are: it is running and here is how far it has got; it cannot run and here is
+ * the one clause that says why; or there is nothing to say, and then nothing is
+ * printed. `find` prints the same sentence from the same report while it waits.
+ */
+function warmingSentence(vec: VecStatus | undefined, spawned: boolean): string | null {
+  const r = vec?.report;
+  if (!r) return null;
+  if (r.phase === 'unavailable') {
+    return `semantic search: ${r.reason ?? 'not running on this machine'} — text search is live`;
+  }
+  if (r.phase === 'ready' || r.phase === 'empty') return null;
+  const head = `semantic search: warming (${fmt.num(r.embedded)} of ${fmt.num(r.total)} embedded)`;
+  if (!spawned) return head;
+  return r.runtimeReady
+    ? `${head} — in the background, newest sessions first`
+    : `${head} — fetching the ${fmt.bytes(r.acquireBytes)} runtime in the background, once`;
 }
 
 function harnessNote(h: HarnessReport, sep = ' · '): string {
@@ -294,56 +439,40 @@ function harnessNote(h: HarnessReport, sep = ' · '): string {
 }
 
 /**
- * The `vectors` row.
+ * The `vectors` row — from `vecStatus(db, root)`, the same call `doctor` and
+ * `find` make.
  *
- * Three different facts, and the row says which one it is (T8.E). The one
- * that did not exist before the default flipped is the third: a user who ran
- * `index --embed` last week and plain `index` today still has their vectors,
- * and this run did not refresh them. Printing `—  skipped` over an index
- * holding 1,294 vectors would be false, and printing the count with no
- * qualifier would be worse — it would claim the vectors cover what was just
- * parsed. So the count is shown *and* labelled stale.
+ * It used to be rendered from the {@link IndexReport}, which knew only what
+ * *this pass* had embedded, while `doctor` rendered a `COUNT(*)` guarded by a
+ * native extension. The two printed different things about the same index in
+ * the same session, which is the disagreement audit F2 caught. There is now one
+ * function that answers and one that renders; `tests/vectors-lazy.test.ts` pins
+ * that they agree.
  */
-function embeddingRow(
-  report: IndexReport,
+function vectorsRow(
+  vec: VecStatus | undefined,
   t: ReturnType<typeof themeFrom>,
+  noteWidth: number,
   explicitlyOff: boolean,
-) {
-  const e = report.embeddings;
-  const total = e.embedded + e.upToDate;
-  if (!e.enabled) {
-    if (e.upToDate > 0) {
-      return {
-        label: 'vectors',
-        value: fmt.num(e.upToDate),
-        note: `not refreshed this run ${t.mid} potsherd index --embed`,
-        tone: 'dim' as const,
-      };
-    }
+): Row {
+  if (!vec?.report) {
+    return { label: 'vectors', value: t.dash, note: 'no index yet', tone: 'dim' };
+  }
+  if (explicitlyOff && vec.report.pending > 0) {
     return {
       label: 'vectors',
-      value: t.dash,
-      note: explicitlyOff
-        ? `skipped (--no-embed) ${t.mid} text search only`
-        : `text search only ${t.mid} no model, no network`,
-      tone: 'dim' as const,
+      value: vec.report.embedded > 0 ? fmt.num(vec.report.embedded) : t.dash,
+      note: `not this run (--no-embed) ${t.mid} text search only`,
+      tone: 'dim',
     };
   }
-  if (!e.available) {
-    return {
-      label: 'vectors',
-      value: t.dash,
-      note: fmt.clip(`no vector index: ${e.reason ?? 'unavailable'}`, Math.max(20, t.width - 40), t),
-      tone: 'dim' as const,
-    };
-  }
+  const row = vec.row;
+  if (!row) return { label: 'vectors', value: t.dash, note: 'no index yet', tone: 'dim' };
   return {
     label: 'vectors',
-    value: fmt.num(total),
-    note:
-      `${fmt.num(e.embedded)} new ${t.mid} bge-small` +
-      `${report.vec.version ? ` ${t.mid} sqlite-vec ${report.vec.version}` : ''}`,
-    tone: 'ok' as const,
+    value: row.value === '—' ? t.dash : row.value,
+    note: row.note(noteWidth, ` ${t.mid} `),
+    tone: row.tone,
   };
 }
 
@@ -414,4 +543,8 @@ function maskedThisRunRow(
     note: fmt.joinFit(parts, noteWidth, ` ${t.mid} `, t),
     tone: 'ok',
   };
+}
+
+function firstLine(s: string): string {
+  return (s.split('\n')[0] ?? s).trim();
 }

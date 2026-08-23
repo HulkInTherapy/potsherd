@@ -15,6 +15,7 @@ import {
   type EmbeddingBackend,
 } from './embeddings.js';
 import { fitNote, vectorNote, vectorReport, warmingLine, type VectorReport } from './doctor-line.js';
+import { bytes as fmtBytes, num as fmtNum } from './format.js';
 
 /**
  * Vector storage and vector search, without a native extension.
@@ -104,8 +105,34 @@ export interface VecStatus {
   path?: string;
   /** One line, for `doctor`, when it is not available. */
   reason?: string;
-  /** Populated when {@link vecStatus} is given a potsherd root. */
+
+  // Everything below is populated only when {@link vecStatus} is given a
+  // potsherd root, which is the call `index`, `doctor` and `find` all make.
+  // They are carried on the status object rather than exported separately so
+  // that there is one import, one call, and no way for two verbs to render
+  // the same fact from two different places — which is the whole of audit F2's
+  // second half.
+
+  /** The numbers: embedded, pending, total, and what phase that adds up to. */
   report?: VectorReport;
+  /** The `vectors` row, already worded, with a note that fits a given width. */
+  row?: VectorRow;
+  /** The one status sentence for a verb to print, or null when there is none. */
+  line?: string | null;
+  /**
+   * Advance the index: embed what is pending, newest first, on this
+   * connection. Bound here so a caller that has the status has the pass, and
+   * cannot end up embedding into a different database than it just counted.
+   */
+  embed?: (options?: EmbedPendingOptions) => Promise<EmbedPendingResult>;
+}
+
+export interface VectorRow {
+  value: string;
+  parts: string[];
+  tone: 'ok' | 'warn' | 'dim';
+  /** The parts joined to `width`, dropping whole clauses rather than cutting. */
+  note(width: number, sep?: string): string;
 }
 
 const require_ = createRequire(import.meta.url);
@@ -230,16 +257,43 @@ export function vecStatus(db: Db, root?: string): VecStatus {
     : counts.pending > 0 && !isEmbeddingReady(cacheDir) && offline()
       ? 'offline — the embedding runtime has not been fetched yet'
       : undefined;
+  const report = vectorReport({
+    embedded: counts.embedded,
+    pending: counts.pending,
+    cacheDir,
+    ...(backend ? { backend } : {}),
+    ...(reason ? { reason } : {}),
+  });
+  const worded = vectorNote(report, { num: fmtNum, bytes: fmtBytes });
   return {
     ...base,
-    report: vectorReport({
-      embedded: counts.embedded,
-      pending: counts.pending,
-      cacheDir,
-      ...(backend ? { backend } : {}),
-      ...(reason ? { reason } : {}),
-    }),
+    report,
+    row: {
+      ...worded,
+      note: (width: number, sep = ' · ') => fitNote(worded.parts, width, sep),
+    },
+    line: statusLine(report),
+    embed: (options: EmbedPendingOptions = {}) =>
+      embedPending(db, { cacheDir, ...options }),
   };
+}
+
+/**
+ * The one sentence a verb prints while semantic search is not yet whole.
+ *
+ * `05`'s honesty contract and the audit's item 9 — *tell me what you can't do,
+ * at the top* — with the audit's own wording for the shape: a **status, not a
+ * degradation apology**. There is no command in it because there is nothing
+ * for the reader to do; the work is already running. `null` when everything is
+ * embedded, and `null` on an empty index, because a verb that has nothing to
+ * report should print nothing.
+ */
+function statusLine(r: VectorReport): string | null {
+  if (r.phase === 'ready' || r.phase === 'empty') return null;
+  if (r.phase === 'unavailable') {
+    return `semantic search: ${r.reason ?? 'not running on this machine'}`;
+  }
+  return warmingLine(r, fmtNum);
 }
 
 export function vecAvailable(db: Db): boolean {
@@ -446,18 +500,6 @@ export function vectorCounts(db: Db): { embedded: number; pending: number } {
     }
   }
   return { embedded, pending };
-}
-
-/** The one status line, rendered from the one report. */
-export function vectorStatusLine(
-  status: VecStatus,
-  num: (n: number) => string = String,
-): string | null {
-  const r = status.report;
-  if (!r) return null;
-  if (r.phase === 'ready' || r.phase === 'empty') return null;
-  if (r.phase === 'unavailable') return `semantic search: ${r.reason ?? 'not running here'}`;
-  return warmingLine(r, num);
 }
 
 export { fitNote, vectorNote, vectorReport, warmingLine };
