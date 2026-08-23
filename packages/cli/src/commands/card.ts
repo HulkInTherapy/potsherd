@@ -388,21 +388,44 @@ function runJson(
     usd: Number(report.usd.toFixed(4)),
     seconds: Math.round(report.ms / 1000),
     concurrency,
-    backend: choice ? { name: choice.backend, model: choice.model, chargeable: choice.chargeable } : null,
+    backend: choice
+      ? {
+          name: choice.backend,
+          model: choice.model,
+          rung: choice.rung,
+          rungId: choice.rungId,
+          chargeable: choice.chargeable,
+        }
+      : null,
     aborted: report.aborted ?? null,
     errors: report.errors,
     cards: report.cards,
   };
 }
 
+/**
+ * The one line on the quote and on the receipt that says how this machine
+ * reaches a model — **and which rung of `llm.ts`'s ladder that is.**
+ *
+ * `card` is the verb the audit found dead on a clean install, and the reason
+ * was never that the machine could not reach a model: it was that potsherd
+ * only knew one way to. So the note now names the rung rather than only the
+ * transport, because "rung 2 — the claude binary, spawned" tells a user what
+ * changed and "agent-sdk" tells them nothing they can act on.
+ *
+ * When there is no backend at all, the note is {@link NoBackendError}'s own
+ * `fix` — one line, from one place, so `card`, `ask` and `graft` cannot end up
+ * telling three different stories about the same machine. On a host-agent
+ * machine that line is the seam, not an install.
+ */
 function backendNote(choice: BackendChoice | null, missing: NoBackendError | null): string {
   if (choice) {
+    const rung = `rung ${choice.rung}`;
     return choice.chargeable
-      ? `${choice.backend} — metered, ANTHROPIC_API_KEY`
-      : `${choice.backend} — your own subscription, $0`;
+      ? `${choice.backend} — ${rung}, metered, ANTHROPIC_API_KEY`
+      : `${choice.backend} — ${rung}, your own subscription, $0`;
   }
-  void missing;
-  return 'no backend — install Claude Code or set ANTHROPIC_API_KEY';
+  return missing ? `no backend — ${missing.fix}` : 'no backend';
 }
 
 function cardJson(
@@ -414,9 +437,19 @@ function cardJson(
   return {
     dryRun: Boolean(o.dryRun),
     backend: choice
-      ? { name: choice.backend, model: choice.model, why: choice.why, chargeable: choice.chargeable }
+      ? {
+          name: choice.backend,
+          model: choice.model,
+          why: choice.why,
+          // A1's ladder, as data. An agent reading `--json` should not have to
+          // parse `why` to learn that the host seam was available and the
+          // 677 MB package was not needed.
+          rung: choice.rung,
+          rungId: choice.rungId,
+          chargeable: choice.chargeable,
+        }
       : null,
-    missing: missing ? { message: missing.message, fix: missing.fix } : null,
+    missing: missing ? { message: missing.message, fix: missing.fix, rung: missing.rung } : null,
     targets: plan.targets.length,
     sessions: plan.sessions,
     ghosts: plan.ghosts,

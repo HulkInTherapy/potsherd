@@ -65,6 +65,10 @@ export interface AskCommandOptions extends GlobalOptions, FilterFlags {
   readersOut?: string;
   /** T5.6: replay reader outputs from this path instead of running readers. */
   readersIn?: string;
+  /** T10.2: write the synthesis prompt to this path and stop. No model call. */
+  synthesisOut?: string;
+  /** T10.2: filter a host-written answer from this path. No model call. */
+  filterIn?: string;
   /** 8.7: k 3, a haiku-class synthesizer, and cards-first excerpts. */
   cheap?: boolean;
 }
@@ -146,22 +150,50 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
 
   const readersOut = flagPath(o.readersOut);
   const readersIn = flagPath(o.readersIn);
+  const synthesisOut = flagPath(o.synthesisOut);
+  const filterIn = flagPath(o.filterIn);
   if (readersOut && readersIn) {
     throw new UserError(
       '--readers-out and --readers-in are the two halves of one round trip, not two flags for one run',
       'potsherd ask "…" --readers-out r.json   # then run your readers, then --readers-in r.json',
     );
   }
+  if (synthesisOut && filterIn) {
+    throw new UserError(
+      '--synthesis-out and --filter-in are the two halves of one round trip, not two flags for one run',
+      'potsherd ask "…" --readers-in r.json --synthesis-out s.json   # then answer it, then --filter-in s.json',
+    );
+  }
+  if (filterIn && (readersOut || readersIn)) {
+    throw new UserError(
+      '--filter-in carries its own reader outputs — it does not take a reader file as well',
+      'potsherd ask "…" --filter-in s.json',
+    );
+  }
+  if (readersOut && synthesisOut) {
+    throw new UserError(
+      '--readers-out stops before the readers have run, so there is no synthesis prompt to write yet',
+      'potsherd ask "…" --readers-out r.json   # run your readers, then --readers-in r.json --synthesis-out s.json',
+    );
+  }
 
-  // A verb that is about to spend money says so before it spends it, and says
-  // what would fix it when it cannot. `card --dry-run` is allowed to work with
-  // no backend because it makes no call; `ask` always makes one —
-  // **except under `--readers-out`**, which cannot make one (see
-  // {@link recorder}). Demanding a backend for a run that structurally makes no
-  // call would be this file telling the user something untrue about it, and it
-  // would put a `claude` binary between a skill and the one path that does not
-  // need a model at all.
-  if (!readersOut) {
+  // The runs that **structurally cannot** call a model, and the exact reason
+  // each one cannot, since this list is the whole of `A1` rung 1 from the
+  // CLI's side:
+  //
+  //   --readers-out           the recorder answers every reader itself, so
+  //                           `ask()` returns before the synthesizer exists.
+  //   --readers-in + --out    the readers are recorded and the synthesizer is
+  //                           a capture function; `ask()` opens neither.
+  //   --filter-in             both halves are recorded; the only work left is
+  //                           `filterAnswer`, which is arithmetic.
+  //
+  // A verb that is about to spend money says so before it spends it. Demanding
+  // a backend for a run that cannot use one would be this file telling the
+  // user something untrue about it — and it would put a `claude` binary
+  // between a skill and the one path that needs no model at all.
+  const modelless = Boolean(readersOut || filterIn || (synthesisOut && readersIn));
+  if (!modelless) {
     try {
       detectBackend({ ...(o.model ? { model: o.model } : {}) });
     } catch (err) {
@@ -208,9 +240,15 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
       return await recordReaders(db, question, base, readersOut, o, t);
     }
 
-    const result = readersIn
-      ? await replayReaders(db, question, base, readersIn)
-      : await ask(db, question, { ...base, onProgress });
+    if (synthesisOut) {
+      return await recordSynthesis(db, question, base, synthesisOut, readersIn, o, t, onProgress);
+    }
+
+    const result = filterIn
+      ? await filterHostAnswer(db, question, base, filterIn)
+      : readersIn
+        ? await replayReaders(db, question, base, readersIn)
+        : await ask(db, question, { ...base, onProgress });
 
     if (o.debug) reportDrops(drops);
 
@@ -483,6 +521,30 @@ export async function replayReaders(
   base: AskOptions,
   path: string,
 ): Promise<AskResult> {
+  const staged = await stageReaders(db, question, base, path);
+  // ---- pass two: the real run, with the recorded readers in place of the SDK.
+  return ask(db, question, { ...base, readerFn: staged.readerFn });
+}
+
+/**
+ * Everything `--readers-in` does *except* the answering run: validate the
+ * file, prove it against the live shortlist at zero model calls, and hand
+ * back the reader function it implies.
+ *
+ * Split out because T10.2 gave the same file a second consumer.
+ * `--readers-in --synthesis-out` needs the recorded readers in order to build
+ * the synthesis prompt, and it must reject a stale file for exactly the
+ * reasons {@link matchOrFail} gives — but it must not then run a synthesizer.
+ * Two copies of this validation would be two chances for one of them to get
+ * quietly weaker, on the path whose whole purpose is that the guarantee is
+ * kept by code.
+ */
+async function stageReaders(
+  db: Parameters<typeof ask>[0],
+  question: string,
+  base: AskOptions,
+  path: string,
+): Promise<{ readerFn: AskReaderFn; outputs: RecordedOutput[]; live: string[]; abs: string }> {
   const abs = nodePath.resolve(path);
   const file = readReadersFile(abs);
   const q = redactOutgoing(question).text;
@@ -532,7 +594,410 @@ export async function replayReaders(
     if (!out) throw new Error(`no recorded output for ${input.sessionId}`);
     return out;
   };
-  return ask(db, question, { ...base, readerFn });
+  return { readerFn, outputs, live, abs };
+}
+
+// ======================================================== the synthesis file
+//
+// T10.2, audit fix 2. `--readers-out` / `--readers-in` moved six of `ask`'s
+// seven model calls onto the host agent and left the seventh — the
+// synthesizer — where it was. So the free path was free for six sevenths of
+// its work and then demanded 677 MB of npm to finish. These two flags remove
+// that last call, and with it the last reason potsherd needs model access of
+// its own:
+//
+//   potsherd ask "q" --readers-out r.json                  0 calls
+//   …the host answers each entry in r.json's "targets"…
+//   potsherd ask "q" --readers-in r.json --synthesis-out s.json     0 calls
+//   …the host answers s.json's "prompt"…
+//   potsherd ask "q" --filter-in s.json                    0 calls, cited answer
+//
+// **What is not delegated is the guarantee.** The host's reply is run through
+// `validateSynth` and then `filterAnswer`, in `packages/core/src/ask.ts`,
+// against the transcript bytes on disk at the `(sessionId, seq)` each quote
+// names. A fabricated quote from a host agent is deleted by exactly the code
+// that deletes a fabricated quote from a backend, and the sentence that leaned
+// on it goes with it. `tests/synthesis-seam.test.ts` plants one and proves the
+// two paths drop it identically.
+
+/** The envelope's discriminator. A file without it is not one of ours. */
+export const SYNTHESIS_FILE_KIND = 'potsherd.ask.synthesis';
+
+/** The envelope's own version. See {@link READERS_FILE_VERSION}. */
+export const SYNTHESIS_FILE_VERSION = 1;
+
+/** The `AskSynthInput` `ask()` hands a host synthesizer, without importing the name. */
+type SynthInput = Parameters<NonNullable<AskOptions['synthFn']>>[0];
+
+/**
+ * What `--synthesis-out` writes and `--filter-in` reads.
+ *
+ * One file for both directions, and it carries the **reader outputs** as well
+ * as the prompt. That is the difference between a three-file round trip and a
+ * two-file one, and it matters for a reason beyond tidiness: `--filter-in`
+ * runs the whole of `ask()` — shortlist, readers, synthesizer, filter — with
+ * the readers and the synthesizer both supplied from this file. If the reader
+ * outputs lived somewhere else, the answer and the evidence it is checked
+ * against could come from two files recorded at two different times.
+ */
+export interface SynthesisFile {
+  kind: string;
+  version: number;
+  /** The binary that wrote it. Informational; not checked. */
+  potsherd: string;
+  /** Redacted exactly as `llm.ts` would redact it on the way to a model. */
+  question: string;
+  k: number;
+  /** The shortlist, in shortlist order. The replay checks this set. */
+  sessionIds: string[];
+  /** The synthesizer's system prompt, verbatim. */
+  system: string;
+  /** The reply shape the host must produce. */
+  schema: string;
+  /** The user prompt, verbatim — the quotes the answer is built from. */
+  prompt: string;
+  /** The citable set: which seqs each session's quotes may name. */
+  sessions: SynthInput['sessions'];
+  /** The reader outputs this prompt was built from. */
+  readers: RecordedOutput[];
+  /** Added by whoever answered `prompt`. Absent in a fresh recording. */
+  reply?: unknown;
+}
+
+/**
+ * The `--synthesis-out` synthesizer: captures, returns nothing, and by doing
+ * so makes the run structurally incapable of calling a model.
+ *
+ * The same trick as {@link recorder} and for the same reason. `ask()` opens a
+ * synthesizer `Llm` only when no `synthFn` was supplied, so passing one means
+ * no synthesizer backend is constructed at all; returning an empty reply means
+ * `filterAnswer` has nothing to keep and the run ends with an empty answer,
+ * which is the honest description of a recording pass.
+ */
+function synthCapture(): {
+  fn: NonNullable<AskOptions['synthFn']>;
+  seen: { input: SynthInput | null };
+} {
+  const seen: { input: SynthInput | null } = { input: null };
+  const fn: NonNullable<AskOptions['synthFn']> = async (input) => {
+    seen.input = input;
+    return { evidence: [], answer: [] };
+  };
+  return { fn, seen };
+}
+
+/**
+ * The whole of `--synthesis-out`, without the printing, so a test can drive it.
+ *
+ * `readersPath` is the `--readers-in` file when there is one. With it, the run
+ * costs zero model calls end to end. Without it the readers run on whatever
+ * rung of the ladder this machine reached — which is a legitimate thing to
+ * want (a bare terminal recording a prompt for a colleague's agent) and is why
+ * it is allowed rather than refused. `probe.spend.calls` is the number the
+ * receipt prints either way, so the difference is never hidden.
+ */
+export async function writeSynthesisFile(
+  db: Parameters<typeof ask>[0],
+  question: string,
+  base: AskOptions,
+  path: string,
+  readersPath: string,
+  onProgress?: (p: AskProgress) => void,
+): Promise<{ file: SynthesisFile | null; abs: string; probe: AskResult }> {
+  const staged = readersPath ? await stageReaders(db, question, base, readersPath) : null;
+  const cap = synthCapture();
+  const probe = await ask(db, question, {
+    ...base,
+    ...(staged ? { readerFn: staged.readerFn } : {}),
+    ...(onProgress && !staged ? { onProgress } : {}),
+    synthFn: cap.fn,
+    openThreads: false,
+  });
+
+  const abs = nodePath.resolve(path);
+  // No reader found anything, so there is nothing to synthesize and no file
+  // worth writing. `ask()` reports that itself; writing an empty prompt here
+  // would hand the host agent a question with no evidence under it, which is
+  // the one shape that produces a confident answer from nothing.
+  if (!cap.seen.input) return { file: null, abs, probe };
+
+  const input = cap.seen.input;
+  const q = redactOutgoing(question).text;
+  const file: SynthesisFile = {
+    kind: SYNTHESIS_FILE_KIND,
+    version: SYNTHESIS_FILE_VERSION,
+    potsherd: VERSION,
+    question: q,
+    k: base.k ?? ASK_K,
+    sessionIds: input.sessions.map((s) => s.sessionId),
+    system: input.system,
+    schema: input.schema,
+    // Redacted on the way out for the reason `writeReadersFile` gives: `llm.ts`
+    // masks every outgoing string immediately before a transport sees it, so a
+    // file a user names must not be able to hold a byte a model would not have
+    // been sent. It is a no-op today and the test asserts that it is.
+    prompt: redactOutgoing(input.prompt).text,
+    sessions: input.sessions,
+    readers: staged ? staged.outputs : [],
+  };
+  fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
+  return { file, abs, probe };
+}
+
+async function recordSynthesis(
+  db: Parameters<typeof ask>[0],
+  question: string,
+  base: AskOptions,
+  path: string,
+  readersPath: string,
+  o: AskCommandOptions,
+  t: ReturnType<typeof themeFrom>,
+  onProgress: (p: AskProgress) => void,
+): Promise<number> {
+  const { file, abs, probe } = await writeSynthesisFile(
+    db,
+    question,
+    base,
+    path,
+    readersPath,
+    onProgress,
+  );
+
+  if (o.json) {
+    printJson({
+      kind: SYNTHESIS_FILE_KIND,
+      version: SYNTHESIS_FILE_VERSION,
+      path: abs,
+      question: file?.question ?? redactOutgoing(question).text,
+      k: file?.k ?? base.k ?? ASK_K,
+      sessionIds: file?.sessionIds ?? [],
+      sessions: file?.sessions ?? [],
+      promptChars: file?.prompt.length ?? 0,
+      matching: probe.matching,
+      searched: probe.searched,
+      modelCalls: probe.spend.calls,
+    });
+  } else {
+    print(synthesisOutReceipt(file, abs, probe, t));
+  }
+  return file ? 0 : 1;
+}
+
+function synthesisOutReceipt(
+  file: SynthesisFile | null,
+  abs: string,
+  probe: AskResult,
+  t: ReturnType<typeof themeFrom>,
+): string {
+  const lines: string[] = [];
+  if (!file) {
+    lines.push(`  no reader found anything — no synthesis prompt written to ${abs}`);
+    return lines.join('\n');
+  }
+  const n = file.sessions.length;
+  lines.push(`  ${t.accent('1 synthesis prompt')} → ${abs}`);
+  lines.push(
+    `  built from ${n} session${n === 1 ? '' : 's'} of ${probe.searched} read ${t.sep} ` +
+      `${file.prompt.length.toLocaleString('en-US')} chars`,
+  );
+  lines.push('');
+  for (const s of file.sessions) {
+    lines.push(
+      `    ${s.id8}  ${s.project}${s.isGhost ? t.dim('  ghost') : ''}` +
+        `${s.isSidechain ? t.dim('  subagent') : ''}  ${t.dim(`seq ${s.seqs.join(', ')}`)}`,
+    );
+  }
+  lines.push('');
+  lines.push(
+    `  ${t.dim(`no model call was made (${probe.spend.calls}). the prompt is redacted, as sent.`)}`,
+  );
+  lines.push('');
+  lines.push('  answer "prompt" in the shape of "schema", add it to the file as "reply", then:');
+  lines.push(`    potsherd ask "${file.question}" --filter-in ${abs}`);
+  return lines.join('\n');
+}
+
+/**
+ * `--filter-in`: the host answered, and now **code** decides what it may say.
+ *
+ * This is the step the whole seam exists for, so it is worth being exact about
+ * what is and is not trusted here.
+ *
+ * *Not trusted:* the answer, every quote in it, every seq it names, and the
+ * file's own claim about which sessions it covers. The reply is validated into
+ * shape by `validateSynth` and then checked, quote by quote, against the
+ * transcript bytes at the `(sessionId, seq)` it names — the **live** bytes, in
+ * the index, not the copy in the file. A quote that was paraphrased, trimmed
+ * in the middle, or attributed to the wrong exchange is deleted, and a
+ * sentence whose evidence was all deleted is deleted with it. That is
+ * `filterAnswer`, unchanged, on the same code path a backend's reply takes.
+ *
+ * *Trusted:* nothing else needs to be. The shortlist is rebuilt live and
+ * checked against the file's, at zero model calls, for the reasons
+ * {@link matchOrFail} sets out — a file that no longer covers what this
+ * question shortlists would print the live counts over stale evidence.
+ *
+ * Open threads are off. That section is advisory and makes its own model call;
+ * running it here would turn a zero-call path into a one-call path for a
+ * section nobody asked for.
+ */
+export async function filterHostAnswer(
+  db: Parameters<typeof ask>[0],
+  question: string,
+  base: AskOptions,
+  path: string,
+): Promise<AskResult> {
+  const abs = nodePath.resolve(path);
+  const file = readSynthesisFile(abs);
+  const q = redactOutgoing(question).text;
+
+  if (file.question !== q) {
+    throw new UserError(
+      `${abs} was recorded against a different question — replaying it would answer ` +
+        `"${file.question}" and print it under "${q}"`,
+      `potsherd ask "${file.question}" --filter-in ${abs}`,
+    );
+  }
+  const k = base.k ?? ASK_K;
+  if (file.k !== k) {
+    throw new UserError(
+      `${abs} was recorded with --k ${file.k} and this run asked for --k ${k}, ` +
+        'which is a different shortlist',
+      `potsherd ask "${q}" --k ${file.k} --filter-in ${abs}`,
+    );
+  }
+  if (file.reply === undefined || file.reply === null) {
+    throw new UserError(
+      `${abs} has no "reply" — it is a --synthesis-out recording that nobody has answered yet`,
+      'answer its "prompt" in the shape of its "schema", then add the object as "reply"',
+    );
+  }
+
+  // ---- pass one: the live shortlist, at zero model calls.
+  const rec = recorder();
+  await ask(db, question, { ...base, concurrency: 1, openThreads: false, readerFn: rec.fn });
+  const live = rec.seen.map((x) => x.sessionId);
+  matchOrFail(abs, q, 'recorded shortlist', file.sessionIds, live);
+
+  // The readers are a *subset*: only sessions that found something reach the
+  // synthesizer, and the rest legitimately contributed nothing. So this one is
+  // checked the other way round — every recorded reader must still be
+  // shortlisted, and a shortlisted session with no recorded reader is the
+  // ordinary `found: false`.
+  const known = new Set(live);
+  const orphans = file.readers.map((r) => r.sessionId).filter((id) => !known.has(id));
+  if (orphans.length > 0) {
+    throw new UserError(
+      `${abs}'s "readers" name ${orphans.length} session${orphans.length === 1 ? '' : 's'} ` +
+        `this question no longer shortlists (${id8s(orphans)}), so its answer rests on evidence ` +
+        'that is no longer in scope',
+      `potsherd ask "${q}" --readers-out r.json    # re-record, then run the round trip again`,
+    );
+  }
+
+  const byId = new Map<string, AskReaderOutput>();
+  for (const out of file.readers) byId.set(out.sessionId, out);
+  const readerFn: AskReaderFn = async (input) =>
+    byId.get(input.sessionId) ?? { found: false, quotes: [], answer_fragment: '' };
+
+  // ---- pass two: the real run. Both halves recorded, so `ask()` contains no
+  // expression that can construct a backend, and `filterAnswer` does the work.
+  return ask(db, question, {
+    ...base,
+    readerFn,
+    synthFn: async () => file.reply,
+    openThreads: false,
+  });
+}
+
+/**
+ * Read and validate the envelope, to the same standard {@link readReadersFile}
+ * holds — with one deliberate hole. `reply` is **not** shape-checked here.
+ *
+ * It is checked by `validateSynth` in `packages/core/src/ask.ts`, which is the
+ * same function that checks a backend's reply, and a second validator in this
+ * file could only ever be a weaker or a stricter copy of it. Weaker would let
+ * something through on the seam path that the binary path rejects; stricter
+ * would refuse a host answer that a model is allowed to give. Both are the
+ * same bug — the two paths disagreeing — so there is one validator and it
+ * lives beside the filter it feeds.
+ */
+function readSynthesisFile(abs: string): SynthesisFile {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(abs, 'utf8');
+  } catch {
+    throw new UserError(`cannot read ${abs}`, `potsherd ask "…" --readers-in r.json --synthesis-out ${abs}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new UserError(
+      `${abs} is not JSON — ${err instanceof Error ? err.message : String(err)}`,
+      `potsherd ask "…" --readers-in r.json --synthesis-out ${abs}`,
+    );
+  }
+  if (!isRecord(parsed)) {
+    throw new UserError(`${abs} is not a synthesis file — expected a JSON object`, `potsherd ask "…" --readers-in r.json --synthesis-out ${abs}`);
+  }
+  if (parsed['kind'] !== SYNTHESIS_FILE_KIND) {
+    throw new UserError(
+      `${abs} is not a synthesis file — "kind" is ${JSON.stringify(parsed['kind'] ?? null)}, ` +
+        `expected "${SYNTHESIS_FILE_KIND}"`,
+      parsed['kind'] === READERS_FILE_KIND
+        ? `potsherd ask "…" --readers-in ${abs} --synthesis-out s.json    # that is the reader file`
+        : `potsherd ask "…" --readers-in r.json --synthesis-out ${abs}`,
+    );
+  }
+  const v = parsed['version'];
+  if (v !== SYNTHESIS_FILE_VERSION) {
+    throw new UserError(
+      typeof v === 'number'
+        ? `${abs} is a v${String(v)} synthesis file and this potsherd (${VERSION}) reads v${String(SYNTHESIS_FILE_VERSION)}`
+        : `${abs} has no "version" — this potsherd (${VERSION}) reads v${String(SYNTHESIS_FILE_VERSION)} synthesis files`,
+      `potsherd ask "…" --readers-in r.json --synthesis-out ${abs}    # re-record with this build`,
+    );
+  }
+  const question = parsed['question'];
+  if (typeof question !== 'string' || question.trim() === '') {
+    throw new UserError(
+      `${abs} has no "question" — a synthesis file that cannot say what it was recorded for is not replayable`,
+      `potsherd ask "…" --readers-in r.json --synthesis-out ${abs}`,
+    );
+  }
+  const k = parsed['k'];
+  if (typeof k !== 'number' || !Number.isFinite(k) || k < 1) {
+    throw new UserError(`${abs} has no usable "k"`, `potsherd ask "…" --readers-in r.json --synthesis-out ${abs}`);
+  }
+  const sessionIds = parsed['sessionIds'];
+  if (!Array.isArray(sessionIds) || sessionIds.some((x) => typeof x !== 'string' || x === '')) {
+    throw new UserError(`${abs} has no usable "sessionIds"`, `potsherd ask "…" --readers-in r.json --synthesis-out ${abs}`);
+  }
+  const rawReaders = parsed['readers'];
+  if (!Array.isArray(rawReaders)) {
+    throw new UserError(
+      `${abs} has no "readers" array — the answer would be filtered against nothing`,
+      `potsherd ask "…" --readers-in r.json --synthesis-out ${abs}`,
+    );
+  }
+  const readers = rawReaders.map((entry, i) => readerOutput(abs, entry, i));
+
+  return {
+    kind: SYNTHESIS_FILE_KIND,
+    version: SYNTHESIS_FILE_VERSION,
+    potsherd: typeof parsed['potsherd'] === 'string' ? parsed['potsherd'] : '',
+    question,
+    k,
+    sessionIds: sessionIds as string[],
+    system: typeof parsed['system'] === 'string' ? parsed['system'] : '',
+    schema: typeof parsed['schema'] === 'string' ? parsed['schema'] : '',
+    prompt: typeof parsed['prompt'] === 'string' ? parsed['prompt'] : '',
+    sessions: Array.isArray(parsed['sessions']) ? (parsed['sessions'] as SynthesisFile['sessions']) : [],
+    readers,
+    ...(parsed['reply'] !== undefined ? { reply: parsed['reply'] } : {}),
+  };
 }
 
 /**
