@@ -8,6 +8,7 @@ import { VERSION, allTags, db as dbNs, format as fmt, indexAll, paths } from '@p
 
 import { makeContext } from './context.js';
 import { TOOLS, WRITE_TOOLS } from './server.js';
+import { verifySources } from './tools/sources.js';
 import {
   call as callBare,
   callRaw as callRawBare,
@@ -18,7 +19,7 @@ import {
 } from './testing.js';
 
 /**
- * `node packages/mcp/dist/index.js --selftest` — six tools, proved, offline.
+ * `node packages/mcp/dist/index.js --selftest` — three tools, proved, offline.
  *
  * What this is for: an MCP server fails **silently**. A client that cannot
  * start it, or that gets an exception on every call, shows the user a tool list
@@ -40,17 +41,23 @@ import {
  * directly would prove the wrapping and not the wiring, and the wiring is the
  * half that breaks.
  *
- * **It hides the model backend on purpose.** `potsherd_ask` and
- * `potsherd_graft` are run against an environment with no `claude`, no `codex`
- * and no key, because the acceptance criterion is that they *work, or fail
- * cleanly, with no backend available* — and because a selftest that spent two
- * minutes and twelve cents of somebody's budget every time it ran would be a
- * selftest nobody runs. `ask` must come back as a usable tool error in
- * milliseconds; `graft` must come back with a real brief on the card-only path.
+ * **It hides the model backend on purpose.** `potsherd_graft` is run against
+ * an environment with no `claude`, no `codex` and no key, because the
+ * acceptance criterion is that it *works, or fails cleanly, with no backend
+ * available* — and because a selftest that spent two minutes and twelve cents
+ * of somebody's budget every time it ran would be a selftest nobody runs.
+ * `graft` must come back with a real brief on the card-only path.
  *
- * **It checks answers, not exit codes.** `find` has to return the session the
- * eval set says is the answer, `read` has to page, `tag` has to leave the tag
- * behind. "It did not throw" is not evidence that a tool answers.
+ * **It checks answers, not exit codes.** `recall` has to return the session the
+ * eval set says is the answer, `read` has to page a thread, `graft` has to
+ * produce a cited brief. "It did not throw" is not evidence that a tool
+ * answers.
+ *
+ * **It proves the citation refusal (T10.6 · F3).** The audit's failing case —
+ * a `SOURCES` line whose id8 is a repository filename, and one whose id8 is a
+ * dash — is run through `verifySources` against the live index, because a
+ * refusal that only holds in a unit test is a refusal a shipped server does
+ * not have.
  *
  * **It watches which tools write, rather than believing the list.** Before
  * T5.9 this file asserted `readOnlyHint === !WRITE_TOOLS.includes(name)` in
@@ -137,10 +144,11 @@ export async function selftest(
     /**
      * Every tool observed to change something during this run.
      *
-     * Two surfaces, because potsherd writes to two: the user's project (where
-     * `potsherd_graft` puts its brief) and the index (where `potsherd_tag`
-     * puts labels). A tool that touches either is a writer, whatever it is
-     * annotated.
+     * Two surfaces, because potsherd used to write to two: the user's project
+     * (where `potsherd_graft` puts its brief) and the index (where the retired
+     * `potsherd_tag` put labels). Both are still watched — a tool that starts
+     * writing labels again is a tool this has to catch, not a tool nobody is
+     * looking at.
      */
     const witnessed = new Set<string>();
     const surfaces = (): string => {
@@ -197,8 +205,8 @@ export async function selftest(
       const listed = await client.listTools();
       const names = listed.tools.map((t) => t.name);
       check(
-        names.length === 6 && TOOLS.every((t, i) => names[i] === t),
-        `6 tools, in order: ${names.join(', ')}`,
+        names.length === TOOLS.length && TOOLS.every((t, i) => names[i] === t),
+        `${String(TOOLS.length)} tools, in order: ${names.join(', ')}`,
       );
       check(
         listed.tools.every((t) => (t.description ?? '').length > 200),
@@ -206,80 +214,78 @@ export async function selftest(
       );
       say('');
 
-      // ---------------------------------------------------------- find
-      const find = await call(client, 'potsherd_find', {
+      // -------------------------------------------------------- recall
+      const found = await call(client, 'potsherd_recall', {
         query: 'combining keyword and vector search into one ranked list',
-        limit: 3,
+        scope: { limit: 3 },
       });
-      const sessions = (find['sessions'] as { id: string }[]) ?? [];
+      const threads = (found['threads'] as { thread: string; citation: string }[]) ?? [];
       check(
-        sessions[0]?.id.startsWith('cbcfda7e') === true,
-        `potsherd_find  ranked ${sessions[0]?.id.slice(0, 8) ?? '(nothing)'} first of ${sessions.length}` +
-          ` · rrf k=${String(find['k'])} · ${String(find['ms'])}ms`,
+        threads[0]?.thread.startsWith('cbcfda7e') === true,
+        `potsherd_recall ranked ${threads[0]?.thread.slice(0, 8) ?? '(nothing)'} first of ${threads.length}` +
+          ` · rrf k=${String(found['k'])} · ${String(found['ms'])}ms`,
       );
       check(
-        Array.isArray(find['hits']) && find['weights'] !== undefined,
-        'potsherd_find  carries hits[], k, weights and relaxedLists as the contract pins them',
+        typeof found['confidence'] !== 'undefined' && typeof found['noMatch'] === 'boolean',
+        `potsherd_recall carries the cliff: confidence=${String(found['confidence'])}` +
+          ` calibrated=${String(found['calibrated'])} noMatch=${String(found['noMatch'])}`,
+      );
+      check(
+        typeof threads[0]?.citation === 'string' && threads[0].citation.includes(' \u00b7 '),
+        `potsherd_recall minted a citation rather than leaving one to be composed: ` +
+          `${threads[0]?.citation ?? '(none)'}`,
+      );
+      check(
+        typeof found['capability'] === 'string' && String(found['capability']).length > 0,
+        `potsherd_recall says what it could do: ${String(found['capability'])}`,
       );
 
-      const target = sessions[0]?.id ?? '';
+      // ------------------------------------------- recall · want: context
+      const context = await call(client, 'potsherd_recall', {
+        query: 'combining keyword and vector search into one ranked list',
+        want: 'context',
+        budget: 1_500,
+      });
+      const windows = (context['windows'] as { seq: number | null; ts: string | null; text: string }[]) ?? [];
+      check(
+        windows.length > 0 && windows.every((w) => typeof w.text === 'string' && w.text.length > 0),
+        `potsherd_recall want:context returned ${windows.length} windows, ` +
+          `${String(context['windowTokens'])} est. tokens of ${String(context['windowBudget'])}`,
+      );
+
+      const target = threads[0]?.thread ?? '';
 
       // ---------------------------------------------------------- read
       const page1 = await call(client, 'potsherd_read', {
-        session: target.slice(0, 8),
-        start_line: 1,
-        end_line: 2,
+        thread: target.slice(0, 8),
+        from: 1,
+        to: 2,
       });
-      const ex1 = (page1['exchanges'] as { seq: number }[]) ?? [];
+      const ex1 = (page1['exchanges'] as { seq: number; ts: string | null; position: number }[]) ?? [];
       check(
-        ex1.length === 2 && page1['total'] !== undefined,
-        `potsherd_read  page 1 gave exchanges ${ex1.map((e) => e.seq).join(', ')} of ${String(page1['total'])}`,
+        ex1.length === 2 && page1['total'] !== undefined && ex1.every((e) => typeof e.seq === 'number'),
+        `potsherd_read  page 1 gave exchanges ${ex1.map((e) => e.seq).join(', ')} of ${String(page1['total'])}` +
+          ` · thread via ${String((page1['thread'] as { via: string }).via)}`,
       );
       const page2 = await call(client, 'potsherd_read', {
-        session: target.slice(0, 8),
-        start_line: Number(page1['nextStartLine'] ?? 3),
-        end_line: Number(page1['nextStartLine'] ?? 3) + 1,
+        thread: target.slice(0, 8),
+        from: Number(page1['nextFrom'] ?? 3),
+        to: Number(page1['nextFrom'] ?? 3) + 1,
       });
       const ex2 = (page2['exchanges'] as { seq: number }[]) ?? [];
       check(
         ex2.length > 0 && ex2[0]!.seq > ex1[ex1.length - 1]!.seq,
         `potsherd_read  page 2 continued at seq ${ex2[0]?.seq}, no overlap`,
       );
-
-      // ---------------------------------------------------------- ls
-      const ls = await call(client, 'potsherd_ls', { limit: 5 });
+      const cites = (page1['citations'] as { citation: string }[]) ?? [];
       check(
-        Number(ls['total']) > 0 && Array.isArray(ls['sessions']),
-        `potsherd_ls    ${String(ls['shown'])} of ${String(ls['total'])} sessions, newest first`,
-      );
-
-      // ---------------------------------------------------------- tag
-      const tagged = await call(client, 'potsherd_tag', {
-        session: target.slice(0, 8),
-        add: ['selftest', 'Fusion'],
-      });
-      const tags = (tagged['tags'] as string[]) ?? [];
-      check(
-        tags.includes('selftest') && tags.includes('fusion'),
-        `potsherd_tag   wrote [${tags.join(', ')}] (and normalised "Fusion")`,
-      );
-      const byTag = await call(client, 'potsherd_ls', { tag: 'selftest' });
-      check(
-        Number(byTag['total']) === 1,
-        'potsherd_tag   the tag it wrote is the tag potsherd_ls finds',
-      );
-      const untagged = await call(client, 'potsherd_tag', {
-        session: target.slice(0, 8),
-        remove: ['selftest', 'fusion'],
-      });
-      check(
-        ((untagged['tags'] as string[]) ?? []).length === 0,
-        'potsherd_tag   removed them again, leaving the corpus as it found it',
+        cites.length > 0 && ex1.every((e) => typeof e.position === 'number'),
+        `potsherd_read  every row carries seq + ts + a minted citation: ${cites[0]?.citation ?? '(none)'}`,
       );
 
       // ---------------------------------------------------------- graft
       const grafted = await call(client, 'potsherd_graft', {
-        session: target.slice(0, 8),
+        thread: target.slice(0, 8),
         budget: 400,
       });
       const brief = String(grafted['brief'] ?? '');
@@ -293,19 +299,48 @@ export async function selftest(
         typeof graftPath === 'string' && fs.existsSync(graftPath),
         `potsherd_graft wrote ${graftPath ? path.relative(tmp, graftPath) : '(nothing)'} under the temp project, not the cwd`,
       );
-
-      // ---------------------------------------------------------- ask
-      const askAt = Date.now();
-      const askErr = await callRaw(client, 'potsherd_ask', {
-        question: 'how did we combine the two ranked lists?',
-        k: 2,
-      });
-      const askText = textOf(askErr);
       check(
-        askErr.isError === true && /claude|codex|ANTHROPIC_API_KEY/i.test(askText),
-        `potsherd_ask   no backend → tool error in ${Date.now() - askAt}ms, not after ~100s: ` +
-          askText.split('\n')[0]!,
+        grafted['sourcesChecked'] === true &&
+          ((grafted['refusedSources'] as unknown[]) ?? []).length === 0 &&
+          brief.includes('source:'),
+        `potsherd_graft ran the source check in code: ` +
+          `${((grafted['refusedSources'] as unknown[]) ?? []).length} refused, ` +
+          `${String((grafted['brief'] as string).split('\n').length)} brief lines kept`,
       );
+
+      // ------------------------------------ F3 · the refusal, on this index
+      //
+      // The audit's own failing case, rebuilt: two rows wearing the citation
+      // format whose id8 fields are a repository filename and a dash. Neither
+      // resolves; both are refused, and the quote hanging under each goes with
+      // it. The real row beside them survives, which is the half that proves
+      // the check is a check and not a switch.
+      say('');
+      {
+        const db = dbNs.open({ file: paths.dbPath(root), readonly: true });
+        try {
+          const block = [
+            'SOURCES',
+            `${target.slice(0, 8)} \u00b7 fixture \u00b7 claude \u00b7 12 exchanges \u00b7 2026-01-01`,
+            '  "a quote that is carried by a citation that resolves"',
+            'HANDOFF.md \u00a73 \u00b7 potsherd \u00b7 claude \u00b7 \u2014 exchanges \u00b7 \u2014',
+            '  "a claim the repository could support and the archive cannot"',
+            '\u2014 \u00b7 potsherd \u00b7 claude \u00b7 \u2014 exchanges \u00b7 2026-06-03',
+            '  "the project started on 3 June"',
+          ].join('\n');
+          const verdict = verifySources(db, block);
+          check(
+            verdict.refused.length === 2 && verdict.kept.length === 1,
+            `verifySources  refused ${verdict.refused.length} fabricated source lines, kept ${verdict.kept.length} real one`,
+          );
+          check(
+            !verdict.text.includes('HANDOFF.md') && !verdict.text.includes('3 June'),
+            'verifySources  the refused rows and the quotes under them are gone from the text',
+          );
+        } finally {
+          db.close();
+        }
+      }
 
       // ------------------------------------- who actually wrote anything
       //
@@ -335,12 +370,12 @@ export async function selftest(
       // ------------------------------------------- errors are tool errors
       say('');
       const bad = [
-        ['a malformed argument', 'potsherd_find', { query: 42 }],
-        ['a missing session', 'potsherd_read', { session: 'ffffffff' }],
-        ['an unreadable index', 'potsherd_ls', {}],
+        ['a malformed argument', 'potsherd_recall', { query: 42 }],
+        ['a missing thread', 'potsherd_read', { thread: 'ffffffff' }],
+        ['an unreadable index', 'potsherd_recall', { query: 'anything at all' }],
       ] as const;
       for (const [what, tool, args] of bad) {
-        const ctxBefore = tool === 'potsherd_ls' ? breakIndex(root) : null;
+        const ctxBefore = what === 'an unreadable index' ? breakIndex(root) : null;
         // Bare, not watched: `breakIndex` moves the index out from under the
         // call, so the surfaces differ for a reason that has nothing to do
         // with the tool. A negative test is not evidence about who writes.
@@ -353,8 +388,11 @@ export async function selftest(
       }
 
       // Still alive after all of that — the whole point of the block above.
-      const after = await callBare(client, 'potsherd_ls', { limit: 1 });
-      check(Number(after['total']) > 0, 'the server answered again after three failures');
+      const after = await callBare(client, 'potsherd_recall', { query: 'ranked list', scope: { limit: 1 } });
+      check(
+        Array.isArray(after['threads']),
+        'the server answered again after three failures',
+      );
     } finally {
       await close();
     }

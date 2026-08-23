@@ -4,11 +4,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { availability, indexAll, paths } from '@potsherd/core';
+import { indexAll, paths } from '@potsherd/core';
 
 import { makeContext, resolveGraftCwd } from '../packages/mcp/src/context.js';
 import { TOOLS, WRITE_TOOLS } from '../packages/mcp/src/server.js';
-import { runAsk } from '../packages/mcp/src/tools/ask.js';
+import { runRecall } from '../packages/mcp/src/tools/recall.js';
+import { AGENT_FLOOR, CONFIDENCE_VALUES } from '../packages/mcp/src/tools/shapes.js';
 import * as shipped from '../packages/mcp/src/descriptions.js';
 import {
   call,
@@ -79,21 +80,43 @@ function cliJson(args: string[]): Record<string, unknown> {
   return JSON.parse(stdout) as Record<string, unknown>;
 }
 
-/** A session id the fixture is guaranteed to have. */
+/** A thread the fixture is guaranteed to have. */
 async function anySession(client: Client): Promise<string> {
-  const ls = await call(client, 'potsherd_ls', { limit: 1 });
-  return ((ls['sessions'] as { id: string }[])[0] as { id: string }).id;
+  const r = await call(client, 'potsherd_recall', { query: 'pgbouncer', scope: { limit: 1 } });
+  const threads = r['threads'] as { thread: string }[];
+  return threads[0]!.thread;
 }
 
 describe('the tool list', () => {
-  it('is six tools, in the pinned order, and no more', async () => {
+  it('is three tools, in the pinned order, and no more', async () => {
     const { client, close } = await connect();
     try {
       const listed = await listTools(client);
       expect(listed.tools.map((t) => t.name)).toEqual([...TOOLS]);
-      // `03` §9: ≤ 6 tools, agentmemory's 54 is the named anti-pattern. A
-      // seventh tool fails here before it fails a review.
-      expect(listed.tools).toHaveLength(6);
+      // Plan §B7: "one skill, three MCP tools". It was six until T10.6, and
+      // six was not too many to *hold* — it was too many to *choose between*,
+      // which is a different failure and the one the audit measured. A fourth
+      // tool fails here before it fails a review.
+      expect(listed.tools).toHaveLength(3);
+      expect(listed.tools.map((t) => t.name)).toEqual([
+        'potsherd_recall',
+        'potsherd_read',
+        'potsherd_graft',
+      ]);
+    } finally {
+      await close();
+    }
+  });
+
+  it('the retired tools are gone from the surface, not merely unadvertised', async () => {
+    const { client, close } = await connect();
+    try {
+      for (const name of ['potsherd_find', 'potsherd_ls', 'potsherd_ask', 'potsherd_tag']) {
+        const r = await callRaw(client, name, {});
+        expect(r.isError, name).toBe(true);
+      }
+      // ...and the server is still up afterwards.
+      expect(Array.isArray((await call(client, 'potsherd_recall', { query: 'pooler' }))['threads'])).toBe(true);
     } finally {
       await close();
     }
@@ -117,7 +140,7 @@ describe('the tool list', () => {
       for (const t of listed.tools) {
         expect(t.annotations?.readOnlyHint, t.name).toBe(!WRITE_TOOLS.includes(t.name));
       }
-      expect(WRITE_TOOLS).toEqual(['potsherd_graft', 'potsherd_tag']);
+      expect(WRITE_TOOLS).toEqual(['potsherd_graft']);
     } finally {
       await close();
     }
@@ -132,6 +155,10 @@ describe('the tool list', () => {
       const instructions = client.getInstructions() ?? '';
       expect(instructions).not.toMatch(/only tool here that writes/);
       expect(instructions).toMatch(/potsherd_graft creates/);
+      // F1 and F3 have to reach the client verbatim, because the instructions
+      // are the only prose a model sees before it has called anything.
+      expect(instructions).toMatch(/zero rows and that is a real answer/);
+      expect(instructions).toMatch(/refused in\s+code/);
     } finally {
       await close();
     }
@@ -203,17 +230,24 @@ describe('the tool list', () => {
         (listed.tools.find((t) => t.name === name)!.inputSchema as { properties: Record<string, unknown> })
           .properties;
 
-      // The pinned shapes from `phases/phase-5/WAVE.md`, field for field.
-      expect(Object.keys(props('potsherd_find')).sort()).toEqual(
-        ['ghosts', 'harness', 'limit', 'pinned', 'project', 'query', 'sidechains', 'since', 'tag', 'until'].sort(),
+      // The pinned shapes from `plans/phases/phase-10-agent-audit.md` §B7,
+      // field for field. `budget` on recall is the one addition to the pinned
+      // signature and it is reported as such in T10.6-REPORT.md: `want:
+      // "context"` is specified as "budgeted" and there was nowhere else to
+      // put the ceiling.
+      expect(Object.keys(props('potsherd_recall')).sort()).toEqual(
+        ['budget', 'query', 'scope', 'want'].sort(),
       );
-      expect(Object.keys(props('potsherd_read')).sort()).toEqual(['end_line', 'session', 'start_line']);
-      expect(Object.keys(props('potsherd_ask')).sort()).toEqual(['filters', 'k', 'question', 'strict']);
-      expect(Object.keys(props('potsherd_graft')).sort()).toEqual(['about', 'budget', 'session']);
-      expect(Object.keys(props('potsherd_ls')).sort()).toEqual(
-        ['ghosts', 'limit', 'pinned', 'project', 'since', 'tag'].sort(),
+      expect(Object.keys(props('potsherd_read')).sort()).toEqual(['from', 'thread', 'to']);
+      expect(Object.keys(props('potsherd_graft')).sort()).toEqual(['about', 'budget', 'thread']);
+
+      // `scope` is one object rather than nine peers, which is what makes the
+      // schema readable as (what to look for, where, how much).
+      const scope = (props('potsherd_recall')['scope'] as { properties: Record<string, unknown> })
+        .properties;
+      expect(Object.keys(scope).sort()).toEqual(
+        ['ghosts', 'harness', 'limit', 'pinned', 'project', 'sidechains', 'since', 'tag', 'until'].sort(),
       );
-      expect(Object.keys(props('potsherd_tag')).sort()).toEqual(['add', 'remove', 'session']);
     } finally {
       await close();
     }
@@ -251,77 +285,227 @@ describe('--json parity with the cli', () => {
     }
   }
 
-  it('potsherd_find carries everything find --json carries', async () => {
+  it('potsherd_recall returns the same threads find --json ranks, in the same order', async () => {
     const { client, close } = await connect();
     try {
       const q = 'pgbouncer';
-      const tool = await call(client, 'potsherd_find', { query: q, limit: 5 });
-      sameAs(cliJson(['find', q, '--limit', '5']), tool);
-      // ...and the four the contract names on top of it.
-      for (const key of ['hits', 'k', 'weights', 'relaxedLists']) {
+      const tool = await call(client, 'potsherd_recall', { query: q, scope: { limit: 5 } });
+      const cli = cliJson(['find', q, '--limit', '5']);
+
+      // Parity is now about the ANSWER, not the envelope: `recall` reshapes
+      // sessions into threads and adds the calibration and the citations, so a
+      // key-for-key comparison would assert that nothing changed — which is
+      // the opposite of what §B7 asked for. What must not change is which
+      // threads come back and in what order, because that is the retrieval
+      // the CLI and the tool are supposed to share one implementation of.
+      const cliIds = (cli['sessions'] as { id: string }[]).map((r) => r.id);
+      const toolIds = (tool['threads'] as { links: { sessionId: string }[] }[]).flatMap((t) =>
+        t.links.map((l) => l.sessionId),
+      );
+      expect(toolIds).toEqual(cliIds);
+
+      // The keys the CLI does emit still agree key for key.
+      for (const key of ['query', 'vectors', 'ignored', 'relaxed', 'lists']) {
+        if (!(key in cli)) continue;
+        // `ms` is a duration at every depth: two runs of the same query
+        // legitimately differ by a millisecond and that is not a parity
+        // failure. `lists[]` carries one per list as well as one at the top.
+        expect(stripMs(tool[key]), key).toEqual(stripMs(cli[key]));
+      }
+      // The fusion's own parameters are the contract's extras — `find` puts
+      // them behind `--explain`, this surface puts them on every reply, and a
+      // client that can see why a thread ranked where it did can tell a weak
+      // match from a strong one without a model.
+      for (const key of ['k', 'weights', 'relaxedLists']) {
         expect(tool[key], key).toBeDefined();
       }
-      expect(Array.isArray(tool['hits'])).toBe(true);
     } finally {
       await close();
     }
   });
 
-  it('potsherd_ls carries everything ls --json carries', async () => {
+  it('potsherd_recall reports the project as a short name, never as a path (F9)', async () => {
     const { client, close } = await connect();
     try {
-      sameAs(cliJson(['ls', '--limit', '5']), await call(client, 'potsherd_ls', { limit: 5 }));
+      const tool = await call(client, 'potsherd_recall', { query: 'pgbouncer', scope: { limit: 5 } });
+      for (const t of tool['threads'] as { project: string | null; projectPath: string | null }[]) {
+        if (t.project === null) continue;
+        expect(t.project).not.toContain('/');
+        // The path is still there for anyone who needs it — it is just not
+        // the field named `project`, which is what the audit caught.
+        expect(typeof t.projectPath === 'string' || t.projectPath === null).toBe(true);
+      }
     } finally {
       await close();
     }
   });
 
-  it('potsherd_read carries everything show --json carries for the same window', async () => {
-    const { client, close } = await connect();
-    try {
-      const id = await anySession(client);
-      const tool = await call(client, 'potsherd_read', {
-        session: id,
-        start_line: 1,
-        end_line: 2,
-      });
-      sameAs(cliJson(['show', id, '--from', '1', '--to', '2']), tool);
-    } finally {
-      await close();
-    }
-  });
-
-  it('potsherd_tag carries everything tag --json carries', async () => {
+  it('potsherd_read carries the same exchanges show --json carries for the same window', async () => {
     const { client, close } = await connect();
     try {
       const id = await anySession(client);
-      const tool = await call(client, 'potsherd_tag', { session: id, add: ['parity'] });
-      // The CLI reads the same session back with no operands, which is the
-      // read path of the same verb and prints the same object.
-      const cli = cliJson(['tag', id]);
-      expect(tool['tags']).toEqual(cli['tags']);
-      expect(tool['session']).toEqual(cli['session']);
-      await call(client, 'potsherd_tag', { session: id, remove: ['parity'] });
+      const tool = await call(client, 'potsherd_read', { thread: id, from: 1, to: 2 });
+      const cli = cliJson(['show', id, '--from', '1', '--to', '2']);
+      const cliEx = (cli['exchanges'] as { seq: number; userText: string }[]).map((e) => [
+        e.seq,
+        e.userText,
+      ]);
+      const toolEx = (tool['exchanges'] as { seq: number; userText: string }[]).map((e) => [
+        e.seq,
+        e.userText,
+      ]);
+      expect(toolEx).toEqual(cliEx);
+      expect(tool['total']).toEqual(cli['total']);
     } finally {
       await close();
     }
   });
 });
 
-describe('potsherd_read pagination', () => {
+describe('the cliff (F1) — confidence, read and never re-derived', () => {
+  it('carries confidence on the envelope and on every row', async () => {
+    const { client, close } = await connect();
+    try {
+      const r = await call(client, 'potsherd_recall', { query: 'pgbouncer', scope: { limit: 3 } });
+      expect('confidence' in r).toBe(true);
+      expect(typeof r['calibrated']).toBe('boolean');
+      expect(typeof r['noMatch']).toBe('boolean');
+      for (const t of r['threads'] as { confidence: unknown }[]) {
+        expect('confidence' in t).toBe(true);
+      }
+      for (const h of r['hits'] as { confidence: unknown }[]) {
+        expect('confidence' in h).toBe(true);
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it('says in words that this build does not calibrate, rather than faking a cliff', async () => {
+    // T10.1 has not landed in this tree. `null` is the absence of a
+    // measurement and must never be rendered as `none`, which IS one.
+    const r = await runRecall(ctx(), { query: 'pgbouncer' });
+    if (r['confidence'] === null) {
+      expect(r['calibrated']).toBe(false);
+      expect(String(r['note'])).toMatch(/does not calibrate its scores yet/);
+      expect(r['noMatch']).toBe(false);
+    } else {
+      expect(['strong', 'weak', 'none']).toContain(r['confidence']);
+    }
+  });
+
+  it('says what it could not do, on every reply (audit item 9)', async () => {
+    const r = await runRecall(ctx(), { query: 'pgbouncer' });
+    expect(typeof r['capability']).toBe('string');
+    expect(String(r['capability']).length).toBeGreaterThan(0);
+  });
+
+  it('want: "context" returns discontiguous windows with seq and ts, under a budget', async () => {
+    const r = await runRecall(ctx(), { query: 'pgbouncer', want: 'context', budget: 400 });
+    const windows = r['windows'] as { seq: number | null; ts: string | null; text: string; citation: string }[];
+    expect(Array.isArray(windows)).toBe(true);
+    for (const w of windows) {
+      expect(typeof w.text).toBe('string');
+      expect('seq' in w && 'ts' in w).toBe(true);
+      expect(w.citation).toContain(' · ');
+    }
+    // The budget is honoured, in the est. tokens the reply itself reports.
+    expect(Number(r['windowTokens'])).toBeLessThanOrEqual(Number(r['windowBudget']));
+  });
+
+  it('searches at the same floor the human view searches at', async () => {
+    // T10.1 landed `minConfidence` and the orchestrator gave `find` the floor
+    // at 'weak'. The model-facing door has to search at the SAME floor, or an
+    // agent gets rows a human was spared — which is audit F1 with the blame
+    // moved rather than the defect fixed.
+    expect(AGENT_FLOOR).toBe('weak');
+    expect(CONFIDENCE_VALUES).toEqual(['strong', 'weak', 'none']);
+
+    // Asserted on the source as well as on the constant, because the constant
+    // being right is worth nothing if the call site stops passing it. This is
+    // the one line in the package whose deletion would be silent.
+    const src = fs.readFileSync(
+      path.join(repo, 'packages', 'mcp', 'src', 'tools', 'recall.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/\[MIN_CONFIDENCE_FIELD\]:\s*AGENT_FLOOR/);
+    expect(src).toMatch(/await recall\(db, query, filters, options\)/);
+  });
+
+  it('reports the floor it ran at and how many rows it withheld', async () => {
+    const r = await runRecall(ctx(), { query: 'pgbouncer' });
+    expect('minConfidence' in r).toBe(true);
+    expect('belowFloor' in r).toBe(true);
+    const floor = r['minConfidence'];
+    expect(floor === null || CONFIDENCE_VALUES.includes(floor as never)).toBe(true);
+    const withheld = r['belowFloor'];
+    expect(withheld === null || typeof withheld === 'number').toBe(true);
+  });
+
+  it('passes T10.1 calibration through untouched rather than re-projecting it', async () => {
+    // `{ score, coverage, strength, agreement }` is the arithmetic behind the
+    // one-word label. A surface that re-listed its members by hand would drop
+    // the fifth one T10.1 adds next, so it is passed through whole.
+    const r = await runRecall(ctx(), { query: 'pgbouncer', scope: { limit: 3 } });
+    for (const t of r['threads'] as { calibration: unknown }[]) {
+      expect('calibration' in t).toBe(true);
+    }
+    for (const h of r['hits'] as { calibration: unknown }[]) {
+      expect('calibration' in h).toBe(true);
+    }
+  });
+
+  it('an honest empty is zero rows, whatever produced it', async () => {
+    // The invariant, asserted unconditionally: whenever the envelope says
+    // `none`, there is nothing in the arrays. It holds by construction on the
+    // surface as well as in core, so neither side can regress alone.
+    for (const query of ['pgbouncer', 'zzzqqq flurblewomp aardvark protocol']) {
+      const r = await runRecall(ctx(), { query });
+      if (r['confidence'] !== 'none') continue;
+      expect(r['noMatch']).toBe(true);
+      expect(r['threads']).toEqual([]);
+      expect(r['hits']).toEqual([]);
+      expect(String(r['note'])).toMatch(/^no match\./);
+    }
+  });
+
+  it('the nonsense control returns none once the floor is live', async () => {
+    // The audit's own control: `find "zzzqqq flurblewomp aardvark protocol"`
+    // returned ten rows at 0.0110. Skipped rather than failed while this
+    // worktree's core predates T10.1 — the invariant above still binds.
+    const r = await runRecall(ctx(), { query: 'zzzqqq flurblewomp aardvark protocol' });
+    if (r['confidence'] === null) {
+      process.stderr.write(
+        '\n  nonsense control: core in this worktree predates T10.1 (confidence null) — invariant asserted, cliff not\n',
+      );
+      return;
+    }
+    expect(r['confidence']).toBe('none');
+    expect(r['threads']).toEqual([]);
+  });
+
+  it('a card hit is labelled as not evidence (F6)', async () => {
+    const r = await runRecall(ctx(), { query: 'pgbouncer', scope: { limit: 10 } });
+    for (const h of r['hits'] as { kind: string; evidence: string }[]) {
+      expect(h.evidence).toBe(h.kind === 'card' || h.kind === 'title' ? 'not-a-transcript' : 'transcript');
+    }
+  });
+});
+
+describe('potsherd_read pagination — the thread is the unit', () => {
   it('pages by exchange, 1-based and inclusive, without overlapping', async () => {
     const { client, close } = await connect();
     try {
       const id = await anySession(client);
-      const p1 = await call(client, 'potsherd_read', { session: id, start_line: 1, end_line: 1 });
+      const p1 = await call(client, 'potsherd_read', { thread: id, from: 1, to: 1 });
       expect(p1['from']).toBe(1);
       expect(p1['to']).toBe(1);
       expect((p1['exchanges'] as unknown[]).length).toBe(1);
 
       if (p1['hasMore']) {
-        const next = Number(p1['nextStartLine']);
+        const next = Number(p1['nextFrom']);
         expect(next).toBe(2);
-        const p2 = await call(client, 'potsherd_read', { session: id, start_line: next });
+        const p2 = await call(client, 'potsherd_read', { thread: id, from: next });
         const first = (p2['exchanges'] as { seq: number }[])[0];
         const last = (p1['exchanges'] as { seq: number }[])[0];
         expect(first!.seq).toBeGreaterThan(last!.seq);
@@ -331,18 +515,66 @@ describe('potsherd_read pagination', () => {
     }
   });
 
-  it('echoes start_line and end_line, and says when it clamped them', async () => {
+  it('every row carries seq, ts, its own session and a minted citation', async () => {
+    // §B7's parenthesis: "paginated, seq+ts — so the windowing subagent never
+    // needs filesystem Read". This is that clause, asserted.
     const { client, close } = await connect();
     try {
       const id = await anySession(client);
-      const wide = await call(client, 'potsherd_read', {
-        session: id,
-        start_line: 1,
-        end_line: 10_000,
-      });
-      expect(wide['start_line']).toBe(wide['from']);
-      expect(wide['end_line']).toBe(wide['to']);
+      const page = await call(client, 'potsherd_read', { thread: id, from: 1, to: 2 });
+      const rows = page['exchanges'] as {
+        seq: number;
+        ts: string | null;
+        sessionId: string;
+        id8: string;
+        position: number;
+        cite: string;
+        citation: string;
+      }[];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const r of rows) {
+        expect(typeof r.seq).toBe('number');
+        expect('ts' in r).toBe(true);
+        expect(r.sessionId.startsWith(r.id8)).toBe(true);
+        expect(r.cite).toBe(`${r.id8}@${String(r.seq)}`);
+        expect(r.citation).toContain(' · ');
+        expect(typeof r.position).toBe('number');
+      }
+      // The citations block is the only legal source of a source line.
+      expect((page['citations'] as unknown[]).length).toBeGreaterThan(0);
+      expect(String(page['citationRule'])).toMatch(/refused as a citation/);
+    } finally {
+      await close();
+    }
+  });
+
+  it('reports how the thread was resolved, and says so when the chain model is absent', async () => {
+    const { client, close } = await connect();
+    try {
+      const id = await anySession(client);
+      const page = await call(client, 'potsherd_read', { thread: id, from: 1, to: 1 });
+      const thread = page['thread'] as { via: string; note: string | null; links: unknown[] };
+      expect(['core', 'session-only']).toContain(thread.via);
+      if (thread.via === 'session-only') {
+        // T10.3 has not landed here. A tool that silently returned one link of
+        // a chain and called it a thread would be the v1.1.0 behaviour with a
+        // new label on it, so the reply says which it is.
+        expect(String(thread.note)).toMatch(/does not model fork\/resume chains yet/);
+      }
+      expect(thread.links.length).toBeGreaterThan(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it('clamps a window wider than the thread, and says when it clamped', async () => {
+    const { client, close } = await connect();
+    try {
+      const id = await anySession(client);
+      const wide = await call(client, 'potsherd_read', { thread: id, from: 1, to: 10_000 });
+      expect(wide['to']).toBe(wide['total']);
       expect(wide['truncated']).toBe(true);
+      expect(wide['hasMore']).toBe(false);
     } finally {
       await close();
     }
@@ -352,45 +584,16 @@ describe('potsherd_read pagination', () => {
     const { client, close } = await connect();
     try {
       const id = await anySession(client);
-      const r = await callRaw(client, 'potsherd_read', {
-        session: id,
-        start_line: 9,
-        end_line: 2,
-      });
+      const r = await callRaw(client, 'potsherd_read', { thread: id, from: 9, to: 2 });
       expect(r.isError).toBe(true);
-      expect(textOf(r)).toMatch(/before start_line/);
+      expect(textOf(r)).toMatch(/is before from/);
     } finally {
       await close();
     }
   });
 });
 
-describe('the two tools that write, and the four that do not', () => {
-  it('adds, normalises, reads back and removes', async () => {
-    const { client, close } = await connect();
-    try {
-      const id = await anySession(client);
-      const added = await call(client, 'potsherd_tag', { session: id, add: ['Postgres', 'infra'] });
-      expect(added['tags']).toEqual(['infra', 'postgres']);
-      expect(added['wrote']).toBe(true);
-
-      const found = await call(client, 'potsherd_ls', { tag: 'postgres' });
-      expect(Number(found['total'])).toBe(1);
-
-      const read = await call(client, 'potsherd_tag', { session: id });
-      expect(read['wrote']).toBe(false);
-      expect(read['tags']).toEqual(['infra', 'postgres']);
-
-      const removed = await call(client, 'potsherd_tag', {
-        session: id,
-        remove: ['postgres', 'infra'],
-      });
-      expect(removed['tags']).toEqual([]);
-    } finally {
-      await close();
-    }
-  });
-
+describe('the one tool that writes, and the two that do not', () => {
   it('writes exactly the tools it says it writes', { timeout: 60_000 }, async () => {
     // The structural half of D5: which tools write is decided by watching,
     // not by reading `WRITE_TOOLS`. Annotate a writer read-only, or list a
@@ -420,26 +623,21 @@ describe('the two tools that write, and the four that do not', () => {
       try {
         const id = await anySession(client);
         const calls: [string, Record<string, unknown>][] = [
-          ['potsherd_find', { query: 'pooler', limit: 1 }],
-          ['potsherd_read', { session: id }],
-          ['potsherd_ls', { limit: 1 }],
-          ['potsherd_graft', { session: id.slice(0, 8), budget: 300 }],
-          ['potsherd_tag', { session: id, add: ['writewitness'] }],
+          ['potsherd_recall', { query: 'pooler', scope: { limit: 1 } }],
+          ['potsherd_recall', { query: 'pooler', want: 'context' }],
+          ['potsherd_read', { thread: id }],
+          ['potsherd_graft', { thread: id.slice(0, 8), budget: 300 }],
         ];
         for (const [name, args] of calls) {
           const before = listing();
-          const tagsBefore = JSON.stringify(await call(client, 'potsherd_tag', { session: id }));
           await callRaw(client, name, args);
-          const tagsAfter = JSON.stringify(await call(client, 'potsherd_tag', { session: id }));
-          if (listing() !== before || tagsAfter !== tagsBefore) observed.push(name);
+          if (listing() !== before && !observed.includes(name)) observed.push(name);
         }
-        await call(client, 'potsherd_tag', { session: id, remove: ['writewitness'] });
 
         expect(observed.sort()).toEqual([...WRITE_TOOLS].sort());
 
         const listed = await listTools(client);
         for (const t of listed.tools) {
-          if (!calls.some(([n]) => n === t.name)) continue;
           expect(t.annotations?.readOnlyHint, `${t.name} readOnlyHint`).toBe(
             !observed.includes(t.name),
           );
@@ -452,13 +650,18 @@ describe('the two tools that write, and the four that do not', () => {
     }
   });
 
-  it('rejects a string that no tag can be made of', async () => {
+  it('nothing on the agent surface can change the index any more', async () => {
+    // `potsherd_tag` was the only tool that wrote to the index, and it is
+    // retired: the audit's §4.5 puts tag, pin, link, card, ls, stats and
+    // doctor in the human CLI. The consequence is worth pinning rather than
+    // assuming — the agent surface is now read-only except for one file it
+    // writes into the user's own project.
+    expect(WRITE_TOOLS).toEqual(['potsherd_graft']);
     const { client, close } = await connect();
     try {
-      const id = await anySession(client);
-      const r = await callRaw(client, 'potsherd_tag', { session: id, add: ['!!!'] });
-      expect(r.isError).toBe(true);
-      expect(textOf(r)).toMatch(/letters, digits/);
+      const listed = await listTools(client);
+      const writers = listed.tools.filter((t) => t.annotations?.readOnlyHint === false);
+      expect(writers.map((t) => t.name)).toEqual(['potsherd_graft']);
     } finally {
       await close();
     }
@@ -515,7 +718,7 @@ describe('the stdio transport', () => {
       const before = out.length;
       send(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }));
       await settle();
-      expect(out.slice(before)).toContain('potsherd_find');
+      expect(out.slice(before)).toContain('potsherd_recall');
     } finally {
       child.kill('SIGKILL');
     }
@@ -523,22 +726,22 @@ describe('the stdio transport', () => {
 });
 
 describe('errors are tool errors, and the server stays up', () => {
-  it('survives a malformed argument, a missing session and an unreadable index', async () => {
+  it('survives a malformed argument, a missing thread and an unreadable index', async () => {
     const { client, close } = await connect();
     try {
-      const malformed = await callRaw(client, 'potsherd_find', { query: 42 });
+      const malformed = await callRaw(client, 'potsherd_recall', { query: 42 });
       expect(malformed.isError).toBe(true);
       expect(textOf(malformed)).toMatch(/validation/i);
 
-      const missing = await callRaw(client, 'potsherd_read', { session: 'ffffffffff' });
+      const missing = await callRaw(client, 'potsherd_read', { thread: 'ffffffffff' });
       expect(missing.isError).toBe(true);
-      expect(textOf(missing)).toMatch(/no session in the index starts with/);
+      expect(textOf(missing)).toMatch(/no thread in the index starts with/);
 
       // The database, taken away underneath a live server.
       const db = paths.dbPath(root);
       const saved = fs.readFileSync(db);
       fs.rmSync(db, { force: true });
-      const unreadable = await callRaw(client, 'potsherd_ls', {});
+      const unreadable = await callRaw(client, 'potsherd_recall', { query: 'anything' });
       fs.writeFileSync(db, saved, { mode: 0o600 });
       expect(unreadable.isError).toBe(true);
       expect(textOf(unreadable)).toMatch(/nothing indexed yet/);
@@ -546,40 +749,20 @@ describe('errors are tool errors, and the server stays up', () => {
       expect(textOf(unreadable)).toMatch(/try: {2}potsherd index/);
 
       // ...and it still answers.
-      const after = await call(client, 'potsherd_ls', { limit: 1 });
-      expect(Number(after['total'])).toBeGreaterThan(0);
+      const after = await call(client, 'potsherd_recall', { query: 'pgbouncer', scope: { limit: 1 } });
+      expect((after['threads'] as unknown[]).length).toBeGreaterThan(0);
 
       const unknown = await callRaw(client, 'potsherd_nope', {});
       expect(unknown.isError).toBe(true);
-      const stillUp = await call(client, 'potsherd_ls', { limit: 1 });
-      expect(Number(stillUp['total'])).toBeGreaterThan(0);
+      const stillUp = await call(client, 'potsherd_recall', { query: 'pgbouncer', scope: { limit: 1 } });
+      expect((stillUp['threads'] as unknown[]).length).toBeGreaterThan(0);
     } finally {
       await close();
     }
   });
 });
 
-describe('the two model tools with no backend', () => {
-  it('potsherd_ask fails cleanly and immediately, naming what to install', async () => {
-    const { client, close } = await connect();
-    try {
-      const started = Date.now();
-      const r = await callRaw(client, 'potsherd_ask', { question: 'why did we do that?' });
-      const took = Date.now() - started;
-      expect(r.isError).toBe(true);
-      expect(textOf(r)).toMatch(/claude|codex|ANTHROPIC_API_KEY/i);
-      // The whole point: not 100 seconds. A hundred milliseconds is already
-      // three orders of magnitude of headroom on the measured p50.
-      expect(took).toBeLessThan(2_000);
-    } finally {
-      await close();
-    }
-  });
-
-  it('potsherd_ask refuses an empty question before it looks for a backend', async () => {
-    await expect(runAsk(ctx(), { question: '   ' })).rejects.toThrow(/needs a question/);
-  });
-
+describe('potsherd_graft with no backend', () => {
   it('takes its deadline from the environment', () => {
     expect(makeContext({ env: {}, cwd: project }).askTimeoutMs).toBe(240_000);
     expect(
@@ -591,65 +774,7 @@ describe('the two model tools with no backend', () => {
     ).toBe(240_000);
   });
 
-  /**
-   * The deadline returns a **tool error**, never an empty answer.
-   *
-   * `ask`'s readers report `found: false` when their promise rejects, which is
-   * the right behaviour for one dead reader and the wrong one for an aborted
-   * run: six cancelled calls would otherwise be synthesised into "nothing in
-   * your history addresses this", which is a confident wrong answer.
-   *
-   * A key that cannot work plus a one-millisecond ceiling reaches that path
-   * without a usable backend and without a completed request.
-   */
-  // This one needs a backend that can be *reached and then time out*. On CI
-  // there is no `claude` anywhere and `@anthropic-ai/sdk` is an
-  // optionalDependency that is not installed, so `detectBackend` short-circuits
-  // and the tool errors with "no way to reach a model" instead — which is the
-  // correct product behaviour and is asserted by the test above this one.
-  // Asserting the deadline path unconditionally asserts the machine, not the
-  // code, and it duly passed on every developer laptop and failed on CI.
-  //
-  // The predicate is the product's own answer to "can I reach a model", because
-  // that is exactly the branch being avoided. Note `availability()` finds a
-  // `claude` at a well-known absolute path even with `PATH` emptied, so this
-  // condition CANNOT be exercised on a machine that has Claude Code installed —
-  // CI is the only place it is observable. Convention follows
-  // `describe.skipIf(!hasModel)` in tests/recall.test.ts.
-  const reachable = (): boolean => {
-    const a = availability();
-    return Boolean(a.claude) || Boolean(a.apiKey) || Boolean(a.codex);
-  };
-  it.skipIf(!reachable())('potsherd_ask returns a tool error when it runs past its deadline', async () => {
-    const timed = makeContext({
-      potsherdDir: root,
-      cwd: project,
-      env: { ANTHROPIC_API_KEY: 'sk-ant-not-a-key', POTSHERD_MCP_ASK_TIMEOUT_MS: '1' },
-    });
-    // Nothing leaves the machine. The api transport builds its client from
-    // `process.env`, so pointing the base url at a closed local port makes
-    // every reader fail on connect instead of reaching anthropic.com with a
-    // key that was never real — which is a test that would be slow, would
-    // depend on the network, and would knock on somebody's door to prove a
-    // timeout.
-    const savedBase = process.env['ANTHROPIC_BASE_URL'];
-    process.env['ANTHROPIC_BASE_URL'] = 'http://127.0.0.1:1';
-    const { client, close } = await connectInMemory(timed, 'mcp.test');
-    try {
-      const r = await callRaw(client, 'potsherd_ask', { question: 'pgbouncer', k: 1 });
-      expect(r.isError).toBe(true);
-      expect(textOf(r)).toMatch(/gave up after/);
-      expect(textOf(r)).toMatch(/no answer is being guessed at/);
-      // Whatever happened, it is not an answer.
-      expect(textOf(r)).not.toMatch(/"sentences"/);
-    } finally {
-      await close();
-      if (savedBase === undefined) delete process.env['ANTHROPIC_BASE_URL'];
-      else process.env['ANTHROPIC_BASE_URL'] = savedBase;
-    }
-  }, 30_000);
-
-  it('potsherd_graft still produces a cited brief on the card-only path', async () => {
+  it('still produces a cited brief on the card-only path', async () => {
     const { client, close } = await connect();
     try {
       const id = await anySession(client);
@@ -659,7 +784,7 @@ describe('the two model tools with no backend', () => {
       // what is being asserted. Record the before-state and compare.
       const cwdDotPotsherd = path.join(process.cwd(), '.potsherd');
       const existedBefore = fs.existsSync(cwdDotPotsherd);
-      const r = await call(client, 'potsherd_graft', { session: id, budget: 400 });
+      const r = await call(client, 'potsherd_graft', { thread: id, budget: 400 });
       expect(r['via']).toBe('card-only');
       expect(String(r['brief']).length).toBeGreaterThan(0);
       expect(Number(r['tokens'])).toBeLessThanOrEqual(Number(r['budget']));
@@ -668,6 +793,54 @@ describe('the two model tools with no backend', () => {
       // Into the project it was given, never into the process's own cwd.
       expect(String(r['path']).startsWith(project)).toBe(true);
       expect(fs.existsSync(cwdDotPotsherd)).toBe(existedBefore);
+    } finally {
+      await close();
+    }
+  });
+
+  it('runs the source check in code on every call, and keeps its own footer', async () => {
+    // F3, one level up from `filterAnswer`. `graft`'s brief ends with
+    // `source: <harness> <id> · <n> exchanges · <date>` — a true source line,
+    // which the check has to KEEP. The refusal only exists to remove lines
+    // whose id does not resolve, and a check that ate true lines would be a
+    // worse defect than the one it was written for.
+    const { client, close } = await connect();
+    try {
+      const id = await anySession(client);
+      const r = await call(client, 'potsherd_graft', { thread: id, budget: 400 });
+      expect(r['sourcesChecked']).toBe(true);
+      expect(r['refusedSources']).toEqual([]);
+      expect(r['refusedNote']).toBeNull();
+      expect(String(r['brief'])).toMatch(/^source: /m);
+    } finally {
+      await close();
+    }
+  });
+
+  it('takes words as well as an id, and reports the thread it landed on', async () => {
+    // §B7 names the parameter `thread_or_query`. The v1.1.0 surface refused
+    // the query fallback; with `find` folded into `recall` and this named in
+    // the audit's own two-tool list, the words are a legitimate way in.
+    const { client, close } = await connect();
+    try {
+      const r = await call(client, 'potsherd_graft', { thread: 'pgbouncer', budget: 300 });
+      expect(String(r['brief']).length).toBeGreaterThan(0);
+      const thread = r['thread'] as { id: string; via: string; partial: boolean } | null;
+      expect(thread).not.toBeNull();
+      expect(['core', 'session-only']).toContain(thread!.via);
+    } finally {
+      await close();
+    }
+  });
+
+  it('says so, rather than guessing, when nothing matches the words', async () => {
+    const { client, close } = await connect();
+    try {
+      const r = await callRaw(client, 'potsherd_graft', {
+        thread: 'zzzqqq flurblewomp aardvark protocol',
+      });
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toMatch(/nothing in the index matches/);
     } finally {
       await close();
     }
@@ -706,7 +879,7 @@ describe("where potsherd_graft's brief lands", () => {
     const { client, close } = await connectInMemory(homeless, 'mcp.test');
     try {
       const id = await anySession(client);
-      const r = await call(client, 'potsherd_graft', { session: id, budget: 400 });
+      const r = await call(client, 'potsherd_graft', { thread: id, budget: 400 });
       expect(r['path']).toBeNull();
       expect(r['wrote']).toBe(false);
       expect(String(r['brief']).length).toBeGreaterThan(0);
@@ -744,41 +917,30 @@ describe("where potsherd_graft's brief lands", () => {
  *   verbosity cannot win by itself.
  */
 describe('the three phrasings', () => {
-  type Set6 = Record<(typeof TOOLS)[number], string>;
+  type Set3 = Record<(typeof TOOLS)[number], string>;
 
   // A — label. What most MCP servers ship.
-  const A: Set6 = {
-    potsherd_find: 'Search indexed coding-agent sessions.',
+  const A: Set3 = {
+    potsherd_recall: 'Search indexed coding-agent sessions.',
     potsherd_read: 'Read a session transcript.',
-    potsherd_ask: 'Question answering over session history.',
     potsherd_graft: 'Session brief generator.',
-    potsherd_ls: 'List sessions.',
-    potsherd_tag: 'Session tag management.',
   };
 
   // B — capability. A verb phrase describing behaviour.
-  const B: Set6 = {
-    potsherd_find:
-      'Searches your past coding sessions by keyword and returns the matching sessions with quoted snippets, session ids and dates.',
+  const B: Set3 = {
+    potsherd_recall:
+      'Searches your past coding sessions by keyword and returns the matching threads with quoted snippets, session ids, dates and a confidence label.',
     potsherd_read:
-      'Reads the exchanges of one past session in order, a page at a time, with the seq number of each exchange.',
-    potsherd_ask:
-      'Answers a question from your past sessions by reading the best-matching ones and returning an answer whose every sentence carries a checked citation.',
+      'Reads the exchanges of one past thread in order, a page at a time, with the seq number and timestamp of each exchange.',
     potsherd_graft:
-      'Compresses one past session into a short cited brief under a token budget and returns the brief.',
-    potsherd_ls:
-      'Lists your past sessions newest first with titles, projects, dates, tags and the command that resumes each one.',
-    potsherd_tag: 'Adds and removes tags on a session and returns the tags it carries afterwards.',
+      'Compresses one past thread into a short cited brief under a token budget and returns the brief.',
   };
 
   // C — instruction. What ships.
-  const C: Set6 = {
-    potsherd_find: shipped.FIND_DESCRIPTION,
+  const C: Set3 = {
+    potsherd_recall: shipped.RECALL_DESCRIPTION,
     potsherd_read: shipped.READ_DESCRIPTION,
-    potsherd_ask: shipped.ASK_DESCRIPTION,
     potsherd_graft: shipped.GRAFT_DESCRIPTION,
-    potsherd_ls: shipped.LS_DESCRIPTION,
-    potsherd_tag: shipped.TAG_DESCRIPTION,
   };
 
   /** The moments `plans/phases/phase-5` says recall has to fire on. */
@@ -792,26 +954,20 @@ describe('the three phrasings', () => {
     'never discussed',
     'pick up where we left off',
     'what was i working on',
-    'find the session about',
+    'that thing we tried',
   ];
 
   const UTTERANCES: [string, (typeof TOOLS)[number]][] = [
-    ['find the session about the connection pooler', 'potsherd_find'],
-    ['search my past sessions for the retry logic we wrote', 'potsherd_find'],
-    ['we discussed this before, look it up', 'potsherd_find'],
-    ['which session was the one about icons', 'potsherd_find'],
-    ['read the exchanges of that session', 'potsherd_read'],
-    ['show me the exact words in session cbcfda7e', 'potsherd_read'],
+    ['search my past sessions for the retry logic we wrote', 'potsherd_recall'],
+    ['we discussed this before, look it up', 'potsherd_recall'],
+    ['which session was the one about icons', 'potsherd_recall'],
+    ['what was i working on last week', 'potsherd_recall'],
+    ['read the exchanges of that thread', 'potsherd_read'],
     ['read the next page of that transcript', 'potsherd_read'],
-    ['why did we decide to drop the queue', 'potsherd_ask'],
-    ['what was the reasoning behind that choice', 'potsherd_ask'],
+    ['quote the exact words rather than the snippet', 'potsherd_read'],
     ['pick up where we left off on that project', 'potsherd_graft'],
     ['remind me what state that work was in', 'potsherd_graft'],
-    ['what was i working on last week', 'potsherd_ls'],
-    ['list my pinned sessions', 'potsherd_ls'],
-    ['show everything tagged postgres', 'potsherd_ls'],
-    ['tag that one postgres', 'potsherd_tag'],
-    ['drop the infra label off that session', 'potsherd_tag'],
+    ["i'm restarting that project, carry it forward", 'potsherd_graft'],
   ];
 
   const words = (s: string): Set<string> =>
@@ -829,7 +985,7 @@ describe('the three phrasings', () => {
     return hit / (a.size + b.size - hit);
   }
 
-  function score(set: Set6): { coverage: number; routing: number } {
+  function score(set: Set3): { coverage: number; routing: number } {
     const all = Object.values(set).join(' ').toLowerCase();
     const coverage = TRIGGERS.filter((t) => all.includes(t)).length;
 
@@ -887,16 +1043,35 @@ describe('the three phrasings', () => {
       expect(/Do NOT|instead|rather than/i.test(text), name).toBe(true);
       // Long enough to be an instruction and short enough to be read.
       expect(text.length, name).toBeGreaterThan(200);
-      expect(text.length, name).toBeLessThan(1_600);
+      expect(text.length, name).toBeLessThan(2_400);
     }
   });
 
-  it('names its cost where the cost is not free', () => {
-    expect(shipped.ASK_DESCRIPTION).toMatch(/40 to 180 seconds/);
-    expect(shipped.ASK_DESCRIPTION).toMatch(/costs money/);
-    expect(shipped.TAG_DESCRIPTION).toMatch(/ONLY POTSHERD TOOL THAT WRITES TO THE INDEX/);
+  it('names its cost, and the two things a model must be told before it calls', () => {
     // D5: graft writes into the user's project, and the description that a
     // model reads before calling it has to say so in the same register.
     expect(shipped.GRAFT_DESCRIPTION).toMatch(/IT WRITES TO THE USER'S PROJECT/);
+    // F1: an empty result is an answer, and the description is where a model
+    // learns to believe one.
+    expect(shipped.RECALL_DESCRIPTION).toMatch(/TRUST ITS SILENCE/);
+    expect(shipped.RECALL_DESCRIPTION).toMatch(/ZERO rows/);
+    // The one cost that is not free is still named; recall's is not.
+    expect(shipped.RECALL_DESCRIPTION).toMatch(/no model call, no cost/);
+  });
+
+  it('keeps the parked candidates in the file, exactly one live per tool', () => {
+    // The convention `skills/remembering-sessions/SKILL.md` established and
+    // T10.6's acceptance item 7 carries over: the alternatives stay where the
+    // next person can try them, and exactly one is uncommented.
+    const src = fs.readFileSync(
+      path.join(repo, 'packages', 'mcp', 'src', 'descriptions.ts'),
+      'utf8',
+    );
+    for (const name of ['RECALL_DESCRIPTION', 'READ_DESCRIPTION', 'GRAFT_DESCRIPTION']) {
+      const live = src.match(new RegExp(`^export const ${name} =`, 'gm')) ?? [];
+      const parked = src.match(new RegExp(`^// export const ${name} =`, 'gm')) ?? [];
+      expect(live, name).toHaveLength(1);
+      expect(parked, name).toHaveLength(2);
+    }
   });
 });

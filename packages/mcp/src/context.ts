@@ -15,7 +15,15 @@ export interface ServerContext {
   potsherdDir?: string;
   /** Where `potsherd_graft` may write, or null for "nowhere — return it inline". */
   graftCwd: string | null;
-  /** The ceiling `potsherd_ask` gives up at. See `tools/ask.ts`. */
+  /**
+   * The ceiling a long-running tool gives up at.
+   *
+   * `potsherd_ask` was the only tool that could reach it and T10.6 retired
+   * that tool (`server.ts` says why). The field and its environment variable
+   * stay because `.mcp.json` files in the wild set it and a server that
+   * rejected an unknown key would fail to start over a setting that costs
+   * nothing to keep honouring.
+   */
   askTimeoutMs: number;
   /**
    * The environment the two model-calling tools resolve a backend from.
@@ -30,7 +38,7 @@ export interface ServerContext {
   env: NodeJS.ProcessEnv;
 }
 
-/** The wall clock `potsherd_ask` will not run past. See `tools/ask.ts` for why. */
+/** The wall clock a long-running tool will not run past. */
 export const ASK_TIMEOUT_MS = 240_000;
 
 export interface ContextOptions {
