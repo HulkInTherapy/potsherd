@@ -143,7 +143,27 @@ stayed clean, as the audit credited. Verified deliberately, then deleted.
 
 ## status
 
-- **wave 1: running.** T10.1 calibration · T10.2 model ladder · T10.4 lazy vectors.
-- orchestrator, in parallel: the traffic workflow (`ci: keep the traffic numbers…`), the audit
-  redaction above, and the lineage measurement above.
-- **`NPM_TOKEN` is NOT set** (`gh secret list -R HulkInTherapy/potsherd` is empty). Asked meghavi.
+**Five workers running**, each in its own worktree with disjoint deliverables:
+
+| task | what | owns |
+|---|---|---|
+| T10.1 | the cliff: calibrated confidence, honest empty | `recall` `calibration` `find` + renderer |
+| T10.2 | the model ladder: host agent → `claude -p` → SDK | `llm` `ask` `card` |
+| T10.3 | threads: derive the chain, date by content | `db`(mig 11) `ingest` `threads` `graft` `ls` `show` |
+| T10.4 | vectors always on, lazily, in WASM | `embeddings` `vec` `index` `doctor` (mig 10) |
+| T10.6 | three MCP tools, one skill, fabrication killed in code | `packages/mcp` `agents/` `skills/` |
+
+Migration numbers were allocated **before** the wave, per `09 §6.6`: 10 → T10.4, 11 → T10.3,
+12 → the `note` write-back, 13 → the cards lane. No worker takes the next free number.
+
+Deferred on purpose, because they collide with a live worker:
+- **W7 id substitution** (`phases/phase-8/registration-W7.txt`) — the largest remaining privacy item.
+  It rewrites a real session id used as the `--help` example across `packages/cli`, `packages/core`,
+  `packages/mcp`, seven tests and both bundles. Four of those files are owned by live workers.
+  Runs after wave 2 merges, in one commit, by the orchestrator.
+- T10.5 windows (needs T10.2's seam) · T10.7 cards lane (needs T10.1's scoring) · T10.8 `note` ·
+  T10.9 keyphrase.
+
+**Blocked on a human:** `NPM_TOKEN` is not set — `gh secret list -R HulkInTherapy/potsherd` returns
+empty. v1.2.0 publishes through the provenance workflow, which needs it. Asked meghavi. Everything
+up to the tag proceeds without it.
