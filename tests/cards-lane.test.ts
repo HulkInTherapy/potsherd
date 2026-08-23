@@ -15,6 +15,7 @@ import {
 // not re-export the lane yet, so the lane is imported from the module that
 // owns it. `T10.7-REPORT.md` carries the barrel lines.
 import {
+  CARDS_SCORE_EVIDENCE_BLOCKS,
   LANES,
   ROUTING_PER_SESSION,
   laneOfHit,
@@ -228,26 +229,34 @@ describe("the audit's failing case", () => {
   });
 
   /**
-   * The residual the report names: a card inside a block that *does* have
-   * transcript evidence contributes nothing to that block's rank either.
-   * Otherwise "cards never outrank transcripts" would hold between blocks and
-   * fail inside one.
+   * The line the eval numbers drew, pinned in both directions.
+   *
+   * Carding a session that already has transcript hits **may** move its rank —
+   * that is routing working, and switching it off cost four points of recall@5
+   * on `pnpm evals` (see {@link CARDS_SCORE_EVIDENCE_BLOCKS}). It must **not**
+   * move its coverage or its confidence, because those are what an agent acts
+   * on without reading the rows, and a summary that certifies the conversation
+   * it summarises is the whole of F6.
    */
-  it('gives a card no weight in the score of a block that has transcript hits', async () => {
-    const [plain] = await both(QUERY);
-    const withCard = plain!.sessions.find((s) => s.id === full.pgbouncer)!;
-    // Card the *real* session too, then re-measure its score.
+  it('lets a card move rank and never coverage, on a block that has transcript hits', async () => {
+    const plain = (await both(QUERY))[0]!.sessions.find((s) => s.id === full.pgbouncer)!;
+
+    // Card the *real* session, with a summary that says the query's words.
     seedCard(
       full.pgbouncer,
       'pgbouncer transaction pooling',
-      'pgbouncer transaction pooling, decided and shipped',
+      'pgbouncer transaction pooling, decided and shipped after the zonal drain cutover',
       ['pgbouncer'],
     );
     const after = (await both(QUERY))[0]!.sessions.find((s) => s.id === full.pgbouncer)!;
     expect(after.lane).toBe('evidence');
-    expect(after.score).toBeCloseTo(withCard.score, 10);
-    // And its coverage is still measured over its transcript, not its summary.
-    expect(after.calibration.coverage).toBeCloseTo(withCard.calibration.coverage, 10);
+    expect(CARDS_SCORE_EVIDENCE_BLOCKS).toBe(true);
+    // Rank: the card is allowed to help, and on this corpus it does.
+    expect(after.score).toBeGreaterThan(plain.score);
+    // Confidence: it is not allowed to help, and it does not.
+    expect(after.calibration.coverage).toBeCloseTo(plain.calibration.coverage, 10);
+    expect(after.calibration.score).toBeCloseTo(plain.calibration.score, 10);
+    expect(after.confidence).toBe(plain.confidence);
     db.prepare('DELETE FROM cards WHERE session_id = ?').run(full.pgbouncer);
   });
 });

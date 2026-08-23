@@ -189,6 +189,34 @@ export const ROUTING_KINDS: ReadonlySet<RecallHit['kind']> = new Set(['card']);
  */
 export const ROUTING_PER_SESSION = 1;
 
+/**
+ * Whether a card may contribute to the **rank** of a block that already has
+ * transcript evidence of its own.
+ *
+ * `true`, and it was measured rather than assumed. The stricter reading of
+ * "cards are routing, never evidence" says a card should add nothing to any
+ * ordering anywhere; T10.7 built that, ran `pnpm evals`, and it cost four
+ * points of recall@5 (hybrid 22/25 -> 18/25) with seven queries losing their
+ * answer, including two whose answer session is a real transcript the card was
+ * merely *pointing at*. With this `true` the same eval is 22/25 and 10/25 —
+ * identical to the fusion before the lane existed, with the bm25 half a point
+ * better.
+ *
+ * The line the numbers drew is the same one Bet 02 draws in words. A card that
+ * lifts a conversation the transcript lists also found is **routing working**:
+ * the reader gets transcript text, and the summary only decided which thread
+ * to open. A card that puts a conversation on the page *by itself* is a
+ * summary being read as evidence, and that is the case {@link LANES} refuses
+ * outright.
+ *
+ * What is switched off regardless of this constant, because it is the case an
+ * agent acts on: a card contributes nothing to a block's **coverage** or its
+ * **confidence**. Rank is a suggestion; `strong` is a licence to stop reading.
+ *
+ * `tests/cards-lane.test.ts` pins both halves.
+ */
+export const CARDS_SCORE_EVIDENCE_BLOCKS = true;
+
 /** Which lane a hit belongs to. */
 export function laneOfHit(kind: RecallHit['kind']): Lane {
   return ROUTING_KINDS.has(kind) ? 'routing' : 'evidence';
@@ -1926,13 +1954,16 @@ export async function recall(
     else routingBuilt++;
     sessions.push({
       ...m,
-      // The block's rank is its **evidence's** rank. A card contributes
-      // nothing to the score of a block that has transcript hits — otherwise
-      // "cards never outrank transcripts" would hold between blocks and
-      // quietly fail inside one, with a summary lifting a thin exchange over a
-      // strong one. A routing block is scored by its card, which is all it
-      // has, and then sorts behind every evidence block regardless.
-      score: sessionScore(counted, corroboration),
+      // Rank. A routing block is scored by its card, which is all it has, and
+      // then sorts behind every evidence block regardless of the number. An
+      // evidence block includes its card here — see
+      // {@link CARDS_SCORE_EVIDENCE_BLOCKS} for the measurement that decided
+      // it — and excludes it from `calibration` below, which is the half an
+      // agent is allowed to act on.
+      score: sessionScore(
+        CARDS_SCORE_EVIDENCE_BLOCKS ? hits : counted,
+        corroboration,
+      ),
       calibration,
       confidence: calibration.confidence,
       lane,
