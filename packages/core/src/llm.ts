@@ -1413,14 +1413,27 @@ export class LlmError extends Error {
    * clock twice.
    */
   readonly timedOut: boolean;
+  /**
+   * What the child printed before it failed, when it was a spawned one.
+   *
+   * A CLI that fails by *answering* — `claude -p` exits non-zero and prints
+   * `{"is_error":true,"result":"Not logged in · Please run /login"}` on
+   * stdout — is a CLI whose exit code alone says nothing a user can act on.
+   * `potsherd: claude exited 1 / try: claude --version` was the message that
+   * came out of exactly that, and `claude --version` works fine, so the
+   * suggested fix confirmed the machine was healthy while the run stayed
+   * broken. The transport reads this and says the real sentence instead.
+   */
+  readonly stdout?: string;
   constructor(
     message: string,
     readonly fix?: string,
     readonly cause?: unknown,
-    options: { timedOut?: boolean } = {},
+    options: { timedOut?: boolean; stdout?: string } = {},
   ) {
     super(message);
     this.timedOut = options.timedOut ?? false;
+    if (options.stdout !== undefined) this.stdout = options.stdout;
   }
 }
 
@@ -1679,13 +1692,34 @@ class ClaudeCliTransport implements Transport {
       ...extra,
     ];
 
-    const out = await run(this.opts.bin, args, {
-      input: req.prompt,
-      cwd: this.scratch,
-      env: { ...this.opts.env, [REENTRANCY_ENV]: '1' },
-      timeoutMs: req.timeoutMs,
-      ...(req.signal ? { signal: req.signal } : {}),
-    });
+    let out: { stdout: string; stderr: string; code: number };
+    try {
+      out = await run(this.opts.bin, args, {
+        input: req.prompt,
+        cwd: this.scratch,
+        env: { ...this.opts.env, [REENTRANCY_ENV]: '1' },
+        timeoutMs: req.timeoutMs,
+        ...(req.signal ? { signal: req.signal } : {}),
+      });
+    } catch (err) {
+      // `claude -p` fails by *answering*: it exits non-zero and prints its
+      // reason on stdout as a normal result object. Raising "claude exited 1,
+      // try claude --version" over the top of `Not logged in · Please run
+      // /login` tells the user to run a command that will succeed and teach
+      // them nothing. Measured on the reference machine while running potsherd
+      // under a relocated HOME, which is exactly how a user who has never
+      // logged in will meet it.
+      const reply = err instanceof LlmError ? parseClaudeCli(err.stdout ?? '') : null;
+      const said = reply?.said ?? reply?.text ?? '';
+      if (said) {
+        throw new LlmError(
+          `claude --print could not answer: ${said.split('\n')[0]}`,
+          /not logged in|\/login/i.test(said) ? 'claude   # sign in once, then retry' : 'claude -p "hello"',
+          err,
+        );
+      }
+      throw err;
+    }
 
     const parsed = parseClaudeCli(out.stdout);
     if (parsed.error) {
@@ -1728,6 +1762,16 @@ export interface ClaudeCliReply {
   usd?: number;
   /** The `subtype` of a non-success result, when the run failed on purpose. */
   error?: string;
+  /**
+   * The `result` field as printed, **whether or not the run succeeded**.
+   *
+   * Separate from {@link ClaudeCliReply.text}, which is deliberately empty on
+   * a failure so that no caller can mistake an error for an answer. This one
+   * exists for the error message: when `claude -p` fails, the sentence a user
+   * needs is the one the CLI already wrote, and `Not logged in · Please run
+   * /login` is worth infinitely more than `exited 1`.
+   */
+  said?: string;
 }
 
 /**
@@ -1761,12 +1805,13 @@ export function parseClaudeCli(stdout: string): ClaudeCliReply {
   }
   if (!obj) return { text: raw };
 
+  const said = typeof obj['result'] === 'string' ? obj['result'].trim() : '';
   const subtype = typeof obj['subtype'] === 'string' ? obj['subtype'] : '';
   if (obj['is_error'] === true || (subtype !== '' && subtype !== 'success')) {
-    return { text: '', error: subtype || 'an error' };
+    return { text: '', error: subtype || 'an error', ...(said ? { said } : {}) };
   }
 
-  const text = typeof obj['result'] === 'string' ? obj['result'].trim() : '';
+  const text = said;
   const usage = asRecord(obj['usage']);
   const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const inputTokens = usage
@@ -2076,6 +2121,8 @@ function run(
           new LlmError(
             `${path.basename(bin)} exited ${code}${stderr.trim() ? `: ${stderr.trim().split('\n').slice(-1)[0]}` : ''}`,
             `${path.basename(bin)} --version`,
+            undefined,
+            { stdout },
           ),
         );
         return;

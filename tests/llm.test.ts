@@ -1173,6 +1173,37 @@ describe('claude -p backend plumbing', () => {
     }
   });
 
+  /**
+   * **`claude -p` fails by answering**, and the first version of this
+   * transport threw that answer away.
+   *
+   * Signed out, it exits non-zero *and* prints
+   * `{"is_error":true,"result":"Not logged in · Please run /login"}` on
+   * stdout. Reporting only the exit code produced
+   *
+   *     potsherd: claude exited 1
+   *       try:  claude --version
+   *
+   * — a message whose suggested fix succeeds, reports a healthy binary, and
+   * leaves the user exactly where they were. It was measured on the reference
+   * machine while running potsherd under a relocated HOME, which is also how
+   * anyone who has installed Claude Code and never signed in will meet it.
+   */
+  it('says what claude said, not just that it exited', async () => {
+    const llm = claudeLlm(
+      `cat > /dev/null; echo '{"is_error":true,"subtype":"success","result":"Not logged in · Please run /login"}'; exit 1`,
+    );
+    try {
+      const err = await llm.text({ prompt: 'q' }).catch((e: unknown) => e);
+      expect(String((err as Error).message)).toContain('Not logged in');
+      // and the fix is one that changes something, unlike `claude --version`.
+      expect(String((err as LlmError).fix)).not.toContain('--version');
+      expect(String((err as LlmError).fix)).toMatch(/sign in/);
+    } finally {
+      await llm.close();
+    }
+  });
+
   it('raises a refusal the CLI reports in its own json, rather than printing it as an answer', async () => {
     const llm = claudeLlm(
       `cat > /dev/null; echo '{"subtype":"error_max_turns","is_error":true,"result":""}'`,
