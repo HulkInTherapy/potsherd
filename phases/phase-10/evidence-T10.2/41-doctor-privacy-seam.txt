@@ -1,0 +1,8 @@
+$ potsherd doctor --privacy   (bare machine, but INSIDE claude code: rung 1 live)
+  who receives them:
+    nobody — there is no model backend on this machine.
+    no `claude` binary and no ANTHROPIC_API_KEY, so `potsherd card`
+    refuses rather than calling anything. every other verb still works.
+
+  no other network, except the one-off embedding-model download,
+  and only when you ask for it.
