@@ -309,3 +309,87 @@ describe('opencode adapter — the contract', () => {
     expect(fs.existsSync(`${file}-journal`)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MEASURED AGAINST A REAL opencode-ai 1.18.21 (T10.12, 2026-08-24)
+//
+// This is the one of the four harnesses where a full round trip happened.
+// `opencode-ai@1.18.21` installs from npm — the phase-5 claim that it could
+// not be installed here was never checked and is false — and it answered "say
+// hello" through its bundled provider with no credentials of ours. Run under a
+// relocated HOME, then indexed:
+//
+//   opencode  1  1 session · 1 exchange · 1 re-read
+//   24 aug  openco…  work   Greeting request   live
+//
+// SO: DISCOVERY IS VERIFIED. The store is `~/.local/share/opencode/opencode.db`
+// exactly as this adapter guessed; `describeStore` accepts it, the `session`
+// row parses, and title, directory and both timestamps are right. That half of
+// the `unverified` label is earned off and `T10.12-LABELS.md` says so.
+//
+// FINDING — the CONTENT half is verified WRONG. `message` at 1.18.21 has no
+// role and no content column: the role is inside a `data` JSON blob, and the
+// turn's text is not in `message` at all, it is in `part.data`. Column
+// discovery finds `data`, treats the metadata blob as the message body, and a
+// real session comes out as `prompts: 0` with `doctor` counting
+// `opencode role:(no role)` twice — while `potsherd show` prints a JSON object
+// of token counts where the answer should be. Neither "say hello" nor "Hello!"
+// survives anywhere in the index.
+//
+// NOT FIXED HERE: joining `part` is a new read path, and `03 §10`'s rule is
+// discovery plus degrade, not a second hard-coded schema. `T10.12-LABELS.md`
+// carries the recommendation (widen MESSAGE_COLUMNS to look inside `data`, and
+// join `part` on `message_id` when no content column exists).
+describe('opencode adapter — a real opencode-ai 1.18.21 store (T10.12)', () => {
+  let realDir: string;
+  let realDb: string;
+
+  beforeAll(async () => {
+    realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-11821-'));
+    realDb = path.join(realDir, 'opencode.db');
+    const mod = await import('../fixtures/opencode/make-opencode-db.mjs');
+    (mod as { buildOpencodeReal: (f: string) => void }).buildOpencodeReal(realDb);
+  });
+
+  afterAll(() => {
+    fs.rmSync(realDir, { recursive: true, force: true });
+  });
+
+  it('VERIFIED — the store is found where the adapter looks and is supported', () => {
+    expect(findStores(realDir)).toContain(realDb);
+    const described = describeStore(realDb);
+    expect(described.ok, described.ok ? '' : described.reason).toBe(true);
+  });
+
+  it('VERIFIED — the session row parses: title, directory, both timestamps', async () => {
+    const found = discover(realDir);
+    expect(found).toHaveLength(1);
+    const r = await parse(found[0]!);
+    expect(r.session.title).toBe('Greeting request');
+    expect(r.session.project).toBe('/w/scratch');
+    expect(r.session.startedAt).not.toBe('');
+    expect(r.session.endedAt).not.toBe('');
+  });
+
+  it('FINDING — message has no role or content column; both live in JSON', () => {
+    const described = describeStore(realDb);
+    if (!described.ok) throw new Error(described.reason);
+    const cols = described.schema.messages.columns;
+    expect(described.schema.messages.table).toBe('message');
+    // The adapter resolved neither: both are inside the `data` JSON blob.
+    expect(cols['role']).toBeUndefined();
+    // and what it DID resolve as content is that blob.
+    expect(cols['content']).toBe('data');
+  });
+
+  it('FINDING — so a real session indexes with zero prompts and no turn text', async () => {
+    const r = await parse(discover(realDir)[0]!);
+    expect(r.session.counts.userPrompts, 'see T10.12-LABELS.md — opencode F1').toBe(0);
+    const whole = JSON.stringify(r.exchanges);
+    expect(whole).not.toContain('say hello');
+    expect(whole).not.toContain('Hello!');
+    // what landed instead: the metadata blob, verbatim.
+    expect(whole).toContain('finish');
+    expect(Object.keys(r.unknownTypes).some((t) => /no role/i.test(t))).toBe(true);
+  });
+});

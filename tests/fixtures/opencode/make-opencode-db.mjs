@@ -176,3 +176,84 @@ export function makeOpencodeFixtures(dir) {
 }
 
 export default makeOpencodeFixtures;
+
+/**
+ * `real-1-18-21.db` — the schema a REAL `opencode-ai@1.18.21` writes (T10.12,
+ * measured 2026-08-24, `phases/phase-10/T10.12-REPORT.md` §4).
+ *
+ * `opencode-ai@1.18.21` installs from npm and — unlike codex, gemini and
+ * copilot — ANSWERED, over its bundled provider, with no credentials of ours.
+ * So this is the one harness of the four where a real end-to-end session
+ * exists. Its store is `~/.local/share/opencode/opencode.db`, exactly where
+ * this adapter looks. What is inside is not what the adapter assumes:
+ *
+ *   session(id, project_id, workspace_id, parent_id, slug, directory, path,
+ *           title, version, …, model, time_created, time_updated, …)
+ *   message(id, session_id, time_created, time_updated, data)      ← NO role
+ *   part   (id, message_id, session_id, time_created, time_updated, data)
+ *
+ * `message` has **no role and no content column**: the role lives inside the
+ * `data` JSON blob, and the turn's TEXT is not in `message` at all — it is in
+ * `part.data`, one row per content block. The adapter's discovery finds `data`
+ * as its content column and stringifies the metadata blob, so a real session
+ * parses to `prompts: 0` with the assistant "text" being a JSON object of
+ * token counts. The session row itself (title, directory, times) parses fine.
+ *
+ * No real ids, paths or prose: ids are hand-written, 2 distinct hex digits in
+ * the first eight, and the content is the two words the test typed.
+ */
+export function buildOpencodeReal(file) {
+  const db = new Database(file);
+  db.exec(`
+    create table session (
+      id text primary key, project_id text not null, workspace_id text,
+      parent_id text, slug text not null, directory text not null, path text,
+      title text not null, version text not null, agent text, model text,
+      time_created integer not null, time_updated integer not null
+    );
+    create table message (
+      id text primary key, session_id text not null,
+      time_created integer not null, time_updated integer not null,
+      data text not null
+    );
+    create table part (
+      id text primary key, message_id text not null, session_id text not null,
+      time_created integer not null, time_updated integer not null,
+      data text not null
+    );
+  `);
+  const ses = 'ses_0b0b0b0b0b0b0b0b0b0b0b0b0b';
+  const mUser = 'msg_0b0b0b0b0b0b0b0b0b0b0b0b0b';
+  const mAsst = 'msg_0b0b0b0b0b0b0b0b0b0b0b0b0c';
+  const t0 = 1_780_000_000_000;
+  db.prepare(
+    `insert into session (id, project_id, workspace_id, parent_id, slug, directory,
+       path, title, version, agent, model, time_created, time_updated)
+     values (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  ).run(ses, 'prj_0b0b', null, null, 'greeting', '/w/scratch', null,
+        'Greeting request', '1.18.21', 'build', 'a-model', t0, t0 + 5000);
+  const m = db.prepare(
+    `insert into message (id, session_id, time_created, time_updated, data) values (?,?,?,?,?)`,
+  );
+  // The role is INSIDE data. There is no role column to find.
+  m.run(mUser, ses, t0, t0, JSON.stringify({
+    role: 'user', time: { created: t0 }, agent: 'build',
+    model: { providerID: 'p', modelID: 'a-model' }, summary: { diffs: [] },
+  }));
+  m.run(mAsst, ses, t0 + 100, t0 + 5000, JSON.stringify({
+    parentID: mUser, role: 'assistant', mode: 'build', agent: 'build',
+    path: { cwd: '/w/scratch', root: '/' }, cost: 0,
+    tokens: { total: 100, input: 90, output: 10, reasoning: 0, cache: { write: 0, read: 0 } },
+    modelID: 'a-model', providerID: 'p',
+    time: { created: t0 + 100, completed: t0 + 5000 }, finish: 'stop',
+  }));
+  // The TEXT lives here, in a table the adapter never joins.
+  const p = db.prepare(
+    `insert into part (id, message_id, session_id, time_created, time_updated, data) values (?,?,?,?,?,?)`,
+  );
+  p.run('prt_0b0b0b0b0b0b0b0b0b0b0b0b0b', mUser, ses, t0, t0,
+        JSON.stringify({ type: 'text', text: 'say hello' }));
+  p.run('prt_0b0b0b0b0b0b0b0b0b0b0b0b0c', mAsst, ses, t0 + 5000, t0 + 5000,
+        JSON.stringify({ type: 'text', text: 'Hello!' }));
+  db.close();
+}
