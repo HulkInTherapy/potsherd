@@ -493,6 +493,128 @@ export function callProfile(backend?: Backend): CallProfile {
 export const HARNESS_OVERHEAD_USD = CALL_PROFILES['agent-sdk'].baseUsd;
 
 /**
+ * ## The money the ideal call count never sees — T10.11
+ *
+ * `08` §2 row 6 records the card estimator as *"~2× optimistic, one
+ * directionally"*, and `08` §6 item 20 records why that direction is the
+ * dangerous one: `--max-usd` is a **pre-call** ceiling, so a quote that is too
+ * low lets a run start that should not have, and no gate downstream can catch
+ * it. This constant is the fix, and the paragraphs below are the whole of the
+ * evidence for it, because a number chosen without one is what produced the
+ * defect.
+ *
+ * ### What the recorded runs actually say
+ *
+ * `card_runs` on the reference machine holds **two** runs — 22 and 23 aug
+ * 2026, `agent-sdk`, haiku, concurrency 6, **47 real calls between them**.
+ * (The phase plan's "~50 recorded real calls" is those 47; it is two runs, not
+ * fifty, and **both were stopped before they finished**, so by this module's
+ * own rule 1 neither has ever corrected anything.) Normalised per call —
+ * which is the only fair comparison when one run was truncated — they agree:
+ *
+ * | run | quoted $/call | actual $/call | money | quoted s/call | actual s/call | time |
+ * |---|---:|---:|---:|---:|---:|---:|
+ * | 22 aug, 4 targets, 11 of 18 calls | $0.0516 | $0.0875 | **1.70× under** | 15.40 s | 22.94 s | 1.49× under |
+ * | 23 aug, 8 targets, 36 of 35 calls | $0.0502 | $0.0818 | **1.63× under** | 15.15 s | 16.89 s | 1.11× under |
+ *
+ * Two things follow, and only these two:
+ *
+ *   1. **The miss is on money, not on the clock.** The 23 aug run — the only
+ *      one whose call count was not truncated away — came in at **1.15× of
+ *      its quoted wall time** and **1.68× of its quoted money**. That is not
+ *      one error seen twice: extra calls join the concurrency gate and overlap
+ *      with the fan-out already in flight, so they cost wall time at the
+ *      marginal rate and money at the full rate. {@link CALL_PROFILES}'s
+ *      latency fit is therefore **left exactly as it was**.
+ *   2. **The money miss is one-directional and about the same size twice.**
+ *      1.70 and 1.63, from different scopes on different days.
+ *
+ * ### Why the correction is not on the per-call price
+ *
+ * The per-call price has an independent check that the run-level ratios do
+ * not: given the **true** call count and the true mean prompt size, the fit
+ * reproduces the 21 aug 209-call run at $11.18 against a real $12.93 — 1.16×
+ * under, not 1.7× (`tests/llm.test.ts`, "reproduces the one real run it is
+ * fitted to"). So the twelve-call price fit is close, and moving it would
+ * throw away a direct measurement in order to absorb a residual that belongs
+ * somewhere else.
+ *
+ * Where it belongs is the **call arithmetic**. {@link estimate} derives calls
+ * as `chunks === 1 ? 1 : chunks + 1` — the *ideal* pipeline. The real one, in
+ * `cards/pipeline.ts` and `cards/extract.ts`, also pays for a **supplement
+ * pass** (at most one extra call per card, re-sending the units coverage says
+ * the first pass missed) and for **retries** (`into.calls += r.attempts`), and
+ * prices neither. Every one of those can only add calls and characters, never
+ * remove them, which is exactly the shape of a one-directional under-quote.
+ *
+ * ### The stopping rule
+ *
+ * `pipeline.ts` allows **at most one** supplement per card. So the work the
+ * ideal arithmetic omits is bounded below by nothing (no card supplemented)
+ * and above by a second full call on every card — the interval **[1×, 2×]**,
+ * fixed by the pipeline's own code rather than by any sample. **1.5 is the
+ * midpoint of that interval**, and that is the entire derivation: it is not
+ * the value that minimises residual on the two runs (that is 1.66) and it was
+ * chosen before they were consulted. They were then used only to *check* it,
+ * which is the direction of inference this project requires — the same reason
+ * `03` records `1.5` as a stopping rule rather than an argmax.
+ *
+ * ### What the check says
+ *
+ * With the factor applied, the two recorded runs land at **1.13×** and
+ * **1.09×** of quote. The quote **still errs low**, by about a tenth, and that
+ * is deliberate: what a ceiling must be safe against is the top of the range,
+ * not the point. Before this constant, {@link CallProfile.spread}'s
+ * `usdHigh` of 1.4 did **not** contain either run (1.70 and 1.63 are outside
+ * it) — the honest range itself under-quoted. After it, both are inside, with
+ * margin, for the first time.
+ *
+ * ### Where it is *not* applied
+ *
+ * Only to calls this function **derived**. A caller that passes
+ * {@link EstimateSession.calls} is stating what the pipeline really did rather
+ * than asking for a guess, and the estimator must not second-guess a fact.
+ * That is what keeps the 209-call check above honest.
+ */
+export const PIPELINE_COST_FACTOR = 1.5;
+
+/**
+ * The identity of the fit compiled into this build.
+ *
+ * A `card_runs` row records what *that* run was quoted and what it did. Once
+ * the constants above move, an older row is a measurement of a **different
+ * estimator**, and letting `calibration.ts` average it into a correction on
+ * top of the new one double-counts the very error the new one already fixes:
+ * the two runs that justify {@link PIPELINE_COST_FACTOR} would, left
+ * unfiltered, immediately multiply the corrected quote by 1.66 again.
+ *
+ * So the fit carries a date, `readCalibration` ignores rows older than it, and
+ * this line moves — deliberately, in the same commit — every time a constant
+ * in this section does. It is the one bookkeeping entry that makes a
+ * self-correcting estimator safe to re-fit at all.
+ *
+ * The value is the T10.11 re-fit, placed immediately **after** the last row it
+ * was derived from (23 aug 2026, 11:30 UTC) rather than at the wall-clock
+ * moment of the edit. The boundary's whole job is to exclude the evidence, and
+ * a boundary in the future would also exclude the next run a user makes.
+ */
+export const ESTIMATOR_FIT = '2026-08-23T12:00:00.000Z';
+
+/**
+ * What the quote says on rung 1, where there is no call to price.
+ *
+ * `$0.00` would be arithmetically true and would still mislead: it reads as
+ * "this is free", when what is actually true is "potsherd is not the one
+ * spending". The prompts still have to be answered, out of the host agent's
+ * context and on the user's own subscription, and the quantity that decides
+ * whether that is a good idea is the token count sitting two rows above it on
+ * the same card — not a dollar figure at all. So the money row says this
+ * instead of a number.
+ */
+export const HOST_SEAM_BASIS =
+  'the host agent answers — potsherd makes no model call, so the unit is tokens, not dollars';
+
+/**
  * Effective concurrency for `n` requested slots.
  *
  * The first call is free of contention; every slot after it delivers
@@ -543,6 +665,20 @@ export interface EstimateInput {
    * multiplier rather than baked into the constants.
    */
   calibration?: Calibration;
+  /**
+   * Rung 1 of {@link RESOLUTION_LADDER}: the host agent is the model.
+   *
+   * potsherd makes **no model call** on this path — it emits prompts through
+   * `--synthesis-out` / `--filter-in` and the agent already holding the
+   * conversation answers them on its own subscription. There is nothing to
+   * charge and no wall time potsherd owns, so the dollars and the seconds are
+   * zero and the honest unit is what is left: how many prompts, and how many
+   * tokens of the host's context they will take.
+   *
+   * It is a flag rather than a {@link Backend} because rung 1's `backend` is
+   * `null` by construction: there is no transport here to name.
+   */
+  hostSeam?: boolean;
 }
 
 /**
@@ -620,7 +756,14 @@ export function estimate(input: EstimateInput): Estimate {
   const outChars = input.outputCharsPerCall ?? OUTPUT_CHARS_PER_CALL;
   const overhead = input.promptOverheadChars ?? PROMPT_OVERHEAD_CHARS;
   const concurrency = Math.max(1, Math.floor(input.concurrency ?? 1));
-  const chargeable = input.chargeable ?? (input.backend ? input.backend === 'api' : true);
+  const hostSeam = input.hostSeam === true;
+  // Rung 1 charges nothing and rung 2 charges nothing; only a real api key
+  // does. Before T10.11 an omitted `backend` — which is what the host-agent
+  // seam looks like, its rung having no transport to name — defaulted to
+  // `true`, so the one path on which potsherd makes no model call at all was
+  // the one path that quoted the user a bill.
+  const chargeable =
+    input.chargeable ?? (hostSeam ? false : input.backend ? input.backend === 'api' : true);
   // The measured fit is a haiku fit. A `--model sonnet` run buys the same
   // seconds and three times the tokens, so the money scales with the class
   // and the clock does not.
@@ -632,6 +775,13 @@ export function estimate(input: EstimateInput): Estimate {
   let outputTokens = 0;
   // Input characters actually sent, which is what the per-call fits take.
   let promptChars = 0;
+  // The same four totals, restricted to sessions whose call count this
+  // function *derived*. Only those carry PIPELINE_COST_FACTOR: a caller that
+  // states its own `calls` is reporting a fact, not asking for a guess.
+  let derivedCalls = 0;
+  let derivedInputTokens = 0;
+  let derivedOutputTokens = 0;
+  let derivedChars = 0;
 
   for (const s of input.sessions) {
     // Map-reduce: a session longer than one chunk is extracted per chunk and
@@ -648,17 +798,25 @@ export function estimate(input: EstimateInput): Estimate {
         ? n * profile.outputTokensPerCall
         : tokensForChars(n * outChars);
 
+    const derived = s.calls === undefined;
+    const bare = callUsd(n, chars, inTok, outTok, profile, price, priceScale);
     perSession.push({
       id: s.id,
       calls: n,
       inputTokens: inTok,
       outputTokens: outTok,
-      usd: callUsd(n, chars, inTok, outTok, profile, price, priceScale),
+      usd: derived ? bare * PIPELINE_COST_FACTOR : bare,
     });
     calls += n;
     inputTokens += inTok;
     outputTokens += outTok;
     promptChars += chars;
+    if (derived) {
+      derivedCalls += n;
+      derivedInputTokens += inTok;
+      derivedOutputTokens += outTok;
+      derivedChars += chars;
+    }
   }
 
   const cal = input.calibration;
@@ -667,12 +825,32 @@ export function estimate(input: EstimateInput): Estimate {
 
   const rawUsd =
     calls === 0 ? 0 : callUsd(calls, promptChars, inputTokens, outputTokens, profile, price, priceScale);
-  const usd = rawUsd * usdRatio;
+  // `callUsd` is linear in every argument, so this is exactly the per-session
+  // sum above — the supplement passes and retries the ideal call arithmetic
+  // never counted, charged once, on the derived part only.
+  const unquoted =
+    derivedCalls === 0
+      ? 0
+      : (PIPELINE_COST_FACTOR - 1) *
+        callUsd(
+          derivedCalls,
+          derivedChars,
+          derivedInputTokens,
+          derivedOutputTokens,
+          profile,
+          price,
+          priceScale,
+        );
+  const usd = hostSeam ? 0 : (rawUsd + unquoted) * usdRatio;
 
   // Serial work first, then the concurrency the machine actually delivers.
+  // PIPELINE_COST_FACTOR is deliberately absent: the one un-truncated recorded
+  // run came in at 1.15x of its quoted time and 1.68x of its quoted money, and
+  // an estimator corrected on both axes when only one is wrong is the "2x
+  // pessimistic" failure that would replace this one.
   const serialMs = calls * profile.baseMs + (promptChars / 1_000) * profile.msPerKChar;
   const eff = effectiveConcurrency(concurrency, profile);
-  const seconds = calls === 0 ? 0 : (serialMs / 1_000 / eff) * timeRatio;
+  const seconds = calls === 0 || hostSeam ? 0 : (serialMs / 1_000 / eff) * timeRatio;
 
   return {
     sessions: input.sessions.length,
@@ -689,8 +867,8 @@ export function estimate(input: EstimateInput): Estimate {
     modelClass: cls,
     ...(input.backend ? { backend: input.backend } : {}),
     chargeable,
-    basis: profile.basis,
-    measured: profile.measured,
+    basis: hostSeam ? HOST_SEAM_BASIS : profile.basis,
+    measured: hostSeam ? false : profile.measured,
     effectiveConcurrency: eff,
     ...(cal && cal.samples > 0 ? { calibration: cal } : {}),
     perSession,

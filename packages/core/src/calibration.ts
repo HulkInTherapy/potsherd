@@ -1,4 +1,5 @@
 import type { Db } from './db.js';
+import { ESTIMATOR_FIT } from './llm.js';
 import type { Backend, Calibration, Estimate } from './llm.js';
 import { wordMatchesToken, wordSpans } from './search/snippet.js';
 
@@ -20,6 +21,14 @@ import { wordMatchesToken, wordSpans } from './search/snippet.js';
  *      lost targets to errors, is recorded with `complete = 0` and never used
  *      as evidence. It did less work than it was quoted for, so its ratio is
  *      arithmetic about nothing.
+ *   1a. **Only runs quoted by *this* estimator count** ({@link ESTIMATOR_FIT},
+ *      T10.11). A row is a record of what one run was told by the constants
+ *      that were compiled that day. Re-fit those constants and the row becomes
+ *      a measurement of a different estimator, and averaging it into a
+ *      correction on top of the new one applies the same error twice — which
+ *      is not hypothetical: the two rows on the reference machine are the
+ *      evidence for the current fit, and left unfiltered they would multiply
+ *      the already-corrected quote by 1.66 again.
  *   2. **Only runs big enough to mean something.** {@link MIN_CALLS} calls.
  *      One session finishing 30% fast is noise, and correcting a 200-call
  *      quote by it would be worse than not correcting at all.
@@ -113,12 +122,18 @@ export function recordCardRun(db: Db, run: CardRunRecord): CardRunRow {
  *
  * `null` when there is nothing usable, which is the common case and must stay
  * cheap: the first run on a machine is quoted from the fitted constants alone
- * and says so.
+ * and says so. It is also, after T10.11's re-fit, the answer on the reference
+ * machine itself: both of its recorded runs pre-date {@link ESTIMATOR_FIT} and
+ * both were stopped early, so they are evidence *for* the constants rather
+ * than a correction *on* them.
  */
 export function readCalibration(
   db: Db,
-  o: { backend?: Backend; model?: string; window?: number } = {},
+  o: { backend?: Backend; model?: string; window?: number; fittedAt?: string } = {},
 ): Calibration | null {
+  // The test seam is the *only* reason this is a parameter: production has
+  // exactly one answer and it is the constant compiled beside the fit.
+  const fittedAt = o.fittedAt ?? ESTIMATOR_FIT;
   let rows: { time_ratio: number; usd_ratio: number; ran_at: string }[];
   try {
     rows = db
@@ -127,6 +142,7 @@ export function readCalibration(
            FROM card_runs
           WHERE complete = 1
             AND actual_calls >= ?
+            AND ran_at >= ?
             AND predicted_seconds > 0
             AND predicted_usd > 0
             ${o.backend ? 'AND backend = ?' : ''}
@@ -135,8 +151,8 @@ export function readCalibration(
       )
       .all(
         ...(o.backend
-          ? [MIN_CALLS, o.backend, o.window ?? CALIBRATION_WINDOW]
-          : [MIN_CALLS, o.window ?? CALIBRATION_WINDOW]),
+          ? [MIN_CALLS, fittedAt, o.backend, o.window ?? CALIBRATION_WINDOW]
+          : [MIN_CALLS, fittedAt, o.window ?? CALIBRATION_WINDOW]),
       ) as { time_ratio: number; usd_ratio: number; ran_at: string }[];
   } catch {
     // A database from before migration 6. No table, no correction, no crash:
