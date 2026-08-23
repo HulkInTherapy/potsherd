@@ -61,8 +61,11 @@ gh run watch
 
 **Publishing is the tag now.** `.github/workflows/publish.yml` fires on `v*`,
 re-runs every guard, publishes with `--provenance`, and then checks that the
-attestation landed. It needs the repository secret `NPM_TOKEN`, which a **human**
-creates once — nothing publishes without it. See [`npm.md`](npm.md).
+attestation landed. It needs **no secret at all**: npm trusted publishing (OIDC)
+was configured on 24 aug 2026, so the runner proves it is this workflow in this
+repository. What a **human** did once, on npmjs.com, was name this workflow as
+the package's trusted publisher and then disallow bypass-2fa tokens entirely —
+so the only way to publish potsherd is through this file. See [`npm.md`](npm.md).
 
 
 **HUMAN — submit the marketplace listing.** See

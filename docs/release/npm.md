@@ -107,11 +107,25 @@ not resolve npm packages, and it is already self-contained — see
 is a tag.
 
 ```bash
-# 1. ONCE, and only a human can: an npm automation token with read+write on
-#    this package, stored as the repository secret NPM_TOKEN.
-#      npmjs.com/settings/~/tokens  ->  Generate New Token  ->  Granular Access
-#      scope it to the `potsherd` package, give it Read and write, then:
-gh secret set NPM_TOKEN --repo HulkInTherapy/potsherd
+# 1. ONCE, and only a human can, on npmjs.com — DONE 24 aug 2026, no token:
+#      potsherd -> Settings -> Trusted Publisher -> GitHub Actions
+#        repository:  HulkInTherapy/potsherd
+#        workflow:    publish.yml
+#        environment: (blank)
+#        allowed:     npm publish        (NOT `npm stage publish` — unused here)
+#      potsherd -> Settings -> Publishing access ->
+#        "Require two-factor authentication and disallow bypass 2fa tokens"
+#
+#    There is no NPM_TOKEN and there should never be one. Publishing is OIDC:
+#    the runner proves it is this workflow in this repository and npm trusts
+#    that, so there is no secret to store, rotate, leak or paste. It also means
+#    the ONLY way to publish potsherd is through publish.yml — which is the
+#    same reason the provenance attestation is worth having, arrived at from
+#    the other direction.
+#
+#    The cost, stated because it is real: nobody can publish this package from
+#    a laptop any more. If a release cannot go out, the fix is to fix CI. Both
+#    settings are reversible on that page.
 
 # 2. EVERY RELEASE
 $EDITOR packages/core/src/version.ts     # and the six manifests pinned to it

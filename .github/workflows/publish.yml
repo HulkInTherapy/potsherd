@@ -25,10 +25,19 @@ name: publish
 #
 # ## what a human still has to do
 #
-#   1. create an npm **automation** token (granular, "Read and write", scoped to
-#      the `potsherd` package if you can) at npmjs.com/settings/~/tokens
-#   2. add it as the repository secret `NPM_TOKEN`
+#   1. on npmjs.com, the `potsherd` package -> Settings -> Trusted Publisher:
+#      GitHub Actions, repo `HulkInTherapy/potsherd`, workflow `publish.yml`,
+#      allowed action `npm publish`. Done 24 aug 2026.
+#   2. Publishing access -> "Require two-factor authentication and disallow
+#      bypass 2fa tokens". Trusted publishers keep working under it, and it
+#      means a leaked token cannot publish this package at all.
 #   3. bump the version, tag, push the tag
+#
+# There is NO npm token, deliberately. Publishing is OIDC: the runner proves it
+# is this workflow in this repository, and npm trusts that rather than a secret
+# somebody has to store, rotate and hope nobody pastes. It also means the only
+# way to publish potsherd is through this file, which is the same reason the
+# provenance attestation is worth having.
 #
 # Nothing here publishes without a tag, and nothing here can publish a version
 # that does not match the tag — see "the tag and the manifest must agree".
@@ -70,6 +79,28 @@ jobs:
           node-version: '24'
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
+
+      # OIDC trusted publishing needs a recent npm; the one bundled with the
+      # Node in use is not something to assume when the failure mode is a
+      # release that cannot publish. Checked and upgraded in place, and the
+      # version is printed so a failed run says which npm it had.
+      - name: an npm new enough to publish over OIDC
+        run: |
+          set -euo pipefail
+          have="$(npm --version)"
+          echo "bundled npm $have"
+          # 11.5.1 is where npm learned to authenticate a publish with an OIDC
+          # id-token. Whatever Node happens to bundle is not something to assume
+          # when the failure mode is a release that cannot publish at all.
+          if ! NPM_V="$have" node -e '
+            const [a, b, c] = (process.env.NPM_V || "0.0.0").split(".").map(Number);
+            const ok = a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1)));
+            process.exit(ok ? 0 : 1);
+          '; then
+            echo "npm $have is older than 11.5.1 — upgrading for OIDC publish"
+            npm install -g npm@latest
+          fi
+          echo "publishing with npm $(npm --version)"
 
       - run: pnpm install --frozen-lockfile
 
@@ -145,8 +176,9 @@ jobs:
       - name: publish, with provenance
         if: startsWith(github.ref, 'refs/tags/v') && inputs.dry_run != true
         working-directory: packages/cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # No NODE_AUTH_TOKEN. Authentication is the OIDC id-token this job
+        # already requests above; setting an empty token env var here would be
+        # worse than omitting it, because npm would try to use it.
         run: npm publish --provenance --access public
 
       # A flag that is documented and does nothing is the failure mode this
