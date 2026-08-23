@@ -319,7 +319,15 @@ export function planWindows(
     let unitsLeft = candidates.length;
     for (const i of candidates) {
       const u = transcript.units[i]!;
-      const per = Math.max(MIN_UNIT_CHARS, Math.floor(windowLeft / Math.max(1, unitsLeft)));
+      // The share has to cover the header as well as the body, or a window
+      // whose second exchange misses its allowance by exactly the 24
+      // characters of `[seq n · date]` drops it and prints as a singleton.
+      // Measured: at `--windows 5` the opening window of a 119-exchange
+      // session lost its neighbour by one character.
+      const per = Math.max(
+        MIN_UNIT_CHARS,
+        Math.floor(windowLeft / Math.max(1, unitsLeft)) - UNIT_HEADER_CHARS,
+      );
       const body = u.text.length > per ? renderUnitBody(u, per) : u.text;
       unitsLeft -= 1;
       const cost = body.length + UNIT_HEADER_CHARS;
