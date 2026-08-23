@@ -11,6 +11,7 @@ import {
   ASK_SESSION_CHARS,
   MIN_QUOTE_CHARS,
   STRICT_MIN_EVIDENCE,
+  SYNTH_SYSTEM,
   ask,
   excerptText,
   excerptUnits,
@@ -2300,5 +2301,110 @@ describe('the plugin skill routes ask through --readers-out / --readers-in', () 
     for (const named of ['outputs', 'found', 'quotes', 'answer_fragment']) {
       expect(ask, `skill names ${named}`).toContain(named);
     }
+  });
+});
+
+// ============================================================ T10.2 synthFn
+//
+// The file-shaped round trip lives in `tests/synthesis-seam.test.ts`. What is
+// here is the library-level seam it is built on — `AskOptions.synthFn` — because
+// the phase-5 plugin and the MCP server call `ask()` directly and must get the
+// same guarantees the CLI gets. T4.4 made the same argument for `readerFn`.
+
+describe('T10.2 AskOptions.synthFn', () => {
+  const QUESTION = 'how did we handle pgbouncer with prepared statements?';
+  const RECORDED = { sessionId: POOLER, ...(JSON.parse(READER_OK) as AskReaderOutput) };
+
+  it('opens no synthesizer backend at all, so a run with both seams costs nothing', async () => {
+    const { root, db } = seedDb();
+    const transport = new Throwing();
+    const llm = Llm.open({ transport, model: 'sonnet' });
+    const readerLlm = Llm.open({ transport, model: 'haiku' });
+
+    const r = await ask(db, QUESTION, {
+      root,
+      llm,
+      readerLlm,
+      openThreads: false,
+      readerFn: async () => RECORDED,
+      synthFn: async () => ({
+        evidence: [{ n: 1, session_id: POOLER, seq: 12, quote: REAL_QUOTE }],
+        answer: [{ text: 'The client cache was set to zero.', cites: [1] }],
+      }),
+    });
+
+    // Not "the call was skipped" — no expression on this path constructs a
+    // backend, so the throwing transport is never even reached.
+    expect(transport.sent).toHaveLength(0);
+    expect(r.spend.calls).toBe(0);
+    expect(r.answer).toContain('client cache was set to zero');
+    expect(r.evidence).toHaveLength(1);
+    db.close();
+    await llm.close();
+    await readerLlm.close();
+  });
+
+  it('hands the host the prompt, the system rule, the schema and the citable seqs', async () => {
+    const { root, db } = seedDb();
+    let seen: { prompt: string; system: string; schema: string; sessions: unknown[] } | null = null;
+    await ask(db, QUESTION, {
+      root,
+      openThreads: false,
+      readerFn: async () => RECORDED,
+      synthFn: async (input) => {
+        seen = input;
+        return { evidence: [], answer: [] };
+      },
+    });
+
+    expect(seen).not.toBeNull();
+    const input = seen as unknown as { prompt: string; system: string; schema: string; sessions: { sessionId: string; seqs: number[] }[] };
+    expect(input.prompt).toContain(QUESTION);
+    expect(input.prompt).toContain(REAL_QUOTE);
+    expect(input.system).toBe(SYNTH_SYSTEM);
+    expect(input.schema).toContain('session_id');
+    expect(input.sessions[0]!.sessionId).toBe(POOLER);
+    expect(input.sessions[0]!.seqs).toContain(12);
+    db.close();
+  });
+
+  it('validates the host reply with the same function that validates a backend reply', async () => {
+    const { root, db } = seedDb();
+    // Every one of these is a reply a model is also allowed to produce, and
+    // each must land on the empty answer rather than on an exception or,
+    // worse, on an uncited sentence.
+    for (const reply of [null, undefined, 'a string', 42, {}, { answer: 'not an array' }, { evidence: [{}] }]) {
+      const r = await ask(db, QUESTION, {
+        root,
+        openThreads: false,
+        readerFn: async () => RECORDED,
+        synthFn: async () => reply,
+      });
+      expect(r.answer, `reply ${JSON.stringify(reply) ?? 'undefined'}`).toBe('');
+      expect(r.sentences).toHaveLength(0);
+      expect(r.spend.calls).toBe(0);
+    }
+    db.close();
+  });
+
+  /**
+   * A dead reader is one session contributing nothing and the run goes on. A
+   * dead synthesizer is the answer, and swallowing it would print "the readers
+   * found nothing" about a corpus that had plenty — the exact false statement
+   * `03` §8 exists to prevent.
+   */
+  it('does not swallow a failing host synthesizer the way it swallows a failing reader', async () => {
+    const { root, db } = seedDb();
+    await expect(
+      ask(db, QUESTION, {
+        root,
+        openThreads: false,
+        readerFn: async () => RECORDED,
+        synthFn: async () => {
+          throw new Error('the host agent gave up');
+        },
+      }),
+    ).rejects.toThrow(/the host agent gave up/);
+    db.close();
   });
 });
