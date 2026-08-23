@@ -464,6 +464,71 @@ DELETE FROM sync_state WHERE key LIKE 'index:%' AND key <> 'index:ghosts';
 UPDATE sessions SET source_mtime = NULL;
 `,
   },
+  {
+    version: 12,
+    name: 'notes',
+    // The notes lane — the first table potsherd writes on a user's say-so
+    // rather than on what it read (`docs/AGENT-AUDIT-2026-08-23.md` §4.7,
+    // phase-10 §B9). Every other verb is read-only; this is the one that
+    // makes the archive learn.
+    //
+    // Four properties are load-bearing, and each one is a column decision:
+    //
+    // **Append-only.** `id` is an autoincrement rowid and nothing in
+    // `notes.ts` issues an `UPDATE` or a `DELETE` against this table — a
+    // second note on the same thread is a second row, and the older verdict
+    // is still there afterwards. There is deliberately no `superseded_by`
+    // column, because maintaining one would mean writing to a row that had
+    // already been written, which is the property this table exists to not
+    // have. "Which note is current" is derived at read time (`MAX(id)`) and
+    // therefore cannot go stale or be corrupted by a half-finished write.
+    //
+    // **No foreign key.** Exactly the reasoning `tags`, `pins` and `links`
+    // carry (migration 1): a ghost has no row in `sessions`, and a note about
+    // a session the sweep later deletes is the note most worth keeping. An
+    // `ON DELETE CASCADE` here would also hand any future re-index the power
+    // to destroy user-written text, which no read path should ever have.
+    //
+    // **`thread_id` and `session_id` both.** The thread is the unit a note
+    // attaches to (migration 11), but threads are *derived* and are rebuilt
+    // whole on every `index`. Storing only the derived id would mean a
+    // re-derivation could orphan a note. Storing only the session id would
+    // lose the thing the caller actually meant. So both are recorded: what it
+    // was told (`session_id`, the ref the caller named, resolved) and what
+    // that meant at the time (`thread_id`).
+    //
+    // **`author` and `via` are recorded, never inferred.** `via` is known for
+    // certain — the code path that wrote the row. `author` is not: from a
+    // terminal potsherd cannot tell an agent typing a command from a human
+    // typing the same command, so it defaults to `'unknown'` and is only ever
+    // whatever the caller stated with `--by`. A guessed author on an
+    // assertion table would be a fabricated provenance, which is worse than
+    // no provenance.
+    //
+    // `notes_fts` is `content='notes'` exactly like `cards_fts`: sqlite keeps
+    // no second copy of the text. It is safe as external content precisely
+    // because rows are never deleted or updated, so the 'delete' command form
+    // that `cards/write.ts` needs has no counterpart here.
+    up: `
+CREATE TABLE IF NOT EXISTS notes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id  TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  decided    TEXT NOT NULL DEFAULT '',
+  open       TEXT NOT NULL DEFAULT '',
+  next_step  TEXT NOT NULL DEFAULT '',
+  author     TEXT NOT NULL DEFAULT 'unknown',
+  via        TEXT NOT NULL DEFAULT 'cli',
+  written_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notes_thread  ON notes(thread_id, id);
+CREATE INDEX IF NOT EXISTS notes_session ON notes(session_id, id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+  decided, open, next_step, content='notes'
+);
+`,
+  },
 ];
 
 export function open(opts: OpenOptions = {}): Db {
