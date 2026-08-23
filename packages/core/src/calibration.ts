@@ -422,6 +422,57 @@ export const STRONG_FLOOR = 0.75;
  */
 export const ROUTING_CEILING: Confidence = 'weak';
 
+/**
+ * How many of the query's **distinctive** terms a row must be able to show
+ * before it may carry any label at all.
+ *
+ * One, and it is a *necessary condition* rather than a weight — which is the
+ * whole difference between this and the IDF-weighted coverage T10.1 measured
+ * and rejected (`T10.1-REPORT.md` §d1). Nothing here multiplies a score by a
+ * rarity; a term's rarity decides only whether it is *in* the distinctive set,
+ * and the set is chosen by relative rank on this index (`keyphrase.ts`), never
+ * by a magnitude. T10.1's objection — that df-0 words get the highest IDF and
+ * so the least informative words dominate — cannot arise, because
+ * `selectTerms` excludes df-0 terms from the set entirely and, when every word
+ * of a query is absent from the index, produces no set and this rule does not
+ * fire.
+ *
+ * ## The defect it exists for, measured
+ *
+ * `evals/queries.jsonl` control `bluetooth on the checkout page`. The archive
+ * has bluetooth (a deleted devices thread) and it has checkout (four web
+ * sessions), and it has no conversation about both. The honest answer is zero
+ * rows. Measured at `99bbb8b`, on the committed fixture, at the floor `find`
+ * runs at:
+ *
+ * ```
+ *   FAIL  zero rows   2 rows weak   bluetooth on the checkout page
+ * ```
+ *
+ * and it fails **identically with vectors off and on an index built with
+ * `--no-embed`** — `evals/run.ts` runs its controls at `vectors: false`, so
+ * this was never a vector artefact. The arithmetic:
+ *
+ * ```
+ * quotable terms      bluetooth · checkout · page
+ * a checkout session  covers 2 of 3        = 0.667
+ * x (0.6 + 0.25 x 1)                       = 0.567   >= WEAK_FLOOR
+ * ```
+ *
+ * {@link coveredTerms} is a **uniform** partition: missing `bluetooth` costs
+ * exactly what missing `page` would. So a two-topic question can be answered
+ * at `weak` by a row that has one topic and not the other, and the half it is
+ * missing is the half that named the subject. {@link WEAK_FLOOR}'s own
+ * docstring says it means *a clear majority of the distinctive words*; 2 of 3
+ * is a clear majority of the words, and the constant was keeping a promise
+ * about a different quantity than the one it was measuring.
+ *
+ * This rule restores that promise **without moving the floor**: whatever a row
+ * scores, if it cannot show one single distinctive word of the question, it is
+ * not an answer to it.
+ */
+export const KEY_TERMS_REQUIRED = 1;
+
 /** The worse of two labels — a ceiling, where {@link maxConfidence} is a floor. */
 export function capConfidence(a: Confidence, b: Confidence): Confidence {
   return RANK[a] <= RANK[b] ? a : b;
@@ -453,6 +504,18 @@ export interface RowEvidence {
    * rows are disqualified from claiming it.
    */
   ceiling?: Confidence;
+  /**
+   * The distinctive terms of the query this row is **required** to show, and
+   * how many of them it actually does. `keyTerms` 0 — or both absent — when
+   * the query has no distinctive terms to speak of, which is the case for a
+   * query whose words are all function words or all absent from the index.
+   *
+   * The caller decides which terms are required and how many;
+   * {@link KEY_TERMS_REQUIRED} is the policy `recall()` applies. Missing any
+   * of them caps the row at `none`.
+   */
+  keyCovered?: number;
+  keyTerms?: number;
 }
 
 export interface Calibrated {
@@ -491,18 +554,26 @@ export function calibrate(e: RowEvidence): Calibrated {
   const score = clamp01(
     coverage * (WEIGHT_BASE + WEIGHT_STRENGTH * strength + WEIGHT_AGREEMENT * agreement),
   );
+  // The distinctive-term condition (F8's second half). It is expressed as a
+  // *ceiling of `none`* rather than as a term in the arithmetic on purpose:
+  // `score` keeps reproducing `coverage x (base + …)` from the three numbers
+  // printed beside it, which is the one property that makes this module
+  // debuggable from `--explain` alone, and the thing being refused is the
+  // label rather than the measurement.
+  const missesKeyTerm = (e.keyTerms ?? 0) > 0 && (e.keyCovered ?? 0) < (e.keyTerms ?? 0);
+  const ceiling = missesKeyTerm ? capConfidence(e.ceiling ?? 'none', 'none') : e.ceiling;
   // The cap, when the caller named one. `capConfidence` is a `min` over the
   // three-word ladder, so no score can climb past it — which is what makes "a
   // card-only hit cannot reach `strong`" a fact about this function rather
   // than a fact about how well cards happen to score.
-  const confidence = e.ceiling ? capConfidence(label(score), e.ceiling) : label(score);
+  const confidence = ceiling ? capConfidence(label(score), ceiling) : label(score);
   return {
     score,
     confidence,
     coverage,
     strength,
     agreement,
-    ...(e.ceiling ? { ceiling: e.ceiling } : {}),
+    ...(ceiling ? { ceiling } : {}),
   };
 }
 
