@@ -1,0 +1,172 @@
+name: publish
+
+# Fires on a `v*` tag and nowhere else, plus a manual button for a dry run.
+#
+# ## why this exists at all
+#
+# `v1.1.0` was published from a laptop. It works, and npm's own registry
+# signature is on it, but there is **no provenance attestation** — nothing
+# cryptographically ties that tarball to the commit it claims to come from.
+# A stranger has to take our word for it.
+#
+# That is the one claim this project does not let itself make anywhere else.
+# `audit --verify` prints standalone python so nobody has to trust potsherd to
+# check potsherd; every card decision cites the exchanges behind it; every
+# number printed is measured or labelled `est.` Publishing an artefact that
+# says "trust me, this is the code" was the last place that rule was not being
+# applied.
+#
+# With `id-token: write` and `--provenance`, npm records a sigstore attestation
+# binding the tarball to this repository, this commit and this workflow run,
+# and shows a verified Provenance panel on the package page. That is also the
+# GitHub<->npm link people look for and do not find in the "Packages" sidebar —
+# which shows GitHub's OWN registry (`npm.pkg.github.com`) and will always be
+# empty for a package published to npmjs.com.
+#
+# ## what a human still has to do
+#
+#   1. create an npm **automation** token (granular, "Read and write", scoped to
+#      the `potsherd` package if you can) at npmjs.com/settings/~/tokens
+#   2. add it as the repository secret `NPM_TOKEN`
+#   3. bump the version, tag, push the tag
+#
+# Nothing here publishes without a tag, and nothing here can publish a version
+# that does not match the tag — see "the tag and the manifest must agree".
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'build and check, but do not publish'
+        type: boolean
+        default: true
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write        # ← the whole point: without this there is no provenance
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # tags, for the version test
+
+      # Everything below the publish step is a reason NOT to publish. A release
+      # pipeline whose only job is to publish will publish anything.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: the tag and the manifest must agree
+        # Publishing 1.1.0 under the tag v1.2.0 produces a package nobody can
+        # trace, and provenance would then attest to that mismatch rather than
+        # catch it. The suite already pins seven manifests to each other and to
+        # the newest tag; this is the same rule at the moment it matters most.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./packages/cli/package.json').version")"
+          echo "tag=$TAG  package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match packages/cli/package.json ($PKG)"
+            exit 1
+          fi
+
+      - name: not already published
+        run: |
+          set -euo pipefail
+          PKG="$(node -p "require('./packages/cli/package.json').version")"
+          if npm view "potsherd@$PKG" version >/dev/null 2>&1; then
+            echo "::error::potsherd@$PKG is already on the registry. Bump the version."
+            exit 1
+          fi
+          echo "potsherd@$PKG is not published yet"
+
+      - name: no committed file carries real-corpus content
+        run: |
+          python3 scripts/check-privacy.py --selftest
+          python3 scripts/check-privacy.py
+
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      - name: the same suite on Node's own sqlite
+        env:
+          POTSHERD_SQLITE: node
+        run: |
+          if node -e "require('node:sqlite')" 2>/dev/null; then
+            pnpm test
+          else
+            echo "$(node --version) has no unflagged node:sqlite — nothing to test"
+          fi
+
+      - name: the vendored plugin bundles are the ones this build produces
+        # A release that ships a stale plugin bundle ships last release's
+        # behaviour under this release's version number.
+        run: |
+          node scripts/vendor-plugin.mjs
+          git diff --exit-code -- plugins/ || {
+            echo "::error::plugins/*/dist is not what this source builds. Run: pnpm build && pnpm vendor"
+            exit 1
+          }
+
+      - name: the tarball installs and runs on a machine that has never seen this
+        run: |
+          set -euo pipefail
+          cd packages/cli && npm pack --silent && cd ../..
+          TGZ="$(ls packages/cli/potsherd-*.tgz)"
+          WORK="$(mktemp -d)"
+          cp "$TGZ" "$WORK/"
+          cd "$WORK"
+          npm init -y >/dev/null
+          npm install --silent ./potsherd-*.tgz
+          ./node_modules/.bin/potsherd --version
+          ./node_modules/.bin/potsherd audit --claude-dir /tmp/definitely-not-here
+          du -sh node_modules
+
+      - name: publish, with provenance
+        if: startsWith(github.ref, 'refs/tags/v') && inputs.dry_run != true
+        working-directory: packages/cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
+
+      # A flag that is documented and does nothing is the failure mode this
+      # project has now recorded seven times. `--provenance` succeeds silently
+      # when `id-token: write` is missing, so the attestation is CHECKED rather
+      # than assumed. The registry needs a moment to index it.
+      - name: provenance actually landed
+        if: startsWith(github.ref, 'refs/tags/v') && inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          PKG="$(node -p "require('./packages/cli/package.json').version")"
+          for i in 1 2 3 4 5 6; do
+            sleep 10
+            ATT="$(npm view "potsherd@$PKG" --json 2>/dev/null \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.stringify(JSON.parse(s).dist.attestations??null))}catch{console.log("null")}})')"
+            echo "attempt $i: $ATT"
+            if [ "$ATT" != "null" ]; then
+              echo "provenance recorded for potsherd@$PKG"
+              exit 0
+            fi
+          done
+          echo "::error::published, but npm records no attestation — check that the job has id-token: write"
+          exit 1

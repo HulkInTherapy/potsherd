@@ -41,10 +41,14 @@ Runtime dependencies, and why each is where it is:
 npm view potsherd
 ```
 
-Today: **404**. If that ever returns somebody else's package, stop — the name is
-taken and this readme's `npx potsherd audit` line is a claim about their code.
+Before the first publish this was a **404**. Since 22 August 2026 it returns
+**1.1.0**. The check still matters on any future rename: if it ever returns
+somebody else's package, stop, because the readme's `npx potsherd audit` line
+would then be a claim about their code.
 
-## the command, decided
+## the command, decided — and superseded for the next release
+
+**1.1.0 was published by hand:**
 
 ```bash
 cd packages/cli
@@ -59,6 +63,14 @@ npm publish --access public
   having. Not tonight. It is the right thing for a later release that publishes
   from a workflow, and it is written down here so the next person does not have
   to rediscover why it was skipped.
+
+  **That later release is now set up.** `.github/workflows/publish.yml` fires on
+  a `v*` tag with `id-token: write` and publishes with `--provenance`. See
+  "the next release" below. `1.1.0` keeps no attestation — it cannot be added
+  retroactively — and
+  `npm view potsherd@1.1.0 --json | jq .dist.attestations` returns `null`,
+  which is the honest state and should be said out loud rather than left to be
+  discovered.
 - **`--tag next`** would publish without moving `latest`. Refused because it
   makes `npx potsherd audit` — the first line of the README — resolve to nothing,
   which is the one command this release exists to make work.
@@ -85,3 +97,76 @@ stops needing its qualifier. Change it in the same commit.
 Nothing about the plugin. A Claude Code plugin install is a git clone, it does
 not resolve npm packages, and it is already self-contained — see
 `scripts/vendor-plugin.mjs`.
+
+
+---
+
+## the next release: publishing is the tag
+
+`.github/workflows/publish.yml`. A human does step 1 once; everything after it
+is a tag.
+
+```bash
+# 1. ONCE, and only a human can: an npm automation token with read+write on
+#    this package, stored as the repository secret NPM_TOKEN.
+#      npmjs.com/settings/~/tokens  ->  Generate New Token  ->  Granular Access
+#      scope it to the `potsherd` package, give it Read and write, then:
+gh secret set NPM_TOKEN --repo HulkInTherapy/potsherd
+
+# 2. EVERY RELEASE
+$EDITOR packages/core/src/version.ts     # and the six manifests pinned to it
+pnpm build && pnpm vendor
+git commit -am "release vX.Y.Z" && git push origin main
+gh run watch                              # CI green on the PUSHED COMMIT first
+git tag -a vX.Y.Z -m "potsherd vX.Y.Z" && git push origin vX.Y.Z
+gh run watch                              # then the publish workflow
+```
+
+### what the workflow refuses to publish
+
+Every one of these is a reason **not** to publish, and they run before the
+publish step. A release pipeline whose only job is to publish will publish
+anything.
+
+- the tag and `packages/cli/package.json` disagree
+- that version is already on the registry
+- `check-privacy.py --selftest` or the full sweep is red
+- `pnpm typecheck` or `pnpm test` is red
+- the suite is red under `POTSHERD_SQLITE=node`
+- `plugins/*/dist` is not what this source builds
+- the packed tarball will not install and run in a clean directory
+
+### and it checks that provenance actually landed
+
+`npm publish --provenance` **succeeds silently** when the job is missing
+`id-token: write`. A flag that is documented and does nothing is the failure
+mode this project has recorded seven times, so the workflow polls
+`npm view potsherd@<version> --json` afterwards and fails if
+`dist.attestations` is still `null`.
+
+### what provenance buys, and why it is on-brand
+
+npm shows a verified **Provenance** panel on the package page, linking the
+tarball to this repository, the exact commit and the workflow run that built it.
+
+It is also the GitHub↔npm link people look for and do not find. **The "Packages"
+box in the GitHub sidebar is GitHub's own registry** (`npm.pkg.github.com`), not
+npmjs.com, and it will read "No packages published" forever no matter how many
+times this package is published to npm. Publishing there instead would force a
+scoped name (`@hulkintherapy/potsherd`) and require consumers to authenticate
+with a GitHub token even for a public package — which would break
+`npx potsherd audit`, the first command in the README.
+
+And it is the same rule as everything else here. `audit --verify` prints
+standalone python so nobody has to trust potsherd to check potsherd. An artefact
+that says "trust me, this is the code" was the last place that rule was not
+being applied.
+
+### dry run
+
+`workflow_dispatch` runs everything except the publish, so the whole pipeline
+can be exercised without spending a version number:
+
+```bash
+gh workflow run publish.yml -f dry_run=true && gh run watch
+```

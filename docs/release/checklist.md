@@ -59,8 +59,11 @@ git push origin v1.0.0
 gh run watch
 ```
 
-**HUMAN — publish to npm.** See [`npm.md`](npm.md). One command, and it cannot
-be undone.
+**Publishing is the tag now.** `.github/workflows/publish.yml` fires on `v*`,
+re-runs every guard, publishes with `--provenance`, and then checks that the
+attestation landed. It needs the repository secret `NPM_TOKEN`, which a **human**
+creates once — nothing publishes without it. See [`npm.md`](npm.md).
+
 
 **HUMAN — submit the marketplace listing.** See
 [`marketplace.md`](marketplace.md).
