@@ -16,6 +16,9 @@ import {
   RUNTIME_FETCH_VERBS,
   CARD_MODEL,
   CHARS_PER_TOKEN,
+  ESTIMATOR_FIT,
+  HOST_SEAM_BASIS,
+  PIPELINE_COST_FACTOR,
   Llm,
   LlmError,
   IMPLAUSIBLE_TOKEN_FACTOR,
@@ -480,7 +483,11 @@ describe('estimate', () => {
     });
     expect(e.inputTokens).toBe(1_000_000);
     expect(e.outputTokens).toBe(0);
-    expect(e.usd).toBeCloseTo(PRICES.haiku.inputPerMTok, 6);
+    // List price for the tokens, times the work the ideal call arithmetic
+    // never counted (T10.11). The api path needs that factor most of all: it
+    // is the one where the dollars are a bill rather than an equivalent, and
+    // `08` item 20 says a pre-call ceiling cannot catch an under-quote.
+    expect(e.usd).toBeCloseTo(PRICES.haiku.inputPerMTok * PIPELINE_COST_FACTOR, 6);
   });
 
   it('charges a long session for the map-reduce it will need', () => {
@@ -581,6 +588,164 @@ describe('estimate', () => {
     const s = (n: number) =>
       estimate({ sessions: Array.from({ length: n }, (_, i) => ({ id: `s${i}`, chars: 5_000 })) });
     expect(s(10).usd).toBeCloseTo(s(1).usd * 10, 8);
+  });
+});
+
+// ------------------------------------------------- the T10.11 estimator re-fit
+
+/**
+ * The two runs `card_runs` actually holds on the reference machine, 22–23 aug
+ * 2026, `agent-sdk` / haiku / concurrency 6 — **47 real calls between them**,
+ * which is what the phase plan's "~50 recorded real calls" turns out to be.
+ * Both were stopped before they finished.
+ *
+ * Only the quoted-and-actual numbers are reproduced; nothing here identifies a
+ * session, a project or a machine. The ratios are computed **per call**,
+ * because one of the two runs was truncated and its totals are therefore
+ * arithmetic about two different amounts of work — the same reason
+ * `calibration.ts` rule 1 refuses such a row as a correction.
+ */
+const RECORDED_RUNS = [
+  {
+    when: '22 aug',
+    predictedCalls: 18,
+    predictedSeconds: 277.261371,
+    predictedUsd: 0.928792509,
+    actualCalls: 11,
+    actualSeconds: 252.382,
+    actualUsd: 0.9625478,
+    /** The run did not reach the end of its scope, so its wall clock is not comparable. */
+    truncated: true,
+  },
+  {
+    when: '23 aug',
+    predictedCalls: 35,
+    predictedSeconds: 530.333472,
+    predictedUsd: 1.755238688,
+    actualCalls: 36,
+    actualSeconds: 608.035,
+    actualUsd: 2.9440806,
+    truncated: false,
+  },
+] as const;
+
+/** How many times the quote a run's money actually came in at, per call. */
+function moneyRatio(r: (typeof RECORDED_RUNS)[number]): number {
+  return r.actualUsd / r.actualCalls / (r.predictedUsd / r.predictedCalls);
+}
+
+/** The same for the clock. */
+function timeRatio(r: (typeof RECORDED_RUNS)[number]): number {
+  return r.actualSeconds / r.actualCalls / (r.predictedSeconds / r.predictedCalls);
+}
+
+describe('the re-fit against the calls the estimator actually made', () => {
+  it('PIPELINE_COST_FACTOR is 1.5 — the midpoint of a bound the pipeline sets, not an argmax', () => {
+    // `cards/pipeline.ts` allows **at most one** supplement call per card and
+    // `cards/extract.ts` counts retries; `estimate` prices neither. So the
+    // omitted work is bounded below by nothing and above by a second full call
+    // on every card. The stopping rule is the midpoint of [1, 2].
+    expect(PIPELINE_COST_FACTOR).toBe(1.5);
+    expect(PIPELINE_COST_FACTOR).toBeGreaterThan(1);
+    expect(PIPELINE_COST_FACTOR).toBeLessThanOrEqual(2);
+    // And explicitly *not* the value that minimises residual on the two runs
+    // that check it. That value is 1.66, and fitting to the sample that scores
+    // you is the mistake `03` records `1.5` as a stopping rule to avoid.
+    const argmax = (moneyRatio(RECORDED_RUNS[0]) + moneyRatio(RECORDED_RUNS[1])) / 2;
+    expect(argmax).toBeGreaterThan(1.6);
+    expect(PIPELINE_COST_FACTOR).toBeLessThan(argmax);
+  });
+
+  it('the recorded runs were outside the honest range before the factor, and inside it after', () => {
+    const { usdLow, usdHigh } = CALL_PROFILES['agent-sdk'].spread;
+    for (const run of RECORDED_RUNS) {
+      const before = moneyRatio(run);
+      // The defect `08` row 6 names. Not merely a point estimate that was low:
+      // the *top* of the quoted range was still below what the run cost, so
+      // no reading of the card would have warned anybody.
+      expect(before).toBeGreaterThan(usdHigh);
+      const after = before / PIPELINE_COST_FACTOR;
+      expect(after).toBeGreaterThan(usdLow);
+      expect(after).toBeLessThan(usdHigh);
+    }
+  });
+
+  it('still errs low, and only low — which is the half of the direction that is deliberate', () => {
+    for (const run of RECORDED_RUNS) {
+      const after = moneyRatio(run) / PIPELINE_COST_FACTOR;
+      // Under-quoting is the dangerous direction, so the residual is kept
+      // small; over-quoting is the *other* failure, so it is not allowed at
+      // all. A factor of 2 would put both of these below 1 and fail here.
+      expect(after).toBeGreaterThan(1);
+      expect(after).toBeLessThan(1.2);
+    }
+  });
+
+  it('leaves the clock alone, because the clock was never the thing that was wrong', () => {
+    // The 23 aug run is the only one whose scope was not truncated away, and
+    // it came in at 1.15x of its quoted time against 1.63x of its quoted
+    // money. Correcting both axes by the money factor would quote that run's
+    // 10m 8s as 13m 15s — the "2x pessimistic" outcome that is not a success.
+    const un = RECORDED_RUNS[1];
+    expect(timeRatio(un)).toBeLessThan(1.2);
+    expect(moneyRatio(un)).toBeGreaterThan(1.6);
+
+    const p = CALL_PROFILES['agent-sdk'];
+    const e = estimate({ sessions: [{ id: 'a', chars: 1_000 }], promptOverheadChars: 0 });
+    expect(e.seconds).toBeCloseTo((p.baseMs + p.msPerKChar) / 1_000, 5);
+    expect(p.baseMs).toBe(46_200);
+    expect(p.msPerKChar).toBe(915);
+  });
+
+  it('charges the derived call count and never second-guesses a stated one', () => {
+    const derived = estimate({ sessions: [{ id: 'a', chars: 40_000 }] });
+    const stated = estimate({ sessions: [{ id: 'a', chars: 40_000, calls: 1 }] });
+    expect(derived.calls).toBe(stated.calls);
+    expect(derived.usd / stated.usd).toBeCloseTo(PIPELINE_COST_FACTOR, 6);
+    // Same in the per-session breakdown, so `--json` and the card agree.
+    expect(derived.perSession[0]!.usd / stated.perSession[0]!.usd).toBeCloseTo(
+      PIPELINE_COST_FACTOR,
+      6,
+    );
+    // A caller that states its calls is reporting a fact. That is what keeps
+    // the 209-call reproduction above at 1.16x under rather than 1.30x over.
+    expect(derived.seconds).toBeCloseTo(stated.seconds, 6);
+  });
+});
+
+// ------------------------------------------------ rung 1: nothing to charge
+
+describe('the host-agent seam has no dollars to quote', () => {
+  it('returns zero money and zero potsherd wall time, and keeps the tokens', () => {
+    const seam = estimate({ sessions: [{ id: 'a', chars: 40_000 }], hostSeam: true });
+    expect(seam.usd).toBe(0);
+    expect(seam.usdLow).toBe(0);
+    expect(seam.usdHigh).toBe(0);
+    expect(seam.seconds).toBe(0);
+    expect(seam.chargeable).toBe(false);
+    // The unit that is left, and the one the card should be printing there.
+    expect(seam.calls).toBeGreaterThan(0);
+    expect(seam.inputTokens).toBeGreaterThan(0);
+    expect(seam.basis).toBe(HOST_SEAM_BASIS);
+    expect(seam.basis).toContain('tokens, not dollars');
+    expect(seam.measured).toBe(false);
+  });
+
+  it('the bare-cli rung still quotes an equivalent, because that one really runs calls', () => {
+    // Rung 2 spends no money either, but potsherd *does* make the calls, so
+    // the seconds are real and the dollars are a truthful api-equivalent.
+    const cli = estimate({ sessions: [{ id: 'a', chars: 40_000 }], backend: 'claude-cli' });
+    expect(cli.chargeable).toBe(false);
+    expect(cli.usd).toBeGreaterThan(0);
+    expect(cli.seconds).toBeGreaterThan(0);
+  });
+
+  it('an omitted backend no longer quotes a bill for a call it will not make', () => {
+    // Before T10.11 the host-agent seam — whose ladder rung has no transport
+    // to name, so `backend` is absent — fell through to `chargeable: true`.
+    expect(estimate({ sessions: [{ id: 'a', chars: 1_000 }], hostSeam: true }).chargeable).toBe(
+      false,
+    );
   });
 });
 
@@ -723,6 +888,37 @@ describe('calibration from the machine own runs', () => {
       actualSeconds: 9_861,
     });
     expect(readCalibration(db)).toBeNull();
+    db.close();
+  });
+
+  it('ignores a run quoted by a different fit, so a re-fit is not counted twice', () => {
+    const db = store.open({ file: ':memory:' });
+    // A finished, large, perfectly usable run — recorded before the constants
+    // currently compiled in were fitted. It is a measurement of a *different*
+    // estimator. Using it would apply the correction the re-fit already made,
+    // a second time, on top of itself.
+    recordCardRun(db, {
+      ...finished,
+      ranAt: '2026-08-23T11:30:53.669Z',
+      actualSeconds: 9_861,
+      actualUsd: 33.54,
+    });
+    expect(ESTIMATOR_FIT > '2026-08-23T11:30:53.669Z').toBe(true);
+    expect(readCalibration(db)).toBeNull();
+
+    // The same row, recorded against this fit, corrects as it always did.
+    recordCardRun(db, {
+      ...finished,
+      ranAt: '2999-01-01T00:00:00.000Z',
+      actualSeconds: 9_861,
+      actualUsd: 33.54,
+    });
+    expect(readCalibration(db)!.samples).toBe(1);
+    expect(readCalibration(db)!.usdRatio).toBeCloseTo(3, 2);
+
+    // And the seam is a seam, not a bypass: asked about an older fit, the
+    // older row is evidence again.
+    expect(readCalibration(db, { fittedAt: '2026-01-01T00:00:00.000Z' })!.samples).toBe(2);
     db.close();
   });
 
