@@ -1,0 +1,191 @@
+{
+  "result": {
+    "tools": [
+      {
+        "name": "potsherd_recall",
+        "title": "Search past coding sessions",
+        "description": "USE THIS BEFORE telling the user you do not remember, do not have access to earlier sessions, or that something was never discussed — it searches every coding-agent session already on this machine, and it is the ONLY potsherd tool you need to reach for first.\n\nReach for it the moment the user says \"last time\", \"before\", \"we discussed\", \"why did we\", \"what did we decide\", \"that thing we tried\", \"pick up where we left off\", \"what was I working on\", or names a decision without saying when. Also use it before re-solving a problem that sounds familiar: the answer is often already in a session from months ago.\n\nTRUST ITS SILENCE. Every reply carries confidence — strong, weak or none — and a none comes back with ZERO rows and a \"no match\" note. That is a real answer: the archive does not contain this, and saying so is better than widening into a guess. Never fill an empty result from the repository in front of you.\n\nwant: \"hits\" (the default) returns ranked threads with snippets, dates and a ready-made citation line for each. want: \"context\" returns the matching exchanges themselves — seq, timestamp and text, selected from across a long session rather than its opening — when you intend to quote rather than to choose. scope narrows by project, date, tag or harness; leave it out on the first call, because the answer is usually in a DIFFERENT project than the one you are in.\n\nKeyword and semantic search over the user's own history. No network, no model call, no cost. Do NOT use it to search the web, and do NOT use it to search the files in the current repository — it reads conversations, not code.",
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "description": "what to look for. Two to four distinctive nouns beat a whole sentence: the index is keyword-first and a long question dilutes into stopwords"
+            },
+            "scope": {
+              "description": "narrow the search. Leave it out on the first call: the archive's whole value is that the answer is usually in a DIFFERENT project than the one you are in",
+              "type": "object",
+              "properties": {
+                "project": {
+                  "description": "only this project — a directory name like \"event-bus\", not a path",
+                  "type": "string"
+                },
+                "harness": {
+                  "description": "only sessions from this coding agent",
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex",
+                    "cursor",
+                    "pi",
+                    "gemini",
+                    "opencode",
+                    "copilot"
+                  ]
+                },
+                "since": {
+                  "description": "only sessions at or after this. Takes 30d, 2w, \"last week\", \"in july\", or 2026-08-01",
+                  "type": "string"
+                },
+                "until": {
+                  "description": "only sessions at or before this. Takes 30d, 2w, \"last week\", \"in july\", or 2026-08-01",
+                  "type": "string"
+                },
+                "tag": {
+                  "description": "only sessions carrying this tag",
+                  "type": "string"
+                },
+                "sidechains": {
+                  "description": "subagent transcripts: include (default), only, or exclude. Most of the actual work is in these",
+                  "type": "string",
+                  "enum": [
+                    "include",
+                    "only",
+                    "exclude"
+                  ]
+                },
+                "ghosts": {
+                  "description": "sessions the harness deleted, rebuilt from history: include (default), only, or exclude",
+                  "type": "string",
+                  "enum": [
+                    "include",
+                    "only",
+                    "exclude"
+                  ]
+                },
+                "pinned": {
+                  "description": "only sessions the user pinned",
+                  "type": "boolean"
+                },
+                "limit": {
+                  "description": "threads to return. Default 10",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                }
+              }
+            },
+            "want": {
+              "description": "hits (default) — ranked threads with snippets, confidence and a citation line each. context — the matching windows themselves, seq + ts + text, ready to quote",
+              "type": "string",
+              "enum": [
+                "hits",
+                "context"
+              ]
+            },
+            "budget": {
+              "description": "want: \"context\" only — token ceiling on the windows returned. Default 6000",
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "execution": {
+          "taskSupport": "forbidden"
+        }
+      },
+      {
+        "name": "potsherd_read",
+        "title": "Read a past thread",
+        "description": "USE THIS AFTER potsherd_recall has given you a thread and you need the exact words rather than a snippet — quoting what was actually said is the difference between recalling a decision and inventing one.\n\nIt reads a THREAD: the whole fork/resume chain, in order, a page at a time. from and to are 1-based inclusive exchange numbers across the thread, not characters and not one session's numbering; omit them for the first page. The reply carries the thread's total, the next from, and every link the chain is made of, so keep paging instead of asking for a thousand exchanges at once.\n\nEvery exchange carries its seq, its timestamp and the session it came from. Cite it as <id8>@<seq>, and copy the ready-made line from the reply's citations[] when you list sources — a source line you composed yourself, a file path, or a dash is refused as a citation by code, not by convention.\n\nThis is the tool that means you never need filesystem access to read a transcript. Do NOT invent or guess a thread id — get one from potsherd_recall. Do NOT use this to read files on disk; it reads conversations, not code.",
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "thread": {
+              "type": "string",
+              "minLength": 1,
+              "description": "a thread: the first eight characters of ANY session id in the fork/resume chain, as potsherd_recall prints them. The whole chain is returned, not just the link you named"
+            },
+            "from": {
+              "description": "first exchange in the thread to return, 1-based and inclusive. Default 1",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "to": {
+              "description": "last exchange to return, 1-based and inclusive. Default from + 24; at most 200 exchanges per call",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "execution": {
+          "taskSupport": "forbidden"
+        }
+      },
+      {
+        "name": "potsherd_graft",
+        "title": "Bring a past session into this one",
+        "description": "USE THIS when the user wants to carry work forward from an earlier thread into this one — \"pick up where we left off\", \"remind me what we did on X\", \"I'm restarting that project\", \"what was the state of this\".\n\nIt compresses one past thread into a short cited brief under a token budget and returns the brief as text. Read that brief and then continue the work with it in mind: it is written to be dropped straight into your context, and it names the session and exchange every claim came from. Every source line in it has been resolved against the index in code; lines whose citations did not resolve are removed before you see them, and the reply lists what was refused.\n\nGive it a thread from potsherd_recall, or — when you have no id yet — the user's own words, and it will find the best-matching thread itself. Set about to narrow the brief to one topic when the thread covered several. budget is the token ceiling for the brief, not for the call.\n\nIT WRITES TO THE USER'S PROJECT. It saves the brief as ./.potsherd/graft-<id>.md, creating ./.potsherd/ and a .gitignore inside it if they are not there, so the user can reread it later — the reply tells you the exact path, or tells you nothing was written. That is the only thing it writes, and the only potsherd write outside ~/.potsherd; it changes nothing else on disk.\n\nIt works with no model backend at all — the brief is then assembled from the stored card, is labelled unsummarised, and is still cited. Do NOT use it to summarise the current session, and do NOT use it instead of potsherd_recall when you are still looking for which thread you want.",
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "thread": {
+              "type": "string",
+              "minLength": 1,
+              "description": "a thread — the first eight characters of any session id in the chain — OR words to find one by, when you do not have an id yet"
+            },
+            "about": {
+              "description": "narrow the brief to one topic, when the session covered several",
+              "type": "string"
+            },
+            "budget": {
+              "description": "token ceiling for the brief itself. Default 1200",
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        },
+        "execution": {
+          "taskSupport": "forbidden"
+        }
+      }
+    ]
+  },
+  "jsonrpc": "2.0",
+  "id": 2
+}

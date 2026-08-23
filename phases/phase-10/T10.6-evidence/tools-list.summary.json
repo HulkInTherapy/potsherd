@@ -1,0 +1,75 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "tools": [
+      {
+        "name": "potsherd_recall",
+        "title": "Search past coding sessions",
+        "description": "USE THIS BEFORE telling the user you do not remember, do not …[1614 chars]",
+        "inputSchema": {
+          "type": "object",
+          "properties": [
+            "query",
+            "scope",
+            "want",
+            "budget"
+          ],
+          "required": [
+            "query"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "potsherd_read",
+        "title": "Read a past thread",
+        "description": "USE THIS AFTER potsherd_recall has given you a thread and yo …[1105 chars]",
+        "inputSchema": {
+          "type": "object",
+          "properties": [
+            "thread",
+            "from",
+            "to"
+          ],
+          "required": [
+            "thread"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "potsherd_graft",
+        "title": "Bring a past session into this one",
+        "description": "USE THIS when the user wants to carry work forward from an e …[1611 chars]",
+        "inputSchema": {
+          "type": "object",
+          "properties": [
+            "thread",
+            "about",
+            "budget"
+          ],
+          "required": [
+            "thread"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        }
+      }
+    ]
+  }
+}

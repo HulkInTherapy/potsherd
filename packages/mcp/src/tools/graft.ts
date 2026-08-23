@@ -194,7 +194,7 @@ export function registerGraft(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
     'potsherd_graft',
     {
-      title: 'Bring a past session into this one',
+      title: 'Bring a past thread into this one',
       description: GRAFT_DESCRIPTION,
       inputSchema: graftInput,
       annotations: {
