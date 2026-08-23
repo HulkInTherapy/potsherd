@@ -1,4 +1,11 @@
 import { type Confidence } from '@potsherd/core';
+
+// Re-exported, not merely imported. Every tool in this package reads the
+// type from `./shapes.js` because that is where the confidence contract
+// lives; pointing the import at core without re-exporting compiled fine
+// under esbuild -- which strips types rather than checking them -- and
+// broke only `pnpm typecheck`.
+export type { Confidence };
 import { z } from 'zod';
 
 /**

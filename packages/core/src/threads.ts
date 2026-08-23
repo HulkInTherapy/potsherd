@@ -284,7 +284,7 @@ function sharedCounts(db: Db): Map<string, number> {
       for (let j = i + 1; j < group.length; j += 1) {
         const a = group[i]!;
         const b = group[j]!;
-        const key = a < b ? `${a} ${b}` : `${b} ${a}`;
+        const key = a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
         pairs.set(key, (pairs.get(key) ?? 0) + 1);
       }
     }
@@ -364,7 +364,7 @@ export function deriveThreads(db: Db): ThreadReport {
   };
 
   for (const [key, count] of shared) {
-    const [a, b] = key.split(' ') as [string, string];
+    const [a, b] = key.split('\u0000') as [string, string];
     const smaller = Math.min(sizes.size.get(a) ?? 0, sizes.size.get(b) ?? 0);
     if (smaller === 0) continue;
     const overlap = count / smaller;
@@ -387,7 +387,7 @@ export function deriveThreads(db: Db): ThreadReport {
 
   for (const [child, list] of declared) {
     for (const d of list) {
-      const key = child < d.parent ? `${child} ${d.parent}` : `${d.parent} ${child}`;
+      const key = child < d.parent ? `${child}\u0000${d.parent}` : `${d.parent}\u0000${child}`;
       const count = shared.get(key) ?? 0;
       const edge = best.get(child);
       if (edge && edge.parent === d.parent) continue;
