@@ -4906,6 +4906,71 @@ CREATE INDEX IF NOT EXISTS session_threads_head   ON session_threads(head);
 DELETE FROM sync_state WHERE key LIKE 'index:%' AND key <> 'index:ghosts';
 UPDATE sessions SET source_mtime = NULL;
 `
+  },
+  {
+    version: 12,
+    name: "notes",
+    // The notes lane — the first table potsherd writes on a user's say-so
+    // rather than on what it read (`docs/AGENT-AUDIT-2026-08-23.md` §4.7,
+    // phase-10 §B9). Every other verb is read-only; this is the one that
+    // makes the archive learn.
+    //
+    // Four properties are load-bearing, and each one is a column decision:
+    //
+    // **Append-only.** `id` is an autoincrement rowid and nothing in
+    // `notes.ts` issues an `UPDATE` or a `DELETE` against this table — a
+    // second note on the same thread is a second row, and the older verdict
+    // is still there afterwards. There is deliberately no `superseded_by`
+    // column, because maintaining one would mean writing to a row that had
+    // already been written, which is the property this table exists to not
+    // have. "Which note is current" is derived at read time (`MAX(id)`) and
+    // therefore cannot go stale or be corrupted by a half-finished write.
+    //
+    // **No foreign key.** Exactly the reasoning `tags`, `pins` and `links`
+    // carry (migration 1): a ghost has no row in `sessions`, and a note about
+    // a session the sweep later deletes is the note most worth keeping. An
+    // `ON DELETE CASCADE` here would also hand any future re-index the power
+    // to destroy user-written text, which no read path should ever have.
+    //
+    // **`thread_id` and `session_id` both.** The thread is the unit a note
+    // attaches to (migration 11), but threads are *derived* and are rebuilt
+    // whole on every `index`. Storing only the derived id would mean a
+    // re-derivation could orphan a note. Storing only the session id would
+    // lose the thing the caller actually meant. So both are recorded: what it
+    // was told (`session_id`, the ref the caller named, resolved) and what
+    // that meant at the time (`thread_id`).
+    //
+    // **`author` and `via` are recorded, never inferred.** `via` is known for
+    // certain — the code path that wrote the row. `author` is not: from a
+    // terminal potsherd cannot tell an agent typing a command from a human
+    // typing the same command, so it defaults to `'unknown'` and is only ever
+    // whatever the caller stated with `--by`. A guessed author on an
+    // assertion table would be a fabricated provenance, which is worse than
+    // no provenance.
+    //
+    // `notes_fts` is `content='notes'` exactly like `cards_fts`: sqlite keeps
+    // no second copy of the text. It is safe as external content precisely
+    // because rows are never deleted or updated, so the 'delete' command form
+    // that `cards/write.ts` needs has no counterpart here.
+    up: `
+CREATE TABLE IF NOT EXISTS notes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id  TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  decided    TEXT NOT NULL DEFAULT '',
+  open       TEXT NOT NULL DEFAULT '',
+  next_step  TEXT NOT NULL DEFAULT '',
+  author     TEXT NOT NULL DEFAULT 'unknown',
+  via        TEXT NOT NULL DEFAULT 'cli',
+  written_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notes_thread  ON notes(thread_id, id);
+CREATE INDEX IF NOT EXISTS notes_session ON notes(session_id, id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+  decided, open, next_step, content='notes'
+);
+`
   }
 ];
 function open(opts = {}) {
@@ -5781,7 +5846,7 @@ function fitCell(t, c, w) {
 function table(t, rows, opts = {}) {
   if (rows.length === 0)
     return [];
-  const gap = opts.gap ?? 2;
+  const gap2 = opts.gap ?? 2;
   const indent = opts.indent ?? INDENT;
   const cols = Math.max(...rows.map((r) => r.length));
   const widths = [];
@@ -5791,7 +5856,7 @@ function table(t, rows, opts = {}) {
     widths[c] = cap2 !== void 0 ? Math.min(content, cap2) : content;
   }
   const grow = Math.min(Math.max(opts.grow ?? cols - 1, 0), cols - 1);
-  const budget = t.width - indent.length - gap * (cols - 1);
+  const budget = t.width - indent.length - gap2 * (cols - 1);
   const fixed = widths.reduce((a, b, i) => i === grow ? a : a + b, 0);
   const growMax = Math.max(8, budget - fixed);
   widths[grow] = Math.min(widths[grow] ?? 0, growMax);
@@ -5810,7 +5875,7 @@ function table(t, rows, opts = {}) {
     const clipped = fitCell(t, cell, w);
     const pad4 = " ".repeat(Math.max(0, w - Theme.len(clipped)));
     return opts.align?.[c] === "right" ? pad4 + clipped : clipped + pad4;
-  }).join(" ".repeat(gap))).trimEnd()));
+  }).join(" ".repeat(gap2))).trimEnd()));
 }
 
 // ../core/dist/archive-state.js
@@ -7415,10 +7480,10 @@ function matchSnippet(text, query, max2 = SNIPPET_CHARS) {
   const rawEnd = snapEnd(text, spans, Math.min(text.length, rawStart + max2), masks);
   const needleSpan = { start: at, end: at + needle.length };
   const sliceEnd = offMask(masks, Math.max(rawEnd, at + needle.length), "back", needleSpan);
-  const slice = text.slice(rawStart, sliceEnd);
+  const slice2 = text.slice(rawStart, sliceEnd);
   const lead = rawStart > 0 ? "\u2026" : "";
-  const tail2 = rawStart + slice.length < text.length ? "\u2026" : "";
-  const collapsed = collapse(slice);
+  const tail2 = rawStart + slice2.length < text.length ? "\u2026" : "";
+  const collapsed = collapse(slice2);
   const found = collapsed.toLowerCase().indexOf(needle);
   const out = lead + collapsed + tail2;
   return found === -1 ? { text: out } : { text: out, match: { start: lead.length + found, end: lead.length + found + needle.length } };
@@ -7774,12 +7839,24 @@ var WEIGHT_AGREEMENT = 0.15;
 var AGREEMENT_LISTS = 3;
 var WEAK_FLOOR = 0.5;
 var STRONG_FLOOR = 0.75;
+var ROUTING_CEILING = "weak";
+function capConfidence(a, b) {
+  return RANK[a] <= RANK[b] ? a : b;
+}
 function calibrate(e) {
   const coverage = e.terms > 0 ? clamp01(e.covered / e.terms) : 1;
   const strength = clamp01(e.strength);
   const agreement = clamp01((e.lists - 1) / (AGREEMENT_LISTS - 1));
   const score = clamp01(coverage * (WEIGHT_BASE + WEIGHT_STRENGTH * strength + WEIGHT_AGREEMENT * agreement));
-  return { score, confidence: label(score), coverage, strength, agreement };
+  const confidence = e.ceiling ? capConfidence(label(score), e.ceiling) : label(score);
+  return {
+    score,
+    confidence,
+    coverage,
+    strength,
+    agreement,
+    ...e.ceiling ? { ceiling: e.ceiling } : {}
+  };
 }
 function label(score) {
   if (score >= STRONG_FLOOR)
@@ -7835,6 +7912,19 @@ var LISTS = [
   "vec_ghost_prompts",
   "vec_cards"
 ];
+var LANES = { evidence: 0, routing: 1 };
+var ROUTING_KINDS = /* @__PURE__ */ new Set(["card"]);
+var ROUTING_PER_SESSION = 1;
+var CARDS_SCORE_EVIDENCE_BLOCKS = true;
+function laneOfHit(kind) {
+  return ROUTING_KINDS.has(kind) ? "routing" : "evidence";
+}
+function laneOfSession(hits) {
+  return hits.some((h) => laneOfHit(h.kind) === "evidence") ? "evidence" : "routing";
+}
+function byLane(a, b) {
+  return LANES[a.lane ?? "evidence"] - LANES[b.lane ?? "evidence"] || b.score - a.score;
+}
 var PER_SESSION = 3;
 var CORROBORATION = 0.12;
 var RELAXED_PENALTY = 0.6;
@@ -7856,8 +7946,18 @@ var WEIGHTS = {
   // A card is a statement about the whole session, like a title, but unlike a
   // title it has been checked against the transcript (`cards/verify.ts`) and
   // carries the session's topics and decisions rather than six words a model
-  // wrote before the session was over. It is weighted between the two: above a
-  // single exchange, below a title that names the thing outright.
+  // wrote before the session was over.
+  //
+  // **This number no longer decides whether a card can beat a transcript.**
+  // It used to be the only thing that did, and F6 is the transcript of that
+  // going wrong. Since T10.7 the two lanes are partitioned (see {@link Lane}):
+  // a card-only block sorts after every block with transcript evidence at any
+  // weight, and a card contributes nothing at all to the rank of a block that
+  // *does* have transcript evidence. What this weight still decides is the
+  // order of card-only blocks **among themselves** — which thread the routing
+  // lane offers first — and nothing else. Left at 1.2 because changing it now
+  // would move that ordering for no reason; it is not load-bearing for the
+  // safety property, which is exactly the change T10.7 made.
   cards_fts: 1.2,
   exchanges_fts: 1,
   ghosts_fts: 1,
@@ -7872,7 +7972,8 @@ var WEIGHTS = {
   // Card vectors are the semantic half of the same statement. Same weight as
   // the exchange vectors: rank-based fusion needs no common scale, but a list
   // that answers "about the same thing" still should not outvote one that
-  // answers "says these words".
+  // answers "says these words". Since T10.7 it, too, only orders the routing
+  // lane internally — see `cards_fts` above.
   vec_cards: 1.5
 };
 function ftsQuery(query) {
@@ -8447,6 +8548,10 @@ async function recall(db, query, requested = {}, options = {}) {
   if (!tableExists(db, "vec_ghost_prompts") || countRows(db, "vec_ghost_prompts") === 0) {
     wanted.delete("vec_ghost_prompts");
   }
+  if (options.cards === false) {
+    wanted.delete("cards_fts");
+    wanted.delete("vec_cards");
+  }
   if (!tableExists(db, "cards_fts") || countRows(db, "cards") === 0) {
     wanted.delete("cards_fts");
   }
@@ -8581,18 +8686,20 @@ async function recall(db, query, requested = {}, options = {}) {
   };
   const conversationOf = conversationKeys(db, ranked.map((h) => h.sessionId));
   const perSessionCount = /* @__PURE__ */ new Map();
+  const routingCount = /* @__PURE__ */ new Map();
   const kept = [];
-  for (const hit2 of ranked) {
-    const conversation = conversationOf(hit2.sessionId);
-    const n2 = perSessionCount.get(conversation) ?? 0;
-    if (n2 >= perSession)
-      continue;
-    perSessionCount.set(conversation, n2 + 1);
+  const take = (hit2) => {
+    const lane = laneOfHit(hit2.kind);
     const calibration = calibrate({
       covered: coveredTerms(quotableTokens, `${hit2.userText} ${hit2.assistantText ?? ""}`),
       terms: quotableTokens.length,
       strength: strengthOf(hit2.from),
-      lists: new Set(hit2.from.map((f) => f.list)).size
+      lists: new Set(hit2.from.map((f) => f.list)).size,
+      // A card's text is a model's paragraph about the session, so full
+      // coverage of the query inside it means the *summary* used those words
+      // — which is the one thing an agent must not be allowed to read as "the
+      // archive answers this". See `calibration.ts`.
+      ...lane === "routing" ? { ceiling: ROUTING_CEILING } : {}
     });
     kept.push({
       kind: hit2.kind,
@@ -8607,8 +8714,29 @@ async function recall(db, query, requested = {}, options = {}) {
       score: hit2.score,
       from: hit2.from,
       calibration,
-      confidence: calibration.confidence
+      confidence: calibration.confidence,
+      lane
     });
+  };
+  for (const hit2 of ranked) {
+    if (laneOfHit(hit2.kind) !== "evidence")
+      continue;
+    const conversation = conversationOf(hit2.sessionId);
+    const n2 = perSessionCount.get(conversation) ?? 0;
+    if (n2 >= perSession)
+      continue;
+    perSessionCount.set(conversation, n2 + 1);
+    take(hit2);
+  }
+  for (const hit2 of ranked) {
+    if (laneOfHit(hit2.kind) === "evidence")
+      continue;
+    const conversation = conversationOf(hit2.sessionId);
+    const n2 = routingCount.get(conversation) ?? 0;
+    if (n2 >= ROUTING_PER_SESSION)
+      continue;
+    routingCount.set(conversation, n2 + 1);
+    take(hit2);
   }
   const order = [];
   const grouped = /* @__PURE__ */ new Map();
@@ -8627,6 +8755,8 @@ async function recall(db, query, requested = {}, options = {}) {
   }
   const meta = sessionMeta(db, [...represents.values()]);
   const sessions = [];
+  let evidenceBuilt = 0;
+  let routingBuilt = 0;
   for (const conversation of order) {
     const id = represents.get(conversation) ?? conversation;
     const m = meta.get(id);
@@ -8642,21 +8772,37 @@ async function recall(db, query, requested = {}, options = {}) {
       seenText.add(key);
       return true;
     });
-    const blockText = [m.displayTitle, m.title ?? ""].concat(hits.map((h) => `${h.userText} ${h.assistantText ?? ""}`)).join(" ");
+    const lane = laneOfSession(hits);
+    const counted = lane === "evidence" ? hits.filter((h) => h.lane === "evidence") : hits;
+    const blockText = (lane === "evidence" ? [m.displayTitle, m.title ?? ""] : []).concat(counted.map((h) => `${h.userText} ${h.assistantText ?? ""}`)).join(" ");
     const calibration = calibrate({
       covered: coveredTerms(quotableTokens, blockText),
       terms: quotableTokens.length,
-      strength: Math.max(0, ...hits.map((h) => h.calibration.strength)),
-      lists: new Set(hits.flatMap((h) => h.from.map((f) => f.list))).size
+      strength: Math.max(0, ...counted.map((h) => h.calibration.strength)),
+      lists: new Set(counted.flatMap((h) => h.from.map((f) => f.list))).size,
+      ...lane === "routing" ? { ceiling: ROUTING_CEILING } : {}
     });
+    if (lane === "evidence" ? evidenceBuilt >= limit * 3 : routingBuilt >= limit)
+      continue;
+    if (lane === "evidence")
+      evidenceBuilt++;
+    else
+      routingBuilt++;
     sessions.push({
       ...m,
-      score: sessionScore(hits, corroboration),
+      // Rank. A routing block is scored by its card, which is all it has, and
+      // then sorts behind every evidence block regardless of the number. An
+      // evidence block includes its card here — see
+      // {@link CARDS_SCORE_EVIDENCE_BLOCKS} for the measurement that decided
+      // it — and excludes it from `calibration` below, which is the half an
+      // agent is allowed to act on.
+      score: sessionScore(CARDS_SCORE_EVIDENCE_BLOCKS ? hits : counted, corroboration),
       calibration,
       confidence: calibration.confidence,
+      lane,
       hits
     });
-    if (sessions.length >= limit * 3)
+    if (evidenceBuilt >= limit * 3 && routingBuilt >= limit)
       break;
   }
   const built = sessions.length;
@@ -8664,10 +8810,10 @@ async function recall(db, query, requested = {}, options = {}) {
   const belowFloor = built - surviving.length;
   sessions.length = 0;
   sessions.push(...surviving);
-  sessions.sort((a, b) => b.score - a.score);
+  sessions.sort(byLane);
   sessions.length = Math.min(sessions.length, limit);
   const confidence = sessions.reduce((best, s) => maxConfidence(best, s.confidence), "none");
-  const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => b.score - a.score);
+  const flat = [...sessions.flatMap((s) => s.hits)].sort(byLane);
   return {
     query,
     sessions,
@@ -14189,8 +14335,8 @@ var LINEAGE_FIELDS = {
 async function indexLineage(db, harness, source, sessionId) {
   if (!LINEAGE_HARNESSES.includes(harness))
     return;
-  const fields = LINEAGE_FIELDS[harness];
-  if (!fields || source.isSidechain)
+  const fields2 = LINEAGE_FIELDS[harness];
+  if (!fields2 || source.isSidechain)
     return;
   const ids = [];
   const declared = /* @__PURE__ */ new Map();
@@ -14200,10 +14346,10 @@ async function indexLineage(db, harness, source, sessionId) {
     const record = parseJsonLine(line.text);
     if (!isRecord(record))
       continue;
-    const id = record[fields.id];
+    const id = record[fields2.id];
     if (typeof id === "string" && id)
       ids.push(id);
-    const parent = record[fields.declaredParent];
+    const parent = record[fields2.declaredParent];
     if (typeof parent === "string" && parent && parent !== sessionId) {
       declared.set(parent, (declared.get(parent) ?? 0) + 1);
     }
@@ -15552,12 +15698,15 @@ function block(s, r, t, now) {
   const ordered = quotableOrder(quotable);
   const evidence = ordered.filter((h) => h.snippet.match);
   for (const hit2 of withMember(evidence.length > 0 ? evidence : ordered, s)) {
-    const mark = memberMark(s, hit2, t);
+    const mark = memberMark(s, hit2, t) + laneMark(hit2, t);
     const rendered = snippetLine(hit2, t, width - 2 - Theme.len(mark));
     if (rendered)
       lines.push(INDENT + "  " + mark + rendered);
   }
-  if (s.hits.length > 0 && !quotable.some((h) => h.snippet.match)) {
+  if (s.lane === "routing") {
+    lines.push(INDENT + "  " + t.dim(clip(CARD_ONLY_NOTE, width - 2, t)));
+  }
+  if (s.hits.length > 0 && !quotable.some((h) => h.snippet.match) && s.lane !== "routing") {
     lines.push(INDENT + "  " + t.dim(clip(unmatchedReason(s, r), width - 2, t)));
   }
   lines.push(INDENT + "  " + t.dim(action(s, t, width - 2)));
@@ -15591,9 +15740,13 @@ function memberMark(s, hit2, t) {
   const who = hit2.isSidechain ? `${t.g("\u21B3", ">")} subagent ${idTag(hit2.sessionId)}` : `${t.g("\u2191", "^")} parent ${idTag(hit2.sessionId)}`;
   return t.dim(`${who} `);
 }
+var CARD_ONLY_NOTE = "card only \u2014 routing, not evidence: this is a summary of that session, not its transcript";
+function laneMark(hit2, t) {
+  return hit2.kind === "card" ? t.dim("card ") : "";
+}
 function unmatchedReason(s, r) {
   if (s.hits.some((h) => h.kind === "card")) {
-    return "the session card matched; the transcript does not use those words";
+    return s.lane === "routing" ? CARD_ONLY_NOTE : "the session card matched; the transcript does not use those words";
   }
   if (s.hits.some((h) => h.kind === "title")) {
     return "the session title matched; the body does not use those words";
@@ -15701,6 +15854,9 @@ function footer(r, t) {
   const parts = [];
   const ghosts = r.sessions.filter((s) => s.status === "ghost").length;
   const sidechains = r.sessions.filter((s) => s.isSidechain || s.hits.some((h) => h.isSidechain && h.sessionId !== s.id)).length;
+  const routing = r.sessions.filter((s) => s.lane === "routing").length;
+  if (routing)
+    parts.push(`${num(routing)} card-only ${t.dash} routing, not evidence`);
   if (ghosts)
     parts.push(`${num(ghosts)} ghost ${plural(ghosts, "hit")}`);
   if (sidechains)
@@ -15789,9 +15945,9 @@ function tail(e, t, width) {
   const lines = [];
   if (e.margin && e.sessions.length >= 2) {
     const m = e.margin;
-    const gap = `#1 leads #2 by ${m.by.toFixed(4)}`;
+    const gap2 = `#1 leads #2 by ${m.by.toFixed(4)}`;
     const because = m.reason === "corroboration" ? `${num(m.firstHits)} hits against ${num(m.secondHits)}, not a better one` : m.list && m.firstRank !== null && m.secondRank !== null ? `${m.list} ranked them ${m.firstRank} and ${m.secondRank}` : m.list ? `${m.list} found #1 and not #2` : "";
-    lines.push(INDENT + t.dim(joinFit([gap, because].filter(Boolean), width, ` ${t.sep} `, t)));
+    lines.push(INDENT + t.dim(joinFit([gap2, because].filter(Boolean), width, ` ${t.sep} `, t)));
   }
   const slowest = [...e.lists].sort((a, b) => b.ms - a.ms)[0];
   if (slowest) {
@@ -16758,6 +16914,11 @@ var OFFLINE_VERBS = [
   "show",
   "stats",
   "tag",
+  // T10.8 — `note` writes, and writes only into `~/.potsherd/potsherd.db`. It
+  // is on this list for the reason `unpin` and `setup` are: a verb missing
+  // from every list is a verb `doctor --privacy` has not accounted for, and
+  // the one verb that writes is the last one that should go unaccounted for.
+  "note",
   "pin",
   "unpin",
   "link",
@@ -17989,8 +18150,8 @@ function loadVectors(db, ids) {
   const CHUNK = 400;
   try {
     for (let i = 0; i < ids.length; i += CHUNK) {
-      const slice = ids.slice(i, i + CHUNK);
-      const rows = db.prepare(`SELECT id, embedding FROM vec_exchanges WHERE id IN (${slice.map(() => "?").join(",")})`).all(...slice);
+      const slice2 = ids.slice(i, i + CHUNK);
+      const rows = db.prepare(`SELECT id, embedding FROM vec_exchanges WHERE id IN (${slice2.map(() => "?").join(",")})`).all(...slice2);
       for (const r of rows) {
         const buf = Buffer.isBuffer(r.embedding) ? r.embedding : Buffer.from(r.embedding);
         out.set(r.id, Array.from(new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))));
@@ -19980,12 +20141,181 @@ async function confirmOpenThreads(cands, o = {}) {
   });
 }
 
+// ../core/dist/windows.js
+var ASK_WINDOWS = 5;
+var WINDOW_MIN_EXCHANGES = 12;
+var WINDOW_NEIGHBOURS = 1;
+var WINDOW_SEPARATION = 2 * WINDOW_NEIGHBOURS + 2;
+var MIN_UNIT_CHARS = 700;
+var UNIT_HEADER_CHARS = 24;
+function windowCount(exchanges, requested, maxChars) {
+  if (exchanges < WINDOW_MIN_EXCHANGES)
+    return 1;
+  const asked = Math.max(1, Math.floor(requested));
+  const byMaterial = Math.floor(exchanges / WINDOW_MIN_EXCHANGES);
+  const byBudget = Math.floor((maxChars - WINDOW_PREAMBLE_CHARS - WINDOW_GAP_CHARS) / (MIN_UNIT_CHARS + UNIT_HEADER_CHARS + WINDOW_GAP_CHARS));
+  return Math.max(1, Math.min(asked, byMaterial, byBudget));
+}
+function seedIndices(total, hits, n2) {
+  const chosen2 = [];
+  const free = (i) => i >= 0 && i < total && chosen2.every((c) => Math.abs(c.index - i) >= WINDOW_SEPARATION);
+  const held = n2 > 1 ? 1 : 0;
+  for (const i of hits) {
+    if (chosen2.length >= n2 - held)
+      break;
+    if (free(i))
+      chosen2.push({ index: i, via: "hit" });
+  }
+  if (chosen2.length < n2 && free(total - 1)) {
+    chosen2.push({ index: total - 1, via: "tail" });
+  }
+  for (const i of hits) {
+    if (chosen2.length >= n2)
+      break;
+    if (free(i))
+      chosen2.push({ index: i, via: "hit" });
+  }
+  while (chosen2.length < n2) {
+    const sorted = [...chosen2].sort((a, b) => a.index - b.index);
+    let best = -1;
+    let bestWidth = -1;
+    const edges = [-1, ...sorted.map((c) => c.index), total];
+    for (let e = 0; e < edges.length - 1; e++) {
+      const lo = edges[e] + 1;
+      const hi = edges[e + 1] - 1;
+      if (hi < lo)
+        continue;
+      const mid = Math.floor((lo + hi) / 2);
+      const width = hi - lo + 1;
+      if (width > bestWidth && free(mid)) {
+        bestWidth = width;
+        best = mid;
+      }
+    }
+    if (best < 0)
+      break;
+    chosen2.push({ index: best, via: "spread" });
+  }
+  return chosen2.sort((a, b) => a.index - b.index);
+}
+function planWindows(transcript, hits, o) {
+  const total = transcript.units.length;
+  const n2 = Math.max(1, Math.floor(o.windows));
+  const seeds = seedIndices(total, hits, n2);
+  const windows2 = [];
+  let remaining = o.maxChars;
+  let left = seeds.length;
+  for (const seed of seeds) {
+    const share = Math.max(MIN_UNIT_CHARS, Math.floor(remaining / Math.max(1, left)));
+    left -= 1;
+    const admitted = /* @__PURE__ */ new Map();
+    const candidates = unitPriority(seed.index, total);
+    let windowLeft = share;
+    let unitsLeft = candidates.length;
+    for (const i of candidates) {
+      const u = transcript.units[i];
+      const per = Math.max(MIN_UNIT_CHARS, Math.floor(windowLeft / Math.max(1, unitsLeft)) - UNIT_HEADER_CHARS);
+      const body = u.text.length > per ? renderUnitBody(u, per) : u.text;
+      unitsLeft -= 1;
+      const cost = body.length + UNIT_HEADER_CHARS;
+      if (cost > windowLeft && admitted.size > 0)
+        continue;
+      admitted.set(i, body === u.text ? u : { ...u, text: body });
+      windowLeft -= cost;
+      if (windowLeft <= 0)
+        break;
+    }
+    const units = [...admitted.keys()].sort((a, b) => a - b).map((i) => admitted.get(i));
+    if (units.length === 0)
+      continue;
+    windows2.push({ seed: seed.index, via: seed.via, units });
+    remaining -= share - windowLeft;
+    if (remaining <= 0)
+      break;
+  }
+  return {
+    windows: windows2,
+    units: windows2.flatMap((w) => w.units),
+    exchanges: total,
+    requested: n2
+  };
+}
+function unitPriority(seed, total) {
+  const out = [seed];
+  for (let d = 1; d <= WINDOW_NEIGHBOURS; d++) {
+    if (seed - d >= 0)
+      out.push(seed - d);
+    if (seed + d < total)
+      out.push(seed + d);
+  }
+  return out.filter((i) => i >= 0 && i < total);
+}
+function renderUnitBody(u, maxChars) {
+  const rendered = renderUnit(u, maxChars);
+  return rendered.slice(rendered.indexOf("\n") + 1);
+}
+var WINDOW_GAP_MARK = "\u22EF";
+var WINDOW_PREAMBLE_CHARS = 200;
+var WINDOW_GAP_CHARS = 56;
+function windowOverhead(windows2) {
+  return WINDOW_PREAMBLE_CHARS + (Math.max(1, windows2) + 1) * WINDOW_GAP_CHARS;
+}
+function windowText(transcript, units) {
+  if (units.length === 0)
+    return "";
+  const at = /* @__PURE__ */ new Map();
+  transcript.units.forEach((u, i) => at.set(u.seq, i));
+  const total = transcript.units.length;
+  let runs = 0;
+  let last2 = null;
+  for (const u of units) {
+    const i = at.get(u.seq);
+    if (i === void 0 || last2 === null || i !== last2 + 1)
+      runs += 1;
+    last2 = i ?? null;
+  }
+  const shown = units.length;
+  const parts = [
+    `${runs} separated window${runs === 1 ? "" : "s"} from a ${total}-exchange session, chosen by relevance to the question; ${shown} exchange${shown === 1 ? "" : "s"} shown. The stretches marked ${WINDOW_GAP_MARK} are NOT included \u2014 do not read across a mark.`
+  ];
+  let previous = null;
+  for (const u of units) {
+    const i = at.get(u.seq);
+    if (i === void 0) {
+      parts.push(`${WINDOW_GAP_MARK} position in the transcript unknown ${WINDOW_GAP_MARK}`);
+      parts.push(renderUnit(u));
+      previous = null;
+      continue;
+    }
+    const from = previous === null ? 0 : previous + 1;
+    const missing = i - from;
+    if (missing > 0) {
+      parts.push(gap(transcript.units[from]?.seq ?? null, transcript.units[i - 1]?.seq ?? null, missing, previous === null ? "earlier" : ""));
+    }
+    parts.push(renderUnit(u));
+    previous = i;
+  }
+  const after = previous === null ? 0 : total - 1 - previous;
+  if (after > 0) {
+    parts.push(gap(transcript.units[previous + 1]?.seq ?? null, transcript.units[total - 1]?.seq ?? null, after, "later"));
+  }
+  return parts.join("\n\n");
+}
+function gap(from, to, n2, when2 = "") {
+  const where = from !== null && to !== null ? from === to ? ` (seq ${from})` : ` (seq ${from}\u2013${to})` : "";
+  const many = n2 === 1 ? "exchange" : "exchanges";
+  const word = when2 ? `${when2} ` : "";
+  const count2 = n2 > 0 ? `${n2} ${word}${many}` : "exchanges";
+  return `${WINDOW_GAP_MARK} ${count2}${where} not shown ${WINDOW_GAP_MARK}`;
+}
+
 // ../core/dist/ask.js
 var ASK_K = 6;
 var ASK_MAX_USD = 0.5;
 var ASK_CONCURRENCY = 6;
 var ASK_SESSION_CHARS = 8e3;
 var ASK_TOP_EXCHANGES = 4;
+var ASK_SEED_FACTOR = 2;
 var ASK_CHEAP_K = 3;
 var ASK_CHEAP_MODEL = CARD_MODEL;
 var ASK_CHEAP_TOP_EXCHANGES = 2;
@@ -20237,7 +20567,7 @@ function excerptUnits(transcript, seqs, o = {}) {
   for (const i of priority) {
     const u = transcript.units[i];
     const share = Math.max(MIN_UNIT_CHARS, Math.floor(remaining / Math.max(1, left)));
-    const body = u.text.length > share ? renderUnitBody(u, share) : u.text;
+    const body = u.text.length > share ? renderUnitBody2(u, share) : u.text;
     left -= 1;
     if (body.length + UNIT_HEADER_CHARS > remaining && admitted.size > 0)
       continue;
@@ -20248,9 +20578,7 @@ function excerptUnits(transcript, seqs, o = {}) {
   }
   return [...admitted.keys()].sort((a, b) => a - b).map((i) => admitted.get(i));
 }
-var MIN_UNIT_CHARS = 700;
-var UNIT_HEADER_CHARS = 24;
-function renderUnitBody(u, maxChars) {
+function renderUnitBody2(u, maxChars) {
   const rendered = renderUnit(u, maxChars);
   return rendered.slice(rendered.indexOf("\n") + 1);
 }
@@ -20306,7 +20634,13 @@ async function ask(db, question, o = {}) {
     ...o.root !== void 0 ? { root: o.root } : {},
     vectors: o.vectors ?? true
   });
-  const { targets, candidates } = shortlist(db, found.sessions, k, cheap);
+  const { targets, candidates } = await shortlist(db, found.sessions, k, {
+    cheap,
+    question: q2,
+    windows: Math.max(1, Math.floor(o.windows ?? ASK_WINDOWS)),
+    ...o.root !== void 0 ? { root: o.root } : {},
+    ...o.vectors !== void 0 ? { vectors: o.vectors } : { vectors: true }
+  });
   const matching2 = candidates;
   o.onProgress?.({
     step: "shortlist",
@@ -20451,7 +20785,8 @@ function openLlm(model, budget, o) {
 function message(err) {
   return err instanceof Error ? err.message : String(err);
 }
-function shortlist(db, sessions, k, cheap = false) {
+async function shortlist(db, sessions, k, o) {
+  const cheap = o.cheap;
   const order = [];
   const seqs = /* @__PURE__ */ new Map();
   const scores = /* @__PURE__ */ new Map();
@@ -20474,18 +20809,73 @@ function shortlist(db, sessions, k, cheap = false) {
       inBlock.push(s.id);
     }
     inBlock.sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0));
-    order.push(...inBlock);
+    const kin = [];
+    for (const id of inBlock) {
+      for (const relative of relatives(db, id)) {
+        if (seqs.has(relative))
+          continue;
+        seqs.set(relative, []);
+        scores.set(relative, 0);
+        kin.push(relative);
+      }
+    }
+    order.push(...inBlock, ...kin);
   }
   const targets = [];
   const cards = cheap ? cardBriefs(db, order.slice(0, Math.max(k * 3, k))) : /* @__PURE__ */ new Map();
   for (const sessionId of order) {
     if (targets.length >= k)
       break;
-    const t = loadTarget(db, sessionId, seqs.get(sessionId) ?? [], scores.get(sessionId) ?? 0, cards.get(sessionId));
+    const t = await loadTarget(db, sessionId, seqs.get(sessionId) ?? [], scores.get(sessionId) ?? 0, o, cards.get(sessionId));
     if (t && t.units.length > 0)
       targets.push(t);
   }
   return { targets, candidates: order.length };
+}
+function relatives(db, sessionId) {
+  const out = [];
+  try {
+    const row2 = db.prepare("SELECT parent_session_id FROM sessions WHERE id = ?").get(sessionId);
+    const parent = row2?.parent_session_id;
+    if (parent && parent !== sessionId)
+      out.push(parent);
+  } catch {
+  }
+  try {
+    for (const seed of [...out, sessionId]) {
+      for (const link of threadOf(db, seed).sessions) {
+        if (link !== sessionId && !out.includes(link))
+          out.push(link);
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+async function seedSeqs(db, question, sessionId, have, want, o) {
+  const out = [...have];
+  if (out.length >= want)
+    return out;
+  try {
+    const found = await recall(db, question, { sessionId }, {
+      limit: 1,
+      perSession: want,
+      ...o.root !== void 0 ? { root: o.root } : {},
+      ...o.vectors !== void 0 ? { vectors: o.vectors } : {}
+    });
+    for (const h of found.hits) {
+      if (out.length >= want)
+        break;
+      if (h.sessionId !== sessionId)
+        continue;
+      if (typeof h.seq !== "number")
+        continue;
+      if (!out.includes(h.seq))
+        out.push(h.seq);
+    }
+  } catch {
+  }
+  return out;
 }
 function cardBriefs(db, sessionIds) {
   const out = /* @__PURE__ */ new Map();
@@ -20540,17 +20930,14 @@ function parseDecisions(raw) {
     return [];
   }
 }
-function loadTarget(db, sessionId, seqs, score, card) {
+async function loadTarget(db, sessionId, seqs, score, o, card) {
   const transcript = loadSessionTranscript(db, sessionId) ?? loadGhostTranscript(db, sessionId);
   if (!transcript)
     return null;
-  const full = excerptUnits(transcript, seqs);
-  const narrow = card ? excerptUnits(transcript, seqs, {
-    top: ASK_CHEAP_TOP_EXCHANGES,
-    maxChars: ASK_CHEAP_SESSION_CHARS
-  }) : null;
-  const worthIt = narrow !== null && excerptText(narrow).length + card.length < excerptText(full).length;
-  const units = worthIt ? narrow : full;
+  const full = await slice(db, transcript, seqs, ASK_SESSION_CHARS, ASK_TOP_EXCHANGES, o);
+  const narrow = card ? await slice(db, transcript, seqs, ASK_CHEAP_SESSION_CHARS, ASK_CHEAP_TOP_EXCHANGES, o) : null;
+  const worthIt = narrow !== null && narrow.text.length + card.length < full.text.length;
+  const chosen2 = worthIt ? narrow : full;
   return {
     sessionId,
     id8: idTag(sessionId),
@@ -20558,9 +20945,39 @@ function loadTarget(db, sessionId, seqs, score, card) {
     harness: transcript.harness,
     isSidechain: transcript.isSidechain,
     isGhost: transcript.kind === "ghost",
-    units,
+    units: chosen2.units,
+    excerpts: chosen2.text,
+    windows: chosen2.windows,
+    exchanges: transcript.units.length,
     score,
     ...worthIt ? { card } : {}
+  };
+}
+async function slice(db, transcript, seqs, maxChars, top, o) {
+  const n2 = windowCount(transcript.units.length, o.windows, maxChars);
+  if (n2 <= 1) {
+    const units = excerptUnits(transcript, seqs, { top, maxChars });
+    return { units, text: excerptText(units), windows: 1, plan: null };
+  }
+  const wanted = n2 * ASK_SEED_FACTOR;
+  const hitSeqs = await seedSeqs(db, o.question, transcript.id, seqs, wanted, o);
+  const byIndex = /* @__PURE__ */ new Map();
+  transcript.units.forEach((u, i) => byIndex.set(u.seq, i));
+  const positions = [];
+  for (const seq of hitSeqs) {
+    const i = byIndex.get(seq);
+    if (i !== void 0 && !positions.includes(i))
+      positions.push(i);
+  }
+  const plan = planWindows(transcript, positions, {
+    windows: n2,
+    maxChars: Math.max(MIN_UNIT_CHARS + UNIT_HEADER_CHARS, maxChars - windowOverhead(n2))
+  });
+  return {
+    units: plan.units,
+    text: windowText(transcript, plan.units),
+    windows: plan.windows.length,
+    plan
   };
 }
 function readerInput(question, t) {
@@ -20572,8 +20989,10 @@ function readerInput(question, t) {
     harness: t.harness,
     isSidechain: t.isSidechain,
     isGhost: t.isGhost,
-    excerpts: excerptText(t.units),
+    excerpts: t.excerpts,
     seqs: t.units.map((u) => u.seq),
+    windows: t.windows,
+    exchanges: t.exchanges,
     ...t.card ? { card: t.card } : {}
   };
 }
@@ -21300,7 +21719,7 @@ async function collectSource(db, sessionId, o = {}) {
   const thread = threadOf(db, sessionId);
   const totals = threadTotals(db, thread);
   const chained = thread.sessions.length > 1;
-  const slice = [];
+  const slice2 = [];
   let sliceVia = null;
   const about = o.about?.trim();
   if (about) {
@@ -21317,8 +21736,8 @@ async function collectSource(db, sessionId, o = {}) {
     }
     found.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? "") || a.seq - b.seq);
     for (const f of found.slice(-(o.k ?? ABOUT_K)))
-      slice.push(f);
-    sliceVia = slice.length ? "about" : null;
+      slice2.push(f);
+    sliceVia = slice2.length ? "about" : null;
   } else if (!card) {
     const units = show2.ghostPrompts ? show2.ghostPrompts.map((p) => ({
       seq: p.seq,
@@ -21330,9 +21749,9 @@ async function collectSource(db, sessionId, o = {}) {
     for (const u of units.slice(-Math.max(1, o.k ?? RECENT_K))) {
       const text = sliceText(u.user, u.assistant, isGhost);
       if (text)
-        slice.push({ seq: u.seq, ts: u.ts, text, id8: u.id8 });
+        slice2.push({ seq: u.seq, ts: u.ts, text, id8: u.id8 });
     }
-    sliceVia = slice.length ? "recent" : null;
+    sliceVia = slice2.length ? "recent" : null;
   }
   const s = show2.session;
   return {
@@ -21341,7 +21760,7 @@ async function collectSource(db, sessionId, o = {}) {
     card,
     isGhost,
     id8,
-    slice,
+    slice: slice2,
     sliceVia,
     // A ghost has no thread — `history.jsonl` kept prompts, not records — so
     // its count stays its own, and the noun stays `prompts`.
@@ -23793,20 +24212,20 @@ function describe2(files) {
 function sections(file, kind, content) {
   const lines = content.split("\n");
   const out = [];
-  let heading2 = path29.basename(file);
+  let heading3 = path29.basename(file);
   let start = 1;
   let buffer = [];
   const flush = () => {
     const text = buffer.join("\n").trim();
     if (text)
-      out.push({ file, kind, heading: heading2, text, line: start });
+      out.push({ file, kind, heading: heading3, text, line: start });
     buffer = [];
   };
   lines.forEach((line, i) => {
     const m = /^(#{1,6})\s+(.*\S)\s*$/.exec(line);
     if (m) {
       flush();
-      heading2 = m[2] ?? path29.basename(file);
+      heading3 = m[2] ?? path29.basename(file);
       start = i + 1;
       return;
     }
@@ -25735,7 +26154,10 @@ async function runFind(o) {
       // a *reader* that can see for itself that a row is noise; `find` hands
       // its rows to whoever typed the query. One number, set by the caller who
       // knows who is reading. See `RecallOptions.minConfidence`.
-      minConfidence: minConfidence(o)
+      minConfidence: minConfidence(o),
+      // F6. `undefined` and `true` both mean "cards on"; only an explicit
+      // `--no-cards` takes the two card lists out of the fusion.
+      cards: o.cards !== false
     });
     const wanted = (o.with ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
     const pending = [];
@@ -25766,6 +26188,12 @@ async function runFind(o) {
         confidence: result.confidence,
         minConfidence: result.minConfidence,
         withheld: result.belowFloor,
+        // F6, on the envelope: whether the card lists ran at all, and how much
+        // of this page is routing rather than evidence. A caller that wants
+        // transcripts only can assert `routing === 0` without walking the
+        // sessions, and a caller that passed `--no-cards` can confirm it took.
+        cards: o.cards !== false,
+        routing: result.sessions.filter((s) => s.lane === "routing").length,
         vectors: result.vectors,
         ignored: result.ignored,
         lists: result.lists,
@@ -25791,6 +26219,15 @@ async function runFind(o) {
           resume: s.resume,
           score: s.score,
           confidence: s.confidence,
+          // F6 — `"routing"` when nothing in this block is transcript text:
+          // the only thing that matched was a card, which is the artefact of a
+          // model call. A routing block sorts below every evidence block
+          // whatever the scores say, its confidence is capped at `weak`, and
+          // it must not appear in a `SOURCES` line. One word, on the row, so a
+          // caller filters on data and never on the sentence the human view
+          // prints.
+          lane: s.lane ?? "evidence",
+          citable: (s.lane ?? "evidence") === "evidence",
           // 0..1, and **not** `score` rescaled. `score` is reciprocal rank
           // fusion — a function of rank alone, which is why a true topic and a
           // topic the archive has never heard of come out 1.12x apart.
@@ -25802,6 +26239,11 @@ async function runFind(o) {
           // the other two, so it is a ceiling: nothing can lift a row whose
           // words are not there. See `packages/core/src/calibration.ts`.
           calibrated: s.calibration.score,
+          // The cap that produced `confidence`, when one applied. A card-only
+          // block routinely calibrates above `STRONG_FLOOR` — its coverage is
+          // measured over a summary that paraphrased the question — and this
+          // is the field that says the label was refused rather than earned.
+          ceiling: s.calibration.ceiling ?? null,
           coverage: s.calibration.coverage,
           strength: s.calibration.strength,
           agreement: s.calibration.agreement,
@@ -25819,7 +26261,13 @@ async function runFind(o) {
             ts: h.ts ?? null,
             score: h.score,
             confidence: h.confidence,
+            /** F6 — `"routing"` for a card, `"evidence"` for transcript text. */
+            lane: h.lane ?? "evidence",
             calibrated: h.calibration.score,
+            // The cap that produced `confidence`, when one applied — so a
+            // caller reading `calibrated: 0.925` beside `confidence: "weak"`
+            // is told why rather than left to conclude the two disagree.
+            ceiling: h.calibration.ceiling ?? null,
             from: h.from,
             snippet: h.snippet.text,
             match: h.snippet.match ?? null
@@ -26342,6 +26790,116 @@ function cardJson(plan, choice, missing, o) {
   };
 }
 
+// ../core/src/threads.ts
+function threadOf2(db, sessionId) {
+  const row2 = db.prepare("SELECT thread_id FROM session_threads WHERE session_id = ?").get(sessionId);
+  if (!row2) return { id: sessionId, sessions: [sessionId], head: sessionId };
+  const rows = db.prepare(
+    `SELECT session_id, depth, head FROM session_threads
+        WHERE thread_id = ? ORDER BY depth, session_id`
+  ).all(row2.thread_id);
+  const sessions = rows.map((r) => r.session_id);
+  const head = rows.find((r) => r.head === 1)?.session_id ?? sessions[sessions.length - 1];
+  return { id: row2.thread_id, sessions, head };
+}
+
+// ../core/src/notes.ts
+var MAX_NOTE_FIELD = 2e3;
+var MAX_AUTHOR = 64;
+var NoteFieldError = class extends Error {
+  constructor(message2, fix) {
+    super(message2);
+    this.fix = fix;
+    this.name = "NoteFieldError";
+  }
+};
+function cleanNoteField(raw, flag) {
+  const parts = (Array.isArray(raw) ? raw : raw == null ? [] : [raw]).map((s) => String(s).replace(/\r\n?/g, "\n").trim()).filter((s) => s.length > 0);
+  const joined = parts.join("; ");
+  if (joined.length > MAX_NOTE_FIELD) {
+    throw new NoteFieldError(
+      `--${flag} is ${joined.length} characters; the limit is ${MAX_NOTE_FIELD}`,
+      "shorten it, or leave two notes \u2014 the lane is append-only, so both are kept"
+    );
+  }
+  return joined;
+}
+function cleanAuthor(raw) {
+  const cleaned = String(raw ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_AUTHOR).trim();
+  return cleaned || "unknown";
+}
+function addNote(db, input) {
+  const decided = cleanNoteField(input.decided, "decided");
+  const open2 = cleanNoteField(input.open, "open");
+  const next = cleanNoteField(input.next, "next");
+  if (!decided && !open2 && !next) {
+    throw new NoteFieldError(
+      "a note needs something to say \u2014 give at least one of --decided, --open, --next",
+      `potsherd note ${input.sessionId.slice(0, 8)} --decided "..." --next "..."`
+    );
+  }
+  const thread = threadOf2(db, input.sessionId);
+  const author = cleanAuthor(input.author);
+  const via = input.via ?? "cli";
+  const writtenAt = input.at ?? (/* @__PURE__ */ new Date()).toISOString();
+  const previous = countThreadNotes(db, thread.id);
+  const write = db.transaction(() => {
+    const info = db.prepare(
+      `INSERT INTO notes (thread_id, session_id, decided, open, next_step, author, via, written_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(thread.id, input.sessionId, decided, open2, next, author, via, writtenAt);
+    const id2 = Number(info.lastInsertRowid);
+    db.prepare(
+      `INSERT INTO notes_fts (rowid, decided, open, next_step) VALUES (?, ?, ?, ?)`
+    ).run(id2, decided, open2, next);
+    return id2;
+  });
+  const id = write();
+  return {
+    note: {
+      id,
+      threadId: thread.id,
+      sessionId: input.sessionId,
+      decided,
+      open: open2,
+      next,
+      author,
+      via,
+      writtenAt
+    },
+    thread,
+    previous
+  };
+}
+var SELECT_NOTE = `SELECT id, thread_id, session_id, decided, open, next_step, author, via, written_at
+                       FROM notes`;
+function toNote(r) {
+  return {
+    id: r.id,
+    threadId: r.thread_id,
+    sessionId: r.session_id,
+    decided: r.decided,
+    open: r.open,
+    next: r.next_step,
+    author: r.author,
+    via: r.via,
+    writtenAt: r.written_at
+  };
+}
+function threadNotes(db, threadId) {
+  return db.prepare(`${SELECT_NOTE} WHERE thread_id = ? ORDER BY id DESC`).all(threadId).map(toNote);
+}
+function countThreadNotes(db, threadId) {
+  const row2 = db.prepare("SELECT COUNT(*) AS n FROM notes WHERE thread_id = ?").get(threadId);
+  return row2.n;
+}
+function notesTableExists(db) {
+  return db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'notes'").get() !== void 0;
+}
+function noteHeadline(n2) {
+  return (n2.decided || n2.next || n2.open || "").replace(/\s+/g, " ").trim();
+}
+
 // src/session-ref.ts
 function mustResolve(db, ref2, verb) {
   const needle = ref2?.trim() ?? "";
@@ -26385,6 +26943,201 @@ function titleOf(db, id, kind) {
   return displayTitleOf(row2?.title ?? null, row2?.project ?? null, id);
 }
 
+// src/commands/note.ts
+var LABEL_W2 = 9;
+async function runNote(o) {
+  const { db } = openIndex(o);
+  try {
+    if (!notesTableExists(db)) {
+      throw new UserError(
+        "this index has no notes lane yet",
+        "potsherd index    # migration 12 creates it"
+      );
+    }
+    const found = mustResolve(db, o.session, "note");
+    const t = themeFrom(o);
+    const writing = (o.decided?.length ?? 0) > 0 || (o.open?.length ?? 0) > 0 || (o.next?.length ?? 0) > 0;
+    if (!writing) {
+      return readBack(db, o, t, found);
+    }
+    const result = addNote(db, {
+      sessionId: found.id,
+      decided: o.decided ?? [],
+      open: o.open ?? [],
+      next: o.next ?? [],
+      author: o.by ?? null,
+      via: o.via ?? "cli"
+    });
+    if (o.json) {
+      printJson({
+        lane: "notes",
+        appended: true,
+        // Nothing was rewritten and nothing was deleted — the two facts a
+        // machine reading this needs in order to trust the lane.
+        superseded: null,
+        transcriptTouched: false,
+        thread: result.thread,
+        earlier: result.previous,
+        wrote: jsonNote(result.note),
+        notes: threadNotes(db, result.thread.id).map(jsonNote)
+      });
+      return 0;
+    }
+    print(receipt(t, found, result.note, result.thread.sessions.length, result.previous));
+    return 0;
+  } catch (err) {
+    if (err instanceof NoteFieldError) throw new UserError(err.message, err.fix);
+    throw err;
+  } finally {
+    db.close();
+  }
+}
+function readBack(db, o, t, found) {
+  const { threadOfRef, notes } = laneFor(db, found.id);
+  if (o.json) {
+    printJson({
+      lane: "notes",
+      session: { id: found.id, kind: found.kind, title: found.title },
+      thread: threadOfRef,
+      current: notes[0] ? jsonNote(notes[0]) : null,
+      notes: notes.map(jsonNote)
+    });
+    return 0;
+  }
+  print(listing(t, found, threadOfRef.sessions.length, notes));
+  return 0;
+}
+function laneFor(db, sessionId) {
+  const row2 = db.prepare("SELECT thread_id FROM session_threads WHERE session_id = ?").get(sessionId);
+  const threadId = row2?.thread_id ?? sessionId;
+  const sessions = row2 ? db.prepare(
+    "SELECT session_id FROM session_threads WHERE thread_id = ? ORDER BY depth, session_id"
+  ).all(threadId).map((r) => r.session_id) : [sessionId];
+  return {
+    threadOfRef: { id: threadId, sessions, head: sessions[sessions.length - 1] ?? sessionId },
+    notes: threadNotes(db, threadId)
+  };
+}
+function heading(t, found, chain) {
+  const unit = chain > 1 ? `thread of ${chain} sessions` : "thread of 1 session";
+  return t.dim(
+    format_exports.clip(`potsherd note ${t.sep} ${found.id.slice(0, 8)} ${t.sep} ${unit}`, t.width, t) + "\n" + format_exports.clip(`  ${found.title}`, t.width, t)
+  );
+}
+function provenance(t, n2) {
+  const who = n2.author === "unknown" ? "author not stated" : `by ${n2.author}`;
+  const left = `note ${n2.id} ${t.sep} ${who} ${t.sep} via ${n2.via}`;
+  const right = format_exports.date(n2.writtenAt);
+  const gap2 = Math.max(1, t.width - 2 - Theme.len(left) - Theme.len(right));
+  return t.dim(`  ${left}${" ".repeat(gap2)}${right}`);
+}
+function fields(t, n2) {
+  const out = [];
+  const body = Math.max(20, t.width - 2 - LABEL_W2);
+  for (const [label4, text] of [
+    ["decided", n2.decided],
+    ["open", n2.open],
+    ["next", n2.next]
+  ]) {
+    if (!text) continue;
+    const lines = format_exports.wrap(text, body);
+    lines.forEach((line, i) => {
+      const head = i === 0 ? t.dim(label4.padEnd(LABEL_W2)) : " ".repeat(LABEL_W2);
+      out.push(`  ${head}${line}`);
+    });
+  }
+  return out;
+}
+function receipt(t, found, n2, chain, previous) {
+  const id8 = found.id.slice(0, 8);
+  const lines = [heading(t, found, chain), "", provenance(t, n2), "", ...fields(t, n2), ""];
+  lines.push(
+    fitLine(
+      t,
+      t.ok("appended") + t.dim("  the transcript was not touched; notes are never rewritten"),
+      t.ok("appended") + t.dim("  the transcript was not touched")
+    )
+  );
+  if (previous > 0) {
+    lines.push(
+      fitLine(
+        t,
+        t.dim(
+          `${format_exports.num(previous)} earlier ${format_exports.plural(previous, "note")} on this thread ${format_exports.plural(previous, "is", "are")} still there`
+        ),
+        t.dim(`${format_exports.num(previous)} earlier ${format_exports.plural(previous, "note")} kept`)
+      )
+    );
+  }
+  lines.push("");
+  lines.push(
+    fitLine(
+      t,
+      `${t.dim("run")}  potsherd graft ${id8}  ${t.dim("to carry this thread into a new session")}`,
+      `${t.dim("run")}  potsherd graft ${id8}  ${t.dim("to carry it forward")}`,
+      `${t.dim("run")}  potsherd graft ${id8}`
+    )
+  );
+  return lines.join("\n");
+}
+function listing(t, found, chain, notes) {
+  const id8 = found.id.slice(0, 8);
+  const lines = [heading(t, found, chain), ""];
+  if (notes.length === 0) {
+    lines.push(`  ${t.dim("no notes on this thread yet.")}`);
+    lines.push("");
+    lines.push(
+      fitLine(
+        t,
+        `${t.dim("run")}  potsherd note ${id8} --decided "..." --next "..."`,
+        `${t.dim("run")}  potsherd note ${id8} --decided "..."`
+      )
+    );
+    return lines.join("\n");
+  }
+  notes.forEach((n2, i) => {
+    if (i > 0) lines.push("");
+    lines.push(provenance(t, n2));
+    lines.push(...fields(t, n2));
+  });
+  lines.push("");
+  lines.push(
+    fitLine(
+      t,
+      t.dim(
+        `${format_exports.num(notes.length)} ${format_exports.plural(notes.length, "note")}, newest first ${t.sep} assertions by their authors, not transcript`
+      ),
+      t.dim(`${format_exports.num(notes.length)} ${format_exports.plural(notes.length, "note")} ${t.sep} assertions, not transcript`),
+      t.dim(`${format_exports.num(notes.length)} ${format_exports.plural(notes.length, "note")}`)
+    )
+  );
+  lines.push("");
+  lines.push(
+    fitLine(
+      t,
+      `${t.dim("run")}  potsherd graft ${id8}  ${t.dim("to carry this thread into a new session")}`,
+      `${t.dim("run")}  potsherd graft ${id8}`
+    )
+  );
+  return lines.join("\n");
+}
+function jsonNote(n2) {
+  return {
+    kind: "note",
+    citable: false,
+    id: n2.id,
+    threadId: n2.threadId,
+    sessionId: n2.sessionId,
+    decided: n2.decided,
+    open: n2.open,
+    next: n2.next,
+    headline: noteHeadline(n2),
+    author: n2.author,
+    via: n2.via,
+    writtenAt: n2.writtenAt
+  };
+}
+
 // src/commands/tag.ts
 async function runTag(o) {
   const { db } = openIndex(o);
@@ -26397,7 +27150,7 @@ async function runTag(o) {
         printJson({ session: summary2(found), tags, added: [], removed: [], unchanged: [], rejected: [] });
         return 0;
       }
-      print(listing(t, found, tags));
+      print(listing2(t, found, tags));
       return 0;
     }
     const { add, remove, rejected } = parseTagArgs(o.ops);
@@ -26419,7 +27172,7 @@ async function runTag(o) {
       });
       return 0;
     }
-    print(receipt(t, found, result, rejected, db));
+    print(receipt2(t, found, result, rejected, db));
     return 0;
   } finally {
     db.close();
@@ -26428,7 +27181,7 @@ async function runTag(o) {
 function summary2(found) {
   return { id: found.id, kind: found.kind, title: found.title };
 }
-function heading(t, verb, found) {
+function heading2(t, verb, found) {
   return t.dim(
     format_exports.clip(`potsherd ${verb} ${t.sep} ${found.id.slice(0, 8)} ${t.sep} ${found.title}`, t.width, t)
   );
@@ -26436,8 +27189,8 @@ function heading(t, verb, found) {
 function tagList(tags) {
   return tags.map((tag) => `#${tag}`).join(" ");
 }
-function listing(t, found, tags) {
-  const lines = [heading(t, "tag", found), ""];
+function listing2(t, found, tags) {
+  const lines = [heading2(t, "tag", found), ""];
   if (tags.length === 0) {
     lines.push(`  ${t.dim("no tags yet.")}`);
     lines.push("");
@@ -26461,8 +27214,8 @@ function listing(t, found, tags) {
   );
   return lines.join("\n");
 }
-function receipt(t, found, result, rejected, db) {
-  const lines = [heading(t, "tag", found), ""];
+function receipt2(t, found, result, rejected, db) {
+  const lines = [heading2(t, "tag", found), ""];
   const changes = [
     ...result.added.map((tag) => t.ok(`+${tag}`)),
     ...result.removed.map((tag) => t.warn(`-${tag}`))
@@ -26760,7 +27513,7 @@ async function runLink(o) {
         printJson({ a: ref(a), b: ref(b), removed, links: sessionLinks(db, a.id) });
         return 0;
       }
-      print(receipt2(themeFrom(o), verb, a, b, removed ? "unlinked" : "they were not linked", null));
+      print(receipt3(themeFrom(o), verb, a, b, removed ? "unlinked" : "they were not linked", null));
       return 0;
     }
     const note = o.note?.trim() ? o.note.trim() : null;
@@ -26780,7 +27533,7 @@ async function runLink(o) {
       return 0;
     }
     const what = result.created ? "linked" : result.reversed ? "already linked (the other way round)" : "already linked";
-    print(receipt2(themeFrom(o), verb, a, b, what, result.note));
+    print(receipt3(themeFrom(o), verb, a, b, what, result.note));
     return 0;
   } finally {
     db.close();
@@ -26789,7 +27542,7 @@ async function runLink(o) {
 function ref(r) {
   return { id: r.id, kind: r.kind, title: r.title };
 }
-function receipt2(t, verb, a, b, what, note) {
+function receipt3(t, verb, a, b, what, note) {
   const lines = [t.dim(format_exports.clip(`potsherd ${verb} ${t.sep} ${what}`, t.width, t)), ""];
   for (const side of [a, b]) {
     lines.push(
@@ -26893,6 +27646,10 @@ async function runAsk(o) {
       strict: Boolean(o.strict),
       maxUsd: money2(o.maxUsd),
       concurrency: positive(o.concurrency, ASK_CONCURRENCY, "--concurrency"),
+      // Only when it was typed. `positive()` would substitute the default and
+      // core could no longer tell 'unset' from 'five'; today those agree, and
+      // a flag whose forwarding depends on that staying true is a trap.
+      ...o.windows !== void 0 && o.windows !== null && o.windows !== "" ? { windows: positive(o.windows, 1, "--windows") } : {},
       ...vectorMode2(o) !== void 0 ? { vectors: vectorMode2(o) } : {},
       ...o.model ? { model: o.model } : {},
       ...o.readerModel ? { readerModel: o.readerModel } : {},
@@ -26948,7 +27705,12 @@ async function recordReaders(db, question, base2, path32, o, t) {
         harness: x.harness,
         isGhost: x.isGhost,
         isSidechain: x.isSidechain,
-        seqs: x.seqs
+        seqs: x.seqs,
+        // T10.5: the two numbers that make F5 measurable from outside. A
+        // reader handed `windows: 1` out of `exchanges: 119` is the audit's
+        // finding, printed, on any archive, with no model call.
+        ...x.windows !== void 0 ? { windows: x.windows } : {},
+        ...x.exchanges !== void 0 ? { exchanges: x.exchanges } : {}
       })),
       matching: probe2.matching,
       modelCalls: probe2.spend.calls
@@ -26998,8 +27760,9 @@ function readersOutReceipt(file, abs, probe2, t) {
   lines.push(`  of ${probe2.matching} matching session${probe2.matching === 1 ? "" : "s"}, k ${file.k}`);
   lines.push("");
   for (const target of file.targets) {
+    const shape = target.windows !== void 0 && target.windows > 1 ? t.dim(`  ${target.windows} windows of ${target.exchanges ?? "?"}`) : "";
     lines.push(
-      `    ${target.id8}  ${target.project}${target.isGhost ? t.dim("  ghost") : ""}${target.isSidechain ? t.dim("  subagent") : ""}  ${t.dim(`seq ${target.seqs.join(", ")}`)}`
+      `    ${target.id8}  ${target.project}${target.isGhost ? t.dim("  ghost") : ""}${target.isSidechain ? t.dim("  subagent") : ""}  ${t.dim(`seq ${target.seqs.join(", ")}`)}` + shape
     );
   }
   lines.push("");
@@ -28151,6 +28914,9 @@ var STACK_VERIFIED_ON = stack_exports.VERIFIED_ON;
 
 // src/index.ts
 var GLOBAL_ONLY = /^(--json|--no-color|--ascii|--width|--claude-dir|--potsherd-dir|--debug|\d+|\/.*|~.*)$/;
+function collect2(value, previous) {
+  return [...previous ?? [], value];
+}
 function addGlobals(cmd) {
   const name = cmd.name();
   if (name && name !== "potsherd") {
@@ -28274,7 +29040,7 @@ example:
       new Option("--vectors <mode>", "the vector half of the hybrid").choices(["auto", "on", "off"]).default("auto")
     ).addOption(
       new Option("--min-confidence <level>", "withhold rows the archive does not answer").choices(["strong", "weak", "none"]).default("weak")
-    ).option("--no-vec", "text search only \u2014 the same as --vectors off").option("--explain", "show the per-list ranks and scores behind the order").option("--with <tools>", "also search other memory tools: claude-mem, agentmemory, notes").option("--all", "include the projects  potsherd ignore  hides")
+    ).option("--no-vec", "text search only \u2014 the same as --vectors off").option("--no-cards", "transcripts only \u2014 do not search session cards").option("--explain", "show the per-list ranks and scores behind the order").option("--with <tools>", "also search other memory tools: claude-mem, agentmemory, notes").option("--all", "include the projects  potsherd ignore  hides")
   ).addHelpText("after", `
 example:
   potsherd find "pgbouncer"
@@ -28307,6 +29073,7 @@ filters, one example each \u2014 they compose, and all of them are AND:
         vec: opts["vec"] !== false,
         explain: Boolean(opts["explain"]),
         all: Boolean(opts["all"]),
+        cards: opts["cards"] !== false,
         minConfidence: String(opts["minConfidence"] ?? "weak"),
         ...opts["vectors"] ? { vectors: String(opts["vectors"]) } : {},
         ...opts["with"] ? { with: String(opts["with"]) } : {}
@@ -28324,6 +29091,11 @@ filters, one example each \u2014 they compose, and all of them are AND:
     ).option(
       "--cheap",
       "k 3, a haiku-class synthesizer, and cards in place of long slices \u2014 about half the cost, not faster, and it can miss"
+    ).addOption(
+      new Option(
+        "--windows <n>",
+        `separated excerpt windows per long session (default ${ASK_WINDOWS}; 1 restores one contiguous run)`
+      ).argParser(Number)
     ).option("--strict", "refuse rather than answer when fewer than 2 quotes survive").addOption(
       new Option("--max-usd <n>", "stop before crossing this").argParser(Number).default(ASK_MAX_USD)
     ).option("--model <name>", "synthesizer model (default sonnet-class)").option("--reader-model <name>", "reader model (default haiku-class)").addOption(
@@ -28356,6 +29128,11 @@ exit codes:  0 answered  \xB7  1 nothing matched  \xB7  2 --strict refused`);
         strict: Boolean(opts["strict"]),
         vec: opts["vec"] !== false,
         ...opts["k"] !== void 0 ? { k: opts["k"] } : {},
+        // The half that gets forgotten. This action enumerates every flag it
+        // forwards, so an option registered above and missing here is dropped
+        // in silence -- and for --windows that means the receipt reports a
+        // window count the readers never received.
+        ...opts["windows"] !== void 0 ? { windows: opts["windows"] } : {},
         ...opts["maxUsd"] !== void 0 ? { maxUsd: opts["maxUsd"] } : {},
         ...opts["concurrency"] !== void 0 ? { concurrency: opts["concurrency"] } : {},
         ...opts["model"] ? { model: String(opts["model"]) } : {},
@@ -28411,6 +29188,31 @@ example:
   tag.action(async (session, tags, opts) => {
     const o = globals(program2, tag, opts);
     await run2(() => runTag({ ...o, session, ops: [...tagOperands, ...tags] }), o);
+  });
+  const note = addGlobals(
+    program2.command("note").description("leave the two-line verdict on a thread \u2014 the one verb that writes").argument("<thread>", "session or thread id, or the first 8 characters of one").option("--decided <text>", "what this thread settled (repeatable)", collect2).option("--open <text>", "what it left open (repeatable)", collect2).option("--next <text>", "the next step (repeatable)", collect2).option("--by <who>", "who is writing it \u2014 recorded as stated, never guessed")
+  ).addHelpText("after", `
+example:
+  potsherd note 22222222 --decided "the pooler stays in transaction mode"
+  potsherd note 22222222 --open "p99 unmeasured" --next "re-run the load test"
+  potsherd note 22222222                             # read the lane back
+  potsherd note 22222222 --json | jq -r '.notes[0].decided'
+
+the lane is append-only: a second note is a second row, the transcript is
+never touched, and nothing potsherd writes here can be cited as evidence.`);
+  note.action(async (session, opts) => {
+    const o = globals(program2, note, opts);
+    await run2(
+      () => runNote({
+        ...o,
+        session,
+        decided: opts["decided"] ?? [],
+        open: opts["open"] ?? [],
+        next: opts["next"] ?? [],
+        ...opts["by"] ? { by: String(opts["by"]) } : {}
+      }),
+      o
+    );
   });
   const pin = addGlobals(
     program2.command("pin").description("keep a session where you can find it; a \u2605 marks it in ls").argument("<session>", "session id, or the first 8 characters of one")
@@ -28731,7 +29533,7 @@ var PATH6 = [
 ];
 var REST = [
   [["index", "show", "stats", "doctor"], "the archive, and what is in it"],
-  [["card", "tag", "pin", "unpin", "link", "guard"], "what you add to it"],
+  [["note", "card", "tag", "pin", "unpin", "link", "guard"], "what you add to it"],
   [["ignore", "unignore"], "projects you would rather not see"],
   [["setup", "export", "stack"], "reaching your other tools"]
 ];

@@ -23087,10 +23087,12 @@ __export(dist_exports, {
   ASK_SCAN: () => ASK_SCAN,
   ASK_SESSION_CHARS: () => ASK_SESSION_CHARS,
   ASK_TOP_EXCHANGES: () => ASK_TOP_EXCHANGES,
+  ASK_WINDOWS: () => ASK_WINDOWS,
   Budget: () => Budget,
   BudgetError: () => BudgetError,
   CALIBRATION_WINDOW: () => CALIBRATION_WINDOW,
   CALL_PROFILES: () => CALL_PROFILES,
+  CARDS_SCORE_EVIDENCE_BLOCKS: () => CARDS_SCORE_EVIDENCE_BLOCKS,
   CARD_MODEL: () => CARD_MODEL,
   CARD_OUTCOMES: () => CARD_OUTCOMES,
   CARD_SCHEMA: () => CARD_SCHEMA,
@@ -23115,6 +23117,7 @@ __export(dist_exports, {
   HARNESS_OVERHEAD_USD: () => HARNESS_OVERHEAD_USD,
   IMPLAUSIBLE_TOKEN_FACTOR: () => IMPLAUSIBLE_TOKEN_FACTOR,
   INDENT: () => INDENT,
+  LANES: () => LANES,
   LINKED_TO_SQL: () => LINKED_TO_SQL,
   LISTS: () => LISTS,
   LOCAL_SOCKET_VERBS: () => LOCAL_SOCKET_VERBS,
@@ -23155,6 +23158,9 @@ __export(dist_exports, {
   READER_GHOST_NOTE: () => READER_GHOST_NOTE,
   READER_SYSTEM: () => READER_SYSTEM,
   REENTRANCY_ENV: () => REENTRANCY_ENV,
+  ROUTING_CEILING: () => ROUTING_CEILING,
+  ROUTING_KINDS: () => ROUTING_KINDS,
+  ROUTING_PER_SESSION: () => ROUTING_PER_SESSION,
   ReentrancyError: () => ReentrancyError,
   SECRET_TYPES: () => SECRET_TYPES,
   SEQ_HEADER_CHARS: () => SEQ_HEADER_CHARS,
@@ -23197,9 +23203,11 @@ __export(dist_exports, {
   backupPath: () => backupPath,
   bestMatch: () => bestMatch,
   buildPrompt: () => buildPrompt,
+  byLane: () => byLane,
   cachedEmbedder: () => cachedEmbedder,
   calibrate: () => calibrate,
   callProfile: () => callProfile,
+  capConfidence: () => capConfidence,
   cardEmbeddingText: () => cardEmbeddingText,
   cardItems: () => cardItems,
   cardMarkdown: () => cardMarkdown,
@@ -23284,6 +23292,8 @@ __export(dist_exports, {
   isAlias: () => isAlias,
   isPinned: () => isPinned,
   isStale: () => isStale2,
+  laneOfHit: () => laneOfHit,
+  laneOfSession: () => laneOfSession,
   lastAgentMessage: () => lastAgentMessage,
   linkSessions: () => linkSessions,
   linkedSessionIds: () => linkedSessionIds,
@@ -25279,6 +25289,71 @@ CREATE INDEX IF NOT EXISTS session_threads_head   ON session_threads(head);
 DELETE FROM sync_state WHERE key LIKE 'index:%' AND key <> 'index:ghosts';
 UPDATE sessions SET source_mtime = NULL;
 `
+  },
+  {
+    version: 12,
+    name: "notes",
+    // The notes lane — the first table potsherd writes on a user's say-so
+    // rather than on what it read (`docs/AGENT-AUDIT-2026-08-23.md` §4.7,
+    // phase-10 §B9). Every other verb is read-only; this is the one that
+    // makes the archive learn.
+    //
+    // Four properties are load-bearing, and each one is a column decision:
+    //
+    // **Append-only.** `id` is an autoincrement rowid and nothing in
+    // `notes.ts` issues an `UPDATE` or a `DELETE` against this table — a
+    // second note on the same thread is a second row, and the older verdict
+    // is still there afterwards. There is deliberately no `superseded_by`
+    // column, because maintaining one would mean writing to a row that had
+    // already been written, which is the property this table exists to not
+    // have. "Which note is current" is derived at read time (`MAX(id)`) and
+    // therefore cannot go stale or be corrupted by a half-finished write.
+    //
+    // **No foreign key.** Exactly the reasoning `tags`, `pins` and `links`
+    // carry (migration 1): a ghost has no row in `sessions`, and a note about
+    // a session the sweep later deletes is the note most worth keeping. An
+    // `ON DELETE CASCADE` here would also hand any future re-index the power
+    // to destroy user-written text, which no read path should ever have.
+    //
+    // **`thread_id` and `session_id` both.** The thread is the unit a note
+    // attaches to (migration 11), but threads are *derived* and are rebuilt
+    // whole on every `index`. Storing only the derived id would mean a
+    // re-derivation could orphan a note. Storing only the session id would
+    // lose the thing the caller actually meant. So both are recorded: what it
+    // was told (`session_id`, the ref the caller named, resolved) and what
+    // that meant at the time (`thread_id`).
+    //
+    // **`author` and `via` are recorded, never inferred.** `via` is known for
+    // certain — the code path that wrote the row. `author` is not: from a
+    // terminal potsherd cannot tell an agent typing a command from a human
+    // typing the same command, so it defaults to `'unknown'` and is only ever
+    // whatever the caller stated with `--by`. A guessed author on an
+    // assertion table would be a fabricated provenance, which is worse than
+    // no provenance.
+    //
+    // `notes_fts` is `content='notes'` exactly like `cards_fts`: sqlite keeps
+    // no second copy of the text. It is safe as external content precisely
+    // because rows are never deleted or updated, so the 'delete' command form
+    // that `cards/write.ts` needs has no counterpart here.
+    up: `
+CREATE TABLE IF NOT EXISTS notes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id  TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  decided    TEXT NOT NULL DEFAULT '',
+  open       TEXT NOT NULL DEFAULT '',
+  next_step  TEXT NOT NULL DEFAULT '',
+  author     TEXT NOT NULL DEFAULT 'unknown',
+  via        TEXT NOT NULL DEFAULT 'cli',
+  written_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notes_thread  ON notes(thread_id, id);
+CREATE INDEX IF NOT EXISTS notes_session ON notes(session_id, id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+  decided, open, next_step, content='notes'
+);
+`
   }
 ];
 function open(opts = {}) {
@@ -26154,7 +26229,7 @@ function fitCell(t, c, w) {
 function table(t, rows, opts = {}) {
   if (rows.length === 0)
     return [];
-  const gap = opts.gap ?? 2;
+  const gap2 = opts.gap ?? 2;
   const indent = opts.indent ?? INDENT;
   const cols = Math.max(...rows.map((r) => r.length));
   const widths = [];
@@ -26164,7 +26239,7 @@ function table(t, rows, opts = {}) {
     widths[c] = cap2 !== void 0 ? Math.min(content, cap2) : content;
   }
   const grow = Math.min(Math.max(opts.grow ?? cols - 1, 0), cols - 1);
-  const budget = t.width - indent.length - gap * (cols - 1);
+  const budget = t.width - indent.length - gap2 * (cols - 1);
   const fixed = widths.reduce((a, b, i) => i === grow ? a : a + b, 0);
   const growMax = Math.max(8, budget - fixed);
   widths[grow] = Math.min(widths[grow] ?? 0, growMax);
@@ -26183,7 +26258,7 @@ function table(t, rows, opts = {}) {
     const clipped = fitCell(t, cell, w);
     const pad3 = " ".repeat(Math.max(0, w - Theme.len(clipped)));
     return opts.align?.[c] === "right" ? pad3 + clipped : clipped + pad3;
-  }).join(" ".repeat(gap))).trimEnd()));
+  }).join(" ".repeat(gap2))).trimEnd()));
 }
 
 // ../core/dist/archive-state.js
@@ -27842,10 +27917,10 @@ function matchSnippet(text, query, max2 = SNIPPET_CHARS) {
   const rawEnd = snapEnd(text, spans, Math.min(text.length, rawStart + max2), masks);
   const needleSpan = { start: at, end: at + needle.length };
   const sliceEnd = offMask(masks, Math.max(rawEnd, at + needle.length), "back", needleSpan);
-  const slice = text.slice(rawStart, sliceEnd);
+  const slice2 = text.slice(rawStart, sliceEnd);
   const lead = rawStart > 0 ? "\u2026" : "";
-  const tail2 = rawStart + slice.length < text.length ? "\u2026" : "";
-  const collapsed = collapse(slice);
+  const tail2 = rawStart + slice2.length < text.length ? "\u2026" : "";
+  const collapsed = collapse(slice2);
   const found = collapsed.toLowerCase().indexOf(needle);
   const out = lead + collapsed + tail2;
   return found === -1 ? { text: out } : { text: out, match: { start: lead.length + found, end: lead.length + found + needle.length } };
@@ -28236,12 +28311,24 @@ var WEIGHT_AGREEMENT = 0.15;
 var AGREEMENT_LISTS = 3;
 var WEAK_FLOOR = 0.5;
 var STRONG_FLOOR = 0.75;
+var ROUTING_CEILING = "weak";
+function capConfidence(a, b) {
+  return RANK[a] <= RANK[b] ? a : b;
+}
 function calibrate(e) {
   const coverage = e.terms > 0 ? clamp01(e.covered / e.terms) : 1;
   const strength = clamp01(e.strength);
   const agreement = clamp01((e.lists - 1) / (AGREEMENT_LISTS - 1));
   const score = clamp01(coverage * (WEIGHT_BASE + WEIGHT_STRENGTH * strength + WEIGHT_AGREEMENT * agreement));
-  return { score, confidence: label(score), coverage, strength, agreement };
+  const confidence = e.ceiling ? capConfidence(label(score), e.ceiling) : label(score);
+  return {
+    score,
+    confidence,
+    coverage,
+    strength,
+    agreement,
+    ...e.ceiling ? { ceiling: e.ceiling } : {}
+  };
 }
 function label(score) {
   if (score >= STRONG_FLOOR)
@@ -28297,6 +28384,19 @@ var LISTS = [
   "vec_ghost_prompts",
   "vec_cards"
 ];
+var LANES = { evidence: 0, routing: 1 };
+var ROUTING_KINDS = /* @__PURE__ */ new Set(["card"]);
+var ROUTING_PER_SESSION = 1;
+var CARDS_SCORE_EVIDENCE_BLOCKS = true;
+function laneOfHit(kind) {
+  return ROUTING_KINDS.has(kind) ? "routing" : "evidence";
+}
+function laneOfSession(hits) {
+  return hits.some((h) => laneOfHit(h.kind) === "evidence") ? "evidence" : "routing";
+}
+function byLane(a, b) {
+  return LANES[a.lane ?? "evidence"] - LANES[b.lane ?? "evidence"] || b.score - a.score;
+}
 var PER_SESSION = 3;
 var CORROBORATION = 0.12;
 var RELAXED_PENALTY = 0.6;
@@ -28318,8 +28418,18 @@ var WEIGHTS = {
   // A card is a statement about the whole session, like a title, but unlike a
   // title it has been checked against the transcript (`cards/verify.ts`) and
   // carries the session's topics and decisions rather than six words a model
-  // wrote before the session was over. It is weighted between the two: above a
-  // single exchange, below a title that names the thing outright.
+  // wrote before the session was over.
+  //
+  // **This number no longer decides whether a card can beat a transcript.**
+  // It used to be the only thing that did, and F6 is the transcript of that
+  // going wrong. Since T10.7 the two lanes are partitioned (see {@link Lane}):
+  // a card-only block sorts after every block with transcript evidence at any
+  // weight, and a card contributes nothing at all to the rank of a block that
+  // *does* have transcript evidence. What this weight still decides is the
+  // order of card-only blocks **among themselves** — which thread the routing
+  // lane offers first — and nothing else. Left at 1.2 because changing it now
+  // would move that ordering for no reason; it is not load-bearing for the
+  // safety property, which is exactly the change T10.7 made.
   cards_fts: 1.2,
   exchanges_fts: 1,
   ghosts_fts: 1,
@@ -28334,7 +28444,8 @@ var WEIGHTS = {
   // Card vectors are the semantic half of the same statement. Same weight as
   // the exchange vectors: rank-based fusion needs no common scale, but a list
   // that answers "about the same thing" still should not outvote one that
-  // answers "says these words".
+  // answers "says these words". Since T10.7 it, too, only orders the routing
+  // lane internally — see `cards_fts` above.
   vec_cards: 1.5
 };
 function ftsQuery(query) {
@@ -28909,6 +29020,10 @@ async function recall(db, query, requested = {}, options = {}) {
   if (!tableExists(db, "vec_ghost_prompts") || countRows(db, "vec_ghost_prompts") === 0) {
     wanted.delete("vec_ghost_prompts");
   }
+  if (options.cards === false) {
+    wanted.delete("cards_fts");
+    wanted.delete("vec_cards");
+  }
   if (!tableExists(db, "cards_fts") || countRows(db, "cards") === 0) {
     wanted.delete("cards_fts");
   }
@@ -29043,18 +29158,20 @@ async function recall(db, query, requested = {}, options = {}) {
   };
   const conversationOf = conversationKeys(db, ranked.map((h) => h.sessionId));
   const perSessionCount = /* @__PURE__ */ new Map();
+  const routingCount = /* @__PURE__ */ new Map();
   const kept = [];
-  for (const hit of ranked) {
-    const conversation = conversationOf(hit.sessionId);
-    const n2 = perSessionCount.get(conversation) ?? 0;
-    if (n2 >= perSession)
-      continue;
-    perSessionCount.set(conversation, n2 + 1);
+  const take = (hit) => {
+    const lane = laneOfHit(hit.kind);
     const calibration = calibrate({
       covered: coveredTerms(quotableTokens, `${hit.userText} ${hit.assistantText ?? ""}`),
       terms: quotableTokens.length,
       strength: strengthOf(hit.from),
-      lists: new Set(hit.from.map((f) => f.list)).size
+      lists: new Set(hit.from.map((f) => f.list)).size,
+      // A card's text is a model's paragraph about the session, so full
+      // coverage of the query inside it means the *summary* used those words
+      // — which is the one thing an agent must not be allowed to read as "the
+      // archive answers this". See `calibration.ts`.
+      ...lane === "routing" ? { ceiling: ROUTING_CEILING } : {}
     });
     kept.push({
       kind: hit.kind,
@@ -29069,8 +29186,29 @@ async function recall(db, query, requested = {}, options = {}) {
       score: hit.score,
       from: hit.from,
       calibration,
-      confidence: calibration.confidence
+      confidence: calibration.confidence,
+      lane
     });
+  };
+  for (const hit of ranked) {
+    if (laneOfHit(hit.kind) !== "evidence")
+      continue;
+    const conversation = conversationOf(hit.sessionId);
+    const n2 = perSessionCount.get(conversation) ?? 0;
+    if (n2 >= perSession)
+      continue;
+    perSessionCount.set(conversation, n2 + 1);
+    take(hit);
+  }
+  for (const hit of ranked) {
+    if (laneOfHit(hit.kind) === "evidence")
+      continue;
+    const conversation = conversationOf(hit.sessionId);
+    const n2 = routingCount.get(conversation) ?? 0;
+    if (n2 >= ROUTING_PER_SESSION)
+      continue;
+    routingCount.set(conversation, n2 + 1);
+    take(hit);
   }
   const order = [];
   const grouped = /* @__PURE__ */ new Map();
@@ -29089,6 +29227,8 @@ async function recall(db, query, requested = {}, options = {}) {
   }
   const meta3 = sessionMeta(db, [...represents.values()]);
   const sessions = [];
+  let evidenceBuilt = 0;
+  let routingBuilt = 0;
   for (const conversation of order) {
     const id = represents.get(conversation) ?? conversation;
     const m = meta3.get(id);
@@ -29104,21 +29244,37 @@ async function recall(db, query, requested = {}, options = {}) {
       seenText.add(key);
       return true;
     });
-    const blockText = [m.displayTitle, m.title ?? ""].concat(hits.map((h) => `${h.userText} ${h.assistantText ?? ""}`)).join(" ");
+    const lane = laneOfSession(hits);
+    const counted = lane === "evidence" ? hits.filter((h) => h.lane === "evidence") : hits;
+    const blockText = (lane === "evidence" ? [m.displayTitle, m.title ?? ""] : []).concat(counted.map((h) => `${h.userText} ${h.assistantText ?? ""}`)).join(" ");
     const calibration = calibrate({
       covered: coveredTerms(quotableTokens, blockText),
       terms: quotableTokens.length,
-      strength: Math.max(0, ...hits.map((h) => h.calibration.strength)),
-      lists: new Set(hits.flatMap((h) => h.from.map((f) => f.list))).size
+      strength: Math.max(0, ...counted.map((h) => h.calibration.strength)),
+      lists: new Set(counted.flatMap((h) => h.from.map((f) => f.list))).size,
+      ...lane === "routing" ? { ceiling: ROUTING_CEILING } : {}
     });
+    if (lane === "evidence" ? evidenceBuilt >= limit * 3 : routingBuilt >= limit)
+      continue;
+    if (lane === "evidence")
+      evidenceBuilt++;
+    else
+      routingBuilt++;
     sessions.push({
       ...m,
-      score: sessionScore(hits, corroboration),
+      // Rank. A routing block is scored by its card, which is all it has, and
+      // then sorts behind every evidence block regardless of the number. An
+      // evidence block includes its card here — see
+      // {@link CARDS_SCORE_EVIDENCE_BLOCKS} for the measurement that decided
+      // it — and excludes it from `calibration` below, which is the half an
+      // agent is allowed to act on.
+      score: sessionScore(CARDS_SCORE_EVIDENCE_BLOCKS ? hits : counted, corroboration),
       calibration,
       confidence: calibration.confidence,
+      lane,
       hits
     });
-    if (sessions.length >= limit * 3)
+    if (evidenceBuilt >= limit * 3 && routingBuilt >= limit)
       break;
   }
   const built = sessions.length;
@@ -29126,10 +29282,10 @@ async function recall(db, query, requested = {}, options = {}) {
   const belowFloor = built - surviving.length;
   sessions.length = 0;
   sessions.push(...surviving);
-  sessions.sort((a, b) => b.score - a.score);
+  sessions.sort(byLane);
   sessions.length = Math.min(sessions.length, limit);
   const confidence = sessions.reduce((best, s) => maxConfidence(best, s.confidence), "none");
-  const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => b.score - a.score);
+  const flat = [...sessions.flatMap((s) => s.hits)].sort(byLane);
   return {
     query,
     sessions,
@@ -36036,12 +36192,15 @@ function block(s, r, t, now) {
   const ordered = quotableOrder(quotable);
   const evidence = ordered.filter((h) => h.snippet.match);
   for (const hit of withMember(evidence.length > 0 ? evidence : ordered, s)) {
-    const mark = memberMark(s, hit, t);
+    const mark = memberMark(s, hit, t) + laneMark(hit, t);
     const rendered = snippetLine(hit, t, width - 2 - Theme.len(mark));
     if (rendered)
       lines.push(INDENT + "  " + mark + rendered);
   }
-  if (s.hits.length > 0 && !quotable.some((h) => h.snippet.match)) {
+  if (s.lane === "routing") {
+    lines.push(INDENT + "  " + t.dim(clip(CARD_ONLY_NOTE, width - 2, t)));
+  }
+  if (s.hits.length > 0 && !quotable.some((h) => h.snippet.match) && s.lane !== "routing") {
     lines.push(INDENT + "  " + t.dim(clip(unmatchedReason(s, r), width - 2, t)));
   }
   lines.push(INDENT + "  " + t.dim(action(s, t, width - 2)));
@@ -36075,9 +36234,13 @@ function memberMark(s, hit, t) {
   const who = hit.isSidechain ? `${t.g("\u21B3", ">")} subagent ${idTag(hit.sessionId)}` : `${t.g("\u2191", "^")} parent ${idTag(hit.sessionId)}`;
   return t.dim(`${who} `);
 }
+var CARD_ONLY_NOTE = "card only \u2014 routing, not evidence: this is a summary of that session, not its transcript";
+function laneMark(hit, t) {
+  return hit.kind === "card" ? t.dim("card ") : "";
+}
 function unmatchedReason(s, r) {
   if (s.hits.some((h) => h.kind === "card")) {
-    return "the session card matched; the transcript does not use those words";
+    return s.lane === "routing" ? CARD_ONLY_NOTE : "the session card matched; the transcript does not use those words";
   }
   if (s.hits.some((h) => h.kind === "title")) {
     return "the session title matched; the body does not use those words";
@@ -36185,6 +36348,9 @@ function footer(r, t) {
   const parts = [];
   const ghosts = r.sessions.filter((s) => s.status === "ghost").length;
   const sidechains = r.sessions.filter((s) => s.isSidechain || s.hits.some((h) => h.isSidechain && h.sessionId !== s.id)).length;
+  const routing = r.sessions.filter((s) => s.lane === "routing").length;
+  if (routing)
+    parts.push(`${num(routing)} card-only ${t.dash} routing, not evidence`);
   if (ghosts)
     parts.push(`${num(ghosts)} ghost ${plural(ghosts, "hit")}`);
   if (sidechains)
@@ -36273,9 +36439,9 @@ function tail(e, t, width) {
   const lines = [];
   if (e.margin && e.sessions.length >= 2) {
     const m = e.margin;
-    const gap = `#1 leads #2 by ${m.by.toFixed(4)}`;
+    const gap2 = `#1 leads #2 by ${m.by.toFixed(4)}`;
     const because = m.reason === "corroboration" ? `${num(m.firstHits)} hits against ${num(m.secondHits)}, not a better one` : m.list && m.firstRank !== null && m.secondRank !== null ? `${m.list} ranked them ${m.firstRank} and ${m.secondRank}` : m.list ? `${m.list} found #1 and not #2` : "";
-    lines.push(INDENT + t.dim(joinFit([gap, because].filter(Boolean), width, ` ${t.sep} `, t)));
+    lines.push(INDENT + t.dim(joinFit([gap2, because].filter(Boolean), width, ` ${t.sep} `, t)));
   }
   const slowest = [...e.lists].sort((a, b) => b.ms - a.ms)[0];
   if (slowest) {
@@ -37314,6 +37480,11 @@ var OFFLINE_VERBS = [
   "show",
   "stats",
   "tag",
+  // T10.8 — `note` writes, and writes only into `~/.potsherd/potsherd.db`. It
+  // is on this list for the reason `unpin` and `setup` are: a verb missing
+  // from every list is a verb `doctor --privacy` has not accounted for, and
+  // the one verb that writes is the last one that should go unaccounted for.
+  "note",
   "pin",
   "unpin",
   "link",
@@ -38545,8 +38716,8 @@ function loadVectors(db, ids) {
   const CHUNK = 400;
   try {
     for (let i = 0; i < ids.length; i += CHUNK) {
-      const slice = ids.slice(i, i + CHUNK);
-      const rows = db.prepare(`SELECT id, embedding FROM vec_exchanges WHERE id IN (${slice.map(() => "?").join(",")})`).all(...slice);
+      const slice2 = ids.slice(i, i + CHUNK);
+      const rows = db.prepare(`SELECT id, embedding FROM vec_exchanges WHERE id IN (${slice2.map(() => "?").join(",")})`).all(...slice2);
       for (const r of rows) {
         const buf = Buffer.isBuffer(r.embedding) ? r.embedding : Buffer.from(r.embedding);
         out.set(r.id, Array.from(new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))));
@@ -40542,12 +40713,181 @@ async function confirmOpenThreads(cands, o = {}) {
   });
 }
 
+// ../core/dist/windows.js
+var ASK_WINDOWS = 5;
+var WINDOW_MIN_EXCHANGES = 12;
+var WINDOW_NEIGHBOURS = 1;
+var WINDOW_SEPARATION = 2 * WINDOW_NEIGHBOURS + 2;
+var MIN_UNIT_CHARS = 700;
+var UNIT_HEADER_CHARS = 24;
+function windowCount(exchanges, requested, maxChars) {
+  if (exchanges < WINDOW_MIN_EXCHANGES)
+    return 1;
+  const asked = Math.max(1, Math.floor(requested));
+  const byMaterial = Math.floor(exchanges / WINDOW_MIN_EXCHANGES);
+  const byBudget = Math.floor((maxChars - WINDOW_PREAMBLE_CHARS - WINDOW_GAP_CHARS) / (MIN_UNIT_CHARS + UNIT_HEADER_CHARS + WINDOW_GAP_CHARS));
+  return Math.max(1, Math.min(asked, byMaterial, byBudget));
+}
+function seedIndices(total, hits, n2) {
+  const chosen = [];
+  const free = (i) => i >= 0 && i < total && chosen.every((c) => Math.abs(c.index - i) >= WINDOW_SEPARATION);
+  const held = n2 > 1 ? 1 : 0;
+  for (const i of hits) {
+    if (chosen.length >= n2 - held)
+      break;
+    if (free(i))
+      chosen.push({ index: i, via: "hit" });
+  }
+  if (chosen.length < n2 && free(total - 1)) {
+    chosen.push({ index: total - 1, via: "tail" });
+  }
+  for (const i of hits) {
+    if (chosen.length >= n2)
+      break;
+    if (free(i))
+      chosen.push({ index: i, via: "hit" });
+  }
+  while (chosen.length < n2) {
+    const sorted = [...chosen].sort((a, b) => a.index - b.index);
+    let best = -1;
+    let bestWidth = -1;
+    const edges = [-1, ...sorted.map((c) => c.index), total];
+    for (let e = 0; e < edges.length - 1; e++) {
+      const lo = edges[e] + 1;
+      const hi = edges[e + 1] - 1;
+      if (hi < lo)
+        continue;
+      const mid = Math.floor((lo + hi) / 2);
+      const width = hi - lo + 1;
+      if (width > bestWidth && free(mid)) {
+        bestWidth = width;
+        best = mid;
+      }
+    }
+    if (best < 0)
+      break;
+    chosen.push({ index: best, via: "spread" });
+  }
+  return chosen.sort((a, b) => a.index - b.index);
+}
+function planWindows(transcript, hits, o) {
+  const total = transcript.units.length;
+  const n2 = Math.max(1, Math.floor(o.windows));
+  const seeds = seedIndices(total, hits, n2);
+  const windows2 = [];
+  let remaining = o.maxChars;
+  let left = seeds.length;
+  for (const seed of seeds) {
+    const share = Math.max(MIN_UNIT_CHARS, Math.floor(remaining / Math.max(1, left)));
+    left -= 1;
+    const admitted = /* @__PURE__ */ new Map();
+    const candidates = unitPriority(seed.index, total);
+    let windowLeft = share;
+    let unitsLeft = candidates.length;
+    for (const i of candidates) {
+      const u = transcript.units[i];
+      const per = Math.max(MIN_UNIT_CHARS, Math.floor(windowLeft / Math.max(1, unitsLeft)) - UNIT_HEADER_CHARS);
+      const body = u.text.length > per ? renderUnitBody(u, per) : u.text;
+      unitsLeft -= 1;
+      const cost = body.length + UNIT_HEADER_CHARS;
+      if (cost > windowLeft && admitted.size > 0)
+        continue;
+      admitted.set(i, body === u.text ? u : { ...u, text: body });
+      windowLeft -= cost;
+      if (windowLeft <= 0)
+        break;
+    }
+    const units = [...admitted.keys()].sort((a, b) => a - b).map((i) => admitted.get(i));
+    if (units.length === 0)
+      continue;
+    windows2.push({ seed: seed.index, via: seed.via, units });
+    remaining -= share - windowLeft;
+    if (remaining <= 0)
+      break;
+  }
+  return {
+    windows: windows2,
+    units: windows2.flatMap((w) => w.units),
+    exchanges: total,
+    requested: n2
+  };
+}
+function unitPriority(seed, total) {
+  const out = [seed];
+  for (let d = 1; d <= WINDOW_NEIGHBOURS; d++) {
+    if (seed - d >= 0)
+      out.push(seed - d);
+    if (seed + d < total)
+      out.push(seed + d);
+  }
+  return out.filter((i) => i >= 0 && i < total);
+}
+function renderUnitBody(u, maxChars) {
+  const rendered = renderUnit(u, maxChars);
+  return rendered.slice(rendered.indexOf("\n") + 1);
+}
+var WINDOW_GAP_MARK = "\u22EF";
+var WINDOW_PREAMBLE_CHARS = 200;
+var WINDOW_GAP_CHARS = 56;
+function windowOverhead(windows2) {
+  return WINDOW_PREAMBLE_CHARS + (Math.max(1, windows2) + 1) * WINDOW_GAP_CHARS;
+}
+function windowText(transcript, units) {
+  if (units.length === 0)
+    return "";
+  const at = /* @__PURE__ */ new Map();
+  transcript.units.forEach((u, i) => at.set(u.seq, i));
+  const total = transcript.units.length;
+  let runs = 0;
+  let last2 = null;
+  for (const u of units) {
+    const i = at.get(u.seq);
+    if (i === void 0 || last2 === null || i !== last2 + 1)
+      runs += 1;
+    last2 = i ?? null;
+  }
+  const shown = units.length;
+  const parts = [
+    `${runs} separated window${runs === 1 ? "" : "s"} from a ${total}-exchange session, chosen by relevance to the question; ${shown} exchange${shown === 1 ? "" : "s"} shown. The stretches marked ${WINDOW_GAP_MARK} are NOT included \u2014 do not read across a mark.`
+  ];
+  let previous = null;
+  for (const u of units) {
+    const i = at.get(u.seq);
+    if (i === void 0) {
+      parts.push(`${WINDOW_GAP_MARK} position in the transcript unknown ${WINDOW_GAP_MARK}`);
+      parts.push(renderUnit(u));
+      previous = null;
+      continue;
+    }
+    const from = previous === null ? 0 : previous + 1;
+    const missing = i - from;
+    if (missing > 0) {
+      parts.push(gap(transcript.units[from]?.seq ?? null, transcript.units[i - 1]?.seq ?? null, missing, previous === null ? "earlier" : ""));
+    }
+    parts.push(renderUnit(u));
+    previous = i;
+  }
+  const after = previous === null ? 0 : total - 1 - previous;
+  if (after > 0) {
+    parts.push(gap(transcript.units[previous + 1]?.seq ?? null, transcript.units[total - 1]?.seq ?? null, after, "later"));
+  }
+  return parts.join("\n\n");
+}
+function gap(from, to, n2, when2 = "") {
+  const where = from !== null && to !== null ? from === to ? ` (seq ${from})` : ` (seq ${from}\u2013${to})` : "";
+  const many = n2 === 1 ? "exchange" : "exchanges";
+  const word = when2 ? `${when2} ` : "";
+  const count2 = n2 > 0 ? `${n2} ${word}${many}` : "exchanges";
+  return `${WINDOW_GAP_MARK} ${count2}${where} not shown ${WINDOW_GAP_MARK}`;
+}
+
 // ../core/dist/ask.js
 var ASK_K = 6;
 var ASK_MAX_USD = 0.5;
 var ASK_CONCURRENCY = 6;
 var ASK_SESSION_CHARS = 8e3;
 var ASK_TOP_EXCHANGES = 4;
+var ASK_SEED_FACTOR = 2;
 var ASK_CHEAP_K = 3;
 var ASK_CHEAP_MODEL = CARD_MODEL;
 var ASK_CHEAP_TOP_EXCHANGES = 2;
@@ -40802,7 +41142,7 @@ function excerptUnits(transcript, seqs, o = {}) {
   for (const i of priority) {
     const u = transcript.units[i];
     const share = Math.max(MIN_UNIT_CHARS, Math.floor(remaining / Math.max(1, left)));
-    const body = u.text.length > share ? renderUnitBody(u, share) : u.text;
+    const body = u.text.length > share ? renderUnitBody2(u, share) : u.text;
     left -= 1;
     if (body.length + UNIT_HEADER_CHARS > remaining && admitted.size > 0)
       continue;
@@ -40813,9 +41153,7 @@ function excerptUnits(transcript, seqs, o = {}) {
   }
   return [...admitted.keys()].sort((a, b) => a - b).map((i) => admitted.get(i));
 }
-var MIN_UNIT_CHARS = 700;
-var UNIT_HEADER_CHARS = 24;
-function renderUnitBody(u, maxChars) {
+function renderUnitBody2(u, maxChars) {
   const rendered = renderUnit(u, maxChars);
   return rendered.slice(rendered.indexOf("\n") + 1);
 }
@@ -40871,7 +41209,13 @@ async function ask(db, question, o = {}) {
     ...o.root !== void 0 ? { root: o.root } : {},
     vectors: o.vectors ?? true
   });
-  const { targets, candidates } = shortlist(db, found.sessions, k, cheap);
+  const { targets, candidates } = await shortlist(db, found.sessions, k, {
+    cheap,
+    question: q,
+    windows: Math.max(1, Math.floor(o.windows ?? ASK_WINDOWS)),
+    ...o.root !== void 0 ? { root: o.root } : {},
+    ...o.vectors !== void 0 ? { vectors: o.vectors } : { vectors: true }
+  });
   const matching2 = candidates;
   o.onProgress?.({
     step: "shortlist",
@@ -41016,7 +41360,8 @@ function openLlm(model, budget, o) {
 function message(err) {
   return err instanceof Error ? err.message : String(err);
 }
-function shortlist(db, sessions, k, cheap = false) {
+async function shortlist(db, sessions, k, o) {
+  const cheap = o.cheap;
   const order = [];
   const seqs = /* @__PURE__ */ new Map();
   const scores = /* @__PURE__ */ new Map();
@@ -41039,18 +41384,73 @@ function shortlist(db, sessions, k, cheap = false) {
       inBlock.push(s.id);
     }
     inBlock.sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0));
-    order.push(...inBlock);
+    const kin = [];
+    for (const id of inBlock) {
+      for (const relative of relatives(db, id)) {
+        if (seqs.has(relative))
+          continue;
+        seqs.set(relative, []);
+        scores.set(relative, 0);
+        kin.push(relative);
+      }
+    }
+    order.push(...inBlock, ...kin);
   }
   const targets = [];
   const cards = cheap ? cardBriefs(db, order.slice(0, Math.max(k * 3, k))) : /* @__PURE__ */ new Map();
   for (const sessionId of order) {
     if (targets.length >= k)
       break;
-    const t = loadTarget(db, sessionId, seqs.get(sessionId) ?? [], scores.get(sessionId) ?? 0, cards.get(sessionId));
+    const t = await loadTarget(db, sessionId, seqs.get(sessionId) ?? [], scores.get(sessionId) ?? 0, o, cards.get(sessionId));
     if (t && t.units.length > 0)
       targets.push(t);
   }
   return { targets, candidates: order.length };
+}
+function relatives(db, sessionId) {
+  const out = [];
+  try {
+    const row2 = db.prepare("SELECT parent_session_id FROM sessions WHERE id = ?").get(sessionId);
+    const parent = row2?.parent_session_id;
+    if (parent && parent !== sessionId)
+      out.push(parent);
+  } catch {
+  }
+  try {
+    for (const seed of [...out, sessionId]) {
+      for (const link of threadOf(db, seed).sessions) {
+        if (link !== sessionId && !out.includes(link))
+          out.push(link);
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+async function seedSeqs(db, question, sessionId, have, want, o) {
+  const out = [...have];
+  if (out.length >= want)
+    return out;
+  try {
+    const found = await recall(db, question, { sessionId }, {
+      limit: 1,
+      perSession: want,
+      ...o.root !== void 0 ? { root: o.root } : {},
+      ...o.vectors !== void 0 ? { vectors: o.vectors } : {}
+    });
+    for (const h of found.hits) {
+      if (out.length >= want)
+        break;
+      if (h.sessionId !== sessionId)
+        continue;
+      if (typeof h.seq !== "number")
+        continue;
+      if (!out.includes(h.seq))
+        out.push(h.seq);
+    }
+  } catch {
+  }
+  return out;
 }
 function cardBriefs(db, sessionIds) {
   const out = /* @__PURE__ */ new Map();
@@ -41105,17 +41505,14 @@ function parseDecisions(raw) {
     return [];
   }
 }
-function loadTarget(db, sessionId, seqs, score, card) {
+async function loadTarget(db, sessionId, seqs, score, o, card) {
   const transcript = loadSessionTranscript(db, sessionId) ?? loadGhostTranscript(db, sessionId);
   if (!transcript)
     return null;
-  const full = excerptUnits(transcript, seqs);
-  const narrow = card ? excerptUnits(transcript, seqs, {
-    top: ASK_CHEAP_TOP_EXCHANGES,
-    maxChars: ASK_CHEAP_SESSION_CHARS
-  }) : null;
-  const worthIt = narrow !== null && excerptText(narrow).length + card.length < excerptText(full).length;
-  const units = worthIt ? narrow : full;
+  const full = await slice(db, transcript, seqs, ASK_SESSION_CHARS, ASK_TOP_EXCHANGES, o);
+  const narrow = card ? await slice(db, transcript, seqs, ASK_CHEAP_SESSION_CHARS, ASK_CHEAP_TOP_EXCHANGES, o) : null;
+  const worthIt = narrow !== null && narrow.text.length + card.length < full.text.length;
+  const chosen = worthIt ? narrow : full;
   return {
     sessionId,
     id8: idTag(sessionId),
@@ -41123,9 +41520,39 @@ function loadTarget(db, sessionId, seqs, score, card) {
     harness: transcript.harness,
     isSidechain: transcript.isSidechain,
     isGhost: transcript.kind === "ghost",
-    units,
+    units: chosen.units,
+    excerpts: chosen.text,
+    windows: chosen.windows,
+    exchanges: transcript.units.length,
     score,
     ...worthIt ? { card } : {}
+  };
+}
+async function slice(db, transcript, seqs, maxChars, top, o) {
+  const n2 = windowCount(transcript.units.length, o.windows, maxChars);
+  if (n2 <= 1) {
+    const units = excerptUnits(transcript, seqs, { top, maxChars });
+    return { units, text: excerptText(units), windows: 1, plan: null };
+  }
+  const wanted = n2 * ASK_SEED_FACTOR;
+  const hitSeqs = await seedSeqs(db, o.question, transcript.id, seqs, wanted, o);
+  const byIndex = /* @__PURE__ */ new Map();
+  transcript.units.forEach((u, i) => byIndex.set(u.seq, i));
+  const positions = [];
+  for (const seq of hitSeqs) {
+    const i = byIndex.get(seq);
+    if (i !== void 0 && !positions.includes(i))
+      positions.push(i);
+  }
+  const plan = planWindows(transcript, positions, {
+    windows: n2,
+    maxChars: Math.max(MIN_UNIT_CHARS + UNIT_HEADER_CHARS, maxChars - windowOverhead(n2))
+  });
+  return {
+    units: plan.units,
+    text: windowText(transcript, plan.units),
+    windows: plan.windows.length,
+    plan
   };
 }
 function readerInput(question, t) {
@@ -41137,8 +41564,10 @@ function readerInput(question, t) {
     harness: t.harness,
     isSidechain: t.isSidechain,
     isGhost: t.isGhost,
-    excerpts: excerptText(t.units),
+    excerpts: t.excerpts,
     seqs: t.units.map((u) => u.seq),
+    windows: t.windows,
+    exchanges: t.exchanges,
     ...t.card ? { card: t.card } : {}
   };
 }
@@ -41865,7 +42294,7 @@ async function collectSource(db, sessionId, o = {}) {
   const thread = threadOf(db, sessionId);
   const totals = threadTotals(db, thread);
   const chained = thread.sessions.length > 1;
-  const slice = [];
+  const slice2 = [];
   let sliceVia = null;
   const about = o.about?.trim();
   if (about) {
@@ -41882,8 +42311,8 @@ async function collectSource(db, sessionId, o = {}) {
     }
     found.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? "") || a.seq - b.seq);
     for (const f of found.slice(-(o.k ?? ABOUT_K)))
-      slice.push(f);
-    sliceVia = slice.length ? "about" : null;
+      slice2.push(f);
+    sliceVia = slice2.length ? "about" : null;
   } else if (!card) {
     const units = show.ghostPrompts ? show.ghostPrompts.map((p) => ({
       seq: p.seq,
@@ -41895,9 +42324,9 @@ async function collectSource(db, sessionId, o = {}) {
     for (const u of units.slice(-Math.max(1, o.k ?? RECENT_K))) {
       const text = sliceText(u.user, u.assistant, isGhost);
       if (text)
-        slice.push({ seq: u.seq, ts: u.ts, text, id8: u.id8 });
+        slice2.push({ seq: u.seq, ts: u.ts, text, id8: u.id8 });
     }
-    sliceVia = slice.length ? "recent" : null;
+    sliceVia = slice2.length ? "recent" : null;
   }
   const s = show.session;
   return {
@@ -41906,7 +42335,7 @@ async function collectSource(db, sessionId, o = {}) {
     card,
     isGhost,
     id8,
-    slice,
+    slice: slice2,
     sliceVia,
     // A ghost has no thread — `history.jsonl` kept prompts, not records — so
     // its count stays its own, and the noun stays `prompts`.
@@ -52176,8 +52605,21 @@ function groupThreads(sessions) {
       exchanges,
       resume: lead.resume,
       score: lead.score,
-      /** Minted here. Copy it; do not compose one. See `sources.ts`. */
-      citation: mintCitation({
+      /**
+       * F6 — a card-only thread gets no citation.
+       *
+       * `mintCitation` exists so a model copies a source line instead of
+       * composing one. Minting one for a thread the agent has only ever seen a
+       * *summary* of would hand it a syntactically perfect, index-resolvable
+       * citation for a claim no transcript supports — and `verifySources`
+       * would keep it, because the session really is in the index. Checking
+       * the id is not checking the provenance, so the refusal has to happen
+       * where the line is minted. `lane` is read off the core row; a build
+       * whose core predates the lane carries none and mints as before.
+       */
+      lane: lead.lane ?? "evidence",
+      citable: (lead.lane ?? "evidence") === "evidence",
+      citation: (lead.lane ?? "evidence") === "routing" ? null : mintCitation({
         sessionId: key,
         kind: lead.kind,
         harness: lead.harness,

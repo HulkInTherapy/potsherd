@@ -303,16 +303,32 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
       exchanges,
       resume: lead.resume,
       score: lead.score,
-      /** Minted here. Copy it; do not compose one. See `sources.ts`. */
-      citation: mintCitation({
-        sessionId: key,
-        kind: lead.kind,
-        harness: lead.harness,
-        project: lead.projectName,
-        exchanges,
-        prompts,
-        date: (ended ?? started)?.slice(0, 10) ?? null,
-      }),
+      /**
+       * F6 — a card-only thread gets no citation.
+       *
+       * `mintCitation` exists so a model copies a source line instead of
+       * composing one. Minting one for a thread the agent has only ever seen a
+       * *summary* of would hand it a syntactically perfect, index-resolvable
+       * citation for a claim no transcript supports — and `verifySources`
+       * would keep it, because the session really is in the index. Checking
+       * the id is not checking the provenance, so the refusal has to happen
+       * where the line is minted. `lane` is read off the core row; a build
+       * whose core predates the lane carries none and mints as before.
+       */
+      lane: lead.lane ?? 'evidence',
+      citable: (lead.lane ?? 'evidence') === 'evidence',
+      citation:
+        (lead.lane ?? 'evidence') === 'routing'
+          ? null
+          : mintCitation({
+              sessionId: key,
+              kind: lead.kind,
+              harness: lead.harness,
+              project: lead.projectName,
+              exchanges,
+              prompts,
+              date: (ended ?? started)?.slice(0, 10) ?? null,
+            }),
     };
   });
 }

@@ -158,6 +158,14 @@ export {
   type VectorState,
   type SessionRow,
   type GhostRow,
+  CARDS_SCORE_EVIDENCE_BLOCKS,
+  LANES,
+  ROUTING_KINDS,
+  ROUTING_PER_SESSION,
+  byLane,
+  laneOfHit,
+  laneOfSession,
+  type Lane,
 } from './recall.js';
 export {
   listSessions,
@@ -333,6 +341,8 @@ export {
   type Calibrated,
   type Confidence,
   type RowEvidence,
+  ROUTING_CEILING,
+  capConfidence,
 } from './calibration.js';
 export * as cardSentinel from './cards/sentinel.js';
 
@@ -481,6 +491,7 @@ export {
   ASK_SCAN,
   ASK_SESSION_CHARS,
   ASK_TOP_EXCHANGES,
+  ASK_WINDOWS,
   MIN_QUOTE_CHARS,
   READER_CARD_NOTE,
   READER_GHOST_NOTE,

@@ -1,6 +1,6 @@
 import process from 'node:process';
 import { Command, Option } from 'commander';
-import { ASK_K, ASK_CHEAP_K, ASK_MAX_USD, ASK_CONCURRENCY } from '@potsherd/core';
+import { ASK_K, ASK_CHEAP_K, ASK_MAX_USD, ASK_CONCURRENCY, ASK_WINDOWS } from '@potsherd/core';
 import { closeAgentMemoryClients } from '@potsherd/bridges';
 import { fail, print, printJson, themeFrom, type GlobalOptions } from './output.js';
 import { runAudit } from './commands/audit.js';
@@ -280,6 +280,7 @@ example:
           .default('weak'),
       )
       .option('--no-vec', 'text search only — the same as --vectors off')
+      .option('--no-cards', 'transcripts only — do not search session cards')
       .option('--explain', 'show the per-list ranks and scores behind the order')
       .option('--with <tools>', 'also search other memory tools: claude-mem, agentmemory, notes')
       .option('--all', 'include the projects  potsherd ignore  hides'),
@@ -316,6 +317,7 @@ filters, one example each — they compose, and all of them are AND:
           vec: opts['vec'] !== false,
           explain: Boolean(opts['explain']),
           all: Boolean(opts['all']),
+          cards: opts['cards'] !== false,
           minConfidence: String(opts['minConfidence'] ?? 'weak'),
           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
           ...(opts['with'] ? { with: String(opts['with']) } : {}),
@@ -344,6 +346,12 @@ filters, one example each — they compose, and all of them are AND:
       .option(
         '--cheap',
         'k 3, a haiku-class synthesizer, and cards in place of long slices — about half the cost, not faster, and it can miss',
+      )
+      .addOption(
+        new Option(
+          '--windows <n>',
+          `separated excerpt windows per long session (default ${ASK_WINDOWS}; 1 restores one contiguous run)`,
+        ).argParser(Number),
       )
       .option('--strict', 'refuse rather than answer when fewer than 2 quotes survive')
       .addOption(
@@ -401,6 +409,11 @@ exit codes:  0 answered  ·  1 nothing matched  ·  2 --strict refused`);
           strict: Boolean(opts['strict']),
           vec: opts['vec'] !== false,
           ...(opts['k'] !== undefined ? { k: opts['k'] } : {}),
+          // The half that gets forgotten. This action enumerates every flag it
+          // forwards, so an option registered above and missing here is dropped
+          // in silence -- and for --windows that means the receipt reports a
+          // window count the readers never received.
+          ...(opts['windows'] !== undefined ? { windows: opts['windows'] } : {}),
           ...(opts['maxUsd'] !== undefined ? { maxUsd: opts['maxUsd'] } : {}),
           ...(opts['concurrency'] !== undefined ? { concurrency: opts['concurrency'] } : {}),
           ...(opts['model'] ? { model: String(opts['model']) } : {}),
