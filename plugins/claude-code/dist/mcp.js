@@ -28028,6 +28028,62 @@ function cut(text, start, end, pick3) {
   };
 }
 
+// ../core/dist/keyphrase.js
+var KEYPHRASE_RULE = Object.freeze({ keepRatio: 0.5, minTerms: 1, maxTerms: 4 });
+var DF_TABLES = [
+  "exchanges_fts",
+  "ghosts_fts",
+  "ghost_prompts_fts",
+  "cards_fts"
+];
+var MAX_SCORED_TERMS = 16;
+var NO_KEYPHRASE = { terms: [], content: [], df: /* @__PURE__ */ new Map() };
+function contentTerms(tokens, stop) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const t of tokens) {
+    if (stop.has(t) || seen.has(t))
+      continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= MAX_SCORED_TERMS)
+      break;
+  }
+  return out;
+}
+function documentFrequency(db, terms) {
+  const df = /* @__PURE__ */ new Map();
+  for (const term of terms) {
+    const match = `"${term.replace(/"/g, '""')}"`;
+    let n2 = 0;
+    for (const table2 of DF_TABLES) {
+      try {
+        const row2 = db.prepare(`SELECT count(*) AS c FROM ${table2} WHERE ${table2} MATCH ?`).get(match);
+        n2 += Number(row2?.c ?? 0);
+      } catch {
+      }
+    }
+    df.set(term, n2);
+  }
+  return df;
+}
+function selectTerms(content, df) {
+  const present = content.filter((t) => (df.get(t) ?? 0) > 0);
+  if (present.length === 0)
+    return [];
+  const order = new Map(content.map((t, i) => [t, i]));
+  const ranked = [...present].sort((a, b) => (df.get(a) ?? 0) - (df.get(b) ?? 0) || (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  const keep = Math.min(KEYPHRASE_RULE.maxTerms, Math.max(KEYPHRASE_RULE.minTerms, Math.ceil(present.length * KEYPHRASE_RULE.keepRatio)));
+  return ranked.slice(0, Math.min(keep, ranked.length));
+}
+function keyphrase(db, tokens, stop) {
+  const content = contentTerms(tokens, stop);
+  if (content.length === 0)
+    return NO_KEYPHRASE;
+  const df = documentFrequency(db, content);
+  return { terms: selectTerms(content, df), content, df };
+}
+
 // ../core/dist/ignore.js
 import fs11 from "node:fs";
 import path9 from "node:path";
@@ -28313,6 +28369,7 @@ var AGREEMENT_LISTS = 3;
 var WEAK_FLOOR = 0.5;
 var STRONG_FLOOR = 0.75;
 var ROUTING_CEILING = "weak";
+var KEY_TERMS_REQUIRED = 1;
 function capConfidence(a, b) {
   return RANK[a] <= RANK[b] ? a : b;
 }
@@ -28321,14 +28378,16 @@ function calibrate(e) {
   const strength = clamp01(e.strength);
   const agreement = clamp01((e.lists - 1) / (AGREEMENT_LISTS - 1));
   const score = clamp01(coverage * (WEIGHT_BASE + WEIGHT_STRENGTH * strength + WEIGHT_AGREEMENT * agreement));
-  const confidence = e.ceiling ? capConfidence(label(score), e.ceiling) : label(score);
+  const missesKeyTerm = (e.keyTerms ?? 0) > 0 && (e.keyCovered ?? 0) < (e.keyTerms ?? 0);
+  const ceiling = missesKeyTerm ? capConfidence(e.ceiling ?? "none", "none") : e.ceiling;
+  const confidence = ceiling ? capConfidence(label(score), ceiling) : label(score);
   return {
     score,
     confidence,
     coverage,
     strength,
     agreement,
-    ...e.ceiling ? { ceiling: e.ceiling } : {}
+    ...ceiling ? { ceiling } : {}
   };
 }
 function label(score) {
@@ -28980,6 +29039,12 @@ async function recall(db, query, requested = {}, options = {}) {
   if (filters.until)
     validateISODate(filters.until, "--until");
   const fts = ftsQuery(query);
+  let key = NO_KEYPHRASE;
+  try {
+    key = keyphrase(db, fts.tokens, QUOTE_STOPWORDS);
+  } catch {
+    key = NO_KEYPHRASE;
+  }
   const listReports = [];
   const empty = (vectors2) => ({
     query,
@@ -28997,6 +29062,8 @@ async function recall(db, query, requested = {}, options = {}) {
     confidence: "none",
     minConfidence,
     belowFloor: 0,
+    keyphrase: key,
+    keyphraseLists: [],
     ms: Date.now() - started
   });
   const vecMode = options.vectors ?? "auto";
@@ -29033,23 +29100,39 @@ async function recall(db, query, requested = {}, options = {}) {
   }
   let relaxed = false;
   const relaxedLists = /* @__PURE__ */ new Set();
+  const keyphraseLists = /* @__PURE__ */ new Set();
+  const quoteTerm = (t) => `"${t.replace(/"/g, '""')}"`;
+  const distinctMeaningful = new Set(fts.tokens.filter((t) => !STOPWORDS.has(t))).size;
+  const keyOr = key.terms.length > 0 && key.terms.length < distinctMeaningful ? key.terms.map((t) => t.length >= PREFIX_MIN ? `${quoteTerm(t)}*` : quoteTerm(t)).join(" OR ") : "";
   const textList = (list, fn) => {
     if (!wanted.has(list))
       return [];
     const t0 = Date.now();
     let hits = [];
     let usedOr = false;
+    let usedKeyphrase = false;
+    const anyWord = () => fts.or && fts.or !== fts.and ? fn(fts.or) : [];
     try {
       hits = fn(fts.and);
-      if (hits.length === 0 && fts.or && fts.or !== fts.and) {
+      if (hits.length === 0 && keyOr && keyOr !== fts.and && keyOr !== fts.or) {
         usedOr = true;
-        hits = fn(fts.or);
+        usedKeyphrase = true;
+        hits = fn(keyOr);
+      }
+      if (hits.length === 0) {
+        const rest = anyWord();
+        if (fts.or && fts.or !== fts.and)
+          usedOr = true;
+        usedKeyphrase = false;
+        hits = rest;
       }
     } catch {
       hits = [];
     }
     if (usedOr) {
       relaxedLists.add(list);
+      if (usedKeyphrase)
+        keyphraseLists.add(list);
       if (hits.length > 0)
         relaxed = true;
     }
@@ -29112,6 +29195,7 @@ async function recall(db, query, requested = {}, options = {}) {
   const quotable = fts.tokens.filter((t) => !QUOTE_STOPWORDS.has(t));
   const meaningfulTokens = fts.tokens.filter((t) => !STOPWORDS.has(t));
   const quotableTokens = quotable.length > 0 ? quotable : meaningfulTokens.length > 0 ? meaningfulTokens : fts.tokens;
+  const requiredTerms = key.terms.slice(0, KEY_TERMS_REQUIRED);
   const fused = /* @__PURE__ */ new Map();
   const effectiveWeights = {};
   for (const [name, hits] of Object.entries(lists)) {
@@ -29163,11 +29247,18 @@ async function recall(db, query, requested = {}, options = {}) {
   const kept = [];
   const take = (hit) => {
     const lane = laneOfHit(hit.kind);
+    const hitText = `${hit.userText} ${hit.assistantText ?? ""}`;
     const calibration = calibrate({
-      covered: coveredTerms(quotableTokens, `${hit.userText} ${hit.assistantText ?? ""}`),
+      covered: coveredTerms(quotableTokens, hitText),
       terms: quotableTokens.length,
       strength: strengthOf(hit.from),
       lists: new Set(hit.from.map((f) => f.list)).size,
+      // F8's second half. Coverage above is a uniform partition over every
+      // word the user typed; this says which of those words the question was
+      // actually *about*. A row that shows none of them is not an answer to
+      // it, whatever the other four numbers say. See `calibration.ts`.
+      keyCovered: coveredTerms(requiredTerms, hitText),
+      keyTerms: requiredTerms.length,
       // A card's text is a model's paragraph about the session, so full
       // coverage of the query inside it means the *summary* used those words
       // — which is the one thing an agent must not be allowed to read as "the
@@ -29237,12 +29328,12 @@ async function recall(db, query, requested = {}, options = {}) {
       continue;
     const seenText = /* @__PURE__ */ new Set();
     const hits = grouped.get(conversation).filter((h) => {
-      const key = h.snippet.text.trim();
-      if (!key)
+      const key2 = h.snippet.text.trim();
+      if (!key2)
         return true;
-      if (seenText.has(key))
+      if (seenText.has(key2))
         return false;
-      seenText.add(key);
+      seenText.add(key2);
       return true;
     });
     const lane = laneOfSession(hits);
@@ -29251,6 +29342,8 @@ async function recall(db, query, requested = {}, options = {}) {
     const calibration = calibrate({
       covered: coveredTerms(quotableTokens, blockText),
       terms: quotableTokens.length,
+      keyCovered: coveredTerms(requiredTerms, blockText),
+      keyTerms: requiredTerms.length,
       strength: Math.max(0, ...counted.map((h) => h.calibration.strength)),
       lists: new Set(counted.flatMap((h) => h.from.map((f) => f.list))).size,
       ...lane === "routing" ? { ceiling: ROUTING_CEILING } : {}
@@ -29303,6 +29396,8 @@ async function recall(db, query, requested = {}, options = {}) {
     confidence,
     minConfidence,
     belowFloor,
+    keyphrase: key,
+    keyphraseLists: [...keyphraseLists],
     ms: Date.now() - started
   };
 }
