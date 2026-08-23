@@ -97,6 +97,20 @@ export const BGE_QUERY_PREFIX = 'Represent this sentence for searching relevant 
 /** Longer inputs degrade mean-pooled embeddings; upstream measured this too. */
 const MAX_INPUT_CHARS = 2000;
 
+/**
+ * bge-small is a BERT with 512 learned position embeddings, and a sequence
+ * longer than that indexes past the end of them.
+ *
+ * transformers.js passed `truncation: true` and never had to think about it.
+ * Driving the ONNX graph directly means doing it here: 2,000 characters of
+ * ordinary prose tokenizes to about 270, so this never fires on real text —
+ * but 2,000 characters of a base64 blob or minified JSON tokenizes to well
+ * over 512, and those are in every archive. The tail is what gets dropped and
+ * the closing `[SEP]` is kept, which is what the reference implementation
+ * does.
+ */
+const MAX_TOKENS = 512;
+
 // --------------------------------------------------------------- acquisition
 
 /**
@@ -541,22 +555,25 @@ async function wasmPipeline(cacheDir: string): Promise<Pipeline> {
     interOpNumThreads: 1,
   });
   const wantsTypeIds = session.inputNames.includes('token_type_ids');
+  const sepId = sepTokenId(path.join(modelDir, 'tokenizer.json'));
 
   const one = async (text: string): Promise<Float32Array> => {
     const enc = tokenizer.encode(text, {
       add_special_tokens: true,
       return_token_type_ids: true,
     });
-    const n = enc.ids.length;
+    const ids = truncate(enc.ids, sepId);
+    const mask = enc.attention_mask.slice(0, ids.length);
+    const n = ids.length;
     const big = (xs: number[]) => BigInt64Array.from(xs, (x) => BigInt(x));
     const feeds: Record<string, unknown> = {
-      input_ids: new ort.Tensor('int64', big(enc.ids), [1, n]),
-      attention_mask: new ort.Tensor('int64', big(enc.attention_mask), [1, n]),
+      input_ids: new ort.Tensor('int64', big(ids), [1, n]),
+      attention_mask: new ort.Tensor('int64', big(mask), [1, n]),
     };
     if (wantsTypeIds) {
       feeds['token_type_ids'] = new ort.Tensor(
         'int64',
-        big(enc.token_type_ids ?? enc.ids.map(() => 0)),
+        big((enc.token_type_ids ?? ids.map(() => 0)).slice(0, n)),
         [1, n],
       );
     }
@@ -569,7 +586,7 @@ async function wasmPipeline(cacheDir: string): Promise<Pipeline> {
     const v = new Float32Array(width);
     let counted = 0;
     for (let i = 0; i < length; i += 1) {
-      if (!enc.attention_mask[i]) continue;
+      if (!mask[i]) continue;
       counted += 1;
       const base = i * width;
       for (let j = 0; j < width; j += 1) v[j] = (v[j] ?? 0) + (data[base + j] ?? 0);
@@ -596,6 +613,30 @@ async function wasmPipeline(cacheDir: string): Promise<Pipeline> {
     parts.forEach((p, i) => all.set(p, i * width));
     return { data: all, dims: [parts.length, width] };
   };
+}
+
+/** Cut a sequence to the model's position limit, keeping the closing `[SEP]`. */
+function truncate(ids: readonly number[], sepId: number | null): number[] {
+  if (ids.length <= MAX_TOKENS) return [...ids];
+  const cut = ids.slice(0, MAX_TOKENS);
+  if (sepId !== null) cut[MAX_TOKENS - 1] = sepId;
+  return cut;
+}
+
+/** `[SEP]`'s id, read out of the tokenizer rather than assumed to be 102. */
+function sepTokenId(tokenizerJson: string): number | null {
+  try {
+    const spec = JSON.parse(fs.readFileSync(tokenizerJson, 'utf8')) as {
+      added_tokens?: { id: number; content: string }[];
+      model?: { vocab?: Record<string, number> };
+    };
+    const added = spec.added_tokens?.find((t) => t.content === '[SEP]');
+    if (added) return added.id;
+    const fromVocab = spec.model?.vocab?.['[SEP]'];
+    return typeof fromVocab === 'number' ? fromVocab : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

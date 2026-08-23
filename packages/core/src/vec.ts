@@ -11,7 +11,6 @@ import {
   embedThreads,
   generateExchangeEmbedding,
   isEmbeddingReady,
-  offline,
   type EmbeddingBackend,
 } from './embeddings.js';
 import { fitNote, vectorNote, vectorReport, warmingLine, type VectorReport } from './doctor-line.js';
@@ -252,11 +251,13 @@ export function vecStatus(db: Db, root?: string): VecStatus {
   const counts = vectorCounts(db);
   const cacheDir = modelsDir(potsherdDir(root));
   const backend = embeddingBackend();
-  const reason = !base.available
-    ? base.reason
-    : counts.pending > 0 && !isEmbeddingReady(cacheDir) && offline()
-      ? 'offline — the embedding runtime has not been fetched yet'
-      : undefined;
+  // Deliberately a pure function of the database and the cache directory.
+  // Whether *this* process is allowed to reach the network is a property of
+  // this process, not of the index, and folding it in here made `doctor`,
+  // `index` and `find` describe the same index differently depending on which
+  // one you happened to run — the exact failure this call exists to end. The
+  // verb that knows it is offline says so in its own sentence.
+  const reason = base.available ? undefined : base.reason;
   const report = vectorReport({
     embedded: counts.embedded,
     pending: counts.pending,

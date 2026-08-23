@@ -140,7 +140,7 @@ export function vectorNote(
         value: dash,
         parts: r.runtimeReady
           ? [`warming 0 of ${num(r.total)}`, runtime]
-          : [`fetching the ${bytes(r.acquireBytes)} runtime`, `then ${num(r.total)} exchanges`],
+          : [`0 of ${num(r.total)}`, `${bytes(r.acquireBytes)} runtime not fetched yet`],
         tone: 'dim',
       };
     case 'empty':

@@ -4,6 +4,7 @@ import {
   Card,
   countsJson,
   db as store,
+  embeddings,
   format as fmt,
   indexAll,
   lock,
@@ -138,6 +139,18 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
       ...report,
       redaction: countsJson(report.redaction),
       redactionScope: 'run',
+      // `embeddings` is what the *parse* pass did, and it never embeds now, so
+      // reporting its `enabled: false` on a run that has just started the
+      // background pass would be the same kind of lie audit F2 caught. The
+      // three fields a consumer reads are corrected from the state of the
+      // index; the rest of the shape is untouched so nothing downstream
+      // breaks.
+      embeddings: {
+        ...report.embeddings,
+        enabled: o.embed !== false,
+        available: vec.available && (vec.report?.phase ?? 'unavailable') !== 'unavailable',
+        upToDate: vec.report?.embedded ?? report.embeddings.upToDate,
+      },
       // `--json` parity with the human view (audit F9): the same numbers, from
       // the same call, named the same way.
       vectors: vec.report ?? null,
@@ -426,6 +439,11 @@ function warmingSentences(vec: VecStatus | undefined, spawned: boolean): string[
   // work, and falls back to the bare sentence at 60 columns.
   const head = vec?.line ?? `semantic search: warming (${fmt.num(r.embedded)} of ${fmt.num(r.total)})`;
   if (!spawned) return [head];
+  if (!r.runtimeReady && embeddings.offline()) {
+    // The one case where nothing is happening and saying "in the background"
+    // would be a lie: this machine has been told not to use the network.
+    return [`${head} — offline, so the runtime was not fetched`, head];
+  }
   const long = r.runtimeReady
     ? 'in the background, newest sessions first'
     : `fetching the ${fmt.bytes(r.acquireBytes)} runtime in the background, once`;

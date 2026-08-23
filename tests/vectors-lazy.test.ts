@@ -273,6 +273,10 @@ describe('acquisition is lazy, verified, and confined', () => {
     const port = (server.address() as { port: number }).port;
     const dir = tempDir('potsherd-acq-bad-');
     try {
+      // `tests/setup.ts` sets POTSHERD_OFFLINE so that no test ever pulls the
+      // real 48 MB runtime. This one has a server of its own to talk to, so it
+      // lifts that for the length of the fetch and nothing else.
+      delete process.env['POTSHERD_OFFLINE'];
       process.env['POTSHERD_RUNTIME_BASE'] = `http://127.0.0.1:${port}`;
       process.env['POTSHERD_MODEL_BASE'] = `http://127.0.0.1:${port}`;
       await expect(embeddings.acquire(dir)).rejects.toThrow(/checksum|size/);

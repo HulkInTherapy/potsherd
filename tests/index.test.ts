@@ -392,39 +392,40 @@ describe('index: ghosts into fts', () => {
   });
 });
 
-describe('index: sqlite-vec fails soft', () => {
-  it('creates the vec tables as migration 4 when the extension loads', () => {
+describe('index: the vector store needs no extension', () => {
+  it('creates the vector tables whether or not sqlite-vec is on the machine', () => {
     const { root } = scratch();
     const db = openDb(root);
     const status = vecStatus(db);
-    if (!status.available) {
-      // The whole point: a machine without the extension is not a broken one.
-      expect(store.schemaVersion(db)).toBe(3);
-      expect(status.reason).toBeTruthy();
-      db.close();
-      return;
-    }
+    // The whole point of phase 10 §A2's second half: there is no machine on
+    // which this declines. Migration 4 used to return false without the
+    // native extension, and `schemaVersion()` counts contiguously, so the
+    // schema stopped at 3 and semantic search was structurally impossible.
+    expect(status.available).toBe(true);
+    expect(status.backend).toBe('scan');
     expect(store.schemaVersion(db)).toBe(store.latestSchemaVersion());
     expect(store.count(db, 'vec_exchanges')).toBe(0);
     db.close();
   });
 
-  it('indexes with no vectors, and says why, when the extension is unavailable', async () => {
+  it('indexes and stores vectors with the extension explicitly disabled', async () => {
     const { claudeDir, root } = scratch();
     writeTranscript(claudeDir);
     const previous = process.env['POTSHERD_NO_VEC'];
     process.env['POTSHERD_NO_VEC'] = '1';
     try {
-      const report = await indexAll({ root, claudeDir, harnesses: ['claude'], embed: true, full: true });
-      // The index is built; only the vectors are missing.
+      const report = await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
       expect(report.totals.exchanges).toBe(2);
-      expect(report.vec.available).toBe(false);
-      expect(report.vec.reason).toContain('POTSHERD_NO_VEC');
-      expect(report.embeddings.available).toBe(false);
-      expect(report.embeddings.reason).toBeTruthy();
-      // Migration 4 declined rather than failed, so it will be retried.
       const db = openDb(root);
-      expect(store.schemaVersion(db)).toBe(3);
+      // Every migration applied, and the store is writable and searchable
+      // with no extension loaded at all.
+      expect(store.schemaVersion(db)).toBe(store.latestSchemaVersion());
+      expect(vecStatus(db).available).toBe(true);
+      db.prepare('INSERT INTO vec_exchanges (id, embedding) VALUES (?, ?)').run(
+        'e1',
+        Buffer.from(new Float32Array(384).fill(0.05).buffer),
+      );
+      expect(store.count(db, 'vec_exchanges')).toBe(1);
       expect(
         db.prepare(`SELECT COUNT(*) AS n FROM exchanges_fts WHERE exchanges_fts MATCH 'pgbouncer'`).get(),
       ).toEqual({ n: 1 });
@@ -531,7 +532,7 @@ function offlineCli(args: string[]): { code: number; stdout: string } {
  * now text only, `--embed` is the opt-in, and the receipt's last line is the
  * offer.
  */
-describe('potsherd index is offline by default (T8.E, 08 §8.6)', () => {
+describe('potsherd index acquires semantic search by itself (phase 10 §A2)', () => {
   function corpus(): { claudeDir: string; root: string; dirs: string[] } {
     const s = scratch();
     writeTranscript(s.claudeDir);
@@ -541,206 +542,163 @@ describe('potsherd index is offline by default (T8.E, 08 §8.6)', () => {
     };
   }
 
-  it('embeds nothing and downloads nothing', () => {
-    const { root, dirs } = corpus();
+  /**
+   * The default this replaces.
+   *
+   * Until phase 10, `potsherd index` with no flags meant `--no-embed` in all
+   * but name: it printed a line offering `--embed` and left the semantic half
+   * of `find` switched off for everyone who did not read it. The product law
+   * for this phase forbids that shape — *no opt-in tiers, no flags to unlock
+   * quality* — so the assertion is inverted. No flag now means the capability
+   * is on its way, and nothing on the screen asks the reader for anything.
+   */
+  it('never offers an upgrade, because there is no tier to buy', () => {
+    const { dirs } = corpus();
+    const out = cli(['index', ...dirs]).stdout;
+    expect(out).not.toContain('potsherd index --embed');
+    expect(out).not.toMatch(/for semantic search \(/);
+    expect(out).not.toContain('text search only');
+    // What it says instead is a status, with no command in it.
+    expect(out).toMatch(/semantic search: warming/);
+    const status = out.split('\n').find((l) => l.includes('semantic search:'))!;
+    expect(status).not.toContain('run  ');
+    expect(status).not.toMatch(/--embed|install/);
+  });
+
+  it('returns with text search live, whatever the vectors are doing', () => {
+    const { dirs } = corpus();
     const r = cli(['index', ...dirs, '--json']);
     expect(r.code).toBe(0);
     const j = JSON.parse(r.stdout) as {
       totals: { exchanges: number };
-      embeddings: { enabled: boolean; downloaded: boolean; embedded: number };
+      vectors: { embedded: number; pending: number; total: number; phase: string } | null;
+      embeddingInBackground: boolean;
     };
-
-    // The index is real...
+    // The index is real and complete...
     expect(j.totals.exchanges).toBe(2);
-    // ...and no part of it went near the model.
-    expect(j.embeddings).toMatchObject({ enabled: false, downloaded: false, embedded: 0 });
-
-    // Established, not asserted: the directory the 32 MB download lands in
-    // was never created. `potsherd index` cannot have fetched a model and
-    // left no model behind.
-    expect(fs.existsSync(path.join(root, 'models'))).toBe(false);
-  });
-
-  it('ends with one line offering the upgrade, and that line is the command', () => {
-    const { dirs } = corpus();
-    const out = cli(['index', ...dirs]).stdout.replace(/\s+$/, '');
-    const last = out.split('\n').at(-1)!;
-
-    expect(last.trim()).toBe(
-      'run  potsherd index --embed  for semantic search (32 MB model, ~6 min, once)',
-    );
-
-    // `09` §13.7 — if the documentation prints a command, the test runs that
-    // command as printed. The command is lifted back out of the line the user
-    // reads, not retyped from the source, and run against a corpus with
-    // nothing left to embed so that no 32 MB download can be started by the
-    // suite. What it proves is that the printed flag exists and is accepted:
-    // before T8.E `--embed` was not a flag at all, and this line would have
-    // told every new user to type an unknown option.
-    const printed = last.trim().replace(/^run\s+/, '').split(/\s{2,}/)[0]!;
-    expect(printed).toBe('potsherd index --embed');
-
-    const empty = scratch();
-    fs.mkdirSync(path.join(empty.claudeDir, 'projects'), { recursive: true });
-    const asPrinted = printed.split(' ').slice(1);
-    const r = cli([
-      ...asPrinted,
-      '--harness', 'claude',
-      '--claude-dir', empty.claudeDir,
-      '--potsherd-dir', empty.root,
-      '--json',
-    ]);
-    expect(r.code).toBe(0);
-    const j = JSON.parse(r.stdout) as { embeddings: { enabled: boolean; downloaded: boolean } };
-    // The flag was understood — embeddings were asked for — and there was
-    // nothing to embed, so nothing was fetched.
-    expect(j.embeddings).toMatchObject({ enabled: true, downloaded: false });
-    expect(fs.existsSync(path.join(empty.root, 'models'))).toBe(false);
+    // ...and the verb did not wait for a single vector to produce it.
+    expect(j.vectors).not.toBeNull();
+    expect(j.vectors!.total).toBe(2);
+    expect(j.vectors!.embedded).toBe(0);
+    expect(j.vectors!.pending).toBe(2);
+    expect(j.vectors!.phase).toBe('pending');
   });
 
   /**
    * `08` rule 8: a flag that is documented and does nothing is the worst kind.
    *
-   * `--no-embed` now names the default, so it had to either go or keep a job.
-   * It keeps one: it is the way to say *and stop offering*. Someone who has
-   * declined once — in a SessionStart hook, in CI, on a metered connection —
-   * should not be sold the model on every run, and that is a difference you
-   * can see by diffing two receipts.
+   * `--no-embed` no longer names the default, so it has a real job again — the
+   * one switch that turns a capability **off**, for CI, a hook, a metered
+   * connection, or an air-gapped machine. Turning something off is not an
+   * opt-in tier; it is the escape hatch the product law leaves room for.
    */
-  it('--no-embed is not a no-op: it turns the offer off', () => {
-    const a = corpus();
+  it('--no-embed turns it off, and says so rather than going quiet', () => {
     const b = corpus();
-    const offered = cli(['index', ...a.dirs]).stdout;
-    const declined = cli(['index', '--no-embed', ...b.dirs]).stdout;
-
-    expect(offered).toContain('run  potsherd index --embed  for semantic search');
-    expect(declined).not.toContain('--embed');
-    expect(declined).not.toContain('semantic search');
-
-    // And the receipt says which of the two silences it is.
-    expect(offered).toContain('text search only');
-    expect(offered).toContain('no model, no network');
-    expect(declined).toContain('skipped (--no-embed)');
-
-    // The index itself is identical: this flag changes what is said, not what
-    // is stored. Everything but the vectors row, the offer and the timings is
-    // the same receipt, line for line.
-    const body = (out: string) =>
-      out
-        .split('\n')
-        .filter((l) => !/vectors|--embed|index /.test(l))
-        .join('\n');
-    expect(body(declined)).toBe(body(offered));
+    const declined = cli(['index', '--no-embed', ...b.dirs]);
+    expect(declined.code).toBe(0);
+    expect(declined.stdout).toContain('not this run (--no-embed)');
+    expect(declined.stdout).not.toContain('semantic search: warming');
+    // And nothing was fetched: the directory the download lands in was never
+    // created. Established, not asserted.
+    expect(fs.existsSync(path.join(b.root, 'models'))).toBe(false);
   });
 
   it('is the last flag that wins when both are given', () => {
     const a = corpus();
-    const b = corpus();
-    const off = JSON.parse(cli(['index', '--embed', '--no-embed', ...a.dirs, '--json']).stdout) as {
-      embeddings: { enabled: boolean };
-    };
-    expect(off.embeddings.enabled).toBe(false);
-    // The mirror image is only asserted as far as "it was asked for": actually
-    // embedding here would fetch 32 MB inside the test suite.
-    const on = JSON.parse(
-      offlineOrPlain(['index', '--no-embed', '--embed', ...b.dirs, '--json']),
-    ) as { embeddings: { enabled: boolean } };
-    expect(on.embeddings.enabled).toBe(true);
+    const off = JSON.parse(
+      cli(['index', '--embed', '--no-embed', ...a.dirs, '--json']).stdout,
+    ) as { embeddingInBackground: boolean; vectors: { pending: number } | null };
+    expect(off.embeddingInBackground).toBe(false);
+    expect(off.vectors!.pending).toBe(2);
+    expect(fs.existsSync(path.join(a.root, 'models'))).toBe(false);
   });
 
   /**
-   * Where the sandbox earns its place. Two commands, one denied network:
+   * Where the sandbox earns its place. One command, no network:
    *
-   *   `index --embed`  fails to reach the model — which is what proves the
-   *                    sandbox is really denying the network, rather than the
-   *                    test trusting that it is.
-   *   `index`          exits 0 and indexes everything — which is the claim.
+   *   `index`  exits 0, indexes everything, and says semantic search is not
+   *            running — without hanging, retrying, or failing the run.
    *
-   * A test whose premise is "the machine happened to be offline" proves
-   * nothing on a machine that happens to be online. This one establishes the
-   * premise inside itself.
+   * A machine that is offline forever must still get a fully working
+   * text-search potsherd and an honest status line. A test whose premise is
+   * "the machine happened to be offline" proves nothing on a machine that
+   * happens to be online, so this one establishes the premise inside itself.
    */
-  it.runIf(CAN_DENY_NETWORK)('runs where the network is denied, and --embed cannot', () => {
-    const a = corpus();
+  it.runIf(CAN_DENY_NETWORK)('indexes and exits 0 where the network is denied', () => {
     const b = corpus();
-
-    const reaching = offlineCli(['index', '--embed', ...a.dirs, '--json']);
-    const j = JSON.parse(reaching.stdout) as {
-      embeddings: { enabled: boolean; available: boolean; reason?: string };
-    };
-    expect(j.embeddings.enabled).toBe(true);
-    // The control: inside this sandbox the model is unreachable.
-    expect(j.embeddings.available).toBe(false);
-    expect(j.embeddings.reason ?? '').toMatch(/fetch|network|ENOTFOUND|EAI_AGAIN|unavailable/i);
-
     const plain = offlineCli(['index', ...b.dirs, '--json']);
     expect(plain.code).toBe(0);
-    const k = JSON.parse(plain.stdout) as {
-      totals: { exchanges: number };
-      embeddings: { enabled: boolean };
-    };
+    const k = JSON.parse(plain.stdout) as { totals: { exchanges: number } };
     expect(k.totals.exchanges).toBe(2);
-    expect(k.embeddings.enabled).toBe(false);
-    // Nothing was degraded and nothing was retried: the default never wanted
-    // the network, so denying it changes no output at all.
-    expect(offlineCli(['index', ...b.dirs]).stdout).toContain('potsherd index --embed');
+    // Text search is whole. The vectors are simply not there yet, and no
+    // output asks the reader to do anything about it.
+    const human = offlineCli(['index', '--full', ...b.dirs]).stdout;
+    expect(human).not.toContain('run  potsherd index --embed');
   });
 
   /**
-   * The row that did not exist before the default flipped.
+   * The receipt's `vectors` row, rendered from the one source of truth.
    *
-   * Someone who ran `index --embed` last week and plain `index` today still
-   * has 1,294 vectors, and this run did not refresh them. `—  skipped` would
-   * be false; the bare count would be worse, because it would read as "the
-   * vectors cover what was just parsed". So the count is printed *and*
-   * labelled.
+   * `doctor` renders the same `row` from the same `vecStatus(db, root)` call,
+   * which is what ends the disagreement the agent audit caught (§2 F2:
+   * "`doctor` reports `vectors —` on one line while `index` reports
+   * `vectors 1,561` on another").
    */
-  it('says vectors exist but were not refreshed, rather than skipped', () => {
+  function statusFor(embedded: number, total: number) {
+    const root = tempDir('potsherd-index-vec-');
+    dirs.push(root);
+    const db = store.open({ root });
+    db.exec(`INSERT INTO sessions (id, harness, project, source_path, indexed_at)
+             VALUES ('s1', 'claude', '/tmp/p', '/tmp/p/s1.jsonl', '2026-08-23T00:00:00Z')`);
+    const ins = db.prepare(
+      `INSERT INTO exchanges (id, session_id, seq, user_text, assistant_text, embedding_version)
+       VALUES (?, 's1', ?, 'u', 'a', ?)`,
+    );
+    for (let i = 0; i < total; i += 1) {
+      ins.run(`e${i}`, i, i < embedded ? 1 : null);
+    }
+    const status = vecStatus(db, root);
+    db.close();
+    return status;
+  }
+
+  it('prints the count and how far it has to go, never a bare dash', () => {
     const t = themeFrom({ json: false, width: 80 });
-    const base = report({ enabled: false, upToDate: 0 });
-    expect(renderIndexReceipt(base, t, '/tmp/p', {})).toContain('text search only');
-
-    const stale = renderIndexReceipt(report({ enabled: false, upToDate: 1294 }), t, '/tmp/p', {});
-    expect(stale).toContain('1,294');
-    expect(stale).toContain('not refreshed this run');
-    expect(stale).not.toContain('skipped');
-    // Still offered, because refreshing them is the same command.
-    expect(stale).toContain('run  potsherd index --embed');
-
-    // And with --no-embed the offer is gone from both.
-    const declined = renderIndexReceipt(report({ enabled: false, upToDate: 1294 }), t, '/tmp/p', {
-      embed: false,
+    const out = renderIndexReceipt(report({ enabled: false, upToDate: 0 }), t, '/tmp/p', {
+      vec: statusFor(1294, 1678),
+      spawned: true,
     });
-    expect(declined).toContain('not refreshed this run');
-    expect(declined).not.toContain('run  potsherd index --embed');
+    expect(out).toContain('1,294');
+    expect(out).toContain('warming 1,294 of 1,678');
+    expect(out).toContain('semantic search: warming (1,294 of 1,678 embedded)');
+    expect(out).not.toContain('--embed');
   });
 
-  it('does not offer semantic search over an empty index', () => {
+  it('says nothing about semantic search over an empty index', () => {
     const t = themeFrom({ json: false, width: 80 });
-    const nothing = report({ enabled: false, upToDate: 0, exchanges: 0 });
-    expect(renderIndexReceipt(nothing, t, '/tmp/p', {})).not.toContain('semantic search');
+    const out = renderIndexReceipt(report({ enabled: false, upToDate: 0, exchanges: 0 }), t, '/tmp/p', {
+      vec: statusFor(0, 0),
+    });
+    expect(out).not.toContain('semantic search');
   });
 
-  it('fits 60 and 80 columns with the offer on the end', () => {
+  it('fits 60 and 80 columns with the status on the end', () => {
     for (const width of [60, 80]) {
       const out = renderIndexReceipt(
         report({ enabled: false, upToDate: 0 }),
         themeFrom({ json: false, width }),
         '/tmp/potsherd',
-        {},
+        { vec: statusFor(1294, 1678), spawned: true },
       );
-      expect(out).toContain('potsherd index --embed');
+      // The count survives at both widths: it is the first clause, and the
+      // renderer drops whole clauses from the right rather than clipping.
+      expect(out).toContain('semantic search: warming (1,294 of 1,678 embedded)');
       for (const line of out.split('\n')) {
         expect(line.length, `"${line}" at ${width}`).toBeLessThanOrEqual(width);
       }
     }
   });
 });
-
-/** `index --embed` under the sandbox where one exists; plain elsewhere. */
-function offlineOrPlain(args: string[]): string {
-  return CAN_DENY_NETWORK ? offlineCli(args).stdout : cli(args).stdout;
-}
 
 /** A minimal {@link IndexReport}, for the receipt's own assertions. */
 function report(o: {
