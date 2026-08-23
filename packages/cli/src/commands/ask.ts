@@ -61,6 +61,14 @@ export interface AskCommandOptions extends GlobalOptions, FilterFlags {
   concurrency?: unknown;
   vectors?: string;
   vec?: boolean;
+  /**
+   * T10.5 F5 `--windows n`: separated excerpt windows per long session.
+   *
+   * Unset means {@link ASK_WINDOWS}, applied in `core/ask.ts` — the same rule
+   * `--k` follows, and for the same reason: a commander default would make
+   * every run look as if the user had typed the number.
+   */
+  windows?: unknown;
   /** T5.6: record the reader inputs to this path and stop. No model call. */
   readersOut?: string;
   /** T5.6: replay reader outputs from this path instead of running readers. */
@@ -227,6 +235,12 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
       strict: Boolean(o.strict),
       maxUsd: money(o.maxUsd),
       concurrency: positive(o.concurrency, ASK_CONCURRENCY, '--concurrency'),
+      // Only when it was typed. `positive()` would substitute the default and
+      // core could no longer tell 'unset' from 'five'; today those agree, and
+      // a flag whose forwarding depends on that staying true is a trap.
+      ...(o.windows !== undefined && o.windows !== null && o.windows !== ''
+        ? { windows: positive(o.windows, 1, '--windows') }
+        : {}),
       ...(vectorMode(o) !== undefined ? { vectors: vectorMode(o) } : {}),
       ...(o.model ? { model: o.model } : {}),
       ...(o.readerModel ? { readerModel: o.readerModel } : {}),
@@ -385,6 +399,11 @@ async function recordReaders(
         isGhost: x.isGhost,
         isSidechain: x.isSidechain,
         seqs: x.seqs,
+        // T10.5: the two numbers that make F5 measurable from outside. A
+        // reader handed `windows: 1` out of `exchanges: 119` is the audit's
+        // finding, printed, on any archive, with no model call.
+        ...(x.windows !== undefined ? { windows: x.windows } : {}),
+        ...(x.exchanges !== undefined ? { exchanges: x.exchanges } : {}),
       })),
       matching: probe.matching,
       modelCalls: probe.spend.calls,
@@ -473,9 +492,17 @@ function readersOutReceipt(
   lines.push(`  of ${probe.matching} matching session${probe.matching === 1 ? '' : 's'}, k ${file.k}`);
   lines.push('');
   for (const target of file.targets) {
+    // T10.5: `5 windows of 119` after the seqs, and only when there is more
+    // than one — on a short session the sentence would be noise, and `05`'s
+    // rule is that a line earns its width.
+    const shape =
+      target.windows !== undefined && target.windows > 1
+        ? t.dim(`  ${target.windows} windows of ${target.exchanges ?? '?'}`)
+        : '';
     lines.push(
       `    ${target.id8}  ${target.project}${target.isGhost ? t.dim('  ghost') : ''}` +
-        `${target.isSidechain ? t.dim('  subagent') : ''}  ${t.dim(`seq ${target.seqs.join(', ')}`)}`,
+        `${target.isSidechain ? t.dim('  subagent') : ''}  ${t.dim(`seq ${target.seqs.join(', ')}`)}` +
+        shape,
     );
   }
   lines.push('');
