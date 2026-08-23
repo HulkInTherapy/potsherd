@@ -24,6 +24,22 @@ import {
 import { confirmOpenThreads } from './open-threads-confirm.js';
 import { idTag, projectName, recall, type RecallSession } from './recall.js';
 import type { SearchFilters } from './search/filters.js';
+import { threadOf } from './threads.js';
+// T10.5 F5 — the window selection policy is its own module. It is pure over a
+// `Transcript` and a list of seed positions, so every claim about what a
+// reader was handed can be tested without a database and without a model.
+import {
+  ASK_WINDOWS,
+  MIN_UNIT_CHARS,
+  UNIT_HEADER_CHARS,
+  planWindows,
+  windowCount,
+  windowOverhead,
+  windowText,
+  type WindowPlan,
+} from './windows.js';
+
+export { ASK_WINDOWS, MIN_UNIT_CHARS } from './windows.js';
 
 /**
  * `potsherd ask` — the differentiator verb (`03` §8, phase-4 T4.1).
@@ -108,6 +124,17 @@ export const ASK_SESSION_CHARS = 8_000;
 
 /** Top-n exchanges per session, by hybrid score, before the ±1 neighbours. */
 export const ASK_TOP_EXCHANGES = 4;
+
+/**
+ * T10.5 F5: seed candidates asked of the per-session relevance pass.
+ *
+ * Twice the window count, because seeds land inside one another — two hits at
+ * seq 30 and 31 are one window, and the second is dropped by
+ * `WINDOW_SEPARATION`. Asking for `2n` and taking the first `n` that survive
+ * separation is what keeps a clustered set of hits from spending the whole
+ * window budget on one paragraph of the conversation.
+ */
+export const ASK_SEED_FACTOR = 2;
 
 // ------------------------------------------------------- the cheap path
 //
@@ -326,6 +353,18 @@ export interface AskReaderInput {
   /** The seq numbers in `excerpts`, so a caller can check what it may cite. */
   seqs: number[];
   /**
+   * T10.5 F5: how many separated windows `excerpts` was cut into.
+   *
+   * `1` is the whole of a short session, or one contiguous run of a long one —
+   * the pre-F5 shape. Anything above 1 means the block carries `⋯ n exchanges
+   * not shown ⋯` marks and the reader must not read across them. Recorded so
+   * `--readers-out --json` can be diffed run against run, which is how F5's
+   * before-and-after was measured at all.
+   */
+  windows?: number;
+  /** Exchanges in the whole session, so `windows` has a denominator. */
+  exchanges?: number;
+  /**
    * 8.7 cards-first: this session's card, as context, when `--cheap` found one.
    *
    * **Not citable, and that is structural rather than a request.** A card is
@@ -493,6 +532,14 @@ export interface AskOptions {
   /** Reader model. Default {@link CARD_MODEL} (haiku-class). */
   readerModel?: string;
   concurrency?: number;
+  /**
+   * T10.5 F5 `--windows n`: separated excerpt windows per long session.
+   *
+   * Default {@link ASK_WINDOWS}. `1` restores the pre-F5 single contiguous
+   * run. A session below `WINDOW_MIN_EXCHANGES` ignores this and takes one
+   * window whatever is asked, because at that size the whole transcript fits.
+   */
+  windows?: number;
   /** potsherd root, so the embedding model is found under `--potsherd-dir`. */
   root?: string;
   vectors?: boolean | 'auto';
@@ -994,12 +1041,6 @@ export function excerptUnits(
   return [...admitted.keys()].sort((a, b) => a - b).map((i) => admitted.get(i)!);
 }
 
-/** The floor on one unit's share of the slice. Below this an excerpt is noise. */
-export const MIN_UNIT_CHARS = 700;
-
-/** `[seq 12 · 2026-08-21]\n` — what `unitHeader` costs, budgeted for. */
-const UNIT_HEADER_CHARS = 24;
-
 function renderUnitBody(u: TranscriptUnit, maxChars: number): string {
   // `renderUnit` prepends the `[seq n · date]` header; the body is what the
   // filter matches against, so the header is stripped back off.
@@ -1158,6 +1199,19 @@ interface Target {
   isSidechain: boolean;
   isGhost: boolean;
   units: TranscriptUnit[];
+  /**
+   * The rendered block, built where the units were chosen.
+   *
+   * Not `excerptText(units)` at the call site any more: a windowed block's gap
+   * markers depend on the *transcript*, which only the builder has. Rendering
+   * it here is what makes it impossible for a caller to reassemble the units
+   * into something that reads as continuous (T10.5 acceptance 5).
+   */
+  excerpts: string;
+  /** How many separated windows `excerpts` holds. 1 is one contiguous run. */
+  windows: number;
+  /** Exchanges in the whole session, so `windows` has a denominator. */
+  exchanges: number;
   score: number;
   /** 8.7 cards-first: set only when `--cheap` found a card for this session. */
   card?: string;
@@ -1207,7 +1261,13 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
   // counting blocks against a `searched` that counts sessions printed
   // "6 of 5 sessions read" on a corpus with two subagents in it. Both numbers
   // now come out of the same expansion.
-  const { targets, candidates } = shortlist(db, found.sessions, k, cheap);
+  const { targets, candidates } = await shortlist(db, found.sessions, k, {
+    cheap,
+    question: q,
+    windows: Math.max(1, Math.floor(o.windows ?? ASK_WINDOWS)),
+    ...(o.root !== undefined ? { root: o.root } : {}),
+    ...(o.vectors !== undefined ? { vectors: o.vectors } : { vectors: true }),
+  });
   const matching = candidates;
   o.onProgress?.({
     step: 'shortlist',
@@ -1421,13 +1481,49 @@ function message(err: unknown): string {
  * hit that actually matched may belong to it rather than to the 120-exchange
  * parent it is filed under. Taking the block's id would hand a reader the
  * wrong transcript and cite the wrong session id on the answer.
+ *
+ * **And the thread the hit's session belongs to** (T10.5, on T10.3's
+ * `threads.ts`). That rule, taken alone, has a hole the audit fell straight
+ * into. Measured on the reference archive on 24 aug 2026, for the audit's own
+ * question scoped to the audit's own project: `find` returned one block,
+ * `strong`, headed by a 119-exchange session — and `ask` read **three
+ * one-exchange subagent transcripts and not the parent**. `recall` represents
+ * a block by whichever member earned the best hit, so when the subagents
+ * out-hit their parent, `s.id` is a subagent, the `!seqs.has(s.id)` guard
+ * below is already satisfied, and the 119 exchanges holding the answer are
+ * never offered to a reader at all.
+ *
+ * So each hit-bearing session now drags in, immediately after itself and
+ * before the next block:
+ *
+ *   - **its parent conversation**, when the hit is in a sidechain;
+ *   - **every other link of its fork/resume thread**, because `claude
+ *     --resume` writes a new transcript whose head is a copy of the old one
+ *     and the work continues across the two. On the reference archive one such
+ *     chain is 119 + 4 exchanges over eight days, and the four are the last
+ *     day — the part a *what is left to do* question is entirely about.
+ *
+ * The additions are placed inside the block that pulled them in, so the
+ * ranking `find` shows is untouched: block one is fully expanded before block
+ * two is looked at, which is the right precedence — the top block's own thread
+ * is better evidence than the second block's opening.
  */
-function shortlist(
+interface ShortlistOptions {
+  cheap: boolean;
+  /** `--windows n`, already defaulted. Per long session, before the ceilings. */
+  windows: number;
+  question: string;
+  root?: string;
+  vectors?: boolean | 'auto';
+}
+
+async function shortlist(
   db: Db,
   sessions: readonly RecallSession[],
   k: number,
-  cheap = false,
-): { targets: Target[]; candidates: number } {
+  o: ShortlistOptions,
+): Promise<{ targets: Target[]; candidates: number }> {
+  const cheap = o.cheap;
   // Recall's block order is kept — it is the ranking `find` shows and the one
   // phase 3 measured — and each block is expanded into the distinct sessions
   // its hits actually came from, best hit first. So a parent and the subagent
@@ -1457,7 +1553,19 @@ function shortlist(
       inBlock.push(s.id);
     }
     inBlock.sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0));
-    order.push(...inBlock);
+    // The thread, after the sessions that earned the block. A relative is
+    // worth reading, never worth outranking the hit that found it, so it is
+    // scored strictly below every member already in this block.
+    const kin: string[] = [];
+    for (const id of inBlock) {
+      for (const relative of relatives(db, id)) {
+        if (seqs.has(relative)) continue;
+        seqs.set(relative, []);
+        scores.set(relative, 0);
+        kin.push(relative);
+      }
+    }
+    order.push(...inBlock, ...kin);
   }
 
   const targets: Target[] = [];
@@ -1468,16 +1576,111 @@ function shortlist(
   const cards = cheap ? cardBriefs(db, order.slice(0, Math.max(k * 3, k))) : new Map<string, string>();
   for (const sessionId of order) {
     if (targets.length >= k) break;
-    const t = loadTarget(
+    const t = await loadTarget(
       db,
       sessionId,
       seqs.get(sessionId) ?? [],
       scores.get(sessionId) ?? 0,
+      o,
       cards.get(sessionId),
     );
     if (t && t.units.length > 0) targets.push(t);
   }
   return { targets, candidates: order.length };
+}
+
+/**
+ * The sessions that hold the same work as this one, in reading order.
+ *
+ * Two relationships, both already derived by code this file does not own:
+ * the sidechain's parent (`ingest.ts` writes `parent_session_id`) and the
+ * fork/resume chain (`threads.ts`, T10.3). Neither is a guess and neither
+ * needs a model.
+ *
+ * A failure here is not an error: an index written before `session_threads`
+ * existed simply has no chain, and a session with no relatives is the ordinary
+ * case. Both return an empty list and the shortlist is what it was.
+ */
+function relatives(db: Db, sessionId: string): string[] {
+  const out: string[] = [];
+  try {
+    const row = db
+      .prepare('SELECT parent_session_id FROM sessions WHERE id = ?')
+      .get(sessionId) as { parent_session_id: string | null } | undefined;
+    const parent = row?.parent_session_id;
+    if (parent && parent !== sessionId) out.push(parent);
+  } catch {
+    // no `parent_session_id` column: an index older than sidechains.
+  }
+  try {
+    // The chain of the session **and of its parent**: a subagent's own id is
+    // never a link in a fork/resume chain, but the transcript that spawned it
+    // is, and that is the chain whose last day holds the answer.
+    for (const seed of [...out, sessionId]) {
+      for (const link of threadOf(db, seed).sessions) {
+        if (link !== sessionId && !out.includes(link)) out.push(link);
+      }
+    }
+  } catch {
+    // no `session_threads` table: an index older than T10.3.
+  }
+  return out;
+}
+
+/**
+ * T10.5 F5: seed positions for one session's windows, by relevance.
+ *
+ * **No second ranker.** This is `recall`, scoped to one session, which is
+ * exactly what `graft --about` already does for the same reason — *"one
+ * `recall` per link; the chain is two or three transcripts, never hundreds"*.
+ * The hits `ask`'s own shortlist query returned are kept and come first; this
+ * only tops them up, and only for a session long enough to need windowing.
+ *
+ * It is needed because the shortlist query's hits are diversified **per
+ * conversation** at `PER_SESSION = 3`, and a conversation is a parent plus its
+ * subagents. On the reference archive the three that survived for the audit's
+ * question all belonged to subagents, so the 119-exchange parent arrived with
+ * *zero* seeds and the old code answered that with `units[0..2]`.
+ *
+ * The confidence floor is left at `recall`'s default — off — deliberately, and
+ * for the same reason T10.2 gave for the shortlist: a seed is not a claim. A
+ * weak seed costs one window that the reader is free to answer `found: false`
+ * about; a floor that withheld it costs the window entirely and replaces it
+ * with an evenly-spread guess.
+ */
+async function seedSeqs(
+  db: Db,
+  question: string,
+  sessionId: string,
+  have: readonly number[],
+  want: number,
+  o: ShortlistOptions,
+): Promise<number[]> {
+  const out = [...have];
+  if (out.length >= want) return out;
+  try {
+    const found = await recall(
+      db,
+      question,
+      { sessionId },
+      {
+        limit: 1,
+        perSession: want,
+        ...(o.root !== undefined ? { root: o.root } : {}),
+        ...(o.vectors !== undefined ? { vectors: o.vectors } : {}),
+      },
+    );
+    for (const h of found.hits) {
+      if (out.length >= want) break;
+      if (h.sessionId !== sessionId) continue;
+      if (typeof h.seq !== 'number') continue;
+      if (!out.includes(h.seq)) out.push(h.seq);
+    }
+  } catch {
+    // A session `recall` cannot score is a session whose windows come from
+    // the tail and the spread. That is a worse excerpt, not a failed verb.
+  }
+  return out;
 }
 
 /**
@@ -1572,13 +1775,14 @@ function parseDecisions(raw: string | null): { what: string; why: string; eviden
   }
 }
 
-function loadTarget(
+async function loadTarget(
   db: Db,
   sessionId: string,
   seqs: readonly number[],
   score: number,
+  o: ShortlistOptions,
   card?: string,
-): Target | null {
+): Promise<Target | null> {
   const transcript =
     loadSessionTranscript(db, sessionId) ?? loadGhostTranscript(db, sessionId);
   if (!transcript) return null;
@@ -1601,16 +1805,18 @@ function loadTarget(
   // session with nothing to trade away is read exactly as the default path
   // reads it, and `AskReaderInput.card` is absent so the screen and the
   // recorded reader file both say so.
-  const full = excerptUnits(transcript, seqs);
+  //
+  // **T10.5 F5, layered on top of that and not through it.** Both forms below
+  // are windowed, at their own budget, so the trade `--cheap` makes is still
+  // "a card instead of transcript" and not, silently, "a card instead of
+  // coverage". A short session takes `windowCount() === 1` and the classic
+  // contiguous path, byte for byte: no marker, no preamble, nothing moved.
+  const full = await slice(db, transcript, seqs, ASK_SESSION_CHARS, ASK_TOP_EXCHANGES, o);
   const narrow = card
-    ? excerptUnits(transcript, seqs, {
-        top: ASK_CHEAP_TOP_EXCHANGES,
-        maxChars: ASK_CHEAP_SESSION_CHARS,
-      })
+    ? await slice(db, transcript, seqs, ASK_CHEAP_SESSION_CHARS, ASK_CHEAP_TOP_EXCHANGES, o)
     : null;
-  const worthIt =
-    narrow !== null && excerptText(narrow).length + card!.length < excerptText(full).length;
-  const units = worthIt ? narrow! : full;
+  const worthIt = narrow !== null && narrow.text.length + card!.length < full.text.length;
+  const chosen = worthIt ? narrow! : full;
   return {
     sessionId,
     id8: idTag(sessionId),
@@ -1618,9 +1824,49 @@ function loadTarget(
     harness: transcript.harness,
     isSidechain: transcript.isSidechain,
     isGhost: transcript.kind === 'ghost',
-    units,
+    units: chosen.units,
+    excerpts: chosen.text,
+    windows: chosen.windows,
+    exchanges: transcript.units.length,
     score,
     ...(worthIt ? { card: card! } : {}),
+  };
+}
+
+/** One session's excerpt block: `n` windows, or the one contiguous run. */
+async function slice(
+  db: Db,
+  transcript: Transcript,
+  seqs: readonly number[],
+  maxChars: number,
+  top: number,
+  o: ShortlistOptions,
+): Promise<{ units: TranscriptUnit[]; text: string; windows: number; plan: WindowPlan | null }> {
+  const n = windowCount(transcript.units.length, o.windows, maxChars);
+  if (n <= 1) {
+    const units = excerptUnits(transcript, seqs, { top, maxChars });
+    return { units, text: excerptText(units), windows: 1, plan: null };
+  }
+  const wanted = n * ASK_SEED_FACTOR;
+  const hitSeqs = await seedSeqs(db, o.question, transcript.id, seqs, wanted, o);
+  const byIndex = new Map<number, number>();
+  transcript.units.forEach((u, i) => byIndex.set(u.seq, i));
+  const positions: number[] = [];
+  for (const seq of hitSeqs) {
+    const i = byIndex.get(seq);
+    if (i !== undefined && !positions.includes(i)) positions.push(i);
+  }
+  // The gap markers are paid for out of the same slice, not added on top of
+  // it — see `windowOverhead`.
+  const plan = planWindows(transcript, positions, {
+    windows: n,
+    maxChars: Math.max(MIN_UNIT_CHARS + UNIT_HEADER_CHARS, maxChars - windowOverhead(n)),
+  });
+  return {
+    units: plan.units,
+    text: windowText(transcript, plan.units),
+    windows: plan.windows.length,
+    plan,
   };
 }
 
@@ -1633,8 +1879,10 @@ function readerInput(question: string, t: Target): AskReaderInput {
     harness: t.harness,
     isSidechain: t.isSidechain,
     isGhost: t.isGhost,
-    excerpts: excerptText(t.units),
+    excerpts: t.excerpts,
     seqs: t.units.map((u) => u.seq),
+    windows: t.windows,
+    exchanges: t.exchanges,
     ...(t.card ? { card: t.card } : {}),
   };
 }
