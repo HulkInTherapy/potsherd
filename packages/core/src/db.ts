@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { dbPath, potsherdDir } from './paths.js';
 import { openDatabase, type Db } from './sqlite-driver.js';
-import { createGhostVecTable, createVecTables, migrateToPortableVectors } from './vec.js';
+import { createGhostVecTable, createVecTables, loadVec, migrateToPortableVectors } from './vec.js';
 
 /**
  * One SQLite file, `~/.potsherd/potsherd.db`, WAL mode.
@@ -416,6 +416,15 @@ export function open(opts: OpenOptions = {}): Db {
   }
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
+  // `vec_exchanges`, `vec_cards` and `vec_ghost_prompts` are views whose
+  // `distance` column is an application-defined function, and sqlite resolves
+  // every column of a view at prepare time — so a connection that has not been
+  // given the functions cannot even `SELECT COUNT(*)` from them. They are
+  // registered here, on every connection including a read-only one, because
+  // this is the single point every connection passes through and the
+  // alternative is each call site remembering. `loadVec` is idempotent, costs
+  // two closures, and never throws.
+  loadVec(db);
   if (!opts.readonly) migrate(db);
   return db;
 }

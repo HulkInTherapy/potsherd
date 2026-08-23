@@ -442,7 +442,11 @@ function warmingSentences(vec: VecStatus | undefined, spawned: boolean): string[
   if (!r.runtimeReady && embeddings.offline()) {
     // The one case where nothing is happening and saying "in the background"
     // would be a lie: this machine has been told not to use the network.
-    return [`${head} — offline, so the runtime was not fetched`, head];
+    return [
+      `${head} — offline, so the runtime was not fetched`,
+      `${head} — offline`,
+      head,
+    ];
   }
   const long = r.runtimeReady
     ? 'in the background, newest sessions first'
