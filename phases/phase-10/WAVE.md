@@ -114,6 +114,33 @@ largest files in the archive: the sessions the thread model fails on are exactly
 the most work in them. Record dates are present on the records themselves, so dating by content
 needs no new source of truth — only for the ranker to stop inheriting the fork point.
 
+## reading real output by eye (`09 §10.4`) — three things the audit did not say
+
+**1. `show` contradicts itself four lines apart.** The header dates the session by its fork point;
+its own first exchange is eight days later. Both are on the same screen:
+
+```
+  claude · live · <project-a> · 12 aug 19:21 · main
+  4 exchanges
+    1  20 aug 23:26  you
+```
+
+The audit reported this as "`find` and `ls` date it as 12 aug". It is worse than that: the date and
+the evidence that contradicts it are printed together, by one verb, in one render.
+
+**2. `graft` already dates by content, and nothing else does.** The same session, same index:
+`graft` prints `2026-08-20` — the content date, correct — while `show`, `ls` and `find` print
+12 aug. So the fix for F4 is not "teach potsherd to date by content"; potsherd already knows how,
+in one verb. It is **one source of truth**, and `graft.ts` is where the right answer already lives.
+
+**3. `ls` is still drowning in the build's own sessions.** `08 §8` item 25 says phase 8.4 addressed
+this. On the default `ls --limit 12`, **eight of twelve rows** are potsherd's own development or its
+test probes — two rows are sessions whose entire content is `Reply with exactly: PONG`, under
+projects `w6-ask` and `tmp`. An item marked closed in a handoff is not an item that was closed.
+
+`graft` writing `.potsherd/graft-<id>.md` into the cwd **is** correctly self-ignoring — `git status`
+stayed clean, as the audit credited. Verified deliberately, then deleted.
+
 ## status
 
 - **wave 1: running.** T10.1 calibration · T10.2 model ladder · T10.4 lazy vectors.
