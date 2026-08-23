@@ -225,6 +225,40 @@ find.ts` now calls `recall()` with `minConfidence: 'weak'`, so the **agent-facin
 cliff as the human one. Suite 1,536 → **1,566 green on 40 files**; the single red T10.1 reported was
 the MCP parity test and this patch is its fix. `pnpm evals` exit 0 with three confidence controls.
 
+## the eval gate now fails, and the decision is not the one it looks like
+
+`pnpm evals` exits 1 on `main`. **`main` is knowingly red on exactly one test**
+(`tests/evals-gate.test.ts`) and everything else is green: 1,691 of 1,692.
+
+Measured by the orchestrator, both runs on the same commit and the same fixture:
+
+| runtime | vectors-only R@5 | hybrid R@5 | hybrid **R@1** | bm25 R@1 | gate |
+|---|---:|---:|---:|---:|---|
+| **wasm** (shipping) | 21/25 | 22/25 | **10/25** | 10/25 | **FAIL** — not *strictly* above bm25 |
+| native (control) | 22/25 | 22/25 | **11/25** | 10/25 | PASS |
+
+The isolation is exact: one query at recall@1, one at vectors-only recall@5. T10.4 traced it to
+onnxruntime-web's int8 kernels — tokenizers byte-identical, pooling precision irrelevant, every
+optimisation level the same. Nothing about the storage change moved a number.
+
+**The tempting reading is "wasm is worse, so keep native".** That is wrong twice: native is the
+677 MB native-addon class the whole task exists to remove, and — the part that matters — **the gate
+was never measuring anything at n = 25.** `plans/08` has recorded *"the margin at recall@1 is one"*
+since phase 8.5. σ ≈ 2.2 on this set. A criterion whose pass/fail turns on a margin four times
+smaller than its own noise was going to flip on the next change whatever that change was; wasm is
+simply what flipped it first.
+
+**Ruling: widen the measuring instrument, do not touch the criterion.** Re-basing the gate on
+whatever the shipping runtime happens to score is the thing phases 3–7 all refused — *rewriting the
+test around the result*. Widening the query set changes no clause; it raises the power of a test
+that currently cannot tell 10 from 11. Phase 3's best decision was building the instrument with a
+worker who had **no stake in the score**, and that is how this one is commissioned: the eval-set
+worker is told nothing about wasm, native, or which way the number needs to go, and its set must
+still fail at `--vector-weight 0`.
+
+If the gate still fails at n ≈ 50, that is a real finding about the wasm runtime and it will be
+reported as one rather than tuned away.
+
 ## status
 
 **Five workers running**, each in its own worktree with disjoint deliverables:
