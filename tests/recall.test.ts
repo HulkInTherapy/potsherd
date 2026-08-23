@@ -972,3 +972,167 @@ describe('the find renderer never prints half a mask', () => {
     }
   });
 });
+
+/**
+ * T10.1 — the cliff.
+ *
+ * The audit of 23 aug 2026 found `find`'s score carries no information about
+ * whether the archive answers the question: 0.01836 for a true phrase hit and
+ * 0.01639 for a topic the archive has never heard of, on the reference
+ * machine. 1.12x. The cause is structural — reciprocal rank fusion is a
+ * function of rank alone — so these tests are about the *second* axis, and
+ * every one of them also asserts that the first axis did not move.
+ *
+ * The arithmetic itself is `tests/calibration.test.ts`; this is what it does
+ * to a corpus.
+ */
+describe('recall: calibrated confidence — T10.1', () => {
+  it('labels every hit, every block and the envelope, and never disagrees with itself', async () => {
+    const r = await recall(db, 'pgbouncer transaction pooling', {}, { vectors: false });
+    expect(r.sessions.length).toBeGreaterThan(0);
+    // The envelope is the best block on the page, which is what makes
+    // `confidence: none` and `sessions: []` two spellings of one fact.
+    const best = r.sessions.map((s) => s.confidence);
+    expect(best).toContain(r.confidence);
+    for (const s of r.sessions) {
+      expect(['strong', 'weak', 'none']).toContain(s.confidence);
+      // The word and the number are one measurement, not two. If these could
+      // drift, `--json` and the terminal would be reading different things.
+      expect(s.confidence).toBe(s.calibration.confidence);
+      expect(s.calibration.score).toBeGreaterThanOrEqual(0);
+      expect(s.calibration.score).toBeLessThanOrEqual(1);
+      for (const h of s.hits) expect(h.confidence).toBe(h.calibration.confidence);
+    }
+  });
+
+  it('the human view prints exactly the words --json carries', async () => {
+    // `find --json` emits `result.confidence` and `s.confidence` verbatim
+    // (`packages/cli/src/commands/find.ts`). This pins the other half: the
+    // rendered screen shows those same strings, on the headline and on every
+    // block. Two views, one field.
+    const r = await recall(db, 'pgbouncer transaction pooling', {}, { vectors: false });
+    const out = renderFind(r, new Theme({ color: false, ascii: true, width: 80 }), new Date());
+    const lines = out.split('\n');
+    expect(lines[0]).toContain(r.confidence);
+    for (const s of r.sessions) {
+      const meta = lines.find((l) => l.includes(s.score.toFixed(4)));
+      expect(meta, `no meta line for ${s.id}`).toBeDefined();
+      expect(meta!).toContain(s.confidence);
+    }
+  });
+
+  it('a true, distinctive topic still comes back, and comes back strong', async () => {
+    const r = await recall(db, 'pgbouncer transaction pooling', {}, { vectors: false, minConfidence: 'weak' });
+    expect(r.sessions.length).toBeGreaterThan(0);
+    expect(r.confidence).toBe('strong');
+    expect(has(r, ID.pgbouncer)).toBe(true);
+  });
+
+  it('an absent topic returns zero rows, and says how many it withheld', async () => {
+    // Every one of these four words is in the corpus somewhere — there are
+    // sessions about payments and about services — so bm25 finds rows and
+    // ranks them, which is exactly the case the audit hit. What no
+    // conversation in the corpus is *about* is kubernetes ingress.
+    const q = 'kubernetes ingress payment service';
+    const before = await recall(db, q, {}, { vectors: false, minConfidence: 'none' });
+    expect(before.sessions.length).toBeGreaterThan(0);
+
+    const after = await recall(db, q, {}, { vectors: false, minConfidence: 'weak' });
+    expect(after.sessions).toEqual([]);
+    expect(after.hits).toEqual([]);
+    expect(after.confidence).toBe('none');
+    expect(after.belowFloor).toBe(before.sessions.length);
+  });
+
+  it('the empty screen names the next verb, and names the escape hatch', async () => {
+    const r = await recall(db, 'kubernetes ingress payment service', {}, { vectors: false, minConfidence: 'weak' });
+    const out = renderFind(r, new Theme({ color: false, ascii: true, width: 80 }), new Date());
+    expect(out).toContain('no match');
+    // "nothing matches" would be false — things matched and were withheld —
+    // and an agent told the wrong one of those widens a query that did not
+    // need widening.
+    expect(out).toContain('nothing in the index answers');
+    expect(out).toContain('none of them enough');
+    expect(out).toContain('--min-confidence none');
+    // `05`: every verb ends with the next verb, and after an honest empty the
+    // next verb is a narrower search — which is what makes the archaeologist's
+    // "widen once, then stop" reachable at all.
+    expect(out.trimEnd().split('\n').at(-1)).toContain('potsherd find');
+  });
+
+  it('invented words still return nothing, which they already did', async () => {
+    // The audit's headline — "ten confident rows for a word that does not
+    // exist in any human language" — did not reproduce on uncontaminated
+    // tokens: fts5 finds no term and there is nothing to rank. This is a
+    // regression control, not a fix, and it must hold at every floor.
+    for (const min of ['none', 'weak', 'strong'] as const) {
+      const r = await recall(db, 'vondrelic pashtomeer', {}, { vectors: false, minConfidence: min });
+      expect(r.sessions).toEqual([]);
+      expect(r.confidence).toBe('none');
+      // Nothing was withheld, because nothing was found. The two empties are
+      // different facts and the screen prints different last lines for them.
+      expect(r.belowFloor).toBe(0);
+    }
+  });
+
+  it('the escape hatch returns the withheld rows, labelled', async () => {
+    // A human's "show me anything, I will judge" is legitimate; an agent's is
+    // not. So the rows come back and they come back wearing the label that
+    // says why they were hidden.
+    const r = await recall(db, 'kubernetes ingress payment service', {}, { vectors: false, minConfidence: 'none' });
+    expect(r.sessions.length).toBeGreaterThan(0);
+    expect(r.sessions.every((s) => s.confidence === 'none')).toBe(true);
+    expect(r.confidence).toBe('none');
+    expect(r.minConfidence).toBe('none');
+  });
+
+  it('the floor removes rows and never reorders them', async () => {
+    // The whole design: RRF stays the ranker, calibration is a second and
+    // independent axis. If the floor could reorder, `--explain`'s ledger would
+    // stop explaining the page it is printed under.
+    for (const q of ['pgbouncer transaction pooling', 'the pooler decision', 'icon']) {
+      const open = await recall(db, q, {}, { vectors: false, limit: 20, minConfidence: 'none' });
+      const floored = await recall(db, q, {}, { vectors: false, limit: 20, minConfidence: 'weak' });
+      const survivors = open.sessions.filter((s) => s.confidence !== 'none').map((s) => s.id);
+      expect(floored.sessions.map((s) => s.id)).toEqual(survivors);
+      for (const s of floored.sessions) {
+        const same = open.sessions.find((o) => o.id === s.id)!;
+        expect(s.score).toBeCloseTo(same.score, 12);
+      }
+    }
+  });
+
+  it('the calibrated score is not the fused score rescaled', async () => {
+    // The audit prescribed normalising the fused score against the query's own
+    // distribution. It cannot work: RRF is rank-only, so the top row maps to
+    // 1.0 whether it is a bullseye or the least-bad of two bad rows. The proof
+    // is a pair of queries whose top rows have the *same* fused score and
+    // opposite calibrations — any function of the fused score alone would have
+    // to give them the same answer.
+    const good = await recall(db, 'pgbouncer transaction pooling', {}, { vectors: false, minConfidence: 'none' });
+    const bad = await recall(db, 'kubernetes ingress payment service', {}, { vectors: false, minConfidence: 'none' });
+    const g = good.sessions[0]!;
+    const b = bad.sessions[0]!;
+    expect(g.confidence).toBe('strong');
+    expect(b.confidence).toBe('none');
+    // Both are the top row of their own query, so **any** rescaling of the
+    // fused score against that query's own distribution maps both to the same
+    // value. What is left to tell them apart is the gap between the raw fused
+    // numbers, and on this corpus that gap is 1.7x — the audit measured 1.67x
+    // on a corpus a thousand times the size and called it fatal. The second
+    // axis puts the same two rows more than three apart.
+    expect(g.score / b.score).toBeLessThan(2);
+    expect(g.calibration.score / b.calibration.score).toBeGreaterThan(3);
+  });
+
+  it('is off by default, because ask and graft hand their rows to a reader', async () => {
+    // `recall()` labels everything and withholds nothing unless asked. `find`
+    // asks; the shortlist builders do not, because a model that opens the
+    // transcript can see for itself that a row is noise, and a floor that
+    // silently shortened every shortlist would be a change to three verbs made
+    // inside one.
+    const r = await recall(db, 'kubernetes ingress payment service', {}, { vectors: false });
+    expect(r.minConfidence).toBe('none');
+    expect(r.sessions.length).toBeGreaterThan(0);
+  });
+});
