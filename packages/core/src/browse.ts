@@ -27,7 +27,11 @@ import {
  * they are one archive with a hole in it, and the hole is the point.
  */
 
-export interface BrowseSession extends Omit<RecallSession, 'score' | 'hits'> {
+// `calibration`/`confidence` are `find`'s second axis and are computed against
+// a *query*; `ls` has none, so a browse row carries the session's metadata and
+// not the fields that only mean something inside a search. T10.1.
+export interface BrowseSession
+  extends Omit<RecallSession, 'score' | 'hits' | 'calibration' | 'confidence'> {
   /**
    * The card's title, when `potsherd card` has written one.
    *

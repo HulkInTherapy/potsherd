@@ -188,6 +188,76 @@ describe('find', () => {
   });
 
   /**
+   * T10.1 — the same three words on the screen and in the pipe.
+   *
+   * `05`'s contract is `--json` on everything, *identical data to the human
+   * view*. For confidence that is not a nicety: an agent reads the JSON, a
+   * person reads the terminal, and the entire value of the label is that the
+   * two of them are looking at one fact. This runs the shipped binary twice
+   * on one query and compares what each printed.
+   */
+  it('--json and the human view carry identical confidence, row for row', () => {
+    const q = 'pgbouncer transaction pooling';
+    const j = JSON.parse(run(['find', q, '--json']).stdout) as {
+      confidence: string;
+      minConfidence: string;
+      withheld: number;
+      sessions: {
+        score: number;
+        confidence: string;
+        calibrated: number;
+        coverage: number;
+        hits: { confidence: string; calibrated: number }[];
+      }[];
+    };
+    const human = run(['find', q, '--width', '80']).stdout;
+    expect(j.sessions.length).toBeGreaterThan(0);
+    expect(j.confidence).toBe('strong');
+    // The floor `find` runs at, on the record, so a consumer knows whether it
+    // is looking at a filtered page or an unfiltered one.
+    expect(j.minConfidence).toBe('weak');
+    expect(human.split('\n')[0]).toContain(j.confidence);
+    for (const s of j.sessions) {
+      const meta = human.split('\n').find((l) => l.includes(s.score.toFixed(4)));
+      expect(meta, `no meta line for a session scored ${s.score}`).toBeDefined();
+      expect(meta!).toContain(s.confidence);
+      // 0..1, and a real number rather than a copy of the fused score, which
+      // on this row is ~0.018.
+      expect(s.calibrated).toBeGreaterThan(0);
+      expect(s.calibrated).toBeLessThanOrEqual(1);
+      expect(s.calibrated).not.toBeCloseTo(s.score, 3);
+      expect(s.coverage).toBeGreaterThan(0);
+      for (const h of s.hits) expect(['strong', 'weak', 'none']).toContain(h.confidence);
+    }
+  });
+
+  it('an absent topic is an honest empty in both views, and exits 1', () => {
+    // Every word of this is somewhere in the corpus; no conversation in it is
+    // about the topic. Before T10.1 this returned confident-looking rows whose
+    // top score was inside 12% of a true phrase hit on the reference archive.
+    const q = 'kubernetes ingress payment service';
+    const r = run(['find', q, '--width', '80']);
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain('no match');
+    expect(r.stdout).toContain('nothing in the index answers');
+    expect(r.stdout).toContain('--min-confidence none');
+    // The last line names the next verb, and after an honest empty the next
+    // verb is a narrower search.
+    expect(r.stdout.trimEnd().split('\n').at(-1)).toContain('potsherd find');
+
+    const j = JSON.parse(run(['find', q, '--json']).stdout) as {
+      confidence: string;
+      withheld: number;
+      sessions: unknown[];
+    };
+    expect(j.sessions).toEqual([]);
+    expect(j.confidence).toBe('none');
+    // The count is the difference between "nothing matched" and "things
+    // matched and none of them well enough", which are different facts.
+    expect(j.withheld).toBeGreaterThan(0);
+  });
+
+  /**
    * **T3.6.** A block is a conversation, so a hit under it can belong to the
    * session in the heading *or* to a subagent it spawned. The human view marks
    * the difference; without `sessionId` on the hit `--json` could not, and a

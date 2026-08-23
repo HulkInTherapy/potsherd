@@ -26,6 +26,15 @@ import {
 } from './embeddings.js';
 import { modelsDir, potsherdDir } from './paths.js';
 import { applyIgnore, countIgnoredSessions, type IgnoreReport } from './ignore.js';
+import {
+  atLeastConfident,
+  calibrate,
+  coveredTerms,
+  maxConfidence,
+  relativeStrength,
+  type Calibrated,
+  type Confidence,
+} from './calibration.js';
 
 /**
  * L6 — recall.
@@ -126,6 +135,19 @@ export interface RecallHit {
    * relaxed.
    */
   from: { list: ListName; rank: number; raw: number; contribution: number }[];
+  /**
+   * F1 — the second axis, and **not** {@link score} rescaled.
+   *
+   * `score` is reciprocal rank fusion: a function of rank alone, which is why
+   * a true topic and a topic the archive has never heard of come out 1.12x
+   * apart. `calibration` is computed from the evidence RRF discards —
+   * `from[].raw`, how many of the query's distinctive words this row can
+   * actually show, and how many lists independently found it. See
+   * `calibration.ts` for the arithmetic and for why coverage is a ceiling.
+   */
+  calibration: Calibrated;
+  /** {@link Calibrated.confidence}, lifted for callers that only want the word. */
+  confidence: Confidence;
 }
 
 export interface RecallSession {
@@ -155,6 +177,16 @@ export interface RecallSession {
   /** `claude --resume <id>` / `codex resume <id>`, or null when not resumable. */
   resume: string | null;
   score: number;
+  /**
+   * The block's own confidence, over the union of its hits **and its title**.
+   *
+   * Measured on the block rather than on any one hit because the block is what
+   * `find` prints and what a `--json` consumer iterates: a conversation that
+   * says "privacy" in one exchange and "redaction" in another has covered both
+   * words, and a per-hit-only reading would call it half an answer twice.
+   */
+  calibration: Calibrated;
+  confidence: Confidence;
   hits: RecallHit[];
 }
 
@@ -215,6 +247,26 @@ export interface RecallResult {
    * behaviour, whichever verb asked.
    */
   ignored: IgnoreReport;
+  /**
+   * The best confidence on the page, and `none` when the page is empty.
+   *
+   * The envelope and every row carry the same vocabulary and the same values,
+   * in the human view and in `--json` alike, because an agent that has to
+   * reconcile two spellings of "did you find it" will trust neither.
+   */
+  confidence: Confidence;
+  /** The floor this call was run at. See {@link RecallOptions.minConfidence}. */
+  minConfidence: Confidence;
+  /**
+   * Session blocks that matched and were then withheld for scoring below
+   * {@link minConfidence}.
+   *
+   * `find` prints it on the `no match` screen, because "nothing in the index
+   * matches" and "six things matched and none of them well enough" are
+   * different facts and only one of them is true. Counted over the blocks that
+   * were built, which is at most `limit * 3`.
+   */
+  belowFloor: number;
   ms: number;
 }
 
@@ -269,6 +321,22 @@ export interface RecallOptions {
   all?: boolean;
   /** The ignore list, instead of reading it. Tests, and cached callers. */
   ignore?: readonly string[];
+  /**
+   * The confidence floor: blocks scoring below it are withheld.
+   *
+   * **The default is `none`, which withholds nothing**, and that is deliberate
+   * rather than timid. `recall()` is the shortlist builder for `ask` and for
+   * `graft` as well as the engine behind `find`, and those two hand their rows
+   * to a *reader* — a model that opens the transcript and can see for itself
+   * that a row is noise. `find` hands its rows to whoever typed the query, and
+   * for an agent an unlabelled least-bad row is indistinguishable from an
+   * answer, so `find` sets the floor to `weak`. One number, set by the caller
+   * who knows who is reading.
+   *
+   * Every row is labelled at every floor. Only whether they are *returned*
+   * changes.
+   */
+  minConfidence?: Confidence;
 }
 
 /** Max exchange hits from one session in the top list (`03` §7). */
@@ -1233,6 +1301,7 @@ export async function recall(
   const perSession = Math.max(1, options.perSession ?? PER_SESSION);
   const baseWeights: Partial<Record<ListName, number>> = { ...WEIGHTS, ...options.weights };
   const corroboration = options.corroboration ?? CORROBORATION;
+  const minConfidence: Confidence = options.minConfidence ?? 'none';
   const depth = Math.max(options.candidates ?? Math.max(limit * 10, 60), limit);
   // `--status ghost` is `--ghosts only` said the other way round; a ghost has
   // no row in `sessions`, so there is nothing else it could mean.
@@ -1261,6 +1330,9 @@ export async function recall(
     ghostsOnly: ghosts === 'only',
     indexedGhosts: countGhosts(db),
     ignored,
+    confidence: 'none',
+    minConfidence,
+    belowFloor: 0,
     ms: Date.now() - started,
   });
 
@@ -1484,6 +1556,35 @@ export async function recall(
     (a, b) => b.score - a.score || (a.seq ?? 0) - (b.seq ?? 0),
   );
 
+  // ---- calibration inputs
+  //
+  // F1. Everything below this comment is the *second* axis and touches the
+  // order of nothing: `ranked` is already final and is not re-sorted.
+  //
+  // `bestRaw` is each list's own strongest magnitude **for this query** —
+  // the most negative bm25, the highest cosine. It is the denominator that
+  // makes `from[].raw` mean something without an absolute scale, and it is
+  // computed over the full candidate list rather than the page, so a row
+  // being 40% of its list's best is a fact about the list and not about how
+  // many rows happened to survive diversification.
+  const bestRaw = new Map<ListName, number>();
+  for (const [name, hits] of Object.entries(lists)) {
+    if (hits.length === 0) continue;
+    const kind = rawKind(name as ListName);
+    if (kind === 'flat') continue;
+    let best = hits[0]!.raw;
+    for (const h of hits) best = kind === 'bm25' ? Math.min(best, h.raw) : Math.max(best, h.raw);
+    bestRaw.set(name as ListName, best);
+  }
+  const strengthOf = (from: RecallHit['from']): number => {
+    let best = 0;
+    for (const f of from) {
+      const kind = rawKind(f.list);
+      best = Math.max(best, relativeStrength(f.raw, bestRaw.get(f.list) ?? 0, kind));
+    }
+    return best;
+  };
+
   // ---- one conversation, one block
   //
   // A subagent transcript is not a separate conversation. potsherd already
@@ -1517,6 +1618,15 @@ export async function recall(
     const n = perSessionCount.get(conversation) ?? 0;
     if (n >= perSession) continue;
     perSessionCount.set(conversation, n + 1);
+    // Coverage is counted over the text this row can actually *show* — the
+    // same string `bestSnippet` cuts from — so the label and the highlighted
+    // words on the screen are two readings of one measurement.
+    const calibration = calibrate({
+      covered: coveredTerms(quotableTokens, `${hit.userText} ${hit.assistantText ?? ''}`),
+      terms: quotableTokens.length,
+      strength: strengthOf(hit.from),
+      lists: new Set(hit.from.map((f) => f.list)).size,
+    });
     kept.push({
       kind: hit.kind,
       sessionId: hit.sessionId,
@@ -1529,6 +1639,8 @@ export async function recall(
       isSidechain: hit.isSidechain,
       score: hit.score,
       from: hit.from,
+      calibration,
+      confidence: calibration.confidence,
     });
   }
 
@@ -1569,15 +1681,53 @@ export async function recall(
       seenText.add(key);
       return true;
     });
-    sessions.push({ ...m, score: sessionScore(hits, corroboration), hits });
+    // The block's own calibration, over the union of everything it can show
+    // *and* its title. A conversation that says "privacy" in one exchange and
+    // "redaction" in another has covered both words; reading each hit alone
+    // would call it half an answer twice. The title is in because a session
+    // named after the query is evidence — it is a whole list in the fusion.
+    const blockText = [m.displayTitle, m.title ?? '']
+      .concat(hits.map((h) => `${h.userText} ${h.assistantText ?? ''}`))
+      .join(' ');
+    const calibration = calibrate({
+      covered: coveredTerms(quotableTokens, blockText),
+      terms: quotableTokens.length,
+      strength: Math.max(0, ...hits.map((h) => h.calibration.strength)),
+      lists: new Set(hits.flatMap((h) => h.from.map((f) => f.list))).size,
+    });
+    sessions.push({
+      ...m,
+      score: sessionScore(hits, corroboration),
+      calibration,
+      confidence: calibration.confidence,
+      hits,
+    });
     // Three times the page, then sort by the *session's* total and cut. A
     // session whose best single hit ranks eleventh but which matched five
     // times is a better answer than one that matched once at rank ten, and
     // cutting at `limit` before the aggregation would never let it say so.
     if (sessions.length >= limit * 3) break;
   }
+  // ---- the floor
+  //
+  // The cliff. A block whose calibration says the archive does not answer the
+  // question is withheld rather than ranked, because ten rows scored 0.0110
+  // are worse than no rows at all: a human glances at the titles and knows, an
+  // agent cannot, and an agent that cannot tell a match from noise stops
+  // calling the tool. `belowFloor` survives so the `no match` screen can say
+  // *six matched and none of them well enough* rather than the false
+  // *nothing in the index matches*.
+  const built = sessions.length;
+  const surviving = sessions.filter((s) => atLeastConfident(s.confidence, minConfidence));
+  const belowFloor = built - surviving.length;
+  sessions.length = 0;
+  sessions.push(...surviving);
   sessions.sort((a, b) => b.score - a.score);
   sessions.length = Math.min(sessions.length, limit);
+  const confidence = sessions.reduce<Confidence>(
+    (best, s) => maxConfidence(best, s.confidence),
+    'none',
+  );
 
   // The flat list is every hit that is on the page, in fused order. It used to
   // be filtered by the *representative* session's id, which quietly threw away
@@ -1601,13 +1751,30 @@ export async function recall(
     ghostsOnly: ghosts === 'only',
     indexedGhosts: sessions.length === 0 ? countGhosts(db) : null,
     ignored,
+    confidence,
+    minConfidence,
+    belowFloor,
     ms: Date.now() - started,
   };
 }
 
+/**
+ * What kind of number a list's `raw` is, so it can be normalised against its
+ * own list's best rather than against an absolute scale.
+ *
+ * `titles` is `flat`: {@link titleMatches} has already dropped every title
+ * that did not match the query as well as the best one did, so every title hit
+ * that reaches here is by construction the strongest of its kind and has no
+ * magnitude left to compare.
+ */
+function rawKind(list: ListName): 'bm25' | 'cosine' | 'flat' {
+  if (list === 'titles') return 'flat';
+  return list.startsWith('vec_') ? 'cosine' : 'bm25';
+}
+
 // -------------------------------------------------------------- session meta
 
-type SessionMeta = Omit<RecallSession, 'score' | 'hits'>;
+type SessionMeta = Omit<RecallSession, 'score' | 'hits' | 'calibration' | 'confidence'>;
 
 /**
  * `sessionId -> conversationId`, where a subagent transcript's conversation is
