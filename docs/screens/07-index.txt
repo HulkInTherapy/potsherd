@@ -1,4 +1,4 @@
-potsherd index · ~/.potsherd · 23 aug 2026
+potsherd index · ~/.potsherd · 24 aug 2026
 
   claude                       228   31 sessions · 197 sidechains · 439 exchang…
   codex                          0   not installed — ~/.codex/sessions
@@ -13,7 +13,7 @@ potsherd index · ~/.potsherd · 23 aug 2026
   masked this run                5   aws 1 · gcp 1 · github 1 · stripe 1 · …
   vectors                        —   text search only · no model, no network
 
-  full index                 333ms   228 parsed · 0 unchanged · 546 KB
+  full index                 280ms   228 parsed · 0 unchanged · 546 KB
 
   run  potsherd doctor  for parse coverage and every path read.
   run  potsherd index --embed  for semantic search (32 MB model, ~6 min, once)

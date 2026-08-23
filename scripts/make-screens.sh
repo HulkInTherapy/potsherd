@@ -230,7 +230,7 @@ shot 11-show.txt         show 9c4d2f18
 # anybody having to know what the key was. The demo corpus plants five
 # credentials (scripts/make-demo-corpus.mjs); this is what the index kept of
 # them. The assertions below fail the build if a raw one ever reaches a screen.
-shot 13-find-redacted.txt find "redacted aws"
+shot 13-find-redacted.txt find "redacted"
 
 # Last of the offline screens, so that both doctor screens report on an index
 # that exists.

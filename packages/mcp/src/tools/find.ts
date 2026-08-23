@@ -71,7 +71,16 @@ export async function runFind(ctx: ServerContext, args: FindArgs): Promise<Recor
   return withIndexAsync(ctx, async (db, root) => {
     const filters = parseFilters(db, toFlags(args));
     const limit = parseLimit(args.limit, 10);
-    const result = await recall(db, query, filters, { limit, root, vectors: 'auto' });
+    const result = await recall(db, query, filters, {
+      limit,
+      root,
+      vectors: 'auto',
+      // The agent-facing door gets the same floor the human-facing one does.
+      // An unlabelled least-bad row is indistinguishable from an answer to a
+      // caller that cannot glance at the titles, and the audit that started
+      // phase 10 is a transcript of an agent acting on ten of them.
+      minConfidence: 'weak',
+    });
 
     return {
       query: result.query,
@@ -80,6 +89,9 @@ export async function runFind(ctx: ServerContext, args: FindArgs): Promise<Recor
       ignored: result.ignored,
       lists: result.lists,
       relaxed: result.relaxed,
+      confidence: result.confidence,
+      minConfidence: result.minConfidence,
+      withheld: result.belowFloor,
       ms: result.ms,
       // The contract's four named fields, straight off `RecallResult`.
       k: result.k,
@@ -105,6 +117,11 @@ export async function runFind(ctx: ServerContext, args: FindArgs): Promise<Recor
         exchanges: s.exchanges,
         resume: s.resume,
         score: s.score,
+        confidence: s.confidence,
+        calibrated: s.calibration.score,
+        coverage: s.calibration.coverage,
+        strength: s.calibration.strength,
+        agreement: s.calibration.agreement,
         hits: s.hits.map(hitJson),
       })),
     };
@@ -122,6 +139,8 @@ function hitJson(h: Hit): Record<string, unknown> {
     seq: h.seq ?? null,
     ts: h.ts ?? null,
     score: h.score,
+    confidence: h.confidence,
+    calibrated: h.calibration.score,
     from: h.from,
     snippet: h.snippet.text,
     match: h.snippet.match ?? null,

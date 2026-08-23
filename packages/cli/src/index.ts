@@ -261,6 +261,11 @@ example:
           .choices(['auto', 'on', 'off'])
           .default('auto'),
       )
+      .addOption(
+        new Option('--min-confidence <level>', 'withhold rows the archive does not answer')
+          .choices(['strong', 'weak', 'none'])
+          .default('weak'),
+      )
       .option('--no-vec', 'text search only — the same as --vectors off')
       .option('--explain', 'show the per-list ranks and scores behind the order')
       .option('--with <tools>', 'also search other memory tools: claude-mem, agentmemory, notes')
@@ -298,6 +303,7 @@ filters, one example each — they compose, and all of them are AND:
           vec: opts['vec'] !== false,
           explain: Boolean(opts['explain']),
           all: Boolean(opts['all']),
+          minConfidence: String(opts['minConfidence'] ?? 'weak'),
           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
           ...(opts['with'] ? { with: String(opts['with']) } : {}),
         }),

@@ -1,4 +1,4 @@
-potsherd doctor --privacy · 23 aug 2026
+potsherd doctor --privacy · 24 aug 2026
 
   reads (never modified):
     ~/.claude/projects

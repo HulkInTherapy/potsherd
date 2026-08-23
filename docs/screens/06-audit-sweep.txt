@@ -1,4 +1,4 @@
-potsherd audit · ~/.claude · 23 aug 2026
+potsherd audit · ~/.claude · 24 aug 2026
 
   sessions ever started        330   nov 2025 → aug 2026
   still on disk                 31

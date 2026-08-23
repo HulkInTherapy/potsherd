@@ -315,6 +315,24 @@ export {
   MIN_CALLS as MIN_CALIBRATION_CALLS,
   type CardRunRecord,
   type CardRunRow,
+  // The other half of the file, added in phase 10: the estimator says what a
+  // card run will cost, and this says how much of the query a row actually
+  // answered. Same module because both are the honest number behind a screen.
+  atLeastConfident,
+  calibrate,
+  coveredTerms,
+  label as confidenceLabel,
+  maxConfidence,
+  relativeStrength,
+  AGREEMENT_LISTS,
+  STRONG_FLOOR,
+  WEAK_FLOOR,
+  WEIGHT_AGREEMENT,
+  WEIGHT_BASE,
+  WEIGHT_STRENGTH,
+  type Calibrated,
+  type Confidence,
+  type RowEvidence,
 } from './calibration.js';
 export * as cardSentinel from './cards/sentinel.js';
 
