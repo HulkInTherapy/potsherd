@@ -149,6 +149,41 @@ projects `w6-ask` and `tmp`. An item marked closed in a handoff is not an item t
 `graft` writing `.potsherd/graft-<id>.md` into the cwd **is** correctly self-ignoring — `git status`
 stayed clean, as the audit credited. Verified deliberately, then deleted.
 
+## codex is installable, and the subprocess ladder writes into the corpus it reads
+
+Two findings from verifying third-party flags before documenting them (`09 §10.1`, the rule six
+false plan claims wrote).
+
+**1. `codex` is not uninstallable here, and has not been since phase 5.** `@openai/codex@0.149.0`
+installs from npm in 39 seconds. Against the real `codex exec --help`, **every flag potsherd's
+`CodexTransport` guessed from documentation is real**: `exec`, `--skip-git-repo-check`,
+`-C/--cd <DIR>`, `-m/--model <MODEL>`, and `-` for stdin. The plumbing was right. The
+`unverified — documentation only` label can narrow to what is still genuinely unverified — a real
+authenticated round trip — instead of covering the argv it now covers.
+
+**2. The subprocess ladder writes new sessions into the archive potsherd indexes.** Already true in
+the reference archive, from phase 6's probes:
+
+```
+~/.claude/projects/-Users-zebra-randomness-wt-w6-ask/    1 session
+~/.claude/projects/-private-tmp/                          2 sessions
+```
+
+They are visible in `ls` today as rows titled `Reply with exactly: PONG`, sitting in the user's own
+history beside their real work — and they are part of why `ls` reads the way item 25 says it does.
+
+The SDK path never had this problem; it is in-process. **Rung 2 of A1 introduces it at production
+scale**: `card --all` is ~39 calls, so 39 junk sessions injected into the user's archive, which
+potsherd then indexes, cards, ranks and surfaces. A tool whose premise is *your archive is the
+record* cannot write to the archive as a side effect of reading it, and the project already has a
+rule saying agent dirs are read-only inputs.
+
+The levers, both verified against the real binaries: `claude` has no ephemeral flag, so
+**`CLAUDE_CONFIG_DIR`** must point at a scratch dir; `codex exec` has **`--ephemeral`**, *"run
+without persisting session files to disk"*. Handed to T10.2 with a test added to its acceptance
+list: a subprocess model call must leave `~/.claude` and `~/.codex` untouched, proved by copying the
+trap rather than building a clean room.
+
 ## status
 
 **Five workers running**, each in its own worktree with disjoint deliverables:
