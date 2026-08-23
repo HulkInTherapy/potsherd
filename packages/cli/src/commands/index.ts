@@ -391,8 +391,11 @@ export function renderIndexReceipt(
 
   // The status line. A status, not an apology and not an offer: there is no
   // command in it, because there is nothing for the reader to do. §A2 item 2.
-  const warming = warmingSentence(o.vec, o.spawned === true);
-  if (warming) card.blank().text(warming, 'dim');
+  // Given longest-first so a narrow terminal loses the elaboration and keeps
+  // the count, and never gets a sentence cut in half.
+  const warming =
+    o.embed === false ? [] : warmingSentences(o.vec, o.spawned === true);
+  if (warming.length > 0) card.blank().fit(...warming);
 
   card.blank().fix(
     'potsherd doctor',
@@ -410,18 +413,24 @@ export function renderIndexReceipt(
  * the one clause that says why; or there is nothing to say, and then nothing is
  * printed. `find` prints the same sentence from the same report while it waits.
  */
-function warmingSentence(vec: VecStatus | undefined, spawned: boolean): string | null {
+function warmingSentences(vec: VecStatus | undefined, spawned: boolean): string[] {
   const r = vec?.report;
-  if (!r) return null;
+  if (!r) return [];
   if (r.phase === 'unavailable') {
-    return `semantic search: ${r.reason ?? 'not running on this machine'} — text search is live`;
+    const why = r.reason ?? 'not running on this machine';
+    return [`semantic search: ${why} — text search is live`, `semantic search: ${why}`];
   }
-  if (r.phase === 'ready' || r.phase === 'empty') return null;
-  const head = `semantic search: warming (${fmt.num(r.embedded)} of ${fmt.num(r.total)} embedded)`;
-  if (!spawned) return head;
-  return r.runtimeReady
-    ? `${head} — in the background, newest sessions first`
-    : `${head} — fetching the ${fmt.bytes(r.acquireBytes)} runtime in the background, once`;
+  if (r.phase === 'ready' || r.phase === 'empty') return [];
+  // `vec.line` is the sentence `find` prints while it waits, from the same
+  // report. `index` prints it with one extra clause saying who is doing the
+  // work, and falls back to the bare sentence at 60 columns.
+  const head = vec?.line ?? `semantic search: warming (${fmt.num(r.embedded)} of ${fmt.num(r.total)})`;
+  if (!spawned) return [head];
+  const long = r.runtimeReady
+    ? 'in the background, newest sessions first'
+    : `fetching the ${fmt.bytes(r.acquireBytes)} runtime in the background, once`;
+  const short = r.runtimeReady ? 'in the background' : `fetching ${fmt.bytes(r.acquireBytes)}, once`;
+  return [`${head} — ${long}`, `${head} — ${short}`, head];
 }
 
 function harnessNote(h: HarnessReport, sep = ' · '): string {
@@ -462,7 +471,7 @@ function vectorsRow(
     return {
       label: 'vectors',
       value: vec.report.embedded > 0 ? fmt.num(vec.report.embedded) : t.dash,
-      note: `not this run (--no-embed) ${t.mid} text search only`,
+      note: 'not this run (--no-embed)',
       tone: 'dim',
     };
   }

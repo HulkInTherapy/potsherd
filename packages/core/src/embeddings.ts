@@ -495,7 +495,7 @@ async function wasmPipeline(cacheDir: string): Promise<Pipeline> {
   const dir = path.join(cacheDir, ...RUNTIME_SUBDIR.split('/'));
   const modelDir = path.join(cacheDir, ...MODEL_ID.split('/'));
 
-  const ort = (await import(pathToFileUrl(path.join(dir, 'ort.wasm.bundle.min.mjs')))) as {
+  const ort = (await import(/* @vite-ignore */ pathToFileUrl(path.join(dir, 'ort.wasm.bundle.min.mjs')))) as {
     env: { wasm: { wasmPaths: string; numThreads: number }; logLevel: string };
     Tensor: new (type: string, data: BigInt64Array, dims: number[]) => unknown;
     InferenceSession: {
@@ -511,7 +511,7 @@ async function wasmPipeline(cacheDir: string): Promise<Pipeline> {
       }>;
     };
   };
-  const { Tokenizer } = (await import(pathToFileUrl(path.join(dir, 'tokenizers.mjs')))) as {
+  const { Tokenizer } = (await import(/* @vite-ignore */ pathToFileUrl(path.join(dir, 'tokenizers.mjs')))) as {
     Tokenizer: new (
       spec: unknown,
       config: unknown,

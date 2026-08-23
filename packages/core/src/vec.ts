@@ -561,7 +561,11 @@ export async function embedPending(
     return { embedded: 0, remaining: 0, ms: Date.now() - started, reason: status.reason ?? 'no vector store' };
   }
 
-  const rows = pendingRows(db, options.limit);
+  const queue = pendingRows(db, options.limit);
+  if (queue.error) {
+    return { embedded: 0, remaining: 0, ms: Date.now() - started, reason: queue.error };
+  }
+  const rows = queue.rows;
   if (rows.length === 0) {
     return { embedded: 0, remaining: 0, ms: Date.now() - started };
   }
@@ -652,41 +656,42 @@ interface PendingRow {
  * against an exchange's two — a run that did all the exchanges before touching
  * a ghost would leave the cheapest rows for last.
  */
-function pendingRows(db: Db, limit?: number): PendingRow[] {
-  const cap = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
-  const out: PendingRow[] = [];
-  const rows = query<{ kind: string; id: string; a: string; b: string | null }>(
-    db,
-    `SELECT 'exchange' AS kind, id, user_text AS a, assistant_text AS b, ts
-       FROM exchanges
-      WHERE embedding_version IS NULL OR embedding_version != ?
-     UNION ALL
-     SELECT 'ghost' AS kind, id, text AS a, NULL AS b, ts
-       FROM ghost_prompts
-      WHERE embedding_version IS NULL OR embedding_version != ?
-      ORDER BY ts IS NULL, ts DESC
-      LIMIT ?`,
-    [EMBEDDING_VERSION, EMBEDDING_VERSION, Math.min(cap, 1_000_000)],
-  );
-  for (const r of rows) {
-    out.push({
+function pendingRows(db: Db, limit?: number): { rows: PendingRow[]; error?: string } {
+  const cap = limit && limit > 0 ? limit : 1_000_000;
+  // The ORDER BY lives outside the compound SELECT deliberately: sqlite only
+  // accepts result-column names or ordinals as ORDER BY terms on a UNION, so
+  // `ORDER BY ts IS NULL, ts DESC` written inside one is a prepare-time error
+  // — which is exactly the kind of failure a bare `catch { return [] }` turns
+  // into "there is nothing to embed", silently, forever. The wrapper makes the
+  // expression legal and the error is now returned rather than swallowed.
+  const sql = `
+SELECT kind, id, a, b FROM (
+  SELECT 'exchange' AS kind, id, user_text AS a, assistant_text AS b, ts
+    FROM exchanges
+   WHERE embedding_version IS NULL OR embedding_version != ?
+  UNION ALL
+  SELECT 'ghost' AS kind, id, text AS a, NULL AS b, ts
+    FROM ghost_prompts
+   WHERE embedding_version IS NULL OR embedding_version != ?
+)
+ORDER BY ts IS NULL, ts DESC
+LIMIT ?`;
+  let raw: { kind: string; id: string; a: string; b: string | null }[];
+  try {
+    raw = db
+      .prepare(sql)
+      .all(EMBEDDING_VERSION, EMBEDDING_VERSION, Math.min(cap, 1_000_000)) as typeof raw;
+  } catch (err) {
+    return { rows: [], error: firstLine((err as Error)?.message ?? String(err)) };
+  }
+  return {
+    rows: raw.map((r) => ({
       kind: r.kind === 'ghost' ? 'ghost' : 'exchange',
       id: r.id,
       userText: r.a ?? '',
       assistantText: r.b ?? '',
-    });
-  }
-  return out;
-}
-
-function query<T>(db: Db, sql: string, params: unknown[]): T[] {
-  try {
-    return db.prepare(sql).all(...(params as never[])) as T[];
-  } catch {
-    // A schema that predates `ghost_prompts.embedding_version`, or a database
-    // mid-migration. No rows is the right answer; the next open fixes it.
-    return [];
-  }
+    })),
+  };
 }
 
 /** Exported so `doctor` can name the thread count without importing two modules. */
