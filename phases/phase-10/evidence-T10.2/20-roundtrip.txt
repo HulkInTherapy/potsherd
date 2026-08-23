@@ -1,0 +1,55 @@
+$ which claude ; echo $ANTHROPIC_API_KEY ; node -e require.resolve(...)
+/var/folders/x7/878s1bxj4c950snx6h2200k00000gn/T//cmux-cli-shims/1E14DF30-EEC1-4106-BA2A-64ED8342E44E/claude
+ANTHROPIC_API_KEY=[UNSET]
+agent-sdk: NOT INSTALLED
+
+$ potsherd ask "$Q" --readers-out r.json
+  1 reader input → /tmp/w/r.json
+  of 1 matching session, k 6
+
+    11111111  potsherd-alpha  seq 1, 2
+
+  no model call was made (0). the excerpts are redacted, as sent.
+
+  run your readers, add an "outputs" array to the file, then:
+    potsherd ask "how do we pin the pgbouncer prepared-statement setting?" --readers-in /tmp/w/r.json
+
+real	0m0.294s
+user	0m0.173s
+sys	0m0.032s
+
+--- the host agent (me) reads r.json and answers each reader ---
+
+$ potsherd ask "$Q" --readers-in r.json --synthesis-out s.json
+  1 synthesis prompt → /tmp/w/s.json
+  built from 1 session of 1 read · 419 chars
+
+    11111111  potsherd-alpha  seq 1, 2
+
+  no model call was made (0). the prompt is redacted, as sent.
+
+  answer "prompt" in the shape of "schema", add it to the file as "reply", then:
+    potsherd ask "how do we pin the pgbouncer prepared-statement setting?" --filter-in /tmp/w/s.json
+
+real	0m0.416s
+user	0m0.199s
+sys	0m0.037s
+
+--- the host agent (me) answers s.json's prompt on its own subscription ---
+
+$ potsherd ask "$Q" --filter-in s.json
+potsherd ask "how do we pin the pgbouncer prepared-statement setting?"
+
+ANSWER
+  The setting is pinned by putting statement_cache_size at 0 and running
+  pgbouncer in transaction pooling mode. [1]
+
+EVIDENCE
+  [1] potsherd-alpha/11111111  1 aug 14:30  "Set statement_cache_size to 0 and…"
+
+  1 of 1 session read · 1 answered · 15ms
+  run  potsherd graft 11111111  to carry it into the agent you are in
+
+real	0m0.326s
+user	0m0.215s
+sys	0m0.041s
