@@ -242,3 +242,71 @@ describe('gemini adapter — the contract', () => {
     expect(fs.readdirSync(path.join(FIXTURE_GEMINI, 'tmp')).sort()).toEqual(before);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MEASURED AGAINST A REAL Gemini CLI 0.56.0 (T10.12, 2026-08-24)
+//
+// `@google/gemini-cli@0.56.0` installs from npm — the phase-5 claim that it
+// could not be installed here was never checked and is false. It was installed
+// and run under a relocated HOME. It refused to answer without an auth method
+// (`GEMINI_API_KEY`, `GOOGLE_GENAI_USE_VERTEXAI` or `GOOGLE_GENAI_USE_GCA`),
+// none of which this machine has, so **no saved chat exists** and the parse
+// half of this adapter remains genuinely unverified — that label is EARNED and
+// stays. What the run did settle is the layout, before any model call:
+//
+//   ~/.gemini/projects.json          {"projects": {"<abs cwd>": "<dir name>"}}
+//   ~/.gemini/tmp/<dir name>/.project_root
+//   ~/.gemini/history/<dir name>/.project_root
+//
+// FINDING — the directory under `tmp/` is NOT a hash. At 0.56.0 it is a plain,
+// human-readable name (the cwd's basename, deduplicated through
+// `projects.json`), and `projects.json` maps it back to the absolute path
+// exactly. This adapter's header states the opposite in so many words — "The
+// directory under `tmp/` is a **hash of the project path**, not the path. A
+// hash cannot be inverted" — and {@link projectHashes} / {@link recoverCwd}
+// exist entirely to corroborate a hash that is not there. Against a real
+// 0.56.0 install `recoverCwd` can never match, so `project` is always `''`
+// even though the answer is sitting in `projects.json` in plain text.
+//
+// NOT FIXED HERE (`T10.12-LABELS.md` carries the recommendation): reading
+// `projects.json` is a new source, and no real checkpoint exists to check the
+// rest of the parse against. The hash path must also stay — a hashed layout may
+// still be what older Gemini CLIs wrote, and this is a sample of one.
+describe('gemini adapter — a real Gemini CLI 0.56.0 layout (T10.12)', () => {
+  function realShape(): { root: string; dir: string; cwd: string } {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-0560-'));
+    const cwd = '/w/scratch/work';
+    const dir = 'work';
+    fs.mkdirSync(path.join(root, 'tmp', dir), { recursive: true });
+    fs.mkdirSync(path.join(root, 'history', dir), { recursive: true });
+    fs.writeFileSync(path.join(root, 'tmp', dir, '.project_root'), '');
+    fs.writeFileSync(path.join(root, 'history', dir, '.project_root'), '');
+    fs.writeFileSync(
+      path.join(root, 'projects.json'),
+      JSON.stringify({ projects: { [cwd]: dir } }, null, 2) + '\n',
+    );
+    return { root, dir, cwd };
+  }
+
+  it('FINDING — tmp/<dir> is a plain name, not one of the hashes projectHashes builds', () => {
+    const { root, dir, cwd } = realShape();
+    expect(dir).not.toMatch(/^[0-9a-f]{64}$/);
+    expect(projectHashes(cwd)).not.toContain(dir);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('FINDING — so recoverCwd cannot corroborate it, though projects.json states it outright', () => {
+    const { root, dir, cwd } = realShape();
+    // Even handed the true path as a candidate, the hash test rejects it.
+    expect(recoverCwd(dir, [cwd, path.dirname(cwd)])).toBeUndefined();
+    const mapping = JSON.parse(fs.readFileSync(path.join(root, 'projects.json'), 'utf8'));
+    expect(mapping.projects[cwd]).toBe(dir);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('and there is no chats/ directory until a chat is saved, so discover() is empty', () => {
+    const { root } = realShape();
+    expect(discover(root)).toEqual([]);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});

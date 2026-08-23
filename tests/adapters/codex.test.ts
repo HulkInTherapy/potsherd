@@ -495,3 +495,118 @@ function countUserMessages(file: string): number {
   }
   return n;
 }
+
+// ---------------------------------------------------------------------------
+// MEASURED AGAINST A REAL codex-cli 0.149.0 (T10.12, 2026-08-24)
+//
+// Phases 5–9 said codex "is not installed here and cannot be". That was never
+// checked: `@openai/codex@0.149.0` installs from npm in 39s. It was installed,
+// pointed at a scratch `CODEX_HOME`, and asked one question. The rollout it
+// wrote does not have the shape this adapter's header describes, and the two
+// records below are hand-written from scratch to the SHAPE that was observed —
+// no real ids, paths or prose (`00-README.md`).
+//
+// TWO FINDINGS, both reported in `phases/phase-10/T10.12-LABELS.md` and
+// DELIBERATELY NOT FIXED HERE (one real session is a sample of one; shaping
+// the parser to it could break the documented 2026-07 format, which still
+// parses correctly — 1 session, 2 exchanges, 12 tool calls, re-measured).
+//
+//   F1. `event_msg/user_message` NO LONGER EXISTS. 0.149.0 emits
+//       `event_msg/item_completed` carrying `item.type:"UserMessage"` instead.
+//       `collectHumanPrompts` therefore returns an empty set, the
+//       `humanPrompts.size > 0` guard in `parser/codex.ts` never engages, and
+//       EVERY `response_item/message` with `role:"user"` starts an exchange —
+//       including the injected `<environment_context>` block, which then
+//       becomes the session title and puts the user's cwd in `potsherd ls`.
+//       This is the "no event_msg at all" degrade firing on a rollout that has
+//       three of them; the guard tests for the wrong thing.
+//
+//   F2. `session_index.jsonl` is gone — the header calls it "the ONLY title
+//       source". 0.149.0 keeps titles in `$CODEX_HOME/state_5.sqlite`,
+//       `threads(id, title, first_user_message, preview, rollout_path, cwd,
+//       git_branch, model, cli_version, …)`. `first_user_message` alone would
+//       resolve F1 exactly.
+//
+// The assertions below therefore record what the adapter DOES today. When
+// either finding is fixed these fail, and that is the point: they are the
+// tripwire, not the endorsement.
+describe('codex adapter — a real codex-cli 0.149.0 rollout (T10.12)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmrf(d);
+  });
+
+  /** Hand-written to the observed shape. Id has 2 distinct hex digits in its first eight. */
+  const SESSION = '0a0a0a0a-0a0a-7a0a-8a0a-0a0a0a0a0a0a';
+  const TURN = '0a0a0a0a-0a0a-7a0a-8a0a-0a0a0a0a0a0b';
+
+  function writeRollout(): SessionSource {
+    const root = tempDir('codex-149');
+    dirs.push(root);
+    const day = path.join(root, 'sessions', '2026', '08', '24');
+    fs.mkdirSync(day, { recursive: true });
+    const file = path.join(day, `rollout-2026-08-24T00-00-00-${SESSION}.jsonl`);
+    const at = '2026-08-24T00:00:00.000Z';
+    const lines = [
+      // ordinal is new at 0.149.0 and sits on the envelope, not the payload.
+      { timestamp: at, ordinal: 0, type: 'session_meta', payload: { session_id: SESSION, id: SESSION, timestamp: at, cwd: '/w/scratch', originator: 'codex_exec', cli_version: '0.149.0', source: 'exec' } },
+      { timestamp: at, ordinal: 1, type: 'event_msg', payload: { type: 'task_started', turn_id: TURN, model_context_window: 258400 } },
+      // role:"developer" is new too, and is dropped (correctly) as injection.
+      { timestamp: at, ordinal: 2, type: 'response_item', payload: { type: 'message', id: 'msg_a', role: 'developer', content: [{ type: 'input_text', text: 'system preamble' }] } },
+      // the injected block. NOT typed by the user.
+      { timestamp: at, ordinal: 3, type: 'response_item', payload: { type: 'message', id: 'msg_b', role: 'user', content: [{ type: 'input_text', text: '<environment_context>\n  <cwd>/w/scratch</cwd>\n  <shell>zsh</shell>\n</environment_context>' }] } },
+      { timestamp: at, ordinal: 4, type: 'turn_context', payload: { turn_id: TURN, cwd: '/w/scratch', model: 'a-model' } },
+      // the one thing the human typed.
+      { timestamp: at, ordinal: 5, type: 'response_item', payload: { type: 'message', id: 'msg_c', role: 'user', content: [{ type: 'input_text', text: 'say hello' }] } },
+      // 0.149.0's replacement for event_msg/user_message.
+      { timestamp: at, ordinal: 6, type: 'event_msg', payload: { type: 'item_completed', thread_id: SESSION, turn_id: TURN, item: { type: 'UserMessage', id: 'it_a', content: [{ type: 'text', text: 'say hello' }] } } },
+      { timestamp: at, ordinal: 7, type: 'event_msg', payload: { type: 'task_complete', turn_id: TURN, last_agent_message: null } },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join('\n') + '\n';
+    fs.writeFileSync(file, lines);
+    const found = discover({ codexHome: root }).find((s) => s.sessionId === SESSION);
+    if (!found) throw new Error('0.149.0 rollout not discovered');
+    return found;
+  }
+
+  it('is still discovered — the sessions/YYYY/MM/DD/rollout-*.jsonl layout did not change', () => {
+    const src = writeRollout();
+    expect(src.harness).toBe('codex');
+    expect(path.basename(src.path)).toMatch(/^rollout-.*\.jsonl$/);
+  });
+
+  it('reads session_meta as before: id, cwd, entrypoint, model', async () => {
+    const r = await parse(writeRollout());
+    expect(r.session.id).toBe(SESSION);
+    expect(r.session.project).toBe('/w/scratch');
+    expect(r.session.model).toBe('a-model');
+  });
+
+  it('FINDING F1 — counts the injected <environment_context> as a human prompt', async () => {
+    const r = await parse(writeRollout());
+    // What it SHOULD be is 1. It is 2 because `event_msg/user_message` is gone
+    // and the guard that depends on it silently disengages.
+    expect(r.session.counts.userPrompts, 'see T10.12-LABELS.md — codex F1').toBe(2);
+    expect(r.exchanges[0]?.userText).toContain('<environment_context>');
+    expect(r.exchanges[1]?.userText).toBe('say hello');
+  });
+
+  it('FINDING F1 — the ground truth IS in the file, under a shape the parser does not read', async () => {
+    const src = writeRollout();
+    const raw = fs.readFileSync(src.path, 'utf8');
+    // The parser looks for payload.type === 'user_message'. There is none.
+    expect(raw).not.toContain('"user_message"');
+    // What is there instead, and what a fix should read:
+    expect(raw).toContain('"item_completed"');
+    expect(raw).toContain('"UserMessage"');
+  });
+
+  it('FINDING F2 — 0.149.0 writes no session_index.jsonl, so nothing is titled', async () => {
+    const src = writeRollout();
+    const root = path.resolve(path.dirname(src.path), '..', '..', '..', '..');
+    expect(fs.existsSync(path.join(root, 'session_index.jsonl'))).toBe(false);
+    const r = await parse(src);
+    expect(r.session.title).toBeUndefined();
+  });
+});

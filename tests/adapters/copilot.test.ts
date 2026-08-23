@@ -224,3 +224,100 @@ describe('copilot adapter — the contract', () => {
     expect(fs.readdirSync(state).sort()).toEqual(before);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MEASURED AGAINST A REAL GitHub Copilot CLI 1.0.80 (T10.12, 2026-08-24)
+//
+// `08 §3` item 7 recorded an anomaly: the Copilot CLI had run on the reference
+// machine and had still written no `session-state/`. Both halves are now
+// explained, by installing `@github/copilot@1.0.80` from npm (33s, alongside
+// gemini and opencode) and running it under a relocated HOME.
+//
+//   WHY THE REFERENCE MACHINE HAS NONE. `~/.copilot/logs/process-*.log` shows
+//   every run there was `Starting CLI in server mode (stdio)` … `Destroying 0
+//   active sessions` — the IDE's JSON-RPC engine, never an interactive or
+//   `-p` CLI session. Copilot writes `session-state/` per *CLI session*, and
+//   there had never been one. The adapter's PATH IS RIGHT; the machine had no
+//   sessions to put in it. One `copilot -p …` created the directory on the
+//   first try.
+//
+//   WHAT IS ACTUALLY IN IT — and this is the finding. `session-state/<uuid>/`
+//   at 1.0.80 holds `workspace.yaml`, `checkpoints/index.md`,
+//   `rewind-file-snapshots/tracking.json`, and empty `files/` and `research/`.
+//   It holds NONE of the six names {@link STATE_FILES} looks for, and no JSON
+//   document of turns at all. The transcript lives one level up, in
+//   `~/.copilot/session-store.db` — a sqlite database with
+//   `sessions(id, cwd, repository, host_type, branch, summary, created_at,
+//   updated_at)` and `turns(session_id, turn_index, user_message,
+//   assistant_response, timestamp)`, plus `checkpoints`, `session_files` and
+//   an FTS `search_index`. The adapter never opens it.
+//
+// So `potsherd index` over a real, non-empty Copilot install reports
+// `copilot 0 · no transcripts in ~/.copilot/session-state`. NOT FIXED HERE:
+// reading it means a second sqlite adapter, which is a feature, not a
+// correction (`T10.12-LABELS.md` carries the recommendation). These assertions
+// pin the measured layout so the next person starts from a fact.
+describe('copilot adapter — a real Copilot CLI 1.0.80 session directory (T10.12)', () => {
+  function realShape(): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-1080-'));
+    // 2 distinct hex digits in the first eight — the guard's entropy test.
+    const id = 'bbbbbbbb-0b0b-4b0b-8b0b-0b0b0b0b0b0b';
+    const dir = path.join(root, 'session-state', id);
+    fs.mkdirSync(path.join(dir, 'checkpoints'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'rewind-file-snapshots'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'files'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'research'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'workspace.yaml'),
+      [
+        `id: ${id}`,
+        'cwd: /w/scratch',
+        'client_name: github/cli',
+        'user_named: false',
+        'summary_count: 0',
+        'created_at: 2026-08-24T00:00:00.000Z',
+        'updated_at: 2026-08-24T00:00:00.000Z',
+        '',
+      ].join('\n'),
+    );
+    fs.writeFileSync(
+      path.join(dir, 'checkpoints', 'index.md'),
+      '# Checkpoint History\n\n| # | Title | File |\n|---|-------|------|\n',
+    );
+    fs.writeFileSync(path.join(dir, 'rewind-file-snapshots', 'tracking.json'), '{}\n');
+    return root;
+  }
+
+  it('FINDING — the session directory exists and holds none of the names STATE_FILES looks for', () => {
+    const root = realShape();
+    const dir = fs.readdirSync(path.join(root, 'session-state'))[0]!;
+    const inside = fs.readdirSync(path.join(root, 'session-state', dir)).sort();
+    expect(inside).toEqual([
+      'checkpoints',
+      'files',
+      'research',
+      'rewind-file-snapshots',
+      'workspace.yaml',
+    ]);
+    expect(stateFileIn(path.join(root, 'session-state', dir))).toBeUndefined();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('FINDING — so discover() returns nothing for a real, non-empty install', () => {
+    const root = realShape();
+    expect(discover(root)).toEqual([]);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('the metadata IS there, in YAML the adapter does not read', () => {
+    const root = realShape();
+    const dir = fs.readdirSync(path.join(root, 'session-state'))[0]!;
+    const yaml = fs.readFileSync(path.join(root, 'session-state', dir, 'workspace.yaml'), 'utf8');
+    // Everything SessionRecord wants except the turns themselves.
+    expect(yaml).toMatch(/^id: /m);
+    expect(yaml).toMatch(/^cwd: /m);
+    expect(yaml).toMatch(/^created_at: /m);
+    expect(yaml).toMatch(/^updated_at: /m);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
