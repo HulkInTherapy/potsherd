@@ -90,9 +90,9 @@ export function createServer(ctx: ServerContext): McpServer {
         'exactly, potsherd_graft to carry a whole thread into this conversation as a brief. ' +
         'Citations are minted by potsherd, not composed by you: copy the citation line a reply ' +
         'gives you. A source line whose id does not resolve against the index is refused in ' +
-        'code. Two of the three only read; potsherd_graft says so in its readOnlyHint, because ' +
-        'it creates ./.potsherd/graft-<id8>.md in the current project — the only potsherd ' +
-        'write outside ~/.potsherd. Everything else potsherd does — tag, pin, link, card, ls, ' +
+        'code. Two of the three only read. potsherd_graft creates ' +
+        './.potsherd/graft-<id8>.md in the current project and says so in its readOnlyHint — ' +
+        'the only potsherd write outside ~/.potsherd. Everything else potsherd does — tag, pin, link, card, ls, ' +
         'stats, doctor — is a command the user runs in their own terminal.',
     },
   );

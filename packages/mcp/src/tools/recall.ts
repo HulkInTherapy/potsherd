@@ -153,6 +153,7 @@ export async function runRecall(
           : 'this build of potsherd does not calibrate its scores yet, so "confidence" is null ' +
             'rather than a measurement. Treat a low-scoring row as unproven.',
       ignored: result.ignored,
+      lists: result.lists,
       relaxed: result.relaxed,
       relaxedLists: result.relaxedLists,
       k: result.k,
