@@ -23161,6 +23161,7 @@ __export(dist_exports, {
   ROUTING_CEILING: () => ROUTING_CEILING,
   ROUTING_KINDS: () => ROUTING_KINDS,
   ROUTING_PER_SESSION: () => ROUTING_PER_SESSION,
+  RUNTIME_FETCH_VERBS: () => RUNTIME_FETCH_VERBS,
   ReentrancyError: () => ReentrancyError,
   SECRET_TYPES: () => SECRET_TYPES,
   SEQ_HEADER_CHARS: () => SEQ_HEADER_CHARS,
@@ -37471,11 +37472,18 @@ import os3 from "node:os";
 import path22 from "node:path";
 import process11 from "node:process";
 var MODEL_CALL_VERBS = ["card", "ask", "graft"];
+var RUNTIME_FETCH_VERBS = ["index"];
 var OFFLINE_VERBS = [
   "audit",
   "rescue",
   "guard",
-  "index",
+  // `index` WAS here, and phase 10 took it out. A2 made semantic search
+  // automatic: the first index fetches the embedding runtime from
+  // huggingface.co in the background, without being asked. The verb still
+  // calls no model -- that is a different property -- but it can no longer
+  // sit under the words "open no socket at all", which is the FOURTH false
+  // claim this receipt has published and the second one caused by a verb
+  // quietly acquiring a capability. See RUNTIME_FETCH_VERBS below.
   "ls",
   "show",
   "stats",

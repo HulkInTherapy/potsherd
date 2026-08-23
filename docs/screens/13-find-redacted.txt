@@ -1,4 +1,4 @@
-potsherd find "redacted" · 1 session · strong · bm25 · 10ms
+potsherd find "redacted" · 1 session · strong · bm25 · 13ms
 
   Put the importer behind the pooler                              claude · ghost
   crm-ingest · 22 nov 2025 · 6 prompts recovered · feat/retry-b…  strong  0.0164

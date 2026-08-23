@@ -73,8 +73,12 @@ potsherd doctor --privacy · 24 aug 2026
     potsherd graft     one call, to compress one session into a brief
 
   these never do, and open no socket at all:
-    audit, rescue, guard, index, ls, show, stats, tag, pin, unpin,
+    audit, rescue, guard, ls, show, stats, tag, note, pin, unpin,
     link, setup, stack, ignore, unignore, doctor
+
+  this one calls no model and does reach the network,
+  because it acquires what it needs instead of asking you to:
+    potsherd index     the embedding runtime, once per machine
 
   these call no model either, but do open a socket on
   this machine — and only when you ask them to:
@@ -91,11 +95,17 @@ potsherd doctor --privacy · 24 aug 2026
     the call runs with no tools, in an empty scratch directory, and
     its session is never written to ~/.claude/projects.
 
-  no other network, except the one-off embedding-model download,
-  and only when you ask for it.
-  A plain `potsherd index` fetches nothing: text search is the default, it
-  needs no model, and it opens no socket at all. `potsherd index --embed` is
-  what asks for the model, and it names the download before it starts — but
-  `--quiet` and `--json` suppress that line. The plugin's SessionEnd hook runs
-  `index --quiet` without `--embed`, so it downloads nothing at all.
+  one other download, once per machine: the embedding runtime,
+  fetched by potsherd index without being asked.
+  The first `potsherd index` on a machine fetches from cdn.jsdelivr.net and
+  huggingface.co — 46.1 MB of WebAssembly runtime and quantized model weights,
+  into ~/.potsherd/models. Every file is pinned to a size and a sha256 that
+  ships in the source and is checked before it is kept. They are GET requests
+  for public files: no transcript, no path, no identifier and no count leaves
+  this machine, and nothing is installed into node_modules. It runs in a
+  background process so the verb returns as soon as text search is live, which
+  means `--quiet` and `--json` — and the plugin's SessionEnd hook, which runs
+  `index --quiet` — do it silently. `potsherd index --no-embed` does not do it
+  at all, and neither does any run on a machine with `POTSHERD_OFFLINE` set;
+  text search is unaffected either way.
   no telemetry. no account. potsherd stores no credential of its own.

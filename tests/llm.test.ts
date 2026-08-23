@@ -13,6 +13,7 @@ import {
   MODEL_CALL_VERBS,
   LOCAL_SOCKET_VERBS,
   OFFLINE_VERBS,
+  RUNTIME_FETCH_VERBS,
   CARD_MODEL,
   CHARS_PER_TOKEN,
   Llm,
@@ -2203,7 +2204,7 @@ describe('which verbs may call a model (T2.7 D2)', () => {
    * here — at the moment it is registered — rather than shipping into a
    * receipt that quietly skips it.
    */
-  it('every registered command is in one of the three privacy lists', () => {
+  it('every registered command is in one of the four privacy lists', () => {
     const src = fs.readFileSync(
       path.resolve(process.cwd(), 'packages/cli/src/index.ts'),
       'utf-8',
@@ -2220,6 +2221,11 @@ describe('which verbs may call a model (T2.7 D2)', () => {
       ...MODEL_CALL_VERBS,
       ...OFFLINE_VERBS,
       ...LOCAL_SOCKET_VERBS,
+      // Phase 10 added a fourth: a verb that calls no model and still reaches
+      // the network, because the product law says a capability is acquired
+      // rather than asked for. `index` moved here out of OFFLINE_VERBS, where
+      // it had become the fourth false claim this receipt has published.
+      ...RUNTIME_FETCH_VERBS,
     ]);
     const undisclosed = registered.filter((v) => !disclosed.has(v));
     expect(undisclosed).toEqual([]);
@@ -2234,6 +2240,11 @@ describe('which verbs may call a model (T2.7 D2)', () => {
     // guaranteed not to.
     expect(MODEL_CALL_VERBS.filter((v) => OFFLINE_VERBS.includes(v))).toEqual([]);
     expect(MODEL_CALL_VERBS.filter((v) => LOCAL_SOCKET_VERBS.includes(v))).toEqual([]);
+    // The fourth list is disjoint from the other three for the same reason: a
+    // verb that fetches a runtime cannot also be one that opens no socket.
+    expect(RUNTIME_FETCH_VERBS.filter((v) => OFFLINE_VERBS.includes(v))).toEqual([]);
+    expect(RUNTIME_FETCH_VERBS.filter((v) => LOCAL_SOCKET_VERBS.includes(v))).toEqual([]);
+    expect(RUNTIME_FETCH_VERBS.filter((v) => MODEL_CALL_VERBS.includes(v))).toEqual([]);
     expect(OFFLINE_VERBS.filter((v) => LOCAL_SOCKET_VERBS.includes(v))).toEqual([]);
   });
 

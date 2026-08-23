@@ -14,6 +14,7 @@ import {
   NoBackendError,
   LOCAL_SOCKET_VERBS,
   OFFLINE_VERBS,
+  RUNTIME_FETCH_VERBS,
   db as store,
   paths,
   pi as piAdapter,
@@ -326,6 +327,17 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // into a screenshot — it was to stop the receipt saying something false,
     // and only then regenerate the screen. `LOCAL_SOCKET_VERBS` carries the
     // whole reasoning.
+    // Phase 10, and the same defect as T6.6 D2/D12 one release later: `index`
+    // sat in the list above, under "open no socket at all", while A2 made it
+    // fetch 46.1 MB from huggingface.co on first use without being asked. The
+    // download was already described further down this screen, which meant the
+    // receipt contradicted itself nine lines apart -- and the CI guard could
+    // not see it, because the guard proves screen == live output and never
+    // live output == truth.
+    card.blank().text('this one calls no model and does reach the network,');
+    note('because it acquires what it needs instead of asking you to:', 2);
+    for (const verb of RUNTIME_FETCH_VERBS) verbRow(verb, 'the embedding runtime, once per machine');
+
     card.blank().text('these call no model either, but do open a socket on');
     note('this machine — and only when you ask them to:', 2);
     for (const verb of LOCAL_SOCKET_VERBS) verbRow(verb, socketNote[verb]);

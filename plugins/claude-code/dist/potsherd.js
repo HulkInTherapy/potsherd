@@ -16905,11 +16905,18 @@ import os3 from "node:os";
 import path22 from "node:path";
 import process9 from "node:process";
 var MODEL_CALL_VERBS = ["card", "ask", "graft"];
+var RUNTIME_FETCH_VERBS = ["index"];
 var OFFLINE_VERBS = [
   "audit",
   "rescue",
   "guard",
-  "index",
+  // `index` WAS here, and phase 10 took it out. A2 made semantic search
+  // automatic: the first index fetches the embedding runtime from
+  // huggingface.co in the background, without being asked. The verb still
+  // calls no model -- that is a different property -- but it can no longer
+  // sit under the words "open no socket at all", which is the FOURTH false
+  // claim this receipt has published and the second one caused by a verb
+  // quietly acquiring a capability. See RUNTIME_FETCH_VERBS below.
   "ls",
   "show",
   "stats",
@@ -25232,6 +25239,9 @@ async function runDoctor(o) {
     for (const verb of MODEL_CALL_VERBS) verbRow(verb, verbNote[verb]);
     card2.blank().text("these never do, and open no socket at all:");
     for (const line of format_exports.wrap(OFFLINE_VERBS.join(", "), pathW)) card2.raw(`    ${line}`);
+    card2.blank().text("this one calls no model and does reach the network,");
+    note("because it acquires what it needs instead of asking you to:", 2);
+    for (const verb of RUNTIME_FETCH_VERBS) verbRow(verb, "the embedding runtime, once per machine");
     card2.blank().text("these call no model either, but do open a socket on");
     note("this machine \u2014 and only when you ask them to:", 2);
     for (const verb of LOCAL_SOCKET_VERBS) verbRow(verb, socketNote[verb]);
@@ -29007,11 +29017,11 @@ example:
     );
   });
   const index = addGlobals(
-    program2.command("index").description("parse, redact and index every transcript on this machine").option("--full", "re-read every transcript, ignoring what has not changed").option("--incremental", "only what changed since the last run (the default)").option("--harness <list>", "only these harnesses: claude,codex,cursor,pi").option("--embed", "add semantic search: fetch the 32 MB model once, then embed (~6 min)").option("--no-embed", "text only, and stop offering --embed (text only is the default)").option("--session <id>", "index one session id and nothing else").option("-q, --quiet", "print nothing on success (for hooks)")
+    program2.command("index").description("parse, redact and index every transcript on this machine").option("--full", "re-read every transcript, ignoring what has not changed").option("--incremental", "only what changed since the last run (the default)").option("--harness <list>", "only these harnesses: claude,codex,cursor,pi").option("--embed", "embed in the foreground rather than in the background").option("--no-embed", "text only \u2014 fetch nothing, embed nothing").option("--session <id>", "index one session id and nothing else").option("-q, --quiet", "print nothing on success (for hooks)")
   ).addHelpText("after", `
 example:
   potsherd index                                    # text only: no model, no network
-  potsherd index --embed                            # ...and semantic search, once
+  potsherd index --no-embed                         # ...and never fetch a model
   potsherd index --full
   potsherd index --json | jq .totals`);
   index.action(async (opts) => {
@@ -29045,7 +29055,7 @@ example:
 example:
   potsherd find "pgbouncer"
   potsherd find "rate limiter" --json | jq -r '.sessions[0].resume'
-  potsherd index --embed                             # once, for semantic search
+  potsherd index --no-embed                          # text only, fetch nothing
   potsherd find "the pooler decision" --vectors on   # force it, once vectors exist
   potsherd find "pgbouncer" --explain                # why this order
 

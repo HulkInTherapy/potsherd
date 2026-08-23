@@ -10,6 +10,6 @@ potsherd stats · ~/.potsherd · 24 aug 2026
 
   indexed                   24 aug   228 transcripts · up to date
   vectors                        0   bge-small · 439 pending · index --embed to…
-  database                  2.0 MB   ~/.potsherd/potsherd.db
+  database                  2.1 MB   ~/.potsherd/potsherd.db
 
   run  potsherd ls  to read the archive by title, newest first.

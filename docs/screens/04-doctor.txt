@@ -2,7 +2,7 @@ potsherd doctor · potsherd 1.1.0 · node v24.9.0
 
   claude dir                         ~/.claude
   potsherd dir                       ~/.potsherd
-  database                           schema v9 of v9
+  database                           schema v12 of v12
   sqlite                             better-sqlite3 (native addon)
 
   sessions on disk              31   21 harness-titled · 3 sdk · 546 KB
@@ -14,7 +14,7 @@ potsherd doctor · potsherd 1.1.0 · node v24.9.0
   sessions indexed             228   439 exchanges · 242 tool calls
   ghost prompts indexed      2,971   searchable in ghost_prompts_fts
   secrets masked                 5   aws 1 · gcp 1 · github 1 · stripe 1 · …
-  vectors                        0   sqlite-vec v0.1.9 · bge-small, 384-d
+  vectors                        —   0 of 3,410
 
   record types the parsers did not consume, over the whole index:
     claude file-history-snapshot                           90  5 versions  known

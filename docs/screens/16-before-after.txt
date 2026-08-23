@@ -10,14 +10,14 @@ what Claude Code leaves you  —  ls ~/.claude/projects/*
 
 what potsherd leaves you  —  potsherd ls
 
-  potsherd ls · 5 of 330
+  potsherd ls · 5 of 300
   
-      when  harness  project         title                              status
-    21 aug  claude   data-pipeline   Pool the ingest workers through…   live
-    19 aug  claude   auth-gateway    Rewrite rss parser to stream  ↳6   live
-    17 aug  claude   auth-gateway    Untangle token refresh error han…  live
-    16 aug  claude   report-builder  Add a timeout to mock server       live
-    15 aug  claude   report-builder  why does the file uploader alloc…  live
+      when  harness  project        title                               status
+    21 aug  claude   data-pipeline  Pool the ingest workers through p…  live
+    21 jul  claude   asset-cdn      refactor the docker entrypoint so…  ghost
+    20 jul  claude   payments-api   explain what the invoice renderer…  ghost
+    19 jul  claude   payments-api   add a feature flag around the cac…  ghost
+    18 jul  claude   crm-ingest     turn the rss parser into a backgr…  ghost
   
-    31 sessions · 197 subagents inside them · 299 ghosts, prompts only
+    1 session · 197 subagents inside them · 299 ghosts, prompts only
     run  potsherd show <id8>  to read one, or  potsherd find <words>

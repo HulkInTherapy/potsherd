@@ -126,11 +126,31 @@ export const MODEL_CALL_VERBS: readonly string[] = ['card', 'ask', 'graft'];
  * {@link LOCAL_SOCKET_VERBS}, and the sentence above each list is now one a
  * reader can hold the product to.
  */
+/**
+ * Verbs that call no model and still reach the network, because a capability
+ * they need is acquired rather than asked for.
+ *
+ * The product law for phase 10 is that a user never configures capability: if
+ * something is heavy it is fetched lazily on first use. That is a better
+ * default and it is *also* a network fact, and a privacy receipt that lists
+ * the verb under "opens no socket at all" because it used to be true is the
+ * same failure as the three before it. The download itself is already
+ * described further down the screen, pinned to a size and a sha256; this list
+ * is what stops the two paragraphs contradicting each other.
+ */
+export const RUNTIME_FETCH_VERBS: readonly string[] = ['index'];
+
 export const OFFLINE_VERBS: readonly string[] = [
   'audit',
   'rescue',
   'guard',
-  'index',
+  // `index` WAS here, and phase 10 took it out. A2 made semantic search
+  // automatic: the first index fetches the embedding runtime from
+  // huggingface.co in the background, without being asked. The verb still
+  // calls no model -- that is a different property -- but it can no longer
+  // sit under the words "open no socket at all", which is the FOURTH false
+  // claim this receipt has published and the second one caused by a verb
+  // quietly acquiring a capability. See RUNTIME_FETCH_VERBS below.
   'ls',
   'show',
   'stats',

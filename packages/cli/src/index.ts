@@ -229,14 +229,20 @@ example:
       .option('--full', 're-read every transcript, ignoring what has not changed')
       .option('--incremental', 'only what changed since the last run (the default)')
       .option('--harness <list>', 'only these harnesses: claude,codex,cursor,pi')
-      .option('--embed', 'add semantic search: fetch the 32 MB model once, then embed (~6 min)')
-      .option('--no-embed', 'text only, and stop offering --embed (text only is the default)')
+      // Semantic search is ON and needs no flag: the runtime is fetched in the
+      // background on the first index and `find` upgrades to hybrid when the
+      // vectors are ready. `--embed` now means *wait for it* rather than
+      // *enable it*, and `--no-embed` is the escape hatch for a machine that
+      // must never fetch anything. Until phase 10 these two said the opposite,
+      // and the help contradicted what the verb actually did.
+      .option('--embed', 'embed in the foreground rather than in the background')
+      .option('--no-embed', 'text only — fetch nothing, embed nothing')
       .option('--session <id>', 'index one session id and nothing else')
       .option('-q, --quiet', 'print nothing on success (for hooks)'),
   ).addHelpText('after', `
 example:
   potsherd index                                    # text only: no model, no network
-  potsherd index --embed                            # ...and semantic search, once
+  potsherd index --no-embed                         # ...and never fetch a model
   potsherd index --full
   potsherd index --json | jq .totals`);
   index.action(async (opts: Record<string, unknown>) => {
@@ -288,7 +294,7 @@ example:
 example:
   potsherd find "pgbouncer"
   potsherd find "rate limiter" --json | jq -r '.sessions[0].resume'
-  potsherd index --embed                             # once, for semantic search
+  potsherd index --no-embed                          # text only, fetch nothing
   potsherd find "the pooler decision" --vectors on   # force it, once vectors exist
   potsherd find "pgbouncer" --explain                # why this order
 
