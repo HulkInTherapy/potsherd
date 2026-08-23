@@ -172,6 +172,32 @@ describe('find', () => {
     expect(r.stdout).toContain('potsherd ls');
   });
 
+  /**
+   * Audit F9, first bullet. `--json` returned the absolute path as `project`
+   * while the human view printed the short directory name, and omitted `title`
+   * on many rows — so a caller parsing JSON got a strictly WORSE object than a
+   * reader of the terminal. For a tool whose stated target is the agent, that
+   * is backwards, and it is the kind of gap nobody notices because the pretty
+   * view looks right.
+   *
+   * The path is kept, because a caller that wants to open the directory needs
+   * it. What the test pins is that the name the human sees is there too.
+   */
+  it('--json shows the short project name the terminal shows, not only the path', () => {
+    const r = run(['find', 'pgbouncer transaction pooling', '--width', '80']);
+    const j = JSON.parse(run(['find', 'pgbouncer transaction pooling', '--json']).stdout) as {
+      sessions: { project: string; projectName: string; title: string | null }[];
+    };
+    expect(j.sessions.length).toBeGreaterThan(0);
+    for (const s of j.sessions) {
+      // Whatever the human was shown for this row is present in the JSON.
+      expect(r.stdout).toContain(s.projectName);
+      expect(s.projectName).not.toContain('/');
+      // And the path is still there for anyone who needs to open it.
+      expect(s.project.endsWith(s.projectName)).toBe(true);
+    }
+  });
+
   it('--json carries the score, the lists and the snippet the human view showed', () => {
     const j = JSON.parse(run(['find', 'pgbouncer transaction pooling', '--json']).stdout) as {
       vectors: { used: boolean; reason?: string };

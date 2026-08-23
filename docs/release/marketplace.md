@@ -62,11 +62,14 @@ the repository — pinned by a test that enumerates all of them.
 The plugin carries:
 
 - `skills/potsherd/SKILL.md` — `/potsherd <verb>`, user-invocable
-- `skills/remembering-sessions/SKILL.md` — model-invocable, dispatches the agent
-- `agents/session-archaeologist.md` — haiku-class, **four** MCP tools and `Read`
-  (`find`, `read`, `ls`, `ask`; not `graft` or `tag`). The server itself serves six
+- `skills/remembering-sessions/SKILL.md` — the one model-invocable skill
+- `agents/session-archaeologist.md` — **two** MCP tools, `potsherd_recall` and
+  `potsherd_read`, and **no `Read`**. v1.1.0 granted it filesystem `Read`, and an
+  audit caught it citing repository markdown in a `SOURCES` block, in the correct
+  format, with the session-id fields left blank. The tool is gone and the
+  citation check now runs in code
 - `hooks/hooks.json` — `SessionStart` rescue, `SessionEnd` index
-- `.mcp.json` — the stdio server, six tools
+- `.mcp.json` — the stdio server, three tools
 - **`dist/potsherd.js` and `dist/mcp.js`, committed** — an install is a git
   clone, so this is what makes it work at all, and it is why `pnpm vendor` is
   step 2 of the release
@@ -102,9 +105,12 @@ Then in Claude Code:
 /potsherd audit
 ```
 
-and check the six MCP tools are present — `session-archaeologist` holding only
-`Read` is exactly the failure v1.0.0 existed to fix, and it is the kind that
-only shows up once the artefact has moved.
+and check the three MCP tools are present — `potsherd_recall`, `potsherd_read`,
+`potsherd_graft`. A plugin whose tools are missing is exactly the failure v1.1.0
+shipped with, and it is the kind that only shows up once the artefact has moved:
+the marketplace copies `plugins/claude-code/` alone, so the nearest
+`package.json` becomes `~/.claude/package.json` and its `"type": "commonjs"`
+killed the ESM bundle. `tests/plugin-install.test.ts` reproduces that trap.
 
 ## what a person needs, to submit it
 
@@ -114,7 +120,12 @@ the README. In short:
 - **name** `potsherd` · **repository** `HulkInTherapy/potsherd` · **licence** MIT
 - **what it does:** archives, indexes and searches every coding-agent session on
   a machine, including ones the harness has already deleted
-- **why it is safe:** no network by default, no telemetry, no account; every
-  path it reads and writes is printed by `potsherd doctor --privacy`, and CI
-  fails if that receipt drifts from what the program does
+- **why it is safe:** no telemetry, no account, no credential of its own. One
+  download, once per machine — the embedding runtime, so semantic search needs
+  no flag and no tier — announced on one line before it starts and pinned to a
+  size and a sha256. Model work runs on the subscription the user already has:
+  inside a coding agent potsherd emits the prompts and the agent answers them,
+  so potsherd need never hold a key. Every path it reads and writes, and every
+  verb that touches the network, is printed by `potsherd doctor --privacy`, and
+  CI fails if that receipt drifts from what the program does
 - `claude plugin validate --strict` passes

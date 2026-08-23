@@ -1,4 +1,10 @@
-import { recall, renderFind, search as searchNs, type RecallOptions } from '@potsherd/core';
+import {
+  projectName,
+  recall,
+  renderFind,
+  search as searchNs,
+  type RecallOptions,
+} from '@potsherd/core';
 import {
   federate,
   federationLine,
@@ -215,6 +221,14 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
           title: s.title,
           displayTitle: s.displayTitle,
           project: s.project,
+          // Audit F9: `--json` returned the absolute path as `project` while the
+          // human view printed the short name, so a caller parsing JSON got a
+          // strictly WORSE object than a reader of the terminal — for a tool
+          // whose whole target is the agent, that is backwards. The path stays,
+          // because a caller that wants to open the directory needs it; the
+          // name the human sees is added beside it rather than swapped in, so
+          // nothing that already reads `project` breaks.
+          projectName: projectName(s.project),
           startedAt: s.startedAt,
           endedAt: s.endedAt,
           status: s.status,
