@@ -22,16 +22,25 @@ import {
   PRICES,
   REENTRANCY_ENV,
   ReentrancyError,
+  CLAUDE_CLI_ARGS,
+  CLAUDE_CWD_NAME,
+  RESOLUTION_LADDER,
   availability,
   detectBackend,
   effectiveConcurrency,
   estimate,
+  hostAgent,
+  ladderFor,
   lastAgentMessage,
+  parseClaudeCli,
+  topRung,
+  transportRung,
   modelClass,
   parseJsonish,
   redactOutgoing,
   resolveModel,
   tokensForChars,
+  type Availability,
   type Backend,
   type SendRequest,
   type SendResult,
@@ -170,11 +179,105 @@ describe('re-entrancy', () => {
 const NOTHING = { claude: null, codex: null };
 const which = (found: Record<string, string | null>) => (n: string) => found[n] ?? null;
 
+/**
+ * T10.2 — **the order is the product**, so it is pinned here and nowhere else.
+ *
+ * The whole of the audit's fix 2 is one reordering: a `claude` binary sitting
+ * on PATH now answers, where before potsherd could see it and still refuse
+ * because the only way it knew how to talk to that binary was through a
+ * 677 MB npm package. Three of six headline verbs were dead on a default
+ * install because of that one line.
+ *
+ * These tests fail if the ladder moves. That is their entire job.
+ */
+describe('the resolution ladder', () => {
+  const READY: Availability = {
+    claude: '/usr/local/bin/claude',
+    codex: '/usr/local/bin/codex',
+    apiKey: true,
+    codexHarness: false,
+    agentSdk: true,
+    apiSdk: true,
+    host: 'claude-code',
+    hostSeam: true,
+  };
+
+  it('is the four rungs of A1, in order, and this test fails when the order moves', () => {
+    expect(RESOLUTION_LADDER.map((r) => r.id)).toEqual([
+      'host-seam',
+      'claude-cli',
+      'codex-cli',
+      'agent-sdk',
+      'api-key',
+    ]);
+    // The rung numbers travel with the ids: two entries share rung 2 and two
+    // share rung 3, and an entry that changed rung without changing place
+    // would be a silent reordering of the thing the ids only look like they
+    // pin.
+    expect(RESOLUTION_LADDER.map((r) => r.rung)).toEqual([1, 2, 2, 3, 3]);
+    // Rung 1 builds no transport. Every other rung builds exactly one, and no
+    // two rungs build the same one.
+    expect(RESOLUTION_LADDER[0]!.backend).toBeNull();
+    const backends = RESOLUTION_LADDER.slice(1).map((r) => r.backend);
+    expect(backends).toEqual(['claude-cli', 'codex', 'agent-sdk', 'api']);
+    expect(new Set(backends).size).toBe(backends.length);
+  });
+
+  it('puts the binary above the SDK — the placement the whole fix turns on', () => {
+    const bin = RESOLUTION_LADDER.findIndex((r) => r.id === 'claude-cli');
+    const sdk = RESOLUTION_LADDER.findIndex((r) => r.id === 'agent-sdk');
+    expect(bin).toBeLessThan(sdk);
+    // And it shows up where it counts: with both installed, the binary wins.
+    const c = detectBackend({
+      env: {},
+      which: which({ claude: '/usr/local/bin/claude' }),
+      resolvable: () => true,
+    });
+    expect(c.backend).toBe('claude-cli');
+  });
+
+  it('takes the top ready rung, and rung 1 is the top one inside a coding agent', () => {
+    expect(topRung(READY)?.id).toBe('host-seam');
+    // …but rung 1 builds nothing, so the transport is still rung 2.
+    expect(transportRung(READY)?.id).toBe('claude-cli');
+  });
+
+  it('breaks the rung-2 tie for the harness the user is actually sitting in', () => {
+    const inCodex: Availability = { ...READY, host: 'codex', codexHarness: true };
+    expect(ladderFor(inCodex).map((r) => r.id)).toEqual([
+      'host-seam',
+      'codex-cli',
+      'claude-cli',
+      'agent-sdk',
+      'api-key',
+    ]);
+    // and nothing else moves: the canonical constant is untouched.
+    expect(RESOLUTION_LADDER.map((r) => r.id)[1]).toBe('claude-cli');
+    expect(ladderFor(READY)).toBe(RESOLUTION_LADDER);
+  });
+
+  it('reads the harness out of the environment, never out of a question to the user', () => {
+    expect(hostAgent({ CLAUDECODE: '1' })).toBe('claude-code');
+    expect(hostAgent({ CLAUDE_CODE_ENTRYPOINT: 'cli' })).toBe('claude-code');
+    expect(hostAgent({ CODEX_HOME: '/home/x/.codex' })).toBe('codex');
+    expect(hostAgent({ CURSOR_TRACE_ID: 'x' })).toBe('cursor');
+    expect(hostAgent({})).toBeNull();
+    expect(hostAgent({ POTSHERD_HARNESS: 'cursor', CLAUDECODE: '1' })).toBe('cursor');
+  });
+});
+
 describe('backend detection', () => {
-  it('picks agent-sdk when a claude binary exists', () => {
-    const c = detectBackend({ env: {}, which: which({ claude: '/usr/local/bin/claude' }) });
-    expect(c.backend).toBe('agent-sdk');
+  it('picks the claude binary when one exists, with no npm package involved', () => {
+    const c = detectBackend({
+      env: {},
+      which: which({ claude: '/usr/local/bin/claude' }),
+      // The install this is the fix for: a binary on PATH and nothing resolvable.
+      resolvable: () => false,
+    });
+    expect(c.backend).toBe('claude-cli');
     expect(c.chargeable).toBe(false);
+    expect(c.rung).toBe(2);
+    expect(c.rungId).toBe('claude-cli');
     expect(c.why).toContain('claude');
   });
 
@@ -182,38 +285,81 @@ describe('backend detection', () => {
     const c = detectBackend({
       env: { ANTHROPIC_API_KEY: 'sk-ant-test' },
       which: which({ claude: '/usr/local/bin/claude' }),
+      resolvable: () => true,
     });
     // `04` Q4: the key is a fallback, not a preference. A Claude Code user must
     // never be billed for what their subscription already covers.
-    expect(c.backend).toBe('agent-sdk');
+    expect(c.chargeable).toBe(false);
+    expect(c.backend).toBe('claude-cli');
   });
 
   it('falls back to the api key when there is no claude binary', () => {
-    const c = detectBackend({ env: { ANTHROPIC_API_KEY: 'sk-ant-test' }, which: which(NOTHING) });
+    const c = detectBackend({
+      env: { ANTHROPIC_API_KEY: 'sk-ant-test' },
+      which: which(NOTHING),
+      resolvable: () => true,
+    });
     expect(c.backend).toBe('api');
     expect(c.chargeable).toBe(true);
+    expect(c.rung).toBe(3);
   });
 
   it('uses codex when codex is the harness and there is no claude', () => {
     const c = detectBackend({
       env: { CODEX_HOME: '/home/x/.codex', ANTHROPIC_API_KEY: 'sk-ant-test' },
       which: which({ codex: '/usr/local/bin/codex' }),
+      resolvable: () => true,
     });
     expect(c.backend).toBe('codex');
+    expect(c.rung).toBe(2);
   });
 
-  it('names both ways out when there is neither', () => {
+  it('says which rung it took, and that rung 1 was live too', () => {
+    const c = detectBackend({
+      env: { CLAUDECODE: '1' },
+      which: which({ claude: '/usr/local/bin/claude' }),
+      resolvable: () => false,
+    });
+    expect(c.rung).toBe(2);
+    expect(c.why).toMatch(/rung 2/);
+    // The line an agent reads to learn it could have used the seam instead.
+    expect(c.why).toMatch(/rung 1 \(claude-code\) is live/);
+  });
+
+  it('routes to the seam, not to an install, when the host agent is the only rung', () => {
     let err: unknown;
     try {
-      detectBackend({ env: {}, which: which(NOTHING) });
+      detectBackend({ env: { CLAUDECODE: '1' }, which: which(NOTHING), resolvable: () => false });
     } catch (e) {
       err = e;
     }
     expect(err).toBeInstanceOf(NoBackendError);
     const e = err as NoBackendError;
+    expect(e.rung).toBe('host-seam');
+    // The product law: if a capability needs a model, the subscription the
+    // user already has is the model. There is nothing to install here and the
+    // message must not pretend there is.
+    expect(e.message).toMatch(/none is needed/);
+    expect(e.fix).toContain('--readers-out');
+    expect(e.message + e.fix).not.toMatch(/npm install|npm i /);
+  });
+
+  it('names one install, and only when every rung is genuinely absent', () => {
+    let err: unknown;
+    try {
+      detectBackend({ env: {}, which: which(NOTHING), resolvable: () => false });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(NoBackendError);
+    const e = err as NoBackendError;
+    expect(e.rung).toBeNull();
     expect(e.message).toContain('claude');
-    expect(e.message).toContain('ANTHROPIC_API_KEY');
-    expect(e.fix).toContain('ANTHROPIC_API_KEY');
+    // One line, naming the thing a subscription user already has. **Not** the
+    // api key: `A1` rung 3 is "if already present", never suggested at
+    // install, and a product that answers "no model" with "get a credit card"
+    // has misunderstood who its users are.
+    expect(e.fix).toBe('https://claude.com/product/claude-code');
   });
 
   it('an empty ANTHROPIC_API_KEY is not a credential', () => {
@@ -231,6 +377,54 @@ describe('backend detection', () => {
       which: which({ claude: '/usr/local/bin/claude' }),
     });
     expect(c.backend).toBe('api');
+  });
+
+  it('POTSHERD_LLM_BACKEND=agent-sdk is the escape hatch back to rung 3', () => {
+    const c = detectBackend({
+      env: { POTSHERD_LLM_BACKEND: 'agent-sdk' },
+      which: which({ claude: '/usr/local/bin/claude' }),
+      resolvable: () => true,
+    });
+    expect(c.backend).toBe('agent-sdk');
+    expect(c.rung).toBe(3);
+  });
+});
+
+/**
+ * The one string this product may never print on a happy path.
+ *
+ * The audit's F2 was not that the SDK is large. It was that a 677 MB optional
+ * dependency had become load-bearing without anyone deciding it should, and
+ * that the error message naming it read as a requirement. With rung 2 in
+ * place there is no machine with a `claude` binary that needs it, so nothing
+ * a user sees may mention it.
+ */
+describe('the 677 MB dependency is named in no user-facing message', () => {
+  const messages = (a: Availability): string => {
+    const e = new NoBackendError(a);
+    return `${e.message}\n${e.fix}`;
+  };
+  const BARE: Availability = {
+    claude: null,
+    codex: null,
+    apiKey: false,
+    codexHarness: false,
+    agentSdk: false,
+    apiSdk: false,
+    host: null,
+    hostSeam: false,
+  };
+
+  it('not when there is nothing, not inside a host agent, not with a key and no sdk', () => {
+    for (const a of [
+      BARE,
+      { ...BARE, host: 'claude-code' as const, hostSeam: true },
+      { ...BARE, apiKey: true },
+      { ...BARE, claude: '/usr/local/bin/claude' },
+    ]) {
+      expect(messages(a)).not.toContain('claude-agent-sdk');
+      expect(messages(a)).not.toContain('677');
+    }
   });
 });
 
@@ -855,6 +1049,470 @@ function fakeBin(name: string, body: string): string {
   return `${dir}${path.delimiter}${process.env['PATH'] ?? ''}`;
 }
 
+/**
+ * `claude -p` — **the rung the audit's fix 2 turns on**, and the one transport
+ * in this file whose flags were verified against the real binary rather than
+ * assumed.
+ *
+ * `CodexTransport` is tested against a stub because codex is not installed on
+ * the reference machine and cannot be. `claude` *is* installed there, so this
+ * transport gets both: the plumbing below against a stub — argv, stdin,
+ * stdout, exit code, timeout, the re-entrancy guard, the scratch cwd — and a
+ * real end-to-end run recorded in `phases/phase-10/evidence-T10.2/`. The stub
+ * is what fails in CI; the real run is what proves the flags exist.
+ *
+ * The stub is a shell script, so `$1 $2 …` are the argv potsherd built. That
+ * is deliberately a stronger assertion than "it ran": a flag that a future
+ * release removes would still spawn fine and silently do nothing, which is
+ * exactly the failure mode this project has been bitten by before.
+ */
+describe('claude -p backend plumbing', () => {
+  /** The stub's own reply, in the shape `--output-format json` produces. */
+  const REPLY = JSON.stringify({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: 'the answer',
+    total_cost_usd: 0.0121,
+    usage: { input_tokens: 2, cache_creation_input_tokens: 3025, cache_read_input_tokens: 0, output_tokens: 4 },
+    modelUsage: { 'claude-haiku-4-5': { inputTokens: 2, outputTokens: 4 } },
+  });
+
+  function claudeLlm(body: string, extra: Record<string, string> = {}, timeoutMs?: number) {
+    const dir = fakeBin('claude', body);
+    return Llm.open({
+      backend: 'claude-cli',
+      env: { ...process.env, PATH: dir, ...extra },
+      tmpRoot: scratch(),
+      ...(timeoutMs ? { timeoutMs } : {}),
+    });
+  }
+
+  it('feeds the prompt on stdin and reads the answer out of the json result', async () => {
+    const llm = claudeLlm(`cat > /dev/null; cat <<'EOF'\n${REPLY}\nEOF`);
+    try {
+      const r = await llm.text({ prompt: 'question' });
+      expect(r.text).toBe('the answer');
+      expect(r.backend).toBe('claude-cli');
+      // The structured reply is believed, so the receipt is a measurement.
+      expect(r.model).toBe('claude-haiku-4-5');
+      expect(r.usd).toBeCloseTo(0.0121, 6);
+      expect(r.outputTokens).toBe(4);
+      // 2 uncached + 3,025 cache-write. `usage.input_tokens` alone would have
+      // been 2 against a 3,025-token prompt — the same quantity-wearing-the-
+      // wrong-name that IMPLAUSIBLE_TOKEN_FACTOR exists to catch.
+      expect(r.inputTokens).toBe(3_027);
+      expect(r.inputTokensEstimated).toBe(false);
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('really does send the prompt on stdin, rather than as an argument', async () => {
+    // The stub echoes back everything it was fed, so this fails if the prompt
+    // ever moves to argv — where a 40,000-character transcript would blow the
+    // argument limit rather than fail cleanly.
+    const llm = claudeLlm(
+      `body=$(cat); printf '{"subtype":"success","result":"%s"}\\n' "$(echo "$body" | tr -d '\\n' | tail -c 40)"`,
+    );
+    try {
+      const r = await llm.text({ prompt: 'the-prompt-body' });
+      expect(r.text).toContain('the-prompt-body');
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('passes the flags that were verified against the real binary', async () => {
+    const llm = claudeLlm(
+      `cat > /dev/null; printf '{"subtype":"success","result":"%s"}\\n' "$*"`,
+    );
+    try {
+      const r = await llm.text({ prompt: 'q', system: 'be brief' });
+      const argv = r.text;
+      // Each of these was read out of \`claude --help\` on 2.1.241, and each
+      // mirrors an AgentSdkTransport option that is load-bearing:
+      expect(argv).toContain('--print');                     // non-interactive
+      expect(argv).toContain('--output-format json');        // a parseable result
+      expect(argv).toContain('--permission-mode dontAsk');   // never blocks
+      expect(argv).toContain('--no-session-persistence');    // writes no transcript
+      expect(argv).toContain('--setting-sources');           // no CLAUDE.md
+      expect(argv).toContain('--system-prompt be brief');
+      expect(argv).toContain('--model');
+      // `--tools ""` is the one that matters most: a summariser that can run
+      // Bash can be prompt-injected by the transcript it is summarising.
+      expect(argv).toContain('--tools');
+      // And the flag that would have broken the whole rung: `--bare` forces
+      // auth to an API key, turning the path that needs no key into one that
+      // does.
+      expect(argv).not.toContain('--bare');
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('POTSHERD_CLAUDE_ARGS appends argv, mirroring POTSHERD_CODEX_ARGS', async () => {
+    const llm = claudeLlm(
+      `cat > /dev/null; printf '{"subtype":"success","result":"%s"}\\n' "$*"`,
+      { POTSHERD_CLAUDE_ARGS: '--effort low' },
+    );
+    try {
+      const r = await llm.text({ prompt: 'q' });
+      expect(r.text).toContain('--effort low');
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('reports a non-zero exit as something the user can act on', async () => {
+    const llm = claudeLlm('echo "not logged in" >&2; exit 3');
+    try {
+      await expect(llm.text({ prompt: 'q' })).rejects.toThrow(/exited 3/);
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('raises a refusal the CLI reports in its own json, rather than printing it as an answer', async () => {
+    const llm = claudeLlm(
+      `cat > /dev/null; echo '{"subtype":"error_max_turns","is_error":true,"result":""}'`,
+    );
+    try {
+      await expect(llm.text({ prompt: 'q' })).rejects.toThrow(/error_max_turns/);
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('never hangs: a silent backend hits the timeout', async () => {
+    const llm = claudeLlm('sleep 30', {}, 300);
+    try {
+      await expect(llm.text({ prompt: 'q' })).rejects.toThrow(/did not answer within/);
+    } finally {
+      await llm.close();
+    }
+  }, 10_000);
+
+  it('sets the re-entrancy guard in the spawned environment', async () => {
+    const llm = claudeLlm(
+      `cat > /dev/null; printf '{"subtype":"success","result":"guard=%s"}\\n' "\${${REENTRANCY_ENV}:-unset}"`,
+    );
+    try {
+      const r = await llm.text({ prompt: 'q' });
+      expect(r.text).toBe('guard=1');
+    } finally {
+      await llm.close();
+    }
+  });
+
+  /**
+   * The guard is not decoration. potsherd is often invoked **by** Claude Code,
+   * and this transport spawns Claude Code — so without it, a `claude` that ran
+   * `potsherd card` would spawn a `claude` that ran `potsherd card`, forever.
+   *
+   * This proves the loop is actually closed rather than merely that a variable
+   * is set: the environment the child is handed is fed straight back into
+   * `Llm.open`, which is what a nested potsherd would do, and it refuses.
+   */
+  it('the guard closes the recursion: a potsherd inside the spawned claude refuses', async () => {
+    const llm = claudeLlm(
+      `cat > /dev/null; printf '{"subtype":"success","result":"guard=%s"}\\n' "\${${REENTRANCY_ENV}:-unset}"`,
+    );
+    try {
+      const r = await llm.text({ prompt: 'q' });
+      const childEnv = { ...process.env, [REENTRANCY_ENV]: r.text.split('=')[1] ?? '' };
+      expect(() => Llm.open({ backend: 'claude-cli', env: childEnv })).toThrow(ReentrancyError);
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('runs in an empty scratch cwd, so no CLAUDE.md is ever loaded', async () => {
+    const tmpRoot = scratch();
+    const dir = fakeBin('claude', `cat > /dev/null; printf '{"subtype":"success","result":"%s"}\\n' "$PWD"`);
+    const llm = Llm.open({ backend: 'claude-cli', env: { ...process.env, PATH: dir }, tmpRoot });
+    try {
+      const r = await llm.text({ prompt: 'q' });
+      // `$PWD` can arrive through a symlinked temp root, so compare basenames.
+      expect(path.basename(r.text.trim())).toBe(CLAUDE_CWD_NAME);
+      expect(fs.readdirSync(r.text.trim())).toEqual([]);
+    } finally {
+      await llm.close();
+    }
+  });
+
+  /**
+   * **The cwd is stable, and that is a fix rather than an optimisation.**
+   *
+   * Claude Code creates `~/.claude/projects/<slug-of-cwd>/` for whatever
+   * directory it is spawned in. A fresh `mkdtemp` per call means a fresh
+   * directory in the user's archive per call: `card --all` over the reference
+   * corpus is 39 calls, so 39 of them, in the archive potsherd exists to read.
+   * Two probe runs on the reference machine produced two, which is how this
+   * was caught.
+   *
+   * `--no-session-persistence` already stops the *transcript*, so none of it
+   * can ever be indexed, carded or ranked — that was the harm that mattered.
+   * This test pins the rest: N calls touch one directory, not N.
+   */
+  it('spawns every call in the same directory, so N calls leave one project entry', async () => {
+    const tmpRoot = scratch();
+    const dir = fakeBin('claude', `cat > /dev/null; printf '{"subtype":"success","result":"%s"}\\n' "$PWD"`);
+    const a = Llm.open({ backend: 'claude-cli', env: { ...process.env, PATH: dir }, tmpRoot });
+    const b = Llm.open({ backend: 'claude-cli', env: { ...process.env, PATH: dir }, tmpRoot });
+    try {
+      const first = (await a.text({ prompt: 'q' })).text.trim();
+      const second = (await a.text({ prompt: 'q' })).text.trim();
+      const other = (await b.text({ prompt: 'q' })).text.trim();
+      expect(second).toBe(first);
+      expect(other).toBe(first);
+      // Across a close, too: a second run of `potsherd card` reuses it rather
+      // than minting a second entry in someone else's archive.
+      await a.close();
+      const c = Llm.open({ backend: 'claude-cli', env: { ...process.env, PATH: dir }, tmpRoot });
+      expect((await c.text({ prompt: 'q' })).text.trim()).toBe(first);
+      await c.close();
+      // And closing does not delete it: deleting the cwd would not un-create
+      // the `~/.claude/projects` entry named after it, and the next call would
+      // simply mint a second one.
+      expect(fs.existsSync(first)).toBe(true);
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it('says which binary it could not run', async () => {
+    const llm = Llm.open({
+      backend: 'claude-cli',
+      // An empty PATH: nothing named claude anywhere.
+      env: { ...process.env, PATH: scratch() },
+      tmpRoot: scratch(),
+    });
+    try {
+      await expect(llm.text({ prompt: 'q' })).rejects.toBeInstanceOf(LlmError);
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('redacts an outgoing credential before the binary sees it', async () => {
+    const llm = claudeLlm(
+      `cat > /tmp/potsherd-claude-stdin.txt; printf '{"subtype":"success","result":"ok"}\\n'`,
+    );
+    try {
+      const r = await llm.text({ prompt: `the key is ${AWS_KEY}` });
+      expect(r.redactions).toBeGreaterThan(0);
+      expect(fs.readFileSync('/tmp/potsherd-claude-stdin.txt', 'utf8')).not.toContain(AWS_KEY);
+    } finally {
+      await llm.close();
+      fs.rmSync('/tmp/potsherd-claude-stdin.txt', { force: true });
+    }
+  });
+});
+
+/**
+ * **A tool whose premise is "your archive is the record" must not write to the
+ * archive as a side effect of reading it.**
+ *
+ * This is a regression class, not a single test, and it exists because the
+ * defect was real and was found in the reference archive rather than
+ * hypothesised. Two `card --probe` runs left two directories in
+ * `~/.claude/projects`, named after the random cwd each call was spawned in.
+ * At `card --all` scale that is one per model call.
+ *
+ * The trap is built the way `tests/plugin-install.test.ts` builds its own —
+ * a real spawn against a decoy, not a clean room — because the failure being
+ * guarded against is potsherd handing a child the *user's* directories. So:
+ * a fake `HOME` with a populated `.claude` and `.codex` inside it, a stub
+ * binary that tries to write into both, and afterwards an assertion that the
+ * real ones are untouched and byte-identical.
+ *
+ * What this cannot prove, and the report says so: `claude -p` itself writes
+ * its own bookkeeping into the real `~/.claude`, and potsherd cannot stop it.
+ * `CLAUDE_CONFIG_DIR` is the documented lever and it was measured three ways —
+ * empty, seeded from the user's own `.claude.json`, and with a symlinked
+ * credential — and every one of them answered `Not logged in · Please run
+ * /login`. Isolating the config dir costs the subscription, which costs the
+ * rung. What potsherd *can* do is hold its own footprint to zero writes and
+ * one stable directory, and that is what is pinned here.
+ */
+describe('a subprocess model call writes nothing into the user’s agent directories', () => {
+  /** A fake home with both agent directories in it, and a census of them. */
+  function fakeHome(): { home: string; census: () => string } {
+    const home = scratch('potsherd-home-');
+    for (const rel of ['.claude/projects/-a-real-project', '.claude/sessions', '.codex/sessions']) {
+      fs.mkdirSync(path.join(home, rel), { recursive: true });
+    }
+    fs.writeFileSync(path.join(home, '.claude', '.claude.json'), '{"userID":"decoy"}');
+    fs.writeFileSync(path.join(home, '.codex', 'config.toml'), 'model = "decoy"\n');
+    fs.writeFileSync(
+      path.join(home, '.claude/projects/-a-real-project', 'session.jsonl'),
+      '{"type":"user"}\n',
+    );
+    const census = (): string => {
+      const out: string[] = [];
+      const walk = (dir: string): void => {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((x, y) => x.name.localeCompare(y.name))) {
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) {
+            out.push(`d ${path.relative(home, full)}`);
+            walk(full);
+          } else {
+            out.push(`f ${path.relative(home, full)} ${fs.readFileSync(full, 'utf8')}`);
+          }
+        }
+      };
+      walk(path.join(home, '.claude'));
+      walk(path.join(home, '.codex'));
+      return out.join('\n');
+    };
+    return { home, census };
+  }
+
+  for (const backend of ['claude-cli', 'codex'] as const) {
+    it(`${backend}: potsherd's own call adds nothing to ~/.claude or ~/.codex`, async () => {
+      const { home, census } = fakeHome();
+      const before = census();
+      const tmpRoot = scratch();
+      // A stub that would pollute if potsherd pointed it at the user's dirs.
+      const bin = fakeBin(
+        backend === 'codex' ? 'codex' : 'claude',
+        `cat > /dev/null
+` +
+          `mkdir -p "$HOME/.claude/projects/-junk-from-a-model-call"
+` +
+          `echo '{"type":"user"}' > "$HOME/.claude/projects/-junk-from-a-model-call/s.jsonl"
+` +
+          `mkdir -p "$HOME/.codex/sessions/junk"
+` +
+          `printf '{"subtype":"success","result":"ok"}\\n'`,
+      );
+      const llm = Llm.open({
+        backend,
+        env: { ...process.env, PATH: bin, HOME: home },
+        tmpRoot,
+      });
+      try {
+        await llm.text({ prompt: 'q' });
+      } finally {
+        await llm.close();
+      }
+
+      // The stub really did write — into the fake home it was handed, which is
+      // the point: the trap is armed, so a pass is evidence and not an absence.
+      expect(census()).not.toBe(before);
+      expect(census()).toContain('-junk-from-a-model-call');
+
+      // And now the assertion that is actually about potsherd: every entry
+      // that appeared is one the stub wrote. Nothing potsherd created is in
+      // either agent directory — no scratch cwd, no temp file, no marker.
+      const appeared = census()
+        .split('\n')
+        .filter((line) => !before.split('\n').includes(line));
+      expect(appeared.length).toBeGreaterThan(0);
+      for (const line of appeared) {
+        expect(line, `potsherd left "${line}" in an agent directory`).toMatch(/junk/);
+      }
+      // The scratch cwd is under the tmp root potsherd was given, never under
+      // the user's home.
+      expect(fs.existsSync(path.join(home, '.claude', CLAUDE_CWD_NAME))).toBe(false);
+      // And the one decoy file that was already there is byte-identical.
+      expect(fs.readFileSync(path.join(home, '.claude', '.claude.json'), 'utf8')).toBe(
+        '{"userID":"decoy"}',
+      );
+    });
+  }
+
+  it('the flag that stops the transcript is not optional, and is passed on every call', async () => {
+    // `--no-session-persistence` is what keeps a model call out of
+    // `potsherd ls`. If it is ever dropped, every card run starts seeding the
+    // archive with its own summaries.
+    expect(CLAUDE_CLI_ARGS).toContain('--no-session-persistence');
+  });
+
+  it('codex takes the real flag for it, verified against codex 0.149.0', async () => {
+    const dir = fakeBin('codex', `cat > /dev/null; echo "$*"`);
+    const llm = Llm.open({ backend: 'codex', env: { ...process.env, PATH: dir }, tmpRoot: scratch() });
+    try {
+      const argv = (await llm.text({ prompt: 'q' })).text;
+      // "Run without persisting session files to disk" — the flag the claude
+      // rung does not have and this one does.
+      expect(argv).toContain('--ephemeral');
+      // "Do not load $CODEX_HOME/config.toml; auth still uses CODEX_HOME" —
+      // safe to pass, unlike `claude --bare`, which moves auth to an API key.
+      expect(argv).toContain('--ignore-user-config');
+      // The answer as a file rather than as a scrape of stdout.
+      expect(argv).toContain('--output-last-message');
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('prefers the answer codex wrote to a file over the one scraped from stdout', async () => {
+    // stdout says one thing; the -o file says another. The file is the CLI's
+    // statement and the scrape is our inference, so the file must win.
+    const dir = fakeBin(
+      'codex',
+      `cat > /dev/null
+for a in "$@"; do :; done
+while [ $# -gt 0 ]; do if [ "$1" = "--output-last-message" ]; then echo "from the file" > "$2"; fi; shift; done
+echo "from stdout"`,
+    );
+    const llm = Llm.open({ backend: 'codex', env: { ...process.env, PATH: dir }, tmpRoot: scratch() });
+    try {
+      expect((await llm.text({ prompt: 'q' })).text).toBe('from the file');
+    } finally {
+      await llm.close();
+    }
+  });
+
+  it('falls back to stdout when codex is too old to write the file', async () => {
+    const dir = fakeBin('codex', 'cat > /dev/null; echo "only stdout"');
+    const llm = Llm.open({ backend: 'codex', env: { ...process.env, PATH: dir }, tmpRoot: scratch() });
+    try {
+      expect((await llm.text({ prompt: 'q' })).text).toBe('only stdout');
+    } finally {
+      await llm.close();
+    }
+  });
+});
+
+describe('parseClaudeCli', () => {
+  it('sums the three input buckets, because every one of them is input the model read', () => {
+    const r = parseClaudeCli(
+      JSON.stringify({
+        subtype: 'success',
+        result: 'hi',
+        usage: { input_tokens: 2, cache_creation_input_tokens: 3025, cache_read_input_tokens: 11, output_tokens: 4 },
+      }),
+    );
+    expect(r.inputTokens).toBe(3_038);
+    expect(r.outputTokens).toBe(4);
+    expect(r.text).toBe('hi');
+  });
+
+  /**
+   * The one place this parser is deliberately lenient, and why.
+   *
+   * If a future release changes or drops `--output-format json`, `claude -p`
+   * still prints the answer as plain text. An answer without a token count is
+   * worth far more than an exception, so a stdout that does not parse is taken
+   * as the answer — the same call `lastAgentMessage` makes for codex.
+   */
+  it('falls back to plain stdout when the reply is not the json object', () => {
+    expect(parseClaudeCli('just the answer, then').text).toBe('just the answer, then');
+    expect(parseClaudeCli('  ').text).toBe('');
+  });
+
+  it('is not lenient about a failure: a non-success subtype is an error, not an answer', () => {
+    expect(parseClaudeCli('{"subtype":"error_during_execution","result":"partial"}').error).toBe(
+      'error_during_execution',
+    );
+    expect(parseClaudeCli('{"subtype":"success","is_error":true,"result":"x"}').error).toBeTruthy();
+  });
+});
+
 describe('codex backend plumbing', () => {
   it('feeds the prompt on stdin and reads the answer from stdout', async () => {
     const dir = fakeBin('codex', 'cat > /dev/null; echo "the answer"');
@@ -917,7 +1575,8 @@ describe('codex backend plumbing', () => {
   });
 
   it('runs in a scratch cwd, so no CLAUDE.md is ever loaded', async () => {
-    const dir = fakeBin('codex', 'cat > /dev/null; echo "$4"');
+    // argv: exec --skip-git-repo-check --ephemeral --ignore-user-config --cd <scratch> …
+    const dir = fakeBin('codex', 'cat > /dev/null; echo "$6"');
     const tmpRoot = scratch();
     const llm = Llm.open({
       backend: 'codex',
@@ -925,7 +1584,6 @@ describe('codex backend plumbing', () => {
       tmpRoot,
     });
     try {
-      // argv is: exec --skip-git-repo-check --cd <scratch> …
       const r = await llm.text({ prompt: 'q' });
       expect(r.text.startsWith(tmpRoot)).toBe(true);
       expect(fs.readdirSync(r.text.trim())).toEqual([]);
@@ -935,7 +1593,7 @@ describe('codex backend plumbing', () => {
   });
 
   it('removes the scratch directory on close', async () => {
-    const dir = fakeBin('codex', 'cat > /dev/null; echo "$4"');
+    const dir = fakeBin('codex', 'cat > /dev/null; echo "$6"');
     const tmpRoot = scratch();
     const llm = Llm.open({ backend: 'codex', env: { ...process.env, PATH: dir }, tmpRoot });
     const r = await llm.text({ prompt: 'q' });

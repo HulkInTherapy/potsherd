@@ -445,7 +445,7 @@ export const CALL_PROFILES: Record<Backend, CallProfile> = {
     parallelEfficiency: 0.8,
     spread: { timeLow: 0.4, timeHigh: 3.0, usdLow: 0.7, usdHigh: 1.6 },
     measured: false,
-    basis: 'not measured — assumed to behave like the agent sdk',
+    basis: 'est. — argv verified at codex 0.149.0, timings assumed from the agent sdk',
   },
 };
 
@@ -1436,6 +1436,50 @@ function makeScratch(tmpRoot?: string): string {
   return fs.mkdtempSync(path.join(tmpRoot ?? os.tmpdir(), 'potsherd-llm-'));
 }
 
+/**
+ * The **one** directory potsherd ever spawns `claude -p` in, per tmp root.
+ *
+ * This is not a tidiness choice; it is the whole of what can be done about a
+ * real defect, and the shape of the fix is decided by what was measured.
+ *
+ * Claude Code creates `~/.claude/projects/<slug-of-cwd>/` for whatever
+ * directory it is run in. {@link makeScratch} makes a *fresh random* one per
+ * transport, so a `card --all` over the reference corpus — 39 calls — would
+ * leave 39 differently-named directories in the archive potsherd exists to
+ * read. A tool whose premise is "your archive is the record" must not write to
+ * the archive as a side effect of reading it.
+ *
+ * Three things were measured on the reference machine (23 aug 2026, Claude
+ * Code 2.1.241), and they bound the fix:
+ *
+ *   1. `--no-session-persistence` **works**: no transcript JSONL is written,
+ *      so nothing a subprocess call creates can ever appear in `potsherd ls`
+ *      or be indexed, carded or ranked. That is the harm that mattered.
+ *   2. What survives is an **empty** `projects/<slug>/memory/` directory. Two
+ *      probe runs produced two of them. It holds no content, but it is litter
+ *      in someone else's directory and there are as many as there are calls.
+ *   3. `CLAUDE_CONFIG_DIR` — the obvious lever, and potsherd already knows the
+ *      variable — **cannot be used**. Pointed at a scratch directory, empty or
+ *      seeded from the user's own `.claude.json`, `claude -p` answers
+ *      `Not logged in · Please run /login` and the run is dead. The
+ *      subscription credential is not in that directory and does not follow
+ *      it. Isolating the config dir would trade a stray empty folder for the
+ *      entire rung, which is not a trade worth making.
+ *
+ * So: a **fixed name**, created once, reused by every call, and deliberately
+ * **not removed on close** — because deleting the cwd does not un-create the
+ * `~/.claude/projects` entry that names it, and a fresh name next time would
+ * simply create a second one. One stable directory means one entry, ever,
+ * whose name says what made it.
+ */
+export const CLAUDE_CWD_NAME = 'potsherd-llm-cwd';
+
+function stableScratch(tmpRoot?: string): string {
+  const dir = path.join(tmpRoot ?? os.tmpdir(), CLAUDE_CWD_NAME);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 function dropScratch(dir: string | null): void {
   if (!dir) return;
   try {
@@ -1625,7 +1669,7 @@ class ClaudeCliTransport implements Transport {
   constructor(private readonly opts: { env: NodeJS.ProcessEnv; bin: string; tmpRoot?: string }) {}
 
   async send(req: SendRequest): Promise<SendResult> {
-    this.scratch ??= makeScratch(this.opts.tmpRoot);
+    this.scratch ??= stableScratch(this.opts.tmpRoot);
     const extra = (this.opts.env['POTSHERD_CLAUDE_ARGS'] ?? '').split(' ').filter(Boolean);
     const args = [
       ...CLAUDE_CLI_ARGS,
@@ -1665,8 +1709,13 @@ class ClaudeCliTransport implements Transport {
     };
   }
 
+  /**
+   * Nothing to clean up, on purpose. See {@link CLAUDE_CWD_NAME}: removing the
+   * cwd would not remove the `~/.claude/projects` entry named after it, and
+   * the next call would then mint a second one. Keeping it is what holds the
+   * footprint at one directory instead of one per call.
+   */
   async close(): Promise<void> {
-    dropScratch(this.scratch);
     this.scratch = null;
   }
 }
@@ -1746,10 +1795,39 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 /**
  * `codex exec`, for a machine whose harness is codex.
  *
- * **Unverified on the reference machine** — codex is not installed there, so
- * what is tested is the plumbing (argv, stdin, stdout, exit code, timeout)
- * against a stub binary, not the real CLI's flags. `POTSHERD_CODEX_ARGS` is
- * the escape hatch if a codex release moves them.
+ * **The argv is verified; the round trip is not, and those are different
+ * claims.** This transport carried a blanket "unverified" label from phase 5
+ * on the grounds that codex was not installable on the reference machine. That
+ * turned out to be false: `@openai/codex@0.149.0` installs from npm in under a
+ * minute, and every flag below was then read out of the real
+ * `codex exec --help` — `exec`, `--skip-git-repo-check`, `-C/--cd`,
+ * `-m/--model`, and `-` for stdin ("instructions are read from stdin").
+ *
+ * What is still unverified is a real model round trip, which needs codex
+ * credentials this machine does not have. So the label is narrowed rather than
+ * dropped: the plumbing is tested against a stub binary and the flags are
+ * tested against a real `--help`, and nobody has yet watched codex answer a
+ * question. `POTSHERD_CODEX_ARGS` remains the escape hatch.
+ *
+ * Three flags were added once the real binary could be read, and each one
+ * fixes something the documentation-only version got wrong:
+ *
+ *   - **`--ephemeral`** — *"Run without persisting session files to disk"*.
+ *     Without it, every model call potsherd makes writes a session into the
+ *     archive potsherd indexes. That is the same defect
+ *     {@link CLAUDE_CWD_NAME} documents for the claude rung, and on this rung
+ *     there is a real flag for it.
+ *   - **`--ignore-user-config`** — *"Do not load `$CODEX_HOME/config.toml`;
+ *     auth still uses `CODEX_HOME`"*. The summariser stops inheriting whatever
+ *     is in the user's config, which is the same argument
+ *     `settingSources: []` makes on the claude rungs. The second half of that
+ *     sentence is why it is safe to pass and why `claude --bare`, which says
+ *     the opposite about auth, is not.
+ *   - **`-o/--output-last-message <FILE>`** — the final message, written to a
+ *     file. {@link lastAgentMessage} scrapes it out of stdout instead, which
+ *     works and is a guess about formatting; a file is the answer the CLI
+ *     means to give. The scraper stays as the fallback for a codex too old to
+ *     have the flag, or a run that writes nothing.
  */
 class CodexTransport implements Transport {
   readonly backend = 'codex' as const;
@@ -1762,13 +1840,21 @@ class CodexTransport implements Transport {
   async send(req: SendRequest): Promise<SendResult> {
     this.scratch ??= makeScratch(this.opts.tmpRoot);
     const extra = (this.opts.env['POTSHERD_CODEX_ARGS'] ?? '').split(' ').filter(Boolean);
+    const lastMessage = path.join(this.scratch, 'last-message.txt');
     const args = [
       'exec',
       '--skip-git-repo-check',
+      // Verified at 0.149.0: no session files on disk, so a model call cannot
+      // write into the archive potsherd reads.
+      '--ephemeral',
+      // Verified at 0.149.0: config.toml is not loaded, auth still is.
+      '--ignore-user-config',
       '--cd',
       this.scratch,
       '--model',
       req.model,
+      '--output-last-message',
+      lastMessage,
       ...extra,
       '-',
     ];
@@ -1781,7 +1867,10 @@ class CodexTransport implements Transport {
       ...(req.signal ? { signal: req.signal } : {}),
     });
 
-    const text = lastAgentMessage(out.stdout);
+    // The file first, the scraper second. `-o` is what the CLI means to hand
+    // over; `lastAgentMessage` is an inference from stdout's shape, and an
+    // inference should never win over a statement.
+    const text = readIfPresent(lastMessage) || lastAgentMessage(out.stdout);
     if (!text) {
       throw new LlmError(
         `codex exec produced no answer${out.stderr ? `: ${out.stderr.trim().split('\n').slice(-1)[0]}` : ''}`,
@@ -1794,6 +1883,15 @@ class CodexTransport implements Transport {
   async close(): Promise<void> {
     dropScratch(this.scratch);
     this.scratch = null;
+  }
+}
+
+/** The `--output-last-message` file, when codex wrote one. Never throws. */
+function readIfPresent(file: string): string {
+  try {
+    return fs.readFileSync(file, 'utf8').trim();
+  } catch {
+    return '';
   }
 }
 
