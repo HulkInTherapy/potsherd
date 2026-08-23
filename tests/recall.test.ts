@@ -1136,3 +1136,58 @@ describe('recall: calibrated confidence — T10.1', () => {
     expect(r.sessions.length).toBeGreaterThan(0);
   });
 });
+
+// ------------------------------------------------------------- F6, the lane
+
+/**
+ * T10.7 — the invariants the lane owes the rest of `recall()`, on the corpus
+ * every other test in this file uses. The finding's own failing case, the
+ * confidence cap and `--no-cards` live in `tests/cards-lane.test.ts`, which
+ * seeds the cards the audited machine could not write; these are the
+ * properties that have to hold on a corpus with **no cards at all**, which is
+ * the state 90% of a real index is in.
+ */
+describe('cards are routing, never evidence (F6)', () => {
+  it('labels every row of an uncarded corpus as evidence', async () => {
+    // The default. An index that has never run `potsherd card` has no routing
+    // lane, and a caller filtering on `lane` must not have to special-case
+    // that: the field is present and says `evidence` on every row.
+    for (const q of ['pgbouncer transaction pooling', 'the pooler decision', 'canon printer driver']) {
+      const r = await recall(db, q, {}, { vectors: false, minConfidence: 'none' });
+      expect(r.sessions.length).toBeGreaterThan(0);
+      expect(r.sessions.every((s) => s.lane === 'evidence')).toBe(true);
+      expect(r.hits.every((h) => h.lane === 'evidence')).toBe(true);
+    }
+  });
+
+  it('changes nothing about an uncarded corpus, ordering included', async () => {
+    // The lane is a partition, and a partition with one non-empty side is the
+    // identity. This is the regression guard for every eval number: on an
+    // index with no cards, `--no-cards` and the default must be the same
+    // search, row for row and score for score.
+    for (const q of ['pgbouncer transaction pooling', 'timezone drift', 'icon']) {
+      const on = await recall(db, q, {}, { vectors: false, limit: 20, minConfidence: 'none' });
+      const off = await recall(db, q, {}, { vectors: false, limit: 20, minConfidence: 'none', cards: false });
+      expect(off.sessions.map((s) => s.id)).toEqual(on.sessions.map((s) => s.id));
+      on.sessions.forEach((s, i) => {
+        expect(off.sessions[i]!.score).toBeCloseTo(s.score, 12);
+        expect(off.sessions[i]!.confidence).toBe(s.confidence);
+      });
+    }
+  });
+
+  it('never puts a `strong` on something that is not transcript text', async () => {
+    // The one-line reading of the finding, asserted over every query this file
+    // runs: `strong` is the label an agent is allowed to act on without
+    // reading the rows, so nothing whose evidence is a summary may carry it.
+    for (const q of ['pgbouncer transaction pooling', 'the pooler decision', 'timezone drift', 'icon']) {
+      const r = await recall(db, q, {}, { vectors: false, minConfidence: 'none' });
+      for (const s of r.sessions) {
+        if (s.confidence === 'strong') expect(s.lane).toBe('evidence');
+        for (const h of s.hits) {
+          if (h.confidence === 'strong') expect(h.kind).not.toBe('card');
+        }
+      }
+    }
+  });
+});

@@ -71,6 +71,22 @@ export interface FindCommandOptions extends GlobalOptions, FilterFlags {
    * fallback` mean what it looks like it means.
    */
   minConfidence?: string;
+  /**
+   * `--no-cards` — search transcripts only.
+   *
+   * Commander spells a negatable flag as `cards: boolean`, default `true`, so
+   * **off by default** here reads as `cards !== false`. That is the F6 ruling
+   * exactly: cards are *demoted*, not switched off, because a card is often
+   * the only list that can find a conversation whose transcript never uses the
+   * words the user typed. The flag is for the caller who has decided that even
+   * a labelled, last-on-the-page summary is more than they want.
+   *
+   * Registering it is only half the job. `packages/cli/src/index.ts` enumerates
+   * every flag it forwards into `runFind`, so an option that is declared and
+   * not listed there is accepted on the command line and silently dropped
+   * before it reaches `recall()`. See `T10.7-REPORT.md`.
+   */
+  cards?: boolean;
 }
 
 /**
@@ -110,6 +126,9 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
       // its rows to whoever typed the query. One number, set by the caller who
       // knows who is reading. See `RecallOptions.minConfidence`.
       minConfidence: minConfidence(o),
+      // F6. `undefined` and `true` both mean "cards on"; only an explicit
+      // `--no-cards` takes the two card lists out of the fusion.
+      cards: o.cards !== false,
     });
 
     // `--with` federates other memory tools' hits alongside ours. `federate()`
@@ -178,6 +197,12 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
         confidence: result.confidence,
         minConfidence: result.minConfidence,
         withheld: result.belowFloor,
+        // F6, on the envelope: whether the card lists ran at all, and how much
+        // of this page is routing rather than evidence. A caller that wants
+        // transcripts only can assert `routing === 0` without walking the
+        // sessions, and a caller that passed `--no-cards` can confirm it took.
+        cards: o.cards !== false,
+        routing: result.sessions.filter((s) => s.lane === 'routing').length,
         vectors: result.vectors,
         ignored: result.ignored,
         lists: result.lists,
@@ -203,6 +228,15 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
           resume: s.resume,
           score: s.score,
           confidence: s.confidence,
+          // F6 — `"routing"` when nothing in this block is transcript text:
+          // the only thing that matched was a card, which is the artefact of a
+          // model call. A routing block sorts below every evidence block
+          // whatever the scores say, its confidence is capped at `weak`, and
+          // it must not appear in a `SOURCES` line. One word, on the row, so a
+          // caller filters on data and never on the sentence the human view
+          // prints.
+          lane: s.lane ?? 'evidence',
+          citable: (s.lane ?? 'evidence') === 'evidence',
           // 0..1, and **not** `score` rescaled. `score` is reciprocal rank
           // fusion — a function of rank alone, which is why a true topic and a
           // topic the archive has never heard of come out 1.12x apart.
@@ -214,6 +248,11 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
           // the other two, so it is a ceiling: nothing can lift a row whose
           // words are not there. See `packages/core/src/calibration.ts`.
           calibrated: s.calibration.score,
+          // The cap that produced `confidence`, when one applied. A card-only
+          // block routinely calibrates above `STRONG_FLOOR` — its coverage is
+          // measured over a summary that paraphrased the question — and this
+          // is the field that says the label was refused rather than earned.
+          ceiling: s.calibration.ceiling ?? null,
           coverage: s.calibration.coverage,
           strength: s.calibration.strength,
           agreement: s.calibration.agreement,
@@ -231,7 +270,13 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
             ts: h.ts ?? null,
             score: h.score,
             confidence: h.confidence,
+            /** F6 — `"routing"` for a card, `"evidence"` for transcript text. */
+            lane: h.lane ?? 'evidence',
             calibrated: h.calibration.score,
+            // The cap that produced `confidence`, when one applied — so a
+            // caller reading `calibrated: 0.925` beside `confidence: "weak"`
+            // is told why rather than left to conclude the two disagree.
+            ceiling: h.calibration.ceiling ?? null,
             from: h.from,
             snippet: h.snippet.text,
             match: h.snippet.match ?? null,

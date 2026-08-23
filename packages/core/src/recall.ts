@@ -28,6 +28,7 @@ import { modelsDir, potsherdDir } from './paths.js';
 import { applyIgnore, countIgnoredSessions, type IgnoreReport } from './ignore.js';
 import {
   atLeastConfident,
+  ROUTING_CEILING,
   calibrate,
   coveredTerms,
   maxConfidence,
@@ -104,6 +105,113 @@ export const LISTS: readonly ListName[] = [
   'vec_cards',
 ];
 
+/**
+ * The two lanes of `03` §7 as F6 restates them: **cards are routing, never
+ * evidence.**
+ *
+ * ## The measurement
+ *
+ * For the query *"where did we leave off on <project> what is left to build"*,
+ * three of the top five hits were card-only matches on sessions belonging to
+ * other projects, and they outranked every real transcript for the project the
+ * question named. A generated summary beat primary evidence. `find` even
+ * printed an honest note when it happened — *"the session card matched; the
+ * transcript does not use those words"* — which is the right instinct wired to
+ * the wrong ranking.
+ *
+ * ## Why this is a partition and not a weight
+ *
+ * The tempting fix is to drop {@link WEIGHTS}.cards_fts until cards stop
+ * winning. That is a fix that holds for one corpus. RRF's contribution is
+ * `weight / (k + rank)`, so whether a card at rank 1 beats a transcript hit at
+ * rank 3 is arithmetic about *this* query on *this* index: change the corpus,
+ * the query length, the relax state or `k`, and a weight that behaved
+ * yesterday stops behaving. And the audit's complaint was never that cards
+ * scored slightly too high. It was that a card can be read as evidence at all:
+ *
+ * > If a card can be cited as evidence, you have rebuilt the hallucination
+ * > problem inside the tool that exists to prevent it.
+ *
+ * So the ordering is **partitioned**, not re-weighted. {@link LANES} is the
+ * first term of every comparator that decides what a caller sees, and the
+ * fused score is consulted only *within* a lane. No assignment of
+ * {@link WEIGHTS} can invert it, because no value of any weight ever reaches
+ * the comparison: `LANES[a.lane] - LANES[b.lane]` is evaluated first and, when
+ * the lanes differ, alone. That is what makes "a card-only hit never outranks
+ * a transcript hit" a property of the ranking rather than a number that
+ * happens to come out right.
+ *
+ * ## And cards are still on
+ *
+ * Demoted, not silenced. Cards are the one list that can find a conversation
+ * whose transcript never uses the words the user typed, which is exactly the
+ * routing job Bet 02 was restated to keep. A card-only block still appears; it
+ * appears **after** everything with transcript evidence behind it, labelled,
+ * capped at {@link ROUTING_CEILING}, and never citable in a `SOURCES` block.
+ * `--no-cards` turns the two lists off for the caller who wants transcripts or
+ * nothing.
+ */
+export type Lane = 'evidence' | 'routing';
+
+/**
+ * The lane order, and the constant this whole task reduces to.
+ *
+ * Lower sorts first. It is a `Record`, not a boolean, so that the ordering
+ * rule is a *value* the tests can read and pin rather than a comparison
+ * spelled out inside a sort callback where nothing can see it.
+ * `tests/cards-lane.test.ts` fails in both directions when it moves
+ * (`plans/08` rule 3): it asserts the pair, and it asserts the ordering the
+ * pair produces — set `routing` to 0 and the comparator collapses to
+ * score-only, which is the v1.1.0 behaviour the ordering test reproduces and
+ * refuses.
+ */
+export const LANES: Readonly<Record<Lane, number>> = { evidence: 0, routing: 1 };
+
+/**
+ * Hit kinds that are a *statement about* a conversation rather than text *from*
+ * one.
+ *
+ * Only `card` today. `title` is deliberately not here: a title is not evidence
+ * either, but it is not the artefact of a model call over the transcript, it
+ * has never been citable, and widening this set would be re-litigating a
+ * different finding under F6's name. See `T10.7-REPORT.md` for the one
+ * laundering path that observation leaves open.
+ */
+export const ROUTING_KINDS: ReadonlySet<RecallHit['kind']> = new Set(['card']);
+
+/**
+ * How many routing hits one conversation may put on the page.
+ *
+ * One. A card is one row per session by construction (`cards.session_id` is
+ * unique), so this only binds when a conversation's parent and one of its
+ * subagents are both carded — and two summaries of the same conversation are
+ * not two pieces of evidence about anything.
+ */
+export const ROUTING_PER_SESSION = 1;
+
+/** Which lane a hit belongs to. */
+export function laneOfHit(kind: RecallHit['kind']): Lane {
+  return ROUTING_KINDS.has(kind) ? 'routing' : 'evidence';
+}
+
+/**
+ * Which lane a *block* belongs to: `routing` when nothing in it is transcript
+ * text.
+ *
+ * The block is the unit `find` prints and `--json` iterates, so the block is
+ * where the demotion has to bite. A conversation with one exchange hit and one
+ * card hit is an evidence block — it has something quotable — and its card
+ * still contributes nothing to its rank or its coverage; see `recall()`.
+ */
+export function laneOfSession(hits: readonly { kind: RecallHit['kind'] }[]): Lane {
+  return hits.some((h) => laneOfHit(h.kind) === 'evidence') ? 'evidence' : 'routing';
+}
+
+/** Evidence before routing, then the fused score. The comparator, once. */
+export function byLane<T extends { lane?: Lane; score: number }>(a: T, b: T): number {
+  return (LANES[a.lane ?? 'evidence'] - LANES[b.lane ?? 'evidence']) || b.score - a.score;
+}
+
 export interface RecallHit {
   /**
    * `exchange` has both sides; `ghost` has the prompt side only; `title` is the
@@ -148,6 +256,20 @@ export interface RecallHit {
   calibration: Calibrated;
   /** {@link Calibrated.confidence}, lifted for callers that only want the word. */
   confidence: Confidence;
+  /**
+   * F6 — `routing` for a card, `evidence` for anything cut from a transcript.
+   *
+   * A machine-readable label, not prose: `--json` carries it on every hit and
+   * `packages/mcp` filters on it, so no caller has to parse the sentence the
+   * human view prints to find out that what it is looking at is a summary.
+   *
+   * **Optional in the type, always set by {@link recall}.** `browse.ts`
+   * derives `BrowseSession` from `RecallSession` with its own `Omit`, and that
+   * file is another worker's this phase; a required field here would not
+   * compile there. `T10.7-REPORT.md` carries the two-line change that makes it
+   * required.
+   */
+  lane?: Lane;
 }
 
 export interface RecallSession {
@@ -187,6 +309,21 @@ export interface RecallSession {
    */
   calibration: Calibrated;
   confidence: Confidence;
+  /**
+   * F6 — `routing` when **nothing** in this block is transcript text: the only
+   * thing that matched was a card, which is the artefact of a model call and
+   * not something the user or the assistant ever said.
+   *
+   * A routing block is still returned — a card is often the only list that can
+   * find a conversation whose words differ from the query's, and that is the
+   * job Bet 02 was restated to keep — but it sorts after every evidence block
+   * whatever the scores are, it is labelled on screen and in `--json`, its
+   * confidence is capped at {@link ROUTING_CEILING}, and it is not citable.
+   *
+   * Optional for the same compilation reason as {@link RecallHit.lane}, and
+   * set on every block {@link recall} returns.
+   */
+  lane?: Lane;
   hits: RecallHit[];
 }
 
@@ -337,6 +474,21 @@ export interface RecallOptions {
    * changes.
    */
   minConfidence?: Confidence;
+  /**
+   * `--no-cards`: run the search over transcripts only.
+   *
+   * **Default true**, and that is the point of the whole finding rather than a
+   * timid default. Cards are demoted, not switched off: a query whose words
+   * exist only in a summary still has to find its thread, because routing is
+   * the job cards are kept for. This flag is for the caller who has decided
+   * that even a labelled, last-in-the-page summary is more than they want —
+   * a script that wants transcript rows or nothing.
+   *
+   * It removes `cards_fts` and `vec_cards` from the fusion outright, which is
+   * strictly stronger than the lane: with it on there is nothing in the
+   * routing lane to demote.
+   */
+  cards?: boolean;
 }
 
 /** Max exchange hits from one session in the top list (`03` §7). */
@@ -445,8 +597,18 @@ export const WEIGHTS: Record<ListName, number> = {
   // A card is a statement about the whole session, like a title, but unlike a
   // title it has been checked against the transcript (`cards/verify.ts`) and
   // carries the session's topics and decisions rather than six words a model
-  // wrote before the session was over. It is weighted between the two: above a
-  // single exchange, below a title that names the thing outright.
+  // wrote before the session was over.
+  //
+  // **This number no longer decides whether a card can beat a transcript.**
+  // It used to be the only thing that did, and F6 is the transcript of that
+  // going wrong. Since T10.7 the two lanes are partitioned (see {@link Lane}):
+  // a card-only block sorts after every block with transcript evidence at any
+  // weight, and a card contributes nothing at all to the rank of a block that
+  // *does* have transcript evidence. What this weight still decides is the
+  // order of card-only blocks **among themselves** — which thread the routing
+  // lane offers first — and nothing else. Left at 1.2 because changing it now
+  // would move that ordering for no reason; it is not load-bearing for the
+  // safety property, which is exactly the change T10.7 made.
   cards_fts: 1.2,
   exchanges_fts: 1,
   ghosts_fts: 1,
@@ -461,7 +623,8 @@ export const WEIGHTS: Record<ListName, number> = {
   // Card vectors are the semantic half of the same statement. Same weight as
   // the exchange vectors: rank-based fusion needs no common scale, but a list
   // that answers "about the same thing" still should not outvote one that
-  // answers "says these words".
+  // answers "says these words". Since T10.7 it, too, only orders the routing
+  // lane internally — see `cards_fts` above.
   vec_cards: 1.5,
 };
 
@@ -1379,6 +1542,15 @@ export async function recall(
   if (!tableExists(db, 'vec_ghost_prompts') || countRows(db, 'vec_ghost_prompts') === 0) {
     wanted.delete('vec_ghost_prompts');
   }
+  // `--no-cards`, and it comes before every other card test because it is the
+  // only one that is a decision rather than a fact about the index: the caller
+  // asked for transcripts. Removing the lists here rather than filtering their
+  // hits later is what makes the flag free — two fewer queries and, when
+  // `vec_cards` was the only reason to embed, one fewer forward pass.
+  if (options.cards === false) {
+    wanted.delete('cards_fts');
+    wanted.delete('vec_cards');
+  }
   // The card lists are real from T2.2 on, and still leave the set the moment
   // there is nothing behind them: an index that has never run `potsherd card`
   // has an empty `cards` table, and running two extra queries per search to
@@ -1610,14 +1782,20 @@ export async function recall(
   // actually earned the top hit — so a query whose only answer is in the
   // subagent still shows the subagent, and a query the parent answers better
   // shows the parent with the subagent's line underneath it.
+  //
+  // **F6 — evidence fills the budget first.** The three-hit budget used to be
+  // handed out in fused order, so a card could take one of a conversation's
+  // three slots away from an exchange that actually said the words. Two
+  // passes: transcript hits take the {@link PER_SESSION} budget, then cards
+  // take a separate {@link ROUTING_PER_SESSION} budget of their own. A card
+  // can therefore no longer cost a transcript its line, and it can no longer
+  // be the reason a page is full.
   const conversationOf = conversationKeys(db, ranked.map((h) => h.sessionId));
   const perSessionCount = new Map<string, number>();
+  const routingCount = new Map<string, number>();
   const kept: RecallHit[] = [];
-  for (const hit of ranked) {
-    const conversation = conversationOf(hit.sessionId);
-    const n = perSessionCount.get(conversation) ?? 0;
-    if (n >= perSession) continue;
-    perSessionCount.set(conversation, n + 1);
+  const take = (hit: (typeof ranked)[number]): void => {
+    const lane = laneOfHit(hit.kind);
     // Coverage is counted over the text this row can actually *show* — the
     // same string `bestSnippet` cuts from — so the label and the highlighted
     // words on the screen are two readings of one measurement.
@@ -1626,6 +1804,11 @@ export async function recall(
       terms: quotableTokens.length,
       strength: strengthOf(hit.from),
       lists: new Set(hit.from.map((f) => f.list)).size,
+      // A card's text is a model's paragraph about the session, so full
+      // coverage of the query inside it means the *summary* used those words
+      // — which is the one thing an agent must not be allowed to read as "the
+      // archive answers this". See `calibration.ts`.
+      ...(lane === 'routing' ? { ceiling: ROUTING_CEILING } : {}),
     });
     kept.push({
       kind: hit.kind,
@@ -1641,7 +1824,24 @@ export async function recall(
       from: hit.from,
       calibration,
       confidence: calibration.confidence,
+      lane,
     });
+  };
+  for (const hit of ranked) {
+    if (laneOfHit(hit.kind) !== 'evidence') continue;
+    const conversation = conversationOf(hit.sessionId);
+    const n = perSessionCount.get(conversation) ?? 0;
+    if (n >= perSession) continue;
+    perSessionCount.set(conversation, n + 1);
+    take(hit);
+  }
+  for (const hit of ranked) {
+    if (laneOfHit(hit.kind) === 'evidence') continue;
+    const conversation = conversationOf(hit.sessionId);
+    const n = routingCount.get(conversation) ?? 0;
+    if (n >= ROUTING_PER_SESSION) continue;
+    routingCount.set(conversation, n + 1);
+    take(hit);
   }
 
   // ---- group into session blocks
@@ -1666,6 +1866,19 @@ export async function recall(
   }
   const meta = sessionMeta(db, [...represents.values()]);
   const sessions: RecallSession[] = [];
+  // Two budgets, because one budget is a silencer.
+  //
+  // The build used to stop at `limit * 3` conversations outright. With the
+  // lanes partitioned, `order` is every evidence conversation followed by
+  // every routing one — so on a query that relaxes to any-word matching and
+  // turns up thirty mediocre transcript blocks, a single card-only block
+  // would never be *built*, and "demoted" would have quietly become "deleted".
+  // Reserving the routing lane its own budget is what keeps F6's second half
+  // true: cards still route, they just route last. `sessionMeta` has already
+  // been read for every representative above, so the extra passes cost a map
+  // lookup each.
+  let evidenceBuilt = 0;
+  let routingBuilt = 0;
   for (const conversation of order) {
     const id = represents.get(conversation) ?? conversation;
     const m = meta.get(id);
@@ -1686,27 +1899,50 @@ export async function recall(
     // "redaction" in another has covered both words; reading each hit alone
     // would call it half an answer twice. The title is in because a session
     // named after the query is evidence — it is a whole list in the fusion.
-    const blockText = [m.displayTitle, m.title ?? '']
-      .concat(hits.map((h) => `${h.userText} ${h.assistantText ?? ''}`))
+    //
+    // **F6 — and a card is not part of that union.** Coverage is the ceiling
+    // in `calibrate`, so any text folded in here can lift a block's
+    // confidence. A card's summary is a model's paragraph *about* the session;
+    // letting it count would mean a conversation could be called `strong`
+    // because a summary of it used the query's words, which is the laundering
+    // the whole finding is about. So an evidence block is calibrated over its
+    // evidence, and a routing block over its card — under the
+    // {@link ROUTING_CEILING}, which is what stops the second case being the
+    // first case by another route.
+    const lane = laneOfSession(hits);
+    const counted = lane === 'evidence' ? hits.filter((h) => h.lane === 'evidence') : hits;
+    const blockText = (lane === 'evidence' ? [m.displayTitle, m.title ?? ''] : [])
+      .concat(counted.map((h) => `${h.userText} ${h.assistantText ?? ''}`))
       .join(' ');
     const calibration = calibrate({
       covered: coveredTerms(quotableTokens, blockText),
       terms: quotableTokens.length,
-      strength: Math.max(0, ...hits.map((h) => h.calibration.strength)),
-      lists: new Set(hits.flatMap((h) => h.from.map((f) => f.list))).size,
+      strength: Math.max(0, ...counted.map((h) => h.calibration.strength)),
+      lists: new Set(counted.flatMap((h) => h.from.map((f) => f.list))).size,
+      ...(lane === 'routing' ? { ceiling: ROUTING_CEILING } : {}),
     });
+    if (lane === 'evidence' ? evidenceBuilt >= limit * 3 : routingBuilt >= limit) continue;
+    if (lane === 'evidence') evidenceBuilt++;
+    else routingBuilt++;
     sessions.push({
       ...m,
-      score: sessionScore(hits, corroboration),
+      // The block's rank is its **evidence's** rank. A card contributes
+      // nothing to the score of a block that has transcript hits — otherwise
+      // "cards never outrank transcripts" would hold between blocks and
+      // quietly fail inside one, with a summary lifting a thin exchange over a
+      // strong one. A routing block is scored by its card, which is all it
+      // has, and then sorts behind every evidence block regardless.
+      score: sessionScore(counted, corroboration),
       calibration,
       confidence: calibration.confidence,
+      lane,
       hits,
     });
     // Three times the page, then sort by the *session's* total and cut. A
     // session whose best single hit ranks eleventh but which matched five
     // times is a better answer than one that matched once at rank ten, and
     // cutting at `limit` before the aggregation would never let it say so.
-    if (sessions.length >= limit * 3) break;
+    if (evidenceBuilt >= limit * 3 && routingBuilt >= limit) break;
   }
   // ---- the floor
   //
@@ -1722,7 +1958,10 @@ export async function recall(
   const belowFloor = built - surviving.length;
   sessions.length = 0;
   sessions.push(...surviving);
-  sessions.sort((a, b) => b.score - a.score);
+  // The partition. `byLane` compares the lane first and the fused score only
+  // when the lanes are equal, so no weight and no corpus can put a card-only
+  // block above a block with transcript evidence in it. See {@link Lane}.
+  sessions.sort(byLane);
   sessions.length = Math.min(sessions.length, limit);
   const confidence = sessions.reduce<Confidence>(
     (best, s) => maxConfidence(best, s.confidence),
@@ -1737,7 +1976,7 @@ export async function recall(
   // repo's own tests — undercounted a clustered conversation and never saw a
   // sidechain. Take the blocks' own hits instead, so the two views cannot
   // disagree and every hit still names the session it came from.
-  const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => b.score - a.score);
+  const flat = [...sessions.flatMap((s) => s.hits)].sort(byLane);
   return {
     query,
     sessions,
