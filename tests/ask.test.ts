@@ -47,6 +47,7 @@ import {
   READERS_FILE_KIND,
   READERS_FILE_VERSION,
   replayReaders,
+  runAsk,
   writeReadersFile,
 } from '../packages/cli/src/commands/ask.js';
 import type { Transcript, TranscriptUnit } from '../packages/core/src/cards/transcript.js';
@@ -2531,5 +2532,86 @@ describe('T10.2 AskOptions.synthFn', () => {
       }),
     ).rejects.toThrow(/the host agent gave up/);
     db.close();
+  });
+});
+
+// ==================== --synthesis-out promises no model call, and now keeps it
+
+/**
+ * VERIFICATION-4 C5. `--help` says of this flag:
+ *
+ * ```
+ * --synthesis-out <path>  write the synthesis prompt to this file; makes no model call
+ * ```
+ *
+ * On its own that was false. With no recorded readers there is nothing to
+ * build a prompt out of, so the run shortlisted k sessions and sent one reader
+ * call per session before it had a prompt to write — six calls, measured, in
+ * 7.09 s. `--readers-out`'s identical clause is true because that flag returns
+ * before a reader runs; this one was not, and the code already knew it: the
+ * `modelless` expression read `(synthesisOut && readersIn)`.
+ *
+ * The project has recorded "a flag that is documented and does nothing" nine
+ * times. This is that class inverted — a flag documenting an absence it did
+ * not deliver — and it is the more expensive direction, because the absence
+ * being promised is money.
+ *
+ * The `.option()` line lives in `packages/cli/src/index.ts`, reserved to
+ * another worker this phase, so the sentence could not be qualified. It is
+ * made true instead: the bare flag is refused, and the refusal names the two
+ * commands that do the same work for free. **This changes what the flag does.**
+ */
+describe('--synthesis-out without --readers-in', () => {
+  it('is refused rather than quietly spending one reader call per shortlisted session', async () => {
+    let err: unknown;
+    try {
+      await runAsk({ question: 'how did we pin the pooler?', synthesisOut: '/tmp/s.json' });
+    } catch (e) {
+      err = e;
+    }
+    const e = err as Error & { fix?: string };
+    expect(e).toBeInstanceOf(Error);
+    expect(e.message).toMatch(/makes no model call only when the readers are already recorded/);
+    expect(e.message).toMatch(/one reader call per shortlisted session/);
+    // The refusal is only honest if it hands back the free path.
+    expect(String(e.fix)).toMatch(/--readers-out r\.json/);
+    expect(String(e.fix)).toMatch(/--readers-in r\.json --synthesis-out/);
+  });
+
+  it('refuses before it opens the index, so nothing is read and nothing is spent', async () => {
+    // The guard runs above `openIndex`, so a run with no index at all still
+    // gets the flag error rather than "nothing indexed yet" — which is the
+    // proof that no reader could have run before the refusal.
+    const dir = tempDir('potsherd-c5-');
+    let message = '';
+    try {
+      await runAsk({ question: 'q', synthesisOut: '/tmp/s.json', potsherdDir: dir });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/makes no model call only when/);
+    expect(message).not.toMatch(/nothing indexed yet/);
+    rmrf(dir);
+  });
+
+  it('leaves the composed form — the seam’s real second leg — alone', async () => {
+    // `--readers-in … --synthesis-out …` is free and says so. It must get past
+    // the guard and past the backend check (it is `modelless`), and fail only
+    // on the empty index it was pointed at.
+    const dir = tempDir('potsherd-c5-ok-');
+    let message = '';
+    try {
+      await runAsk({
+        question: 'q',
+        readersIn: '/tmp/r.json',
+        synthesisOut: '/tmp/s.json',
+        potsherdDir: dir,
+      });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/nothing indexed yet/);
+    expect(message).not.toMatch(/makes no model call only when/);
+    rmrf(dir);
   });
 });

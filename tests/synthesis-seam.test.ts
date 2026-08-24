@@ -16,6 +16,7 @@ import {
   type Transport,
 } from '../packages/core/src/llm.js';
 import {
+  REPLY_INSTRUCTION,
   SYNTHESIS_FILE_KIND,
   SYNTHESIS_FILE_VERSION,
   READERS_FILE_KIND,
@@ -414,16 +415,13 @@ describe('the citation filter runs over the host answer, in code', () => {
     db.close();
   });
 
-  it('a reply that is not the right shape at all is the empty answer, not a crash', async () => {
-    const { root, db } = seedDb();
-    const { synth } = await stagedSynthesis(db, root);
-    answerWith(synth, { some: 'other thing entirely' });
-    const r = await filterHostAnswer(db, QUESTION, { root }, synth);
-
-    expect(r.answer).toBe('');
-    expect(r.sentences).toHaveLength(0);
-    db.close();
-  });
+  // The test that stood here — *"a reply that is not the right shape at all is
+  // the empty answer, not a crash"* — asserted VERIFICATION-4's C4 as if it
+  // were the specification. It is inverted in §7 below: a refusal is not a
+  // crash, and an object with neither an "evidence" nor an "answer" array is
+  // not a fact about the user's archive. The two halves it was really pinning
+  // — no exception escapes, and nothing unchecked reaches the answer — are
+  // both still pinned there.
 
   it('--strict refuses a host answer the filter emptied, with ask’s own exit-2 refusal', async () => {
     const { root, db } = seedDb();
@@ -688,6 +686,273 @@ describe('a shortlisted session whose reader found nothing', () => {
     expect(result.spend.calls).toBe(0);
     expect(result.answer).toContain('client cache was set to zero');
 
+    db.close();
+  });
+});
+
+// ============ 7. a reply potsherd cannot use is never an empty archive (C4)
+
+/**
+ * VERIFICATION-4 C4, and the shape of the hole it went through.
+ *
+ * `--synthesis-out`'s receipt said *"answer "prompt" in the shape of "schema",
+ * add it to the file as "reply""*. A host agent captures its model's **text**
+ * and stores it, so `"reply"` was a JSON *string* — and every layer below
+ * `filterHostAnswer` is tolerant by design: `validateSynth` returns `null` for
+ * a value it cannot read, `hostSynthesize` turns `null` into
+ * `{evidence:[],answer:[]}`, `filterAnswer` keeps nothing out of nothing. The
+ * run printed *"the readers found nothing that answers the question"* with
+ * *"1 answered"* on the line below, and exited as if it had read the archive.
+ *
+ * Two claims are tested here and they are not the same claim:
+ *
+ *   1. **the string form works**, and works *identically* — same answer, same
+ *      evidence, same drops, same zero calls. A fabrication planted inside the
+ *      JSON string dies in the same line of code as one planted in the object,
+ *      which is the ruling this was written under: if accepting the string let
+ *      anything through that the object catches, reject it loudly instead.
+ *   2. **nothing unusable is ever silent.** Every shape that cannot be filtered
+ *      is refused by name, at an exit code no honest empty uses, and none of
+ *      the refusals prints the reply back — it is a model's prose about the
+ *      user's own transcripts.
+ *
+ * Every test below runs on {@link seedTwo}: two sessions shortlisted, one
+ * reader answering and one not. The single-session fixture is what hid the
+ * last defect in this file (§6), and a false honest-empty is exactly the class
+ * of bug a one-session premise cannot see.
+ */
+
+const QUIET_ID = '22222222-0000-4000-8000-000000000002';
+
+/** The seam, staged on two sessions, up to the point the host must answer. */
+async function stagedTwo(): Promise<{
+  root: string;
+  db: ReturnType<typeof store.open>;
+  synth: string;
+}> {
+  const { root, db } = seedTwo();
+  const readers = await readersWithOutputs(db, root, [
+    RECORDED,
+    { sessionId: QUIET_ID, found: false, quotes: [], answer_fragment: '' },
+  ]);
+  const synth = outFile('synthesis-two.json');
+  const { file } = await writeSynthesisFile(db, QUESTION, { root }, synth, readers);
+  // The premise of every test below: two sessions shortlisted, one answering.
+  expect(file!.sessionIds).toHaveLength(2);
+  expect(file!.sessions).toHaveLength(1);
+  return { root, db, synth };
+}
+
+/** Everything an answer is made of, minus the clock. */
+function answerShape(r: AskResult): unknown {
+  return { ...r, ms: 0, readers: r.readers.map((x) => ({ ...x, ms: 0 })) };
+}
+
+async function refusal(fn: () => Promise<unknown>): Promise<Error & { fix?: string; code?: number }> {
+  try {
+    await fn();
+  } catch (e) {
+    return e as Error & { fix?: string; code?: number };
+  }
+  throw new Error('expected a refusal and got none');
+}
+
+describe('a reply recorded as a JSON string', () => {
+  it('answers exactly as the same reply recorded as an object does', async () => {
+    const { root, db, synth } = await stagedTwo();
+
+    answerWith(synth, HONEST);
+    const viaObject = await filterHostAnswer(db, QUESTION, { root }, synth);
+    answerWith(synth, JSON.stringify(HONEST));
+    const notes: string[] = [];
+    const viaString = await filterHostAnswer(db, QUESTION, { root }, synth, (l) => notes.push(l));
+
+    // Not "it answers": it answers with the same bytes.
+    expect(JSON.stringify(answerShape(viaString))).toBe(JSON.stringify(answerShape(viaObject)));
+    expect(viaString.answer).toContain('client cache was set to zero');
+    expect(viaString.evidence).toHaveLength(1);
+    expect(viaString.spend.calls).toBe(0);
+    // And the run says it had to parse, above the answer.
+    expect(notes.join(' ')).toMatch(/was a JSON string; parsed it/);
+    db.close();
+  });
+
+  it('drops a fabrication planted inside the string exactly as it drops one in the object', async () => {
+    const { root, db, synth } = await stagedTwo();
+
+    answerWith(synth, FABRICATING);
+    const viaObject = await filterHostAnswer(db, QUESTION, { root }, synth);
+    answerWith(synth, JSON.stringify(FABRICATING));
+    const viaString = await filterHostAnswer(db, QUESTION, { root }, synth);
+
+    expect(JSON.stringify(answerShape(viaString))).toBe(JSON.stringify(answerShape(viaObject)));
+    expect(viaString.answer).not.toContain('Session mode');
+    expect(viaString.sentences).toHaveLength(1);
+    expect(viaString.dropped.length).toBeGreaterThan(0);
+    expect(JSON.stringify(viaString.evidence)).not.toContain('session mode and the errors');
+    db.close();
+  });
+
+  it('parses a fenced string, which is what a model returns when it is being helpful', async () => {
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, '```json\n' + JSON.stringify(HONEST, null, 2) + '\n```');
+    const r = await filterHostAnswer(db, QUESTION, { root }, synth);
+
+    expect(r.answer).toContain('client cache was set to zero');
+    expect(r.spend.calls).toBe(0);
+    db.close();
+  });
+
+  it('refuses a fence with prose inside it rather than guessing at the prose', async () => {
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, '```\nThe client cache was set to zero.\n```');
+    const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+
+    expect(err.message).toMatch(/is a string and it is not JSON/);
+    db.close();
+  });
+});
+
+describe('a reply that cannot be filtered is refused, not reported as nothing found', () => {
+  it('refuses prose, and says it is prose rather than answering nothing', async () => {
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, 'The client cache was set to zero rather than changing the pooler mode.');
+    const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+
+    expect(err.message).toMatch(/"reply" is a string and it is not JSON/);
+    expect(err.message).toMatch(/prose carries no quote it can check/);
+    // `JSON.parse`'s own message quotes back ten characters of what it was
+    // given. Those ten characters are a model's prose about the user's
+    // transcripts, so the parser's message is not printed at all.
+    expect(err.message).not.toContain('The client cache');
+    expect(err.fix).toMatch(/store that object as "reply"/);
+    db.close();
+  });
+
+  it('refuses an empty string as an unanswered file, not an empty archive', async () => {
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, '   ');
+    const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+
+    expect(err.message).toMatch(/"reply" is an empty string/);
+    expect(err.message).toMatch(/not an archive with nothing in it/);
+    db.close();
+  });
+
+  it('refuses a JSON string that parses to something other than an object, and names what it found', async () => {
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, JSON.stringify([HONEST]));
+    const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+
+    expect(err.message).toMatch(/is a JSON string containing an array/);
+    db.close();
+  });
+
+  it('refuses a reply that is not an object at all', async () => {
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, 42);
+    const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+
+    expect(err.message).toMatch(/"reply" is a number/);
+    db.close();
+  });
+
+  it('refuses an object with neither an "evidence" nor an "answer" array', async () => {
+    // This test used to assert the opposite — *"a reply that is not the right
+    // shape at all is the empty answer, not a crash"* — and a refusal is not a
+    // crash. An object with neither array is a host agent that answered the
+    // wrong question or wrote the wrong field, and printing "the readers found
+    // nothing" over it is a statement about the user's archive that this run
+    // has no basis for. FIX-G C4(b).
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, { some: 'other thing entirely' });
+    const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+
+    expect(err.message).toMatch(/neither an "evidence" array nor an "answer" array/);
+    expect(err.message).toMatch(/nothing in it for the citation filter to check/);
+    db.close();
+  });
+
+  it('refuses arrays whose every entry is malformed, the case validateSynth nulls', async () => {
+    const { root, db, synth } = await stagedTwo();
+    // Both arrays are present and non-empty, so the shape check above passes.
+    // Every entry is missing a field the schema requires, so `validateSynth`
+    // would return null and the run would have printed an empty archive.
+    answerWith(synth, { evidence: [{ quote: 'x' }, { session_id: POOLER }], answer: [{}, { cites: [1] }] });
+    const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+
+    expect(err.message).toMatch(/holds 2 evidence entries and 2 sentences/);
+    expect(err.message).toMatch(/not one of them is usable/);
+    db.close();
+  });
+
+  it('allows an object with both arrays empty — the host’s own honest empty', async () => {
+    // The one case where an empty result is the truth: a synthesizer that read
+    // the evidence and concluded nothing is supportable is answering, not
+    // failing. The refusal above must never swallow this.
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, { evidence: [], answer: [] });
+    const r = await filterHostAnswer(db, QUESTION, { root }, synth);
+
+    expect(r.answer).toBe('');
+    expect(r.sentences).toHaveLength(0);
+    expect(r.spend.calls).toBe(0);
+    db.close();
+  });
+
+  it('exits 2 on every reply refusal — the code no honest empty uses', async () => {
+    // `ask`'s codes: 0 a grounded answer, 1 the archive was read and had
+    // nothing, 2 potsherd declined to answer. C4 is that a broken input was
+    // being reported in the vocabulary of the empty archive, so 1 is the one
+    // code these must not carry.
+    const { root, db, synth } = await stagedTwo();
+    for (const bad of ['prose, not JSON', '', 42, { some: 'thing' }, JSON.stringify([1, 2])]) {
+      answerWith(synth, bad);
+      const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+      expect(err.code).toBe(2);
+    }
+    // and the unanswered recording, which is the same problem one stage earlier
+    const file = JSON.parse(fs.readFileSync(synth, 'utf8')) as Record<string, unknown>;
+    delete file['reply'];
+    fs.writeFileSync(synth, JSON.stringify(file, null, 2), 'utf8');
+    const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+    expect(err.message).toMatch(/has no "reply"/);
+    expect(err.code).toBe(2);
+    db.close();
+  });
+
+  it('never prints the reply back, because it is prose about the user’s transcripts', async () => {
+    const { root, db, synth } = await stagedTwo();
+    const secret = 'the migration ran against the production ledger at 03:40';
+    for (const bad of [secret, JSON.stringify([secret]), { note: secret }]) {
+      answerWith(synth, bad);
+      const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+      // Not a word of it, and not the ten-character head `JSON.parse` quotes.
+      expect(err.message).not.toContain(secret.slice(0, 10));
+      expect(err.message).not.toContain('migration');
+      expect(err.message).not.toContain('ledger');
+      expect(String(err.fix ?? '')).not.toContain('migration');
+    }
+    db.close();
+  });
+});
+
+describe('the instruction the host is given names the shape', () => {
+  it('is written into the file, for the agent that only ever sees the file', async () => {
+    const { db, synth } = await stagedTwo();
+    const parsed = JSON.parse(fs.readFileSync(synth, 'utf8')) as Record<string, unknown>;
+
+    const instruction = String(parsed['instruction'] ?? '');
+    expect(instruction).toBe(REPLY_INSTRUCTION);
+    // The three facts a competent reader needed and did not have: that it is
+    // an object, that the JSON text of it is also accepted, and that anything
+    // else is refused rather than read as an empty answer.
+    expect(instruction).toMatch(/JSON object/);
+    expect(instruction).toMatch(/JSON text/);
+    expect(instruction).toMatch(/refused rather than read as an empty answer/);
+    // The old sentence — "add it to the file as reply" — is what a reader
+    // resolved to "add the model's text".
+    expect(instruction).not.toMatch(/add it to the file/);
     db.close();
   });
 });

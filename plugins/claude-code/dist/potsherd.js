@@ -28720,7 +28720,13 @@ async function runAsk(o) {
       'potsherd ask "\u2026" --readers-out r.json   # run your readers, then --readers-in r.json --synthesis-out s.json'
     );
   }
-  const modelless = Boolean(readersOut || filterIn || synthesisOut && readersIn);
+  if (synthesisOut && !readersIn) {
+    throw new UserError(
+      "--synthesis-out makes no model call only when the readers are already recorded; on its own it would spend one reader call per shortlisted session before it had a prompt to write",
+      `potsherd ask "${question}" --readers-out r.json   # run your readers, then --readers-in r.json --synthesis-out ${synthesisOut}`
+    );
+  }
+  const modelless = Boolean(readersOut || filterIn || synthesisOut);
   if (!modelless) {
     try {
       detectBackend({ ...o.model ? { model: o.model } : {} });
@@ -28760,7 +28766,9 @@ async function runAsk(o) {
     if (synthesisOut) {
       return await recordSynthesis(db, question, base2, synthesisOut, readersIn, o, t, onProgress);
     }
-    const result = filterIn ? await filterHostAnswer(db, question, base2, filterIn) : readersIn ? await replayReaders(db, question, base2, readersIn, (line) => {
+    const result = filterIn ? await filterHostAnswer(db, question, base2, filterIn, (line) => {
+      if (!o.json && !o.quiet) print(`  ${t.dim(line)}`);
+    }) : readersIn ? await replayReaders(db, question, base2, readersIn, (line) => {
       if (!o.json && !o.quiet) print(`  ${t.dim(line)}`);
     }) : await ask(db, question, { ...base2, onProgress });
     if (o.debug) reportDrops(drops);
@@ -28965,6 +28973,7 @@ function goneOrFail(abs, question, recorded, resolved) {
 }
 var SYNTHESIS_FILE_KIND = "potsherd.ask.synthesis";
 var SYNTHESIS_FILE_VERSION = 1;
+var REPLY_INSTRUCTION = 'answer "prompt" in the shape of "schema" and store that answer here as "reply". "reply" is the JSON object itself \u2014 {"evidence":[\u2026],"answer":[\u2026]} \u2014 or the JSON text of that object, which potsherd will parse. Prose, or a JSON value that is not that object, is refused rather than read as an empty answer.';
 function synthCapture() {
   const seen = { input: null };
   const fn = async (input) => {
@@ -29019,7 +29028,8 @@ async function writeSynthesisFile(db, question, base2, path32, readersPath, onPr
     // been sent. It is a no-op today and the test asserts that it is.
     prompt: redactOutgoing(input.prompt).text,
     sessions: input.sessions,
-    readers: staged ? staged.outputs : []
+    readers: staged ? staged.outputs : [],
+    instruction: REPLY_INSTRUCTION
   };
   fs40.mkdirSync(nodePath2.dirname(abs), { recursive: true });
   fs40.writeFileSync(abs, `${JSON.stringify(file, null, 2)}
@@ -29046,6 +29056,10 @@ async function recordSynthesis(db, question, base2, path32, readersPath, o, t, o
       sessionIds: file?.sessionIds ?? [],
       sessions: file?.sessions ?? [],
       promptChars: file?.prompt.length ?? 0,
+      // FIX-G C4(c). The `--json` receipt is what an agent reads, and it is
+      // the surface on which the shape of `reply` was least well stated: the
+      // instruction only ever existed in the human receipt.
+      instruction: REPLY_INSTRUCTION,
       matching: probe2.matching,
       searched: probe2.searched,
       modelCalls: probe2.spend.calls
@@ -29073,15 +29087,19 @@ function synthesisOutReceipt(file, abs, probe2, t) {
     );
   }
   lines.push("");
+  const calls = probe2.spend.calls;
   lines.push(
-    `  ${t.dim(`no model call was made (${probe2.spend.calls}). the prompt is redacted, as sent.`)}`
+    `  ${t.dim(
+      calls === 0 ? "no model call was made (0). the prompt is redacted, as sent." : `${calls} model ${calls === 1 ? "call was" : "calls were"} made \u2014 the readers ran here. the prompt is redacted, as sent.`
+    )}`
   );
   lines.push("");
-  lines.push('  answer "prompt" in the shape of "schema", add it to the file as "reply", then:');
+  lines.push('  answer "prompt" in the shape of "schema" and add that answer to the file as "reply" \u2014');
+  lines.push('  the JSON object {"evidence":[\u2026],"answer":[\u2026]}, or the JSON text of it. then:');
   lines.push(`    potsherd ask "${file.question}" --filter-in ${abs}`);
   return lines.join("\n");
 }
-async function filterHostAnswer(db, question, base2, path32) {
+async function filterHostAnswer(db, question, base2, path32, onNote) {
   const abs = nodePath2.resolve(path32);
   const file = readSynthesisFile(abs);
   const q2 = redactOutgoing(question).text;
@@ -29098,12 +29116,7 @@ async function filterHostAnswer(db, question, base2, path32) {
       `potsherd ask "${q2}" --k ${file.k} --filter-in ${abs}`
     );
   }
-  if (file.reply === void 0 || file.reply === null) {
-    throw new UserError(
-      `${abs} has no "reply" \u2014 it is a --synthesis-out recording that nobody has answered yet`,
-      'answer its "prompt" in the shape of its "schema", then add the object as "reply"'
-    );
-  }
+  const { reply, note: replyNote } = hostReply(abs, file.reply);
   const pin = { sessionIds: file.sessionIds };
   const rec = recorder();
   await ask(db, question, { ...base2, pin, concurrency: 1, openThreads: false, readerFn: rec.fn });
@@ -29120,13 +29133,97 @@ async function filterHostAnswer(db, question, base2, path32) {
   const byId = /* @__PURE__ */ new Map();
   for (const out of file.readers) byId.set(out.sessionId, out);
   const readerFn = async (input) => byId.get(input.sessionId) ?? { found: false, quotes: [], answer_fragment: "" };
+  if (replyNote) onNote?.(replyNote);
   return ask(db, question, {
     ...base2,
     pin,
     readerFn,
-    synthFn: async () => file.reply,
+    synthFn: async () => reply,
     openThreads: false
   });
+}
+function shapeOf(v) {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "an array";
+  return `a ${typeof v}`;
+}
+function usableEvidence(x) {
+  if (!isRecord2(x)) return false;
+  return String(x["session_id"] ?? "").length > 0 && Number.isInteger(Number(x["seq"])) && typeof x["quote"] === "string" && x["quote"].length > 0;
+}
+function usableSentence(x) {
+  return isRecord2(x) && typeof x["text"] === "string" && x["text"].trim().length > 0;
+}
+var REPLY_EXIT = 2;
+function hostReply(abs, raw) {
+  const fix = 'answer its "prompt" in the shape of its "schema", then store that object as "reply"';
+  if (raw === void 0 || raw === null) {
+    throw new UserError(
+      `${abs} has no "reply" \u2014 it is a --synthesis-out recording that nobody has answered yet`,
+      fix,
+      REPLY_EXIT
+    );
+  }
+  let value = raw;
+  let note = "";
+  if (typeof raw === "string") {
+    const text = unfence(raw).trim();
+    if (text === "") {
+      throw new UserError(
+        `${abs}'s "reply" is an empty string, so there is no answer in it to filter \u2014 that is a file nobody has answered, not an archive with nothing in it`,
+        fix,
+        REPLY_EXIT
+      );
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new UserError(
+        `${abs}'s "reply" is a string and it is not JSON. potsherd will parse a JSON string for you, but this is prose, and prose carries no quote it can check`,
+        fix,
+        REPLY_EXIT
+      );
+    }
+    if (!isRecord2(parsed)) {
+      throw new UserError(
+        `${abs}'s "reply" is a JSON string containing ${shapeOf(parsed)}, and the shape "schema" asks for is an object`,
+        fix,
+        REPLY_EXIT
+      );
+    }
+    value = parsed;
+    note = 'the recorded "reply" was a JSON string; parsed it into the object the filter checks.';
+  }
+  if (!isRecord2(value)) {
+    throw new UserError(
+      `${abs}'s "reply" is ${shapeOf(value)}, and the shape "schema" asks for is an object`,
+      fix,
+      REPLY_EXIT
+    );
+  }
+  const ev = Array.isArray(value["evidence"]) ? value["evidence"] : null;
+  const ans = Array.isArray(value["answer"]) ? value["answer"] : null;
+  if (ev === null && ans === null) {
+    throw new UserError(
+      `${abs}'s "reply" is an object with neither an "evidence" array nor an "answer" array, so there is nothing in it for the citation filter to check`,
+      fix,
+      REPLY_EXIT
+    );
+  }
+  const n2 = (ev?.length ?? 0) + (ans?.length ?? 0);
+  if (n2 > 0 && !(ev ?? []).some(usableEvidence) && !(ans ?? []).some(usableSentence)) {
+    throw new UserError(
+      `${abs}'s "reply" holds ${ev?.length ?? 0} evidence ${(ev?.length ?? 0) === 1 ? "entry" : "entries"} and ${ans?.length ?? 0} ${(ans?.length ?? 0) === 1 ? "sentence" : "sentences"}, and not one of them is usable: evidence needs "session_id", an integer "seq" and a "quote"; a sentence needs "text"`,
+      fix,
+      REPLY_EXIT
+    );
+  }
+  return { reply: value, note };
+}
+function unfence(s) {
+  const m = /^\s*```[a-zA-Z0-9_-]*\r?\n([\s\S]*?)\r?\n?```\s*$/.exec(s);
+  return m ? m[1] ?? "" : s;
 }
 function readSynthesisFile(abs) {
   let raw;
@@ -29195,6 +29292,10 @@ function readSynthesisFile(abs) {
     prompt: typeof parsed["prompt"] === "string" ? parsed["prompt"] : "",
     sessions: Array.isArray(parsed["sessions"]) ? parsed["sessions"] : [],
     readers,
+    // Read back for completeness only. It is advice to the host agent, not an
+    // input to anything here, so a file written by an older build that has no
+    // `instruction` is read without complaint.
+    instruction: typeof parsed["instruction"] === "string" ? parsed["instruction"] : "",
     ...parsed["reply"] !== void 0 ? { reply: parsed["reply"] } : {}
   };
 }
