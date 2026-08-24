@@ -821,3 +821,122 @@ tag a worker makes appears in the orchestrator's checkout.**
 Against `4fd221e`, briefed with the five commits since round 4 named so it does not re-find closed
 work, with **eleven** burned control strings listed as forbidden, and with the gate stated as
 score-what-you-find. Rounds 1–4 scored 6, 7, 7, 7.
+
+---
+
+## round 5: 7 again, and this time the reason is a family with my name on it
+
+`VERIFICATION-5.md`, against `4fd221e`. Fifth verifier, authored nothing, invented both controls
+after freezing the corpus, made its one allowed change and reverted it.
+
+| row | v4 | **v5** | gate |
+|---|---:|---:|---|
+| **overall** | 7 | **7** | ≥ 8 · **FAIL** |
+| retrieval quality | 7 | **7** | ≥ 7 · PASS |
+| reliability of a default install | 8 | **8** | ≥ 8 · PASS |
+| **agent ergonomics** | 7 | **7** | ≥ 8 · **FAIL** |
+| human CLI ergonomics | 8 | **7** | — |
+| re-entry · concept · capture | 8 · 9 · 9 | **8 · 9 · 9** | — |
+
+**Every fix since `9ee2c6e` is real, and it checked them in both directions** — all four lock states
+for the warming fix; the fabrication deleted identically in object, JSON-string *and fenced* forms;
+the refusal firing before the index opens, proved with a nonexistent `--potsherd-dir`; the version
+test made to fail with a planted `v9.9.9` and to ignore a foreign non-ancestor `v1.4.2`, both tags
+deleted in the same command. Every baseline reproduces.
+
+**What blocks the gate is one family, three times, and it is the orchestrator's:**
+
+> **the fix landed at the MCP door and the CLI door still says the old thing.**
+
+I put that shape on the verifier's hunting list as item 9 because round 4 had found it three times.
+It found it three more times, in the fixes I had just merged.
+
+**C-1 ★★★★★.** `orderByLabel` — FIX-D, whose commit message is *"a model door whose first row is its
+best row"* — exists **only** in `packages/mcp/`. `core/recall.ts:2265` sorts by `summaryRank ||
+byLane`, and `byLane` is lane then **fused RRF score**; the confidence word is never a sort key on
+the CLI path.
+
+```
+potsherd find "git rebase conflict" · 6 sessions · strong · bm25
+  …  weak    0.0110      ← sessions[0]
+  …  strong  0.0100
+0 weak   cal 0.567     4 strong cal 0.925   ← the best-calibrated row, at index 4
+```
+
+The header says `strong` and the first row says `weak` — the screenshot test failing on the headline
+verb. For an agent it is worse: `sessions[0]` is what **every `jq -r '.sessions[0].resume'` example
+in `find --help`** takes.
+
+**C-2 ★★★★.** `find --json` reports `citable: true` for a title-only block while `potsherd_recall`
+reports `citable: false, citation: null` — **same thread id, same index, same run.** `find.ts:270`
+tests the lane only, and `laneOfHit('title') === 'evidence'` by design. So an agent reading the door
+`find --help` points at is told it may quote a **model-written session title** as evidence. That is
+F6, alive on the surface nobody re-checked.
+
+**And the damning measurement is the verifier's own §F**: two lines made the CLI agree with MCP, and
+**1,931 tests passed both before and after.** The only thing that went red was the vendored-bundle
+byte check. *Nothing tests that field in either direction.*
+
+**C-3 ★★★★** is the same disease on the human side: `ls` prints `1 session` where `doctor` and
+`stats` print `31`, **on three published screenshots**. `threaded: 30` is in `--json` and is correct
+— F4 working — but the footer accounts for the 197 subagents on the same line, silently drops the 30
+threaded siblings, and calls the remainder "sessions". This is the audit's own F2 complaint, closed
+for `vectors` and still open for session counts.
+
+**C-10 ★★ is the one to keep.** The version test's escape is a bare `return`, which vitest reports as
+**passed**, not skipped — and `actions/checkout@v4` fetches no tags by default, **so that is CI's
+state on every run.** The assertion that exists because *"at tag `v0.7.0` the binary printed
+`0.4.0`"* has been green without ever being evaluated, in the commit that added it. Rule 4: a
+benchmark that cannot fail.
+
+Also: `kill -9` leaves `.lock.embed` behind and `isStale` never expires a **live** pid, so a
+recycled pid makes every surface say `warming` forever with no verb to clear it — which lands
+squarely on C2's new honest sentence; `pnpm evals` and its per-query alarm are **never run by CI**;
+and the `10-stats.txt` normaliser hides a difference the guard's own capture sequence creates, with
+a pattern that would accept `2.1 GB`.
+
+## and the release blocker, found by a re-audit rather than by the verifier
+
+`docs/AGENT-AUDIT-2026-08-24.md` — the same agent that scored 1.1.0 at 4/10, re-running its own §7
+list against 1.2.0. Its rows: agent ergonomics **3 → 8**, re-entry **5 → 9**, retrieval **3 → 7**,
+human CLI **8 → 9**, overall **7**, held there by one thing:
+
+```
+$ potsherd index
+potsherd: no such module: vec0
+```
+
+**Confirmed independently by the orchestrator, read-only, against this machine's own 1.1.0-written
+database before any worker was briefed:**
+
+```
+$ sqlite3 ~/.potsherd/potsherd.db "select sql from sqlite_master where name='vec_exchanges';"
+CREATE VIRTUAL TABLE vec_exchanges USING vec0(id TEXT PRIMARY KEY, embedding FLOAT[384])
+$ sqlite3 ~/.potsherd/potsherd.db "select count(*) from vec_exchanges;"
+Error: in prepare, no such module: vec0
+```
+
+v1.2.0 correctly drops `sqlite-vec` as a search path; a database written by **the version live on
+npm today** holds three vec0 virtual tables, and every statement touching them throws. A clean
+install is fine — 17.9 s, 376 transcripts. It is strictly a 1.1.0 → 1.2.0 migration bug.
+
+**Every fix in the release is gated behind indexing**, so the auditor saw `show` still dating by the
+fork point and `graft` still returning 4 exchanges and **very nearly filed F4 as "did not move"**.
+Any existing user upgrading in place would get the 4/10 product and a changelog describing the 8/10
+one. Compounding it: `doctor` prints `run potsherd index`, which is the command that crashes.
+
+**And the project knew.** Migration 10's own comment: *"It declines — rather than throwing — on the
+one case it cannot handle: vec0 tables on a machine that has since lost the extension … `doctor`
+says so, and the next open retries."* `09 §13.9` — **a guard's stated limitation is an open item,
+not boilerplate** — is the rule this project has written down and broken more often than any other.
+
+## the wave
+
+| worker | items | owns |
+|---|---|---|
+| **FIX-H** | N1 the vec0 migration · C-4 the lock that never expires · C-6 | `db` `vec` `ingest` `doctor-line` `lock` |
+| **FIX-I** | C-1 ordering in core · C-2 `citable` parity · C-5 · C-7 | `core/recall` `cli/find` `cli/ask` `mcp/tools/recall` |
+| **FIX-J** | C-3 counts · C-8 normaliser · C-9 · C-10 · C-11 | `render/ls` `render/ask` `ci.yml` `terminal.test` `evals-gate.test` |
+
+FIX-I's brief carries the standing instruction this round earned: **one implementation, not two that
+agree.** The whole family exists because a rule was written twice and one copy was updated.
