@@ -633,3 +633,103 @@ Against `9ee2c6e`, briefed with the four commits since round 3 named so it does 
 already fixed, with the three burned control strings named as forbidden, and with the gate stated as
 score-what-you-find: **rounds 1–3 scored 6, 7, 7, and three FAILs are on the record rather than one
 moved criterion.**
+
+---
+
+## round 4: 7 again, and the guard added one commit ago is red on the commit that added it
+
+`VERIFICATION-4.md`, against `9ee2c6e`. Fourth verifier, authored nothing, invented both controls
+after freezing the corpus, changed one byte and reverted it.
+
+| row | audit | v3 | **v4** | gate |
+|---|---:|---:|---:|---|
+| **overall** | 4 | 7 | **7** | ≥ 8 · **FAIL** |
+| retrieval quality | 3 | 7 | **7** | ≥ 7 · PASS |
+| reliability of a default install | 2 | 8 | **8** | ≥ 8 · PASS |
+| **agent ergonomics** | 3 | 7 | **7** | ≥ 8 · **FAIL** |
+| re-entry | 5 | 8 | **8** | — |
+| human CLI ergonomics | 8 | 8 | **8** | — |
+| concept · archive capture | 9 · 9 | 9 · 9 | **9 · 9** | — |
+
+**All five commits since round 3 are real fixes, and four were verified in both directions** —
+`capabilityLine`'s three branches at 0 / 285 / fully-embedded vectors; FIX-D's content comparison
+red on a seeded byte and green on an mtime-only touch; FIX-E's signal path at the real MCP door
+with a model call in flight; both README-receipt CI steps. Every claimed baseline reproduces on a
+clone the verifier never edited. **F1, F3, F4, F6 and F7 all hold** — the cliff on two fresh
+controls at three vector states, the in-code citation refusal on both model paths, the thread as
+the unit dated by content, three disjoint tools.
+
+Seven new defects. Four at ★★★★, and they share a shape: **the agent-facing surface says something
+the code already knows is false.**
+
+**C1 — the screen guard FIX-E added is RED on `9ee2c6e`.** `10-stats.txt` publishes
+`database 2.1 MB`; this build prints `2.2 MB`. Not a step flake — `make-screens.sh` on a pristine
+clone changes the same line, and the screen has been stale since `2cd1be0`. **The guard worked on
+its first outing, on a screen nobody had looked at.** But the number it caught is not a property of
+the corpus: `stats.ts:361` is `statSync(potsherd.db).size` on a **WAL-mode** database, measured at
+**2,248,704 bytes** after one capture order and **2,260,992** after another — a three-page
+difference straddling the rounding boundary the screen prints. Pinning that digit is a flake
+generator. And **running the guard leaks a detached 46 MB-fetching embedder per invocation**; the
+verifier found five alive with `PPID 1`, and `make-screens.sh` leaks one too. Handed to FIX-E's
+round 2, which owns `ci.yml` and `docs/screens/**`.
+
+**C2 — "semantic search is warming" when nothing is warming, at both doors.** After `--no-embed`,
+or on any offline first run, with no worker alive and `<root>/models` never created, `doctor` is
+honest (`46.1 MB runtime not fetched yet`) and `find` and the MCP door say `warming (0 of 4,745
+embedded)`. `index` itself appends `— offline`; `find` drops the clause. **Nothing anywhere consults
+`<root>/.lock.embed`, which carries the holder's pid.** `warmingLine`'s own docstring says *"there
+is nothing for the reader to do; the work is already running"* — the claim that is false here. At
+the model door it lands in the same reply as *"the archive does not contain this"*: **the agent is
+told to wait for a half that will never run.** `vecStatus` exists so the three surfaces "cannot
+disagree in print the way audit F2 caught them doing" — the numbers agree and the *words* disagree,
+and the wrong one is the agent's.
+
+**C3 — a title-only thread is `citable: true`, carries a minted citation, and outranks the
+transcript.** One live recall: 18 of 28 hits `not-a-transcript`, the first transcript hit at index
+**18 of 28**, `weights.titles 1.5` against `exchanges_fts 1.0`, and 5 of 10 threads matched *only*
+on their title — every one `lane: "evidence"`. The block that mints the citation says exactly why it
+must not (*"a claim no transcript supports"*), but its refusal is keyed on `lane === 'routing'` and
+`ROUTING_KINDS` is `{'card'}`. `T10.7-REPORT §5` scoped titles out, justified as *"a title has never
+been citable"* — **which is not true of this build**: Claude Code's titles are model-written and
+`doctor` counts 80 `ai-title` records here. So this is **F6 reached through the other door** — a
+generated summary beating primary evidence — and **the human CLI prints the honest note on the
+identical query** while the model door prints a citation. `§B8` also requires a `--no-cards`;
+`potsherd_recall`'s `scope` has no cards control at all.
+
+**C4 — the model-free seam returns a false honest-empty when `reply` is a JSON string.** Which is
+what a model returns. Not rejected, not warned, not counted as dropped — reported as *"the readers
+found nothing that answers the question"*, with **`1 answered` on the next line contradicting it**.
+The identical file with `reply` as an object answers correctly and drops a planted fabrication.
+`filterHostAnswer` checks only `reply === undefined || null`. **This is the worst defect available
+to this phase**: the honest empty is what the whole release asks an agent to trust — the tool
+description says *TRUST ITS SILENCE* — and this is a capability failure wearing its clothes. The
+verifier hit it twice, from two directions, before reading the source.
+
+**C5 — `--synthesis-out` says "makes no model call" and makes six.** `ask.ts:204` already knows:
+`modelless = Boolean(readersOut || filterIn || (synthesisOut && readersIn))`. `--readers-out`'s
+identical clause is true. The documented-and-does-nothing class, inverted.
+
+**C6 — `want:"context"` can return zero windows, no hits and `readMore: null`.** The one matching
+exchange is longer than the 6,000-token ceiling, so `windowsFrom` `continue`s past it — and
+`readMore` is withheld in exactly the case where "read the thread" is the only useful thing to say.
+
+**C7 — smaller.** `"though 1 rows were withheld"` does not singularise. A capability failure prints
+under an emptiness headline (the same frame as C4). `potsherd_read`'s `seq` is per-session across a
+link, so `{from:118,to:121}` returns `118, 119, 1, 2` — the `cite` field switches session at the
+right row so nothing is mis-attributed, which is why this is the one item **deliberately deferred to
+phase 11** rather than fixed now.
+
+## the fix wave for round 4
+
+Three workers, disjoint deliverables, all off `4064c4e`:
+
+| worker | items | owns |
+|---|---|---|
+| **FIX-E round 2** | the two CI reds + C1 | `tests/llm.test.ts` `ci.yml` `docs/screens/**` |
+| **FIX-F** | C2 · C3 · C6 · C7 plural | `mcp/tools/recall.ts` `core/recall.ts` `core/vec.ts` `render/doctor-line.ts` |
+| **FIX-G** | C4 · C5 · C7 headline | `cli/commands/ask.ts` |
+
+Every brief carries the same two additions, both earned this round: **run the full suite under
+*both* sqlite drivers** — the phase gate names both and the orchestrator skipping the second is why
+CI is red — and **kill the background embedder by recorded pid**, because a default `index` starts
+one that nothing in the product stops.
