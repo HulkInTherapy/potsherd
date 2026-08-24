@@ -509,3 +509,335 @@ is a product decision and it is not mine to make here.
    reachable from here. It is rung 3 and only used "if it happens to be
    there", but a machine that has it has a model path this branch did not
    touch. Worth its own item.
+
+---
+
+# ROUND 2 — three CI failures, all of them real, none of them reproducible here without help
+
+`work/FIX-E2`, cut from `origin/main` at `40d48a9`, then merged with `4064c4e`
+(the fourth verifier's report). Three items: the fan-out test's baseline, the
+screens' timezone, and `VERIFICATION-4 §C1` — the guard's own red on a pristine
+clone.
+
+**A discrepancy first, because it explains one of the three.** The merge at
+`9ee2c6e` took `8f50152`, which is FIX-E's second-to-last commit. `8b4fbf6` —
+"the screens guard does not start an embedder nothing owns", which put
+`POTSHERD_OFFLINE=1` on the guard's captures — **is not on `main`**
+(`git merge-base --is-ancestor 8b4fbf6 HEAD` → no). That is why the fourth
+verifier found five unowned embedders each fetching 46 MB: the step it ran had
+no such flag. Round 2 lands that change again, and goes further than it did.
+
+## R0. THE CLAIMS, CHECKED BEFORE FIXING
+
+| claim | verdict | the command, and what it printed |
+|---|---|---|
+| **F1** — `process.listenerCount` is a shared, moving baseline | **confirmed, and it is the whole defect** | it is process-global by definition; the CI failure reads `expected [ +0, +0 ] to deeply equal [ 2, 2 ]`, i.e. baseline `[1,1]` at sample time and `[0,0]` at assert time — **below** where it started, which no behaviour of `llm.ts` can produce. Reproduced deliberately: a foreign `SIGINT` listener removed mid-test makes the old assertion red on this machine every time |
+| **F1** — it is not the sampling point | **confirmed** | the old loop exited on `count !== before[0]`, so somebody else's *removal* satisfied it too. Widening the sleep cannot fix an assertion whose premise is its environment (`09 §7.2` / rule 7) |
+| **F2** — the screens are timezone-dependent | **confirmed** | the step, ambient `TZ=UTC`, on `9ee2c6e`'s screens: `DRIFTED 08-ls.txt`, `11-show.txt`, `12-ls-ghosts.txt`. `11-show` is the clearest — `21 aug 09:14` → `21 aug 03:44`, exactly UTC+05:30 |
+| **F2** — the demo corpus is *not* the machine-dependent part | **confirmed** | `TZ=UTC` and `TZ=Asia/Kolkata` generations of the corpus are byte-identical (`diff -rq`, empty). `ANCHOR` is a literal `2026-08-21T14:00:00.000Z`; only the rendering (`core/format.ts`, `getDate`/`getMonth`/`getHours`) is local |
+| **F2** — anything else machine-dependent in the same way | **checked: no locale, no relative dates** | month names are a hardcoded lowercase English array (`format.ts:12`); `toLocaleString('en-US')` is pinned at all three call sites; nothing renders "yesterday" or a week boundary. What remains is named in the step's comment |
+| **C1** — `10-stats.txt` is stale, and the number is not a property of the corpus | **confirmed, and worse than a rounding wobble** | `statSync` on a WAL-mode store answers *how much has been checkpointed*. With one writer holding the WAL: `statSync 4,096` for a database holding `442,368` bytes. The published 2.1/2.2 MB flip is the mild version of a number that can be wrong by a factor of a hundred |
+| **C1(b)** — the guard leaks an embedder per invocation | **confirmed, and quantified** | `index --full` with no flags starts one; with `POTSHERD_OFFLINE=1` it still starts one that dies inside a second; with `--no-embed` none is started at all. The verifier's five were long-lived because the step they ran had neither flag |
+
+## R1. WHAT CHANGED, AND WHY THAT SHAPE
+
+### F1 — `packages/core/src/llm.ts` + `tests/llm.test.ts`: identity, not counting
+
+`process.listenerCount(sig)` is a single number for the whole process, and
+`llm.ts` is not the only thing that puts a `SIGINT` listener on it — the MCP
+server installs its own shutdown handler, and under vitest a second test file
+in the same worker installs and removes others. A test that reads that number
+is asserting about its environment.
+
+So the handlers now carry a mark and the module answers a different question:
+
+```ts
+const OUR_SIGNAL_HANDLER = Symbol('potsherd backend signal handler');
+
+export function backendSignalListeners(sig: FatalSignal): number {
+  return process.listeners(sig)
+    .filter((fn) => (fn as MarkedHandler)[OUR_SIGNAL_HANDLER] === true).length;
+}
+```
+
+Three things about that, each deliberate:
+
+- **It reads `process.listeners`, not the module's own map.** The assertion
+  stays about what `process` is actually holding — a bookkeeping map that had
+  drifted from reality would still be caught. Asking the map would have been
+  the module marking its own homework.
+- **A module-local `Symbol()`, never `Symbol.for()`.** vitest can hold two
+  instances of this module in one process; each instance is answerable for its
+  own handlers and no one else's, and a global symbol would have made the two
+  interfere in exactly the way this fix exists to stop.
+- **There is no baseline left.** The expected values are `[1, 1]` while
+  backends are live and `[0, 0]` afterwards, absolutely — not relative to
+  anything sampled at runtime.
+
+The test changed to match. Both of its waits are for a **state** rather than a
+duration: that our handler has appeared, and — via a marker file each stub
+appends to — that all three backends have actually started, so "one handler
+however many are live" is asserted at a moment when three demonstrably are.
+The precondition `[0,0]` is polled for rather than assumed, because an earlier
+test's child may still be a beat from its `exit`.
+
+And a **fourth test plants the CI event**: a foreign listener is removed, and
+another arrives, while a backend of ours is live. Against the old baseline
+assertion that is red by construction; against the mark it cannot move.
+
+### F2 — `scripts/make-screens.sh` and the guard: the zone is pinned
+
+`export TZ=UTC` at the top of the script, next to where `HOME` is moved, and
+`TZ=UTC` in the guard's `run()`. The reason is written into both, at length,
+because the next person to regenerate these on a laptop in another country
+will otherwise produce a day-wide diff and "fix" it by deleting the line.
+
+**UTC and not this machine's zone**, which is the only judgement call here: a
+published artefact in a public repository should not encode which country its
+last regenerator was sitting in, and every CI runner is already UTC, so the
+guard reproduces what is committed with no per-runner arrangement. The cost is
+that `08-ls.txt`, `11-show.txt` and `12-ls-ghosts.txt` are regenerated (the
+same rows CI rejected, moving the other way), and that the three model screens
+— `14`, `15`, `17` — still carry the zone they were last captured in, because
+regenerating them needs a backend this machine does not have. `17-ls-cards.txt`
+is an `ls`, so it has a date column and is the one that will move when someone
+with a backend next runs the script. That is written into §R4.
+
+### C1 — `packages/core/src/stats.ts`: a size measured of the database
+
+`dbBytes` was `fs.statSync(<potsherd.db>).size`. The store is in WAL mode, so
+that answers **how much of this database has been checkpointed into the main
+file at this instant** — a fact about sqlite's housekeeping and about whatever
+else has the store open. It is now `page_count * page_size`.
+
+The verifier found the mild version: the same demo corpus printing `2.1 MB` or
+`2.2 MB` depending on what had run before `stats`. The severe version is two
+lines of a measurement:
+
+```
+writer still open    statSync   4,096   wal 453,232   page_count*page_size 442,368
+after a checkpoint   statSync 442,368   wal       0   page_count*page_size 442,368
+```
+
+`stats` would have told a user their archive was **4.1 kB** while it held
+442 kB. `plans/06` says a number a user reads must be measured; this one was
+measured, of the wrong thing.
+
+Why this and not the other two options. **Checkpointing before the read** makes
+the file size true, but it makes `stats` — a read verb — write to a store
+another process may be reading, and it can block. **Normalising the field in
+the guard** is the one to be most suspicious of, and it fails its own test:
+what a normaliser may hide is a fact about the *machine* (the clock, the
+runner's OS, how many milliseconds something took), never a fact about the
+build, and "how big is the archive" is the latter. `page_count * page_size` is
+a read, needs no checkpoint, is stable whatever else has the store open, and is
+the same number on both sqlite drivers. **The published screen needed no
+regeneration and the guard needs no exception** — `10-stats.txt` is unchanged
+in this branch and green.
+
+### C1(b) — the guard stops producing the lane it cannot stop
+
+`run index --full --no-embed`, plus `POTSHERD_OFFLINE=1` on every capture.
+Measured, all three states, same corpus, same everything else:
+
+```
+  index --full <no flags>    t+ 0s  workers alive with this root: 1     (long-lived: fetches 46 MB)
+  index --full <no flags>    t+ 1s  workers alive with this root: 0     (with POTSHERD_OFFLINE=1)
+  index --full --no-embed    t+ 0s  workers alive with this root: 0
+```
+
+`POTSHERD_OFFLINE=1` alone leaves the *decision to spawn* untouched — that was
+FIX-E §4's finding and it is why the flag is not enough on its own: a process
+is still started, it just gives up quickly. `--no-embed` is what stops one
+being started. Neither flag changes a screen this step compares; checked with
+and without.
+
+`make-screens.sh` cannot have either. `--no-embed` deletes the
+`semantic search: warming … — fetching 46.1 MB, once` line that `07-index.txt`
+exists to publish, and `POTSHERD_OFFLINE=1` rewrites it to `— offline`. So one
+run of the script starts one embedder that nothing stops, and the script now
+says so where the capture is, with the `ps` incantation that finds it. A
+documented leak beats a screen that lies about the product.
+
+## R2. THE ARTIFACTS — one per failure
+
+### F1 — the old premise red on the planted event, the mark green
+
+The fourth test plants the CI event: a foreign `SIGINT`/`SIGTERM` listener is
+removed while one of ours is installed. With the **old** premise put back into
+that test — a sampled `process.listenerCount` baseline and `baseline + 1` —
+this machine reproduces CI's failure on demand:
+
+```
+ FAIL  tests/llm.test.ts > a killed backend takes what it started with it
+       > is not disturbed by listeners that are not ours arriving and leaving
+AssertionError: expected [ 1, 1 ] to deeply equal [ 2, 2 ]
+```
+
+which is the same shape CI printed on four jobs (`expected [ +0, +0 ] to deeply
+equal [ 2, 2 ]`; there the foreign listener left without one of ours ever being
+counted). With the mark, the same planted event asserts `[1, 1]` and passes.
+
+### F1 — red on the unfixed code, in the **full suite** under `POTSHERD_SQLITE=node`
+
+Not in isolation — isolation is what passed locally while CI failed. The fix
+undone by deleting exactly two lines from `llm.ts` (`detached: true` and
+`trackBackend(child)`), everything else as committed:
+
+```
+ FAIL  … > on the timeout path: the grandchild is dead, not reparented to init
+AssertionError: expected [ 89467, 89472 ] to deeply equal []
+ FAIL  … > on the abort path: the same, when the caller cancels
+AssertionError: expected [ 89527 ] to deeply equal []
+ FAIL  … > installs one signal handler however many backends are live, and takes it back off
+AssertionError: expected [ +0, +0 ] to deeply equal [ 1, 1 ]
+ FAIL  … > is not disturbed by listeners that are not ours arriving and leaving
+AssertionError: expected [ +0, +0 ] to deeply equal [ 1, 1 ]
+
+ Test Files  1 failed | 52 passed (53)
+      Tests  4 failed | 1890 passed (1894)
+```
+
+Four red, 1,890 green, nothing else disturbed. Restored, rebuilt, re-vendored.
+
+### F2 — the guard under three ambient zones, and red on a seeded drift in each
+
+The step extracted verbatim from `.github/workflows/ci.yml` and run with the
+shell's `TZ` set to three different things. The step pins `TZ=UTC` internally,
+so all three are the same run:
+
+```
+### ambient TZ=UTC                → ten published screens match what this build prints
+### ambient TZ=Asia/Kolkata       → ten published screens match what this build prints
+### ambient TZ=Pacific/Kiritimati → ten published screens match what this build prints
+--- embedders started by three guard runs: (none)
+```
+
+Seeded with `docs/screens/08-ls.txt` **exactly as `9ee2c6e` committed it** — the
+copy CI itself rejected — it is red under both, with the identical diff, which
+is the point: the outcome no longer depends on where the machine is.
+
+```
+  DRIFTED   docs/screens/08-ls.txt  <-  potsherd ls
+-  17 jul  claude   portfolio-site  add metrics to the event replayer so…  ghost
+-  16 jul  claude   infant-vision   review the dead-letter queue for rac…  ghost
++  16 jul  claude   portfolio-site  add metrics to the event replayer so…  ghost
++  15 jul  claude   infant-vision   review the dead-letter queue for rac…  ghost
+…
+ambient TZ=UTC           EXIT=1
+ambient TZ=Asia/Kolkata  EXIT=1
+```
+
+### C1 — a pristine worktree, nothing edited, including `10-stats.txt`
+
+The check that failed for the fourth verifier. A detached worktree at this
+branch's HEAD, `pnpm install --frozen-lockfile` and `pnpm build` in it, the
+step extracted from **that tree's** `ci.yml`, ambient zone deliberately not the
+pinned one:
+
+```
+### a pristine worktree at 83e1c6a, nothing edited
+### git status --porcelain lines: 0
+### pnpm install --frozen-lockfile && pnpm build, both exit 0
+### the step extracted verbatim from that tree's ci.yml, ambient TZ=Asia/Kolkata
+  ok        docs/screens/01-audit.txt
+  ok        docs/screens/06-audit-sweep.txt
+  ok        docs/screens/02-rescue.txt
+  ok        docs/screens/03-audit-after.txt
+  ok        docs/screens/08-ls.txt
+  ok        docs/screens/09-find.txt
+  ok        docs/screens/10-stats.txt
+  ok        docs/screens/11-show.txt
+  ok        docs/screens/12-ls-ghosts.txt
+  ok        docs/screens/13-find-redacted.txt
+ten published screens match what this build prints
+EXIT=0
+```
+
+And `make-screens.sh` in that same pristine worktree, which is what proved the
+staleness in the first place, now reproduces every screen:
+
+```
+SCREENS EXIT=0
+### bash scripts/make-screens.sh in the pristine worktree, ambient TZ=Asia/Kolkata
+### git status --porcelain docs/screens  ->
+ M docs/screens/07-index.txt
+ M docs/screens/09-find.txt
+ M docs/screens/13-find-redacted.txt
+### (only millisecond timings; no content change)
+ docs/screens/07-index.txt         | 2 +-
+ docs/screens/09-find.txt          | 2 +-
+ docs/screens/13-find-redacted.txt | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+-  full index                 374ms   228 parsed · 0 unchanged · 546 KB
++  full index                 389ms   228 parsed · 0 unchanged · 546 KB
+```
+
+Three files, three millisecond timings, no content change — and `10-stats.txt`
+is not among them.
+
+### C1 — the two ways to answer "how big is this database"
+
+One writer holding the WAL, which is what a leaked background embedder does to
+the store the guard then runs `stats` against:
+
+```
+writer still open   { statSync:   4096, wal: 453232, pages: 442368 }
+after a checkpoint  { statSync: 442368, wal:      0, pages: 442368 }
+statSync moved by 438272 bytes;  page_count*page_size moved by 0
+```
+
+## R3. THE NUMBERS
+
+| | |
+|---|---|
+| files changed vs `40d48a9` | **8** — `llm.ts`, `stats.ts`, `llm.test.ts`, `ci.yml`, `make-screens.sh`, 3 screens (`08`, `11`, `12`), plus 2 vendored bundles |
+| `pnpm test` | `Test Files 53 passed (53)` / **`Tests 1894 passed (1894)`**, exit 0 — 1,893 + the new foreign-listener test, 0 regressions |
+| **`POTSHERD_SQLITE=node pnpm test`** | `Test Files 53 passed (53)` / **`Tests 1894 passed (1894)`**, exit 0 — **the driver that was red, run as a full suite** |
+| red-first, under `POTSHERD_SQLITE=node`, full suite | `4 failed | 1890 passed`, on a two-line removal |
+| `pnpm typecheck` | **4 of 4** `Done`, exit 0 |
+| `python3 scripts/check-privacy.py` | **EXIT CODE 0** read from `$?`, `--selftest` exit 0 |
+| `pnpm evals` | **exit 0** — `hybrid (auto) recall@5 51/60, recall@1 27/60`, `PASS`, unchanged |
+| `pnpm build && pnpm vendor` | run; `git status plugins/` **clean** (the round-2 source changes are tree-shaken out of both bundles) |
+| guard, ambient `TZ` | green under `UTC`, `Asia/Kolkata`, `Pacific/Kiritimati`; **red under all of them** on the seeded drift |
+| guard, pristine worktree | **green, all ten**, including `10-stats.txt` |
+| `make-screens.sh`, pristine worktree | 3 files, 3 millisecond timings, **no content change** |
+| embedders started per guard run | **1 → 0** (`--no-embed`); per `make-screens.sh` run, still **1**, documented |
+| `MaxListenersExceededWarning` | 2 on each driver, the same two `[Socket]` ones, neither ours |
+| disk | 4.5 GiB free before, 4.5 GiB after; the pristine worktree and every scratch tree removed |
+
+Evidence directory, outside the repository, absolute path handed over directly:
+`…/fix-e2` — the two green suites and the red one, the three-zone guard runs,
+the seeded drifts, the pristine-worktree run and its `make-screens.sh`, the WAL
+demonstration, and the leak probe. No real session id, project name, home path
+or transcript line is in it or in this file.
+
+## R4. WHAT ROUND 2 COULD NOT DO
+
+1. **Regenerate the three model screens under the pinned zone.** `14-ask`,
+   `15-graft` and `17-ls-cards` need a model backend; `make-screens.sh` keeps
+   the committed copies without one, which is what it did here. `17-ls-cards`
+   is an `ls` and therefore has a date column, so it still carries UTC+05:30
+   dates while `08-ls` now carries UTC ones — two published screens of the same
+   verb, a day apart on some rows. Nothing in CI compares either. The next run
+   with a backend fixes it for free; until then it is an open item, and it is
+   the one thing in this branch I would not want a reader to discover for
+   themselves.
+2. **Re-splice the README's quoted screens.** `README.md` quotes `ls`, `show`
+   and `find` blocks that were already stale before this branch — they say
+   `15 of 330` where the screens say `15 of 300`, so they come from an older
+   corpus generation — and the timezone change moves the same rows in them that
+   it moved in the screens. Only the privacy receipt is diffed against a screen
+   by CI. Left alone deliberately: `README.md` is not on this branch's list and
+   fixing half a staleness is worse than naming it.
+3. **Reproduce either CI failure on this machine without staging it.** F1 needed
+   a foreign listener planted by hand (which is now a committed test); F2 needed
+   an ambient `TZ`. Neither reproduces from a plain local run, which is exactly
+   why both survived to CI, and is the reason the fourth verifier's "run it in a
+   pristine clone" is the check that found C1.
+4. **Test on ubuntu or on node 22.** Everything here is macOS on node 24. The
+   two failures were ubuntu-only and macos-only respectively, which is a fair
+   warning about what one platform can prove.
+5. **Close the embedder lane.** Still not mine, still unfixed, and the guard is
+   no longer a producer of it. `make-screens.sh` still is, once per run, and now
+   documents it. There is still no verb that stops one.
