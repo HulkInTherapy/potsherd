@@ -314,6 +314,29 @@ describe('recall: the fusion — T3.1', () => {
     expect(heavy.weights.exchanges_fts).toBeCloseTo(4 * scale, 12);
   });
 
+  // `plans/09` rule 3: a constant encoding a measured trade-off needs a test
+  // that fails when it moves. The semantic lane's weight had no such test —
+  // `1.5` was `plans/03`'s stopping rule and nothing in the suite noticed it —
+  // and FIX-K moved it, so it gets one now.
+  it('pins the semantic lane at the weight FIX-K measured, and keeps the three equal', () => {
+    // 8 is the smallest weight on both plateaux of FIX-K's sweep: recall@5
+    // plateaus at 57/60 for every w >= 4, recall@1 at 37-38/60 for every
+    // w >= 8. 12 scores one query more at recall@1 and is deliberately not
+    // shipped — both its neighbours are below it, and a one-query maximum on
+    // 60 queries is noise. If this number moves, the sweep in
+    // `phases/phase-10/FIX-K-REPORT.md` has to be re-run and re-argued; it is
+    // not a value anybody may nudge to move a score.
+    expect(WEIGHTS.vec_exchanges).toBe(8);
+    // Equal to each other, deliberately: the same model over the same kind of
+    // text, and the only configuration FIX-K measured. Leaving `vec_cards`
+    // behind at 1.5 cost three queries at recall@5.
+    expect(WEIGHTS.vec_ghost_prompts).toBe(WEIGHTS.vec_exchanges);
+    expect(WEIGHTS.vec_cards).toBe(WEIGHTS.vec_exchanges);
+    // And the lane really is the heavier one now — the sentence the sweep is
+    // about. `titles` is the strongest lexical weight in the table.
+    expect(WEIGHTS.vec_exchanges).toBeGreaterThan(WEIGHTS.titles);
+  });
+
   it('takes k and the contributions move with it', async () => {
     const r = await recall(db, 'pgbouncer prepared statements', {}, { vectors: false, k: 5 });
     expect(r.k).toBe(5);
