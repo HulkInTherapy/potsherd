@@ -1,12 +1,16 @@
-import * as core from '@potsherd/core';
-import { resolveSession, showSession, type db as dbNs } from '@potsherd/core';
+import {
+  resolveThread,
+  showSession,
+  type ThreadResolution,
+  type db as dbNs,
+} from '@potsherd/core';
 
 import { UserError } from '../../../cli/src/output.js';
 
 type Db = dbNs.Db;
 
 /**
- * T10.6 — the thread, resolved, against a core that is still growing one.
+ * T10.6 — the thread, resolved against the core that now models one.
  *
  * Audit F4 and plan §B5: *"Claude Code sessions form chains — fork, resume,
  * compact — and potsherd treats each link as an independent document with no
@@ -15,52 +19,39 @@ type Db = dbNs.Db;
  * working in three days ago indexes as **4 exchanges**, and its other 1,660
  * records live under a different id with no link between them.
  *
- * T10.3 is building that chain at index time. This package cannot wait for it
- * and must not re-derive it — a second uuid-overlap threshold living at the MCP
- * surface would be a second answer to "which sessions are the same work", and
- * `read` and `ls` disagreeing about that is exactly the class of defect F4 is.
+ * ## What this file used to do, and why it was the worst defect of the phase
  *
- * So: **probe once, fall back honestly.** {@link CORE_THREAD_RESOLVER} names
- * the single core export this module wants. When it is there, it decides.
- * When it is not, a thread is the one session named, `via` says
- * `session-only`, and `note` says so in words that reach the model — because a
- * tool that silently returns one link of a chain and calls it a thread is the
- * v1.1.0 behaviour with a new label on it.
- */
-
-/**
- * The core export this module looks for.
+ * T10.3 built the chain at index time and this module could not wait for it,
+ * so it **probed**: it read `core.resolveThread` at runtime, and when the name
+ * was absent it fell back to a thread of exactly the session it was handed,
+ * labelled `via: "session-only"`, with a note explaining the gap *to the model*.
  *
- * The signature it is called with, verbatim, is in `T10.6-REPORT.md` under
- * "core signatures I owe you". Changing this constant is the whole integration.
+ * The name was never written. The probe therefore never once succeeded, and
+ * two separate alarms failed to ring: the fallback was silent by design, and
+ * `threadsAvailable()` — the function whose whole job was to report the
+ * capability missing — had no callers. So `potsherd_read`, one of the
+ * archaeologist's two tools and the stated replacement for filesystem `Read`,
+ * reported the audit's own F4 fixture as its head's handful of exchanges while
+ * `potsherd_graft` on the same id in the same second reported the whole chain.
+ *
+ * The probe and the fallback are gone. {@link resolveThread} is a normal
+ * import from the core barrel: if it ever disappears again the build fails,
+ * loudly, instead of the model being told in prose that lineage is unmodelled.
+ * `via` is retained on the reply and is now always `core` — it is what tells a
+ * reader that the chain came from the index rather than from the caller's
+ * reference, and `tests/threads.test.ts` pins it, so a reintroduced fallback
+ * cannot pass the suite quietly.
+ *
+ * No lineage is re-derived here. A second uuid-overlap threshold living at the
+ * MCP surface would be a second answer to "which sessions are the same work",
+ * and `read` and `ls` disagreeing about that is exactly the class of defect F4
+ * is.
  */
-export const CORE_THREAD_RESOLVER = 'resolveThread';
 
 /** The field a `recall` row is read for its thread id. See {@link threadIdOf}. */
 export const THREAD_ID_FIELD = 'threadId';
 
-export interface CoreThread {
-  threadId: string;
-  /** Chain order, oldest link first. */
-  sessionIds: string[];
-  startedAt?: string | null;
-  endedAt?: string | null;
-  exchanges?: number;
-}
-
-type CoreThreadResolver = (db: Db, ref: string) => CoreThread | null;
-
-function coreResolver(): CoreThreadResolver | null {
-  const fn = (core as unknown as Record<string, unknown>)[CORE_THREAD_RESOLVER];
-  return typeof fn === 'function' ? (fn as CoreThreadResolver) : null;
-}
-
-/** True when this build of core models threads at all. One place asks. */
-export function threadsAvailable(): boolean {
-  return coreResolver() !== null;
-}
-
-/** The thread id a core row carries, or null when this build carries none. */
+/** The thread id a core row carries, or null when the row carries none. */
 export function threadIdOf(row: unknown): string | null {
   if (!row || typeof row !== 'object') return null;
   const v = (row as Record<string, unknown>)[THREAD_ID_FIELD];
@@ -80,14 +71,17 @@ export interface ThreadLink {
 }
 
 export interface ResolvedThread {
-  /** The id the thread is addressed by. The link the caller named, when core has no chain. */
+  /** The root of the chain, whichever member the caller named. */
   threadId: string;
   links: ThreadLink[];
   /** Exchanges across every link. */
   total: number;
-  /** `core` when core resolved the chain; `session-only` when it could not. */
-  via: 'core' | 'session-only';
-  /** One line, printable, when `via` is not `core`. */
+  /**
+   * How the chain was established. `core` — the only value — means the index's
+   * derived lineage, never the caller's reference standing in for a chain.
+   */
+  via: 'core';
+  /** Reserved for a caveat this path no longer has. Always null. */
   note: string | null;
 }
 
@@ -108,40 +102,24 @@ export function resolveThreadRef(db: Db, ref: string, verb = 'read'): ResolvedTh
     );
   }
 
-  const fn = coreResolver();
-  let ids: string[] | null = null;
-  let threadId = '';
-  let via: ResolvedThread['via'] = 'session-only';
-
-  if (fn) {
-    const t = fn(db, needle);
-    if (t && t.sessionIds.length > 0) {
-      ids = t.sessionIds;
-      threadId = t.threadId;
-      via = 'core';
-    }
+  const thread: ThreadResolution | null = resolveThread(db, needle);
+  if (!thread) {
+    throw new UserError(
+      `no thread in the index starts with "${needle}"`,
+      'potsherd_recall {"query":"<what you are looking for>"}    # the ids come from there',
+    );
   }
-
-  if (!ids) {
-    const found = resolveSession(db, needle);
-    if (!found) {
-      throw new UserError(
-        `no thread in the index starts with "${needle}"`,
-        'potsherd_recall {"query":"<what you are looking for>"}    # the ids come from there',
-      );
-    }
-    if (found.ambiguous) {
-      throw new UserError(
-        `"${needle}" matches ${found.ambiguous.length} threads: ${found.ambiguous
-          .slice(0, 5)
-          .map((c) => c.id)
-          .join(', ')}`,
-        `potsherd_read {"thread":"${found.ambiguous[0]!.id}"}`,
-      );
-    }
-    ids = [found.id];
-    threadId = found.id;
+  if (thread.ambiguous) {
+    throw new UserError(
+      `"${needle}" matches ${thread.ambiguous.length} threads: ${thread.ambiguous
+        .slice(0, 5)
+        .map((c) => c.id)
+        .join(', ')}`,
+      `potsherd_read {"thread":"${thread.ambiguous[0]!.id}"}`,
+    );
   }
+  const ids = thread.sessionIds;
+  const threadId = thread.threadId;
 
   const links: ThreadLink[] = [];
   let offset = 1;
@@ -172,11 +150,10 @@ export function resolveThreadRef(db: Db, ref: string, verb = 'read'): ResolvedTh
     threadId,
     links,
     total: links.reduce((n, l) => n + l.total, 0),
-    via,
-    note:
-      via === 'core'
-        ? null
-        : 'this build of potsherd does not model fork/resume chains yet, so this thread is the ' +
-          'one session you named. If the work continued under another id, it is not in this reply.',
+    // Always `core`: the chain is read from `session_threads`, derived at index
+    // time from the harness's own record identity. There is no other path to
+    // this value any more, and a test fails if one reappears.
+    via: 'core',
+    note: null,
   };
 }
