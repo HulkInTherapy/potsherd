@@ -286,6 +286,19 @@ Deferred on purpose, because they collide with a live worker:
 empty. v1.2.0 publishes through the provenance workflow, which needs it. Asked meghavi. Everything
 up to the tag proceeds without it.
 
+> **CORRECTED, same day, and the correction is the interesting part.** There is no `NPM_TOKEN` and
+> there must never be one. meghavi configured npm **trusted publishing** — `potsherd` → Trusted
+> Publisher → GitHub Actions / `HulkInTherapy/potsherd` / `publish.yml`, allowed action `npm publish`
+> only — so the runner authenticates with the OIDC id-token it already requests for `--provenance`,
+> and an empty `NODE_AUTH_TOKEN` would be *worse* than none because npm would try to use it.
+> `gh secret list` returning empty is the **desired** state, and this paragraph read it as a blocker
+> because it was looking for the thing the old plan named rather than for the thing the workflow
+> does. `.github/workflows/publish.yml` has said so in its own header since `03fbba0`, and its
+> `workflow_dispatch` dry run passed every step on that commit (run 32675772351). Logged in
+> `plans/04` on 24 aug; `plans/08 §0` already carried the correct state while this file did not.
+> **The rule it belongs to is `09 §10.1` inverted: verify a prerequisite is still required before
+> waiting on it.**
+
 
 ---
 
