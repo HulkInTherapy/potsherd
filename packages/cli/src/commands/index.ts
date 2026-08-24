@@ -474,8 +474,22 @@ function warmingSentences(vec: VecStatus | undefined, spawned: boolean): string[
   return [`${head} — ${long}`, `${head} — ${short}`, head];
 }
 
+/**
+ * The per-harness note, in three states rather than two — FIX-B D5.
+ *
+ * `not installed` and `installed, has written nothing yet` are different facts
+ * about a machine, and the receipt used to print the first when the second was
+ * true: `present` tested the transcript directory, which for gemini and copilot
+ * is a subdirectory of the harness's own. `doctor` said `empty … installed` on
+ * the same machine in the same minute. `present` is now `paths.harnessInstalled`,
+ * the same disjunction the adapters answer `doctor` with, and the wording here
+ * keeps the distinction that predicate makes.
+ */
 function harnessNote(h: HarnessReport, sep = ' · '): string {
   if (!h.present && h.discovered === 0) return `not installed — ${paths.tildify(h.sourceDir)}`;
+  if (h.discovered === 0 && h.sessions === 0) {
+    return `installed${sep}no transcripts in ${paths.tildify(h.sourceDir)}`;
+  }
   if (h.discovered === 0) return `no transcripts in ${paths.tildify(h.sourceDir)}`;
   const parts: string[] = [];
   const top = h.sessions - h.sidechains;

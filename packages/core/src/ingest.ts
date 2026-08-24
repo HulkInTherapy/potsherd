@@ -44,7 +44,7 @@ import {
   cutToCodePoints,
   firstSubstantivePrompt,
 } from './rescue.js';
-import { modelsDir, potsherdDir } from './paths.js';
+import { harnessInstalled, modelsDir, potsherdDir } from './paths.js';
 import { readJsonlLines, parseJsonLine } from './parser/jsonl.js';
 import { isRecord } from './parser/content.js';
 import { LINEAGE_HARNESSES, deriveThreads, redateFromContent, type ThreadReport } from './threads.js';
@@ -863,7 +863,15 @@ async function indexHarness(
     harness: spec.harness,
     displayName: spec.displayName,
     sourceDir: spec.sourceDir,
-    present: fs.existsSync(spec.sourceDir),
+    // FIX-B D5. This used to be `fs.existsSync(spec.sourceDir)` alone, which
+    // is the transcript directory. For gemini and copilot that is a
+    // subdirectory of the harness's own (`~/.gemini/tmp`, `~/.copilot/
+    // session-state`), so a CLI that is installed and has written nothing yet
+    // came out `present: false` and the receipt printed the words
+    // `not installed` — about a harness `doctor` reported installed on the
+    // same machine, in the same minute. One predicate now, in `paths.ts`, and
+    // it is the same disjunction the adapters answer `doctor` with.
+    present: harnessInstalled(spec.harness, options.claudeDir ? { claudeDir: options.claudeDir } : {}),
     discovered: 0,
     parsed: 0,
     skipped: 0,

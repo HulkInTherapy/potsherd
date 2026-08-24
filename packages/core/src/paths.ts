@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -200,6 +201,61 @@ export function harnessSourceDirs(overrides: { claudeDir?: string } = {}): Harne
     { harness: 'opencode', dir: opencodeDir(), env: 'POTSHERD_OPENCODE_DIR' },
     { harness: 'copilot', dir: copilotSessionStateDir(), env: 'POTSHERD_COPILOT_DIR' },
   ];
+}
+
+/**
+ * The harness's **own** directory, as opposed to the directory its transcripts
+ * land in.
+ *
+ * For four of the seven these are the same path; for gemini and copilot they
+ * are not (`~/.gemini` against `~/.gemini/tmp`, `~/.copilot` against
+ * `~/.copilot/session-state`), and that gap is the whole of FIX-B D5. A CLI
+ * that has been installed and never used has the first and not the second.
+ */
+export function harnessRootDirs(overrides: { claudeDir?: string } = {}): HarnessSourceDir[] {
+  return [
+    { harness: 'claude', dir: claudeDir(overrides.claudeDir), env: 'CLAUDE_CONFIG_DIR' },
+    { harness: 'codex', dir: codexDir(), env: 'CODEX_HOME' },
+    { harness: 'cursor', dir: cursorDir(), env: 'POTSHERD_CURSOR_DIR' },
+    { harness: 'pi', dir: piDir(), env: 'POTSHERD_PI_DIR' },
+    { harness: 'gemini', dir: geminiDir(), env: 'POTSHERD_GEMINI_DIR' },
+    { harness: 'opencode', dir: opencodeDir(), env: 'POTSHERD_OPENCODE_DIR' },
+    { harness: 'copilot', dir: copilotDir(), env: 'POTSHERD_COPILOT_DIR' },
+  ];
+}
+
+/**
+ * Whether this harness is on this machine at all — **the one answer**.
+ *
+ * FIX-B D5: `potsherd index` printed `not installed` for gemini and copilot on
+ * a machine where `potsherd doctor` reported both installed. Neither verb was
+ * lying about what it had looked at. The adapters, which `doctor` asks, test
+ * the harness root **or** the transcript directory and have three answers —
+ * `ready`, `empty`, `absent`. `index` tested the transcript directory alone
+ * and had two, so `empty` (installed, has written nothing yet) came out as the
+ * words `not installed`. The adapters' own comments say "0 sessions alone
+ * cannot tell those apart"; the receipt was the place that lost the
+ * distinction.
+ *
+ * So the predicate lives here, once, and `ingest.ts` sets `HarnessReport.present`
+ * from it. It is deliberately the *same* disjunction the adapters use rather
+ * than a fourth idea about what installed means — the adapters' `doctorLine`
+ * wording belongs to another worker this phase, and the fix for two verbs
+ * disagreeing is not a third answer.
+ */
+export function harnessInstalled(harness: Harness, overrides: { claudeDir?: string } = {}): boolean {
+  const root = harnessRootDirs(overrides).find((h) => h.harness === harness)?.dir;
+  const source = harnessSourceDirs(overrides).find((h) => h.harness === harness)?.dir;
+  return exists(source) || exists(root);
+}
+
+function exists(dir: string | undefined): boolean {
+  if (!dir) return false;
+  try {
+    return fs.existsSync(dir);
+  } catch {
+    return false;
+  }
 }
 
 /** Enterprise-managed settings, which override the user's own. */
