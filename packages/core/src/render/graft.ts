@@ -84,7 +84,14 @@ export function renderGraft(r: GraftReport, t: Theme = new Theme()): string {
     note: r.path ? tildify(r.path) : 'not written',
     tone: 'dim',
   });
-  if (r.via === 'card-only' && r.reason) card.text(t.dim(`no model call — ${r.reason}`));
+  // **C-9**, the same sentence one file over: this printed `no model call —
+  // the model call failed (…)` on the two card-only branches that reach it
+  // *because* a call was made. `called` is the fact that tells them apart, and
+  // it is the difference between a run that cost nothing and a run whose
+  // backend was not there — a flag versus a login.
+  if (r.via === 'card-only' && r.reason) {
+    card.text(t.dim(`${r.called ? 'model call, no summary' : 'no model call'} — ${r.reason}`));
+  }
   if (r.spend.calls > 0) {
     card.row({
       label: 'model',

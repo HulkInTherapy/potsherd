@@ -1347,6 +1347,16 @@ export interface GraftReport extends GraftResult {
   via: GraftPath;
   /** Why the card-only path was taken, when it was. */
   reason: string | null;
+  /**
+   * Whether a model call was **made**, whatever came back — C-9.
+   *
+   * Not the same question as `via === 'model'` (did a call *succeed*) and not
+   * the same question as `spend.calls > 0` (was one *billed*): a backend that
+   * refused the login bills nothing and still consumed a round trip. Carried so
+   * that the brief's own header and the CLI receipt can say which of the two
+   * card-only stories this run is, rather than asserting the wrong one.
+   */
+  called: boolean;
   isGhost: boolean;
   title: string;
   /** Body lines the budget pass removed. */
@@ -1375,6 +1385,15 @@ export async function graft(db: Db, target: string, o: GraftOptions = {}): Promi
   const count = counterFor(llm);
   let via: GraftPath = 'card-only';
   let reason: string | null = null;
+  // **C-9.** Whether a model call was actually *made*, as opposed to whether it
+  // *worked*. The card-only header used to say "No model call was made" on all
+  // four of the branches below, two of which reach it precisely because a call
+  // was made and came back unusable — "No model call was made — the model call
+  // failed (…)" says both things at once in one sentence. This flag is the fact
+  // the sentence needs, and it is recorded where the call happens rather than
+  // inferred downstream from `spend`, which counts a *billed* call and is 0 on
+  // a backend that died before it answered.
+  let called = false;
   let raw = '';
   let spend: Spend = emptySpend();
 
@@ -1387,6 +1406,7 @@ export async function graft(db: Db, target: string, o: GraftOptions = {}): Promi
   if (llm && !hasMaterial(src)) {
     reason = 'the session has no indexed material to compress — nothing was sent to a model';
   } else if (llm) {
+    called = true;
     try {
       const r = await llm.text({
         prompt: buildPrompt(src, { about, budget }),
@@ -1406,7 +1426,10 @@ export async function graft(db: Db, target: string, o: GraftOptions = {}): Promi
     } catch (err) {
       // A brief that needs the network is a brief that does not work on a
       // plane. Fall back to the card, and say so on the face of the brief.
-      reason = `the model call failed (${(err as Error)?.message ?? String(err)})`;
+      // The error alone, with no "the model call failed" prefix: the header
+      // above it now says a call was made and did not produce a brief, so
+      // repeating it here is the same fact twice in one sentence.
+      reason = `${(err as Error)?.message ?? String(err)}`;
       spend = llm.spend;
       raw = '';
     }
@@ -1417,7 +1440,7 @@ export async function graft(db: Db, target: string, o: GraftOptions = {}): Promi
   const bodyLines = via === 'model' ? raw.split('\n') : cardOnlyBody(src);
   const pass = resolveCitations(db, bodyLines.join('\n'), { sessionId: src.sessionId });
 
-  const head = buildHead(src, { about, via, reason, budget });
+  const head = buildHead(src, { about, via, reason, budget, called });
   const tail = buildTail(src, pass);
   const budgeted = await enforceBudget({
     head,
@@ -1461,6 +1484,7 @@ export async function graft(db: Db, target: string, o: GraftOptions = {}): Promi
     ms: Date.now() - started,
     via,
     reason,
+    called,
     isGhost: src.isGhost,
     title: src.title,
     trimmed: budgeted.trimmed,
@@ -1472,7 +1496,14 @@ export async function graft(db: Db, target: string, o: GraftOptions = {}): Promi
 
 function buildHead(
   src: GraftSource,
-  o: { about: string | null; via: GraftPath; reason: string | null; budget: number },
+  o: {
+    about: string | null;
+    via: GraftPath;
+    reason: string | null;
+    budget: number;
+    /** Whether a model call was made at all. See {@link graft}'s `called`. */
+    called: boolean;
+  },
 ): string[] {
   const head: string[] = [];
   head.push(`# ${src.title}`);
@@ -1510,9 +1541,21 @@ function buildHead(
     );
   }
   if (o.via === 'card-only') {
+    // **C-9.** Two different receipts, because they are two different facts,
+    // and the one sentence that used to serve both asserted the false half of
+    // whichever one it was printing: `> **unsummarised.** No model call was
+    // made — the model call failed (claude --print could not answer: Not logged
+    // in)`. A call that failed *was made*. The degradation is honest and stays
+    // honest — that is the important half and it is not what is being changed —
+    // but a reader has to be able to tell "potsherd spent nothing on you" from
+    // "potsherd tried and the backend was not there", and those have different
+    // next actions: one is a flag, the other is a login.
     head.push('');
     head.push(
-      `> **unsummarised.** No model call was made${o.reason ? ` — ${o.reason}` : ''}. ` +
+      (o.called
+        ? '> **unsummarised.** The model call did not produce one'
+        : '> **unsummarised.** No model call was made') +
+        `${o.reason ? ` — ${o.reason}` : ''}. ` +
         'What follows is the stored card and transcript verbatim, not a summary.',
     );
   }

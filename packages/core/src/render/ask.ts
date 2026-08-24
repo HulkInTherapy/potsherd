@@ -410,10 +410,45 @@ function headline(r: AskResult, t: Theme): string {
 }
 
 /** The second line: what was read, how long it took, what it cost. */
+/**
+ * How many of the shortlisted sessions a reader actually **read** — C-9.
+ *
+ * `AskResult.searched` is `targets.length`: the sessions handed to a reader,
+ * whether or not one answered. On a run with no reachable backend that made
+ * this screen contradict itself twice in six lines —
+ *
+ * ```
+ *   nothing was read — all 4 readers failed
+ *   4 of 4 sessions read · 0 answered · 6.4s
+ *   4 readers did not answer · not counted as searched
+ * ```
+ *
+ * — the headline saying nothing was read, the counts saying all four were, and
+ * the note under them asserting the very exclusion the counts had not made.
+ * The headline is the true one: a reader that errored read nothing, and the
+ * verb has no other reader.
+ *
+ * So the count is the shortlist minus the readers that errored, which is the
+ * number the note below it already promised. A run where no reader is recorded
+ * at all — the `--filter-in` seam, where the host agent did the reading — keeps
+ * `searched`, because there is no per-reader outcome to subtract.
+ *
+ * **The residue, deliberately left:** `--json` still serialises `searched: 4`
+ * for the run above, so the machine-readable door and the human one now differ
+ * by exactly the number of failed readers. Closing that means changing
+ * `searched` in `packages/core/src/ask.ts`, which is outside this fix's remit;
+ * the patch is written out in `phases/phase-10/FIX-J-REPORT.md` §4.
+ */
+function sessionsRead(r: AskResult): number {
+  if (r.readers.length === 0) return r.searched;
+  const failed = r.readers.filter((x) => x.error).length;
+  return Math.max(0, r.searched - failed);
+}
+
 function counts(r: AskResult, t: Theme): string {
   const answered = r.readers.filter((x) => x.found).length;
   const parts = [
-    `${f.num(r.searched)} of ${f.num(r.matching)} ${f.plural(r.matching, 'session')} read`,
+    `${f.num(sessionsRead(r))} of ${f.num(r.matching)} ${f.plural(r.matching, 'session')} read`,
     `${f.num(answered)} answered`,
     f.duration(r.ms),
   ];
@@ -589,7 +624,14 @@ function nothing(r: AskResult, t: Theme): string[] {
       f.clip(
         allFailed
           ? `nothing was read — all ${f.num(r.readers.length)} ${f.plural(r.readers.length, 'reader')} failed`
-          : `no grounded answer in ${f.num(r.searched)} ${f.plural(r.searched, 'session')} searched`,
+          : // `sessionsRead`, not `searched`, for the reason C-9 gives: on a
+            // run where two of six readers died, "no grounded answer in 6
+            // sessions searched" is a claim about four sessions nobody read.
+            // `r.searched === 0` above stays `searched` — that branch is "the
+            // shortlist was empty", which is a different fact and the one the
+            // round-4 fix was careful to keep separate from a capability
+            // failure.
+              `no grounded answer in ${f.num(sessionsRead(r))} ${f.plural(sessionsRead(r), 'session')} searched`,
         t.width - 2,
         t,
       ),

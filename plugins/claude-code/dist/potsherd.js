@@ -21667,10 +21667,16 @@ function headline3(r, t) {
   const parts = [`potsherd ask ${JSON.stringify(r.question)}`];
   return clip(parts.join(` ${t.sep} `), t.width, t);
 }
+function sessionsRead(r) {
+  if (r.readers.length === 0)
+    return r.searched;
+  const failed = r.readers.filter((x) => x.error).length;
+  return Math.max(0, r.searched - failed);
+}
 function counts(r, t) {
   const answered = r.readers.filter((x) => x.found).length;
   const parts = [
-    `${num(r.searched)} of ${num(r.matching)} ${plural(r.matching, "session")} read`,
+    `${num(sessionsRead(r))} of ${num(r.matching)} ${plural(r.matching, "session")} read`,
     `${num(answered)} answered`,
     duration(r.ms)
   ];
@@ -21752,7 +21758,16 @@ function nothing(r, t) {
   }
   const failed = r.readers.filter((x) => x.error);
   const allFailed = r.readers.length > 0 && failed.length === r.readers.length;
-  out.push(INDENT + clip(allFailed ? `nothing was read \u2014 all ${num(r.readers.length)} ${plural(r.readers.length, "reader")} failed` : `no grounded answer in ${num(r.searched)} ${plural(r.searched, "session")} searched`, t.width - 2, t));
+  out.push(INDENT + clip(allFailed ? `nothing was read \u2014 all ${num(r.readers.length)} ${plural(r.readers.length, "reader")} failed` : (
+    // `sessionsRead`, not `searched`, for the reason C-9 gives: on a
+    // run where two of six readers died, "no grounded answer in 6
+    // sessions searched" is a claim about four sessions nobody read.
+    // `r.searched === 0` above stays `searched` — that branch is "the
+    // shortlist was empty", which is a different fact and the one the
+    // round-4 fix was careful to keep separate from a capability
+    // failure.
+    `no grounded answer in ${num(sessionsRead(r))} ${plural(sessionsRead(r), "session")} searched`
+  ), t.width - 2, t));
   out.push("");
   out.push(INDENT + t.dim(allFailed ? `no reader could run, so nothing was read: ${clip(failed[0]?.error ?? "the backend did not answer", t.width - 30, t)}` : r.dropped.length > 0 ? `every sentence was dropped for want of a citation that resolves (${num(r.dropped.length)}).` : (
     // A third instance of the same frame, found by FIX-G while it was
@@ -22379,11 +22394,13 @@ async function graft(db, target, o = {}) {
   const count2 = counterFor(llm);
   let via = "card-only";
   let reason = null;
+  let called = false;
   let raw = "";
   let spend = emptySpend();
   if (llm && !hasMaterial(src)) {
     reason = "the session has no indexed material to compress \u2014 nothing was sent to a model";
   } else if (llm) {
+    called = true;
     try {
       const r = await llm.text({
         prompt: buildPrompt(src, { about, budget }),
@@ -22402,7 +22419,7 @@ async function graft(db, target, o = {}) {
         raw = "";
       }
     } catch (err) {
-      reason = `the model call failed (${err?.message ?? String(err)})`;
+      reason = `${err?.message ?? String(err)}`;
       spend = llm.spend;
       raw = "";
     }
@@ -22411,7 +22428,7 @@ async function graft(db, target, o = {}) {
   }
   const bodyLines = via === "model" ? raw.split("\n") : cardOnlyBody(src);
   const pass = resolveCitations(db, bodyLines.join("\n"), { sessionId: src.sessionId });
-  const head = buildHead(src, { about, via, reason, budget });
+  const head = buildHead(src, { about, via, reason, budget, called });
   const tail2 = buildTail(src, pass);
   const budgeted = await enforceBudget({
     head,
@@ -22453,6 +22470,7 @@ async function graft(db, target, o = {}) {
     ms: Date.now() - started,
     via,
     reason,
+    called,
     isGhost: src.isGhost,
     title: src.title,
     trimmed: budgeted.trimmed,
@@ -22480,7 +22498,7 @@ function buildHead(src, o) {
   }
   if (o.via === "card-only") {
     head.push("");
-    head.push(`> **unsummarised.** No model call was made${o.reason ? ` \u2014 ${o.reason}` : ""}. What follows is the stored card and transcript verbatim, not a summary.`);
+    head.push((o.called ? "> **unsummarised.** The model call did not produce one" : "> **unsummarised.** No model call was made") + `${o.reason ? ` \u2014 ${o.reason}` : ""}. What follows is the stored card and transcript verbatim, not a summary.`);
   }
   return head;
 }
@@ -22553,8 +22571,9 @@ function renderGraft(r, t = new Theme()) {
     note: r.path ? tildify(r.path) : "not written",
     tone: "dim"
   });
-  if (r.via === "card-only" && r.reason)
-    card.text(t.dim(`no model call \u2014 ${r.reason}`));
+  if (r.via === "card-only" && r.reason) {
+    card.text(t.dim(`${r.called ? "model call, no summary" : "no model call"} \u2014 ${r.reason}`));
+  }
   if (r.spend.calls > 0) {
     card.row({
       label: "model",
