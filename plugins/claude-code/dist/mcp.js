@@ -34229,11 +34229,13 @@ async function graft(db, target, o = {}) {
   const count2 = counterFor(llm);
   let via = "card-only";
   let reason = null;
+  let called = false;
   let raw = "";
   let spend = emptySpend();
   if (llm && !hasMaterial(src)) {
     reason = "the session has no indexed material to compress \u2014 nothing was sent to a model";
   } else if (llm) {
+    called = true;
     try {
       const r = await llm.text({
         prompt: buildPrompt(src, { about, budget }),
@@ -34252,7 +34254,7 @@ async function graft(db, target, o = {}) {
         raw = "";
       }
     } catch (err) {
-      reason = `the model call failed (${err?.message ?? String(err)})`;
+      reason = `${err?.message ?? String(err)}`;
       spend = llm.spend;
       raw = "";
     }
@@ -34261,7 +34263,7 @@ async function graft(db, target, o = {}) {
   }
   const bodyLines = via === "model" ? raw.split("\n") : cardOnlyBody(src);
   const pass = resolveCitations(db, bodyLines.join("\n"), { sessionId: src.sessionId });
-  const head = buildHead(src, { about, via, reason, budget });
+  const head = buildHead(src, { about, via, reason, budget, called });
   const tail = buildTail(src, pass);
   const budgeted = await enforceBudget({
     head,
@@ -34303,6 +34305,7 @@ async function graft(db, target, o = {}) {
     ms: Date.now() - started,
     via,
     reason,
+    called,
     isGhost: src.isGhost,
     title: src.title,
     trimmed: budgeted.trimmed,
@@ -34330,7 +34333,7 @@ function buildHead(src, o) {
   }
   if (o.via === "card-only") {
     head.push("");
-    head.push(`> **unsummarised.** No model call was made${o.reason ? ` \u2014 ${o.reason}` : ""}. What follows is the stored card and transcript verbatim, not a summary.`);
+    head.push((o.called ? "> **unsummarised.** The model call did not produce one" : "> **unsummarised.** No model call was made") + `${o.reason ? ` \u2014 ${o.reason}` : ""}. What follows is the stored card and transcript verbatim, not a summary.`);
   }
   return head;
 }
@@ -43112,6 +43115,14 @@ async function runGraft(ctx, args) {
         path: report.path || null,
         via: report.via,
         reason: report.reason,
+        // **C-9.** The brief's own header used to say `No model call was made —
+        // the model call failed (…)`, which asserts both halves of the same
+        // question in one sentence; the header now says which of the two it is,
+        // and this is the same fact where an agent can branch on it. `via` says
+        // whether a call *succeeded* and `spend.calls` whether one was
+        // *billed*; neither answers whether one was attempted, and a backend
+        // that refuses a login bills nothing.
+        called: report.called,
         isGhost: report.isGhost,
         title: report.title,
         trimmed: report.trimmed,

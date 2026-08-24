@@ -19,5 +19,5 @@ what potsherd leaves you  —  potsherd ls
     19 jul  claude   payments-api   add a feature flag around the cac…  ghost
     18 jul  claude   crm-ingest     turn the rss parser into a backgr…  ghost
   
-    1 session · 197 subagents inside them · 299 ghosts, prompts only
+    1 of 31 sessions · 197 subagents inside them · 299 ghosts, prompts only
     run  potsherd show <id8>  to read one, or  potsherd find <words>

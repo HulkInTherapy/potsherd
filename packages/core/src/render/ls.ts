@@ -186,10 +186,60 @@ function ignoreNote(r: ListResult, t: Theme): string[] {
   return [Theme.len(wide) <= t.width ? wide : narrow];
 }
 
+/**
+ * The one-line summary under the table — and the line VERIFICATION-5 C-3 is
+ * about.
+ *
+ * ## the defect
+ *
+ * On the demo corpus this line said `1 session · 197 subagents inside them ·
+ * 299 ghosts, prompts only` while `doctor` said `sessions on disk 31` and
+ * `stats` said `sessions 31`, from the same index and the same capture run —
+ * and all three are committed screenshots. Three verbs, three numbers, no way
+ * to reconcile them on the page.
+ *
+ * The counts were not wrong. `--json` carries `threaded: 30`: thirty of the
+ * thirty-one are earlier links of one fork/resume chain, folded into the head's
+ * row, which is F4 working exactly as designed. What was wrong is that this
+ * line **accounted for the 197 rolled-up subagents on the same line and said
+ * nothing at all about the 30 folded siblings**, and then called the remainder
+ * "sessions". A listing that quietly drops rows is lying about the archive —
+ * which is the reason `ListResult.threaded` is counted in the first place, and
+ * it was counted and then not printed.
+ *
+ * ## the shape
+ *
+ * `1 of 31 sessions`, and not a fourth item on the line. Three reasons:
+ *
+ *   - **It is the reconciliation.** `31` is the number the other two verbs
+ *     print, sitting beside the number this one prints, so a reader closes the
+ *     question on the screen rather than in `--json`.
+ *   - **It cannot be elided.** {@link f.joinFit} drops items from the tail, so
+ *     a fourth item at this width would have pushed `299 ghosts, prompts only`
+ *     off `16-before-after.txt` (captured at `--width 76`, where the budget is
+ *     74 and the existing three items already spend 64). Folding the fact into
+ *     the first item costs seven characters and drops nothing.
+ *   - **It is the idiom already on the screen.** The heading says `15 of 300`
+ *     for rows; this says `1 of 31` for sessions. Same shape, one subject each.
+ *
+ * When nothing is threaded — every archive with no fork/resume chain in scope —
+ * `threaded` is 0 and the line is exactly what it was.
+ *
+ * What it still does not say is *why* the other thirty are not rows. That is
+ * `potsherd show <id8>`, which names the rest of the chain, and it is the verb
+ * the last line of this screen already points at.
+ */
 function summary(r: ListResult, t: Theme): string {
   const parts: string[] = [];
   const top = r.total - r.ghosts - r.sidechains;
-  if (top > 0) parts.push(`${f.num(top)} ${f.plural(top, 'session')}`);
+  if (top > 0) {
+    const onDisk = top + r.threaded;
+    parts.push(
+      r.threaded > 0
+        ? `${f.num(top)} of ${f.num(onDisk)} ${f.plural(onDisk, 'session')}`
+        : `${f.num(top)} ${f.plural(top, 'session')}`,
+    );
+  }
   if (r.sidechains > 0) parts.push(`${f.num(r.sidechains)} sidechains`);
   if (r.rolledUp > 0) parts.push(`${f.num(r.rolledUp)} subagents inside them`);
   if (r.ghosts > 0) parts.push(`${f.num(r.ghosts)} ${f.plural(r.ghosts, 'ghost')}, prompts only`);

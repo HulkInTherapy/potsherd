@@ -158,6 +158,14 @@ export async function runGraft(
         path: report.path || null,
         via: report.via,
         reason: report.reason,
+        // **C-9.** The brief's own header used to say `No model call was made —
+        // the model call failed (…)`, which asserts both halves of the same
+        // question in one sentence; the header now says which of the two it is,
+        // and this is the same fact where an agent can branch on it. `via` says
+        // whether a call *succeeded* and `spend.calls` whether one was
+        // *billed*; neither answers whether one was attempted, and a backend
+        // that refuses a login bills nothing.
+        called: report.called,
         isGhost: report.isGhost,
         title: report.title,
         trimmed: report.trimmed,

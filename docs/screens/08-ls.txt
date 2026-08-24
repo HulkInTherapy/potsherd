@@ -17,5 +17,5 @@ potsherd ls · 15 of 300
   11 jul  claude   chat-widget     commit this with a message that expl…  ghost
    9 jul  claude   payments-api    show me the diff before you write an…  ghost
 
-  1 session · 197 subagents inside them · 299 ghosts, prompts only
+  1 of 31 sessions · 197 subagents inside them · 299 ghosts, prompts only
   run  potsherd show <id8>  to read one, or  potsherd find <words>

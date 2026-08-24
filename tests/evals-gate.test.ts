@@ -32,54 +32,72 @@ import { PHASE_3_FLOOR, PHASE_3_GATE, judge, ruleLine, type GateInput } from '..
  *      needing it and names the one-line command in its skip message.
  *
  * The numbers in layer 1 are not invented. They are the two runs measured on
- * this checkout on 22 aug 2026 (`v1.1.0` candidate, `evals/queries.jsonl`,
- * 25 queries):
+ * this checkout on **25 aug 2026**, against `evals/queries.jsonl` as it stands
+ * today: **60 recall queries plus 6 confidence controls**, 66 JSON lines, the
+ * set T10.10 widened it to.
  *
  * ```
- * pnpm evals                        -> exit 0   @5 bm25 12 vec 22 hyb 22 · @1 bm25 10 vec 6 hyb 11
- * pnpm evals -- --vector-weight 0   -> exit 1   @5 bm25 12 vec  5 hyb 12 · @1 bm25 10 vec 4 hyb 10
- *
- * bm25 moved 11 -> 12 at recall@5 and 9 -> 10 at recall@1 late in phase 8,
- * when titles stopped being pasted-screenshot placeholders and started being
- * the words after them. These numbers are a RECORD of a run, not an input to
- * one: the assertions below are written against numbers this file states
- * itself, so that a shift in the corpus cannot quietly satisfy them. But a
- * comment that describes a run nobody can reproduce is the failure this
- * project keeps finding, so when they move, move them.
- *
- * NOTE the margin at recall@1 is now ONE: hybrid 11 against bm25 10. A single
- * query flipping turns the release red, which is what a gate is for.
+ * pnpm evals                        -> exit 0   @5 bm25 39 vec 51 hyb 51 · @1 bm25 24 vec 24 hyb 27
+ * pnpm evals -- --vector-weight 0   -> exit 1   @5 bm25 39 vec 12 hyb 40 · @1 bm25 24 vec  9 hyb 24
  * ```
+ *
+ * **VERIFICATION-5 C-11.** What was written here before was a 25-query run
+ * from 22 aug (`@5 bm25 12 vec 22 hyb 22 · @1 bm25 10 vec 6 hyb 11`) against a
+ * set that has held 60 queries since phase 10 — and `PHASE_3_FLOOR` had already
+ * been moved to `{ hits: 51, of: 60 }` for that set while this comment went on
+ * describing the instrument it replaced. This paragraph's own rule, quoted
+ * below and then broken by it: *a comment that describes a run nobody can
+ * reproduce is the failure this project keeps finding.* Both commands above
+ * were run, in that order, on this commit; either can be run again.
+ *
+ * These numbers are a RECORD of a run, not an input to one: the assertions
+ * below are written against numbers this file states itself, so that a shift in
+ * the corpus cannot quietly satisfy them. When they move, move them — and move
+ * this paragraph with them.
+ *
+ * NOTE the margin at recall@1 is THREE on the wider set: hybrid 27 against
+ * bm25 24 and vectors 24. On the old 25-query set it was one. The wider set
+ * covers all twelve ghosts where the old covered five, so the gate is judged on
+ * more of the corpus and by a margin that a single query flipping no longer
+ * decides — which is the trade the widening bought, and the reason the floor
+ * moved with it rather than staying at 22/25.
+ *
+ * `--vector-weight 0` does not collapse hybrid exactly onto bm25 (40 against
+ * 39 at recall@5): with the semantic half weighted to nothing the fusion still
+ * reorders on the RRF ranks. It ties bm25 at recall@1, which is the clause
+ * that fails it, and it lands 11 under the floor, which is the second.
  */
 
 // The measured release run: the shape the amended gate is supposed to pass.
 const MEASURED: GateInput = {
-  bm25: { at1: 9, atK: 11 },
-  vectors: { at1: 6, atK: 22 },
-  hybrid: { at1: 11, atK: 22 },
+  bm25: { at1: 24, atK: 39 },
+  vectors: { at1: 24, atK: 51 },
+  hybrid: { at1: 27, atK: 51 },
 };
 
-// The measured `--vector-weight 0` run: fusion with its semantic half removed,
-// which collapses hybrid back onto bm25.
+// The measured `--vector-weight 0` run: fusion with its semantic half removed.
+// It does not collapse *exactly* onto bm25 — 40 against 39 at recall@5, because
+// the fusion still reorders on the RRF ranks — but it ties it where the gate
+// looks hardest, at recall@1, and lands 11 under the floor.
 const REGRESSION: GateInput = {
-  bm25: { at1: 9, atK: 11 },
-  vectors: { at1: 4, atK: 5 },
-  hybrid: { at1: 9, atK: 11 },
+  bm25: { at1: 24, atK: 39 },
+  vectors: { at1: 9, atK: 12 },
+  hybrid: { at1: 24, atK: 40 },
 };
 
-const TOTAL = 25;
+const TOTAL = 60;
 const K = 5;
 
 describe('the amended phase-3 fusion gate', () => {
-  it('passes the measured v1.1.0 run, and says which clause carried it', () => {
+  it('passes the measured release run, and says which clause carried it', () => {
     const g = judge('hybrid', MEASURED, TOTAL, K);
     expect(g.pass).toBe(true);
     // recall@5 is a three-way tie at the ceiling; it passes on `>=` and would
     // not pass on `>`. That tie is the whole reason the gate was amended.
     expect(g.wide.hybrid).toBe(g.wide.vectors);
     expect(g.wide.comparison).toBe('>=');
-    // recall@1 is where the fusion is actually worth something: 11 against 9
-    // and 6. It passes strictly.
+    // recall@1 is where the fusion is actually worth something: 27 against 24
+    // and 24. It passes strictly.
     expect(g.tight.comparison).toBe('>');
     expect(g.tight.hybrid).toBeGreaterThan(g.tight.bm25);
     expect(g.tight.hybrid).toBeGreaterThan(g.tight.vectors);
@@ -107,12 +125,12 @@ describe('the amended phase-3 fusion gate', () => {
    */
   it('refuses a tie at recall@1, against either single', () => {
     expect(
-      judge('hybrid', { ...MEASURED, hybrid: { at1: 9, atK: 22 } }, TOTAL, K).pass,
+      judge('hybrid', { ...MEASURED, hybrid: { at1: 24, atK: 51 } }, TOTAL, K).pass,
     ).toBe(false);
     expect(
       judge(
         'hybrid',
-        { bm25: { at1: 4, atK: 11 }, vectors: { at1: 11, atK: 22 }, hybrid: { at1: 11, atK: 22 } },
+        { bm25: { at1: 10, atK: 30 }, vectors: { at1: 27, atK: 51 }, hybrid: { at1: 27, atK: 51 } },
         TOTAL,
         K,
       ).pass,
@@ -129,7 +147,7 @@ describe('the amended phase-3 fusion gate', () => {
     expect(
       judge(
         'hybrid',
-        { bm25: { at1: 9, atK: 11 }, vectors: { at1: 6, atK: 23 }, hybrid: { at1: 11, atK: 22 } },
+        { bm25: { at1: 24, atK: 39 }, vectors: { at1: 24, atK: 52 }, hybrid: { at1: 27, atK: 51 } },
         TOTAL,
         K,
       ).wide.beatsVectors,
@@ -137,7 +155,7 @@ describe('the amended phase-3 fusion gate', () => {
     expect(
       judge(
         'hybrid',
-        { bm25: { at1: 9, atK: 24 }, vectors: { at1: 6, atK: 22 }, hybrid: { at1: 11, atK: 23 } },
+        { bm25: { at1: 24, atK: 53 }, vectors: { at1: 24, atK: 51 }, hybrid: { at1: 27, atK: 52 } },
         TOTAL,
         K,
       ).pass,
@@ -155,7 +173,7 @@ describe('the amended phase-3 fusion gate', () => {
   it('refuses a fusion under the floor even when it beats both singles', () => {
     const g = judge(
       'hybrid',
-      { bm25: { at1: 5, atK: 12 }, vectors: { at1: 4, atK: 15 }, hybrid: { at1: 8, atK: 21 } },
+      { bm25: { at1: 15, atK: 40 }, vectors: { at1: 12, atK: 45 }, hybrid: { at1: 20, atK: 50 } },
       TOTAL,
       K,
     );
