@@ -3,7 +3,9 @@ import { Theme } from '../theme.js';
 import * as f from '../format.js';
 import { redactionRow } from '../redact.js';
 import { tildify } from '../paths.js';
-import type { HarnessStats, StatsReport } from '../stats.js';
+import type { FreshnessStats, HarnessStats, StatsReport } from '../stats.js';
+import { fitNote, vectorNote } from '../doctor-line.js';
+import type { Row } from '../render.js';
 
 /**
  * `potsherd stats` — the index, counted.
@@ -76,22 +78,7 @@ export function renderStats(r: StatsReport, t: Theme = new Theme()): string {
       note: freshnessNote(r, t),
       tone: fr.stale > 0 || fr.missing > 0 ? 'warn' : 'ok',
     },
-    {
-      label: 'vectors',
-      value: fr.vecAvailable ? f.num(fr.vectors) : '—',
-      // `vecAvailable` says sqlite-vec LOADED, not that anything is embedded.
-      // Before 8.6 the two were nearly the same, because `index` embedded by
-      // default; after it, a fresh install loads the extension and has zero
-      // vectors, and this line said `hybrid search on` while the `find` beside
-      // it in the same docs/screens/ directory said `text search only`. Two
-      // committed screens of one corpus contradicting each other.
-      note: fr.vecAvailable
-        ? fr.vectors > 0
-          ? `bge-small ${t.sep} ${f.num(fr.vectorsPending)} pending ${t.sep} hybrid search on`
-          : `bge-small ${t.sep} ${f.num(fr.vectorsPending)} pending ${t.sep} index --embed to build them`
-        : f.clip(`${fr.vecReason ?? 'unavailable'} ${t.sep} text search only`, card.noteWidth()),
-      tone: fr.vecAvailable ? 'ok' : 'dim',
-    },
+    vectorsRow(fr, t, card.noteWidth()),
     {
       label: 'database',
       value: f.bytes(fr.dbBytes),
@@ -158,3 +145,38 @@ function freshnessNote(r: StatsReport, t: Theme): string {
 
 /** Kept for callers that want the block without the card around it. */
 export { INDENT };
+
+/**
+ * The `vectors` row — the same report, the same wording, as `doctor`, `index`
+ * and `find`.
+ *
+ * FIX-B D2. This row used to compose its own sentence out of its own two
+ * numbers: `bge-small · 1,586 pending · hybrid search on`, beside a `doctor`
+ * saying `warming 142 of 4,699`. Two of the differences were arithmetic and
+ * `stats.ts` owns those now; the third was the sentence itself — `hybrid
+ * search on` is a claim about a search that was in fact still warming, and
+ * `index --embed to build them` is an instruction from the release where
+ * vectors were opt-in.
+ *
+ * So there is no wording here. {@link vectorNote} composes the value and the
+ * parts, {@link fitNote} drops whole clauses to the terminal's width, and the
+ * only thing this function decides is that the row is called `vectors`.
+ */
+function vectorsRow(fr: FreshnessStats, t: Theme, noteWidth: number): Row {
+  const report = fr.vectorReport;
+  if (!report) {
+    return {
+      label: 'vectors',
+      value: '—',
+      note: f.clip(`${fr.vecReason ?? 'unavailable'} ${t.sep} text search only`, noteWidth),
+      tone: 'dim',
+    };
+  }
+  const worded = vectorNote(report, { num: f.num, bytes: f.bytes });
+  return {
+    label: 'vectors',
+    value: worded.value,
+    note: fitNote(worded.parts, noteWidth, ` ${t.sep} `),
+    tone: worded.tone,
+  };
+}

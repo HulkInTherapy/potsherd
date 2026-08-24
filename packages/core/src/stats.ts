@@ -12,6 +12,7 @@ import {
   type IgnoreReport,
 } from './ignore.js';
 import { vecStatus, vecTablesExist } from './vec.js';
+import { type VectorReport } from './doctor-line.js';
 
 /**
  * `potsherd stats` — what is actually in the index, per harness.
@@ -61,9 +62,13 @@ export interface FreshnessStats {
   missing: number;
   /** Sources potsherd holds the only copy of. */
   archived: number;
+  /** Rows carrying a current vector. From {@link vecStatus}, like every verb. */
   vectors: number;
+  /** Rows still waiting for one. Exchanges **and** recovered prompts. */
   vectorsPending: number;
   vecAvailable: boolean;
+  /** The one report `doctor`, `index`, `find` and `stats` all render. */
+  vectorReport?: VectorReport;
   vecReason?: string;
   dbBytes: number;
   dbPath: string;
@@ -326,13 +331,29 @@ function freshness(db: Db, root: string, stat: boolean): FreshnessStats {
     }
   }
 
+  // FIX-B D2 — one source of truth, and `stats` is now inside it.
+  //
+  // These three lines used to be their own count: `COUNT(*) FROM vec_exchanges`
+  // for embedded, `exchanges WHERE embedding_version IS NULL` for pending. Two
+  // things were wrong with the second one and both of them printed. It counted
+  // `exchanges` only, while `vec.ts` counts `exchanges` + `ghost_prompts` —
+  // and a recovered prompt is a row that needs a vector exactly as much as an
+  // exchange does — so on the verifier's archive `doctor` and `index` said
+  // `warming 142 of 4,699` while `stats` said `1,586 pending`, 2.9x apart, in
+  // the same minute. It also read `IS NULL` rather than `!= EMBEDDING_VERSION`,
+  // so a vector left behind by an older model counted as done.
+  //
+  // §A2's acceptance says `doctor` and `index` report vectors from one source
+  // of truth; `stats` was never brought in, and a third caller computing its
+  // own numbers is not a source of truth, it is a coincidence that had already
+  // stopped holding. `vecStatus(db, root)` is the call, `vec.ts` owns the
+  // counting, `doctor-line.ts` owns the wording, and `render/stats.ts` renders
+  // the same report `doctor` and `index` render.
   const vecOk = vecTablesExist(db);
-  const status = vecOk ? vecStatus(db) : { available: false, reason: 'sqlite-vec did not load' };
-  const vectors = vecOk ? countOf(db, 'SELECT COUNT(*) AS n FROM vec_exchanges') : 0;
-  const pending = countOf(
-    db,
-    'SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version IS NULL',
-  );
+  const status = vecOk ? vecStatus(db, root) : { available: false, reason: 'sqlite-vec did not load' };
+  const report = 'report' in status ? status.report : undefined;
+  const vectors = report?.embedded ?? 0;
+  const pending = report?.pending ?? 0;
 
   const file = dbPath(root);
   let dbBytes = 0;
@@ -353,6 +374,10 @@ function freshness(db: Db, root: string, stat: boolean): FreshnessStats {
     vectors,
     vectorsPending: pending,
     vecAvailable: Boolean(status.available),
+    // The whole report, so `--json` and the human view read one object and
+    // `render/stats.ts` can print the same sentence `doctor` prints rather
+    // than a second wording of the same facts.
+    ...(report ? { vectorReport: report } : {}),
     ...(status.available ? {} : { vecReason: status.reason ?? 'unavailable' }),
     dbBytes,
     dbPath: file,

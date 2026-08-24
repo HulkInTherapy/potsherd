@@ -37,7 +37,12 @@ import {
   type VecStatus,
 } from '@potsherd/core';
 import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
-import { BRIDGE_READ_PATHS, EXPORT_WRITE_PATHS } from '../privacy-paths.js';
+import {
+  BRIDGE_READ_PATHS,
+  CLAUDE_SPAWN_WRITE_NOTE,
+  CLAUDE_SPAWN_WRITE_PATH,
+  EXPORT_WRITE_PATHS,
+} from '../privacy-paths.js';
 import { search as searchNs } from '@potsherd/core';
 
 // The ignore list. It reaches `doctor` through the `search` namespace because
@@ -150,6 +155,11 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // writes a directory of files wherever you point it appeared nowhere in
     // the list of what potsherd writes.
     ...EXPORT_WRITE_PATHS,
+    // FIX-B D6. Not a path potsherd's own code opens — Claude Code creates it
+    // for whatever cwd it is spawned in — but a directory that exists in the
+    // user's archive because they ran potsherd, in the tree this receipt was
+    // simultaneously listing as *never modified*. See `CLAUDE_SPAWN_WRITE_PATH`.
+    CLAUDE_SPAWN_WRITE_PATH,
   ];
   const settingsFile = paths.claudePaths(report.claudeDir).settings;
   // `setup` writes one MCP stanza into each agent's own config file. That is
@@ -221,6 +231,12 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     for (const p of reads) {
       card.raw(`    ${show(p)}${fs.existsSync(p) ? '' : t.dim('  (absent)')}`);
     }
+    // FIX-B D6. The heading is a claim about potsherd, and potsherd does only
+    // read these. Something still appears in one of them because potsherd ran,
+    // and a reader of a privacy receipt is owed that before they find it — so
+    // the heading points at the entry under `writes:` rather than quietly
+    // remaining true on a technicality.
+    note('potsherd only ever reads these. one directory appears under claude\'s own projects/ anyway — claude code creates it for the cwd potsherd spawns it in, and it is named under writes.', 4);
     // T6.6 D13 — the other tools' stores. `03` §11 says this receipt lists
     // every path read, and until now it listed none of these: `find --with`
     // and `export --to` read a claude-mem database, an agentmemory store and
@@ -251,6 +267,8 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
         );
       } else if (p.startsWith('<the dir you give')) {
         note('one markdown file per card, only when you run export');
+      } else if (p === CLAUDE_SPAWN_WRITE_PATH) {
+        note(CLAUDE_SPAWN_WRITE_NOTE);
       } else if (p.startsWith('<your agentmemory')) {
         note(
           "rows into another tool's store. never without --yes, and never at all " +

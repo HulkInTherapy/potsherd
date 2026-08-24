@@ -560,6 +560,37 @@ export interface AskOptions {
    * throws if it is ever sent anything.
    */
   synthFn?: AskSynthFn;
+  /**
+   * Read **these** sessions, in this order, rather than whatever the index
+   * would shortlist now — FIX-B D4.
+   *
+   * The seam's two halves are separated by however long a host agent takes to
+   * run six readers, and across that gap the shortlist legitimately moves: the
+   * embedding pass keeps landing vectors, and the ranking a question produces
+   * is a function of how much of the index carries one. On the verifier's
+   * archive that is 4,699 rows over about 3.6 hours, and `--readers-in` was
+   * refused on three of four attempts run *seconds* apart.
+   *
+   * Refusing was not wrong about the danger. Answering from a recording while
+   * reporting the live shortlist's counts prints one run's arithmetic over
+   * another run's content. But the fix for that is not to demand the index
+   * stand still; it is to answer over the shortlist the recording was made
+   * from, counts included, so the two agree by construction. That is this
+   * option: the ids replace the shortlist, and `matching` replaces the count
+   * derived from it.
+   *
+   * What it does **not** relax: `filterAnswer` still checks every quote
+   * against the live transcript bytes at the `(sessionId, seq)` it names, so a
+   * pinned shortlist cannot smuggle in a quote the archive no longer holds,
+   * and a pinned id the index can no longer read simply does not resolve —
+   * which the caller is expected to notice and refuse over.
+   */
+  pin?: {
+    /** Session ids, in shortlist order. */
+    sessionIds: readonly string[];
+    /** `matching` as it was when the shortlist was recorded. */
+    matching?: number;
+  };
   /** Off for tests that are measuring something else. */
   openThreads?: boolean;
   signal?: AbortSignal;
@@ -1293,8 +1324,13 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
     windows: Math.max(1, Math.floor(o.windows ?? ASK_WINDOWS)),
     ...(o.root !== undefined ? { root: o.root } : {}),
     ...(o.vectors !== undefined ? { vectors: o.vectors } : { vectors: true }),
+    ...(o.pin ? { pin: o.pin.sessionIds } : {}),
   });
-  const matching = candidates;
+  // With a pinned shortlist the count comes from the recording too: `candidates`
+  // would then be the size of the pin, and printing `2 of 2 matching sessions`
+  // under an answer recorded from `2 of 47` is the same class of untruth the
+  // pin exists to avoid.
+  const matching = o.pin?.matching ?? candidates;
   o.onProgress?.({
     step: 'shortlist',
     done: targets.length,
@@ -1541,6 +1577,8 @@ interface ShortlistOptions {
   question: string;
   root?: string;
   vectors?: boolean | 'auto';
+  /** {@link AskOptions.pin} — replace the derived order with these ids. */
+  pin?: readonly string[];
 }
 
 async function shortlist(
@@ -1592,6 +1630,24 @@ async function shortlist(
       }
     }
     order.push(...inBlock, ...kin);
+  }
+
+  // FIX-B D4. The pin replaces the *order*, not the seqs: an id that the live
+  // recall also found keeps the hit positions it earned, so its excerpts are
+  // the ones a live run would have produced, and an id that has dropped out of
+  // the ranking is still read from its opening. Everything below — the
+  // per-target load, the `units.length > 0` test that drops an unreadable
+  // session, the k ceiling — is untouched, which is what makes an id the index
+  // can no longer read fail to resolve rather than resolve to nothing.
+  if (o.pin) {
+    order.length = 0;
+    for (const id of o.pin) {
+      if (!seqs.has(id)) {
+        seqs.set(id, []);
+        scores.set(id, 0);
+      }
+      order.push(id);
+    }
   }
 
   const targets: Target[] = [];

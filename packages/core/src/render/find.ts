@@ -33,6 +33,20 @@ import type { RecallHit, RecallResult, RecallSession } from '../recall.js';
 export interface FindRenderOptions {
   /** `--explain`: the fusion arithmetic in place of the snippets. */
   explain?: boolean;
+  /**
+   * `semantic search: warming (N of M embedded)`, or `null` when there is
+   * nothing to say — {@link VecStatus.line}, from `vecStatus(db, root)`.
+   *
+   * §A2 item 2 asks for it on **every** `find` while vectors are pending, and
+   * FIX-B D9 found it on no `find` at all. It is passed in rather than
+   * computed here for the reason the whole `vectors` line is computed in one
+   * place: a renderer that can open a connection is a renderer that can
+   * disagree with the module that already did.
+   *
+   * It is printed **above the last line**, because `05` says every verb ends
+   * with the next verb and a status line is not a next verb.
+   */
+  semantic?: string | null;
 }
 
 export function renderFind(
@@ -83,6 +97,7 @@ export function renderFind(
       lines.push(...ignoreNote(result, t));
       return lines.join('\n');
     }
+    lines.push(...semanticNote(opts, t));
     lines.push(...ignoreNote(result, t));
     lines.push(nextVerbOnEmpty(result, t));
     return lines.join('\n');
@@ -102,11 +117,12 @@ export function renderFind(
   // never once fitted: every committed `find` screen ends `3 ghost hits · 1
   // from subagents · …`, an ellipsis standing in for the one note on the line
   // that tells the reader something they can act on.
-  if (!result.vectors.used && result.vectors.reason) {
+  if (!result.vectors.used && result.vectors.reason && !supersededBySemantic(opts, result.vectors.reason)) {
     for (const line of f.wrap(`text search only ${t.dash} ${result.vectors.reason}`, t.width - INDENT.length)) {
       lines.push(INDENT + t.dim(line));
     }
   }
+  lines.push(...semanticNote(opts, t));
   lines.push(...ignoreNote(result, t));
   lines.push(nextVerb(t));
   return lines.join('\n');
@@ -194,6 +210,36 @@ function ignoreNote(result: RecallResult, t: Theme): string[] {
   const wide = `${what}  ${t.sep}  --all`;
   const text = Theme.len(INDENT + wide) <= t.width ? wide : what;
   return f.wrap(text, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
+}
+
+/**
+ * The one status line about semantic search, wrapped to this terminal.
+ *
+ * FIX-B D9. Empty when the index is fully embedded or empty, which is the whole
+ * of `vecStatus`'s contract: a verb with nothing to report prints nothing.
+ */
+function semanticNote(opts: FindRenderOptions, t: Theme): string[] {
+  if (!opts.semantic) return [];
+  return f.wrap(opts.semantic, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
+}
+
+/**
+ * Whether the warming line has already said what `vectors.reason` was going to.
+ *
+ * `recall.ts` composes `the words matched; index --embed adds semantic search`
+ * when bm25 answered on its own. That sentence ends in an instruction phase 10
+ * made false — `index` embeds by default now, and `--embed` only moves the same
+ * work into the foreground — and it sat one line above a status line saying the
+ * embedding was already running. One screen, two accounts of one fact, and the
+ * older one telling the reader to do something the tool had already done.
+ *
+ * The wording lives in `recall.ts`, which FIX-B may not edit; what reaches the
+ * screen is decided here, which is where it belongs anyway. The clause is
+ * dropped only when there is a warming line to replace it, so `--vectors off`
+ * and a genuinely unavailable runtime still say so.
+ */
+function supersededBySemantic(opts: FindRenderOptions, reason: string): boolean {
+  return Boolean(opts.semantic) && reason.startsWith('the words matched;');
 }
 
 /**

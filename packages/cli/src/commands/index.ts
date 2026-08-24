@@ -211,7 +211,7 @@ async function embedInForeground(root: string, showProgress: boolean): Promise<V
           },
         });
       },
-      { root, wait: 5000 },
+      { root, wait: 5000, lane: 'embed' },
     );
     return vecStatus(db, root);
   } catch (err) {
@@ -243,6 +243,17 @@ async function embedInForeground(root: string, showProgress: boolean): Promise<V
 function startBackgroundEmbedding(root: string, o: IndexCommandOptions): boolean {
   const entry = process.argv[1];
   if (!entry) return false;
+  // FIX-B D3, and the whole of it. This used to spawn unconditionally, so a
+  // user who ran `index` three times during one warming window ended up with
+  // three detached embedders, all alive and all burning CPU — the verifier
+  // measured 33:28, 24:46 and 1:01 of accumulated time over a 25-second
+  // window. The lock could not stop them because it expired after five minutes
+  // and a pass runs for hours (see `lock.isStale`); it can now, and this is
+  // the cheaper half of the same answer: do not start a second one at all.
+  //
+  // A read, not an acquire: the child needs the lock, and a parent that took
+  // it first would hand the child a lock it must then wait for.
+  if (lock.holder({ root, lane: 'embed' })) return false;
   try {
     const child = spawn(
       process.execPath,
@@ -261,8 +272,15 @@ function startBackgroundEmbedding(root: string, o: IndexCommandOptions): boolean
 }
 
 /**
- * The background child. Parses nothing, prints nothing, and holds the lock so
- * two of them never race.
+ * The background child. Parses nothing, prints nothing, and holds the embed
+ * lane for the whole pass, so two of them never race.
+ *
+ * That sentence used to be here and used to be false, which is the worst kind
+ * of comment because it stops the next reader checking. Two things make it
+ * true now, and both are in `lock.ts`: a lock whose owner is alive is never
+ * taken over, however long the pass runs; and the pass has a lane of its own,
+ * so keeping the lock for hours costs no foreground verb anything.
+ * `tests/embed-worker.test.ts` fails if either is undone.
  *
  * It exits 0 whatever happens, including when it cannot get the lock or cannot
  * reach the network, because nothing is watching it and a non-zero exit from an
@@ -278,6 +296,7 @@ async function runEmbedWorker(o: IndexCommandOptions): Promise<number> {
     await lock.withLockAsync('embed', async () => void (await status.embed?.({ cacheDir })), {
       root,
       wait: 0,
+      lane: 'embed',
     });
   } catch {
     // Locked by another worker, offline, or a database that moved. All three
@@ -455,8 +474,22 @@ function warmingSentences(vec: VecStatus | undefined, spawned: boolean): string[
   return [`${head} — ${long}`, `${head} — ${short}`, head];
 }
 
+/**
+ * The per-harness note, in three states rather than two — FIX-B D5.
+ *
+ * `not installed` and `installed, has written nothing yet` are different facts
+ * about a machine, and the receipt used to print the first when the second was
+ * true: `present` tested the transcript directory, which for gemini and copilot
+ * is a subdirectory of the harness's own. `doctor` said `empty … installed` on
+ * the same machine in the same minute. `present` is now `paths.harnessInstalled`,
+ * the same disjunction the adapters answer `doctor` with, and the wording here
+ * keeps the distinction that predicate makes.
+ */
 function harnessNote(h: HarnessReport, sep = ' · '): string {
   if (!h.present && h.discovered === 0) return `not installed — ${paths.tildify(h.sourceDir)}`;
+  if (h.discovered === 0 && h.sessions === 0) {
+    return `installed${sep}no transcripts in ${paths.tildify(h.sourceDir)}`;
+  }
   if (h.discovered === 0) return `no transcripts in ${paths.tildify(h.sourceDir)}`;
   const parts: string[] = [];
   const top = h.sessions - h.sidechains;
