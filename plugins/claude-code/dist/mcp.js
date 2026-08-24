@@ -28184,7 +28184,11 @@ function vectorState(db, root) {
       used: false,
       available: false,
       vectors: 0,
-      reason: "no embeddings in the index \u2014 run  potsherd index --embed"
+      // NOT `run potsherd index --embed`. This string reaches `potsherd_recall`,
+      // whose caller has no shell, and `render/find.ts:229` and `render/stats.ts:158`
+      // both record that the instruction is false anyway: `index` embeds by default
+      // now, so there is nothing for anyone to run.
+      reason: "no embeddings in the index yet"
     };
   }
   const cache = modelsDir(potsherdDir(root));
@@ -34617,17 +34621,16 @@ function resolveProject(db, needle) {
   if (partial2.length === 1) return partial2[0].project;
   if (partial2.length > 1) throw ambiguous(needle, partial2.map((p) => p.project));
   throw new UserError(
-    `no indexed project matches "${needle}"`,
-    'potsherd ls --json | jq -r ".sessions[].project" | sort -u'
+    `no indexed project matches "${needle}". The index holds ${projects.length}: ` + nameList(projects.map((p) => p.project))
   );
 }
 function ambiguous(needle, candidates) {
-  const shown = candidates.slice(0, 5).join("\n        ");
-  return new UserError(
-    `"${needle}" matches ${candidates.length} projects:
-        ${shown}`,
-    `potsherd ls --project "${candidates[0]}"`
-  );
+  return new UserError(`"${needle}" matches ${candidates.length} projects: ${nameList(candidates)}`);
+}
+function nameList(names, cap2 = 12) {
+  const shown = names.slice(0, cap2);
+  const rest = names.length - shown.length;
+  return shown.join(", ") + (rest > 0 ? `, and ${rest} more` : "");
 }
 function last(p) {
   const parts = p.split(/[/\\]/).filter(Boolean);
@@ -43250,6 +43253,7 @@ async function runRecall(ctx, args) {
       [MIN_CONFIDENCE_FIELD]: AGENT_FLOOR
     };
     const result = await recall(db, query, filters, options);
+    const vectorReport2 = vecStatus(db, root).report;
     const confidence = confidenceOf(result);
     const calibrated = confidence !== null;
     const minConfidence = minConfidenceOf(result);
@@ -43281,9 +43285,13 @@ async function runRecall(ctx, args) {
        * actually able to do — read off `result.vectors`, which is core's own
        * single source of truth for it.
        */
-      capability: capabilityLine(result.vectors),
+      capability: capabilityLine(result.vectors, vectorReport2),
       vectors: result.vectors,
-      note: noMatch ? "no match. The archive does not contain this" + (belowFloor ? `, though ${String(belowFloor)} rows were withheld below the ${String(minConfidence ?? AGENT_FLOOR)} floor` : "") + ". Say so \u2014 do not widen into a guess, and do not answer from the repository in front of you." : calibrated ? null : 'this build of potsherd does not calibrate its scores yet, so "confidence" is null rather than a measurement. Treat a low-scoring row as unproven.',
+      note: noMatch ? "no match. The archive does not contain this" + (belowFloor ? `, though ${String(belowFloor)} rows were withheld below the ${String(minConfidence ?? AGENT_FLOOR)} floor` : "") + // Which half of the search returned the empty. "The archive does not
+      // contain this" is a much stronger claim when both halves ran than
+      // when only bm25 did, and the gap is measured: the verifier's query
+      // answers 1 session with vectors on and 0 with them off.
+      (result.vectors.used ? "" : ". Only keyword search ran; the semantic half did not") + ". Say so \u2014 do not widen into a guess, and do not answer from the repository in front of you." : calibrated ? null : 'this build of potsherd does not calibrate its scores yet, so "confidence" is null rather than a measurement. Treat a low-scoring row as unproven.',
       ignored: result.ignored,
       lists: result.lists,
       relaxed: result.relaxed,
@@ -43450,11 +43458,15 @@ function windowsFrom(sessions, budgetTokens) {
     tokens: Math.ceil(chars / CHARS_PER_TOKEN2)
   };
 }
-function capabilityLine(v) {
-  if (v.used) return `keyword + semantic search${v.vectors ? ` \xB7 ${String(v.vectors)} vectors` : ""}`;
+function capabilityLine(v, report) {
+  const counts = report && report.total > 0 ? ` (${format_exports.num(report.embedded)} of ${format_exports.num(report.total)} embedded)` : "";
+  const because = (why) => why ? ` (${why})` : "";
+  if (v.used) return `keyword + semantic search${counts}`;
+  if (report && (report.phase === "warming" || report.phase === "pending"))
+    return `keyword search only \u2014 semantic search is warming${counts}`;
   if (!v.available)
-    return `SEMANTIC SEARCH UNAVAILABLE \u2014 results are keyword-only${v.reason ? ` (${v.reason})` : ""}`;
-  return `keyword search answered this one${v.reason ? ` (${v.reason})` : ""}`;
+    return `semantic search unavailable \u2014 results are keyword-only${because(v.reason)}`;
+  return `keyword search answered this one${because(v.reason)}`;
 }
 function toFlags(scope) {
   const s = scope;

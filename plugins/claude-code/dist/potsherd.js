@@ -9766,7 +9766,11 @@ function vectorState(db, root) {
       used: false,
       available: false,
       vectors: 0,
-      reason: "no embeddings in the index \u2014 run  potsherd index --embed"
+      // NOT `run potsherd index --embed`. This string reaches `potsherd_recall`,
+      // whose caller has no shell, and `render/find.ts:229` and `render/stats.ts:158`
+      // both record that the instruction is false anyway: `index` embeds by default
+      // now, so there is nothing for anyone to run.
+      reason: "no embeddings in the index yet"
     };
   }
   const cache = modelsDir(potsherdDir(root));
@@ -26384,17 +26388,16 @@ function resolveProject(db, needle) {
   if (partial.length === 1) return partial[0].project;
   if (partial.length > 1) throw ambiguous(needle, partial.map((p) => p.project));
   throw new UserError(
-    `no indexed project matches "${needle}"`,
-    'potsherd ls --json | jq -r ".sessions[].project" | sort -u'
+    `no indexed project matches "${needle}". The index holds ${projects.length}: ` + nameList(projects.map((p) => p.project))
   );
 }
 function ambiguous(needle, candidates) {
-  const shown = candidates.slice(0, 5).join("\n        ");
-  return new UserError(
-    `"${needle}" matches ${candidates.length} projects:
-        ${shown}`,
-    `potsherd ls --project "${candidates[0]}"`
-  );
+  return new UserError(`"${needle}" matches ${candidates.length} projects: ${nameList(candidates)}`);
+}
+function nameList(names, cap2 = 12) {
+  const shown = names.slice(0, cap2);
+  const rest = names.length - shown.length;
+  return shown.join(", ") + (rest > 0 ? `, and ${rest} more` : "");
 }
 function last(p) {
   const parts = p.split(/[/\\]/).filter(Boolean);

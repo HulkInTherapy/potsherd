@@ -210,18 +210,32 @@ export function resolveProject(db: Db, needle: string): string {
   if (partial.length === 1) return partial[0]!.project;
   if (partial.length > 1) throw ambiguous(needle, partial.map((p) => p.project));
 
+  // The answer, not a command that would produce the answer. This message is
+  // read at the model door too (`potsherd_recall`'s `scope.project`), and its
+  // caller has three tools and no shell — it can neither run `potsherd ls` nor
+  // pipe anything through `jq`. Naming the projects serves the reader in the
+  // terminal just as well, and saves them the round trip.
   throw new UserError(
-    `no indexed project matches "${needle}"`,
-    'potsherd ls --json | jq -r ".sessions[].project" | sort -u',
+    `no indexed project matches "${needle}". The index holds ${projects.length}: ` +
+      nameList(projects.map((p) => p.project)),
   );
 }
 
 function ambiguous(needle: string, candidates: string[]): UserError {
-  const shown = candidates.slice(0, 5).join('\n        ');
-  return new UserError(
-    `"${needle}" matches ${candidates.length} projects:\n        ${shown}`,
-    `potsherd ls --project "${candidates[0]}"`,
-  );
+  return new UserError(`"${needle}" matches ${candidates.length} projects: ${nameList(candidates)}`);
+}
+
+/**
+ * Names, with the tail disclosed rather than dropped.
+ *
+ * This used to `slice(0, 5)` in silence, so an index holding eighteen matching
+ * projects reported five and looked complete. A truncated list that does not
+ * say it is truncated is a wrong answer, not a short one.
+ */
+function nameList(names: string[], cap = 12): string {
+  const shown = names.slice(0, cap);
+  const rest = names.length - shown.length;
+  return shown.join(', ') + (rest > 0 ? `, and ${rest} more` : '');
 }
 
 function last(p: string): string {

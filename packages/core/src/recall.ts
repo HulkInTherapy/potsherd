@@ -1464,7 +1464,11 @@ export function vectorState(db: Db, root?: string): VectorState {
       used: false,
       available: false,
       vectors: 0,
-      reason: 'no embeddings in the index — run  potsherd index --embed',
+      // NOT `run potsherd index --embed`. This string reaches `potsherd_recall`,
+      // whose caller has no shell, and `render/find.ts:229` and `render/stats.ts:158`
+      // both record that the instruction is false anyway: `index` embeds by default
+      // now, so there is nothing for anyone to run.
+      reason: 'no embeddings in the index yet',
     };
   }
   const cache = modelsDir(potsherdDir(root));
