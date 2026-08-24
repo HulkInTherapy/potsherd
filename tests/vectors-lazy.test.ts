@@ -3,7 +3,15 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { db as store, embeddings, paths, vecStatus } from '@potsherd/core';
+import {
+  db as store,
+  embeddings,
+  paths,
+  renderStats,
+  sessionStats,
+  Theme,
+  vecStatus,
+} from '@potsherd/core';
 import { rmrf, tempDir } from './helpers.js';
 
 /**
@@ -30,6 +38,11 @@ import { rmrf, tempDir } from './helpers.js';
 
 const MODEL_CACHE = path.join(os.tmpdir(), 'potsherd-test-models');
 const ready = embeddings.isEmbeddingReady(MODEL_CACHE);
+
+/** A plain 80-column theme, so the assertions are about wording not colour. */
+function theme() {
+  return new Theme({ color: false, width: 80 });
+}
 
 /** A 384-float unit vector, deterministic from a seed. */
 function unit(seed: number): number[] {
@@ -196,6 +209,55 @@ describe('doctor and index read one source of truth', () => {
         expect(row.parts[0]!.startsWith(note.split(' · ')[0]!)).toBe(true);
         expect(note.endsWith('…')).toBe(false);
       }
+    } finally {
+      db.close();
+      rmrf(root);
+    }
+  });
+
+  it('gives stats the same two numbers, ghost prompts included', () => {
+    // FIX-B D2. `doctor` and `index` said `warming 142 of 4,699` while `stats`
+    // said `1,586 pending · hybrid search on`, 2.9x apart, on one index in one
+    // minute. `stats.ts` counted `exchanges` alone and `vec.ts` counted
+    // `exchanges` + `ghost_prompts`, and a ghost prompt is a row that needs a
+    // vector exactly as much as an exchange does. The privacy guard could not
+    // see it: it proves screen == live output, never live output == truth.
+    const root = tempDir('potsherd-vec-stats-');
+    const db = store.open({ root });
+    try {
+      db.exec(`INSERT INTO sessions (id, harness, project, source_path, indexed_at)
+               VALUES ('s1', 'claude', '/tmp/p', '/tmp/p/s1.jsonl', '2026-08-23T00:00:00Z')`);
+      const ex = db.prepare(
+        `INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text)
+         VALUES (?, 's1', ?, ?, ?, '')`,
+      );
+      for (let i = 0; i < 3; i += 1) ex.run(`x${i}`, i, `2026-08-2${i}T00:00:00Z`, `text ${i}`);
+      db.exec(`INSERT INTO ghosts (session_id, harness, project, prompt_count)
+               VALUES ('g1', 'claude', '/tmp/p', 4)`);
+      const gp = db.prepare(
+        `INSERT INTO ghost_prompts (id, session_id, seq, ts, text) VALUES (?, 'g1', ?, ?, ?)`,
+      );
+      for (let i = 0; i < 4; i += 1) gp.run(`g${i}`, i, `2026-08-1${i}T00:00:00Z`, `prompt ${i}`);
+      db.prepare('UPDATE exchanges SET embedding_version = ? WHERE id = ?').run(
+        embeddings.EMBEDDING_VERSION,
+        'x0',
+      );
+      db.prepare('UPDATE ghost_prompts SET embedding_version = ? WHERE id = ?').run(
+        embeddings.EMBEDDING_VERSION,
+        'g0',
+      );
+
+      const truth = vecStatus(db, root).report!;
+      expect(truth.embedded).toBe(2);
+      expect(truth.pending).toBe(5);
+
+      const fr = sessionStats(db, { root }).freshness;
+      expect(fr.vectors).toBe(truth.embedded);
+      expect(fr.vectorsPending).toBe(truth.pending);
+      // And the sentence, not only the number: three verbs, one wording.
+      expect(renderStats(sessionStats(db, { root }), theme())).toContain(
+        vecStatus(db, root).row!.parts[0],
+      );
     } finally {
       db.close();
       rmrf(root);
