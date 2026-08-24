@@ -28147,13 +28147,20 @@ async function writeSynthesisFile(db, question, base2, path32, readersPath, onPr
   const cap2 = synthCapture();
   const probe2 = await ask(db, question, {
     ...base2,
-    ...staged ? { readerFn: staged.readerFn } : {},
+    // FIX-B D4. The pin belongs on every pass that consumes a recording, not
+    // only on `replayReaders`. Without it this pass built the live shortlist
+    // and looked recorded outputs up by session id against it, so a shortlist
+    // that had moved produced `found: false` for whatever it no longer
+    // contained — a quietly thinner synthesis prompt, with nothing anywhere
+    // saying the recording had been half ignored.
+    ...staged ? { pin: staged.pin, readerFn: staged.readerFn } : {},
     ...onProgress && !staged ? { onProgress } : {},
     synthFn: cap2.fn,
     openThreads: false
   });
   const abs = nodePath2.resolve(path32);
-  if (!cap2.seen.input) return { file: null, abs, probe: probe2 };
+  const notes = staged?.notes ?? [];
+  if (!cap2.seen.input) return { file: null, abs, probe: probe2, notes };
   const input = cap2.seen.input;
   const q2 = redactOutgoing(question).text;
   const file = {
@@ -28186,10 +28193,10 @@ async function writeSynthesisFile(db, question, base2, path32, readersPath, onPr
   fs40.mkdirSync(nodePath2.dirname(abs), { recursive: true });
   fs40.writeFileSync(abs, `${JSON.stringify(file, null, 2)}
 `, "utf8");
-  return { file, abs, probe: probe2 };
+  return { file, abs, probe: probe2, notes };
 }
 async function recordSynthesis(db, question, base2, path32, readersPath, o, t, onProgress) {
-  const { file, abs, probe: probe2 } = await writeSynthesisFile(
+  const { file, abs, probe: probe2, notes } = await writeSynthesisFile(
     db,
     question,
     base2,
@@ -28197,6 +28204,7 @@ async function recordSynthesis(db, question, base2, path32, readersPath, o, t, o
     readersPath,
     onProgress
   );
+  if (!o.json && !o.quiet) for (const line of notes) print(`  ${t.dim(line)}`);
   if (o.json) {
     printJson({
       kind: SYNTHESIS_FILE_KIND,
@@ -28265,11 +28273,12 @@ async function filterHostAnswer(db, question, base2, path32) {
       'answer its "prompt" in the shape of its "schema", then add the object as "reply"'
     );
   }
+  const pin = { sessionIds: file.sessionIds };
   const rec = recorder();
-  await ask(db, question, { ...base2, concurrency: 1, openThreads: false, readerFn: rec.fn });
+  await ask(db, question, { ...base2, pin, concurrency: 1, openThreads: false, readerFn: rec.fn });
   const live = rec.seen.map((x) => x.sessionId);
-  matchOrFail(abs, q2, "recorded shortlist", file.sessionIds, live);
-  const known = new Set(live);
+  goneOrFail(abs, q2, file.sessionIds, live);
+  const known = new Set(file.sessionIds);
   const orphans = file.readers.map((r) => r.sessionId).filter((id) => !known.has(id));
   if (orphans.length > 0) {
     throw new UserError(
@@ -28282,6 +28291,7 @@ async function filterHostAnswer(db, question, base2, path32) {
   const readerFn = async (input) => byId.get(input.sessionId) ?? { found: false, quotes: [], answer_fragment: "" };
   return ask(db, question, {
     ...base2,
+    pin,
     readerFn,
     synthFn: async () => file.reply,
     openThreads: false

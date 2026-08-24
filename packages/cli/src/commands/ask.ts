@@ -898,12 +898,18 @@ export async function writeSynthesisFile(
   path: string,
   readersPath: string,
   onProgress?: (p: AskProgress) => void,
-): Promise<{ file: SynthesisFile | null; abs: string; probe: AskResult }> {
+): Promise<{ file: SynthesisFile | null; abs: string; probe: AskResult; notes: string[] }> {
   const staged = readersPath ? await stageReaders(db, question, base, readersPath) : null;
   const cap = synthCapture();
   const probe = await ask(db, question, {
     ...base,
-    ...(staged ? { readerFn: staged.readerFn } : {}),
+    // FIX-B D4. The pin belongs on every pass that consumes a recording, not
+    // only on `replayReaders`. Without it this pass built the live shortlist
+    // and looked recorded outputs up by session id against it, so a shortlist
+    // that had moved produced `found: false` for whatever it no longer
+    // contained — a quietly thinner synthesis prompt, with nothing anywhere
+    // saying the recording had been half ignored.
+    ...(staged ? { pin: staged.pin, readerFn: staged.readerFn } : {}),
     ...(onProgress && !staged ? { onProgress } : {}),
     synthFn: cap.fn,
     openThreads: false,
@@ -914,7 +920,8 @@ export async function writeSynthesisFile(
   // worth writing. `ask()` reports that itself; writing an empty prompt here
   // would hand the host agent a question with no evidence under it, which is
   // the one shape that produces a confident answer from nothing.
-  if (!cap.seen.input) return { file: null, abs, probe };
+  const notes = staged?.notes ?? [];
+  if (!cap.seen.input) return { file: null, abs, probe, notes };
 
   const input = cap.seen.input;
   const q = redactOutgoing(question).text;
@@ -947,7 +954,7 @@ export async function writeSynthesisFile(
   };
   fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
-  return { file, abs, probe };
+  return { file, abs, probe, notes };
 }
 
 async function recordSynthesis(
@@ -960,7 +967,7 @@ async function recordSynthesis(
   t: ReturnType<typeof themeFrom>,
   onProgress: (p: AskProgress) => void,
 ): Promise<number> {
-  const { file, abs, probe } = await writeSynthesisFile(
+  const { file, abs, probe, notes } = await writeSynthesisFile(
     db,
     question,
     base,
@@ -968,6 +975,9 @@ async function recordSynthesis(
     readersPath,
     onProgress,
   );
+  // Provenance before the receipt: this prompt was built from a recorded
+  // shortlist, and the reader is owed that before they hand it to a model.
+  if (!o.json && !o.quiet) for (const line of notes) print(`  ${t.dim(line)}`);
 
   if (o.json) {
     printJson({
@@ -1079,18 +1089,28 @@ export async function filterHostAnswer(
     );
   }
 
-  // ---- pass one: the live shortlist, at zero model calls.
+  // ---- pass one: the recorded shortlist, resolved against the live index, at
+  // zero model calls.
+  //
+  // FIX-B D4, the third leg. This used to rebuild the shortlist and refuse
+  // when it had moved, which is the same failure `--readers-in` had and the
+  // same reason: the embedding pass keeps landing vectors while a host agent
+  // answers a prompt, and the ranking is a function of how many have landed.
+  // The shortlist recorded in the synthesis file is pinned, so what is checked
+  // is the only thing that can still make the answer wrong — whether this
+  // index can still read every session the prompt was built from.
+  const pin: NonNullable<AskOptions['pin']> = { sessionIds: file.sessionIds };
   const rec = recorder();
-  await ask(db, question, { ...base, concurrency: 1, openThreads: false, readerFn: rec.fn });
+  await ask(db, question, { ...base, pin, concurrency: 1, openThreads: false, readerFn: rec.fn });
   const live = rec.seen.map((x) => x.sessionId);
-  matchOrFail(abs, q, 'recorded shortlist', file.sessionIds, live);
+  goneOrFail(abs, q, file.sessionIds, live);
 
   // The readers are a *subset*: only sessions that found something reach the
   // synthesizer, and the rest legitimately contributed nothing. So this one is
   // checked the other way round — every recorded reader must still be
   // shortlisted, and a shortlisted session with no recorded reader is the
   // ordinary `found: false`.
-  const known = new Set(live);
+  const known = new Set(file.sessionIds);
   const orphans = file.readers.map((r) => r.sessionId).filter((id) => !known.has(id));
   if (orphans.length > 0) {
     throw new UserError(
@@ -1110,6 +1130,7 @@ export async function filterHostAnswer(
   // expression that can construct a backend, and `filterAnswer` does the work.
   return ask(db, question, {
     ...base,
+    pin,
     readerFn,
     synthFn: async () => file.reply,
     openThreads: false,

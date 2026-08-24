@@ -2,7 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { db as store, embeddings, vecStatus, type AskReaderOutput } from '@potsherd/core';
-import { replayReaders, writeReadersFile } from '../packages/cli/src/commands/ask.js';
+import {
+  filterHostAnswer,
+  replayReaders,
+  writeReadersFile,
+  writeSynthesisFile,
+} from '../packages/cli/src/commands/ask.js';
 import { rmrf, tempDir } from './helpers.js';
 
 /**
@@ -171,6 +176,47 @@ describe('the seam survives a shortlist that moved', () => {
     await expect(
       replayReaders(db, 'what did we decide about the queue?', { root, k: 2 }, target),
     ).rejects.toThrow(/recorded against a different question/);
+    db.close();
+  });
+});
+
+describe('the other two legs of the round trip are pinned too', () => {
+  it('--readers-in --synthesis-out builds the prompt from the recorded shortlist', async () => {
+    const { root, db } = seed();
+    const { target, ids } = await record(db, root, 2);
+    add(db, LATE, 'the definitive pgbouncer answer',
+      'pgbouncer prepared statements pgbouncer prepared statements', QUOTE);
+    publish(db);
+    const out = path.join(root, 'synthesis.json');
+    const { file, probe } = await writeSynthesisFile(db, QUESTION, { root, k: 2 }, out, target);
+    expect(probe.spend.calls).toBe(0);
+    // The prompt is built from what was recorded, and every recorded reader is
+    // in it — not silently turned into `found: false` by a shortlist that moved.
+    expect(file!.sessionIds.sort()).toEqual([...ids].sort());
+    expect(file!.readers.map((r) => r.sessionId).sort()).toEqual([...ids].sort());
+    db.close();
+  });
+
+  it('--filter-in answers over the shortlist the prompt was built from', async () => {
+    const { root, db } = seed();
+    const { target, ids } = await record(db, root, 2);
+    const out = path.join(root, 'synthesis.json');
+    await writeSynthesisFile(db, QUESTION, { root, k: 2 }, out, target);
+    add(db, LATE, 'the definitive pgbouncer answer',
+      'pgbouncer prepared statements pgbouncer prepared statements', QUOTE);
+    publish(db);
+    const raw = JSON.parse(fs.readFileSync(out, 'utf8')) as Record<string, unknown>;
+    fs.writeFileSync(out, JSON.stringify({
+      ...raw,
+      reply: {
+        evidence: [{ n: 1, session_id: ids[0], seq: 12, quote: QUOTE }],
+        answer: [{ text: 'The client cache was set to zero.', cites: [1] }],
+      },
+    }, null, 2), 'utf8');
+    const r = await filterHostAnswer(db, QUESTION, { root, k: 2 }, out);
+    expect(r.spend.calls).toBe(0);
+    expect(r.answer).not.toBe('');
+    expect(r.evidence.some((e) => e.sessionId === LATE)).toBe(false);
     db.close();
   });
 });
