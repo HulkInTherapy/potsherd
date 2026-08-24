@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { recall } from '@potsherd/core';
+import { format, recall, vecStatus, type VecStatus } from '@potsherd/core';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { parseFilters, parseLimit, type FilterFlags } from '../../../cli/src/filters.js';
@@ -151,6 +151,17 @@ export async function runRecall(
 
     const result = await recall(db, query, filters, options);
 
+    /**
+     * The denominator, from the one place that owns it.
+     *
+     * `VectorState` carries `vectors` (a numerator) and no total, so the count
+     * this door printed could not be interpreted. `vecStatus(db, root).report`
+     * is what `doctor`, `index`, `find` and `stats` all render, read here on
+     * the same connection the search just used — wired, not recomputed, so the
+     * model door and the human verbs cannot drift apart.
+     */
+    const vectorReport = vecStatus(db, root).report;
+
     // T10.1's label, read — never re-derived. `null` means this build of core
     // does not carry one yet, and `null` is not `none`: see `shapes.ts`.
     const confidence = confidenceOf(result);
@@ -199,11 +210,16 @@ export async function runRecall(
        * actually able to do — read off `result.vectors`, which is core's own
        * single source of truth for it.
        */
-      capability: capabilityLine(result.vectors),
+      capability: capabilityLine(result.vectors, vectorReport),
       vectors: result.vectors,
       note: noMatch
         ? 'no match. The archive does not contain this' +
           (belowFloor ? `, though ${String(belowFloor)} rows were withheld below the ${String(minConfidence ?? AGENT_FLOOR)} floor` : '') +
+          // Which half of the search returned the empty. "The archive does not
+          // contain this" is a much stronger claim when both halves ran than
+          // when only bm25 did, and the gap is measured: the verifier's query
+          // answers 1 session with vectors on and 0 with them off.
+          (result.vectors.used ? '' : '. Only keyword search ran; the semantic half did not') +
           '. Say so — do not widen into a guess, and do not answer from the repository in ' +
           'front of you.'
         : calibrated
@@ -420,12 +436,41 @@ function windowsFrom(
   };
 }
 
-/** Audit item 9, on every reply rather than once in `doctor`. */
-export function capabilityLine(v: Result['vectors']): string {
-  if (v.used) return `keyword + semantic search${v.vectors ? ` · ${String(v.vectors)} vectors` : ''}`;
+/**
+ * Audit item 9, on every reply rather than once in `doctor`.
+ *
+ * All three branches answer one question — *what could this search actually
+ * do?* — and all three used to answer it in a way an agent could not act on:
+ *
+ *  - `used` printed `· 928 vectors`, a numerator with no denominator. Every
+ *    human verb prints `of 4,725`, so `928` alone cannot be told apart from a
+ *    finished index.
+ *  - `!available` — **the branch every fresh install hits, at 0 vectors** —
+ *    shouted `SEMANTIC SEARCH UNAVAILABLE` and carried `run potsherd index
+ *    --embed` through `reason`. The command is one the caller has no shell to
+ *    run, and "unavailable" is a claim about a permanent state that an index
+ *    which is embedding right now does not have.
+ *
+ * The denominator is not on {@link VectorState}, so it is read from the report
+ * {@link vecStatus} already computes — the same object `doctor`, `index`,
+ * `find` and `stats` render — rather than counted again here. `report` is
+ * optional because a caller without a connection genuinely does not have it,
+ * and in that case this prints no count at all: silence beats a number that
+ * cannot be interpreted.
+ */
+export function capabilityLine(v: Result['vectors'], report?: VecStatus['report']): string {
+  const counts = report && report.total > 0
+    ? ` (${format.num(report.embedded)} of ${format.num(report.total)} embedded)`
+    : '';
+  const because = (why?: string) => (why ? ` (${why})` : '');
+  if (v.used) return `keyword + semantic search${counts}`;
+  // `pending` is 0-embedded-with-work-queued and `warming` is partway through.
+  // Both are transient and both are what `doctor-line.ts` calls warming.
+  if (report && (report.phase === 'warming' || report.phase === 'pending'))
+    return `keyword search only — semantic search is warming${counts}`;
   if (!v.available)
-    return `SEMANTIC SEARCH UNAVAILABLE — results are keyword-only${v.reason ? ` (${v.reason})` : ''}`;
-  return `keyword search answered this one${v.reason ? ` (${v.reason})` : ''}`;
+    return `semantic search unavailable — results are keyword-only${because(v.reason)}`;
+  return `keyword search answered this one${because(v.reason)}`;
 }
 
 /** The contract's field names, in the words `parseFilters` already speaks. */

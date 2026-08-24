@@ -8,7 +8,8 @@ import { indexAll, paths } from '@potsherd/core';
 
 import { makeContext, resolveGraftCwd } from '../packages/mcp/src/context.js';
 import { TOOLS, WRITE_TOOLS } from '../packages/mcp/src/server.js';
-import { runRecall } from '../packages/mcp/src/tools/recall.js';
+import { capabilityLine, runRecall } from '../packages/mcp/src/tools/recall.js';
+import { describeError } from '../packages/mcp/src/errors.js';
 import { AGENT_FLOOR, CONFIDENCE_VALUES } from '../packages/mcp/src/tools/shapes.js';
 import * as shipped from '../packages/mcp/src/descriptions.js';
 import {
@@ -1078,5 +1079,105 @@ describe('the three phrasings', () => {
       expect(live, name).toHaveLength(1);
       expect(parked, name).toHaveLength(2);
     }
+  });
+});
+
+/**
+ * FIX-C — the model door prints only what an agent can act on.
+ *
+ * Phase 10 has now recorded the same failure three times at this door: an
+ * instruction aimed at an agent that the agent cannot follow. `potsherd_recall`
+ * has a schema of `query, scope, want, budget` and its caller has no shell, so
+ * a string telling it to run `potsherd index --embed` or to pipe `ls --json`
+ * through `jq` is not a remedy, it is a dead end wearing a remedy's clothes.
+ *
+ * These tests are the fence. They assert on the strings a model actually reads
+ * — `capability`, `note`, and the text of a scope error — at **0 vectors**,
+ * which is the state every fresh install is in.
+ */
+describe('FIX-C — no instruction an agent cannot follow', () => {
+  /**
+   * A shell verb, in the forms this repo has actually shipped one: a bare
+   * `run …`, a pipeline, `jq`, or a `potsherd <verb>` invocation. The three MCP
+   * tools are the only things the caller can reach.
+   */
+  const SHELL = /\brun\s|\bjq\b|\|\s|potsherd\s+(index|ls|find|audit|stats|doctor)\b|--embed\b/;
+
+  it('C1 — the capability line at 0 vectors offers no shell command', async () => {
+    // Both branches an empty index reaches: a query that hits, and one that
+    // does not. Before FIX-C the second read
+    //   `SEMANTIC SEARCH UNAVAILABLE — … (no embeddings in the index — run  potsherd index --embed)`
+    for (const query of ['pgbouncer', 'zzzqqq flurblewomp aardvark protocol']) {
+      const r = await runRecall(ctx(), { query });
+      expect(String(r['capability']), query).not.toMatch(SHELL);
+    }
+  });
+
+  it('C1 — a warming index is called warming, not UNAVAILABLE', async () => {
+    // "UNAVAILABLE" is a claim about a permanent state. An index that is 0%
+    // embedded and climbing is transient, and the repo's own word for it —
+    // `warmingLine` in `doctor-line.ts` — is `warming`.
+    const r = await runRecall(ctx(), { query: 'pgbouncer' });
+    expect(String(r['capability'])).toMatch(/warming/);
+    expect(String(r['capability'])).not.toMatch(/UNAVAILABLE/);
+  });
+
+  it('C1 — a count is always `N of M`, never a bare numerator', async () => {
+    // `928 vectors` cannot be told apart from a finished index. Every human
+    // verb prints `of 4,725`; this door now reads the same `vecStatus` report.
+    const r = await runRecall(ctx(), { query: 'pgbouncer' });
+    expect(String(r['capability'])).toMatch(/\d[\d,]* of \d[\d,]* embedded/);
+  });
+
+  it('C1 — the `used` branch carries the denominator too', () => {
+    const line = capabilityLine(
+      { used: true, available: true, vectors: 928 },
+      { phase: 'warming', embedded: 928, pending: 3797, total: 4725, runtimeReady: true, acquireBytes: 0 },
+    );
+    expect(line).toMatch(/928 of 4,725 embedded/);
+    // The bare numerator is gone, not merely joined by a denominator.
+    expect(line).not.toMatch(/928 vectors/);
+  });
+
+  it('C1 — a genuinely unavailable runtime still says unavailable', () => {
+    // The warming wording must not swallow a real failure. `phase: empty` with
+    // `available: false` is an index that has no vectors and no pending work.
+    const line = capabilityLine(
+      { used: false, available: false, reason: 'no vector index — never built' },
+      { phase: 'empty', embedded: 0, pending: 0, total: 0, runtimeReady: false, acquireBytes: 0 },
+    );
+    expect(line).toMatch(/unavailable/i);
+    expect(line).toMatch(/never built/);
+  });
+
+  it('C1 — with no report at hand it says less rather than guessing', () => {
+    // No denominator is available at this call site, so no numerator is
+    // printed either. Silence beats a number that cannot be interpreted.
+    const line = capabilityLine({ used: true, available: true, vectors: 928 });
+    expect(line).not.toMatch(/928/);
+  });
+
+  it('C2 — `noMatch` discloses that only the keyword half ran', async () => {
+    // An agent told "the archive does not contain this" deserves to know the
+    // semantic half was never consulted. The verifier sized the gap: the same
+    // query answers 1 session with vectors on and 0 with them off.
+    const r = await runRecall(ctx(), { query: 'zzzqqq flurblewomp aardvark protocol' });
+    expect(r['noMatch']).toBe(true);
+    expect(String(r['note'])).toMatch(/keyword/i);
+  });
+
+  it('C3 — an unmatched project names the projects instead of a pipeline', async () => {
+    // Was: `try:  potsherd ls --json | jq -r ".sessions[].project" | sort -u`.
+    let text = '';
+    try {
+      await runRecall(ctx(), { query: 'pgbouncer', scope: { project: 'no-such-project-4b1' } });
+    } catch (err) {
+      text = describeError(err);
+    }
+    expect(text).toMatch(/no indexed project matches/);
+    expect(text).not.toMatch(SHELL);
+    // It states how many the index holds, so a truncated list is visibly
+    // truncated rather than silently five-of-eighteen.
+    expect(text).toMatch(/index holds \d+/);
   });
 });
