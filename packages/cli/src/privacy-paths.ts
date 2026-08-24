@@ -67,3 +67,46 @@ export const BRIDGE_READ_PATHS: readonly { path: string; note: string }[] = [
     note: "Claude Code's own auto-memory for this project. read-only.",
   },
 ];
+
+/**
+ * The name of the one directory potsherd ever spawns `claude -p` in.
+ *
+ * A copy of `llm.ts`'s `CLAUDE_CWD_NAME`, written out for the reason every
+ * other path in this file is written out: `doctor` is on `OFFLINE_VERBS` and
+ * must not become a verb that *can* open a socket, and `llm.ts` is the module
+ * that talks to backends. `tests/cli.test.ts` imports the real constant and
+ * asserts the receipt against it, so the copy cannot drift — a test may import
+ * anything.
+ */
+export const CLAUDE_SCRATCH_CWD_NAME = 'potsherd-llm-cwd';
+
+/**
+ * What Claude Code creates in the user's own archive because potsherd ran it.
+ *
+ * FIX-B D6, and the fifth false claim this receipt has published. It listed
+ * `~/.claude/projects` under **reads (never modified)** while the model path
+ * caused `~/.claude/projects/<slug>/memory/` to exist — measured, on the real
+ * machine, and documented inside `llm.ts` as *"litter in someone else's
+ * directory"*. So the code knew and the receipt did not.
+ *
+ * potsherd does not call `mkdir` here: Claude Code does, for whatever cwd it
+ * is spawned in. That distinction is worth nothing to the person reading a
+ * privacy receipt — a directory exists in their archive that would not exist
+ * if they had not run potsherd — so it is listed as a write, with the sentence
+ * that says who creates it and why there is exactly one of them.
+ *
+ * `--no-session-persistence` is what keeps it *empty*: no transcript JSONL is
+ * written, so nothing a potsherd model call creates can ever be indexed,
+ * carded, ranked or shown in `potsherd ls`. The fixed name is what keeps it
+ * *one*: a fresh temp name per call would leave one entry per call, and
+ * `card --all` over the reference corpus is 39 calls.
+ */
+export const CLAUDE_SPAWN_WRITE_PATH =
+  `~/.claude/projects/<slug of the scratch cwd, ending ${CLAUDE_SCRATCH_CWD_NAME}>/`;
+
+export const CLAUDE_SPAWN_WRITE_NOTE =
+  'created by claude code, not by potsherd, because potsherd spawned it there — ' +
+  'only on the verbs that call a model, and only when the model is the claude ' +
+  'cli. one directory however many calls, because the cwd has a fixed name. it ' +
+  'stays empty: potsherd passes --no-session-persistence, so no transcript is ' +
+  'written and nothing it creates can be indexed. potsherd never removes it.';

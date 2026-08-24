@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, afterEach, describe, expect, it } from 'vitest';
 import { format } from '@potsherd/core';
+import { CLAUDE_CWD_NAME } from '../packages/core/src/llm.js';
 import { copyFixtureClaude, FIXTURE_CLAUDE, rmrf, tempDir } from './helpers.js';
 
 const bytes = format.bytes;
@@ -418,6 +419,41 @@ describe('potsherd cli', () => {
     // One backup per consented file, and each names the file it sits beside.
     expect(backups).toHaveLength(configs.length);
     for (const c of configs) expect(backups).toContain(`${c}.potsherd-bak-<UTC>`);
+  });
+
+  /**
+   * FIX-B D6 — the receipt's fifth false claim.
+   *
+   * `~/.claude/projects` is listed under `reads (never modified)`. The model
+   * path spawns `claude -p` in a fixed scratch cwd, and Claude Code creates
+   * `~/.claude/projects/<slug of that cwd>/memory/` for whatever directory it
+   * is run in. `llm.ts` measured that, documented it as *"litter in someone
+   * else's directory"*, and made the name fixed so there is one of them rather
+   * than one per call — so the code knows, and the receipt did not.
+   *
+   * The pattern behind all five: CI proves the screen matches the program, and
+   * never that the program matches the truth. So this asserts the receipt
+   * against the constant the spawning code actually uses.
+   */
+  it('doctor --privacy names the directory claude code creates when potsherd spawns it', () => {
+    const root = scratchRoot();
+    const r = run(['doctor', '--privacy', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root, '--width', '100']);
+    const writes = r.stdout.slice(r.stdout.indexOf('writes:'));
+    // Named where writes are named, not where reads are.
+    expect(writes).toContain(CLAUDE_CWD_NAME);
+    expect(writes).toContain('projects/');
+    // And the read entry no longer claims that tree is never modified without
+    // saying which part of it is not.
+    const reads = r.stdout.slice(0, r.stdout.indexOf('writes:'));
+    expect(reads).not.toMatch(new RegExp(`projects[^\\n]*${CLAUDE_CWD_NAME}`));
+  });
+
+  it('doctor --privacy --json carries that directory among the writes', () => {
+    const root = scratchRoot();
+    const r = run(['doctor', '--privacy', '--json', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    const j = JSON.parse(r.stdout) as { reads: string[]; writes: string[] };
+    expect(j.writes.some((w) => w.includes(CLAUDE_CWD_NAME))).toBe(true);
+    expect(j.reads.some((x) => x.includes(CLAUDE_CWD_NAME))).toBe(false);
   });
 
   it('doctor --privacy --json carries the same disclosure', () => {
