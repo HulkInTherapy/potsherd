@@ -445,9 +445,9 @@ jobs:
           # what a normaliser is allowed to hide; it is also most of the
           # 552-against-533 divergence this step used to blame on capture order.
           # Standing where the script stands removes it: what is left is the
-          # length of the checkout path itself (`/home/runner/work/…` against
-          # `/Users/runner/work/…`), which is a character or two and about a
-          # page. `rm -rf` first, as the script does, so a leftover from a local
+          # length of the checkout path itself, which differs between the linux
+          # and macos runners by a character — about one page, well inside a
+          # tenth of a megabyte. `rm -rf` first, as the script does, so a leftover from a local
           # `make-screens.sh` run cannot be what this compares against.
           home="$(cd "$repo" && pwd -P)/.tmp/demo-home"
           rm -rf "$home"
