@@ -28009,19 +28009,72 @@ var WEIGHTS = {
   exchanges_fts: 1,
   ghosts_fts: 1,
   ghost_prompts_fts: 1,
-  vec_exchanges: 1.5,
+  // ---- the semantic lane, re-derived by FIX-K
+  //
+  // `1.5` was `plans/03`'s phase-3 **stopping rule** — the first value that
+  // worked, deliberately not an argmax — and it was derived when the page was
+  // ordered by the fused score itself. Since FIX-I the page is ordered by
+  // calibrated confidence and only *selected* by the fused score, and on the
+  // 60-query set that change lifted the semantic lane (recall@5 51 -> 57)
+  // further than it lifted the fusion (51 -> 55). The fusion had become the
+  // weak link, which is what the phase-3 gate then said out loud.
+  //
+  // FIX-K swept the whole one-parameter family of lexical:semantic balance —
+  // RRF is linear in these weights, so scaling the three semantic lists is the
+  // *entire* family up to a global scale — over
+  // `{0, .25, .5, .75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 12, 20, 50}`,
+  // stated before it was run, on the committed eval fixture:
+  //
+  //     w      1.5     3      4      5      6      8     12     20     50
+  //     @5      55     56     57     57     57     57     57     57     57
+  //     @1      35     34     35     35     36     37     38     37     37
+  //     (bm25 40/31 and vectors-only 57/40 at every point — neither mode's
+  //      ordering can see this weight)
+  //
+  // recall@5 plateaus at 57 for every `w >= 4`; recall@1 plateaus at 37-38 for
+  // every `w >= 8`. **8 is the smallest weight on both plateaux**, and it is
+  // the value shipped: the argmax is 12 (recall@1 38/60) and it is deliberately
+  // not shipped, because both of its neighbours are one query below it and a
+  // one-query maximum on 60 queries is noise wearing a number.
+  //
+  // Justified by recall, not by the gate — and the distinction is not
+  // rhetorical here, because **the gate still fails at 8** (hybrid 57/37
+  // against vectors-only 57/40; the `>` clause at recall@1 is unmet). What 8
+  // buys over 1.5 is measured: recall@5 55 -> 57, recall@1 35 -> 37, in both
+  // halves of a split-half check (17/18 -> 19/18), at no latency cost — the
+  // weight changes no list's participation, so p50 stays ~43 ms — and with no
+  // cost on a warming index: below 75% embedded the result is weight-invariant,
+  // and at 75% it is better (46/28 -> 47/32). See `phases/phase-10/FIX-K-REPORT.md`.
+  //
+  // The three stay **equal to each other**. That was already the rule for the
+  // two below, and it is also the only configuration measured: leaving
+  // `vec_cards` behind at 1.5 costs three queries at recall@5 (57 -> 54).
+  vec_exchanges: 8,
   // The ghosts' half of the semantic list (schema 8). Same weight as the
   // exchange vectors, because it is the same model over the same kind of text
   // — a prompt someone typed — and the only difference is that the answer to
   // this one no longer exists. Weighting it lower would re-create by hand the
   // exact disadvantage the table was added to remove.
-  vec_ghost_prompts: 1.5,
+  vec_ghost_prompts: 8,
   // Card vectors are the semantic half of the same statement. Same weight as
   // the exchange vectors: rank-based fusion needs no common scale, but a list
   // that answers "about the same thing" still should not outvote one that
-  // answers "says these words". Since T10.7 it, too, only orders the routing
-  // lane internally — see `cards_fts` above.
-  vec_cards: 1.5
+  // answers "says these words".
+  //
+  // FIX-K measured what `cards_fts` above claims about *both* card lists — that
+  // since T10.7 they "only order the routing lane internally" — and the claim
+  // is too strong. {@link CARDS_SCORE_EVIDENCE_BLOCKS} is `true`, so a card
+  // still contributes to the fused score of a block that has transcript
+  // evidence, and moving this weight alone moves recall@5 by three queries.
+  // What T10.7 made weight-independent is the *safety* property — a card-only
+  // block sorts below every block with transcript evidence at any weight — and
+  // that is untouched by this change. What does move with it, and what this
+  // corpus cannot measure because it produces no routing-lane row on any of its
+  // 66 queries, is the order of card-only blocks among themselves: the ratio
+  // `cards_fts : vec_cards` goes from 1.2:1.5 to 1.2:8. Restoring that ratio by
+  // scaling `cards_fts` to 6.4 was measured and costs three queries at recall@1
+  // (37 -> 34), so it is not free and was not done.
+  vec_cards: 8
 };
 function ftsQuery(query) {
   const tokens = (query.match(/[\p{L}\p{N}_]+/gu) ?? []).map((t) => t.toLowerCase()).slice(0, 24);
