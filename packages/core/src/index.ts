@@ -502,6 +502,7 @@ export {
   quoteOccursIn,
   matchSpan,
   quotableText,
+  unlabelQuote,
   MIN_UNIT_CHARS,
   ANSWER_MAX_WORDS,
   ASK_CARD_CHARS,

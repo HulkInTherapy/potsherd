@@ -292,7 +292,7 @@ describe('filterAnswer — the code-level citation filter', () => {
    * This is silent loss of TRUE evidence, on the path the phase's headline
    * claim rests on, punishing exactly the model that followed the instruction.
    */
-  it.fails('D7 (UNFIXED): drops a quote copied exactly as the prompt instructs', () => {
+  it('keeps a quote copied exactly as the prompt instructs', () => {
     const asPrinted = `user: ${quotableText(POOLER_TEXT).split('\n')[0]!}`;
     expect(asPrinted).toBe('user: the pooler is 500ing on deploy');
     const out = filterAnswer(

@@ -20556,6 +20556,10 @@ function matchSpan(quote, text) {
 function quotableText(unitText2) {
   return unitText2.replace(/^user:[ \t]*/, "").replace(/\n\nassistant:[ \t]*/, "\n");
 }
+var LEADING_SPEAKER_LABEL = /^\s*(?:user|assistant):[ \t]*/;
+function unlabelQuote(quote) {
+  return quote.replace(LEADING_SPEAKER_LABEL, "");
+}
 var ELIDED_MIDDLE = /characters elided\]/;
 function wordCount(text) {
   return text.trim() === "" ? 0 : text.trim().split(/\s+/).length;
@@ -20610,12 +20614,12 @@ function filterAnswer(proposedSentences, proposedEvidence, sources) {
       note("unresolved-seq");
       continue;
     }
-    if (normaliseQuote(p.quote).length < MIN_QUOTE_CHARS) {
+    if (normaliseQuote(unlabelQuote(p.quote)).length < MIN_QUOTE_CHARS) {
       note("too-short");
       continue;
     }
     const body = quotableText(unit.text);
-    const span3 = matchSpan(p.quote, body);
+    const span3 = matchSpan(unlabelQuote(p.quote), body);
     if (!span3) {
       note("not-a-quote");
       continue;

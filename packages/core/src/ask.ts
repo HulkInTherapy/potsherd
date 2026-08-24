@@ -702,6 +702,27 @@ export function quotableText(unitText: string): string {
   return unitText.replace(/^user:[ \t]*/, '').replace(/\n\nassistant:[ \t]*/, '\n');
 }
 
+/**
+ * The speaker label `unitText()` puts at the head of an excerpt.
+ *
+ * `quotableText()` strips it from the HAYSTACK; nothing stripped it from the
+ * NEEDLE, and `synthPrompt` says "Copy each quote exactly as printed" — so a
+ * model that obeyed produced `user: …`, `matchSpan` looked for a string that is
+ * in no exchange, every quote was dropped `not-a-quote` and every sentence
+ * behind it `no-citation`. The instruction and the filter disagreed, and the
+ * filter is the half that is code.
+ *
+ * Only a LEADING label is removed, and only one. An interior `assistant:` is
+ * left exactly where it is: a quote carrying one is a quote of both sides of
+ * the join presented as continuous prose — a fabrication of contiguity, not a
+ * label — and it must keep failing.
+ */
+const LEADING_SPEAKER_LABEL = /^\s*(?:user|assistant):[ \t]*/;
+
+export function unlabelQuote(quote: string): string {
+  return quote.replace(LEADING_SPEAKER_LABEL, '');
+}
+
 /** `cards/transcript.ts`'s marker for a unit whose middle was cut. */
 const ELIDED_MIDDLE = /characters elided\]/;
 
@@ -851,12 +872,17 @@ export function filterAnswer(
       note('unresolved-seq');
       continue;
     }
-    if (normaliseQuote(p.quote).length < MIN_QUOTE_CHARS) {
+    if (normaliseQuote(unlabelQuote(p.quote)).length < MIN_QUOTE_CHARS) {
       note('too-short');
       continue;
     }
     const body = quotableText(unit.text);
-    const span = matchSpan(p.quote, body);
+    // The excerpt is printed labelled and the prompt says to copy it exactly;
+    // the stored exchange has no label. Strip it from the quote as well as
+    // from the body so both sides of the comparison are the same text. The
+    // emitted quote is still `body.slice(...)` below — the transcript's own
+    // bytes — so this forgives a model nothing.
+    const span = matchSpan(unlabelQuote(p.quote), body);
     if (!span) {
       note('not-a-quote');
       continue;
