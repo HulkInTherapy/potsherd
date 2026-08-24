@@ -162,6 +162,18 @@ export {
   CARDS_SCORE_EVIDENCE_BLOCKS,
   LANES,
   ROUTING_KINDS,
+  // FIX-F round 2 §4.2. `SUMMARY_KINDS` — the kinds whose text is a statement
+  // *about* a conversation rather than a line *from* one — was spelled twice:
+  // once here as the authority, and once inside
+  // `packages/mcp/src/tools/recall.ts`, because that package reaches core
+  // through this barrel and the constant was not on it. A four-word set
+  // duplicated across a package boundary is a set that drifts, and the two
+  // halves of C3 (a summary is not citable; a summary never outranks a
+  // transcript) are decided on opposite sides of that boundary.
+  SUMMARY_KINDS,
+  hasTranscriptEvidence,
+  isSummaryHit,
+  summaryRank,
   ROUTING_PER_SESSION,
   byLane,
   laneOfHit,

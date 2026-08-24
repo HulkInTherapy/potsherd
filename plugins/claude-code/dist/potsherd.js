@@ -4145,6 +4145,14 @@ function vectorReport(counts2) {
 function warmingLine(r, num3 = String) {
   return `semantic search: warming (${num3(r.embedded)} of ${num3(r.total)} embedded)`;
 }
+function stoppedLine(r, num3 = String, bytes3 = (n2) => `${Math.round(n2 / 1e6)} MB`) {
+  const head = `semantic search: not running (${num3(r.embedded)} of ${num3(r.total)} embedded)`;
+  if (r.embedded > 0)
+    return `${head} \u2014 it stopped partway`;
+  if (!r.runtimeReady)
+    return `${head} \u2014 the ${bytes3(r.acquireBytes)} runtime has not been fetched`;
+  return head;
+}
 function vectorNote(r, opts = {}) {
   const num3 = opts.num ?? String;
   const bytes3 = opts.bytes ?? ((n2) => `${Math.round(n2 / 1e6)} MB`);
@@ -4153,16 +4161,26 @@ function vectorNote(r, opts = {}) {
   switch (r.phase) {
     case "ready":
       return { value: num3(r.embedded), parts: [runtime, "every exchange"], tone: "ok" };
+    // FIX-F round 2 §4.3 — the row says `warming` for the same reason the
+    // sentence did, and it is wrong in the same state. `working === false` is
+    // a live worker's absence; `undefined` is a caller who could not ask, and
+    // an absent measurement must not become a claim, so it keeps the old word.
     case "warming":
       return {
         value: num3(r.embedded),
-        parts: [`warming ${num3(r.embedded)} of ${num3(r.total)}`, runtime],
+        parts: [
+          r.working === false ? `stopped at ${num3(r.embedded)} of ${num3(r.total)}` : `warming ${num3(r.embedded)} of ${num3(r.total)}`,
+          runtime
+        ],
         tone: "ok"
       };
     case "pending":
       return {
         value: dash,
-        parts: r.runtimeReady ? [`warming 0 of ${num3(r.total)}`, runtime] : [`0 of ${num3(r.total)}`, `${bytes3(r.acquireBytes)} runtime not fetched yet`],
+        parts: r.runtimeReady ? [
+          r.working === false ? `not running, 0 of ${num3(r.total)}` : `warming 0 of ${num3(r.total)}`,
+          runtime
+        ] : [`0 of ${num3(r.total)}`, `${bytes3(r.acquireBytes)} runtime not fetched yet`],
         tone: "dim"
       };
     case "empty":
@@ -4376,7 +4394,7 @@ function loadVec(db) {
   loaded.set(db, status3);
   return status3;
 }
-function vecStatus(db, root) {
+function vecStatus(db, root, opts = {}) {
   const base2 = loaded.get(db) ?? loadVec(db);
   if (root === void 0)
     return base2;
@@ -4384,7 +4402,7 @@ function vecStatus(db, root) {
   const cacheDir = modelsDir(potsherdDir(root));
   const backend2 = embeddingBackend();
   const reason = base2.available ? void 0 : base2.reason;
-  const working = holder({ root, lane: "embed" }) !== null;
+  const working = opts.working ?? holder({ root, lane: "embed" }) !== null;
   const report = vectorReport({
     embedded: counts2.embedded,
     pending: counts2.pending,
@@ -4411,6 +4429,8 @@ function statusLine(r) {
   if (r.phase === "unavailable") {
     return `semantic search: ${r.reason ?? "not running on this machine"}`;
   }
+  if (r.working === false)
+    return stoppedLine(r, num, bytes);
   return warmingLine(r, num);
 }
 function vecAvailable(db) {
@@ -17076,7 +17096,7 @@ function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), o
       lines.push(...ignoreNote(result, t));
       return lines.join("\n");
     }
-    lines.push(...semanticNote(opts, t, result.vectors));
+    lines.push(...semanticNote(opts, t));
     lines.push(...ignoreNote(result, t));
     lines.push(nextVerbOnEmpty(result, t));
     return lines.join("\n");
@@ -17090,12 +17110,12 @@ function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), o
   const notes = footer(result, t);
   if (notes)
     lines.push(INDENT + t.dim(notes));
-  if (!result.vectors.used && result.vectors.reason && !supersededBySemantic(opts, result.vectors.reason, result.vectors)) {
+  if (!result.vectors.used && result.vectors.reason && !supersededBySemantic(opts, result.vectors.reason)) {
     for (const line of wrap(`text search only ${t.dash} ${result.vectors.reason}`, t.width - INDENT.length)) {
       lines.push(INDENT + t.dim(line));
     }
   }
-  lines.push(...semanticNote(opts, t, result.vectors));
+  lines.push(...semanticNote(opts, t));
   lines.push(...ignoreNote(result, t));
   lines.push(nextVerb(t));
   return lines.join("\n");
@@ -17138,16 +17158,12 @@ function ignoreNote(result, t) {
   const text = Theme.len(INDENT + wide) <= t.width ? wide : what;
   return wrap(text, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
 }
-function semanticNote(opts, t, vectors) {
+function semanticNote(opts, t) {
   if (!opts.semantic)
-    return [];
-  if (vectors?.working === false)
     return [];
   return wrap(opts.semantic, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
 }
-function supersededBySemantic(opts, reason, vectors) {
-  if (vectors?.working === false)
-    return false;
+function supersededBySemantic(opts, reason) {
   return Boolean(opts.semantic) && reason.startsWith("the words matched;");
 }
 function nextVerb(t) {
@@ -26092,6 +26108,7 @@ async function runIndex(o) {
     vec = await embedInForeground(root, showProgress);
   } else if (o.embed !== false && (vec.report?.pending ?? 0) > 0) {
     spawned = startBackgroundEmbedding(root, o);
+    if (spawned) vec = readVectors(root, { working: true });
   }
   if (o.json) {
     printJson({
@@ -26123,11 +26140,11 @@ async function runIndex(o) {
   print(renderIndexReceipt(report, t, root, { embed: o.embed, vec, spawned }));
   return report.totals.failed ? 1 : 0;
 }
-function readVectors(root) {
+function readVectors(root, opts = {}) {
   let db = null;
   try {
     db = db_exports.open({ root });
-    return vecStatus(db, root);
+    return vecStatus(db, root, opts);
   } catch (err) {
     return { available: false, reason: firstLine6(err?.message ?? String(err)) };
   } finally {

@@ -24081,6 +24081,14 @@ function vectorReport(counts) {
 function warmingLine(r, num2 = String) {
   return `semantic search: warming (${num2(r.embedded)} of ${num2(r.total)} embedded)`;
 }
+function stoppedLine(r, num2 = String, bytes2 = (n) => `${Math.round(n / 1e6)} MB`) {
+  const head = `semantic search: not running (${num2(r.embedded)} of ${num2(r.total)} embedded)`;
+  if (r.embedded > 0)
+    return `${head} \u2014 it stopped partway`;
+  if (!r.runtimeReady)
+    return `${head} \u2014 the ${bytes2(r.acquireBytes)} runtime has not been fetched`;
+  return head;
+}
 function vectorNote(r, opts = {}) {
   const num2 = opts.num ?? String;
   const bytes2 = opts.bytes ?? ((n) => `${Math.round(n / 1e6)} MB`);
@@ -24089,16 +24097,26 @@ function vectorNote(r, opts = {}) {
   switch (r.phase) {
     case "ready":
       return { value: num2(r.embedded), parts: [runtime, "every exchange"], tone: "ok" };
+    // FIX-F round 2 §4.3 — the row says `warming` for the same reason the
+    // sentence did, and it is wrong in the same state. `working === false` is
+    // a live worker's absence; `undefined` is a caller who could not ask, and
+    // an absent measurement must not become a claim, so it keeps the old word.
     case "warming":
       return {
         value: num2(r.embedded),
-        parts: [`warming ${num2(r.embedded)} of ${num2(r.total)}`, runtime],
+        parts: [
+          r.working === false ? `stopped at ${num2(r.embedded)} of ${num2(r.total)}` : `warming ${num2(r.embedded)} of ${num2(r.total)}`,
+          runtime
+        ],
         tone: "ok"
       };
     case "pending":
       return {
         value: dash,
-        parts: r.runtimeReady ? [`warming 0 of ${num2(r.total)}`, runtime] : [`0 of ${num2(r.total)}`, `${bytes2(r.acquireBytes)} runtime not fetched yet`],
+        parts: r.runtimeReady ? [
+          r.working === false ? `not running, 0 of ${num2(r.total)}` : `warming 0 of ${num2(r.total)}`,
+          runtime
+        ] : [`0 of ${num2(r.total)}`, `${bytes2(r.acquireBytes)} runtime not fetched yet`],
         tone: "dim"
       };
     case "empty":
@@ -24229,7 +24247,7 @@ function loadVec(db) {
   loaded.set(db, status);
   return status;
 }
-function vecStatus(db, root) {
+function vecStatus(db, root, opts = {}) {
   const base = loaded.get(db) ?? loadVec(db);
   if (root === void 0)
     return base;
@@ -24237,7 +24255,7 @@ function vecStatus(db, root) {
   const cacheDir = modelsDir(potsherdDir(root));
   const backend2 = embeddingBackend();
   const reason = base.available ? void 0 : base.reason;
-  const working = holder({ root, lane: "embed" }) !== null;
+  const working = opts.working ?? holder({ root, lane: "embed" }) !== null;
   const report = vectorReport({
     embedded: counts.embedded,
     pending: counts.pending,
@@ -24264,6 +24282,8 @@ function statusLine(r) {
   if (r.phase === "unavailable") {
     return `semantic search: ${r.reason ?? "not running on this machine"}`;
   }
+  if (r.working === false)
+    return stoppedLine(r, num, bytes);
   return warmingLine(r, num);
 }
 function vecAvailable(db) {
@@ -43360,9 +43380,8 @@ function registerRead(server, ctx) {
 }
 
 // src/tools/recall.ts
-var SUMMARY_KINDS2 = /* @__PURE__ */ new Set(["card", "title"]);
 function evidenceOf(kind) {
-  return SUMMARY_KINDS2.has(kind) ? "not-a-transcript" : "transcript";
+  return SUMMARY_KINDS.has(kind) ? "not-a-transcript" : "transcript";
 }
 var CHARS_PER_TOKEN2 = 4;
 var DEFAULT_CONTEXT_BUDGET = 6e3;
@@ -43673,7 +43692,7 @@ function windowsFrom(sessions, budgetTokens) {
       const h = q.hits[round];
       if (!h) continue;
       any2 = true;
-      if (SUMMARY_KINDS2.has(h.kind)) continue;
+      if (evidenceOf(h.kind) === "not-a-transcript") continue;
       const text = [h.userText, h.assistantText].filter(Boolean).join("\n\n").trim();
       if (!text) continue;
       if (chars + text.length > ceiling) {

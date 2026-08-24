@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { format, recall, vecStatus, type VecStatus } from '@potsherd/core';
+import { SUMMARY_KINDS, format, recall, vecStatus, type VecStatus } from '@potsherd/core';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { parseFilters, parseLimit, type FilterFlags } from '../../../cli/src/filters.js';
@@ -62,32 +62,27 @@ import { threadIdOf } from './thread.js';
  */
 
 /**
- * Hit kinds whose text is a **summary of** a conversation, not a line from one.
- *
- * FIX-F C3. This door already knew the fact — `hitJson` spelled
- * `h.kind === 'card' || h.kind === 'title'` to label a row `not-a-transcript`,
- * and `windowsFrom` spelled it again to skip a hit with no exchange behind it —
- * and then `groupThreads` minted a citation for the thread anyway, because
- * citability was keyed on `lane` and a title's lane is `evidence`. So the fact
- * was on the row and not on the thread, which is how a session an agent had
- * only ever seen six model-written words of came back with a syntactically
- * perfect, index-resolvable citation attached.
- *
- * It is named once here instead of spelled three times. The authority is
- * `SUMMARY_KINDS` in `packages/core/src/recall.ts`, which this must agree with;
- * it is not imported because it is not on the `@potsherd/core` barrel yet and
- * that file is not this branch's to edit — the one line that closes the gap is
- * in FIX-F-REPORT.md §4.
- */
-const SUMMARY_KINDS: ReadonlySet<string> = new Set(['card', 'title']);
-
-/**
  * What a row is: a line from a transcript, or a statement about one.
  *
  * The word an agent reads before it decides whether it may quote something.
+ * `SUMMARY_KINDS` is core's (`packages/core/src/recall.ts`) — FIX-F round 2
+ * put it on the barrel, so this door and the ranker that demotes those rows
+ * now read one set. It was spelled here as well for one round, because this
+ * package reaches core through the barrel and the constant was not on it.
+ *
+ * This door already knew the fact and spelled it inline twice — `hitJson`
+ * labelled a row `not-a-transcript`, `windowsFrom` skipped a hit with no
+ * exchange behind it — and then `groupThreads` minted a citation for the
+ * thread anyway, because citability was keyed on `lane` and a title's lane is
+ * `evidence`. The fact was on the row and not on the thread, which is how a
+ * session an agent had only ever seen six model-written words of came back
+ * with a syntactically perfect, index-resolvable citation attached.
  */
 export function evidenceOf(kind: string): 'transcript' | 'not-a-transcript' {
-  return SUMMARY_KINDS.has(kind) ? 'not-a-transcript' : 'transcript';
+  // Widened rather than narrowed: `kind` arrives here off a JSON row, and a
+  // build of core that adds a kind this one has never heard of must fall
+  // through to `transcript` rather than fail to compile or throw.
+  return (SUMMARY_KINDS as ReadonlySet<string>).has(kind) ? 'not-a-transcript' : 'transcript';
 }
 
 /** Chars per token, for the `want: "context"` budget. `est.`, not measured. */
@@ -713,7 +708,7 @@ function windowsFrom(
       if (!h) continue;
       any = true;
       // A summary hit has no exchange behind it, so it has no window to return.
-      if (SUMMARY_KINDS.has(h.kind)) continue;
+      if (evidenceOf(h.kind) === 'not-a-transcript') continue;
       const text = [h.userText, h.assistantText].filter(Boolean).join('\n\n').trim();
       if (!text) continue;
       if (chars + text.length > ceiling) {
