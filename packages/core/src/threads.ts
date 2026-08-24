@@ -1,3 +1,4 @@
+import { resolveSession, type SessionCandidate } from './browse.js';
 import type { Db } from './db.js';
 
 /**
@@ -587,5 +588,62 @@ export function threadTotals(db: Db, thread: Thread): ThreadTotals {
     bytes: row.bytes,
     startedAt: row.started_at,
     endedAt: row.ended_at,
+  };
+}
+
+/**
+ * A thread addressed the way a caller types it: by any member's id8.
+ *
+ * Everything here already existed — {@link threadOf} has the chain,
+ * {@link threadTotals} has the arithmetic, `resolveSession` turns eight
+ * characters into an id. What did not exist was one function joining them, and
+ * the MCP package had been asking for it by name since T10.6: `tools/thread.ts`
+ * probed `core.resolveThread`, found `undefined`, and degraded to the single
+ * session it was handed — so `potsherd_read` on the audit's own F4 fixture
+ * returned the head's exchanges and told the model *"this build of potsherd
+ * does not model fork/resume chains yet"*, in the release that had just built
+ * the chain. `potsherd_read` is one of the archaeologist's two tools. F4
+ * reproduced at the model door.
+ *
+ * Resolution is `resolveSession`'s, not a second one, for the same reason
+ * lineage is derived once at index time: `potsherd show <id8>` and
+ * `potsherd_read {"thread":"<id8>"}` cannot be allowed to mean two different
+ * sessions.
+ *
+ * **Never a thread of nothing.** A session no fork touched resolves to a chain
+ * of one, so a caller may treat "the thread" as the unit without first asking
+ * whether there is one. `null` means only that the reference named nothing.
+ *
+ * {@link ThreadResolution.ambiguous} carries `resolveSession`'s candidate list
+ * through rather than swallowing it: showing someone the wrong conversation,
+ * confidently, is the one failure a memory tool cannot recover from, and the
+ * caller — CLI or MCP — is the layer that knows how to say so.
+ */
+export interface ThreadResolution {
+  /** The root of the chain. Stable whichever member was named. */
+  threadId: string;
+  /** Root first, head last. One entry for a session that is its own thread. */
+  sessionIds: string[];
+  /** The thread's range: the earliest link's start, the latest link's end. */
+  startedAt: string | null;
+  endedAt: string | null;
+  /** Exchanges across every link — the number F4 says `graft` should print. */
+  exchanges: number;
+  /** Set when the reference matched more than one thread it could mean. */
+  ambiguous?: SessionCandidate[];
+}
+
+export function resolveThread(db: Db, ref: string): ThreadResolution | null {
+  const found = resolveSession(db, ref?.trim() ?? '');
+  if (!found) return null;
+  const thread = threadOf(db, found.id);
+  const totals = threadTotals(db, thread);
+  return {
+    threadId: thread.id,
+    sessionIds: thread.sessions,
+    startedAt: totals.startedAt,
+    endedAt: totals.endedAt,
+    exchanges: totals.exchanges,
+    ...(found.ambiguous ? { ambiguous: found.ambiguous } : {}),
   };
 }

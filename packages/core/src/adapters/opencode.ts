@@ -74,6 +74,7 @@ import { openSqliteReadOnly, type Db } from '../db.js';
 import type {
   Adapter,
   Exchange,
+  FormatProvenance,
   ExchangeToolCall,
   ParseOptions,
   ParseResult,
@@ -106,20 +107,50 @@ const MAX_DEPTH = 3;
 /**
  * T6.6 D6 — the provenance, as a boolean rather than as prose.
  *
- * `OPENCODE_DOCTOR_NOTE` says this in a sentence, and `doctorLine()` says it in a
- * word — but the rendered line is clipped to the terminal's width, and when
- * the tool is **absent** it does not carry the word at all. Absent is this
- * adapter's state on every machine that does not have the tool. `doctor
+ * `OPENCODE_DOCTOR_NOTE` says this in a sentence, and `doctorLine()` says it
+ * in a word — but the rendered line is clipped to the terminal's width, and
+ * when the tool is **absent** it does not carry the word at all. Absent is
+ * this adapter's state on every machine that does not have the tool. `doctor
  * --json` is the documented API, and an API cannot ask a caller to grep a
  * width-dependent sentence for an adjective. So the fact is a field.
+ *
+ * **Still `true` after T10.12, and the reason changed.** It no longer means
+ * "written from documentation": a real 1.18.21 store was read. It means the
+ * part of the format that carries the answer — `part.data` — has never been
+ * read, which `T10.12-LABELS.md` §6 records as opencode keeping *a form of*
+ * the label. Which part, and which parts are now verified right, is in
+ * {@link OPENCODE_FORMAT_PROVENANCE}; a caller wanting more than one bit
+ * reads that.
  */
 export const OPENCODE_FORMAT_UNVERIFIED = true;
 
 export const OPENCODE_DOCTOR_NOTE =
-  'opencode: format unverified — this adapter was written from documentation, not from a real ' +
-  'store, so its schema is discovered at runtime (pragma table_info) rather than assumed, and it ' +
-  'degrades to "unsupported version" rather than half-parsing a store it does not recognise. ' +
-  'The database is opened read-only.';
+  'opencode: measured against opencode-ai 1.18.21 (T10.12, 24 aug 2026) — a real session was run ' +
+  'and indexed, and the label splits in two. DISCOVERY AND SESSION METADATA ARE CORRECT: the ' +
+  'store is at ~/.local/share/opencode/opencode.db exactly where this adapter looks, ' +
+  'describeStore accepts it, and the session row parses with title, directory and both ' +
+  'timestamps right. MESSAGE CONTENT IS NOT READ: at 1.18.21 the `message` table carries neither ' +
+  'a role column nor a text column — the role is inside a `data` JSON blob, and the turn text is ' +
+  'in the child `part` table, which this adapter does not join — so a real session indexes with ' +
+  '0 prompts and its answer does not reach the index. Schema is still discovered at runtime ' +
+  '(pragma table_info) rather than assumed, and an unrecognised store degrades to "unsupported ' +
+  'version" rather than half-parsing. The database is opened read-only.';
+
+/**
+ * The split label as fields. See {@link FormatProvenance} for why a boolean
+ * could not hold this any more.
+ *
+ * Every entry is from `phases/phase-10/T10.12-LABELS.md` §4, which recorded
+ * the round trip: `opencode run "say hello"` under a relocated HOME, then
+ * `potsherd index` and `potsherd ls` over what it wrote.
+ */
+export const OPENCODE_FORMAT_PROVENANCE: FormatProvenance = {
+  measured: 'opencode-ai 1.18.21, 24 aug 2026',
+  verified: ['store discovery', 'session metadata (title, directory, timestamps)'],
+  wrong: ['message role — it is inside message.data, not a column', 'turn text — it is in part.data, which is not joined'],
+  unverified: OPENCODE_FORMAT_UNVERIFIED,
+  note: OPENCODE_DOCTOR_NOTE,
+};
 
 /**
  * Candidate column names, most specific first. The first name present in the
@@ -819,7 +850,7 @@ export function doctorLine(override?: string): string {
       dir,
       note: hasStorage
         ? 'opencode installed, no sqlite store — this install uses storage/ json, which potsherd does not read yet'
-        : 'opencode installed, no sessions yet · unverified format',
+        : 'opencode installed, no sessions yet',
     });
   }
 
@@ -845,7 +876,7 @@ export function doctorLine(override?: string): string {
       harness: 'opencode',
       status: 'unsupported',
       dir,
-      note: `${failures[0] ?? 'unsupported version'} · unverified format`,
+      note: `${failures[0] ?? 'unsupported version'} · schema not recognised`,
     });
   }
   if (sessions === 0) {
@@ -853,12 +884,14 @@ export function doctorLine(override?: string): string {
       harness: 'opencode',
       status: 'empty',
       dir,
-      note: 'opencode installed, store readable, no sessions yet · unverified format',
+      note: 'opencode installed, store readable, no sessions yet',
     });
   }
   const note = [`${sessions} session${sessions === 1 ? '' : 's'}`];
   if (failures.length) note.push(`${failures.length} store${failures.length === 1 ? '' : 's'} unsupported`);
-  note.push('unverified format');
+  // The measurement, not a state of ignorance: T10.12 ran a real 1.18.21
+  // session through this path and the prompts came out empty.
+  note.push('content unread at 1.18.21 — text is in part.data');
   return formatDoctorLine({
     harness: 'opencode',
     status: 'ready',

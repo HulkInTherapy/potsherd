@@ -16,10 +16,13 @@ import {
   deriveThreads,
   sessionDate,
   storedThreads,
+  resolveThread,
   threadOf,
   threadTotals,
 } from '../packages/core/src/threads.js';
 import { collectSource, graft } from '../packages/core/src/graft.js';
+import { makeContext } from '../packages/mcp/src/context.js';
+import { runRead } from '../packages/mcp/src/tools/read.js';
 import { rmrf, tempDir } from './helpers.js';
 
 /**
@@ -718,5 +721,103 @@ describe('cold and incremental derive the same chains', () => {
     } finally {
       db.close();
     }
+  });
+});
+
+// -------------------------------------------------------- the model's door
+
+/**
+ * D1 — `potsherd_read` on a fork/resume child.
+ *
+ * The chain above is derived at index time and `show`, `ls` and `graft` all
+ * read it. The MCP surface did not: `tools/thread.ts` probed core for an
+ * export named `resolveThread` that was never written, found nothing, and
+ * degraded politely — `via: "session-only"`, a note telling the model *"this
+ * build of potsherd does not model fork/resume chains yet"*, and the head's
+ * three exchanges where the thread has thirteen.
+ *
+ * `potsherd_read` is one of the archaeologist's two tools and the stated
+ * replacement for filesystem `Read`, so that degradation reproduced audit F4
+ * verbatim at the model door, in the release that claims to have fixed it.
+ * These two tests are the door: the core export, and the tool that asks for it.
+ */
+describe('the chain reaches the model, not just the CLI', () => {
+  it('core resolves a thread from any member id8, chain order oldest first', async () => {
+    const { claudeDir, root } = scratch();
+    writeChain(claudeDir, {
+      parentId: ID.parent,
+      childId: ID.child,
+      parentPairs: 10,
+      copiedRecords: 20,
+      ownPairs: 3,
+    });
+    const { db } = await index(claudeDir, root);
+    try {
+      // Any member id8 resolves the thread — the head's, and the root's.
+      for (const ref of [ID.child.slice(0, 8), ID.parent.slice(0, 8), ID.child]) {
+        const t = resolveThread(db, ref)!;
+        expect(t).not.toBeNull();
+        expect(t.threadId).toBe(ID.parent);
+        expect(t.sessionIds).toEqual([ID.parent, ID.child]);
+        expect(t.exchanges).toBe(13);
+        expect(t.ambiguous).toBeUndefined();
+      }
+      // A session nothing forked from is a thread of one, never null: every
+      // caller may treat "the thread" as the unit without asking first.
+      const lone: Rec[] = [];
+      for (let n = 1; n <= 4; n += 1) lone.push(...pair(ID.lone, n, '2026-07-01', 'q'));
+      writeSession(claudeDir, ID.lone, lone);
+      await indexAll({ claudeDir, root, harnesses: ['claude'], embed: false });
+      const solo = resolveThread(db, ID.lone.slice(0, 8))!;
+      expect(solo.sessionIds).toEqual([ID.lone]);
+      // A reference that names nothing is null, not a guess.
+      expect(resolveThread(db, '0f0f0f0f')).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it('potsherd_read on the fork child returns the whole chain, via core', async () => {
+    const { claudeDir, root } = scratch();
+    writeChain(claudeDir, {
+      parentId: ID.parent,
+      childId: ID.child,
+      parentPairs: 10,
+      copiedRecords: 20,
+      ownPairs: 3,
+    });
+    const { db } = await index(claudeDir, root);
+    db.close();
+
+    const ctx = makeContext({ potsherdDir: root, env: {} });
+    const page = runRead(ctx, { thread: ID.child.slice(0, 8), from: 1, to: 200 });
+
+    const thread = page['thread'] as {
+      id: string;
+      via: string;
+      note: string | null;
+      links: { sessionId: string; total: number; offset: number }[];
+    };
+    // The whole chain, not the head. This is the number audit F4 is about.
+    expect(page['total']).toBe(13);
+    expect(thread.via).toBe('core');
+    expect(thread.note).toBeNull();
+    expect(thread.links.map((l) => l.sessionId)).toEqual([ID.parent, ID.child]);
+    expect(thread.links.map((l) => l.total)).toEqual([10, 3]);
+    expect(thread.links.map((l) => l.offset)).toEqual([1, 11]);
+
+    // Every exchange in the chain, from both links, thread-positioned once.
+    const rows = page['exchanges'] as { position: number; sessionId: string; seq: number }[];
+    expect(rows).toHaveLength(13);
+    expect(rows.map((r) => r.position)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+    expect(new Set(rows.map((r) => r.sessionId))).toEqual(new Set([ID.parent, ID.child]));
+    // `seq` stays session-local, because `<id8>@<seq>` is what a citation means
+    // everywhere else in this product. The child's three restart at 1.
+    expect(rows.filter((r) => r.sessionId === ID.child).map((r) => r.seq)).toEqual([1, 2, 3]);
+    // One citation per link, so a source line for the parent's evidence exists.
+    expect((page['citations'] as { sessionId: string }[]).map((c) => c.sessionId)).toEqual([
+      ID.parent,
+      ID.child,
+    ]);
   });
 });

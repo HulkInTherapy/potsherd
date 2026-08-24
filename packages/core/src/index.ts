@@ -60,6 +60,7 @@ export type {
   ParseResult,
   Adapter,
   AdapterStub,
+  FormatProvenance,
 } from './adapters/types.js';
 export { HARNESSES, isAdapter } from './adapters/types.js';
 
@@ -179,6 +180,28 @@ export {
   type ShowResult,
   type ShownExchange,
 } from './browse.js';
+// L1½ — the fork/resume chain (audit F4, `threads.ts`). Exported here because
+// the MCP package is a consumer of core's public surface and `potsherd_read`
+// addresses the **thread**: it had been probing this barrel for `resolveThread`
+// by name since T10.6 and finding nothing, which is how F4 survived the release
+// that fixed it. A capability a caller asks for by name belongs in the barrel.
+export {
+  resolveThread,
+  threadOf,
+  threadTotals,
+  storedThreads,
+  inThread,
+  sessionDate,
+  sessionDay,
+  LINEAGE_HARNESSES,
+  OVERLAP_THRESHOLD,
+  MIN_SHARED_RECORDS,
+  type Thread,
+  type ThreadResolution,
+  type ThreadTotals,
+  type ThreadReport,
+  type ThreadEdge,
+} from './threads.js';
 export {
   stats as sessionStats,
   type StatsReport,

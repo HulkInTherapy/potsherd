@@ -4,6 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  COPILOT_DOCTOR_NOTE,
+  COPILOT_FORMAT_PROVENANCE,
+  COPILOT_FORMAT_UNVERIFIED,
   copilotAdapter,
   discover,
   doctorLine,
@@ -326,5 +329,35 @@ describe('copilot adapter — a real Copilot CLI 1.0.80 session directory (T10.1
     expect(yaml).toMatch(/^created_at: /m);
     expect(yaml).toMatch(/^updated_at: /m);
     fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+/**
+ * D8 — the half of the relabelling that landed, and what it pointed at.
+ *
+ * `COPILOT_DOCTOR_NOTE` and the ready line were rewritten in T10.12 and are
+ * right. The ready line then said *"format known wrong — see `doctor --json`"*
+ * — and `doctor --json` reports the bare `unverified: true` this adapter has
+ * carried since phase 6, which reads as *nobody looked*. The one surface the
+ * line sent a reader to was the one that contradicted it.
+ *
+ * The line is self-sufficient now, and the split label exists as data so the
+ * JSON can carry it too. Claims are from `T10.12-LABELS.md` §5 only.
+ */
+describe('the copilot label points at nothing that contradicts it (D8)', () => {
+  it('the ready line says where the turns are instead of deferring to --json', () => {
+    const line = doctorLine(FIXTURE_COPILOT);
+    expect(line).toContain('format known wrong');
+    expect(line).not.toContain('doctor --json');
+    expect(line).toContain('session-store.db');
+  });
+
+  it('exports the provenance as data, not only as a sentence', () => {
+    expect(COPILOT_FORMAT_PROVENANCE.measured).toContain('1.0.80');
+    expect(COPILOT_FORMAT_PROVENANCE.verified.length).toBeGreaterThan(0);
+    expect(COPILOT_FORMAT_PROVENANCE.wrong.length).toBeGreaterThan(0);
+    // T10.12 §5: "Until then COPILOT_FORMAT_UNVERIFIED should stay true."
+    expect(COPILOT_FORMAT_UNVERIFIED).toBe(true);
+    expect(COPILOT_FORMAT_PROVENANCE.unverified).toBe(COPILOT_FORMAT_UNVERIFIED);
   });
 });

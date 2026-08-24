@@ -169,3 +169,38 @@ export interface AdapterStub {
 export function isAdapter(a: Adapter | AdapterStub): a is Adapter {
   return !('supported' in a) || a.supported !== false;
 }
+
+/**
+ * What is actually known about an adapter's format, as fields.
+ *
+ * `doctor --json` has carried a single `unverified: boolean` since T6.6 D6,
+ * and it was the right field while the answer was binary: three phase-6
+ * adapters had been written from documentation and none had ever seen real
+ * input. T10.12 broke that. A real opencode-ai 1.18.21 session and a real
+ * Copilot CLI 1.0.80 session were run against their adapters, and the result
+ * for both was neither "unverified" nor "fine" — it was *this part is right,
+ * measured, and this part is wrong, measured*. A boolean cannot hold that, and
+ * the two ways of squashing it are both lies: `true` says nobody looked about
+ * the one harness that got a full round trip, and `false` says it works.
+ *
+ * So the boolean keeps its literal meaning — some part of the format has never
+ * been read from real input — and the split lives here beside it. Provenance
+ * is a **record of measurements**, not a summary: every string in
+ * {@link verified} and {@link wrong} is something a named version was observed
+ * to do.
+ */
+export interface FormatProvenance {
+  /** The build measured, and when. Null when nothing real has been read. */
+  measured: string | null;
+  /** Parts observed CORRECT against that build. */
+  verified: readonly string[];
+  /** Parts observed WRONG against that build — measured defects, not risks. */
+  wrong: readonly string[];
+  /**
+   * The adapter's own `*_FORMAT_UNVERIFIED`, carried here so a caller reading
+   * one object cannot get the two fields from different releases.
+   */
+  unverified: boolean;
+  /** The full sentence — the adapter's `*_DOCTOR_NOTE`. */
+  note: string;
+}

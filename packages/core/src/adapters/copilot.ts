@@ -85,6 +85,7 @@ import type {
   Adapter,
   Exchange,
   ExchangeToolCall,
+  FormatProvenance,
   ParseOptions,
   ParseResult,
   SessionRecord,
@@ -138,6 +139,29 @@ export const COPILOT_DOCTOR_NOTE =
   'assistant_response), which this adapter does not open. This is not "unverified"; it is ' +
   "verified and broken. potsherd reads ~/.copilot only: Copilot's VS Code chats live in " +
   'workspaceStorage, which is not one of the read-only inputs potsherd is allowed.';
+
+/**
+ * The split label as fields. See {@link FormatProvenance} for why a boolean
+ * could not hold this any more, and `T10.12-LABELS.md` §5 for the run: one
+ * `copilot -p` under a relocated HOME created `session-state/<uuid>/` on the
+ * first attempt, unauthenticated, and it held none of the six files
+ * {@link STATE_FILES} looks for.
+ *
+ * `unverified` stays `true` on that file's own instruction — the sqlite store
+ * holding the turns has still never been opened by this adapter — but "nobody
+ * looked" is no longer what it means, and {@link verified} says what a reader
+ * would otherwise have to infer: the *path* was never the defect.
+ */
+export const COPILOT_FORMAT_PROVENANCE: FormatProvenance = {
+  measured: 'Copilot CLI 1.0.80, 24 aug 2026',
+  verified: ['session-state/<id>/ is the right directory and is created on first CLI run'],
+  wrong: [
+    'none of STATE_FILES is written there — the directory holds workspace.yaml, checkpoints/ and rewind-file-snapshots/',
+    'the turns are in ~/.copilot/session-store.db, table turns(session_id, turn_index, user_message, assistant_response), which this adapter does not open',
+  ],
+  unverified: COPILOT_FORMAT_UNVERIFIED,
+  note: COPILOT_DOCTOR_NOTE,
+};
 
 /** Keys a wrapper object may carry the turn array under. */
 const HISTORY_KEYS = ['messages', 'history', 'turns', 'events', 'state'] as const;
@@ -672,7 +696,11 @@ export function doctorLine(override?: string): string {
     if (found.unreadable.length) {
       parts.push(`${found.unreadable.length} unreadable`);
     }
-    parts.push('format known wrong — see doctor --json');
+    // Self-sufficient on purpose. This line used to end "see doctor --json",
+    // and `doctor --json` carries a bare `unverified: true` that reads as
+    // *nobody looked* — so the one surface it sent a reader to was the one
+    // that contradicted it. It names the defect itself now.
+    parts.push('format known wrong at 1.0.80 — turns are in session-store.db');
     status = 'ready';
     note = parts.join(' · ');
   } else if (installed || stateExists) {

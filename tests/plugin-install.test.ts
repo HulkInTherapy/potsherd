@@ -16,6 +16,8 @@ import { cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, r
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { TOOLS } from '../packages/mcp/src/server.js';
+
 const REPO = resolve(__dirname, '..');
 const PLUGIN_SRC = join(REPO, 'plugins', 'claude-code');
 
@@ -285,5 +287,62 @@ describe('the codex plugin, installed the way codex installs it', () => {
     expect(server.command).toBe('sh');
     expect(server.args).toEqual(['bin/potsherd-mcp']);
     expect(existsSync(join(codexPlugin, ...server.args))).toBe(true);
+  });
+});
+
+/**
+ * D9 — the shim that tells a user what a failed start costs them.
+ *
+ * `bin/potsherd-mcp` is the last thing a user sees when the server does not
+ * come up, and it is the only place that says which tools they have lost. It
+ * described the v1.1.0 surface: "six tools", and a `session-archaeologist`
+ * "left with no tools but `Read`". There are three tools, and that agent has
+ * had no `Read` since T10.6 — so the one message written to be actionable was
+ * describing a product that no longer exists.
+ *
+ * Both counts are derived here rather than typed, so a fourth tool or a
+ * renamed one fails this test instead of quietly ageing the shim.
+ */
+describe('the shim shims describe the server that exists', () => {
+  const NUMBER = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'];
+  const shims = ['claude-code', 'codex'].map((h) => {
+    const text = readFileSync(join(REPO, 'plugins', h, 'bin', 'potsherd-mcp'), 'utf8');
+    // A shell comment wraps mid-sentence, so "six\n# tools" is one phrase and a
+    // line-blind reader is the only one that sees it. Unwrap before matching.
+    return { harness: h, text, flat: text.replace(/\n#\s?/g, ' ') };
+  });
+
+  it('counts the tools the server actually registers', () => {
+    for (const { harness, flat } of shims) {
+      const counts = [...flat.matchAll(/\b(zero|one|two|three|four|five|six|seven)\s+tools?\b/gi)].map(
+        (m) => m[1]!.toLowerCase(),
+      );
+      expect(counts.length, `${harness}: the shim says nothing about how many tools`).toBeGreaterThan(0);
+      for (const c of counts) {
+        expect(c, `${harness}: shim claims "${c} tools"`).toBe(NUMBER[TOOLS.length]);
+      }
+    }
+  });
+
+  it('names every tool it says is absent, and no tool that does not exist', () => {
+    for (const { harness, text } of shims) {
+      const named = new Set([...text.matchAll(/\bpotsherd_[a-z]+\b/g)].map((m) => m[0]));
+      expect([...named].sort(), `${harness}`).toEqual([...TOOLS].sort());
+    }
+  });
+
+  it('does not promise the archaeologist a Read it no longer has', () => {
+    // The point of removing `Read` (audit F3) was that the agent could not
+    // fall back to the repository. A shim telling a user the agent still has
+    // it describes the fabrication path as a consolation.
+    const agent = readFileSync(
+      join(REPO, 'plugins', 'claude-code', 'agents', 'session-archaeologist.md'),
+      'utf8',
+    );
+    expect(agent).not.toMatch(/^tools:.*\bRead\b/m);
+    for (const { harness, text } of shims) {
+      expect(text, `${harness}`).not.toMatch(/no tools but `?Read`?/);
+      expect(text, `${harness}`).not.toMatch(/left holding `?Read`?/);
+    }
   });
 });

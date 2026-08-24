@@ -6,8 +6,9 @@
 # gitignored — so `node` died with a module-not-found stack trace before the
 # server ever spoke MCP, every tool vanished from the client, and the only
 # symptom was a tool list that was simply shorter. `session-archaeologist`,
-# whose `tools:` are five `mcp__plugin_potsherd_potsherd__*` entries plus
-# `Read`, was left holding `Read` and answered "not found" to everything.
+# whose `tools:` line is two `mcp__plugin_potsherd_potsherd__*` entries and
+# nothing else since T10.6, was left with no tools at all and answered
+# "not found" to everything.
 #
 # An MCP server that fails to start is invisible by design, so the least this
 # can do is put a sentence a human can act on into the server log instead of a
@@ -16,7 +17,7 @@
 #
 # Since phase 7 place 1 is committed: `dist/mcp.js` is vendored (`scripts/
 # vendor-plugin.mjs`), and the MCP SDK and `zod` are bundled into it rather than
-# left external, so the server starts with an empty `node_modules`. Its six
+# left external, so the server starts with an empty `node_modules`. Its three
 # tools all read the index, so on a machine with no `better-sqlite3` each one
 # answers with a sentence naming the fix -- which is a working server reporting
 # a missing dependency, not a client silently missing every tool.
@@ -49,7 +50,7 @@ Looked in three places:
   3. potsherd-mcp on PATH                         (a global install)
 
 All three tools -- potsherd_recall, potsherd_read, potsherd_graft -- are therefore absent, and the
-session-archaeologist agent is left with no tools but Read.
+session-archaeologist agent is left with no tools at all.
 
 Place 1 is committed to this repository, so a normal install has it. If it is
 missing, this plugin directory was copied without it. Reinstall the plugin, or

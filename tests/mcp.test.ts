@@ -548,19 +548,24 @@ describe('potsherd_read pagination — the thread is the unit', () => {
     }
   });
 
-  it('reports how the thread was resolved, and says so when the chain model is absent', async () => {
+  it('resolves the thread through core, with no fallback left to take', async () => {
+    // D1. This assertion used to accept `session-only` as well, and that is
+    // exactly how the defect survived a release: `tools/thread.ts` probed core
+    // for `resolveThread`, the name did not exist, and the tool told the model
+    // in prose that potsherd "does not model fork/resume chains yet" while
+    // `potsherd_graft` reported the whole chain from the same index.
+    //
+    // The probe is gone and `resolveThread` is a normal import, so `via` has
+    // one legal value. Reintroduce a silent fallback and this fails — which is
+    // the point: a graceful degradation with no alarm becomes permanent.
     const { client, close } = await connect();
     try {
       const id = await anySession(client);
       const page = await call(client, 'potsherd_read', { thread: id, from: 1, to: 1 });
       const thread = page['thread'] as { via: string; note: string | null; links: unknown[] };
-      expect(['core', 'session-only']).toContain(thread.via);
-      if (thread.via === 'session-only') {
-        // T10.3 has not landed here. A tool that silently returned one link of
-        // a chain and called it a thread would be the v1.1.0 behaviour with a
-        // new label on it, so the reply says which it is.
-        expect(String(thread.note)).toMatch(/does not model fork\/resume chains yet/);
-      }
+      expect(thread.via).toBe('core');
+      expect(thread.note).toBeNull();
+      expect(JSON.stringify(page)).not.toMatch(/does not model fork\/resume chains/);
       expect(thread.links.length).toBeGreaterThan(0);
     } finally {
       await close();
@@ -827,7 +832,7 @@ describe('potsherd_graft with no backend', () => {
       expect(String(r['brief']).length).toBeGreaterThan(0);
       const thread = r['thread'] as { id: string; via: string; partial: boolean } | null;
       expect(thread).not.toBeNull();
-      expect(['core', 'session-only']).toContain(thread!.via);
+      expect(thread!.via).toBe('core');
     } finally {
       await close();
     }
