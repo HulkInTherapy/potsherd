@@ -161,7 +161,7 @@ describe('the shipped bundle, with no node_modules anywhere', () => {
     expect(r.stderr).toBe('');
   });
 
-  it('puts the warning back when asked — if this Node emits one at all', () => {
+  it('puts the warning back when asked — if this Node emits one at all', (ctx) => {
     // The escape hatch must not be a flag that does nothing (`10.1`: six plan
     // claims about other software proved false, and the worst *succeeds* and
     // does nothing). But whether there is a warning to put back is a fact
@@ -172,14 +172,23 @@ describe('the shipped bundle, with no node_modules anywhere', () => {
     //
     // So the premise is established rather than assumed (`09 §7.2`): ask this
     // Node directly, and skip loudly if the answer is no.
+    //
+    // **FIX-J §4.3.** It said `skip` and it printed its reason, and then it
+    // `return`ed — which vitest reports as a **pass**. That is C-10's defect,
+    // found here by sweeping the suite for the pattern rather than by anything
+    // going wrong: on a Node that has stopped warning about `node:sqlite`, this
+    // test went green having asserted nothing about the flag it exists to
+    // prove is not a no-op. The reason it printed was already right; only the
+    // verdict was wrong. `ctx.skip()` is the verdict.
     const probe = spawnSync(process.execPath, ['-e', "require('node:sqlite')"], {
       encoding: 'utf8',
     });
     if (!probe.stderr.includes('ExperimentalWarning')) {
       console.log(
-        `  skipped: ${process.version} does not warn about node:sqlite, so there is ` +
+        `  SKIPPED: ${process.version} does not warn about node:sqlite, so there is ` +
           'nothing for POTSHERD_SQLITE_WARN to put back',
       );
+      ctx.skip();
       return;
     }
     const root = path.join(sandbox, 'pd-find');

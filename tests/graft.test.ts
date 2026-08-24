@@ -760,6 +760,42 @@ describe('it works on a plane', () => {
     expect(r.brief).toMatch(/unsummarised/);
   });
 
+  /**
+   * **VERIFICATION-5 C-9, pinned.** The brief's own header said
+   *
+   *   > **unsummarised.** No model call was made — the model call failed
+   *   > (claude --print could not answer: Not logged in · Please run /login).
+   *
+   * A call that failed was made. Both halves of one question, asserted in one
+   * sentence, on the receipt an agent reads first — and the test above it
+   * (`falls back to the card when the model call throws`) passed throughout,
+   * because it asserted `/unsummarised/` and the reason, and never the claim
+   * about the call. This asserts the claim, in both directions, so that neither
+   * sentence can be given to the other run.
+   *
+   * `called` is the fact that separates them, and it is neither
+   * `via === 'model'` (did a call *succeed*) nor `spend.calls > 0` (was one
+   * *billed*): a backend that refuses a login bills nothing and still costs a
+   * round trip, which is exactly the run below.
+   */
+  it('does not say no call was made about a call that failed', async () => {
+    const llm = stub(new Error('claude --print could not answer: Not logged in'));
+    const tried = await graft(db, pgbouncerId, { budget: DEFAULT_BUDGET, llm, cwd: workdir() });
+    await llm.close();
+    expect(tried.via).toBe('card-only');
+    expect(tried.called).toBe(true);
+    // Billed nothing, and still made the call. That is the pair the old
+    // sentence could not tell apart.
+    expect(tried.spend.calls).toBe(0);
+    expect(tried.brief).toContain('**unsummarised.** The model call did not produce one');
+    expect(tried.brief).not.toContain('No model call was made');
+
+    const off = await graft(db, pgbouncerId, { budget: DEFAULT_BUDGET, llm: null, cwd: workdir() });
+    expect(off.called).toBe(false);
+    expect(off.brief).toContain('**unsummarised.** No model call was made');
+    expect(off.brief).not.toContain('The model call did not produce one');
+  });
+
   it('the card-only body is the card verbatim — nothing is paraphrased', async () => {
     const src = await collectSource(db, pgbouncerId, {});
     const body = cardOnlyBody(src).join('\n');

@@ -1628,6 +1628,66 @@ describe('the ask block is built to fit 80x24', () => {
     expect(text).toContain('59 matching sessions not read');
   });
 
+  /**
+   * **VERIFICATION-5 C-9, pinned.** The screen said three things at once on a
+   * run with no reachable backend:
+   *
+   *   nothing was read — all 4 readers failed
+   *   4 of 4 sessions read · 0 answered · 6.4s
+   *   4 readers did not answer · not counted as searched
+   *
+   * — the headline true, the count false, and the note under it asserting the
+   * exclusion the count had not made. `AskResult.searched` was the shortlist
+   * handed *to* readers; FIX-J §4.1 made it the shortlist a reader read, so
+   * this asserts the field and the three lines it drives together. Nothing
+   * pinned any of them before, in either direction.
+   */
+  it('does not say four sessions were read when four readers died', () => {
+    const base = shape(0, 0, 0);
+    const dead: AskResult = {
+      ...base,
+      sentences: [],
+      answer: '',
+      evidence: [],
+      matching: 4,
+      // What `ask()` now records: 4 shortlisted, 4 failed, 0 read.
+      searched: 0,
+      readers: base.readers.slice(0, 4).map((x) => ({
+        ...x,
+        found: false,
+        error: 'claude exited 1: Not logged in',
+      })),
+    };
+    const text = stripAnsi(renderAsk(dead, t80, NOW));
+    expect(text).toContain('nothing was read — all 4 readers failed');
+    expect(text).toContain('0 of 4 sessions read');
+    expect(text).not.toContain('4 of 4 sessions read');
+    expect(text).toContain('4 readers did not answer');
+    // And NOT the archive-shaped empty: `searched === 0` is no longer on its
+    // own enough to mean "nothing in the index matched", because a run whose
+    // readers all died reaches 0 with a shortlist behind it. That frame is the
+    // one VERIFICATION-4 §C7 removed, and this is the door it came back
+    // through while §4.1 was being landed.
+    expect(text).not.toContain('nothing in the index matches');
+  });
+
+  /** The same sentinel from the other side: a shortlist that really was empty. */
+  it('still says nothing matched when no reader ran at all', () => {
+    const base = shape(0, 0, 0);
+    const none: AskResult = {
+      ...base,
+      sentences: [],
+      answer: '',
+      evidence: [],
+      matching: 0,
+      searched: 0,
+      readers: [],
+    };
+    const text = stripAnsi(renderAsk(none, t80, NOW));
+    expect(text).toContain('nothing in the index matches');
+    expect(text).not.toContain('readers failed');
+  });
+
   it('ends with the next verb, in the shape every other screen uses', () => {
     const text = stripAnsi(renderAsk(shape(2, 2, 0), t80, NOW));
     const lines = text.split('\n');
