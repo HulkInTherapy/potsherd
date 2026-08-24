@@ -523,3 +523,113 @@ were cited and kept whole, two were not.
 
 **Added to the wake-up state in `RESUME-PROMPT.md`:** `df -h` and `git worktree list` beside
 `git log` and `gh run list`. A merged worktree is 860 MB of nothing.
+
+## FIX-E landed, and the worker proved my own premise wrong before acting on it
+
+`9ee2c6e`. Suite **1,893 on 53 files** (+3), typecheck 4 of 4, guard exit 0, vendor clean,
+`pnpm evals` exit 0 standalone and identical to the baseline. Report: `phases/phase-10/FIX-E-REPORT.md`.
+
+I briefed this worker that **Ctrl-C works today by accident** — the backend shares potsherd's
+foreground process group, so the terminal signals the whole group — and that `detached: true` would
+therefore trade a background leak for a foreground one. I gave it a standing ruling to land nothing
+and report the blocker rather than move the failure.
+
+**It measured the premise instead of accepting it, and the premise is false.** Real potsherd, real
+backend, real `kill(-pgid, SIGINT)` on the *unfixed* build:
+
+```
+19951  /bin/sh  <stub codex>          ← the launcher
+19956  sleep 300                      ← what the launcher forked
+--- kill(-19950, SIGINT)              potsherd exit 130
+after:  19956  PPID 1  STILL ALIVE
+```
+
+A background job in a non-interactive shell has **SIGINT set to ignore**. The group signal kills
+the launcher; what the launcher forked survives with `PPID 1`. So Ctrl-C at a `card --all` prompt
+**already leaves one live model process per interrupted call** — the foreground leak I was worried
+about creating exists today. SIGKILL to a process group cannot be ignored, so the change does not
+defend a Ctrl-C path, it fixes one. On the fixed build both processes are gone and potsherd still
+exits 130. `09 §9.2` for the third time this phase: the worker corrected the orchestrator and was
+right.
+
+**The shape, and why it is bigger than FIX-D's patch.** FIX-D's `detached: true` alone leaves
+nothing owning the child *between* the two kill paths, which is exactly the hole its own caveat
+named. So: a module-level registry of live children, added on `spawn` and removed on `exit` **and**
+`close`, idempotently — `exit` is the accurate one, `close` is the only one that fires when the
+spawn itself failed. And **one lazily-installed handler per fatal signal**, installed empty→
+non-empty and removed non-empty→empty, which kills every tree, uninstalls itself and **re-raises**
+rather than calling `process.exit`, so potsherd dies *of* the signal and a shell still reads 130.
+
+Three details are load-bearing and are commented as such in the file:
+
+- **A map, not a listener per child.** `process` warns at ten listeners and this suite already
+  prints two `MaxListenersExceededWarning` lines of its own; a reader fan-out registering one
+  apiece would have buried them. Measured 2 → 2, the same two, neither ours.
+- **Every step synchronous**, because `packages/mcp/src/index.ts:136` installs its own `SIGINT`
+  handler ending in `process.exit(0)` and node runs listeners in registration order — anything
+  deferred to a later tick loses that race. **That handler is also why an in-flight `potsherd_ask`
+  was orphaned deliberately on every editor shutdown before this**, which nobody had noticed.
+- **It uninstalls before re-raising**, so it cannot re-enter itself.
+
+It considered and rejected a `pgrep -P` tree walk — smaller, and **blind to the case that produced
+the defect**: a reparented grandchild has no edge left to walk, while process-group membership is
+inherited and survives reparenting exactly. *Smaller is better, but not when the smaller thing
+misses the failure it is for.*
+
+Orphans after the two `never hangs` cases: **4 → 0** (four, not three — one per attempt, and a
+timed-out call is retried once). Three tests red first, driving real spawns whose payload outlives
+its shell, and run **eight times consecutively** before being believed after the first draft proved
+flaky at a 300 ms deadline that could beat `/bin/sh`'s own exec.
+
+## fifteen of seventeen screens had no guard at all
+
+`docs/screens/13-find-redacted.txt` was still publishing `run potsherd index --embed` — the string
+FIX-C deleted at `core/recall.ts:1467` because `index` embeds by default now. It survived because
+CI diffed **two** of seventeen screens against a live run.
+
+**The two cheaper guards I would have reached for both pass on this exact violation**, and the
+worker showed why rather than asserting it: a *"every `potsherd <verb> --<flag>` printed in a screen
+is a flag the CLI still accepts"* check passes because `--embed` **is** still a flag — it is the
+sentence that died; a *"no screen contains a string the source no longer produces"* check passes at
+command granularity because `potsherd index --embed` still appears verbatim in `core/ingest.ts:1163`.
+Only running the command catches it. So the new step rebuilds the demo corpus in a throwaway HOME,
+replays `make-screens.sh`'s capture order and **diffs ten screens against live output**, 2.9 s warm.
+Red on the seeded violation, with exactly the one line as the diff.
+
+Seven screens stay uncovered and the step's own comment names each and why (`09 §13.9`) — three
+need a model backend, `16` is two commands and a shell listing, `07`'s `fetching 46.1 MB, once`
+is a fact about the runner rather than about the build, and `04`/`05` have their own steps. **And
+the guard's real limit, worth reading twice: a screen diff proves the screen is what this build
+prints for the demo corpus, and nothing about a branch that corpus never enters.**
+
+## the background embedder, measured and deliberately not fixed
+
+`packages/cli/src/commands/index.ts:258` spawns `detached: true` + `unref()` with **no kill path**.
+Measured by instrumenting the spawn and running the whole suite: **4 per `pnpm test`, 3 roots, 0
+blocked by the lock.**
+
+Two things that make it worse than `08` recorded:
+
+- **The spawn decision never reads `POTSHERD_OFFLINE`.** The flag is read by `embeddings.offline()`
+  *inside the child*, so it bounds the child's **lifetime**, not the number of children — the count
+  is identical with `POTSHERD_TEST_EMBED=1`. `index --full` with the flag set still starts one.
+- **The lock cannot bound them.** `lockPathFor` is `<root>/.lock.embed`, one lane per root, and
+  every test makes a fresh root. And `<root>/models` means the 48.4 MB download is **once per
+  root**, not once per machine: four workers over four roots is ~194 MB.
+
+One run online, demo corpus: the foreground verb returned in **0.49 s** and left a `PPID 1` worker
+that fetched 48.4 MB and embedded 3,410 chunks over ~70 s. On a real archive that is the multi-hour
+case, on the wasm path `tests/vectors-lazy.test.ts` records as 6.5× slower than native.
+
+**A user's remedy today is nothing inside potsherd.** All 22 verbs checked: none stops, cancels or
+kills anything; `doctor` does not report the embed lane's holder, so the pid is not even shown. The
+only handle in the product is an undocumented `<root>/.lock.embed/owner.json`. `index --no-embed`
+prevents a new one; nothing stops a running one. **Recorded as P1 for phase 11, not fixed here** —
+a stop verb is a product decision and the gate is not waiting on it.
+
+## the fourth verifier is running
+
+Against `9ee2c6e`, briefed with the four commits since round 3 named so it does not re-find what is
+already fixed, with the three burned control strings named as forbidden, and with the gate stated as
+score-what-you-find: **rounds 1–3 scored 6, 7, 7, and three FAILs are on the record rather than one
+moved criterion.**
