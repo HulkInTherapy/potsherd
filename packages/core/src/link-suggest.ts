@@ -11,11 +11,24 @@
  *
  * ## The number this feature has to say out loud
  *
- * Phase 4 measured its own rule pass on the reference corpus and reported the
- * result honestly: of 8 candidates raised, **8 out of 8 were genuinely absent
- * from the other project, but only 1–2 of the 8 were worth raising**. The rule
- * pass is *correct* and *mostly not useful*. That is the same pass this
- * feature stands on.
+ * Phase 4 measured its own rule pass at n = 8 and reported the result
+ * honestly: 8 of 8 genuinely absent from the other project, 1–2 of the 8 worth
+ * raising. **T10.13 re-measured it at n = 109** over 46 cards and 15 projects,
+ * every candidate judged one at a time, and the shape held while one half of
+ * it got worse: **99 of 108 genuinely absent (91.7%, one undecided) and 18 of
+ * 100 worth raising**. The rule pass is *mostly correct* and *mostly not
+ * useful*. That is the same pass this feature stands on.
+ *
+ * The figure this file carries and prints is {@link MEASURED_PRECISION}, and
+ * it is now **this verb's own** re-measurement rather than the open-thread
+ * one, because `link --suggest` asks a weaker question and gets a better
+ * answer: at the shipped {@link DEFAULT_LIMIT} it raised 5 of 20 considered
+ * and **all 5 were worth accepting** — but all 5 were the *same project
+ * relationship*, because {@link suggestLinks} de-duplicates on the session
+ * pair and not the project pair. Over 18 rows the figure is 12 accepted across
+ * only 6 distinct relationships. Both numbers are in
+ * `phases/phase-10/T10.13-REPORT.md` §5; the disclosure below prints the
+ * cautious one and the caveat, never the flattering one alone.
  *
  * For `ask`'s open threads, phase 4 handled that with a model pass that drops
  * unconfirmed candidates. This verb deliberately does **not** take that route,
@@ -46,33 +59,53 @@ import { openThreadCandidates, type OpenThreadCandidate } from './open-threads.j
 import type { Db } from './db.js';
 
 /**
- * The measured precision of the rule pass this feature rests on, from phase
- * 4's own evidence: 8 of 8 candidates were real absences, and 1–2 of the 8
- * were worth a user's attention.
+ * The measured precision of this verb, from T10.13's re-measurement: over 18
+ * suggestions raised from 46 cards, 18 named a pair that was really two
+ * different projects, and 12 of the 18 were worth accepting.
+ *
+ * Was phase 4's 8 raised / 8 absent / 1–2 worth, which was the **open-thread**
+ * rule pass measured at n = 8. Two things made that the wrong figure to print
+ * here. It was replaced rather than adjusted, and the replacement is this
+ * verb's own.
+ *
+ *   - **n = 8 is an anecdote with a fraction in front of it.** T10.13 judged
+ *     109 open-thread candidates and 18 link suggestions one at a time, and
+ *     the open-thread absence figure fell from 8/8 to 99/108.
+ *   - **A link is not an open thread.** This verb asks *are these two sessions
+ *     worth connecting*, which survives a bad decision text as long as the
+ *     pair is right; open threads assert an absence, which does not. Printing
+ *     the open-thread number here understated a verb that measures better.
+ *
+ * The caveat in {@link Precision.note} is not decoration. At
+ * {@link DEFAULT_LIMIT} the measured run raised 5 of 20 considered and all 5
+ * were worth accepting — and all 5 were the **same project relationship**,
+ * because {@link suggestLinks} de-duplicates on the session pair rather than
+ * the project pair. A user who accepts the whole screen gets five links into
+ * one relationship. The 12-of-18 figure printed here is the cautious one.
  *
  * Carried as a value rather than a comment so the renderer prints it and
  * `tests/stack.test.ts` asserts it reached the output. It is a **measurement
  * on one corpus**, not a guarantee, and {@link Precision.note} says so.
  */
 export interface Precision {
-  /** How many candidates the measured run raised. */
+  /** How many suggestions the measured run raised. */
   raised: number;
-  /** How many of those were genuinely absent from the other project. */
+  /** How many named a pair that really was two different projects. */
   absent: number;
-  /** How many were judged worth raising, as a low–high range. */
+  /** How many were judged worth accepting, as a low–high range. */
   worthLow: number;
   worthHigh: number;
   note: string;
 }
 
 export const MEASURED_PRECISION: Precision = {
-  raised: 8,
-  absent: 8,
-  worthLow: 1,
-  worthHigh: 2,
+  raised: 18,
+  absent: 18,
+  worthLow: 12,
+  worthHigh: 12,
   note:
-    'measured in phase 4 on the reference corpus, on the same rule pass this uses. ' +
-    'expect most of these to be wrong.',
+    'measured in phase 10 (T10.13) over 46 cards and 15 projects, on this verb. ' +
+    'expect a screenful to cover fewer relationships than rows.',
 };
 
 /** One proposed link, with everything the user needs to judge it in one line. */
@@ -112,10 +145,12 @@ export interface SuggestOptions {
   /**
    * How many suggestions to return. Default 5, not 8.
    *
-   * At the measured rate a screen of 8 contains 1–2 worth having, so the
-   * default is the smallest number that still expects to hold one. Raising it
-   * does not raise precision; it lowers the fraction of the screen that was
-   * worth reading.
+   * Chosen when the measured rate was 1–2 worth having in 8. T10.13 measured
+   * this verb at 12 of 18 worth accepting, which would argue for a bigger
+   * screen — except that the same measurement found the 18 rows covered only 6
+   * project relationships and the first 5 covered **one**. Raising the default
+   * would spend the extra rows on the relationship the user already has.
+   * Unchanged, and the reason is now the measured one.
    */
   limit?: number;
   /**
@@ -334,9 +369,10 @@ export function renderSuggestions(
   // a full screen of these holds one or two the user wants, and a suggester
   // that does not say so is spending attention it did not ask for.
   const measured =
-    `measured: on the reference corpus this same rule raised ${p.raised} candidates. ` +
-    `${p.absent} of ${p.raised} were genuinely absent from the other project, but only ` +
-    `${worth} of ${p.raised} were worth raising. expect most of these to be wrong.`;
+    `measured: on the reference corpus this verb raised ${p.raised} suggestions. ` +
+    `${p.absent} of ${p.raised} named a pair that really was two different projects, and ` +
+    `${worth} of ${p.raised} were worth accepting. a screenful covers fewer ` +
+    `relationships than it has rows, so expect repeats of the strongest pair.`;
   for (const l of wrap(measured, t.width - 4)) L.push(t.warn(`  ${l}`));
   L.push('');
   L.push(`  ${t.dim('run')}  ${t.bold('potsherd show <id8>')}   ${t.dim('read one before you accept it')}`);

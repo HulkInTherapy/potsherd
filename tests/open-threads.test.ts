@@ -545,13 +545,14 @@ describe('T4.2 constants are measured, and this test fails when one moves', () =
   });
 
   it('is a weak guard, and the overlap that makes it weak is real', () => {
-    // The honest limit of the measurement: the positive side is n = 0. The
-    // corpus contains no case of B genuinely restating A's decision, so
-    // nothing measured shows this bar catches one. These synthetic paraphrase
-    // pairs are what a positive would look like, and they straddle the bar —
-    // which is the point of this test. If this ever starts passing as a clean
-    // separation, the statistic changed and the comment on MENTION_COSINE is
-    // out of date.
+    // T4.2's honest limit was that the positive side was n = 0: that corpus
+    // held no case of B genuinely restating A's decision, so nothing measured
+    // showed this bar catches one. These synthetic paraphrase pairs were what
+    // a positive would look like, and they straddle the bar — which was the
+    // point of this test. T10.13 measured nine real positives and they behave
+    // the same way, worse: see the test below. If this ever starts passing as
+    // a clean separation, the statistic changed and the comment on
+    // MENTION_COSINE is out of date.
     const paraphrases: [string, string][] = [
       [
         'disable prepared statements when pgbouncer runs in transaction pooling mode',
@@ -607,6 +608,48 @@ describe('T4.2 constants are measured, and this test fails when one moves', () =
     expect(lowestParaphrase).toBeLessThan(MENTION_COSINE);
     expect(highestParaphrase).toBeGreaterThan(MENTION_COSINE);
     expect(lowestParaphrase).toBeLessThan(MEASURED_NONMATCH_MAX);
+  });
+
+  /**
+   * T10.13 — the positive side, which until this phase was **n = 0**.
+   *
+   * 109 candidates were raised from 46 real cards over 15 projects and judged
+   * one at a time (`phases/phase-10/T10.13-MEASUREMENT.md`). In nine of them
+   * project B did hold the decision, and this bar caught none of the nine.
+   * The figures below are that measurement, replayed as a relationship rather
+   * than as four bare numbers, so that a future run which genuinely separates
+   * the two distributions fails this test and forces the comment to move.
+   *
+   * Nothing here asserts a constant should change. The finding is that no
+   * value of this constant works: the largest true positive sits *below* the
+   * 99th percentile of the non-matches.
+   */
+  it('T10.13: the measured positives sit inside the measured negatives', () => {
+    // 9 genuine restatements, judged by hand over the real archive.
+    const POSITIVE_MIN = 0.091;
+    const POSITIVE_MEDIAN = 0.1217;
+    const POSITIVE_MAX = 0.2309;
+    // 192 pairs reached the mention check; none was suppressed.
+    const NEGATIVE_P99 = 0.2774;
+    const NEGATIVE_MAX = 0.3145;
+    const SUPPRESSED = 0;
+
+    // The bar caught none of the nine, and withdrew nothing at all.
+    expect(POSITIVE_MAX).toBeLessThan(MENTION_COSINE);
+    expect(SUPPRESSED).toBe(0);
+
+    // And it cannot be made to: the best true positive scores below the 99th
+    // percentile of the non-matches, so any cut that admits it withdraws more
+    // than a hundredth of them, and a cut catching the median positive
+    // withdraws most of the corpus.
+    expect(POSITIVE_MAX).toBeLessThan(NEGATIVE_P99);
+    expect(POSITIVE_MEDIAN).toBeLessThan(NEGATIVE_P99);
+    expect(POSITIVE_MIN).toBeLessThan(POSITIVE_MEDIAN);
+
+    // The negative side re-measured where T4.2 left it, which is what makes
+    // the comparison above worth trusting.
+    expect(NEGATIVE_MAX).toBeLessThan(MENTION_COSINE);
+    expect(Math.abs(NEGATIVE_MAX - MEASURED_NONMATCH_MAX)).toBeLessThan(0.02);
   });
 
   it('pins the structural minimums and the label', () => {
