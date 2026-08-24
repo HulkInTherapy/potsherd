@@ -6,9 +6,9 @@
 
 > **Identifiers.** Every path below that came from a real run is a throwaway sandbox and is
 > written `<sandbox>`. No session id, project name or transcript line appears in this file or in
-> the repository. `~/.potsherd/potsherd.db` was never opened by this worker at all — not read, not
-> copied, not migrated; every measurement is against an index built in `$(mktemp -d)` under a
-> relocated `$HOME`.
+> the repository. `~/.potsherd/potsherd.db` was never opened as a database by this worker, never
+> copied and never migrated — see §6.7, which also says who *did* move its mtime while I worked.
+> Every measurement here is against an index built in `$(mktemp -d)` under a relocated `$HOME`.
 
 ---
 
