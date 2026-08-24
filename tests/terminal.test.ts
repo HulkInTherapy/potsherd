@@ -551,9 +551,9 @@ describe('the version a user reads', () => {
    * So: every manifest in the repository that carries a potsherd version is
    * enumerated here rather than listed, and the git tag is checked when a git
    * checkout is what the test is running inside. A published tarball has no
-   * `.git`, and CI's shallow clone may have no tags; both skip loudly rather
-   * than assert something the environment, not the test, established
-   * (`09 §7.2`).
+   * `.git`, and a shallow clone reaches no tag from HEAD; both skip loudly —
+   * visibly, as a skip and not as a pass — rather than assert something the
+   * environment, not the test, established (`09 §7.2`).
    */
   it('is the same string in every manifest that carries one', () => {
     const cli = manifest('packages/cli/package.json').version;
@@ -605,14 +605,63 @@ describe('the version a user reads', () => {
    * it would have pointed the publish workflow's tag/manifest agreement check
    * at another project's `packages/cli/package.json`.)
    *
-   * The two escapes it already had are kept, and they are the same rule: a
-   * published tarball has no `.git`, and a shallow clone has no reachable tags.
-   * Both skip rather than assert something the environment established.
+   * The three escapes it already had are kept and are now what they claimed to
+   * be. A published tarball has no `.git`, a machine may have no `git`, and a
+   * shallow clone reaches no tag from HEAD; none of the three is a finding
+   * about potsherd, so none of them asserts anything. What changed is that they
+   * **skip** instead of returning — vitest reports a bare `return` as a pass —
+   * and that on CI, where the checkout is the workflow's own choice rather than
+   * the environment's, a missing premise fails. See the block inside the test.
    */
-  it('is not behind the newest git tag this repository released', () => {
-    if (!fs.existsSync(path.join(repo, '.git'))) return; // a packed tarball
-    let tags: string[];
-    try {
+  it('is not behind the newest git tag this repository released', (ctx) => {
+    // **VERIFICATION-5 C-10.** The three escapes below were bare `return`s, and
+    // vitest reports a bare `return` as a **pass**. Simulated with a `git` shim
+    // that answers `git tag` with nothing:
+    //
+    //   ✓ the version a user reads > is not behind the newest git tag …
+    //    Tests  1 passed | 69 skipped (70)
+    //
+    // — a green tick on an assertion that was never evaluated, which is rule 4
+    // ("a benchmark that cannot fail is worse than no benchmark") on the one
+    // assertion that exists because at tag `v0.7.0` the binary printed `0.4.0`.
+    //
+    // And it was **CI's state on every run**: `actions/checkout@v4` at
+    // `.github/workflows/ci.yml:24` had no `fetch-depth` and no `fetch-tags`.
+    // Measured against this repository over `file://`, which is the same fetch
+    // machinery a runner uses:
+    //
+    //   fetch-depth  fetch-tags   v-tags   --merged HEAD   .git    fetch
+    //   1 (default)  false            0               0   3.5M    0.52s
+    //   1            true             0               0   3.5M    0.50s
+    //   0            false            0               0   5.9M    2.07s
+    //   0            true             9               9   5.9M    1.48s
+    //
+    // So `fetch-tags: true` alone buys **nothing**: `--depth 1` fetches only
+    // tags that point into the history it fetched, and this test asks
+    // `--merged HEAD`, which a depth-1 HEAD can never answer. Both knobs are
+    // needed, and the workflow now sets both.
+    //
+    // Which is why the escape is not symmetric. Off CI a missing premise really
+    // is the environment — a packed tarball has no `.git`, a contributor's
+    // shallow clone has no reachable tag — and the honest report is a visible
+    // **skip** with the reason printed. On CI the premise is not the
+    // environment's to withhold: the workflow decides what it checks out, so a
+    // missing premise there is a workflow regression and fails as one. That is
+    // what stops this from silently going back to a green tick meaning
+    // "not run".
+    const absent = ((): string | null => {
+      if (!fs.existsSync(path.join(repo, '.git'))) {
+        return 'no .git here — this is a packed tarball, which has no tags to be behind';
+      }
+      try {
+        execFileSync('git', ['--version'], { cwd: repo, encoding: 'utf8' });
+      } catch {
+        return 'no git binary on PATH';
+      }
+      return null;
+    })();
+    let tags: string[] = [];
+    if (absent === null) {
       tags = execFileSync('git', ['tag', '--list', 'v[0-9]*', '--merged', 'HEAD'], {
         cwd: repo,
         encoding: 'utf8',
@@ -620,13 +669,29 @@ describe('the version a user reads', () => {
         .split('\n')
         .map((t) => t.trim())
         .filter(Boolean);
-    } catch {
-      return; // no git binary
     }
-    // A shallow clone reaches no tag from HEAD, and neither does a checkout of
-    // a commit older than every release. Both are the environment, not a
-    // finding.
-    if (tags.length === 0) return;
+    const missing =
+      absent ??
+      (tags.length === 0
+        ? 'no v* tag is reachable from HEAD — a shallow clone, or a commit older than every release'
+        : null);
+    if (missing !== null) {
+      if (process.env['CI']) {
+        expect.fail(
+          `${missing}. On CI that is a workflow regression, not an environment: ` +
+            '.github/workflows/ci.yml must check out with BOTH fetch-depth: 0 and ' +
+            'fetch-tags: true. A depth-1 checkout reaches no tag from HEAD even with ' +
+            'fetch-tags, so `git tag --merged HEAD` comes back empty and this assertion ' +
+            'is never evaluated — which is exactly the green-that-means-not-run this ' +
+            'test was found guilty of.',
+        );
+      }
+      // Printed before the skip, not instead of it: `09 §7.2` asks for a loud
+      // skip, and a skip nobody can see the reason for is half a report.
+      console.log(`  SKIPPED — ${missing}`);
+      ctx.skip();
+      return;
+    }
 
     const parse = (s: string): [number, number, number] => {
       const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(s);
