@@ -514,7 +514,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       label: 'database',
       value: '',
       note: dbExists
-        ? `schema v${schema} of v${store.latestSchemaVersion()}${schemaNote(schema, vec)}`
+        ? `schema v${schema} of v${store.latestSchemaVersion()}${schemaNote(schema, vec, card.noteWidth())}`
         : 'not created yet — run potsherd rescue',
     },
     { label: 'sqlite', value: '', note: sqliteNote() },
@@ -996,13 +996,38 @@ function sqliteNote(): string {
  * so it is safe to run while an index is in flight — so the fix is the verb
  * that does open for writing.
  *
- * The one case that still declines is a database that was built when vec0 was
- * real and is now on a machine that has lost the extension: sqlite can neither
- * read nor drop those virtual tables. That is worth its own sentence, because
- * it is the only one where the user has something to reinstall.
+ * The one case that still stops it is a database built when vec0 was real, on a
+ * machine that has since lost the extension. `doctor` is the only verb that can
+ * see that state and not fix it — it opens read-only on purpose, so it never
+ * runs the migration — and it is the state this sentence exists for.
+ *
+ * **The sentence is part of the fix, not decoration.** It read `schema v9 of
+ * v12 · run potsherd index` on exactly the database where `potsherd index` was
+ * the one command that could not run (audit §N1): an instruction aimed at a
+ * reader who cannot follow it, which this project has now recorded nine times.
+ * `potsherd index` *is* the answer again — it is the verb that opens for
+ * writing and therefore the verb that converts — and when this driver has
+ * already refused, `vec.reason` names the driver that does not, so the command
+ * is taken from there verbatim rather than reworded here.
+ *
+ * **And it is measured against the room it has.** `schema v9 of v12  · ` costs
+ * 20 of a note column that is 43 characters wide at width 80, and a row elides
+ * from the right — so a command that does not fit is printed as *half* a
+ * command, which is worse than not printing one. `room` is the real width, and
+ * when the command will not survive it, this row says only what is true and the
+ * `vectors` row below carries the command in full. Nothing here is ever a
+ * clause the reader cannot act on.
  */
-function schemaNote(schema: number, vec: VecStatus): string {
+function schemaNote(schema: number, vec: VecStatus, room: number): string {
   if (schema >= store.latestSchemaVersion()) return '';
+  const head = `schema v${schema} of v${store.latestSchemaVersion()}  · `;
+  if (vec.legacy && vec.legacy.length > 0) {
+    // `vec.reason` leads with its command; the em-dash clause is the expendable
+    // half, and the row's own elision drops it for us.
+    const command = (vec.reason ?? 'run potsherd index').split(' — ')[0] ?? 'run potsherd index';
+    if (head.length + command.length <= room) return `  · ${vec.reason ?? command}`;
+    return '  · a vec0 index from potsherd 1.1.0';
+  }
   if (vec.reason && /vec0|extension/i.test(vec.reason)) {
     return '  · a vec0 index this machine can no longer read';
   }
