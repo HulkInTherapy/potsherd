@@ -915,8 +915,10 @@ this Node still warns about `node:sqlite`. Where either is absent the count *wil
 each, and that is the whole point of the change. Both were demonstrated above by simulating the
 absent premise.
 
-Disk: `df -h /` read **11 GiB** free at the start of round 2 and **11 GiB** at the end; scratch is
-deleted, `.tmp/` is removed from the worktree. No process was started that outlived its command —
+Disk: `df -h /` read **11 GiB** free at the start of round 2 and **7.6 GiB** at the end. That fall is
+not mine to claim: my whole scratch is 1.9 MB after cleanup, `.tmp/` is removed from the worktree,
+`git status` is clean, and two other workers were running the full suite on this machine at the same
+time. Three readings, not a delta I cannot attribute. No process was started that outlived its command —
 `ps` for `potsherd.js` after the screens step: nothing. No `git fetch --all`, no `git fetch --tags`,
 no tag created or deleted; the tagless simulations use a `git` shim on `PATH`.
 
