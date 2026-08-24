@@ -120,14 +120,38 @@ export interface CandidateOptions {
  * candidate in 194, and that suppression was read and found wrong: a real
  * catch lost to two decisions that happened to share the word "audit".
  *
- * **This bar is a weak guard and the code must not pretend otherwise.** The
- * honest limit of the measurement is that the positive side is *n = 0* — the
- * corpus contains no case of project B genuinely restating A's decision — so
- * nothing here shows the bar catches one when it appears. Worse, synthetic
- * paraphrase pairs (`tests/open-threads.test.ts`) score from 0.20 to 0.57,
- * which **overlaps the measured negative distribution outright**. There is no
+ * **This bar is a weak guard and the code must not pretend otherwise.** T4.2's
+ * honest limit was that the positive side was *n = 0* — that corpus contained
+ * no case of project B genuinely restating A's decision, so nothing showed the
+ * bar catches one when it appears. **T10.13 measured the positive side and it
+ * is nine.** 109 candidates were raised from 46 cards over 15 projects and
+ * judged one at a time; in nine of them project B does hold the decision, and
+ * this bar caught **none** of the nine:
+ *
+ * ```
+ *   n = 9 genuine restatements
+ *   min 0.0910   median 0.1217   max 0.2309
+ *
+ *   n = 192 pairs reaching this check, of which 0 were suppressed
+ *   median 0.101   p90 0.158   p95 0.177   p99 0.277   max 0.3145
+ * ```
+ *
+ * The two runs agree on the negative side, and the positives sit **inside its
+ * bulk**: the largest true positive (0.2309) scores below the non-matches'
+ * p99 (0.2774). A cut that admits it withdraws more than a hundredth of the
+ * non-matches; a cut catching the median positive suppresses most of the
+ * corpus. T4.2 inferred this from synthetic paraphrase pairs scoring 0.20 to
+ * 0.57 (`tests/open-threads.test.ts`); it is now measured. There is no
  * threshold on this statistic that separates "B said this" from "B used these
- * words", and choosing one differently would not fix that.
+ * words", and choosing one differently would not fix that — so T10.13 moved
+ * nothing. The measurement and the per-case table are
+ * `phases/phase-10/T10.13-REPORT.md` and `T10.13-MEASUREMENT.md`.
+ *
+ * T10.13 also names the cheapest thing that would help, and it is not a
+ * number: three of the nine are cases where **B's own card carries the
+ * decision as a `topics` entry**, and {@link loadCards} builds `mentions`
+ * from `decisions` and `open_threads` only, so the comparison cannot see what
+ * the index already holds.
  *
  * What follows for the design: the mention check is not what makes this
  * feature safe. {@link MIN_ANCHOR_TOKENS} and the model pass are, and the

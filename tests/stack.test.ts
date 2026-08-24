@@ -610,25 +610,41 @@ describe('link --suggest: it proposes, it never writes', () => {
 describe('link --suggest: the measured precision reaches the user', () => {
   /**
    * The ruling: *if you cannot make it useful at the measured precision, say
-   * so with the number*. Phase 4's own evidence
-   * (`phases/phase-4/evidence-T4.2/RESULTS.md`) is 8/8 absent, 1–2/8 worth
-   * raising. These are pinned so that softening the disclosure requires
-   * deleting an assertion.
+   * so with the number*. The number was phase 4's `evidence-T4.2/RESULTS.md`
+   * — 8 raised, 8/8 absent, 1–2/8 worth — which was the **open-thread** rule
+   * pass at n = 8. T10.13 re-measured, judged 109 open-thread candidates and
+   * 18 link suggestions one at a time, and replaced this with **this verb's
+   * own** figure: 18 raised, 18/18 a real cross-project pair, 12/18 worth
+   * accepting (`phases/phase-10/T10.13-REPORT.md` §5).
+   *
+   * Pinned so that softening the disclosure requires deleting an assertion.
    */
-  it('carries phase 4 evidence-T4.2 verbatim', () => {
-    expect(MEASURED_PRECISION.raised).toBe(8);
-    expect(MEASURED_PRECISION.absent).toBe(8);
-    expect(MEASURED_PRECISION.worthLow).toBe(1);
-    expect(MEASURED_PRECISION.worthHigh).toBe(2);
+  it('carries T10.13 evidence verbatim, and it is this verb own', () => {
+    expect(MEASURED_PRECISION.raised).toBe(18);
+    expect(MEASURED_PRECISION.absent).toBe(18);
+    expect(MEASURED_PRECISION.worthLow).toBe(12);
+    expect(MEASURED_PRECISION.worthHigh).toBe(12);
+    // n = 8 was an anecdote with a fraction in front of it. It must not come
+    // back: any future figure has to rest on at least the sample T10.13 read.
+    expect(MEASURED_PRECISION.raised).toBeGreaterThan(8);
   });
 
-  it('prints the number, and does not imply the rows are all good', () => {
+  /**
+   * T10.13's finding that the old disclosure could not have carried: at the
+   * shipped default the verb raised 5 of 20 and **all five were worth
+   * accepting** — and all five were the *same project relationship*, because
+   * `suggestLinks` de-duplicates on the session pair rather than the project
+   * pair. A disclosure that printed 5/5 and stopped would be worse than the
+   * old pessimistic one. So the caveat is asserted, not just the fraction.
+   */
+  it('prints the number, and warns that the rows repeat a relationship', () => {
     const db = memDb();
     twoProjects(db);
     const out = plain(renderSuggestions(suggestLinks(db), theme(80), wrap));
-    expect(out).toContain('1-2 of 8');
-    expect(out).toContain('genuinely absent from the other project');
-    expect(out).toContain('expect most of these to be wrong');
+    expect(out).toContain('12 of 18');
+    expect(out).toContain('really was two different projects');
+    expect(out).toContain('fewer');
+    expect(out).toContain('relationships than it has rows');
     expect(out).toContain('nothing was written');
   });
 
