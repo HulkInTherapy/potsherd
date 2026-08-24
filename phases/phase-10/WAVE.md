@@ -733,3 +733,91 @@ Every brief carries the same two additions, both earned this round: **run the fu
 *both* sqlite drivers** — the phase gate names both and the orchestrator skipping the second is why
 CI is red — and **kill the background embedder by recorded pid**, because a default `index` starts
 one that nothing in the product stops.
+
+## the round-4 wave landed, and `main` is 1,932 green on both drivers
+
+`4fd221e`. All three workers merged plus a fourth round from FIX-F. `pnpm test` and
+`POTSHERD_SQLITE=node pnpm test` both **1,932 on 53 files, 0 skipped**; typecheck 4 of 4; `pnpm
+evals` exit 0 with hybrid **recall@5 51/60, recall@1 27/60 — unmoved** from `4064c4e`, re-measured
+rather than argued; guard exit 0; vendor clean.
+
+**FIX-G — C4, C5, and the specification that was the defect.** The false honest-empty is closed in
+three places: a `reply` recorded as a JSON string is parsed and **re-enters at `validateSynth`
+exactly where the object form does**, so a fabrication inside a string dies in the same line; every
+*unusable* shape is refused by name at exit 2, with `{"evidence":[],"answer":[]}` still allowed
+because it is the host synthesizer's own honest empty; and the instruction was rewritten **into the
+file and the `--json` receipt**, because an agent handed a path never sees the terminal. **The
+worker corrected the verifier on a detail that makes it worse: the false empty exits 1, and 1 is
+the honest empty's own code.** And `tests/synthesis-seam.test.ts` carried a **green test asserting
+that an unusable reply IS the empty answer** — the defect written down as the specification. 15 of
+17 new tests fail on the unfixed build.
+
+`--synthesis-out` now **refuses without `--readers-in`**, above `openIndex` and above
+`detectBackend`. This changes what a flag does and the report says so three times. The docstring
+defending the bare form was rewritten rather than deleted: its argument was real, and **the reason
+it loses is narrow — it said the spend was never hidden, and the spend was hidden, by this exact
+help line.**
+
+**FIX-F — C2, C3, C6, C7.** `git grep "lock.holder"` over `packages` returned **one line in the
+whole product**, deciding whether to *spawn*. Nothing ever asked the lock whether a worker was
+alive, which is why the model door said `warming` at a dead index. `VectorReport.working` now
+carries it, read once from the lock `isStale` already validates. Proved at **four** states including
+one second after a real embedder's pid died with its stale lock still on disk.
+
+On C3 the worker **did not** add `title` to `ROUTING_KINDS` — its report lists the six things that
+set governs — and named the other property instead: `SUMMARY_KINDS = {card, title}`, capped at
+`ROUTING_CEILING`, sorted behind every block with transcript evidence, `citable: false` with a null
+citation. **The cap is what keeps FIX-D's ordering invariant intact**: without it, transcripts-first
+would have contradicted the confidence word. Live on the real archive, same query: **the first
+transcript hit moved from index 18 of 28 to index 0 of 24**, five title-only threads carrying minted
+citations became two carrying none, and the page went from five threads with transcript evidence to
+eight. `scope.cards` gives the agent the `--no-cards` the CLI has had all along.
+
+**FIX-F round 2 — the four patches it handed over rather than shipped.** `VecStatus.line` is read by
+`find`, which renders after the fact and should trust the lock, and by `index`, which renders at the
+moment it spawns a worker the lock cannot see yet. Making `statusLine` honest turns exactly three
+`tests/index.test.ts` assertions red — correctly — so the two had to land together, and both
+directions were measured. **The worker then improved the patch I asked for**: fixing the sentence
+leaves the `vectors` *row* beside it saying `stopped at 1,294 of 1,678` about the same worker, so
+the correction belongs on the report — one line, `if (spawned) vec = readVectors(root, {working:
+true})` — and all three renderings follow. The full suite then found a fourth fixture asserting
+`warming` about a lane nobody held.
+
+Two findings under the screens race, both worse than filed. **CI runs `--no-embed` and never has a
+worker, so the two `find` screens were captured in one state and compared in the other by
+construction, not by luck** — the script now kills the child it starts, by the pid that child wrote
+into its own lock. And **`10-stats.txt` was already DRIFTED on `da13b2f`, the commit CI was believed
+green on.** FIX-E round 2 made the size a measurement of the database rather than of the checkpoint
+and it is *still* not reproducible: two capture orders give **552 pages against 533** with identical
+row counts. The guard normalises it now, the way it already normalises durations and the heading
+date, and still compares the path and the shape — **a normaliser is only honest when what it hides
+is a fact about the machine, and this one is.**
+
+## another project's tags were in the checkout, and one of them was `v1.2.0`
+
+Found because the FIX-F merge turned `tests/terminal.test.ts` red: *"VERSION is 1.2.0 but this
+checkout already has tag v1.4.2"*. The repository has a second remote by design —
+`upstream-episodic` → `obra/episodic-memory`, fetch-only — and a fetch of it landed **23 of its tags
+under plain `v*` names** beside the `upstream-v*` copies that were the intended form, including
+`Release v1.2.0: bge-small-en-v1.5 encoder`.
+
+**So the tag this release is about to create was held by another project's commit.** `git tag
+v1.2.0` would have failed; forced through, the publish workflow's *"the tag and the manifest must
+agree"* step would have read `packages/cli/package.json` out of episodic-memory's tree.
+
+All 32 plain version tags were audited: the 9 potsherd ones are on `origin` **and** reachable from
+`origin/main`; all 23 foreign ones are on neither. The `upstream-v*` counterparts point at
+**different** commits, so the two sets were never duplicates — which is why every tag was recorded
+with its SHA and subject to `/Users/zebra/randomness/foreign-tags-2026-08-24.txt`, with the fetch
+line that re-creates them, before deleting the 23 locally.
+
+Deleting fixes today; **the next `git fetch --all` brings them back**, and one did, minutes later,
+during the fix round. So the durable half is the test's premise: `--merged HEAD`, proved both
+directions with tags created and deleted in one command — because **worktrees share `.git`, and a
+tag a worker makes appears in the orchestrator's checkout.**
+
+## the fifth verifier is running
+
+Against `4fd221e`, briefed with the five commits since round 4 named so it does not re-find closed
+work, with **eleven** burned control strings listed as forbidden, and with the gate stated as
+score-what-you-find. Rounds 1–4 scored 6, 7, 7, 7.
