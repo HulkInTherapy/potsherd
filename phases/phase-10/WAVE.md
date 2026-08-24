@@ -285,3 +285,51 @@ Deferred on purpose, because they collide with a live worker:
 **Blocked on a human:** `NPM_TOKEN` is not set — `gh secret list -R HulkInTherapy/potsherd` returns
 empty. v1.2.0 publishes through the provenance workflow, which needs it. Asked meghavi. Everything
 up to the tag proceeds without it.
+
+
+---
+
+## the gate ran, and it FAILED — 6/10 against 8
+
+A fresh verifier re-ran the audit's §7 on the real archive and re-scored §0.
+Full report: `phases/phase-10/VERIFICATION.md`.
+
+| row | was | now | gate |
+|---|---:|---:|---|
+| **overall** | 4 | **6** | ≥ 8 · **FAIL** |
+| retrieval quality | 3 | **7** | ≥ 7 · PASS |
+| reliability of a default install | 2 | **6** | ≥ 8 · **FAIL** |
+| agent ergonomics | 3 | **6** | ≥ 8 · **FAIL** |
+| re-entry | 5 | 7 | — |
+| human CLI ergonomics | 8 | **7** | — (four printed numbers disagree) |
+
+Nine defects, twenty claims that held, and a could-not-check list with a reason for each.
+**It confirmed the control trap a third time**: the audit's own nonsense string now returns three
+`strong` hits, because the audit document is indexed. It invented two fresh controls after freezing
+the corpus and said so. It changed nothing while scoring. It could not reproduce one thing the
+orchestrator had reported by eye — `show` past 80 columns — across 38,488 lines, max 79. **The
+orchestrator was wrong and the verifier was right to say so.**
+
+### the fix round
+
+**D1 was the orchestrator's, and it is the fifth consecutive phase where integration was the weak
+point.** `potsherd_read` probed `core.resolveThread`, which **was never written and never
+exported**. T10.6 wrote out the signature and asked for it; the orchestrator applied T10.6's *other*
+owed line and missed this one. Two independent alarms failed to fire: the probe degraded politely,
+and `threadsAvailable()` — the function whose job is to report the capability missing — **had no
+callers**. So a missing capability announced itself only to the model, in prose, at the moment it
+mattered.
+
+Fixed at the root: `resolveThread` exists, threads is exported, and **the probe, the fallback and
+`threadsAvailable()` are all deleted**. `via` has one legal value; two tests fail if a fallback ever
+returns. `tests/mcp.test.ts` no longer accepts `session-only`, because that latitude is how this
+passed a release. The worker swept for the pattern and found one other hit — a platform check, not
+a probe.
+
+**D7** was the prompt and the filter disagreeing. The excerpt is printed labelled, the prompt says
+copy it exactly, so a model that *obeyed* produced quotes the filter dropped as fabrications. Fixed
+in the filter's normalisation, and only a leading label comes off — an interior `assistant:` stays
+refused, because that is a fabrication of contiguity rather than a label.
+
+**Standing rule this produced, for `09`:** *when a module probes for a capability and falls back,
+the fallback must be loud in tests, or it becomes the permanent behaviour.*
