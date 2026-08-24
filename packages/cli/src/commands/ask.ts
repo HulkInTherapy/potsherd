@@ -354,6 +354,53 @@ export const READERS_FILE_KIND = 'potsherd.ask.readers';
 export const READERS_FILE_VERSION = 1;
 
 /**
+ * The shape `outputs` must come back in — FIX-I C-5.
+ *
+ * Written the way `SYNTH_SCHEMA` is written in `packages/core/src/ask.ts`: one
+ * JSON literal with the types in the slots, because that is the register the
+ * other half of this seam already uses and an agent that has read one file
+ * should not have to learn a second notation. It names the whole array rather
+ * than one entry, because `outputs` is what the agent adds and "one entry per
+ * target" is part of the shape.
+ *
+ * It is checked against {@link readerOutput}, which is the authority, by
+ * `tests/synthesis-seam.test.ts`: a file built from nothing but this string
+ * completes the round trip, and the two fields the verifier could not guess —
+ * `text` rather than `quote`, and `sessionId` copied off the target — are the
+ * two the test would lose first if this string and that function drifted.
+ *
+ * `ts` is spelled `"<the ts given>"|null` because {@link readerOutput} accepts
+ * either and a reader quoting a ghost prompt genuinely has none.
+ */
+export const READERS_SCHEMA =
+  '{"outputs":[{"sessionId":"<the sessionId of this entry in targets>",' +
+  '"found":true|false,' +
+  '"quotes":[{"seq":<number, one of this entry\'s seqs>,"ts":"<the ts given>"|null,' +
+  '"text":"<verbatim, character for character out of this entry\'s excerpts>"}],' +
+  '"answer_fragment":"<one or two sentences, or empty when found is false>"}]}';
+
+/**
+ * What the host agent is told to do with this file, in the file.
+ *
+ * FIX-I C-5, and written under FIX-G C4(c)'s finding: *"add **it** to the file
+ * as `reply`"* failed because "it" resolved two ways, so nothing here refers
+ * to anything by a pronoun. The array is named, its shape is named, the fact
+ * that it is a JSON **array** and not the text of one is stated — this file's
+ * reader is stricter than the synthesis file's, which parses a JSON string for
+ * you — and the case an agent is most likely to get wrong, a reader that found
+ * nothing, is spelled out rather than left to inference.
+ *
+ * It does not repeat `schema`; it says where the shape is, which is the
+ * register {@link REPLY_INSTRUCTION} uses for the same job.
+ */
+export const READERS_INSTRUCTION =
+  'run one reader per entry in "targets" — each entry carries its own "question" and ' +
+  '"excerpts" — and add their answers to this file as "outputs", in the shape of "schema". ' +
+  '"outputs" is the JSON array itself, one entry per target, not the JSON text of it. ' +
+  'A reader that found nothing records {"found":false,"quotes":[]} rather than being left out. ' +
+  'Then: potsherd ask "<this file\'s question>" --readers-in <this file>';
+
+/**
  * What `--readers-out` writes and `--readers-in` reads.
  *
  * One shape for both directions on purpose. A skill reads the file, fans its
@@ -371,6 +418,27 @@ export interface ReadersFile {
   version: number;
   /** The binary that wrote it. Informational; not checked. */
   potsherd: string;
+  /**
+   * {@link READERS_SCHEMA} — the shape `outputs` must come back in.
+   *
+   * FIX-I C-5. The synthesis file has carried a `schema` since T10.2 and an
+   * `instruction` since FIX-G; this file — the **first** leg of the same seam,
+   * and the one an agent meets with no prior — carried neither, so the quote
+   * shape `{seq, text}` was discoverable only by getting it wrong. The fifth
+   * verifier guessed `{seq, quote}`, which is the natural reading, and learned
+   * the answer from an error message.
+   *
+   * Informational, exactly as the synthesis file's is: `--readers-in` neither
+   * reads it back nor checks it. {@link readerOutput} remains the authority on
+   * what is accepted, and `tests/synthesis-seam.test.ts` pins that a file built
+   * to nothing but this string passes it.
+   */
+  schema: string;
+  /**
+   * {@link READERS_INSTRUCTION}, in the file, for the agent that only ever sees
+   * the file. Informational, like {@link schema}.
+   */
+  instruction: string;
   /** Redacted exactly as `llm.ts` would redact it on the way to a model. */
   question: string;
   k: number;
@@ -453,6 +521,12 @@ async function recordReaders(
       kind: READERS_FILE_KIND,
       version: READERS_FILE_VERSION,
       path: abs,
+      // FIX-I C-5, and the same reasoning FIX-G gave for putting
+      // `instruction` on the synthesis file's `--json` receipt: `--json` is
+      // what an agent reads, and it was the surface on which the shape of
+      // `outputs` was least well stated — it was not stated anywhere.
+      schema: READERS_SCHEMA,
+      instruction: READERS_INSTRUCTION,
       question: file.question,
       k: file.k,
       sessionIds: file.sessionIds,
@@ -534,6 +608,11 @@ export async function writeReadersFile(
     kind: READERS_FILE_KIND,
     version: READERS_FILE_VERSION,
     potsherd: VERSION,
+    // FIX-I C-5. Ahead of `question`, so the two fields that say what to do
+    // with this file are the first thing in it that is not the envelope —
+    // the same place the synthesis file puts `schema`, relative to its prompt.
+    schema: READERS_SCHEMA,
+    instruction: READERS_INSTRUCTION,
     question: q,
     k: base.k ?? ASK_K,
     sessionIds: targets.map((x) => x.sessionId),
@@ -594,7 +673,17 @@ function readersOutReceipt(
     `  ${t.dim(`these ${n} ${n === 1 ? 'session is' : 'sessions are'} the shortlist. --readers-in reads exactly ${n === 1 ? 'it' : 'them'}, however much the index has embedded since.`)}`,
   );
   lines.push('');
-  lines.push('  run your readers, add an "outputs" array to the file, then:');
+  // FIX-I C-5. The old two lines were `run your readers, add an "outputs"
+  // array to the file` and the command — which never said what an entry of
+  // that array looks like, on any surface. The shape is in the file now, as
+  // `schema`; this says so, and states the one field the fifth verifier had to
+  // learn from an error message.
+  lines.push('  run one reader per target, then add an "outputs" array to the file —');
+  lines.push('  one entry per target, in the shape of the file\'s own "schema" field:');
+  lines.push(
+    `  ${t.dim('{ "sessionId": …, "found": true|false, "quotes": [{ "seq": n, "text": "…" }], "answer_fragment": "…" }')}`,
+  );
+  lines.push('  then:');
   lines.push(`    potsherd ask "${file.question}" --readers-in ${abs}`);
   return lines.join('\n');
 }
@@ -1353,6 +1442,10 @@ const REPLY_EXIT = 2;
  *   - a JSON string that parses to something other than an object.
  *   - any other non-object: a number, a boolean, an array.
  *   - an object carrying neither an `evidence` array nor an `answer` array.
+ *   - an object carrying an `evidence` array and **no `answer` array** — FIX-I
+ *     C-7. Not an empty answer: an unfinished one. See the comment at the
+ *     check for why that is a refusal rather than the honest empty, and why
+ *     the mirror shape (`answer` with no `evidence`) is still accepted.
  *   - an object whose arrays hold entries but **not one** of which meets the
  *     schema's necessary conditions — the case that would reach
  *     `validateSynth`, come back `null`, and print as an empty archive.
@@ -1433,6 +1526,41 @@ export function hostReply(abs: string, raw: unknown): HostReply {
     throw new UserError(
       `${abs}'s "reply" is an object with neither an "evidence" array nor an "answer" array, ` +
         'so there is nothing in it for the citation filter to check',
+      fix,
+      REPLY_EXIT,
+    );
+  }
+  // FIX-I C-7 — the shape between the two FIX-G decided.
+  //
+  // FIX-G refuses an object carrying **neither** array and allows
+  // `{"evidence":[],"answer":[]}`, because that is the host synthesizer's own
+  // honest empty. An object with real evidence in it and **no `answer` key at
+  // all** fell between them: it passed, `validateSynth` built nothing out of
+  // it, and it printed *byte-identically* to the honest empty at exit 1 —
+  // "the readers found material, and the answer built from it was empty".
+  //
+  // **It is a refusal, and here is the argument.** Exit 1 is a claim about the
+  // user's archive: *it was read and it had nothing.* The honest empty is the
+  // one signal this release asks an agent to trust — the tool description says
+  // TRUST ITS SILENCE — so the bar for reaching it is that the host actually
+  // said the answer was empty. `"answer": []` says that, in four characters, and
+  // a synthesizer that has produced evidence has manifestly not stopped for
+  // lack of anything to say. An absent key is not a value: it is a reply
+  // nobody finished writing, which is C4's own sentence one shape further out,
+  // and C4's ruling is that a broken input must not be reported in the
+  // vocabulary of an empty corpus.
+  //
+  // The reverse shape — an `answer` array with no `evidence` key — is
+  // deliberately still accepted. It reaches `filterAnswer`, every sentence
+  // fails to resolve a citation, and the receipt says
+  // `N sentences dropped · no citation that resolves`: a different sentence
+  // from the honest empty, naming what went wrong. Nothing is silent there, so
+  // there is nothing for this to fix.
+  if (ans === null) {
+    throw new UserError(
+      `${abs}'s "reply" has an "evidence" array and no "answer" array, so there is no answer in ` +
+        'it to filter — that is a reply nobody finished, not an archive with nothing in it. ' +
+        'A synthesizer that concluded nothing is supportable writes "answer": []',
       fix,
       REPLY_EXIT,
     );
@@ -1692,6 +1820,12 @@ function readReadersFile(abs: string): ReadersFile {
     kind: READERS_FILE_KIND,
     version: READERS_FILE_VERSION,
     potsherd: typeof parsed['potsherd'] === 'string' ? parsed['potsherd'] : '',
+    // Read, never enforced — FIX-I C-5, and the same rule `readSynthesisFile`
+    // applies to its own two: these say what the agent was asked to produce,
+    // and `readerOutput` below is what decides whether it did. A file written
+    // by a build that had neither carries `''` and replays exactly as before.
+    schema: typeof parsed['schema'] === 'string' ? parsed['schema'] : '',
+    instruction: typeof parsed['instruction'] === 'string' ? parsed['instruction'] : '',
     question,
     k,
     sessionIds: sessionIds as string[],

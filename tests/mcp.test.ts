@@ -8,7 +8,12 @@ import { db as store, indexAll, paths, writeCard } from '@potsherd/core';
 
 import { makeContext, resolveGraftCwd } from '../packages/mcp/src/context.js';
 import { TOOLS, WRITE_TOOLS } from '../packages/mcp/src/server.js';
-import { capabilityLine, orderByLabel, runRecall } from '../packages/mcp/src/tools/recall.js';
+import { capabilityLine, runRecall } from '../packages/mcp/src/tools/recall.js';
+// FIX-I C-1. `orderByLabel` was this door's own copy of FIX-D's rule and is
+// gone: the comparator lives in core, `recall()` applies it, and this door
+// takes the order it is given. `packages/core/src/index.ts` is another
+// worker's file this phase, so it is imported from the module that owns it.
+import { byLabel, summaryRank } from '../packages/core/src/recall.js';
 import { describeError } from '../packages/mcp/src/errors.js';
 import { AGENT_FLOOR, CONFIDENCE_VALUES } from '../packages/mcp/src/tools/shapes.js';
 import * as shipped from '../packages/mcp/src/descriptions.js';
@@ -1230,18 +1235,30 @@ describe('FIX-C — no instruction an agent cannot follow', () => {
 describe('FIX-D — the order agrees with the label', () => {
   const RANK: Record<string, number> = { strong: 0, weak: 1, none: 2 };
   const row = (confidence: string, cal: number, score: number, tag: string) => ({
-    confidence,
+    confidence: confidence as 'strong' | 'weak' | 'none',
     calibration: { score: cal, confidence, coverage: 0, strength: 0, agreement: 0 },
     score,
     tag,
   });
 
+  /**
+   * FIX-I C-1 — these three cases are FIX-D's, run against the comparator in
+   * its new home.
+   *
+   * They used to call `orderByLabel`, which lived in
+   * `packages/mcp/src/tools/recall.ts` and which `packages/cli` never
+   * imported: the rule was right and only one of the two doors had it. It is
+   * `byLabel` in `packages/core/src/recall.ts` now, `recall()` applies it to
+   * `sessions` and to `hits`, and both doors read the result — so a fence on
+   * the comparator is a fence on both doors at once, which is what it was
+   * always supposed to be.
+   */
   it('C5a — the verifier\'s two rows come back the other way round', () => {
     // Verbatim from VERIFICATION-3 §C5: same fused score, opposite labels,
     // the weak one first because RRF put it there.
     const merged = [row('weak', 0.5667, 0.016393, 'hit0'), row('strong', 0.85, 0.016393, 'hit1')];
     expect(merged.map((r) => r.tag)).toEqual(['hit0', 'hit1']);
-    expect(orderByLabel(merged).map((r) => r.tag)).toEqual(['hit1', 'hit0']);
+    expect([...merged].sort(byLabel).map((r) => r.tag)).toEqual(['hit1', 'hit0']);
   });
 
   it('C5a — the word wins over the number, because the number can be capped', () => {
@@ -1250,7 +1267,7 @@ describe('FIX-D — the order agrees with the label', () => {
     // top of a transcript. This is why the first key is the label.
     const card = row('weak', 0.92, 0.016393, 'card');
     const transcript = row('strong', 0.61, 0.008197, 'transcript');
-    expect(orderByLabel([card, transcript]).map((r) => r.tag)).toEqual(['transcript', 'card']);
+    expect([card, transcript].sort(byLabel).map((r) => r.tag)).toEqual(['transcript', 'card']);
   });
 
   it('C5a — inside one band it is calibration first, then the fused score', () => {
@@ -1259,7 +1276,7 @@ describe('FIX-D — the order agrees with the label', () => {
       row('weak', 0.55, 0.008197, 'high-cal-low-rrf'),
       row('weak', 0.55, 0.009524, 'high-cal-higher-rrf'),
     ];
-    expect(orderByLabel(rows).map((r) => r.tag)).toEqual([
+    expect([...rows].sort(byLabel).map((r) => r.tag)).toEqual([
       'high-cal-higher-rrf',
       'high-cal-low-rrf',
       'low-cal-high-rrf',
@@ -1268,7 +1285,7 @@ describe('FIX-D — the order agrees with the label', () => {
 
   it('C5a — it moves rows and never adds, drops or edits one', () => {
     const rows = [row('none', 0.2, 0.01, 'a'), row('strong', 0.9, 0.002, 'b'), row('weak', 0.5, 0.03, 'c')];
-    const out = orderByLabel(rows);
+    const out = [...rows].sort(byLabel);
     expect(out).toHaveLength(rows.length);
     expect([...out].sort((x, y) => x.tag.localeCompare(y.tag))).toEqual(
       [...rows].sort((x, y) => x.tag.localeCompare(y.tag)),
@@ -1281,17 +1298,17 @@ describe('FIX-D — the order agrees with the label', () => {
     // `null` is not `none`. With no label there is nothing for the order to
     // contradict, so the fused order — which is a real ordering — stands.
     const rows = [
-      { calibration: null, score: 0.008 },
-      { calibration: null, score: 0.016 },
+      { calibration: null, score: 0.008, tag: 'a' },
+      { calibration: null, score: 0.016, tag: 'b' },
     ];
-    expect(orderByLabel(rows)).toEqual(rows);
+    expect([...rows].sort(byLabel).map((r) => r.tag)).toEqual(['b', 'a']);
   });
 
   it('C5a — the real envelope: hits[] never labels the top row weaker than one below it', async () => {
     // `statement` is the query that makes this falsifiable rather than
     // decorative: on the committed fixture it returned `none, strong` — the
     // verifier's shape exactly — before the ordering landed. Unwire
-    // `orderByLabel` and this case goes red, which is the whole point of it.
+    // core's comparator and this case goes red, which is the whole point of it.
     let sawTwoLabels = false;
     for (const query of ['statement', 'pgbouncer', 'transaction pooling', 'the', 'and the']) {
       const r = await runRecall(ctx(), { query });
@@ -1653,28 +1670,41 @@ describe('FIX-F — the door stops claiming what it cannot know', () => {
     expect(off['routing']).toBe(0);
   });
 
-  it('C3 — orderByLabel puts a summary row last without contradicting the label', () => {
-    const row = (evidence: string, confidence: string, cal: number, tag: string) => ({
-      evidence,
-      confidence,
+  it('C3 — a summary row ranks last without contradicting the label', () => {
+    // FIX-I C-1: the partition and the comparator, spelled the way `recall()`
+    // spells them — `summaryRank` first, `byLabel` under it. It used to be
+    // `orderByLabel`'s first key at this door only, which is why `find --json`
+    // never had it.
+    const row = (kind: string, confidence: string, cal: number, tag: string) => ({
+      hits: [{ kind: kind as 'exchange' | 'title' }],
+      confidence: confidence as 'strong' | 'weak' | 'none',
       calibration: { score: cal, confidence, coverage: 0, strength: 0, agreement: 0 },
       score: 0.0164,
       tag,
     });
+    const order = (a: ReturnType<typeof row>, b: ReturnType<typeof row>): number =>
+      summaryRank(a.hits) - summaryRank(b.hits) || byLabel(a, b);
     // A summary row with a better calibration than a weak transcript row: the
-    // cap stops it being `strong`, and this stops it being first.
-    const out = orderByLabel([
-      row('not-a-transcript', 'weak', 0.92, 'summary'),
-      row('transcript', 'weak', 0.41, 'transcript'),
-    ]);
+    // cap stops it being `strong`, and the partition stops it being first.
+    const out = [row('title', 'weak', 0.92, 'summary'), row('exchange', 'weak', 0.41, 'transcript')].sort(
+      order,
+    );
     expect(out.map((r) => r.tag)).toEqual(['transcript', 'summary']);
-    // Rows carrying no `evidence` field — every FIX-D fence above — are
-    // untouched: absent is not `not-a-transcript`.
-    const plain = [
-      { confidence: 'weak', calibration: { score: 0.4 }, score: 0.02, tag: 'a' },
-      { confidence: 'weak', calibration: { score: 0.9 }, score: 0.01, tag: 'b' },
-    ];
-    expect(orderByLabel(plain).map((r) => r.tag)).toEqual(['b', 'a']);
+  });
+
+  it('C3 — and the published threads[] put the summary-only thread last', async () => {
+    // The same property, asserted on the reply rather than on a comparator:
+    // this is the one that goes red if this door ever stops taking core's
+    // order. The `summaryRoot` corpus holds one title-only thread and one
+    // transcript thread for the same words.
+    const r = await runRecall(at(summaryRoot()), { query: 'kestrel migration', minConfidence: 'none' });
+    const threads = (r['threads'] ?? []) as { evidence: string; confidence: string }[];
+    expect(threads.length).toBeGreaterThan(1);
+    const rank = (t: { evidence: string }) => (t.evidence === 'not-a-transcript' ? 1 : 0);
+    for (let i = 1; i < threads.length; i++) {
+      expect(rank(threads[i - 1]!)).toBeLessThanOrEqual(rank(threads[i]!));
+    }
+    expect(rank(threads[threads.length - 1]!)).toBe(1);
   });
 
   // ------------------------------------------------------------------- C6
