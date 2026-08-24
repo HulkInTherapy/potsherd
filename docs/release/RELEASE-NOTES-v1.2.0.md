@@ -107,10 +107,10 @@ release is the first one where that claim was tested by something other than its
 
 Independent verifiers — five of them, none of whom wrote any of it — re-ran the audit's own command
 list on the real archive and re-scored its rubric. The first four **found twenty-seven defects the
-authors had reported as green**, including three of the worst in the project's history: a tool that could not see a thread in the release that claimed
-to fix threads; a citation minted for a session whose transcript nobody had read; and a capability
-failure that reported itself as an honest empty, in the one place the whole design asks an agent to
-trust silence.
+authors had reported as green**, including three of the worst in the project's history: a tool that
+could not see a thread in the release that claimed to fix threads; a citation minted for a session
+whose transcript nobody had read; and a capability failure that reported itself as an honest empty,
+in the one place the whole design asks an agent to trust silence.
 
 Every one of them is in the repository, with the command that found it. So is every score, including
 the ones that failed the gate.
