@@ -365,9 +365,36 @@ jobs:
                    node "$repo/packages/cli/bin/potsherd.js" "$@" --width 80 --no-color )
           }
 
-          # The two things on these screens that are real output and legitimately
-          # differ between one capture and the next — and nothing else.
-          norm() { sed -E -e 's/[0-9]+ms/<ms>/g' -e '1s/· [0-9]+ [a-z]+ [0-9]{4}$/· <date>/' "$1"; }
+          # The three things on these screens that are real output and
+          # legitimately differ between one capture and the next — and nothing
+          # else.
+          #
+          # The third is `stats`' database size, and it is here because it is
+          # NOT a property of the corpus. FIX-E round 2 fixed the measurement —
+          # `page_count * page_size` instead of `fs.statSync(...).size`, so a
+          # WAL checkpoint no longer moves it — and that was right and it is not
+          # enough. Measured on this repo, same demo corpus, same build, two
+          # capture orders: **552 pages against 533**, with identical row counts
+          # (439 exchanges, 228 sessions, 299 ghosts, 2,971 prompts, 0 vectors,
+          # 0 cards) and an empty freelist in both. Page allocation is a
+          # function of the order rows arrived and the pages sqlite happened to
+          # split, and this step's sequence is a *miniature* of
+          # `scripts/make-screens.sh`'s, not a copy of it: the script also shoots
+          # `16-before-after` and `ls --ghosts only` between `index` and
+          # `stats`, and runs `index --full` where this runs `--no-embed`.
+          #
+          # So it rounded across the 2.1/2.2 MB boundary and the step was red on
+          # `da13b2f` — the commit CI was believed green on — for a screen
+          # nobody had touched. The number stays on the published screen,
+          # because it is real output and a reader should see one; what stops is
+          # this guard pinning a digit that two honest runs disagree about. The
+          # line's shape and its path are still compared, so a `database` row
+          # that vanishes, moves or names the wrong file still fails here.
+          norm() {
+            sed -E -e 's/[0-9]+ms/<ms>/g' \
+                   -e '1s/· [0-9]+ [a-z]+ [0-9]{4}$/· <date>/' \
+                   -e 's/^(  database +)[0-9.]+ [kMG]?B/\1<size>/' "$1"
+          }
 
           status=0
           check() {
