@@ -333,3 +333,88 @@ refused, because that is a fabrication of contiguity rather than a label.
 
 **Standing rule this produced, for `09`:** *when a module probes for a capability and falls back,
 the fallback must be loud in tests, or it becomes the permanent behaviour.*
+
+---
+
+## rounds 2 and 3: the score moved 6 → 7 → 7, and every remaining defect was the same defect
+
+Two more fresh verifiers, each cloning the commit under test to a private directory, each
+relocating `HOME` onto an APFS clone of the seven harness directories, each inventing its own
+negative controls **after** freezing the corpus because the audit's own nonsense string is now
+indexed and returns `strong`.
+
+| round | commit | overall | retrieval | reliability | agent ergonomics | report |
+|---|---|---:|---:|---:|---:|---|
+| 1 | `9c663e9` | 6 | 7 | 6 | 6 | `VERIFICATION.md` |
+| 2 | `9c663e9` | 7 | 7 | 8 | 7 | `VERIFICATION-2.md` |
+| 3 | `339df63` | **7** | 7 ✅ | 8 ✅ | **7** | `VERIFICATION-3.md` |
+
+Retrieval and reliability have passed since round 2 and have not moved since. **Everything still
+under the gate is one failure wearing costumes: an instruction aimed at an agent that the agent
+cannot follow.** `potsherd_recall`'s caller has three MCP tools and no shell.
+
+- **round 2** found `--vectors on` in the model-facing capability string — a flag the schema does
+  not accept.
+- **round 3** found that the fix had changed **one branch of three** in the same function, and
+  that the untouched branch — the one **every fresh install** hits, at zero vectors — said
+  `SEMANTIC SEARCH UNAVAILABLE … run potsherd index --embed`. A shell command, on the agent
+  surface, whose falseness the repository's own comments in `render/find.ts:229` and
+  `render/stats.ts:158` already recorded. It had been deleted from both **human** screens with a
+  comment explaining why, and left on the **agent** one.
+- and `scope.project`'s error answered an agent with `potsherd ls --json | jq …`, which is
+  un-runnable by the reader *and* wrong on its own terms: `ls --json` returns the 15 newest, so
+  the pipeline reported 5 projects where the database holds 18.
+
+**FIX-C** (`8c6fb8e`, merged at `4e8ebe6`) closed all three at their source rather than where they
+surfaced: the shell verb is dead in `core/recall.ts`, all three branches of `capabilityLine` carry
+`N of M embedded` read from the same `vecStatus` the human verbs read, the no-match note discloses
+that only the keyword half ran, and `scope.project` returns *the projects the index holds* with the
+tail disclosed instead of silently slicing to five. Eight tests, seven red first, one green on
+purpose — the guard that a genuinely unavailable runtime still says so had to survive the change.
+
+**The verifier sized the vector half's contribution and it is not small**: the same query returns
+1 session with vectors on and 0 with them off, and evals put bm25-only at 40/60 against hybrid's
+51/60. So during the warm window ~11 of every 60 answerable questions were coming back as
+`noMatch: true` carrying *"The archive does not contain this … do not widen into a guess"*.
+
+**A discrepancy worth keeping.** FIX-C's worker reported, correctly and in its own §0, that
+`VERIFICATION-3.md` did not exist in its worktree or anywhere in git history — it had been briefed
+from quoted excerpts while the file was still uncommitted on the orchestrator's disk. It checked
+every quoted claim itself before acting on any of it, and said which of its conclusions depended on
+the missing file (none). That is the right behaviour and it is why the round is trustworthy;
+the orchestrator's sequencing was the defect, not the worker's.
+
+## the fourth thing I did not read: CI
+
+`main` was **red for three consecutive pushes** — `9c663e9`, `339df63`, `e593dee` — and I pushed
+the third without looking. `09 §7.3` is titled *CI is not a formality; it is the only machine that
+is not yours*, and this phase has now broken `09 §16.7` (**read the exit code, not the last line**)
+three times: twice on the privacy guard in one hour, and once on a workflow whose result I simply
+never opened.
+
+The failure was not in any product code. `docs/screens/05-doctor-privacy.txt` was regenerated when
+FIX-B added `.potsherd/.gitignore` and the two `ask --*-out` paths to the receipt; **README.md
+quotes that screen verbatim and was not regenerated with it**. CI diffs the two, and it is right
+to: the receipt a reader trusts is the published copy, not the source. Fourteen lines the product
+prints that the README did not — including the note that the one directory appearing under
+claude's own `projects/` is created by claude code rather than by potsherd.
+
+Fixed at `15a31cf`. The screen-versus-live half of the same check passed on both runners
+throughout; only the published copy was stale. **`10-MASTER-VERIFICATION.md`'s block does not
+include a CI check, and that is the gap that let this run for eleven hours.** Added to the loop
+protocol in `RESUME-PROMPT.md`: `gh run list -L 3` is part of the wake-up state, beside
+`git log --oneline -5`.
+
+## FIX-D: the residue
+
+Round 3's two remaining items, in `wt-FIX-D` off `15a31cf`:
+
+- **C4** — `tests/plugin-install.test.ts` compares **mtimes**, so a byte-for-byte `cp`, a `touch`,
+  a `git checkout` away and back, or a rebase turns it red while `pnpm vendor` reports no diff.
+  Rule 7 again (*a test's premise must be something the test establishes*), and the third
+  instance this phase. It must compare content, and the worker must show it going red on a real
+  drift — `vectors-lazy.test.ts` was accepted last round only because its author proved that.
+- **C5** — the top `hits[]` row can be labelled weaker than the rows beneath it (order is the RRF
+  fused score, label is the calibration score, and RRF is a rank artifact); the receipt's new
+  `.gitignore` line is the only `writes:` entry with no explanatory sub-line; and the suite has
+  leaked `hang.mjs` children that were still alive after **two days**.
