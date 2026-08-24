@@ -431,3 +431,95 @@ Round 3's two remaining items, in `wt-FIX-D` off `15a31cf`:
   fused score, label is the calibration score, and RRF is a rank artifact); the receipt's new
   `.gitignore` line is the only `writes:` entry with no explanatory sub-line; and the suite has
   leaked `hang.mjs` children that were still alive after **two days**.
+
+## FIX-D landed, and all four items were real
+
+`cd55cb8`. Suite **1,890 on 53 files** (+7), typecheck 4 of 4, guard exit 0, vendor clean,
+`pnpm evals` exit 0 — hybrid recall@5 **51/60**, recall@1 **27/60**, both fusion clauses PASS.
+Report: `phases/phase-10/FIX-D-REPORT.md`.
+
+**C4 — the freshness test now compares bytes, and it was proved red three times.** The old body
+took the newest `mtimeMs` under `packages/**/*.ts`, so a byte-for-byte `cp`, a `touch`, a rebase or
+a **fresh clone** (git stamps every file with the checkout time) turned it red while `pnpm vendor`
+reported no diff. A test that goes red for reasons unrelated to its subject stops being read, which
+is how a real staleness would have got through it. It now compares the bytes `vendor-plugin.mjs`
+computes — and pins the artifact pair list **to that script's own text**, so a third bundle or a
+renamed output fails on the pin instead of leaving the test quietly checking a path nothing writes.
+The third red was unplanned: it caught a rebuilt-but-unvendored `llm.ts` during an unrelated
+measurement. That is the difference between a guard and a ritual.
+
+**C5a — the model door's first row is now its best row.** `hits[]` were ordered by the fused RRF
+score and labelled from calibration, and **RRF is a function of rank only** — it has discarded how
+well anything matched by the time the number exists. Worst real case, on the real server:
+
+```
+BEFORE  hit0  conf none   not-a-transcript  kind=title      ← a CARD, labelled "none"
+        hit1  conf weak   transcript        kind=exchange
+AFTER   hit0  conf weak   transcript        kind=exchange
+        hit2  conf none   not-a-transcript  kind=title
+```
+
+A card, marked `not-a-transcript` and labelled `none`, leading a reply whose envelope said
+`strong`, above a real transcript. An agent reads the first row as the best row.
+
+**The detail neither the verifier nor I anticipated, and the worker got right:** it ordered by the
+*label*, not by `calibration.score`, because a routing row's score is deliberately **not** rewritten
+when `ROUTING_CEILING` caps its label — so sorting on the number alone would have put the card back
+on top by different arithmetic. F6 survives by construction: a card can never reach `strong`, so it
+can never take the top row from a transcript. Nothing is recomputed, filtered or dropped; the same
+rows, moved. `threads[]` got the same fence (it reorders nothing measured — a guard, and described
+as one rather than as a fix).
+
+**C5b** — the receipt's `.gitignore` line has its sub-line; screen and README regenerated from a
+live run, both CI checks reproduced by hand.
+
+## C5c: the suite leaks, every run, and only the payload's own `sleep` hides it
+
+The verifier reported three `hang.mjs` processes alive for two days and could not attribute them —
+the `d10-` prefix does not exist in this tree. **`hang.mjs` never existed here. The mechanism does.**
+
+```
+$ npx vitest run tests/llm.test.ts -t "never hangs"     → 2 passed, 2.33 s
+$ ps -eo pid,ppid,etime,command | grep "sleep 30"       → three, PPID 1, 23 s later
+```
+
+`packages/core/src/llm.ts:2290` spawns with no process group; both exit paths call
+`child.kill('SIGKILL')`, which signals one pid. The payload is behind `/bin/sh`, which forks, so the
+grandchild is reparented to launchd. **Every harness CLI in the wild is that shape.** It is bounded
+today only because the test payload is `sleep 30`; a payload that does not exit lives until reboot,
+which is exactly what the verifier found.
+
+**And the obvious patch has a hole I checked before commissioning the fix.** FIX-D's worker
+flagged that `detached: true` moves the child out of the terminal's foreground group *"if every
+caller wires a signal"*. No caller does:
+
+```
+$ grep -rn "SIGINT" packages/cli/src packages/core/src                      → no matches
+$ grep -rn "signal" packages/cli/src/commands/{ask,card}.ts                 → no matches
+```
+
+Ctrl-C works today **by accident** — the child shares potsherd's foreground group and the terminal
+signals the whole group. So `detached` alone would trade a background leak for a foreground one, on
+a verb (`card --all`) that makes ~39 calls. FIX-E is commissioned with that as a named acceptance
+criterion, and with a standing ruling that landing nothing and reporting the blocker beats landing
+a fix that moves the failure.
+
+FIX-E also carries: `docs/screens/13-find-redacted.txt` still publishes `run potsherd index
+--embed`, the string FIX-C deleted — and **only two of the seventeen screens are diffed against a
+live run by CI**, which is why it survived.
+
+## the disk filled again, and this time it was caught before it killed a worker
+
+`plans/04` records it from 24 aug: *"the machine ran out of disk and it presented as two workers
+stalling."* Checked on resume rather than after: **1.4 GiB free, 100%.** Nine merged worktrees at
+~860 MB each were still on disk, plus `node_modules` trees under four superseded session
+scratchpads and every `/private/tmp/potsherd-*` evidence directory.
+
+Reclaimed ~11 GB → **5.4 GiB free**, and the rule that governed every deletion is the one already
+written down: a `node_modules` tree and a git clone are **reconstructible from a lockfile and a
+SHA**, so they are not evidence; a `--potsherd-dir` and a frozen `home/` are, and none was touched.
+Every candidate was grepped against `plans/**` and `potsherd/phases/**` first — two scratchpads
+were cited and kept whole, two were not.
+
+**Added to the wake-up state in `RESUME-PROMPT.md`:** `df -h` and `git worktree list` beside
+`git log` and `gh run list`. A merged worktree is 860 MB of nothing.
