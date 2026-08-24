@@ -663,3 +663,279 @@ green and red. The checkout behaviour in §2/C-10 was measured against this repo
 using the same commands `actions/checkout@v4` issues, not by running the action. So the claim "this
 is CI's state" remains, as it was for the fifth verifier, an inference from the workflow file — a
 well-measured one.
+
+---
+
+# ROUND 2 — landing my own §4, and sweeping for the rest of C-10
+
+**Branch** `work/FIX-J2`, cut from **local `main` at `7d95276`** — not `origin/main`, which was one
+merge behind at `5b99a10` when I started. `git merge-base --is-ancestor 5b99a10 main` → yes, and
+`7d95276` is `Merge branch 'work/FIX-H'` on top of it. Verified before a line was written, because
+the coordinator's own instruction named a commit that was already stale. Nothing pushed, nothing
+merged. Two commits.
+
+**The baseline moved with FIX-H.** On `7d95276`, before any change of mine: **54 test files, 1,946
+tests, 0 skipped** — not the 53 / 1,932 of round 1. (That run reported one failure,
+`the vendored bundles are byte-for-byte the bundles this build produces`, because I rebuilt `dist`
+while it was in flight without re-running `pnpm vendor`. Mechanical, and the same test is green in
+both final runs below.)
+
+**Scope.** `packages/core/src/{db,vec,ingest,doctor-line,lock}.ts`, `packages/core/src/recall.ts`,
+`packages/cli/src/commands/{find,ask}.ts`, `packages/mcp/src/tools/recall.ts` and
+`tests/{find,mcp,synthesis-seam}.test.ts` were not touched. One sweep finding lives in
+`tests/mcp.test.ts` and is reported, not fixed.
+
+---
+
+## R1. §4.1 — `searched` at the source, and one regression the proof caught
+
+### What changed
+
+`packages/core/src/ask.ts`: a `sessionsRead(shortlisted, readers)` helper beside `AskResult`, used
+at **both** construction sites — `base()` at the all-readers-failed early return, and the full
+return. A free function rather than an inline expression for the reason round 1 found the hard way:
+a fact re-derived in two places is a fact two doors will eventually disagree about.
+
+`packages/core/src/render/ask.ts`: the local `sessionsRead()` is **deleted**, not kept. Its own
+docstring said it should be, and the double-subtraction the coordinator warned about is exactly what
+keeping it would have caused — `-4 of 4` the day the field became right. `counts()` and the
+`no grounded answer in N sessions searched` headline now read `r.searched` straight.
+
+### Both doors, one run
+
+A real `ask` through the CLI, in a relocated `HOME`, with a stub `claude` on `PATH` that exits 1
+with `Not logged in`. Same question, same corpus, same build:
+
+```
+--- the screen -------------------------------------------------
+  nothing was read — all 4 readers failed
+
+  no reader could run, so nothing was read: claude exited 1: Not logged in · Please run /login
+
+  0 of 58 sessions read · 0 answered · 466ms
+  4 readers did not answer · not counted as searched
+  58 matching sessions not read · raise --k to widen
+
+--- --json -----------------------------------------------------
+  {"searched":0,"matching":58,"readers":4,"failed":4}
+```
+
+`0` on the screen, `0` in `--json`, subtracted once. The note that says the failed readers are *not
+counted as searched* is now true of both.
+
+### The regression the side-by-side caught, which no test would have
+
+The **first** run under the new field printed this:
+
+```
+  nothing in the index matches "what did we decide about the pooler".
+
+  run  potsherd find  to check the shortlist, or  potsherd index
+
+  0 of 58 sessions read · 0 answered · 998ms
+  4 readers did not answer · not counted as searched
+```
+
+An archive-shaped empty over a capability failure — the exact frame VERIFICATION-4 §C7 removed, and
+the **third** place it has appeared. `nothing()` branched on `r.searched === 0`, which was a safe
+sentinel only while `searched` could not be 0 with a shortlist behind it; §4.1 made it able to be.
+
+The premise that branch actually wants is that **no reader ran**. `ask.ts` returns early with
+`readers: []` when the shortlist is empty, and every path that reaches a reader records one, so the
+branch is now `r.searched === 0 && r.readers.length === 0`. Checked live in both directions:
+
+```
+$ potsherd ask "xylophrantic bedduzzle qwomparil"     # a control invented for this run
+  nothing in the index matches "xylophrantic bedduzzle qwomparil".
+  0 of 0 sessions read · 0 answered · 12ms
+  json: {"searched":0,"matching":0,"readers":0}
+```
+
+This is the finding of round 2. It was not reachable from the diff: the renderer and the field were
+each defensible alone, and the failure only exists in the pair. It took printing both doors of the
+same run, which is what the coordinator asked for and is why it is asked for.
+
+---
+
+## R2. §4.2 — the three tests, and why they were the point
+
+The fifth verifier's most damning measurement was that its own two-line CLI/MCP fix left **1,931
+tests passing before and after**, because nothing asserted the field it changed. C-3's footer and
+C-9's two sentences were in that position at the end of round 1: fixed, and unpinned.
+
+### `tests/threads.test.ts` — two, not one
+
+`ls says how many sessions the one row stands for`, on a two-session fork/resume chain, where the
+number is small enough to read: `result.sessions` has length 1, `result.threaded` is 1, and the
+rendered screen contains `1 of 2 sessions` and **not** `1 session` as a whole claim. The premise is
+established rather than assumed — the chain is asserted before the screen is.
+
+And `says nothing about threads when no row folds one`, because `n of n sessions` on every listing
+would be a worse screen than the one C-3 replaced. That one asserts `2 sessions` and no `of` at all.
+
+**Red first**, with the pre-C-3 footer put back and rebuilt:
+
+```
+ FAIL  tests/threads.test.ts > the thread is the unit > ls says how many sessions the one row stands for
+ AssertionError: expected 'potsherd ls · 1 session\n\n    when  …' to contain '1 of 2 sessions'
+       Tests  1 failed | 22 skipped (23)
+```
+
+### `tests/ask.test.ts` — the four lines together, and the sentinel from both sides
+
+`does not say four sessions were read when four readers died` asserts the headline, the count, the
+absence of the old count, the reader note **and** the absence of `nothing in the index matches`, on
+one screen. The last of those is the regression above, pinned so it cannot come back.
+
+**Red first**, against `main`'s renderer — round 1's fix, before §4.1:
+
+```
+ FAIL  tests/ask.test.ts > the ask block is built to fit 80x24 > does not say four sessions were read when four readers died
+ AssertionError: expected 'potsherd ask "what did we decide abou…' to contain 'nothing was read — all 4 readers fail…'
+       Tests  1 failed | 118 skipped (119)
+```
+
+`still says nothing matched when no reader ran at all` is green on both the old and the new
+renderer, by design — its job is to stop the fix over-reaching, not to catch the old bug. So it is
+shown red on a **seeded** fault instead, the branch disabled with `&& false`:
+
+```
+ FAIL  tests/ask.test.ts > … > still says nothing matched when no reader ran at all
+ AssertionError: expected 'potsherd ask "what did we decide abou…' to contain 'nothing in the index matches'
+```
+
+### `tests/graft.test.ts` — the claim about the call, in both directions
+
+The test beside it (`falls back to the card when the model call throws`) asserted `/unsummarised/`
+and the reason and **never the claim about the call**, which is exactly why the sentence survived
+review. The new one asserts `called: true` with `spend.calls: 0` in the same run — billed nothing,
+and made the call — plus both headers, each with the other's absence.
+
+**Red first, twice.** Against the pre-fix `graft.ts`, on the field:
+
+```
+ FAIL  tests/graft.test.ts > it works on a plane > does not say no call was made about a call that failed
+ AssertionError: expected undefined to be true
+```
+
+and, with `called` recorded but the published one-sentence-for-both-paths header seeded back, on the
+sentence itself:
+
+```
+ AssertionError: expected '# pgbouncer and prepared statements\n…' to contain '**unsummarised.** The model call did …'
+```
+
+---
+
+## R3. §4.3 and the sweep — every "green tick that means not run" in the suite
+
+### §4.3, fixed
+
+`tests/sqlite-driver.test.ts`. It already printed its reason; only the verdict was wrong. Simulated
+by forcing the probe to report a Node that does not warn about `node:sqlite`:
+
+```
+BEFORE (bare return)   Tests  11 passed (11)
+AFTER  (ctx.skip())    SKIPPED: v24.9.0 does not warn about node:sqlite, so there is nothing
+                                for POTSHERD_SQLITE_WARN to put back
+                       Tests  10 passed | 1 skipped (11)
+```
+
+### The sweep, and the full list
+
+Three passes over `tests/`, each a script rather than a reading:
+
+1. **A bare `return;` inside an `it()`/`test()` body.** 1,765 bodies scanned, 5 hits.
+2. **An early exit guarded by an environment probe** — `process.env`, `existsSync`, a `spawnSync`
+   probe, a version or platform test — inside a test body.
+3. **A `catch` block with no assertion and no rethrow**, i.e. a failure swallowed into a pass. 31
+   hits, all of them helpers capturing a non-zero exit into `{ code, stdout, stderr }` for a test to
+   assert on, or capturing an error into a variable for a later `expect`. **No findings.**
+
+| site | what it is | verdict |
+|---|---|---|
+| `tests/terminal.test.ts:693` | C-10's own escape, after `ctx.skip()` | **fixed in round 1.** The `return` is unreachable and kept only so TypeScript narrows |
+| `tests/sqlite-driver.test.ts:192` | `console.log('skipped') ; return` on an absent `ExperimentalWarning` | **fixed** (§4.3), and the `return` after `ctx.skip()` is now the same unreachable shape |
+| `tests/mcp.test.ts:486` | `process.stderr.write(…) ; return` when `confidence === null` — "core in this worktree predates T10.1" | **left, reported.** It is a real instance of the pattern. It is also **dormant on this build**: I ran that test and the branch is not taken, so its assertions do run today. `tests/mcp.test.ts` belongs to a live worker; the patch is below |
+| `tests/llm.test.ts:1038` | `return` inside an inner `async` arrow in `Promise.all` | **not the defect.** It follows `expect(err).toBeInstanceOf(BudgetError)` — an assertion was made — and it is not the test body's own return. My scanner's block tracking mis-attributed it |
+| `tests/terminal.test.ts:333` | `return` in the `EXEMPT[v.name]` branch of `every verb ends with the next verb` | **not the defect.** The branch asserts `(stdout + stderr).trim().length > 0` first; it is a pass because it passed an assertion |
+
+The patch for the one left, for whoever owns that file next:
+
+```diff
+--- a/tests/mcp.test.ts
++++ b/tests/mcp.test.ts
+-  it('the nonsense control returns none once the floor is live', async () => {
++  it('the nonsense control returns none once the floor is live', async (ctx) => {
+@@
+       process.stderr.write(
+         '\n  nonsense control: core in this worktree predates T10.1 (confidence null) — invariant asserted, cliff not\n',
+       );
++      ctx.skip();
+       return;
+```
+
+### The declared skips — 14 of them, and none is this defect
+
+`describe.skipIf` ×6, `it.runIf` ×7, `it.skipIf` ×1, across `evals-gate`, `recall`, `embeddings`,
+`vectors-lazy`, `index` and the four adapter files. These are honest: vitest reports them as
+**skipped**, which is the verdict this whole item is about. Their premises are a cached 34 MB model,
+`sandbox-exec` on macOS, and a real `~/.pi` / `~/.codex` / frozen corpus on the machine — and on
+this machine **every one of them holds**, which is why both suites below report `0 skipped`.
+
+Two consequences worth stating rather than leaving to be discovered:
+
+* On a runner with no cached model, `describe.skipIf(MODEL === null)` in `tests/evals-gate.test.ts`
+  legitimately skips the end-to-end eval. That is not a hole any more: round 1's CI step runs
+  `pnpm evals` with `POTSHERD_EVALS_EMBED=1` and asserts the vector modes really ran, so the gate is
+  evaluated on CI by the step even when the test skips.
+* `it.runIf(CAN_DENY_NETWORK)` in `tests/index.test.ts` skips on the two ubuntu matrix jobs by
+  construction — `sandbox-exec` is macOS-only, and the file says so.
+
+---
+
+## R4. THE NUMBERS
+
+| gate | required | measured |
+|---|---|---|
+| `pnpm test` | ≥ baseline, 0 skipped | **54 files, 1,951 tests, 0 skipped, EXIT=0** |
+| `POTSHERD_SQLITE=node pnpm test` | same | **54 files, 1,951 tests, 0 skipped, EXIT=0** |
+| baseline on `7d95276` | — | 54 files, **1,946** tests, 0 skipped |
+| the five new assertions | +5 | 1,946 + 5 = **1,951**, and no test changed its verdict |
+| `pnpm typecheck` | 4 of 4 | **4 of 4 `Done`** |
+| `pnpm evals` | exit 0 | **EVALS_EXIT=0** |
+| `python3 scripts/check-privacy.py` | exit 0 from `$?` | **PRIVACY_EXIT=0**, `--selftest` **0** |
+| `pnpm build && pnpm vendor` | `git status plugins/` clean | **clean** |
+| the CI screens step | green, red on a seeded drift | **green**; seeded `1 of 31 sessions` → `1 session`, **DRIFTED**, exit 1 |
+| the CI evals step | green, red on a seeded fault | **green**; seeded a run that returns 0 without judging → three `::error::` lines, exit 1 |
+
+**`0 skipped` did not move**, and `ctx.skip()` is why it did not: both premises the two fixed
+escapes need are present here — this checkout is a full clone with nine reachable `v*` tags, and
+this Node still warns about `node:sqlite`. Where either is absent the count *will* move, by one
+each, and that is the whole point of the change. Both were demonstrated above by simulating the
+absent premise.
+
+Disk: `df -h /` read **11 GiB** free at the start of round 2 and **11 GiB** at the end; scratch is
+deleted, `.tmp/` is removed from the worktree. No process was started that outlived its command —
+`ps` for `potsherd.js` after the screens step: nothing. No `git fetch --all`, no `git fetch --tags`,
+no tag created or deleted; the tagless simulations use a `git` shim on `PATH`.
+
+---
+
+## R5. WHAT ROUND 2 DID NOT DO
+
+1. **`docs/screens/17-ls-cards.txt`** — untouched, as instructed. It still reads `31 sessions`,
+   which is a third spelling of C-3 and is what the footer printed before the fork/resume rollup
+   existed. It needs a model backend (39 calls) to regenerate. Whoever regenerates it should **read**
+   the change rather than assume it is noise.
+2. **`evals/per-query-baseline.json`** — untouched, as instructed. Five losses and two gains of
+   tie-break drift, aggregate unchanged, exit 0, and now in the CI log every run.
+3. **`tests/mcp.test.ts:486`** — the one sweep finding left, with its patch in R3. Dormant on this
+   build; another worker owns the file.
+4. **`AskResult.searched` on the seam paths** — `--readers-in` and `--filter-in` construct their
+   results through the same two sites, so they inherit the fix, but I drove only the live-reader
+   path end to end. The seam's own tests (`tests/synthesis-seam.test.ts`) belong to a live worker and
+   are green unchanged, which is evidence and not a measurement I made.
+5. **I still could not run a GitHub Actions job.** Both CI steps were extracted from `ci.yml` with a
+   YAML parser and run locally, green and red. The checkout claim remains an inference from the
+   workflow file, measured against this repository over `file://`.
