@@ -38,7 +38,7 @@ never printed.
 | item | verdict | the command, and what it printed |
 |---|---|---|
 | **C2** — `warming` at the model door with no embedder and no `models` dir | **confirmed, verbatim** | `ps -eo pid,command \| grep "[i]ndex --quiet"` → **0**; `ls <root>/models` → *No such file or directory*; real server → `capability = "keyword search only — semantic search is warming (0 of 4,751 embedded)"` |
-| **C2** — nothing consults `.lock.embed` | **confirmed** | `grep -rn "lock" packages/core/src/vec.ts packages/core/src/doctor-line.ts packages/mcp/src/tools/recall.ts` → no match on `4064c4e`. `lock.holder({lane:'embed'})` existed and had exactly one caller: `cli/commands/index.ts:256`, deciding whether to *spawn* |
+| **C2** — nothing consults `.lock.embed` | **confirmed** | `git grep -n "lock.holder\|holder({" 4064c4e -- packages` → **one line in the whole product**, `cli/commands/index.ts:256`, and it decides whether to *spawn*, not what to print. The three files that render the sentence (`vec.ts`, `doctor-line.ts`, `mcp/tools/recall.ts`) contain no reference to the lock at all — the only `lock` matches in them are the word `block` |
 | **C2** — `vectors.reason` makes the same promise | **confirmed, and one worse than filed** | the same reply carried `"reason": "the words matched; semantic search adds to this as vectors land"`. On this index they do not land at all |
 | **C3** — 28 hits, 18 titles, first transcript hit at index 18 | **confirmed, exactly** | see §2 C3 *before* |
 | **C3** — five title-only threads, all `citable: true` with a citation | **confirmed** | see §2 C3 *before* |
@@ -82,11 +82,13 @@ Then each surface renders it:
   the verifier named is a *note* plus a *capability* read together: `…Only keyword search ran; the
   semantic half did not, **and nothing is embedding this index, so running the same search again
   will not change that**.`
-- **core's `vectors.reason`** (`packages/core/src/recall.ts`) — `no embeddings in the index **yet**`
-  becomes `no embeddings in the index, and nothing is embedding them`, and `the words matched;
-  semantic search adds to this **as vectors land**` becomes `…semantic search is not running, so
-  nothing will be added`. Both strings reach `find` **and** the model door, so one edit fixes two
-  surfaces. `working` is published on `VectorState` too, so a script never has to parse English.
+- **core's `vectors.reason`** (`packages/core/src/recall.ts`) — two strings, each a promise about
+  the future, each now conditional on the lock. `no embeddings in the index **yet**` becomes
+  `no embeddings in the index, and nothing is embedding them` when nobody holds the lane and is left
+  exactly as it was when somebody does; `the words matched; semantic search adds to this **as
+  vectors land**` becomes `…semantic search is not running, so nothing will be added` on the same
+  condition. Both strings reach `find` **and** the model door, so one edit serves two surfaces.
+  `working` is published on `VectorState` beside them, so a script never has to parse English.
 - **`find`** (`packages/core/src/render/find.ts`) — the warming sentence is **dropped** when
   `vectors.working === false`, and `supersededBySemantic` is inverted in the same case so the honest
   clause is printed instead of being suppressed by a line that is no longer there. This is the exact
@@ -122,7 +124,8 @@ And `tests/cards-lane.test.ts:186` pins `laneOfHit('title') === 'evidence'` in b
 
 So the lane stays exactly where T10.7 put it, and the *other* property gets its own name:
 `SUMMARY_KINDS = {card, title}` — "a statement **about** a conversation rather than text **from**
-one" — with `isSummaryHit` and `hasTranscriptEvidence` beside it. Three uses, one per half of C3:
+one" — with `isSummaryHit` and `hasTranscriptEvidence` beside it. Three uses, one for each of
+the three things C3 asks for:
 
 - **not `strong`.** The per-hit ceiling in `take()` and the per-block ceiling both key on
   `SUMMARY_KINDS` / `hasTranscriptEvidence` instead of on the lane, so a title-only block is capped
@@ -282,7 +285,8 @@ threads 10
 ```
 
 Five title-only threads with minted citations became **two**, uncitable, at the bottom — and the
-four transcript threads that had been pushed off the page by them are now on it. The human CLI on
+page went from five threads with transcript evidence in them to **eight**: three conversations that
+had been pushed off it by summaries are now on it. The human CLI on
 the identical query now ranks the same blocks in the same order (`find --json`: eight
 `exchange`-bearing blocks `strong`, then two `title`-only blocks `weak`), which is the agreement
 `vecStatus`'s own comment asks for, one field over.
@@ -306,6 +310,11 @@ cards: {"type":"boolean","description":"false: search transcripts only, and do n
 {"query":"…","scope":{}}               →  cards True   routing 0  summaryOnly 0
 ```
 
+Both of those ran at `limit: 3`, where the whole page is transcript either way, so the two envelope
+counters agree by arithmetic rather than by luck — and `routing` is 0 on both because this archive
+has **no cards in it at all**. The flag is proved accepted, forwarded to `RecallOptions.cards` and
+reported back; it is **not** proved to change a result set on this corpus, and I say so in §4.6.
+
 ### C6 — the same query, before and after
 
 ```
@@ -321,7 +330,10 @@ after    confidence "strong"  noMatch false  threads 1
                    exchanges around any of them. Some matching exchanges did not fit the budget."
 ```
 
-Reproduced on three separate queries, each one an exchange between 17,000 and 139,000 tokens.
+Reproduced on three separate queries. All three match the archive's largest exchange —
+556,529 characters, about **139,000 estimated tokens** against a 6,000-token ceiling — which is
+why the old code returned nothing: `windowsFrom` `continue`d past it and there was nothing else
+on the page. The index holds twelve exchanges over 17,000 tokens, so this is not one freak row.
 
 ### Red first — every new test, on the unfixed source
 
@@ -377,13 +389,45 @@ deleted, and the amendment is the finding:
 
 | | |
 |---|---|
-| `pnpm test` | **PLACEHOLDER-T1** |
-| `POTSHERD_SQLITE=node pnpm test` | **PLACEHOLDER-T2** |
+| `pnpm test` | **exit 0** · `Test Files 53 passed (53)` · `Tests 1913 passed (1913)` |
+| `POTSHERD_SQLITE=node pnpm test` | **exit 0** · `Test Files 53 passed (53)` · `Tests 1913 passed (1913)` |
 | `pnpm typecheck` | **4 of 4** — `core`, `bridges`, `cli`, `mcp` all `Done` |
-| `pnpm evals` (standalone) | **PLACEHOLDER-EVALS** |
+| `pnpm evals` (standalone) | **exit 0**, `PASS` — hybrid (auto) **recall@5 51/60 (85%)**, **recall@1 27/60 (45%)** |
 | `python3 scripts/check-privacy.py` | **exit 0, read from `$?`** *(output withheld — the guard prints the offending token)* |
-| `pnpm build && pnpm vendor` | `vendored 2 files, 2.6 MB total`; `git status plugins/` clean after the commit |
-| source diff | PLACEHOLDER-DIFF |
+| `pnpm build && pnpm vendor` | `vendored 2 files, 2.6 MB total`; `git status --porcelain plugins/` → **0 lines** |
+| source diff | +552 / −33 across five files; **172 effective lines** (comments and blanks excluded) |
+
+Baseline was 1,893 tests. **+20 new, 0 regressions, 0 skipped, both drivers.** The
+`tests/llm.test.ts` listener-count red I was told to expect under `POTSHERD_SQLITE=node` **did not
+appear** on this branch — that file is untouched and the whole suite is green under both drivers on
+this machine. I am reporting what I measured, not what I expected.
+
+### What C3 costs, measured both ways
+
+`pnpm evals` on `4064c4e` (the branch point, `git checkout 4064c4e -- packages/core/src
+packages/mcp/src`, then restored) against this branch, same corpus, same command:
+
+| mode | `4064c4e` | FIX-F | |
+|---|---|---|---|
+| bm25 only, recall@5 | 40/60 | **39/60** | −1 |
+| bm25 only, recall@1 | 26/60 | **24/60** | −2 |
+| vectors only, recall@5 | 51/60 | 51/60 | — |
+| vectors only, recall@1 | 24/60 | 24/60 | — |
+| **hybrid (auto), recall@5** | **51/60** | **51/60** | **—** |
+| **hybrid (auto), recall@1** | **27/60** | **27/60** | **—** |
+| hybrid (always), recall@5 / @1 | 51/60 · 27/60 | 51/60 · 27/60 | — |
+
+Both runs `PASS` and both exit 0. **The mode the product actually runs does not move.** The whole
+cost lands in `bm25 only` — the diagnostic mode where no vector list exists to balance the `titles`
+weight of 1.5 — and it is exactly the three queries the per-query baseline names as lost
+(`old documentation…`, `the search box…`, `data leakage`), against one gained. Those are queries
+whose top row **was** a session title and is now a transcript block, which is the change, working.
+
+So the ruling did not have to be invoked: the honest fix costs nothing measurable at the door
+either surface uses. Had it cost hybrid recall I would have landed it anyway and said so — a
+citation for a session whose transcript nobody has read is worse than a missed row — but it does
+not, and saying "it cost nothing" is only worth anything with the other five rows printed beside
+it.
 
 Files changed, and nothing outside the delivery list:
 
@@ -433,13 +477,17 @@ $ npx vitest run tests/index.test.ts tests/find-warming.test.ts     # with statu
       Tests  5 failed | 26 passed (31)
 ```
 
+(The other two of the five are `tests/find-warming.test.ts`'s own assertions, still un-updated at
+that point — they are the change, not a casualty. The three above are not: they are `index`
+describing a worker it has just spawned.)
+
 So the honest `find` line and the `index` patch have to land **together**, and I shipped neither
 half of that: the human screen is fixed the other way (§1 C2 — the contradicting sentence is
 dropped), and `find --json`'s `semantic.line` still reads `semantic search: warming (49 of 4,751
 embedded)` while `semantic.working` beside it reads `false`. A script is not misled; a human reading
 the raw JSON could be.
 
-**The patch, exactly.** Two edits, and they must go in one commit:
+**The patch, exactly.** Three edits, and they must go in one commit:
 
 ```diff
 --- a/packages/core/src/vec.ts        (mine, already staged for it — `working` is on the report)
@@ -542,11 +590,23 @@ never an instruction they cannot run* — but it is a loss of the count on the h
 ### 4.5 Two screens under `docs/screens/` are now stale, and they are not mine
 
 `docs/screens/09-find.txt` and `docs/screens/13-find-redacted.txt` both contain
-`semantic search: warming (0 of 3,410 embedded)` on a demo corpus that nothing is embedding, so the
-new `find` behaviour drops that line from both. `docs/screens/**`, `.github/workflows/ci.yml` and
-`tests/llm.test.ts` are another worker's; I did not touch them. Regenerate with
-`bash scripts/make-screens.sh` **after** this lands (that script leaks one detached embedder per
-run — record its pid and kill it). `07-index.txt` is `index`'s own line and does **not** change.
+`semantic search: warming (0 of 3,410 embedded)`, and the new `find` behaviour drops that line
+whenever nothing holds the embed lane. `07-index.txt` is `index`'s own line and does **not** change.
+`docs/screens/**`, `.github/workflows/ci.yml` and `tests/llm.test.ts` are another worker's; I did not
+touch them, and I did not run `make-screens.sh` (it leaks one detached embedder per run and disk was
+tight). Regenerate after this lands, and kill that embedder by its recorded pid.
+
+**And there is a flake in it that its owner should hear about before they regenerate.**
+`scripts/make-screens.sh:176` runs `index --full`, which spawns the detached embedder; `:220` and
+`:233` then shoot the two `find` screens. Whether those two screens contain the warming line now
+depends on **whether that embedder is still alive when `find` runs** — normally it is not, because
+it fails to fetch the 46 MB runtime and exits within a second or two, but on a machine that *can*
+fetch it will hold the lane for the whole download and the line will be there. That is a race
+between a capture script and a background process, and pinning its output byte-for-byte in CI is the
+same class of thing as C1's pinned `2.1 MB`/`2.2 MB` database size. The cheap fix is for the script
+to wait for the embed lane to be free before shooting `09` and `13` — one `until` loop over
+`<root>/.lock.embed` — rather than for the screens to record whichever side of the race that run
+landed on.
 
 ### 4.6 What I did not verify
 
@@ -559,9 +619,12 @@ run — record its pid and kill it). `07-index.txt` is `index`'s own line and do
 3. **The `--no-cards` A/B on cards.** This archive has no cards in it, so `scope.cards` is proved to
    be accepted, forwarded and reported, but not to change a result set. `tests/cards-lane.test.ts`
    covers the fusion half and is green.
-4. **Whether CI is green.** The two reds named in my instructions (`tests/llm.test.ts`'s
-   listener-count test under `POTSHERD_SQLITE=node`, and the screen-diff step) are not mine and I did
-   not fix them; §4.5 adds two screens to the second one's list.
+4. **Whether CI is green.** The two reds named in my instructions are not mine and I did not fix
+   them; §4.5 adds two screens to the second one's list. I will note, because I was told to name it
+   if I saw it, that **I did not see the `tests/llm.test.ts` listener-count red**: the full suite is
+   green under `POTSHERD_SQLITE=node` on this machine, on this branch, in two separate runs. I have
+   no access to the CI matrix and I am not claiming that finding is closed — only that it did not
+   reproduce here.
 
 ### 4.7 One thing I did wrong
 
@@ -573,7 +636,19 @@ killing and did not check *ownership* — the pid was live and mine had just exi
 reaped the orphan it left (21642, `PPID 1`) and killed nothing else by name or pattern; every other
 process I stopped was one I started and whose pid I had recorded (the embedder 43362, §2 state 2b).
 
-### 4.8 The branch
+### 4.8 The branch, the processes, the disk
 
-`work/FIX-F` is one commit on top of `4064c4e`. `origin/main` has moved one commit ahead of that
-since the branch was cut; I did not merge, rebase, push or touch it.
+`work/FIX-F` is three commits on top of `4064c4e` — the fix, a tidy-up, and this report.
+`origin/main` has moved one commit ahead of `4064c4e` since the branch was cut; I did not merge,
+rebase, push or touch it.
+
+**Processes.** One embedder started (pid 43362, §2 state 2b) and killed by its recorded pid, `ps`
+before and `ps` after; one leaked by a manual `index` run early on (96245), same treatment; the two
+vitest workers of §4.7. No name pattern, no `killall`. `ps -eo pid,command | grep "[i]ndex --quiet"`
+→ **0** at the end.
+
+**Disk.** `199Gi total, 5.2Gi free` before, `3.0Gi` at the worst moment (three worktrees and two
+concurrent suites), `5.0Gi` after. The scratch `HOME` (1.8 GB, APFS clones), the rescued archive and
+index (659 MB) and the small embedded corpus (47 MB) are mine and are deleted. Nothing of mine
+remains under `/Users/zebra/randomness/potsherd`: this report is written inside the worktree only,
+as instructed.
