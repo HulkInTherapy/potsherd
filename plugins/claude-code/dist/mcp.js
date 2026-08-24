@@ -27963,6 +27963,15 @@ function summaryRank(hits) {
 function byLane(a, b) {
   return LANES[a.lane ?? "evidence"] - LANES[b.lane ?? "evidence"] || b.score - a.score;
 }
+var CONFIDENCE_RANK = { strong: 0, weak: 1, none: 2 };
+function byLabel(a, b) {
+  const wa = a.confidence, wb = b.confidence;
+  const word = wa && wb ? CONFIDENCE_RANK[wa] - CONFIDENCE_RANK[wb] : 0;
+  return LANES[a.lane ?? "evidence"] - LANES[b.lane ?? "evidence"] || word || (b.calibration?.score ?? 0) - (a.calibration?.score ?? 0) || b.score - a.score;
+}
+function citableBlock(hits, lane) {
+  return (lane ?? laneOfSession(hits)) === "evidence" && hasTranscriptEvidence(hits);
+}
 var PER_SESSION = 3;
 var CORROBORATION = 0.12;
 var RELAXED_PENALTY = 0.6;
@@ -28906,6 +28915,10 @@ async function recall(db, query, requested = {}, options = {}) {
       calibration,
       confidence: calibration.confidence,
       lane,
+      // F6 as a field, not as a rule two doors each re-derive. See
+      // {@link citableBlock}: `transcript` is the same value the ceiling above
+      // is applied from, so the cap and the permission cannot disagree.
+      citable: citableBlock(hits, lane),
       hits
     });
     if (evidenceBuilt >= limit * 3 && routingBuilt >= limit)
@@ -28918,8 +28931,9 @@ async function recall(db, query, requested = {}, options = {}) {
   sessions.push(...surviving);
   sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLane(a, b));
   sessions.length = Math.min(sessions.length, limit);
+  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLabel(a, b));
   const confidence = sessions.reduce((best, s) => maxConfidence(best, s.confidence), "none");
-  const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => summaryRank([a]) - summaryRank([b]) || byLane(a, b));
+  const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => summaryRank([a]) - summaryRank([b]) || byLabel(a, b));
   return {
     query,
     sessions,
@@ -43631,7 +43645,7 @@ async function runRecall(ctx, args) {
     const noMatch = confidence === "none";
     const sessions = noMatch ? [] : result.sessions;
     const hits = noMatch ? [] : result.hits;
-    const threads = orderByLabel(groupThreads(sessions));
+    const threads = groupThreads(sessions);
     const envelope = {
       query: result.query,
       want,
@@ -43704,7 +43718,7 @@ async function runRecall(ctx, args) {
         null
       ) : windows2.length === 0 ? "no window could be returned for this page. potsherd_read the thread to read it \u2014 threads[] names each one." : (clipped > 0 ? 'one window is the opening of an exchange longer than the whole budget, cut to fit and marked "clipped": do not read its end as the end of the exchange. ' : "") + "these windows are discontiguous and relevance-selected. potsherd_read the thread for the exchanges around any of them." + (truncated ? " Some matching exchanges did not fit the budget." : "");
     } else {
-      envelope["hits"] = orderByLabel(hits.map((h) => hitJson(h, sessions)));
+      envelope["hits"] = hits.map((h) => hitJson(h, sessions));
     }
     return envelope;
   });
@@ -43726,6 +43740,7 @@ function groupThreads(sessions) {
     const exchanges = members.reduce((n, m) => n + m.exchanges, 0);
     const prompts = members.reduce((n, m) => n + m.prompts, 0);
     const evidence = threadEvidence(members);
+    const citable = lead.citable === true;
     const started = members.map((m) => m.startedAt).filter(Boolean).sort()[0] ?? null;
     const ended = members.map((m) => m.endedAt).filter(Boolean).sort().pop() ?? null;
     return {
@@ -43787,8 +43802,15 @@ function groupThreads(sessions) {
        */
       lane: lead.lane ?? "evidence",
       evidence,
-      citable: (lead.lane ?? "evidence") === "evidence" && evidence !== "not-a-transcript",
-      citation: (lead.lane ?? "evidence") === "routing" || evidence === "not-a-transcript" ? null : mintCitation({
+      // FIX-I C-2. This was the same two conditions spelled out again, and it
+      // was the copy that was right while `find --json`'s copy was wrong. Both
+      // doors now read the field core publishes (`citableBlock` in
+      // `packages/core/src/recall.ts`), so there is one predicate and not two
+      // that agree. `citation` is minted off the same boolean rather than off
+      // a second spelling of the condition, so a thread cannot be uncitable
+      // and carry a citation.
+      citable,
+      citation: citable ? mintCitation({
         sessionId: key,
         kind: lead.kind,
         harness: lead.harness,
@@ -43796,7 +43818,7 @@ function groupThreads(sessions) {
         exchanges,
         prompts,
         date: (ended ?? started)?.slice(0, 10) ?? null
-      }),
+      }) : null,
       // Why there is no citation, in the words the human view uses for the
       // same row. A `null` field an agent cannot explain is a field it works
       // around; this one says what would have to happen for a citation to
@@ -43811,49 +43833,6 @@ function threadEvidence(members) {
   const hits = members.flatMap((m) => m.hits ?? []);
   if (hits.length === 0) return "transcript";
   return hits.some((h) => evidenceOf(h.kind) === "transcript") ? "transcript" : "not-a-transcript";
-}
-var CONFIDENCE_RANK = { strong: 0, weak: 1, none: 2 };
-function orderByLabel(rows) {
-  const out = [...rows];
-  if (out.some((r) => confidenceOf(r) === null)) return out;
-  return out.map((row, i) => ({ row, i })).sort(
-    (a, b) => (
-      // FIX-F C3, and it is the first key rather than a tie-break.
-      //
-      // Core partitions its own two lists the same way (`recall.summaryRank`),
-      // and this is the fence that stops the re-sort at this door undoing it:
-      // `orderByLabel` reads only `confidence` and two scores, so a
-      // summary-only row with a better `calibration.score` than a weak
-      // transcript row would be lifted straight back over it. That is not
-      // hypothetical — it is what a card could already do here, since the
-      // {@link ROUTING_CEILING} only stops a card beating a *strong* row.
-      //
-      // It does not contradict the label, because core now caps a
-      // summary-only row at `weak` (FIX-F C3): every row above the summaries
-      // is at least as confident as every row below them, so `hits[]` and
-      // `threads[]` stay monotone in the confidence word, which is the
-      // property FIX-D's fences pin. A row carrying no `evidence` field —
-      // any caller passing plain rows, and every unit test written before
-      // this — counts as `transcript` and nothing about its order changes.
-      evidenceRank(a.row) - evidenceRank(b.row) || CONFIDENCE_RANK[confidenceOf(a.row)] - CONFIDENCE_RANK[confidenceOf(b.row)] || calibrationScoreOf(b.row) - calibrationScoreOf(a.row) || scoreOf(b.row) - scoreOf(a.row) || // Explicit, rather than leaning on the runtime's sort being stable.
-      a.i - b.i
-    )
-  ).map((r) => r.row);
-}
-function evidenceRank(row) {
-  if (!row || typeof row !== "object") return 0;
-  return row.evidence === "not-a-transcript" ? 1 : 0;
-}
-function calibrationScoreOf(row) {
-  const c = calibrationOf(row);
-  if (!c || typeof c !== "object") return 0;
-  const s = c.score;
-  return typeof s === "number" && Number.isFinite(s) ? s : 0;
-}
-function scoreOf(row) {
-  if (!row || typeof row !== "object") return 0;
-  const s = row.score;
-  return typeof s === "number" && Number.isFinite(s) ? s : 0;
 }
 function hitJson(h, sessions) {
   const owner = sessions.find((s) => s.id === h.sessionId);

@@ -16,6 +16,8 @@ import {
   type Transport,
 } from '../packages/core/src/llm.js';
 import {
+  READERS_INSTRUCTION,
+  READERS_SCHEMA,
   REPLY_INSTRUCTION,
   SYNTHESIS_FILE_KIND,
   SYNTHESIS_FILE_VERSION,
@@ -953,6 +955,219 @@ describe('the instruction the host is given names the shape', () => {
     // The old sentence — "add it to the file as reply" — is what a reader
     // resolved to "add the model's text".
     expect(instruction).not.toMatch(/add it to the file/);
+    db.close();
+  });
+});
+
+// ============ 8. the file an agent must fill in says what to put in it (C-5)
+
+/**
+ * FIX-I C-5 — **the first leg of the seam carried no specification.**
+ *
+ * `--synthesis-out`'s file has shipped a `schema` since T10.2 and an
+ * `instruction` since FIX-G C4(c). `--readers-out`'s file — the one an agent
+ * meets **first**, with no prior, and the one it must fill in rather than
+ * merely answer — carried neither. Its receipt said *"run your readers, add an
+ * "outputs" array to the file"*, and `quotes: […]` was the whole specification
+ * of a quote. The fifth verifier guessed `{seq, quote}`, which is the natural
+ * reading of the word, and learned the answer from an error message:
+ *
+ *     potsherd: r.json: outputs[0].quotes[0] has no "text"
+ *
+ * An agent with three tools and no shell cannot discover it any other way. The
+ * two fields are there now, and the test that matters is the third one below:
+ * a round trip completed from **nothing but the file's own `schema`**.
+ */
+describe('the reader file says what to put in it', () => {
+  it('carries a schema and an instruction, like the file it hands back', async () => {
+    const { root, db } = seedDb();
+    const target = outFile('readers-schema.json');
+    await writeReadersFile(db, QUESTION, { root }, target);
+    const parsed = JSON.parse(fs.readFileSync(target, 'utf8')) as Record<string, unknown>;
+
+    expect(parsed['schema']).toBe(READERS_SCHEMA);
+    expect(parsed['instruction']).toBe(READERS_INSTRUCTION);
+    // The three facts a competent reader needed and did not have: what an
+    // entry looks like, that `outputs` is the array itself rather than the
+    // text of one, and what a reader that found nothing writes.
+    expect(READERS_INSTRUCTION).toMatch(/in the shape of "schema"/);
+    expect(READERS_INSTRUCTION).toMatch(/the JSON array itself/);
+    expect(READERS_INSTRUCTION).toMatch(/"found":false/);
+    // FIX-G C4(c)'s finding, not repeated: nothing here says "add it".
+    expect(READERS_INSTRUCTION).not.toMatch(/add it to the file/);
+    db.close();
+  });
+
+  it('the schema names every key the reader validator requires, and no other', () => {
+    // The drift test. `readerOutput` in `packages/cli/src/commands/ask.ts` is
+    // the authority on what is accepted; this string is what the agent is
+    // shown. If they ever disagree the agent is being told to write something
+    // the code refuses, which is FIX-C's D7 in the other direction.
+    const keys = (of: string): Set<string> =>
+      new Set([...of.matchAll(/"([a-z_]+)"\s*:/gi)].map((m) => m[1]!));
+    const quotesBlock = /"quotes":\[\{(.*?)\}\]/s.exec(READERS_SCHEMA)![1]!;
+    expect(keys(READERS_SCHEMA.replace(quotesBlock, ''))).toEqual(
+      new Set(['outputs', 'sessionId', 'found', 'quotes', 'answer_fragment']),
+    );
+    expect(keys(quotesBlock)).toEqual(new Set(['seq', 'ts', 'text']));
+    // The word the verifier guessed, named here so the mistake is impossible
+    // to repeat by reading the file.
+    expect(READERS_SCHEMA).toContain('"text"');
+    expect(READERS_SCHEMA).not.toContain('"quote"');
+  });
+
+  it('a reader file answered from nothing but its own schema completes the round trip', async () => {
+    // The claim C-5 actually makes: *a reader can complete the whole round
+    // trip from the file alone.* So this test reads the recorded file, takes
+    // the key names out of the `schema` string it carries — never out of this
+    // repository's types — and builds `outputs` with them.
+    const { root, db } = seedDb();
+    const target = outFile('readers-from-schema.json');
+    await writeReadersFile(db, QUESTION, { root }, target);
+    const file = JSON.parse(fs.readFileSync(target, 'utf8')) as Record<string, unknown>;
+    const schema = JSON.parse(
+      String(file['schema'])
+        // The slots are type names, not JSON. Turn each into a placeholder so
+        // the shape itself can be parsed and walked.
+        .replace(/:\s*<[^>]*>/g, ': 0')
+        .replace(/true\|false/g, 'true')
+        .replace(/"<[^"]*>"\|null/g, 'null')
+        .replace(/"<[^"]*>"/g, '""'),
+    ) as { outputs: Record<string, unknown>[] };
+    const shape = schema.outputs[0]!;
+    const quoteShape = (shape['quotes'] as Record<string, unknown>[])[0]!;
+
+    const targets = file['targets'] as { sessionId: string; seqs: number[] }[];
+    const outputs = targets.map((t) => ({
+      [Object.keys(shape)[0]!]: t.sessionId,
+      [Object.keys(shape)[1]!]: t.sessionId === POOLER,
+      [Object.keys(shape)[2]!]:
+        t.sessionId === POOLER
+          ? [
+              {
+                [Object.keys(quoteShape)[0]!]: 12,
+                [Object.keys(quoteShape)[1]!]: null,
+                [Object.keys(quoteShape)[2]!]: REAL_QUOTE,
+              },
+            ]
+          : [],
+      [Object.keys(shape)[3]!]: t.sessionId === POOLER ? 'they set the client cache to zero.' : '',
+    }));
+    fs.writeFileSync(target, JSON.stringify({ ...file, outputs }, null, 2), 'utf8');
+
+    // Accepted, and it really carries the quote through to the synthesis
+    // prompt: a shape that merely parsed would prove nothing.
+    const synth = outFile('synthesis-from-schema.json');
+    const { file: out, probe } = await writeSynthesisFile(db, QUESTION, { root }, synth, target);
+    expect(out).not.toBeNull();
+    expect(probe.spend.calls).toBe(0);
+    expect(out!.readers.some((r) => r.quotes.some((q) => q.text === REAL_QUOTE))).toBe(true);
+    expect(out!.prompt).toContain('statement_cache_size=0');
+    db.close();
+  });
+
+  it('the shape the verifier guessed is refused by name, which is why the schema is in the file', async () => {
+    const { root, db } = seedDb();
+    // `{seq, quote}` — the natural reading of the word "quotes", and the one
+    // an agent with no schema arrives at.
+    const target = await readersWithOutputs(db, root, [
+      { sessionId: POOLER, found: true, quotes: [{ seq: 12, quote: REAL_QUOTE }], answer_fragment: 'x' },
+    ]);
+    const synth = outFile('synthesis-wrong-quote.json');
+    const err = await refusal(() => writeSynthesisFile(db, QUESTION, { root }, synth, target));
+    expect(err.message).toMatch(/quotes\[0\] has no "text"/);
+    db.close();
+  });
+
+  it('--readers-in still reads a file written before either field existed', async () => {
+    // The two fields are informational: a recording from an older build has
+    // neither and must replay exactly as it always did.
+    const { root, db } = seedDb();
+    const target = await readersWithOutputs(db, root);
+    const file = JSON.parse(fs.readFileSync(target, 'utf8')) as Record<string, unknown>;
+    delete file['schema'];
+    delete file['instruction'];
+    fs.writeFileSync(target, JSON.stringify(file, null, 2), 'utf8');
+
+    const synth = outFile('synthesis-legacy.json');
+    const { file: out, probe } = await writeSynthesisFile(db, QUESTION, { root }, synth, target);
+    expect(out).not.toBeNull();
+    expect(probe.spend.calls).toBe(0);
+    db.close();
+  });
+});
+
+// ============ 9. an unfinished reply is not an empty archive (C-7)
+
+/**
+ * FIX-I C-7 — the shape between the two FIX-G decided.
+ *
+ * FIX-G refuses an object carrying **neither** array and allows
+ * `{"evidence":[],"answer":[]}`, which is the host synthesizer's own honest
+ * empty. A reply carrying real evidence and **no `answer` key at all** fell
+ * between them: it passed, `validateSynth` built nothing from it, and it
+ * printed byte-identically to the honest empty at exit 1 — *"the readers found
+ * material, and the answer built from it was empty"*.
+ *
+ * **The ruling: it is a refusal.** Exit 1 is a claim about the user's archive,
+ * and the honest empty is the one signal this release asks an agent to trust.
+ * The bar for reaching it is that the host said the answer was empty, which
+ * `"answer": []` says in four characters. An absent key is not a value.
+ *
+ * The mirror shape is deliberately still accepted, and the last test says why:
+ * an `answer` with no `evidence` is not silent — every sentence fails to
+ * resolve a citation and the receipt names the drop.
+ */
+describe('a reply with evidence and no answer key', () => {
+  it('is refused, not rendered as the archive having nothing', async () => {
+    const { root, db, synth } = await stagedTwo();
+    // Two entries `validateSynth` would have accepted, and no `answer` key.
+    answerWith(synth, { evidence: [{ n: 1, session_id: POOLER, seq: 12, quote: REAL_QUOTE }] });
+    const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+
+    expect(err.message).toMatch(/has an "evidence" array and no "answer" array/);
+    expect(err.message).toMatch(/not an archive with nothing in it/);
+    // The fix is spellable and is named: the honest empty is an explicit `[]`.
+    expect(err.message).toMatch(/"answer": \[\]/);
+    // Exit 2, the code no honest empty uses.
+    expect(err.code).toBe(2);
+    // And it does not print the reply back.
+    expect(err.message).not.toContain('statement_cache_size');
+    db.close();
+  });
+
+  it('is refused when "answer" is present but is not an array', async () => {
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, {
+      evidence: [{ n: 1, session_id: POOLER, seq: 12, quote: REAL_QUOTE }],
+      answer: 'the client cache was set to zero',
+    });
+    const err = await refusal(() => filterHostAnswer(db, QUESTION, { root }, synth));
+    expect(err.message).toMatch(/no "answer" array/);
+    expect(err.code).toBe(2);
+    db.close();
+  });
+
+  it('leaves the honest empty exactly where FIX-G put it', async () => {
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, { evidence: [], answer: [] });
+    const r = await filterHostAnswer(db, QUESTION, { root }, synth);
+    expect(r.answer).toBe('');
+    expect(r.sentences).toHaveLength(0);
+    expect(r.spend.calls).toBe(0);
+    db.close();
+  });
+
+  it('still accepts an "answer" with no "evidence" key, because that one is not silent', async () => {
+    // The mirror shape. It reaches `filterAnswer`, the sentence cannot resolve
+    // a citation, and the run says so — a different sentence from the honest
+    // empty, naming what went wrong. There is nothing here to fix.
+    const { root, db, synth } = await stagedTwo();
+    answerWith(synth, { answer: [{ text: 'The client cache was set to zero.', cites: [1] }] });
+    const r = await filterHostAnswer(db, QUESTION, { root }, synth);
+    expect(r.answer).toBe('');
+    expect(r.dropped.length).toBeGreaterThan(0);
+    expect(r.spend.calls).toBe(0);
     db.close();
   });
 });

@@ -267,7 +267,24 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
           // caller filters on data and never on the sentence the human view
           // prints.
           lane: s.lane ?? 'evidence',
-          citable: (s.lane ?? 'evidence') === 'evidence',
+          // FIX-I C-2 — read, not re-derived.
+          //
+          // This line used to be `(s.lane ?? 'evidence') === 'evidence'`, and
+          // it could never be false for a title-only block: `title` is in
+          // core's `SUMMARY_KINDS` and deliberately not in its `ROUTING_KINDS`,
+          // so `laneOfHit('title')` is `evidence`. The model door asked the
+          // second half of the question — is there any transcript in this
+          // block — and this door did not, so one index, one query and one
+          // thread produced `citable: true` here and `citable: false` at
+          // `potsherd_recall`, on the one field F6 is about. The rule is now
+          // `citableBlock` in `packages/core/src/recall.ts`, computed once and
+          // published on the row; both doors read this field.
+          // `=== true` rather than `?? <a rule spelled here>`: `recall()` sets
+          // the field on every block it returns, and a fallback would be this
+          // door quietly holding a second opinion again. If it were ever
+          // absent the answer is `false` — withholding a permission is the
+          // safe direction for the one field that says *you may quote this*.
+          citable: s.citable === true,
           // 0..1, and **not** `score` rescaled. `score` is reciprocal rank
           // fusion — a function of rank alone, which is why a true topic and a
           // topic the archive has never heard of come out 1.12x apart.

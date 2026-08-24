@@ -9520,6 +9520,15 @@ function summaryRank(hits) {
 function byLane(a, b) {
   return LANES[a.lane ?? "evidence"] - LANES[b.lane ?? "evidence"] || b.score - a.score;
 }
+var CONFIDENCE_RANK = { strong: 0, weak: 1, none: 2 };
+function byLabel(a, b) {
+  const wa = a.confidence, wb = b.confidence;
+  const word = wa && wb ? CONFIDENCE_RANK[wa] - CONFIDENCE_RANK[wb] : 0;
+  return LANES[a.lane ?? "evidence"] - LANES[b.lane ?? "evidence"] || word || (b.calibration?.score ?? 0) - (a.calibration?.score ?? 0) || b.score - a.score;
+}
+function citableBlock(hits, lane) {
+  return (lane ?? laneOfSession(hits)) === "evidence" && hasTranscriptEvidence(hits);
+}
 var PER_SESSION = 3;
 var CORROBORATION = 0.12;
 var RELAXED_PENALTY = 0.6;
@@ -10463,6 +10472,10 @@ async function recall(db, query, requested = {}, options = {}) {
       calibration,
       confidence: calibration.confidence,
       lane,
+      // F6 as a field, not as a rule two doors each re-derive. See
+      // {@link citableBlock}: `transcript` is the same value the ceiling above
+      // is applied from, so the cap and the permission cannot disagree.
+      citable: citableBlock(hits, lane),
       hits
     });
     if (evidenceBuilt >= limit * 3 && routingBuilt >= limit)
@@ -10475,8 +10488,9 @@ async function recall(db, query, requested = {}, options = {}) {
   sessions.push(...surviving);
   sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLane(a, b));
   sessions.length = Math.min(sessions.length, limit);
+  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLabel(a, b));
   const confidence = sessions.reduce((best, s) => maxConfidence(best, s.confidence), "none");
-  const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => summaryRank([a]) - summaryRank([b]) || byLane(a, b));
+  const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => summaryRank([a]) - summaryRank([b]) || byLabel(a, b));
   return {
     query,
     sessions,
@@ -26901,7 +26915,24 @@ async function runFind(o) {
           // caller filters on data and never on the sentence the human view
           // prints.
           lane: s.lane ?? "evidence",
-          citable: (s.lane ?? "evidence") === "evidence",
+          // FIX-I C-2 — read, not re-derived.
+          //
+          // This line used to be `(s.lane ?? 'evidence') === 'evidence'`, and
+          // it could never be false for a title-only block: `title` is in
+          // core's `SUMMARY_KINDS` and deliberately not in its `ROUTING_KINDS`,
+          // so `laneOfHit('title')` is `evidence`. The model door asked the
+          // second half of the question — is there any transcript in this
+          // block — and this door did not, so one index, one query and one
+          // thread produced `citable: true` here and `citable: false` at
+          // `potsherd_recall`, on the one field F6 is about. The rule is now
+          // `citableBlock` in `packages/core/src/recall.ts`, computed once and
+          // published on the row; both doors read this field.
+          // `=== true` rather than `?? <a rule spelled here>`: `recall()` sets
+          // the field on every block it returns, and a fallback would be this
+          // door quietly holding a second opinion again. If it were ever
+          // absent the answer is `false` — withholding a permission is the
+          // safe direction for the one field that says *you may quote this*.
+          citable: s.citable === true,
           // 0..1, and **not** `score` rescaled. `score` is reciprocal rank
           // fusion — a function of rank alone, which is why a true topic and a
           // topic the archive has never heard of come out 1.12x apart.
@@ -29103,6 +29134,8 @@ async function runAsk(o) {
 }
 var READERS_FILE_KIND = "potsherd.ask.readers";
 var READERS_FILE_VERSION = 1;
+var READERS_SCHEMA = `{"outputs":[{"sessionId":"<the sessionId of this entry in targets>","found":true|false,"quotes":[{"seq":<number, one of this entry's seqs>,"ts":"<the ts given>"|null,"text":"<verbatim, character for character out of this entry's excerpts>"}],"answer_fragment":"<one or two sentences, or empty when found is false>"}]}`;
+var READERS_INSTRUCTION = `run one reader per entry in "targets" \u2014 each entry carries its own "question" and "excerpts" \u2014 and add their answers to this file as "outputs", in the shape of "schema". "outputs" is the JSON array itself, one entry per target, not the JSON text of it. A reader that found nothing records {"found":false,"quotes":[]} rather than being left out. Then: potsherd ask "<this file's question>" --readers-in <this file>`;
 function recorder() {
   const seen = [];
   const fn = async (input) => {
@@ -29118,6 +29151,12 @@ async function recordReaders(db, question, base2, path32, o, t) {
       kind: READERS_FILE_KIND,
       version: READERS_FILE_VERSION,
       path: abs,
+      // FIX-I C-5, and the same reasoning FIX-G gave for putting
+      // `instruction` on the synthesis file's `--json` receipt: `--json` is
+      // what an agent reads, and it was the surface on which the shape of
+      // `outputs` was least well stated — it was not stated anywhere.
+      schema: READERS_SCHEMA,
+      instruction: READERS_INSTRUCTION,
       question: file.question,
       k: file.k,
       sessionIds: file.sessionIds,
@@ -29166,6 +29205,11 @@ async function writeReadersFile(db, question, base2, path32) {
     kind: READERS_FILE_KIND,
     version: READERS_FILE_VERSION,
     potsherd: VERSION,
+    // FIX-I C-5. Ahead of `question`, so the two fields that say what to do
+    // with this file are the first thing in it that is not the envelope —
+    // the same place the synthesis file puts `schema`, relative to its prompt.
+    schema: READERS_SCHEMA,
+    instruction: READERS_INSTRUCTION,
     question: q2,
     k: base2.k ?? ASK_K,
     sessionIds: targets.map((x) => x.sessionId),
@@ -29205,7 +29249,12 @@ function readersOutReceipt(file, abs, probe2, t) {
     `  ${t.dim(`these ${n2} ${n2 === 1 ? "session is" : "sessions are"} the shortlist. --readers-in reads exactly ${n2 === 1 ? "it" : "them"}, however much the index has embedded since.`)}`
   );
   lines.push("");
-  lines.push('  run your readers, add an "outputs" array to the file, then:');
+  lines.push('  run one reader per target, then add an "outputs" array to the file \u2014');
+  lines.push(`  one entry per target, in the shape of the file's own "schema" field:`);
+  lines.push(
+    `  ${t.dim('{ "sessionId": \u2026, "found": true|false, "quotes": [{ "seq": n, "text": "\u2026" }], "answer_fragment": "\u2026" }')}`
+  );
+  lines.push("  then:");
   lines.push(`    potsherd ask "${file.question}" --readers-in ${abs}`);
   return lines.join("\n");
 }
@@ -29530,6 +29579,13 @@ function hostReply(abs, raw) {
       REPLY_EXIT
     );
   }
+  if (ans === null) {
+    throw new UserError(
+      `${abs}'s "reply" has an "evidence" array and no "answer" array, so there is no answer in it to filter \u2014 that is a reply nobody finished, not an archive with nothing in it. A synthesizer that concluded nothing is supportable writes "answer": []`,
+      fix,
+      REPLY_EXIT
+    );
+  }
   const n2 = (ev?.length ?? 0) + (ans?.length ?? 0);
   if (n2 > 0 && !(ev ?? []).some(usableEvidence) && !(ans ?? []).some(usableSentence)) {
     throw new UserError(
@@ -29690,6 +29746,12 @@ function readReadersFile(abs) {
     kind: READERS_FILE_KIND,
     version: READERS_FILE_VERSION,
     potsherd: typeof parsed["potsherd"] === "string" ? parsed["potsherd"] : "",
+    // Read, never enforced — FIX-I C-5, and the same rule `readSynthesisFile`
+    // applies to its own two: these say what the agent was asked to produce,
+    // and `readerOutput` below is what decides whether it did. A file written
+    // by a build that had neither carries `''` and replays exactly as before.
+    schema: typeof parsed["schema"] === "string" ? parsed["schema"] : "",
+    instruction: typeof parsed["instruction"] === "string" ? parsed["instruction"] : "",
     question,
     k,
     sessionIds,

@@ -258,14 +258,23 @@ export async function runRecall(
 
     const sessions = noMatch ? [] : result.sessions;
     const hits = noMatch ? [] : result.hits;
-    // C5a again, on the list the agent actually chooses a thread from. The
-    // verifier filed `hits[]`; `threads[]` carries the same two axes — a
-    // block score that is RRF's and a `calibration`/`confidence` that is not —
-    // so it is the same defect one field over, and leaving it would be fixing
-    // the half that was named. Measured over nine queries on the demo corpus
-    // this reorders nothing: core's block order and the block label already
-    // agree there. This is the fence, not a change of ranking.
-    const threads = orderByLabel(groupThreads(sessions));
+    // C5a's order, and FIX-I C-1 is that it is no longer applied here.
+    //
+    // FIX-D wrote the rule at this door as `orderByLabel` — confidence word,
+    // then calibration score, then the fused score, under a summary/transcript
+    // partition. `find` never got it, because core sorted by lane and RRF
+    // alone. Two comparators, one of them updated: exactly the defect this
+    // whole family is. The rule now lives in `packages/core/src/recall.ts` as
+    // `byLabel`, `recall()` applies it to `sessions` and to `hits`, and this
+    // door takes the order it is given.
+    //
+    // `groupThreads` preserves it: it emits threads in order of first
+    // appearance and each thread's lead is its first member, so the leads are
+    // a subsequence of an ordered list and are ordered. `tests/mcp.test.ts`
+    // pins that the published `threads[]` and `hits[]` are monotone in
+    // (`evidence`, `confidence`, `calibration.score`), which is the property
+    // FIX-D's fences asserted about the helper — asserted now about the reply.
+    const threads = groupThreads(sessions);
 
     const envelope: Record<string, unknown> = {
       query: result.query,
@@ -383,10 +392,11 @@ export async function runRecall(
             'the exchanges around any of them.' +
             (truncated ? ' Some matching exchanges did not fit the budget.' : '');
     } else {
-      // Labelled first, then ordered: `orderByLabel`'s first key is the
-      // `evidence` field `hitJson` attaches, so ordering the raw core rows
-      // would sort on a field that is not there yet. FIX-F C3.
-      envelope['hits'] = orderByLabel(hits.map((h) => hitJson(h, sessions)));
+      // FIX-I C-1: labelled, and not re-ordered. `result.hits` arrives from
+      // core in `byLabel` order, `map` preserves it, and `evidence` is a
+      // rendering of the same `kind` the core comparator's first key reads —
+      // so the label and the order come out of one function.
+      envelope['hits'] = hits.map((h) => hitJson(h, sessions));
     }
 
     return envelope;
@@ -424,6 +434,14 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
     const prompts = members.reduce((n, m) => n + m.prompts, 0);
     // Computed once: four fields below read it, and it walks every hit.
     const evidence = threadEvidence(members);
+    // F6's permission, read off the lead block rather than re-derived — FIX-I
+    // C-2. The lead is the thread's best member by the ordering below, and
+    // `summaryRank` is that ordering's first key, so a thread whose lead is
+    // summary-only has no member that is not: `lead.citable` and this thread's
+    // own `evidence` cannot disagree. `=== true` for the reason
+    // `packages/cli/src/commands/find.ts` gives: a permission that is absent is
+    // withheld.
+    const citable = lead.citable === true;
     const started = members.map((m) => m.startedAt).filter(Boolean).sort()[0] ?? null;
     const ended =
       members
@@ -490,19 +508,25 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
        */
       lane: lead.lane ?? 'evidence',
       evidence,
-      citable: (lead.lane ?? 'evidence') === 'evidence' && evidence !== 'not-a-transcript',
-      citation:
-        (lead.lane ?? 'evidence') === 'routing' || evidence === 'not-a-transcript'
-          ? null
-          : mintCitation({
-              sessionId: key,
-              kind: lead.kind,
-              harness: lead.harness,
-              project: lead.projectName,
-              exchanges,
-              prompts,
-              date: (ended ?? started)?.slice(0, 10) ?? null,
-            }),
+      // FIX-I C-2. This was the same two conditions spelled out again, and it
+      // was the copy that was right while `find --json`'s copy was wrong. Both
+      // doors now read the field core publishes (`citableBlock` in
+      // `packages/core/src/recall.ts`), so there is one predicate and not two
+      // that agree. `citation` is minted off the same boolean rather than off
+      // a second spelling of the condition, so a thread cannot be uncitable
+      // and carry a citation.
+      citable,
+      citation: citable
+        ? mintCitation({
+            sessionId: key,
+            kind: lead.kind,
+            harness: lead.harness,
+            project: lead.projectName,
+            exchanges,
+            prompts,
+            date: (ended ?? started)?.slice(0, 10) ?? null,
+          })
+        : null,
       // Why there is no citation, in the words the human view uses for the
       // same row. A `null` field an agent cannot explain is a field it works
       // around; this one says what would have to happen for a citation to
@@ -534,115 +558,34 @@ function threadEvidence(members: readonly Session[]): 'transcript' | 'not-a-tran
   return hits.some((h) => evidenceOf(h.kind) === 'transcript') ? 'transcript' : 'not-a-transcript';
 }
 
-/** The three words, best first. `null` is not a rank — see {@link orderByLabel}. */
-const CONFIDENCE_RANK: Record<Confidence, number> = { strong: 0, weak: 1, none: 2 };
-
 /**
- * C5a — the first row is the best row, by the number that carries the meaning.
+ * C5a's rule, and where it went — FIX-I C-1.
  *
- * The third verifier caught `hit0 score 0.016393 conf weak` sitting **above**
- * `hit1 score 0.016393 conf strong`. Both numbers were right and they were
- * measuring different things:
+ * FIX-D added `orderByLabel` here, with `CONFIDENCE_RANK`, `evidenceRank`,
+ * `calibrationScoreOf` and `scoreOf` beside it, because the third verifier
+ * caught `hit0 score 0.016393 conf weak` sitting **above** `hit1 score
+ * 0.016393 conf strong` at this door. The rule was right and it was in the
+ * wrong package: `packages/cli/src/commands/find.ts` reads the same core rows
+ * through a different projection and never imported it, so `find --json`'s
+ * `sessions[0]` went on being whatever RRF's merge order put there. Two
+ * implementations, one of them updated, is the whole of the family this fix
+ * belongs to.
  *
- *  - `score` is reciprocal rank fusion, `weight * 1/(k + rank)` — a function of
- *    rank alone (`core/recall.ts`). Two rows at rank 1 of two different lists
- *    are 0.016393 apart from nothing, and RRF is the *merge* order: it decides
- *    which candidates survive, not how good any of them is.
- *  - `calibration.score` — and the `confidence` word lifted off it — is
- *    computed from the evidence RRF discards: `from[].raw`, how many of the
- *    query's distinctive words the row can actually show, and how many lists
- *    found it independently.
+ * The rule is now `byLabel` in `packages/core/src/recall.ts`, applied by
+ * `recall()` to `sessions` and to `hits`, under the `summaryRank` partition
+ * that FIX-F C3 put in front of it. Every reason FIX-D gave for it survives
+ * verbatim in that docstring — in particular that the first key is the
+ * confidence **word** and not `calibration.score`, because a routing row's
+ * score is deliberately not rewritten when `ROUTING_CEILING` caps its label.
  *
- * Every field an agent needs to re-sort was already on the row, so this was
- * never a hole. It was worse in one specific way: the reader at this door is a
- * model, and **the first row is the best row** is the assumption every consumer
- * of a ranked list makes before it reads a field. A default order that
- * contradicts the default label spends that assumption on nothing.
- *
- * So the order is the label's, and the label's own tie-break beneath it:
- *
- *   1. `confidence` — the word, not the number, because the number can be
- *      *capped*. A routing row scoring 0.9 is labelled `weak` by
- *      `ROUTING_CEILING`, and sorting on `calibration.score` alone would
- *      have put a `weak` card back above a `strong` transcript — the same
- *      defect with a different arithmetic behind it.
- *   2. `calibration.score`, within a band.
- *   3. the fused `score`, which is the merge order, as the last tie-break —
- *      so nothing here invents an order where the two axes are silent.
- *
- * F6 survives it. A card is capped at `weak` and can therefore never outrank a
- * `strong` transcript, whatever it scores.
- *
- * **Nothing is recomputed.** This reads `confidence` and `calibration.score`
- * off the rows core already labelled, exactly as the rest of this file does;
- * it moves rows, it does not score them. And it changes no membership: the same
- * hits come back, so the floor, `belowFloor` and the `noMatch` cliff are
- * untouched.
+ * What is left at this door is the labelling, and nothing that re-orders. The
+ * fences moved with the rule: `tests/mcp.test.ts` asserts that the reply's
+ * `threads[]` and `hits[]` come out monotone in (`evidence`, `confidence`,
+ * `calibration.score`) — a property of what the agent is handed rather than of
+ * a helper this file could stop calling — and `tests/recall.test.ts` pins the
+ * comparator itself. A test that fails when the two doors drift is the
+ * standing requirement; the two doors now have one comparator to drift from.
  */
-export function orderByLabel<T>(rows: readonly T[]): T[] {
-  const out = [...rows];
-  // A build whose core carries no label has nothing for the order to
-  // contradict, so the fused order stands untouched. `null` is not `none`.
-  if (out.some((r) => confidenceOf(r) === null)) return out;
-  return out
-    .map((row, i) => ({ row, i }))
-    .sort(
-      (a, b) =>
-        // FIX-F C3, and it is the first key rather than a tie-break.
-        //
-        // Core partitions its own two lists the same way (`recall.summaryRank`),
-        // and this is the fence that stops the re-sort at this door undoing it:
-        // `orderByLabel` reads only `confidence` and two scores, so a
-        // summary-only row with a better `calibration.score` than a weak
-        // transcript row would be lifted straight back over it. That is not
-        // hypothetical — it is what a card could already do here, since the
-        // {@link ROUTING_CEILING} only stops a card beating a *strong* row.
-        //
-        // It does not contradict the label, because core now caps a
-        // summary-only row at `weak` (FIX-F C3): every row above the summaries
-        // is at least as confident as every row below them, so `hits[]` and
-        // `threads[]` stay monotone in the confidence word, which is the
-        // property FIX-D's fences pin. A row carrying no `evidence` field —
-        // any caller passing plain rows, and every unit test written before
-        // this — counts as `transcript` and nothing about its order changes.
-        evidenceRank(a.row) - evidenceRank(b.row) ||
-        CONFIDENCE_RANK[confidenceOf(a.row)!] - CONFIDENCE_RANK[confidenceOf(b.row)!] ||
-        calibrationScoreOf(b.row) - calibrationScoreOf(a.row) ||
-        scoreOf(b.row) - scoreOf(a.row) ||
-        // Explicit, rather than leaning on the runtime's sort being stable.
-        a.i - b.i,
-    )
-    .map((r) => r.row);
-}
-
-/**
- * 0 for a row with transcript evidence behind it, 1 for a summary-only row.
- *
- * Read off the published `evidence` field — the one `hitJson` and
- * `groupThreads` already put on every row — rather than recomputed from
- * `kind`, so what the agent is shown and what the order is built from are one
- * value. An unlabelled row is 0: absent is not `not-a-transcript`.
- */
-function evidenceRank(row: unknown): 0 | 1 {
-  if (!row || typeof row !== 'object') return 0;
-  return (row as { evidence?: unknown }).evidence === 'not-a-transcript' ? 1 : 0;
-}
-
-/** `calibration.score`, or 0 when this build's core attaches none. */
-function calibrationScoreOf(row: unknown): number {
-  const c = calibrationOf(row);
-  if (!c || typeof c !== 'object') return 0;
-  const s = (c as { score?: unknown }).score;
-  return typeof s === 'number' && Number.isFinite(s) ? s : 0;
-}
-
-/** The fused RRF score, or 0 when a row carries none. */
-function scoreOf(row: unknown): number {
-  if (!row || typeof row !== 'object') return 0;
-  const s = (row as { score?: unknown }).score;
-  return typeof s === 'number' && Number.isFinite(s) ? s : 0;
-}
-
 function hitJson(h: Hit, sessions: readonly Session[]): Record<string, unknown> {
   const owner = sessions.find((s) => s.id === h.sessionId);
   return {

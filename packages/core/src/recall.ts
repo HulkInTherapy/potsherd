@@ -324,6 +324,105 @@ export function byLane<T extends { lane?: Lane; score: number }>(a: T, b: T): nu
   return (LANES[a.lane ?? 'evidence'] - LANES[b.lane ?? 'evidence']) || b.score - a.score;
 }
 
+/** The three words, best first. Not a `Confidence`-keyed lookup by accident: a
+ * `Record` is a value a test can read, the way {@link LANES} is. */
+const CONFIDENCE_RANK: Readonly<Record<Confidence, number>> = { strong: 0, weak: 1, none: 2 };
+
+/**
+ * The label's own order — FIX-D's C5a rule, moved here so there is one of it.
+ *
+ * ## the defect this closes
+ *
+ * FIX-D wrote this rule at `packages/mcp/src/tools/recall.ts` as
+ * `orderByLabel`, because that was the door the third verifier was reading.
+ * `find` never got it: {@link byLane} is *lane, then the fused RRF score*, so
+ * the confidence word was never a sort key on the CLI path and
+ * `find --json`'s `sessions[0]` — the row every `jq -r '.sessions[0].resume'`
+ * example in `find --help` takes — could be the weakest row on the page. The
+ * fifth verifier measured it on the real archive at ★★★★★, and on the
+ * synthetic demo corpus `untangle token refresh` put a row calibrating 0.546
+ * first on a page whose best row calibrates 0.567.
+ *
+ * So the rule lives in core, where both doors already read their rows from,
+ * and the model door no longer keeps a copy of it. That is the whole shape of
+ * the fix: not two comparators that agree today, one comparator.
+ *
+ * ## the keys, and why the first one is a word
+ *
+ * `summaryRank` is applied by the callers, ahead of this, and stays there
+ * (FIX-F C3): a summary never outranks a transcript, whatever it scores. Under
+ * it:
+ *
+ *   1. the **lane** — {@link LANES}, the first term of {@link byLane}, and it
+ *      stays in front of everything the label says. A card is a routing aid
+ *      and never evidence (F6), and that is a property of what the row *is*
+ *      rather than of how well it scored: `laneOfHit('title')` is `evidence`
+ *      while a title is summary-only, so on the flat `hits[]` list the lane
+ *      and `summaryRank` genuinely disagree, and without this term a card
+ *      labelled `weak` would sort above a title labelled `none`.
+ *      `tests/cards-lane.test.ts` fails in exactly that case.
+ *   2. `confidence` — **the word, not the number**, and this is FIX-D's
+ *      load-bearing reasoning rather than a stylistic choice. A row's
+ *      `calibration.score` is deliberately *not* rewritten when
+ *      {@link ROUTING_CEILING} caps its label, so a routing row scoring 0.9 is
+ *      labelled `weak` and sorting on the number alone would put a card back
+ *      on top of a `strong` transcript. Sorting on the word cannot: the cap is
+ *      in the word.
+ *   3. `calibration.score`, within a band — the number that carries the
+ *      meaning, once the cap has been respected.
+ *   4. the fused score — {@link byLane}'s second term, the merge order, and
+ *      the last thing left to say when the two label axes are silent.
+ *
+ * So this is {@link byLane}'s two terms with the label's two placed between
+ * them: nothing `byLane` decided is reversed, and everything it left to RRF is
+ * decided by the label first.
+ *
+ * ## what it does not do
+ *
+ * **Nothing is rescored and no row is added or dropped.** This reads the
+ * `confidence` and `calibration.score` `recall()` has already computed and
+ * moves rows; the floor, `belowFloor` and the `noMatch` cliff are untouched,
+ * and `pnpm evals` is the check on that (`FIX-I-REPORT §3`).
+ *
+ * A row whose build carries no confidence word compares equal on that key
+ * rather than being ranked as `none`, for {@link byLane}'s reason: absent is
+ * not a measurement.
+ */
+export function byLabel<
+  T extends { confidence?: Confidence; calibration?: { score?: number } | null; lane?: Lane; score: number },
+>(a: T, b: T): number {
+  const wa = a.confidence, wb = b.confidence;
+  const word = wa && wb ? CONFIDENCE_RANK[wa] - CONFIDENCE_RANK[wb] : 0;
+  return (
+    LANES[a.lane ?? 'evidence'] - LANES[b.lane ?? 'evidence'] ||
+    word ||
+    (b.calibration?.score ?? 0) - (a.calibration?.score ?? 0) ||
+    b.score - a.score
+  );
+}
+
+/**
+ * Whether a block may be quoted as evidence — F6, decided once.
+ *
+ * The predicate was spelled twice: `packages/cli/src/commands/find.ts` asked
+ * only `lane === 'evidence'`, and `packages/mcp/src/tools/recall.ts` asked that
+ * **and** whether the block had any transcript behind it. `title` is in
+ * {@link SUMMARY_KINDS} and deliberately not in {@link ROUTING_KINDS}, so
+ * `laneOfHit('title')` is `evidence` and the CLI's half of the test could never
+ * return false for a title-only block: one index, one query, one thread, and
+ * `find --json` said an agent may quote a model-written session title while
+ * `potsherd_recall` said it may not.
+ *
+ * So it is computed here, published on the row as {@link RecallSession.citable},
+ * and both doors read the field instead of deriving it. The two conditions are
+ * both necessary and they are asking different questions — *is this block a
+ * routing aid* (the lane) and *is there anything in it a reader could quote*
+ * (the kinds) — which is why {@link laneOfSession} alone was never enough.
+ */
+export function citableBlock(hits: readonly { kind: RecallHit['kind'] }[], lane?: Lane): boolean {
+  return (lane ?? laneOfSession(hits)) === 'evidence' && hasTranscriptEvidence(hits);
+}
+
 export interface RecallHit {
   /**
    * `exchange` has both sides; `ghost` has the prompt side only; `title` is the
@@ -436,6 +535,20 @@ export interface RecallSession {
    * set on every block {@link recall} returns.
    */
   lane?: Lane;
+  /**
+   * F6, as a published permission rather than a rule each door re-derives —
+   * {@link citableBlock}.
+   *
+   * `true` when this block is in the evidence lane **and** something in it is
+   * transcript text a reader could quote. A title-only block is `false`: a
+   * Claude Code title is an `ai-title` record, six words a model wrote
+   * mid-session, and an agent told it may quote one as evidence is being told
+   * it may cite a summary — the audit's F6, in a machine-readable field.
+   *
+   * Optional for the same compilation reason as {@link lane}, and set on every
+   * block {@link recall} returns.
+   */
+  citable?: boolean;
   hits: RecallHit[];
 }
 
@@ -2226,6 +2339,10 @@ export async function recall(
       calibration,
       confidence: calibration.confidence,
       lane,
+      // F6 as a field, not as a rule two doors each re-derive. See
+      // {@link citableBlock}: `transcript` is the same value the ceiling above
+      // is applied from, so the cap and the permission cannot disagree.
+      citable: citableBlock(hits, lane),
       hits,
     });
     // Three times the page, then sort by the *session's* total and cut. A
@@ -2264,6 +2381,27 @@ export async function recall(
   // summary-only by construction, so the two terms never disagree.
   sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLane(a, b));
   sessions.length = Math.min(sessions.length, limit);
+  // ---- and then the page is ordered by its own labels
+  //
+  // FIX-I C-1, and it is deliberately **after** the cut rather than instead of
+  // the sort above.
+  //
+  // The defect: `find --json`'s `sessions[0]` could be the sixth
+  // best-calibrated row on a page whose header reported the first row's
+  // neighbour, while `potsherd_recall` — which applied FIX-D's rule at its own
+  // door, to rows core had already chosen — returned the same blocks in a
+  // different order. Two comparators, one of them updated. So the rule moves
+  // here, where both doors read from, and neither door keeps a copy.
+  //
+  // What it must not do on the way is change **which** rows are on the page.
+  // Hence two sorts: *selection* is {@link byLane}, untouched, so the set this
+  // returns is the set `7396c3e` returned — measured, 40 queries on the demo
+  // corpus, membership identical on every one and the order different on 12 —
+  // and *presentation* is {@link byLabel} over the survivors. Sorting once,
+  // before the cut, would have made the label a selector as well as an order;
+  // it was written that way first and `pnpm evals` measured the difference.
+  // `FIX-I-REPORT.md §3` carries both sets of numbers.
+  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLabel(a, b));
   const confidence = sessions.reduce<Confidence>(
     (best, s) => maxConfidence(best, s.confidence),
     'none',
@@ -2277,8 +2415,11 @@ export async function recall(
   // repo's own tests — undercounted a clustered conversation and never saw a
   // sidechain. Take the blocks' own hits instead, so the two views cannot
   // disagree and every hit still names the session it came from.
+  // FIX-I C-1, the same comparator on the flat list — which is what
+  // `potsherd_recall`'s `hits[]` is built from, so the model door's rows and
+  // the human door's rows are ordered by one function and not by two.
   const flat = [...sessions.flatMap((s) => s.hits)].sort(
-    (a, b) => summaryRank([a]) - summaryRank([b]) || byLane(a, b),
+    (a, b) => summaryRank([a]) - summaryRank([b]) || byLabel(a, b),
   );
   return {
     query,
