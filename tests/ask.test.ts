@@ -266,6 +266,71 @@ describe("the emitted quote is the transcript's bytes, not the model's", () => {
 // ============================================================== the filter
 
 describe('filterAnswer — the code-level citation filter', () => {
+  /**
+   * ================== D7. THIS TEST IS A MARKER, NOT A PASS ==================
+   *
+   * `it.fails` — vitest passes it *because the body throws*. It flips to red
+   * the moment the defect below is fixed, which is the point: this is a defect
+   * FIX-A found, reproduced and could not repair, because the repair is two
+   * lines inside `packages/core/src/ask.ts`, a file FIX-A was told not to
+   * touch. The lines are in `phases/phase-10/FIX-A-REPORT.md` §D7. Apply them
+   * and this test starts failing; delete the `.fails` and it is a normal
+   * regression test for the fix.
+   *
+   * THE DEFECT. Reader excerpts are rendered by `unitText()` as
+   * `user: …\n\nassistant: …`, and `synthPrompt` echoes the reader's quotes
+   * verbatim and then says **"Copy each quote exactly as printed."** A model
+   * that obeys returns `user: the pooler is 500ing on deploy`.
+   *
+   * `filterAnswer` matches that against `quotableText(unit.text)` — which has
+   * the labels stripped, because the labels are not in the transcript. So the
+   * needle carries a prefix the haystack cannot contain, `matchSpan` returns
+   * null, the quote is dropped `not-a-quote`, and the sentence behind it is
+   * dropped `no-citation`. Every sentence, for a quote that is a perfectly
+   * real quotation of a real exchange.
+   *
+   * This is silent loss of TRUE evidence, on the path the phase's headline
+   * claim rests on, punishing exactly the model that followed the instruction.
+   */
+  it.fails('D7 (UNFIXED): drops a quote copied exactly as the prompt instructs', () => {
+    const asPrinted = `user: ${quotableText(POOLER_TEXT).split('\n')[0]!}`;
+    expect(asPrinted).toBe('user: the pooler is 500ing on deploy');
+    const out = filterAnswer(
+      [{ text: 'The pooler was 500ing on deploy.', cites: [1] }],
+      [{ index: 1, sessionId: POOLER, seq: 12, quote: asPrinted }],
+      sources(),
+    );
+    // What SHOULD happen, and what fails today: the label comes off the quote
+    // as well as off the body, and the emitted quote is still the transcript's
+    // own bytes — so the citation guarantee is untouched by the fix.
+    expect(out.evidence).toHaveLength(1);
+    expect(out.evidence[0]!.quote).toBe('the pooler is 500ing on deploy');
+    expect(out.sentences).toHaveLength(1);
+  });
+
+  /**
+   * The half of D7 that must NOT change, pinned here so the fix cannot
+   * overreach: only a LEADING label comes off. A quote carrying an interior
+   * `assistant:` is a quote of both sides of the join presented as continuous
+   * prose — a fabrication of contiguity — and stays refused.
+   */
+  it('still refuses a quote that carries the join, label and all', () => {
+    const out = filterAnswer(
+      [{ text: 'Both sides at once.', cites: [1] }],
+      [
+        {
+          index: 1,
+          sessionId: POOLER,
+          seq: 12,
+          quote: 'user: the pooler is 500ing on deploy assistant: pgbouncer in transaction mode',
+        },
+      ],
+      sources(),
+    );
+    expect(out.evidence).toHaveLength(0);
+    expect(reasons(out.drops)).toContain('not-a-quote');
+  });
+
   it('keeps a sentence whose quote actually occurs at the seq it names', () => {
     const out = filterAnswer(
       [{ text: 'We disabled the statement cache at the client.', cites: [1] }],
