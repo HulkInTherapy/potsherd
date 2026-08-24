@@ -2103,9 +2103,14 @@ describe('a killed backend takes what it started with it', () => {
       const call = llm.text({ prompt: 'q' });
       expect(await oursSettlesAt([1, 1])).toEqual([1, 1]);
 
-      // The event that broke the old assertion: somebody else's listener is
-      // taken away mid-flight. And the mirror image, for the same reason.
+      // The event that broke the old assertion, on its own: somebody else's
+      // listener is taken away while ours is installed. Asserted here, before
+      // anything can compensate for it — a removal and an arrival sampled
+      // together cancel out, and a count-based assertion would survive the
+      // pair while failing on either one.
       for (const sig of FATAL) process.removeListener(sig, leaves);
+      expect(ours()).toEqual([1, 1]);
+      // And the mirror image, for the same reason.
       for (const sig of FATAL) process.on(sig, arrives);
       expect(ours()).toEqual([1, 1]);
 
