@@ -724,6 +724,16 @@ export interface Estimate {
   backend?: Backend;
   /** False on the subscription paths: `usd` is an api-equivalent, not a charge. */
   chargeable: boolean;
+  /**
+   * Rung 1: the host agent answers and potsherd makes no model call.
+   *
+   * Distinct from `!chargeable`, which is also true of `claude -p` — that rung
+   * really does spend a subscription's tokens and a real wall time, so its
+   * dollar figure is meaningful as an equivalent. On the seam there is nothing
+   * for potsherd to spend and nothing for it to predict, so the renderer drops
+   * the money and time rows rather than printing zeroes that read as "free".
+   */
+  hostSeam: boolean;
   /** What the per-call model is fitted to, for the card to print. */
   basis: string;
   /** False when the profile is an assumption rather than a measurement. */
@@ -867,6 +877,7 @@ export function estimate(input: EstimateInput): Estimate {
     modelClass: cls,
     ...(input.backend ? { backend: input.backend } : {}),
     chargeable,
+    hostSeam,
     basis: hostSeam ? HOST_SEAM_BASIS : profile.basis,
     measured: hostSeam ? false : profile.measured,
     effectiveConcurrency: eff,

@@ -5,7 +5,28 @@
  *   ~/.copilot/session-state/<session-id>.json
  *   ~/.copilot/session-state/<session-id>.jsonl
  *
- * ## PROVENANCE — `unverified — documentation only`
+ * ## PROVENANCE — **verified 24 aug 2026, and WRONG**
+ *
+ * Phase 10 installed Copilot CLI 1.0.80 and ran a real session against this
+ * adapter. Two things came out of it, and the second is why the label changed
+ * rather than being dropped.
+ *
+ * The path was never wrong. `08 §3` recorded the anomaly that the Copilot CLI
+ * "has run here and has still written no `session-state/`" — and the reason is
+ * that every run on that machine had been `server mode (stdio)`, which creates
+ * nothing. One `copilot -p` created the directory first try.
+ *
+ * The FORMAT is wrong. That directory holds `workspace.yaml`, `checkpoints/`
+ * and `rewind-file-snapshots/`, and none of `STATE_FILES`. The conversation is
+ * in `~/.copilot/session-store.db`. So potsherd reports **0 sessions on a
+ * working install**, which is worse than the old label admitted: an adapter
+ * that returns nothing is not unverified, it is broken, and the difference
+ * matters to somebody deciding whether to trust the number.
+ *
+ * Not fixed here on purpose: one session is a sample of one, and shaping a
+ * parser to it is how a documented format gets broken. `tests/adapters/` holds
+ * a tripwire that fails the moment somebody implements the sqlite read path,
+ * so the fix cannot land without its evidence.
  *
  * **Nothing here was measured against a real Copilot transcript.** `~/.copilot`
  * exists on the reference machine and Copilot CLI has demonstrably *run* on it
@@ -109,10 +130,14 @@ const STATE_FILES = [
 export const COPILOT_FORMAT_UNVERIFIED = true;
 
 export const COPILOT_DOCTOR_NOTE =
-  'copilot: format unverified — this adapter was written from documentation, not from a real ' +
-  'session, so record coverage is a best guess until someone runs it on one. potsherd reads ' +
-  "~/.copilot only: Copilot's VS Code chats live in workspaceStorage, which is not one of the " +
-  'read-only inputs potsherd is allowed, so IDE sessions are not shown here.';
+  'copilot: format WRONG, measured — a real Copilot CLI 1.0.80 session was run against this ' +
+  'adapter on 24 aug 2026. The directory it looks in is right and its contents are not: ' +
+  'session-state/<id>/ holds workspace.yaml, checkpoints/ and rewind-file-snapshots/ and none ' +
+  'of the files this adapter reads, so potsherd finds 0 sessions on a working install. The ' +
+  'turns are in ~/.copilot/session-store.db, table turns(session_id, turn_index, user_message, ' +
+  'assistant_response), which this adapter does not open. This is not "unverified"; it is ' +
+  "verified and broken. potsherd reads ~/.copilot only: Copilot's VS Code chats live in " +
+  'workspaceStorage, which is not one of the read-only inputs potsherd is allowed.';
 
 /** Keys a wrapper object may carry the turn array under. */
 const HISTORY_KEYS = ['messages', 'history', 'turns', 'events', 'state'] as const;
@@ -647,14 +672,14 @@ export function doctorLine(override?: string): string {
     if (found.unreadable.length) {
       parts.push(`${found.unreadable.length} unreadable`);
     }
-    parts.push('unverified format');
+    parts.push('format known wrong — see doctor --json');
     status = 'ready';
     note = parts.join(' · ');
   } else if (installed || stateExists) {
     status = 'empty';
     note = stateExists
-      ? 'Copilot CLI installed, session-state/ holds no sessions · unverified format'
-      : 'Copilot CLI installed, but it has written no session-state/ · unverified format';
+      ? 'Copilot CLI installed · the turns are in session-store.db, which this adapter does not read'
+      : 'Copilot CLI installed, but it has written no session-state/ · run it once outside server mode';
   } else {
     status = 'absent';
     note = 'Copilot CLI not installed';

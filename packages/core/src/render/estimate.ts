@@ -137,28 +137,51 @@ export function renderEstimate(
       value: compact(e.outputTokens),
       note: `est. ${t.sep} ${f.num(perCallOutput(e))} a call, measured`,
     },
-    {
-      label: 'estimated time',
-      value: time,
-      tone: e.chargeable ? (overTime ? 'warn' : 'none') : overTime ? 'warn' : 'accent',
-      note: `est. ${timeRange} ${t.sep} target ${f.duration(TARGET_SECONDS * 1000)}`,
-    },
-    {
-      label: e.chargeable ? 'estimated cost' : 'equivalent cost',
-      value: money,
-      tone: e.chargeable ? (overMoney ? 'warn' : 'accent') : 'dim',
-      note: e.chargeable
-        ? `est. ${moneyRange} ${t.sep} target ${f.money(TARGET_USD)}`
-        : `$0 charged ${t.sep} ${moneyRange} on an api key`,
-    },
+    // On the host-agent seam potsherd makes NO model call, and both of these
+    // rows would be arithmetically true and misleading. `$0.00` reads as "this
+    // is free" when what is true is "potsherd is not the one spending" — the
+    // prompts still have to be answered, out of the host agent's context, on the
+    // user's own subscription. On a large `card --all` that context is the
+    // binding constraint and money is the one quantity that cannot bind, so a
+    // zero in the money row puts the reader's attention in the wrong place.
+    // The seconds are the host's turn and not something potsherd can predict,
+    // so that row goes rather than reading `~0s`.
+    ...(e.hostSeam
+      ? [
+          {
+            label: 'model calls',
+            value: 'none by potsherd',
+            tone: 'accent' as const,
+            note: `the host agent answers ${t.sep} ${compact(e.inputTokens)} tokens of its context`,
+          } as const,
+        ]
+      : [
+          {
+            label: 'estimated time',
+            value: time,
+            tone: e.chargeable ? (overTime ? 'warn' : 'none') : overTime ? 'warn' : 'accent',
+            note: `est. ${timeRange} ${t.sep} target ${f.duration(TARGET_SECONDS * 1000)}`,
+          } as const,
+          {
+            label: e.chargeable ? 'estimated cost' : 'equivalent cost',
+            value: money,
+            tone: e.chargeable ? (overMoney ? 'warn' : 'accent') : ('dim' as const),
+            note: e.chargeable
+              ? `est. ${moneyRange} ${t.sep} target ${f.money(TARGET_USD)}`
+              : `$0 charged ${t.sep} ${moneyRange} on an api key`,
+          } as const,
+        ]),
     ...(o.maxUsd !== undefined
       ? [
           {
             label: 'hard ceiling',
             value: f.money(o.maxUsd),
-            tone: e.usd > o.maxUsd ? ('warn' as const) : ('dim' as const),
+            // The POINT estimate clearing the ceiling says nothing: the run can
+            // reach the top of its own range, and the refit exists because that
+            // top used to sit below both real outcomes.
+            tone: e.usdHigh > o.maxUsd ? ('warn' as const) : ('dim' as const),
             note:
-              e.usd > o.maxUsd
+              e.usdHigh > o.maxUsd
                 ? 'the run will stop part-way and say how far it got'
                 : '--max-usd, checked before every call',
           },

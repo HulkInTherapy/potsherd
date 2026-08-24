@@ -26649,8 +26649,8 @@ function numOr(v) {
 }
 
 // ../core/dist/rescue.js
-import fs12 from "node:fs";
-import path10 from "node:path";
+import fs13 from "node:fs";
+import path11 from "node:path";
 import crypto2 from "node:crypto";
 
 // ../core/dist/tags.js
@@ -28253,6 +28253,1225 @@ function emptyIgnoreReport(entries = []) {
   return { entries: [...entries], projects: [], hidden: 0 };
 }
 
+// ../core/dist/llm.js
+import { createRequire as createRequire3 } from "node:module";
+import { spawn } from "node:child_process";
+import fs12 from "node:fs";
+import os3 from "node:os";
+import path10 from "node:path";
+import process10 from "node:process";
+
+// ../core/dist/markers.js
+var markers_exports = {};
+__export(markers_exports, {
+  EXCLUSION_MARKERS: () => EXCLUSION_MARKERS,
+  POTSHERD_CARD_MARKER: () => POTSHERD_CARD_MARKER,
+  SUMMARIZER_CONTEXT_MARKER: () => SUMMARIZER_CONTEXT_MARKER,
+  hasExclusionMarker: () => hasExclusionMarker
+});
+var SUMMARIZER_CONTEXT_MARKER = "Context: This summary will be shown in a list to help users and Claude choose which conversations are relevant";
+var POTSHERD_CARD_MARKER = "<INSTRUCTIONS-TO-POTSHERD>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-POTSHERD>";
+var EXCLUSION_MARKERS = [
+  "<INSTRUCTIONS-TO-EPISODIC-MEMORY>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-EPISODIC-MEMORY>",
+  "Only use NO_INSIGHTS_FOUND",
+  SUMMARIZER_CONTEXT_MARKER,
+  POTSHERD_CARD_MARKER
+];
+function hasExclusionMarker(text) {
+  return EXCLUSION_MARKERS.some((marker2) => text.includes(marker2));
+}
+
+// ../core/dist/llm.js
+var MODEL_CALL_VERBS = ["card", "ask", "graft"];
+var RUNTIME_FETCH_VERBS = ["index"];
+var OFFLINE_VERBS = [
+  "audit",
+  "rescue",
+  "guard",
+  // `index` WAS here, and phase 10 took it out. A2 made semantic search
+  // automatic: the first index fetches the embedding runtime from
+  // huggingface.co in the background, without being asked. The verb still
+  // calls no model -- that is a different property -- but it can no longer
+  // sit under the words "open no socket at all", which is the FOURTH false
+  // claim this receipt has published and the second one caused by a verb
+  // quietly acquiring a capability. See RUNTIME_FETCH_VERBS below.
+  "ls",
+  "show",
+  "stats",
+  "tag",
+  // T10.8 — `note` writes, and writes only into `~/.potsherd/potsherd.db`. It
+  // is on this list for the reason `unpin` and `setup` are: a verb missing
+  // from every list is a verb `doctor --privacy` has not accounted for, and
+  // the one verb that writes is the last one that should go unaccounted for.
+  "note",
+  "pin",
+  "unpin",
+  "link",
+  // `setup` writes MCP stanzas into other tools' config files, which is a
+  // consent-gated *local* write and not a model call. It belongs on this list
+  // for the same reason `unpin` does: `doctor --privacy` answers by omission
+  // otherwise, and an answer by omission is not one.
+  "setup",
+  // `stack` only detects which memory tools are installed: it stats directories
+  // and reads two of its own files. No model, no socket.
+  "stack",
+  // `ignore` / `unignore` read and write one file, `~/.potsherd/config.json`,
+  // and nothing else. They are on this list for the reason `unpin` and `setup`
+  // are: `doctor --privacy` answers by omission otherwise, and a verb missing
+  // from every list on that receipt is a verb the receipt has not accounted
+  // for. The file they write is named in the `writes:` block above.
+  "ignore",
+  "unignore",
+  "doctor"
+];
+var LOCAL_SOCKET_VERBS = ["find", "export"];
+var MODEL_ALIASES = ["haiku", "sonnet", "opus"];
+var CARD_MODEL = "haiku";
+var ASK_MODEL = "sonnet";
+var API_MODEL_IDS = {
+  haiku: "claude-haiku-4-5",
+  sonnet: "claude-sonnet-5",
+  opus: "claude-opus-5"
+};
+var PRICES = {
+  haiku: { inputPerMTok: 1, outputPerMTok: 5 },
+  sonnet: { inputPerMTok: 3, outputPerMTok: 15 },
+  opus: { inputPerMTok: 5, outputPerMTok: 25 }
+};
+function modelClass(model) {
+  const m = model.toLowerCase();
+  if (m.includes("haiku"))
+    return "haiku";
+  if (m.includes("sonnet"))
+    return "sonnet";
+  return "opus";
+}
+function isAlias(model) {
+  return MODEL_ALIASES.includes(model);
+}
+function resolveModel(model, backend2) {
+  if (backend2 === "api" && isAlias(model))
+    return API_MODEL_IDS[model];
+  return model;
+}
+var CHARS_PER_TOKEN = 3.6;
+function tokensForChars(chars) {
+  return Math.ceil(Math.max(0, chars) / CHARS_PER_TOKEN);
+}
+function tokensForText(text) {
+  return tokensForChars(text.length);
+}
+var CALL_PROFILES = {
+  "agent-sdk": {
+    baseMs: 46200,
+    msPerKChar: 915,
+    baseUsd: 0.016,
+    usdPerMChar: 1.057,
+    outputTokensPerCall: 2100,
+    parallelEfficiency: 0.8,
+    spread: { timeLow: 0.8, timeHigh: 2, usdLow: 0.8, usdHigh: 1.4 },
+    measured: true,
+    basis: "12 real calls, 3k\u201342k chars"
+  },
+  // Never measured on the reference machine: there is no key there and `04`
+  // Q4 made this the fallback. The shape is the agent-sdk fit with the
+  // harness taken out — no spawn, no reasoning-heavy harness loop — and the
+  // range is deliberately three times as wide, because a wide range that
+  // contains the truth beats a narrow one that does not.
+  api: {
+    baseMs: 8e3,
+    msPerKChar: 250,
+    baseUsd: 0,
+    usdPerMChar: null,
+    outputTokensPerCall: null,
+    parallelEfficiency: 0.9,
+    spread: { timeLow: 0.4, timeHigh: 3, usdLow: 0.7, usdHigh: 1.6 },
+    measured: false,
+    basis: "not measured \u2014 api list price and an assumed latency"
+  },
+  // The same binary the agent sdk drives, spawned directly, so it inherits
+  // that fit. **Not measured at card size** — the only real numbers on the
+  // reference machine are two probe calls (13.0 s and 8.7 s wall for a
+  // 30-character prompt), which say nothing about a 40,000-character one. The
+  // range is widened accordingly rather than the point estimate moved.
+  "claude-cli": {
+    baseMs: 46200,
+    msPerKChar: 915,
+    baseUsd: 0.016,
+    usdPerMChar: 1.057,
+    outputTokensPerCall: 2100,
+    parallelEfficiency: 0.8,
+    spread: { timeLow: 0.4, timeHigh: 3, usdLow: 0.7, usdHigh: 1.6 },
+    measured: false,
+    basis: "est. \u2014 the agent-sdk fit for the same binary, spawned directly"
+  },
+  // Likewise unverified: codex is not installed on the reference machine
+  // (`CodexTransport`'s note says the same). It spawns a CLI like the agent
+  // sdk does, so it inherits those timings and is priced from tokens.
+  codex: {
+    baseMs: 46200,
+    msPerKChar: 915,
+    baseUsd: 0,
+    usdPerMChar: null,
+    outputTokensPerCall: null,
+    parallelEfficiency: 0.8,
+    spread: { timeLow: 0.4, timeHigh: 3, usdLow: 0.7, usdHigh: 1.6 },
+    measured: false,
+    basis: "est. \u2014 argv verified at codex 0.149.0, timings assumed from the agent sdk"
+  }
+};
+function callProfile(backend2) {
+  return CALL_PROFILES[backend2 ?? "agent-sdk"] ?? CALL_PROFILES["agent-sdk"];
+}
+var HARNESS_OVERHEAD_USD = CALL_PROFILES["agent-sdk"].baseUsd;
+var PIPELINE_COST_FACTOR = 1.5;
+var ESTIMATOR_FIT = "2026-08-23T12:00:00.000Z";
+var HOST_SEAM_BASIS = "the host agent answers \u2014 potsherd makes no model call, so the unit is tokens, not dollars";
+function effectiveConcurrency(n2, profile) {
+  const c = Math.max(1, Math.floor(n2));
+  return 1 + (c - 1) * profile.parallelEfficiency;
+}
+var CHUNK_CHARS = 4e4;
+var OUTPUT_CHARS_PER_CALL = 1400;
+var PROMPT_OVERHEAD_CHARS = 2e3;
+function estimate(input) {
+  const model = input.model ?? CARD_MODEL;
+  const cls = modelClass(model);
+  const price = PRICES[cls];
+  const profile = callProfile(input.backend);
+  const chunk = Math.max(1e3, input.chunkChars ?? CHUNK_CHARS);
+  const outChars = input.outputCharsPerCall ?? OUTPUT_CHARS_PER_CALL;
+  const overhead = input.promptOverheadChars ?? PROMPT_OVERHEAD_CHARS;
+  const concurrency = Math.max(1, Math.floor(input.concurrency ?? 1));
+  const hostSeam = input.hostSeam === true;
+  const chargeable = input.chargeable ?? (hostSeam ? false : input.backend ? input.backend === "api" : true);
+  const priceScale = price.inputPerMTok / PRICES[CARD_MODEL].inputPerMTok;
+  const perSession = [];
+  let calls = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let promptChars = 0;
+  let derivedCalls = 0;
+  let derivedInputTokens = 0;
+  let derivedOutputTokens = 0;
+  let derivedChars = 0;
+  for (const s of input.sessions) {
+    const chunks = Math.max(1, Math.ceil(Math.max(0, s.chars) / chunk));
+    const n2 = s.calls ?? (chunks === 1 ? 1 : chunks + 1);
+    const reduceChars = chunks === 1 ? 0 : chunks * outChars;
+    const chars = Math.max(0, s.chars) + n2 * overhead + reduceChars;
+    const inTok = tokensForChars(chars);
+    const outTok = profile.outputTokensPerCall !== null ? n2 * profile.outputTokensPerCall : tokensForChars(n2 * outChars);
+    const derived = s.calls === void 0;
+    const bare = callUsd(n2, chars, inTok, outTok, profile, price, priceScale);
+    perSession.push({
+      id: s.id,
+      calls: n2,
+      inputTokens: inTok,
+      outputTokens: outTok,
+      usd: derived ? bare * PIPELINE_COST_FACTOR : bare
+    });
+    calls += n2;
+    inputTokens += inTok;
+    outputTokens += outTok;
+    promptChars += chars;
+    if (derived) {
+      derivedCalls += n2;
+      derivedInputTokens += inTok;
+      derivedOutputTokens += outTok;
+      derivedChars += chars;
+    }
+  }
+  const cal = input.calibration;
+  const usdRatio = cal && cal.samples > 0 ? cal.usdRatio : 1;
+  const timeRatio = cal && cal.samples > 0 ? cal.timeRatio : 1;
+  const rawUsd = calls === 0 ? 0 : callUsd(calls, promptChars, inputTokens, outputTokens, profile, price, priceScale);
+  const unquoted = derivedCalls === 0 ? 0 : (PIPELINE_COST_FACTOR - 1) * callUsd(derivedCalls, derivedChars, derivedInputTokens, derivedOutputTokens, profile, price, priceScale);
+  const usd = hostSeam ? 0 : (rawUsd + unquoted) * usdRatio;
+  const serialMs = calls * profile.baseMs + promptChars / 1e3 * profile.msPerKChar;
+  const eff = effectiveConcurrency(concurrency, profile);
+  const seconds = calls === 0 || hostSeam ? 0 : serialMs / 1e3 / eff * timeRatio;
+  return {
+    sessions: input.sessions.length,
+    calls,
+    inputTokens,
+    outputTokens,
+    usd,
+    usdLow: usd * profile.spread.usdLow,
+    usdHigh: usd * profile.spread.usdHigh,
+    seconds,
+    secondsLow: seconds * profile.spread.timeLow,
+    secondsHigh: seconds * profile.spread.timeHigh,
+    model,
+    modelClass: cls,
+    ...input.backend ? { backend: input.backend } : {},
+    chargeable,
+    hostSeam,
+    basis: hostSeam ? HOST_SEAM_BASIS : profile.basis,
+    measured: hostSeam ? false : profile.measured,
+    effectiveConcurrency: eff,
+    ...cal && cal.samples > 0 ? { calibration: cal } : {},
+    perSession
+  };
+}
+function callUsd(calls, chars, inputTokens, outputTokens, profile, price, priceScale) {
+  if (profile.usdPerMChar === null) {
+    return inputTokens / 1e6 * price.inputPerMTok + outputTokens / 1e6 * price.outputPerMTok + calls * profile.baseUsd * priceScale;
+  }
+  return (calls * profile.baseUsd + chars / 1e6 * profile.usdPerMChar) * priceScale;
+}
+function emptySpend() {
+  return { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0, ms: 0, estimatedInputCalls: 0 };
+}
+var BudgetError = class extends Error {
+  detail;
+  fix;
+  name = "BudgetError";
+  constructor(message2, detail, fix) {
+    super(message2);
+    this.detail = detail;
+    this.fix = fix;
+  }
+};
+var Budget = class {
+  limits;
+  spent = emptySpend();
+  done = 0;
+  total = 0;
+  /** Estimated cost of calls in flight: admitted, not yet recorded or released. */
+  reservedUsd = 0;
+  reservedTokens = 0;
+  constructor(limits = {}) {
+    this.limits = limits;
+  }
+  /** Dollars held for in-flight calls. For receipts and tests, not for display. */
+  get inFlightUsd() {
+    return this.reservedUsd;
+  }
+  get spend() {
+    return { ...this.spent };
+  }
+  get maxUsd() {
+    return this.limits.maxUsd;
+  }
+  get maxTokens() {
+    return this.limits.maxTokens;
+  }
+  /** How far the run has got, for the abort message. */
+  progress(done, total) {
+    this.done = done;
+    this.total = total;
+  }
+  /**
+   * Throws {@link BudgetError} when this call would cross a ceiling, counting
+   * what other calls already hold in flight; otherwise reserves the projection
+   * and returns the {@link Reservation} that must later be recorded or
+   * released.
+   *
+   * The return value is safe to ignore only where nothing is ever in flight (a
+   * strictly serial caller, or a test): an ignored reservation is held for the
+   * life of the `Budget`.
+   */
+  admit(projected = {}) {
+    const usd = projected.usd ?? 0;
+    const tokens = projected.tokens ?? 0;
+    const { maxUsd, maxTokens } = this.limits;
+    const committedUsd = this.spent.usd + this.reservedUsd;
+    if (maxUsd !== void 0 && committedUsd + usd > maxUsd) {
+      const inFlight = this.reservedUsd > 0 ? ` (${fmtUsd(this.reservedUsd)} of it in flight)` : "";
+      throw new BudgetError(`stopped at --max-usd ${maxUsd.toFixed(2)}: ${this.done} of ${this.total} done, ${fmtUsd(committedUsd)} committed${inFlight}, next call needs ${fmtUsd(usd)}`, {
+        kind: "usd",
+        limit: maxUsd,
+        projected: committedUsd + usd,
+        done: this.done,
+        total: this.total,
+        spend: this.spend
+      }, `potsherd card --all --max-usd ${Math.ceil(committedUsd + usd + 1)}`);
+    }
+    const spentTokens = this.spent.inputTokens + this.spent.outputTokens;
+    const committedTokens = spentTokens + this.reservedTokens;
+    if (maxTokens !== void 0 && committedTokens + tokens > maxTokens) {
+      throw new BudgetError(`stopped at --max-tokens ${maxTokens}: ${this.done} of ${this.total} done, ${committedTokens} tokens committed, next call needs ${tokens}`, {
+        kind: "tokens",
+        limit: maxTokens,
+        projected: committedTokens + tokens,
+        done: this.done,
+        total: this.total,
+        spend: this.spend
+      }, `potsherd card --all --max-tokens ${committedTokens + tokens + maxTokens}`);
+    }
+    this.reservedUsd += usd;
+    this.reservedTokens += tokens;
+    let live = true;
+    const self = this;
+    return {
+      usd,
+      tokens,
+      release() {
+        if (!live)
+          return;
+        live = false;
+        self.reservedUsd -= usd;
+        self.reservedTokens -= tokens;
+        if (self.reservedUsd < 1e-12)
+          self.reservedUsd = 0;
+        if (self.reservedTokens < 1e-9)
+          self.reservedTokens = 0;
+      }
+    };
+  }
+  /**
+   * The actual cost of a call that has returned. Pass the {@link Reservation}
+   * {@link admit} gave you and the estimate it held is dropped in the same
+   * step, so `spent + reserved` never double-counts one call.
+   */
+  record(r, reservation) {
+    reservation?.release();
+    this.spent.calls += 1;
+    this.spent.inputTokens += r.inputTokens;
+    this.spent.outputTokens += r.outputTokens;
+    this.spent.usd += r.usd;
+    this.spent.ms += r.ms;
+    if (r.inputTokensEstimated)
+      this.spent.estimatedInputCalls += 1;
+  }
+};
+function fmtUsd(n2) {
+  return n2 < 0.01 && n2 > 0 ? `$${n2.toFixed(4)}` : `$${n2.toFixed(2)}`;
+}
+var REENTRANCY_ENV = "POTSHERD_LLM_GUARD";
+function insidePotsherdCall(env = process10.env) {
+  return env[REENTRANCY_ENV] === "1";
+}
+var ReentrancyError = class extends Error {
+  name = "ReentrancyError";
+  fix = "run potsherd card from a shell, not from inside a potsherd model call";
+  constructor() {
+    super(`refusing to call a model from inside one (${REENTRANCY_ENV}=1). potsherd spawned this process; it must not spawn another.`);
+  }
+};
+function hostAgent(env = process10.env) {
+  const forced = env["POTSHERD_HARNESS"];
+  if (forced === "claude-code" || forced === "codex" || forced === "cursor")
+    return forced;
+  if (env["CLAUDECODE"] === "1" || (env["CLAUDE_CODE_ENTRYPOINT"] ?? "") !== "")
+    return "claude-code";
+  if (env["CODEX_HOME"] || env["CODEX_SANDBOX"])
+    return "codex";
+  if (env["CURSOR_AGENT"] || env["CURSOR_TRACE_ID"])
+    return "cursor";
+  return null;
+}
+var RESOLUTION_LADDER = [
+  {
+    id: "host-seam",
+    rung: 1,
+    backend: null,
+    label: "the host agent is the model",
+    ready: (a) => a.hostSeam
+  },
+  {
+    id: "claude-cli",
+    rung: 2,
+    backend: "claude-cli",
+    label: "the claude binary, spawned",
+    ready: (a) => a.claude !== null
+  },
+  {
+    id: "codex-cli",
+    rung: 2,
+    backend: "codex",
+    label: "the codex binary, spawned",
+    ready: (a) => a.codex !== null
+  },
+  {
+    id: "agent-sdk",
+    rung: 3,
+    backend: "agent-sdk",
+    label: "the agent sdk, already installed",
+    ready: (a) => a.claude !== null && a.agentSdk
+  },
+  {
+    id: "api-key",
+    rung: 3,
+    backend: "api",
+    label: "an api key, already set",
+    ready: (a) => a.apiKey && a.apiSdk
+  }
+];
+function ladderFor(a) {
+  if (a.host !== "codex")
+    return RESOLUTION_LADDER;
+  const codex = RESOLUTION_LADDER.find((r) => r.id === "codex-cli");
+  if (!codex)
+    return RESOLUTION_LADDER;
+  const rest = RESOLUTION_LADDER.filter((r) => r.id !== "codex-cli");
+  const at = rest.findIndex((r) => r.id === "claude-cli");
+  if (at < 0)
+    return RESOLUTION_LADDER;
+  return [...rest.slice(0, at), codex, ...rest.slice(at)];
+}
+function topRung(a) {
+  return ladderFor(a).find((r) => r.ready(a)) ?? null;
+}
+function transportRung(a) {
+  return ladderFor(a).find((r) => r.backend !== null && r.ready(a)) ?? null;
+}
+var NoBackendError = class _NoBackendError extends Error {
+  name = "NoBackendError";
+  fix;
+  availability;
+  /** The highest rung that *is* reachable, when one is. Null for none at all. */
+  rung;
+  constructor(availability2) {
+    super(_NoBackendError.message(availability2));
+    this.availability = availability2;
+    this.fix = _NoBackendError.fixFor(availability2);
+    this.rung = topRung(availability2)?.id ?? null;
+  }
+  static message(a) {
+    if (a.hostSeam) {
+      return `no model backend on this machine \u2014 and none is needed: potsherd is running inside ${a.host}, which is already a model on your own subscription.
+        Run the seam: potsherd emits the prompts, you answer them, potsherd filters the citations in code.`;
+    }
+    const key = a.apiKey ? "\n        ANTHROPIC_API_KEY is set but the Anthropic SDK is not installed." : "";
+    return "no way to reach a model: no `claude` binary on PATH, no `codex`, and no coding agent around this process." + key + "\n        potsherd runs on the Claude Code subscription you already have \u2014 installing Claude Code is enough.";
+  }
+  static fixFor(a) {
+    if (a.hostSeam) {
+      return 'potsherd ask "\u2026" --readers-out r.json   # then --readers-in / --synthesis-out / --filter-in';
+    }
+    if (a.apiKey && !a.apiSdk)
+      return "npm install -g @anthropic-ai/sdk";
+    return "https://claude.com/product/claude-code";
+  }
+};
+function resolvable(specifier) {
+  try {
+    createRequire3(import.meta.url).resolve(specifier);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function availability(o = {}) {
+  const env = o.env ?? process10.env;
+  const which = o.which ?? ((n2) => onPath(n2, env));
+  const key = env["ANTHROPIC_API_KEY"];
+  const canResolve = o.resolvable ?? resolvable;
+  const host = hostAgent(env);
+  return {
+    claude: which("claude"),
+    codex: which("codex"),
+    apiKey: typeof key === "string" && key.trim().length > 0,
+    codexHarness: host === "codex",
+    agentSdk: canResolve("@anthropic-ai/claude-agent-sdk"),
+    apiSdk: canResolve("@anthropic-ai/sdk"),
+    host,
+    hostSeam: host !== null
+  };
+}
+function detectBackend(o = {}) {
+  const env = o.env ?? process10.env;
+  const avail = availability(o);
+  const requested = o.model ?? env["POTSHERD_MODEL"] ?? CARD_MODEL;
+  const forced = o.backend ?? env["POTSHERD_LLM_BACKEND"];
+  const choose = (backend2, rung2, why2, bin) => ({
+    backend: backend2,
+    model: resolveModel(requested, backend2),
+    requested,
+    why: why2,
+    rung: rung2?.rung ?? 3,
+    rungId: rung2?.id ?? null,
+    ...bin ? { bin } : {},
+    chargeable: backend2 === "api",
+    availability: avail
+  });
+  const rungFor = (backend2) => RESOLUTION_LADDER.find((r) => r.backend === backend2) ?? null;
+  if (forced) {
+    const rung2 = rungFor(forced);
+    if (!rung2)
+      throw new NoBackendError(avail);
+    const bin = forced === "agent-sdk" || forced === "claude-cli" ? avail.claude ?? "claude" : forced === "codex" ? avail.codex ?? "codex" : void 0;
+    return choose(forced, rung2, "forced", bin);
+  }
+  const rung = transportRung(avail);
+  if (!rung || !rung.backend)
+    throw new NoBackendError(avail);
+  const seam = avail.hostSeam && rung.rung > 1 ? `; rung 1 (${avail.host}) is live too` : "";
+  const where = rung.backend === "api" ? "ANTHROPIC_API_KEY is set" : rung.backend === "codex" ? `codex on PATH (${avail.codex})` : `claude on PATH (${avail.claude})`;
+  return choose(rung.backend, rung, `rung ${rung.rung} \u2014 ${rung.label}: ${where}${seam}`, rung.backend === "codex" ? avail.codex ?? void 0 : avail.claude ?? void 0);
+}
+var LlmError = class extends Error {
+  fix;
+  cause;
+  name = "LlmError";
+  /**
+   * True when this error is a deadline, not a refusal.
+   *
+   * The distinction is the whole of {@link Llm.text}'s retry rule: a call that
+   * ran out of clock has told us nothing about whether it would ever have
+   * worked, and one more try is cheap. A call that came back `error_max_turns`
+   * or found no `claude` binary has told us, and retrying it just spends the
+   * clock twice.
+   */
+  timedOut;
+  /**
+   * What the child printed before it failed, when it was a spawned one.
+   *
+   * A CLI that fails by *answering* — `claude -p` exits non-zero and prints
+   * `{"is_error":true,"result":"Not logged in · Please run /login"}` on
+   * stdout — is a CLI whose exit code alone says nothing a user can act on.
+   * `potsherd: claude exited 1 / try: claude --version` was the message that
+   * came out of exactly that, and `claude --version` works fine, so the
+   * suggested fix confirmed the machine was healthy while the run stayed
+   * broken. The transport reads this and says the real sentence instead.
+   */
+  stdout;
+  constructor(message2, fix, cause, options = {}) {
+    super(message2);
+    this.fix = fix;
+    this.cause = cause;
+    this.timedOut = options.timedOut ?? false;
+    if (options.stdout !== void 0)
+      this.stdout = options.stdout;
+  }
+};
+function makeScratch(tmpRoot) {
+  return fs12.mkdtempSync(path10.join(tmpRoot ?? os3.tmpdir(), "potsherd-llm-"));
+}
+var CLAUDE_CWD_NAME = "potsherd-llm-cwd";
+function stableScratch(tmpRoot) {
+  const dir = path10.join(tmpRoot ?? os3.tmpdir(), CLAUDE_CWD_NAME);
+  fs12.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+function dropScratch(dir) {
+  if (!dir)
+    return;
+  try {
+    fs12.rmSync(dir, { recursive: true, force: true });
+  } catch {
+  }
+}
+var AgentSdkTransport = class {
+  opts;
+  backend = "agent-sdk";
+  scratch = null;
+  constructor(opts) {
+    this.opts = opts;
+  }
+  async send(req) {
+    let query;
+    try {
+      ({ query } = await import("@anthropic-ai/claude-agent-sdk"));
+    } catch (err) {
+      throw new LlmError("the Claude Agent SDK is not installed, so the subscription path cannot run", "npm i @anthropic-ai/claude-agent-sdk   # or set ANTHROPIC_API_KEY", err);
+    }
+    this.scratch ??= makeScratch(this.opts.tmpRoot);
+    const abort = new AbortController();
+    const onOuter = () => abort.abort();
+    req.signal?.addEventListener("abort", onOuter, { once: true });
+    const timer = setTimeout(() => abort.abort(), req.timeoutMs);
+    let text = "";
+    let result = null;
+    const stderr = [];
+    try {
+      const stream = query({
+        prompt: req.prompt,
+        options: {
+          model: req.model,
+          maxTurns: 1,
+          // Nothing to read, nothing to write, nothing to run. A summariser
+          // that can call Bash is a summariser that can be prompt-injected by
+          // the transcript it is summarising (`03` §11).
+          allowedTools: [],
+          permissionMode: "dontAsk",
+          cwd: this.scratch,
+          // No user, project or local settings, and therefore no CLAUDE.md.
+          settingSources: [],
+          // obra/episodic-memory#83: without this the SDK writes a fake
+          // session into ~/.claude/projects, which potsherd would then index.
+          persistSession: false,
+          abortController: abort,
+          env: { ...this.opts.env, [REENTRANCY_ENV]: "1" },
+          ...req.system ? { systemPrompt: req.system } : {},
+          ...this.opts.bin ? { pathToClaudeCodeExecutable: this.opts.bin } : {},
+          stderr: (d) => {
+            if (stderr.length < 40)
+              stderr.push(d);
+          }
+        }
+      });
+      for await (const message2 of stream) {
+        if (message2.type === "result") {
+          if (message2.subtype === "success") {
+            text = message2.result;
+            const ran = Object.keys(message2.modelUsage ?? {})[0];
+            result = {
+              text,
+              ...ran ? { model: ran } : {},
+              inputTokens: message2.usage?.input_tokens ?? 0,
+              outputTokens: message2.usage?.output_tokens ?? 0,
+              usd: message2.total_cost_usd ?? 0
+            };
+          } else {
+            throw new LlmError(`the model call ended as ${message2.subtype}` + (message2.errors?.length ? `: ${message2.errors[0]}` : ""), "potsherd card --dry-run --all   # to see the size of the run first");
+          }
+        }
+      }
+    } catch (err) {
+      if (err instanceof LlmError)
+        throw err;
+      if (abort.signal.aborted && !req.signal?.aborted) {
+        throw new LlmError(`the model call did not answer within ${Math.round(req.timeoutMs / 1e3)}s`, `POTSHERD_LLM_TIMEOUT_MS=${DEFAULT_TIMEOUT_MS * 2} potsherd card \u2026`, err, { timedOut: true });
+      }
+      throw new LlmError(`the Claude Agent SDK call failed: ${errMessage(err)}` + (stderr.length ? `
+        ${stderr.join("").trim().split("\n").slice(-2).join(" ")}` : ""), "claude  # check the subscription is active, then retry", err);
+    } finally {
+      clearTimeout(timer);
+      req.signal?.removeEventListener("abort", onOuter);
+    }
+    if (!result) {
+      throw new LlmError("the Claude Agent SDK returned no result message", "claude --version   # check the installed harness");
+    }
+    return result;
+  }
+  async close() {
+    dropScratch(this.scratch);
+    this.scratch = null;
+  }
+};
+var CLAUDE_CLI_ARGS = [
+  "--print",
+  "--output-format",
+  "json",
+  "--tools",
+  "",
+  "--permission-mode",
+  "dontAsk",
+  "--no-session-persistence",
+  "--setting-sources",
+  ""
+];
+var ClaudeCliTransport = class {
+  opts;
+  backend = "claude-cli";
+  scratch = null;
+  constructor(opts) {
+    this.opts = opts;
+  }
+  async send(req) {
+    this.scratch ??= stableScratch(this.opts.tmpRoot);
+    const extra = (this.opts.env["POTSHERD_CLAUDE_ARGS"] ?? "").split(" ").filter(Boolean);
+    const args = [
+      ...CLAUDE_CLI_ARGS,
+      "--model",
+      req.model,
+      ...req.system ? ["--system-prompt", req.system] : [],
+      ...extra
+    ];
+    let out;
+    try {
+      out = await run(this.opts.bin, args, {
+        input: req.prompt,
+        cwd: this.scratch,
+        env: { ...this.opts.env, [REENTRANCY_ENV]: "1" },
+        timeoutMs: req.timeoutMs,
+        ...req.signal ? { signal: req.signal } : {}
+      });
+    } catch (err) {
+      const reply = err instanceof LlmError ? parseClaudeCli(err.stdout ?? "") : null;
+      const said = reply?.said ?? reply?.text ?? "";
+      if (said) {
+        throw new LlmError(`claude --print could not answer: ${said.split("\n")[0]}`, /not logged in|\/login/i.test(said) ? "claude   # sign in once, then retry" : 'claude -p "hello"', err);
+      }
+      throw err;
+    }
+    const parsed = parseClaudeCli(out.stdout);
+    if (parsed.error) {
+      throw new LlmError(`claude --print ended as ${parsed.error}`, 'claude -p "hello"   # check the subscription is active, then retry');
+    }
+    if (!parsed.text) {
+      throw new LlmError(`claude --print produced no answer${out.stderr ? `: ${out.stderr.trim().split("\n").slice(-1)[0]}` : ""}`, 'claude -p "hello"   # check claude runs at all');
+    }
+    return {
+      text: parsed.text,
+      ...parsed.model ? { model: parsed.model } : {},
+      ...parsed.inputTokens !== void 0 ? { inputTokens: parsed.inputTokens } : {},
+      ...parsed.outputTokens !== void 0 ? { outputTokens: parsed.outputTokens } : {},
+      ...parsed.usd !== void 0 ? { usd: parsed.usd } : {}
+    };
+  }
+  /**
+   * Nothing to clean up, on purpose. See {@link CLAUDE_CWD_NAME}: removing the
+   * cwd would not remove the `~/.claude/projects` entry named after it, and
+   * the next call would then mint a second one. Keeping it is what holds the
+   * footprint at one directory instead of one per call.
+   */
+  async close() {
+    this.scratch = null;
+  }
+};
+function parseClaudeCli(stdout) {
+  const raw = stdout.trim();
+  if (!raw)
+    return { text: "" };
+  let obj = null;
+  try {
+    const v = JSON.parse(raw);
+    if (v && typeof v === "object" && !Array.isArray(v))
+      obj = v;
+  } catch {
+    obj = null;
+  }
+  if (!obj)
+    return { text: raw };
+  const said = typeof obj["result"] === "string" ? obj["result"].trim() : "";
+  const subtype = typeof obj["subtype"] === "string" ? obj["subtype"] : "";
+  if (obj["is_error"] === true || subtype !== "" && subtype !== "success") {
+    return { text: "", error: subtype || "an error", ...said ? { said } : {} };
+  }
+  const text = said;
+  const usage = asRecord(obj["usage"]);
+  const num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+  const inputTokens = usage ? num2(usage["input_tokens"]) + num2(usage["cache_creation_input_tokens"]) + num2(usage["cache_read_input_tokens"]) : 0;
+  const outputTokens = usage ? num2(usage["output_tokens"]) : 0;
+  const modelUsage = asRecord(obj["modelUsage"]);
+  const model = modelUsage ? Object.keys(modelUsage)[0] : void 0;
+  const usd = typeof obj["total_cost_usd"] === "number" ? obj["total_cost_usd"] : void 0;
+  return {
+    text,
+    ...model ? { model } : {},
+    ...inputTokens > 0 ? { inputTokens } : {},
+    ...outputTokens > 0 ? { outputTokens } : {},
+    ...usd !== void 0 ? { usd } : {}
+  };
+}
+function asRecord(v) {
+  return v && typeof v === "object" && !Array.isArray(v) ? v : null;
+}
+var CodexTransport = class {
+  opts;
+  backend = "codex";
+  scratch = null;
+  constructor(opts) {
+    this.opts = opts;
+  }
+  async send(req) {
+    this.scratch ??= makeScratch(this.opts.tmpRoot);
+    const extra = (this.opts.env["POTSHERD_CODEX_ARGS"] ?? "").split(" ").filter(Boolean);
+    const lastMessage = path10.join(this.scratch, "last-message.txt");
+    const args = [
+      "exec",
+      "--skip-git-repo-check",
+      // Verified at 0.149.0: no session files on disk, so a model call cannot
+      // write into the archive potsherd reads.
+      "--ephemeral",
+      // Verified at 0.149.0: config.toml is not loaded, auth still is.
+      "--ignore-user-config",
+      "--cd",
+      this.scratch,
+      "--model",
+      req.model,
+      "--output-last-message",
+      lastMessage,
+      ...extra,
+      "-"
+    ];
+    const out = await run(this.opts.bin, args, {
+      input: req.system ? `${req.system}
+
+${req.prompt}` : req.prompt,
+      cwd: this.scratch,
+      env: { ...this.opts.env, [REENTRANCY_ENV]: "1" },
+      timeoutMs: req.timeoutMs,
+      ...req.signal ? { signal: req.signal } : {}
+    });
+    const text = readIfPresent(lastMessage) || lastAgentMessage(out.stdout);
+    if (!text) {
+      throw new LlmError(`codex exec produced no answer${out.stderr ? `: ${out.stderr.trim().split("\n").slice(-1)[0]}` : ""}`, 'codex exec "hello"   # check codex runs at all');
+    }
+    return { text, model: req.model };
+  }
+  async close() {
+    dropScratch(this.scratch);
+    this.scratch = null;
+  }
+};
+function readIfPresent(file2) {
+  try {
+    return fs12.readFileSync(file2, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+function lastAgentMessage(stdout) {
+  const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
+  const events = [];
+  let allJson = lines.length > 0;
+  for (const line of lines) {
+    if (!line.trimStart().startsWith("{")) {
+      allJson = false;
+      break;
+    }
+    try {
+      const ev = JSON.parse(line);
+      const text = pickText(ev);
+      if (text)
+        events.push(text);
+    } catch {
+      allJson = false;
+      break;
+    }
+  }
+  if (allJson && events.length > 0)
+    return events[events.length - 1].trim();
+  return stdout.trim();
+}
+function pickText(ev) {
+  for (const key of ["text", "message", "last_agent_message"]) {
+    const v = ev[key];
+    if (typeof v === "string" && v.trim())
+      return v;
+  }
+  for (const key of ["msg", "item", "payload"]) {
+    const v = ev[key];
+    if (v && typeof v === "object") {
+      const inner = pickText(v);
+      if (inner)
+        return inner;
+    }
+  }
+  return null;
+}
+var ApiTransport = class {
+  opts;
+  backend = "api";
+  constructor(opts) {
+    this.opts = opts;
+  }
+  async send(req) {
+    let Anthropic;
+    try {
+      ({ default: Anthropic } = await import("@anthropic-ai/sdk"));
+    } catch (err) {
+      throw new LlmError("the Anthropic SDK is not installed, so the api fallback cannot run", "npm i @anthropic-ai/sdk", err);
+    }
+    const apiKey = this.opts.env["ANTHROPIC_API_KEY"];
+    if (!apiKey) {
+      throw new LlmError("ANTHROPIC_API_KEY is not set", "export ANTHROPIC_API_KEY=\u2026");
+    }
+    const client = new Anthropic({ apiKey, timeout: req.timeoutMs, maxRetries: 1 });
+    const params = {
+      model: req.model,
+      max_tokens: req.maxOutputTokens,
+      ...req.system ? { system: req.system } : {},
+      messages: [{ role: "user", content: req.prompt }]
+    };
+    try {
+      const long = req.prompt.length > 4e4 || req.maxOutputTokens > 8192;
+      const message2 = long ? await client.messages.stream(params, req.signal ? { signal: req.signal } : {}).finalMessage() : await client.messages.create(params, req.signal ? { signal: req.signal } : {});
+      const text = message2.content.map((b) => b.type === "text" ? b.text : "").join("");
+      const price = PRICES[modelClass(message2.model ?? req.model)];
+      const inputTokens = message2.usage.input_tokens;
+      const outputTokens = message2.usage.output_tokens;
+      return {
+        text,
+        model: message2.model,
+        inputTokens,
+        outputTokens,
+        usd: inputTokens / 1e6 * price.inputPerMTok + outputTokens / 1e6 * price.outputPerMTok
+      };
+    } catch (err) {
+      throw new LlmError(`the Anthropic API call failed: ${errMessage(err)}`, "check ANTHROPIC_API_KEY and the network, then retry", err);
+    }
+  }
+  async close() {
+  }
+};
+function run(bin, args, o) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, {
+      env: o.env,
+      ...o.cwd ? { cwd: o.cwd } : {},
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled)
+        return;
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new LlmError(`${path10.basename(bin)} did not answer within ${Math.round(o.timeoutMs / 1e3)}s`, `POTSHERD_LLM_TIMEOUT_MS=${DEFAULT_TIMEOUT_MS * 2} potsherd card \u2026`, void 0, { timedOut: true }));
+    }, o.timeoutMs);
+    const onAbort = () => {
+      if (settled)
+        return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill("SIGKILL");
+      reject(new LlmError("the model call was cancelled"));
+    };
+    o.signal?.addEventListener("abort", onAbort, { once: true });
+    child.stdout.on("data", (d) => stdout += d.toString("utf8"));
+    child.stderr.on("data", (d) => stderr += d.toString("utf8"));
+    child.on("error", (err) => {
+      if (settled)
+        return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new LlmError(`could not run ${bin}: ${errMessage(err)}`, `which ${path10.basename(bin)}`, err));
+    });
+    child.on("close", (code) => {
+      if (settled)
+        return;
+      settled = true;
+      clearTimeout(timer);
+      o.signal?.removeEventListener("abort", onAbort);
+      if (code !== 0) {
+        reject(new LlmError(`${path10.basename(bin)} exited ${code}${stderr.trim() ? `: ${stderr.trim().split("\n").slice(-1)[0]}` : ""}`, `${path10.basename(bin)} --version`, void 0, { stdout }));
+        return;
+      }
+      resolve({ stdout, stderr, code: code ?? 0 });
+    });
+    child.stdin.on("error", () => {
+    });
+    if (o.input !== void 0)
+      child.stdin.end(o.input);
+    else
+      child.stdin.end();
+  });
+}
+function errMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+var IMPLAUSIBLE_TOKEN_FACTOR = 10;
+var DEFAULT_TIMEOUT_MS = 36e4;
+var TIMEOUT_RETRIES = 1;
+var DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+var JSON_RULE = "Reply with one JSON object and nothing else. No prose before it, no prose after it, no markdown fence, no explanation. If a field has no value, use null or an empty array.";
+var Llm = class _Llm {
+  transport;
+  opts;
+  env;
+  backend;
+  model;
+  chargeable;
+  choice;
+  budget;
+  constructor(transport, choice, opts, env) {
+    this.transport = transport;
+    this.opts = opts;
+    this.env = env;
+    this.choice = choice;
+    this.backend = transport.backend;
+    this.model = choice?.model ?? opts.model ?? CARD_MODEL;
+    this.chargeable = choice?.chargeable ?? transport.backend === "api";
+    this.budget = opts.budget ?? new Budget({
+      ...opts.maxUsd !== void 0 ? { maxUsd: opts.maxUsd } : {},
+      ...opts.maxTokens !== void 0 ? { maxTokens: opts.maxTokens } : {}
+    });
+  }
+  /**
+   * Pick a backend and build it. Throws {@link NoBackendError} when there is
+   * none and {@link ReentrancyError} when potsherd spawned this process.
+   */
+  static open(opts = {}) {
+    const env = opts.env ?? process10.env;
+    if (insidePotsherdCall(env) && !opts.transport)
+      throw new ReentrancyError();
+    if (opts.transport) {
+      return new _Llm(opts.transport, null, opts, env);
+    }
+    const choice = detectBackend(opts);
+    const transport = choice.backend === "agent-sdk" ? new AgentSdkTransport({
+      env,
+      ...opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {},
+      ...env["POTSHERD_CLAUDE_BIN"] ? { bin: env["POTSHERD_CLAUDE_BIN"] } : {}
+    }) : choice.backend === "claude-cli" ? new ClaudeCliTransport({
+      env,
+      bin: env["POTSHERD_CLAUDE_BIN"] || choice.bin || "claude",
+      ...opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {}
+    }) : choice.backend === "codex" ? new CodexTransport({
+      env,
+      bin: choice.bin ?? "codex",
+      ...opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {}
+    }) : new ApiTransport({ env });
+    return new _Llm(transport, choice, opts, env);
+  }
+  get spend() {
+    return this.budget.spend;
+  }
+  /** Per-call deadline. A model call must never be able to hang a verb. */
+  timeoutFor(req) {
+    if (req.timeoutMs !== void 0)
+      return req.timeoutMs;
+    if (this.opts.timeoutMs !== void 0)
+      return this.opts.timeoutMs;
+    const fromEnv = Number(this.env["POTSHERD_LLM_TIMEOUT_MS"]);
+    return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_TIMEOUT_MS;
+  }
+  /**
+   * One call. **Redacts `prompt` and `system` itself** — a caller cannot reach
+   * a backend with raw text, and there is no flag that lets it.
+   */
+  async text(req) {
+    const prompt = redactOutgoing(req.prompt);
+    const system = req.system ? redactOutgoing(req.system) : null;
+    const redactions = prompt.hits + (system?.hits ?? 0);
+    const outgoing = `${POTSHERD_CARD_MARKER}
+
+${prompt.text}`;
+    const maxOutputTokens = req.maxOutputTokens ?? this.opts.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+    const inTokens = tokensForText(outgoing) + (system ? tokensForText(system.text) : 0);
+    const price = PRICES[modelClass(this.model)];
+    const reservation = this.budget.admit({
+      usd: inTokens / 1e6 * price.inputPerMTok + maxOutputTokens / 1e6 * price.outputPerMTok,
+      tokens: inTokens + maxOutputTokens
+    });
+    try {
+      return await this.call(req, {
+        outgoing,
+        ...system ? { system: system.text } : {},
+        maxOutputTokens,
+        inTokens,
+        price,
+        redactions,
+        reservation
+      });
+    } finally {
+      reservation.release();
+    }
+  }
+  /** The body of {@link text}, split out so the reservation can be released in one place. */
+  async call(req, ctx) {
+    const { outgoing, system, maxOutputTokens, inTokens, price, redactions } = ctx;
+    const started = Date.now();
+    const sent = await this.send({
+      prompt: outgoing,
+      ...system ? { system } : {},
+      model: this.model,
+      maxOutputTokens,
+      timeoutMs: this.timeoutFor(req),
+      ...req.signal ? { signal: req.signal } : {}
+    }, req.signal);
+    const ms = Date.now() - started;
+    const outputTokensEstimated = typeof sent.outputTokens !== "number" || sent.outputTokens <= 0;
+    const outputTokens = outputTokensEstimated ? tokensForText(sent.text) : sent.outputTokens;
+    const reportedIn = sent.inputTokens;
+    const inputTokensEstimated = typeof reportedIn !== "number" || reportedIn <= 0 || reportedIn * IMPLAUSIBLE_TOKEN_FACTOR < inTokens;
+    const inputTokens = inputTokensEstimated ? inTokens : reportedIn;
+    const usd = sent.usd ?? inputTokens / 1e6 * price.inputPerMTok + outputTokens / 1e6 * price.outputPerMTok;
+    const result = {
+      text: sent.text,
+      backend: this.backend,
+      model: sent.model ?? this.model,
+      inputTokens,
+      outputTokens,
+      inputTokensEstimated,
+      outputTokensEstimated,
+      usd,
+      ms,
+      redactions,
+      chargeable: this.chargeable
+    };
+    this.budget.record(result, ctx.reservation);
+    return result;
+  }
+  /**
+   * The transport call, with {@link TIMEOUT_RETRIES} retries on a deadline.
+   *
+   * Only on a deadline. Every other failure — no binary, no key, a refusal, a
+   * cancelled run — is a fact about the call that trying again cannot change,
+   * and retrying it would double the time the user waits for the same error.
+   * A cancellation from the caller's own signal is never a retry either: the
+   * budget ceiling aborts the run through exactly that signal, and a retry
+   * there would spend past the line the abort exists to hold.
+   */
+  async send(req, outer) {
+    let last2;
+    for (let attempt = 0; attempt <= TIMEOUT_RETRIES; attempt++) {
+      try {
+        return await this.transport.send(req);
+      } catch (err) {
+        last2 = err;
+        const timedOut = err instanceof LlmError && err.timedOut;
+        if (!timedOut || outer?.aborted || attempt === TIMEOUT_RETRIES)
+          throw err;
+      }
+    }
+    throw last2;
+  }
+  /**
+   * A JSON answer, enforced by instruction, retried **once** on a parse
+   * failure, and falling back to {@link JsonRequest.fallback} rather than
+   * throwing away the run (`phase-2` risks: "json drift").
+   */
+  async json(req) {
+    const base2 = `${req.prompt}
+
+${JSON_RULE}
+
+Shape:
+${req.schema}`;
+    let last2 = null;
+    let firstError = "";
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const prompt = attempt === 1 ? base2 : `${base2}
+
+Your previous reply could not be parsed as JSON (${firstError}). Reply again with only the JSON object.`;
+      const { prompt: _p, ...rest } = req;
+      const r = await this.text({ ...rest, prompt });
+      last2 = r;
+      const parsed = parseJsonish(r.text);
+      if (parsed.ok) {
+        const value = req.validate ? req.validate(parsed.value) : parsed.value;
+        if (value !== null && value !== void 0) {
+          return { ...r, value, attempts: attempt, parsed: true };
+        }
+        firstError = "the object did not match the shape";
+      } else {
+        firstError = parsed.error;
+      }
+    }
+    return {
+      ...last2,
+      value: req.fallback,
+      attempts: 2,
+      parsed: false
+    };
+  }
+  async close() {
+    await this.transport.close();
+  }
+};
+function redactOutgoing(text) {
+  const out = redact(elideBinary(text));
+  return { text: out.text, hits: out.hits.length };
+}
+function parseJsonish(raw) {
+  let s = raw.trim();
+  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/m.exec(s);
+  if (fence?.[1])
+    s = fence[1].trim();
+  if (!s.startsWith("{") && !s.startsWith("[")) {
+    const start = s.search(/[{[]/);
+    const end = Math.max(s.lastIndexOf("}"), s.lastIndexOf("]"));
+    if (start >= 0 && end > start)
+      s = s.slice(start, end + 1);
+  }
+  if (!s)
+    return { ok: false, error: "empty reply" };
+  try {
+    return { ok: true, value: JSON.parse(s) };
+  } catch (err) {
+    return { ok: false, error: errMessage(err) };
+  }
+}
+
 // ../core/dist/calibration.js
 var MIN_CALLS = 5;
 var CALIBRATION_WINDOW = 5;
@@ -28271,17 +29490,19 @@ function recordCardRun(db, run2) {
   return { ...run2, ranAt, id: Number(info.lastInsertRowid), timeRatio, usdRatio };
 }
 function readCalibration(db, o = {}) {
+  const fittedAt = o.fittedAt ?? ESTIMATOR_FIT;
   let rows;
   try {
     rows = db.prepare(`SELECT time_ratio, usd_ratio, ran_at
            FROM card_runs
           WHERE complete = 1
             AND actual_calls >= ?
+            AND ran_at >= ?
             AND predicted_seconds > 0
             AND predicted_usd > 0
             ${o.backend ? "AND backend = ?" : ""}
           ORDER BY ran_at DESC, id DESC
-          LIMIT ?`).all(...o.backend ? [MIN_CALLS, o.backend, o.window ?? CALIBRATION_WINDOW] : [MIN_CALLS, o.window ?? CALIBRATION_WINDOW]);
+          LIMIT ?`).all(...o.backend ? [MIN_CALLS, fittedAt, o.backend, o.window ?? CALIBRATION_WINDOW] : [MIN_CALLS, fittedAt, o.window ?? CALIBRATION_WINDOW]);
   } catch {
     return null;
   }
@@ -29562,7 +30783,7 @@ async function rescueUnlocked(opts, root) {
   const now = opts.now ?? /* @__PURE__ */ new Date();
   const src = claudeDir(opts.claudeDir);
   const cp = claudePaths(src);
-  const dest = path10.join(archiveDir(root), HARNESS);
+  const dest = path11.join(archiveDir(root), HARNESS);
   const result = {
     ranAt: now.toISOString(),
     dryRun: Boolean(opts.dryRun),
@@ -29611,7 +30832,7 @@ async function rescueUnlocked(opts, root) {
 }
 function copyPass(db, projectsDir, historyPath, dest, result, opts) {
   const files = collectSourceFiles(projectsDir);
-  if (fs12.existsSync(historyPath)) {
+  if (fs13.existsSync(historyPath)) {
     files.unshift({ abs: historyPath, rel: "history.jsonl", kind: "history" });
   }
   if (files.length === 0)
@@ -29629,18 +30850,18 @@ function copyPass(db, projectsDir, historyPath, dest, result, opts) {
   for (const f of files) {
     result.filesConsidered++;
     done++;
-    opts.onProgress?.({ phase: "copy", done, total: files.length, label: path10.basename(f.rel) });
-    const target = path10.join(dest, f.rel);
+    opts.onProgress?.({ phase: "copy", done, total: files.length, label: path11.basename(f.rel) });
+    const target = path11.join(dest, f.rel);
     let stat;
     try {
-      stat = fs12.statSync(f.abs);
+      stat = fs13.statSync(f.abs);
     } catch (err) {
       result.filesFailed.push({ path: f.abs, error: err.message });
       continue;
     }
     result.bytesArchived += stat.size;
     const prev = known.get(f.abs);
-    if (prev && prev.bytes === stat.size && prev.source_mtime === Math.floor(stat.mtimeMs) && fs12.existsSync(target)) {
+    if (prev && prev.bytes === stat.size && prev.source_mtime === Math.floor(stat.mtimeMs) && fs13.existsSync(target)) {
       result.filesSkipped++;
       countKind(result, f.kind, false);
       continue;
@@ -29652,7 +30873,7 @@ function copyPass(db, projectsDir, historyPath, dest, result, opts) {
       result.filesFailed.push({ path: f.abs, error: err.message });
       continue;
     }
-    if (fs12.existsSync(target) && safeSize(target) === stat.size && sha256File(target) === sha) {
+    if (fs13.existsSync(target) && safeSize(target) === stat.size && sha256File(target) === sha) {
       result.filesSkipped++;
       countKind(result, f.kind, false);
       if (!opts.dryRun) {
@@ -29670,12 +30891,12 @@ function copyPass(db, projectsDir, historyPath, dest, result, opts) {
     }
     if (!opts.dryRun) {
       try {
-        fs12.mkdirSync(path10.dirname(target), { recursive: true, mode: 448 });
+        fs13.mkdirSync(path11.dirname(target), { recursive: true, mode: 448 });
         const tmp = `${target}.potsherd-tmp`;
-        fs12.copyFileSync(f.abs, tmp);
-        fs12.chmodSync(tmp, 384);
-        fs12.utimesSync(tmp, stat.atime, stat.mtime);
-        fs12.renameSync(tmp, target);
+        fs13.copyFileSync(f.abs, tmp);
+        fs13.chmodSync(tmp, 384);
+        fs13.utimesSync(tmp, stat.atime, stat.mtime);
+        fs13.renameSync(tmp, target);
         upsert.run({
           source_path: f.abs,
           archive_path: target,
@@ -29702,33 +30923,33 @@ function collectSourceFiles(projectsDir) {
     if (!slugEntry.isDirectory())
       continue;
     const slug = slugEntry.name;
-    const dir = path10.join(projectsDir, slug);
+    const dir = path11.join(projectsDir, slug);
     for (const e of readdirSafe2(dir, true)) {
       if (e.isFile()) {
         if (e.name.endsWith(".jsonl")) {
-          out.push({ abs: path10.join(dir, e.name), rel: path10.join(slug, e.name), kind: "session" });
+          out.push({ abs: path11.join(dir, e.name), rel: path11.join(slug, e.name), kind: "session" });
         } else if (e.name === "sessions-index.json") {
-          out.push({ abs: path10.join(dir, e.name), rel: path10.join(slug, e.name), kind: "index" });
+          out.push({ abs: path11.join(dir, e.name), rel: path11.join(slug, e.name), kind: "index" });
         }
       } else if (e.isDirectory()) {
         if (e.name === "memory") {
-          for (const m of readdirSafe2(path10.join(dir, "memory"))) {
+          for (const m of readdirSafe2(path11.join(dir, "memory"))) {
             out.push({
-              abs: path10.join(dir, "memory", m),
-              rel: path10.join(slug, "memory", m),
+              abs: path11.join(dir, "memory", m),
+              rel: path11.join(slug, "memory", m),
               kind: "memory"
             });
           }
         } else {
           const nested = e.name === SIDECHAIN_DIR;
-          const subDir = nested ? path10.join(dir, e.name) : path10.join(dir, e.name, SIDECHAIN_DIR);
-          const relDir = nested ? path10.join(slug, e.name) : path10.join(slug, e.name, SIDECHAIN_DIR);
+          const subDir = nested ? path11.join(dir, e.name) : path11.join(dir, e.name, SIDECHAIN_DIR);
+          const relDir = nested ? path11.join(slug, e.name) : path11.join(slug, e.name, SIDECHAIN_DIR);
           for (const s of readdirSafe2(subDir)) {
             if (!s.endsWith(".jsonl"))
               continue;
             out.push({
-              abs: path10.join(subDir, s),
-              rel: path10.join(relDir, s),
+              abs: path11.join(subDir, s),
+              rel: path11.join(relDir, s),
               kind: "sidechain"
             });
           }
@@ -29805,7 +31026,7 @@ function isWrittenTitle(title, project, sessionId) {
 function ghostFingerprint(historyPath, disk) {
   let hs;
   try {
-    hs = fs12.statSync(historyPath);
+    hs = fs13.statSync(historyPath);
   } catch {
     return null;
   }
@@ -29813,9 +31034,9 @@ function ghostFingerprint(historyPath, disk) {
   const ids = disk.sessions.map((s) => s.sessionId).sort();
   parts.push(`sessions:${ids.length}:${crypto2.createHash("sha256").update(ids.join("\n")).digest("hex")}`);
   for (const proj of (disk.projects ?? []).filter((p) => p.hasSessionsIndex)) {
-    const p = path10.join(proj.dir, "sessions-index.json");
+    const p = path11.join(proj.dir, "sessions-index.json");
     try {
-      const st = fs12.statSync(p);
+      const st = fs13.statSync(p);
       parts.push(`index:${p}:${st.size}:${Math.floor(st.mtimeMs)}`);
     } catch {
       parts.push(`index:${p}:gone`);
@@ -29970,30 +31191,30 @@ async function ghostPass(db, src, disk, result, opts) {
 }
 function sha256File(p) {
   const hash2 = crypto2.createHash("sha256");
-  const fd = fs12.openSync(p, "r");
+  const fd = fs13.openSync(p, "r");
   try {
     const buf = Buffer.allocUnsafe(1 << 20);
     for (; ; ) {
-      const read = fs12.readSync(fd, buf, 0, buf.length, null);
+      const read = fs13.readSync(fd, buf, 0, buf.length, null);
       if (read <= 0)
         break;
       hash2.update(buf.subarray(0, read));
     }
   } finally {
-    fs12.closeSync(fd);
+    fs13.closeSync(fd);
   }
   return hash2.digest("hex");
 }
 function safeSize(p) {
   try {
-    return fs12.statSync(p).size;
+    return fs13.statSync(p).size;
   } catch {
     return -1;
   }
 }
 function readdirSafe2(dir, withTypes) {
   try {
-    return withTypes ? fs12.readdirSync(dir, { withFileTypes: true }) : fs12.readdirSync(dir);
+    return withTypes ? fs13.readdirSync(dir, { withFileTypes: true }) : fs13.readdirSync(dir);
   } catch {
     return [];
   }
@@ -30325,7 +31546,7 @@ function basename2(p) {
 }
 
 // ../core/dist/render/verify.js
-import process10 from "node:process";
+import process11 from "node:process";
 var VERIFY_SCRIPT_PATH = "scripts/verify-audit.py";
 var VERIFY_SCRIPT_URL = "https://github.com/HulkInTherapy/potsherd/blob/main/scripts/verify-audit.py";
 var VERIFY_SNIPPET = `python3 - <<'PY'
@@ -30423,7 +31644,7 @@ var VERIFY_DEFINITIONS = {
   deletedWithoutSubstantivePrompt: "deleted sessions with history lines but no prompt that names them: nothing that is not a slash command, is at least 8 characters, and is not one of clear, continue, ok, yes, hi, y, n"
 };
 function snippetFor(claudeDir2, o = {}) {
-  const env = o.env ?? process10.env;
+  const env = o.env ?? process11.env;
   const dflt = env["CLAUDE_CONFIG_DIR"];
   const home2 = env["HOME"] ?? "";
   const isDefault = claudeDir2 === dflt || home2 !== "" && claudeDir2 === `${home2}/.claude`.replace(/\/+/g, "/");
@@ -30634,23 +31855,23 @@ __export(claude_exports, {
   recordTypeStats: () => recordTypeStats,
   sourceDir: () => sourceDir
 });
-import fs15 from "node:fs";
-import path12 from "node:path";
+import fs16 from "node:fs";
+import path13 from "node:path";
 
 // ../core/dist/parser/claude.js
-import fs14 from "node:fs";
-import path11 from "node:path";
+import fs15 from "node:fs";
+import path12 from "node:path";
 import crypto3 from "node:crypto";
 
 // ../core/dist/parser/jsonl.js
-import fs13 from "node:fs";
+import fs14 from "node:fs";
 var LF = 10;
 async function* readJsonlLines(filePath, options = {}) {
   const start = options.start ?? 0;
   let offset = start;
   let lineNumber = options.startLine ?? 0;
   let held = Buffer.alloc(0);
-  const stream = fs13.createReadStream(filePath, { start });
+  const stream = fs14.createReadStream(filePath, { start });
   for await (const chunk of stream) {
     held = held.length === 0 ? chunk : Buffer.concat([held, chunk]);
     let idx = held.indexOf(LF);
@@ -30783,7 +32004,7 @@ var HANDLED_TYPES = /* @__PURE__ */ new Set([
   "system"
 ]);
 async function parseClaudeTranscript(filePath, options = {}) {
-  const absolute2 = path11.resolve(filePath);
+  const absolute2 = path12.resolve(filePath);
   const fromOffset = options.fromOffset ?? 0;
   const unknownTypes = {};
   let malformedLines = 0;
@@ -30968,7 +32189,7 @@ ${text2}` : text2;
 function resolveSessionId(absolute2, options, recordSessionId, sidechainFlag) {
   if (options.sessionId)
     return options.sessionId;
-  const base2 = path11.basename(absolute2, ".jsonl");
+  const base2 = path12.basename(absolute2, ".jsonl");
   const isSidechain = options.isSidechain ?? sidechainFlag ?? false;
   if (isSidechain) {
     const parent = options.parentSessionId ?? recordSessionId;
@@ -30977,7 +32198,7 @@ function resolveSessionId(absolute2, options, recordSessionId, sidechainFlag) {
   return recordSessionId ?? base2;
 }
 function deriveProjectSlug(absolute2) {
-  const parts = absolute2.split(path11.sep);
+  const parts = absolute2.split(path12.sep);
   for (let i = parts.length - 2; i >= 0; i -= 1) {
     const part = parts[i];
     if (!part)
@@ -30993,7 +32214,7 @@ function deriveProjectSlug(absolute2) {
 var UUID_DIR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function statBytes(absolute2) {
   try {
-    return fs14.statSync(absolute2).size;
+    return fs15.statSync(absolute2).size;
   } catch {
     return 0;
   }
@@ -31024,7 +32245,7 @@ function sourceDir(claudeConfigDir) {
   return claudePaths(claudeDir(claudeConfigDir)).projects;
 }
 function archiveSourceDir(root) {
-  return path12.join(archiveDir(root ?? potsherdDir()), "claude");
+  return path13.join(archiveDir(root ?? potsherdDir()), "claude");
 }
 function discover(options = {}) {
   const live = walkProjects(sourceDir(options.claudeDir), "live");
@@ -31036,7 +32257,7 @@ function discover(options = {}) {
     for (const found of walkProjects(archiveRoot, "archived")) {
       if (byRel.has(found.rel))
         continue;
-      found.originalPath = path12.join(sourceDir(options.claudeDir), found.rel);
+      found.originalPath = path13.join(sourceDir(options.claudeDir), found.rel);
       byRel.set(found.rel, found);
     }
   }
@@ -31073,7 +32294,7 @@ function doctorLine(options = {}) {
   } catch {
     found = [];
   }
-  const exists = fs15.existsSync(dir);
+  const exists = fs16.existsSync(dir);
   const sidechains = found.filter((f) => f.isSidechain).length;
   const archived = found.filter((f) => f.status === "archived").length;
   const sessions = found.length - sidechains;
@@ -31120,14 +32341,14 @@ function walkProjects(projectsDir, status) {
     if (!slugEntry.isDirectory())
       continue;
     const slug = slugEntry.name;
-    const dir = path12.join(projectsDir, slug);
+    const dir = path13.join(projectsDir, slug);
     for (const entry2 of readdirSafe3(dir, true)) {
       if (entry2.isFile()) {
         if (!entry2.name.endsWith(".jsonl"))
           continue;
         push(out, {
-          file: path12.join(dir, entry2.name),
-          rel: path12.join(slug, entry2.name),
+          file: path13.join(dir, entry2.name),
+          rel: path13.join(slug, entry2.name),
           slug,
           sessionId: basename3(entry2.name),
           isSidechain: false,
@@ -31140,14 +32361,14 @@ function walkProjects(projectsDir, status) {
       if (entry2.name === "memory")
         continue;
       const flat = entry2.name === SIDECHAIN_DIR;
-      const subDir = flat ? path12.join(dir, entry2.name) : path12.join(dir, entry2.name, SIDECHAIN_DIR);
-      const relDir = flat ? path12.join(slug, entry2.name) : path12.join(slug, entry2.name, SIDECHAIN_DIR);
+      const subDir = flat ? path13.join(dir, entry2.name) : path13.join(dir, entry2.name, SIDECHAIN_DIR);
+      const relDir = flat ? path13.join(slug, entry2.name) : path13.join(slug, entry2.name, SIDECHAIN_DIR);
       for (const name of readdirSafe3(subDir)) {
         if (!name.endsWith(".jsonl"))
           continue;
         push(out, {
-          file: path12.join(subDir, name),
-          rel: path12.join(relDir, name),
+          file: path13.join(subDir, name),
+          rel: path13.join(relDir, name),
           slug,
           sessionId: flat ? basename3(name) : `${entry2.name}:${basename3(name)}`,
           isSidechain: true,
@@ -31278,14 +32499,14 @@ function basename3(fileName) {
 }
 function statSafe(file2) {
   try {
-    return fs15.statSync(file2);
+    return fs16.statSync(file2);
   } catch {
     return null;
   }
 }
 function readdirSafe3(dir, withFileTypes) {
   try {
-    return withFileTypes ? fs15.readdirSync(dir, { withFileTypes: true }) : fs15.readdirSync(dir);
+    return withFileTypes ? fs16.readdirSync(dir, { withFileTypes: true }) : fs16.readdirSync(dir);
   } catch {
     return [];
   }
@@ -31311,12 +32532,12 @@ __export(codex_exports, {
   renderCodexDoctorLine: () => renderCodexDoctorLine,
   sessionIdFromRolloutPath: () => sessionIdFromRolloutPath
 });
-import fs17 from "node:fs";
-import path14 from "node:path";
+import fs18 from "node:fs";
+import path15 from "node:path";
 
 // ../core/dist/parser/codex.js
-import fs16 from "node:fs";
-import path13 from "node:path";
+import fs17 from "node:fs";
+import path14 from "node:path";
 var TOOL_CALL_TYPES = /* @__PURE__ */ new Set([
   "function_call",
   "custom_tool_call",
@@ -31338,7 +32559,7 @@ var HANDLED_ENVELOPES = /* @__PURE__ */ new Set([
   "compacted"
 ]);
 async function parseCodexTranscript(filePath, options = {}) {
-  const absolute2 = path13.resolve(filePath);
+  const absolute2 = path14.resolve(filePath);
   const fromOffset = options.fromOffset ?? 0;
   const humanPrompts = await collectHumanPrompts(absolute2, fromOffset);
   const unknownTypes = {};
@@ -31489,7 +32710,7 @@ async function parseCodexTranscript(filePath, options = {}) {
   }
   finalize2();
   const id = resolvedId();
-  const projectSlug = options.projectSlug ?? (cwd ? path13.basename(cwd) : "unknown");
+  const projectSlug = options.projectSlug ?? (cwd ? path14.basename(cwd) : "unknown");
   const bytes2 = options.bytes ?? statBytes2(absolute2);
   const session = {
     id,
@@ -31529,14 +32750,14 @@ function normalise(text) {
   return text.trim();
 }
 function sessionIdFromPath(filePath) {
-  const base2 = path13.basename(filePath, ".jsonl");
+  const base2 = path14.basename(filePath, ".jsonl");
   const matches = base2.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
   const last2 = matches?.[matches.length - 1];
   return last2 ?? base2;
 }
 function statBytes2(absolute2) {
   try {
-    return fs16.statSync(absolute2).size;
+    return fs17.statSync(absolute2).size;
   } catch {
     return 0;
   }
@@ -31584,7 +32805,7 @@ var ROLLOUT_FILE = /^rollout-.*\.jsonl$/i;
 var UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 var MAX_WALK_DEPTH = 8;
 function sessionIdFromRolloutPath(filePath) {
-  const base2 = path14.basename(filePath, ".jsonl");
+  const base2 = path15.basename(filePath, ".jsonl");
   const matches = base2.match(UUID);
   return matches?.[matches.length - 1] ?? base2;
 }
@@ -31601,12 +32822,12 @@ function walk(dir, status, depth, out) {
     return;
   let entries;
   try {
-    entries = fs17.readdirSync(dir, { withFileTypes: true });
+    entries = fs18.readdirSync(dir, { withFileTypes: true });
   } catch {
     return;
   }
   for (const entry2 of entries) {
-    const full = path14.join(dir, entry2.name);
+    const full = path15.join(dir, entry2.name);
     if (entry2.isDirectory()) {
       walk(full, status, depth + 1, out);
       continue;
@@ -31617,7 +32838,7 @@ function walk(dir, status, depth, out) {
       continue;
     let stat;
     try {
-      stat = fs17.statSync(full);
+      stat = fs18.statSync(full);
     } catch {
       continue;
     }
@@ -31640,7 +32861,7 @@ function readSessionIndex(options = {}) {
   const out = /* @__PURE__ */ new Map();
   let text;
   try {
-    text = fs17.readFileSync(file2, "utf8");
+    text = fs18.readFileSync(file2, "utf8");
   } catch {
     return out;
   }
@@ -31666,7 +32887,7 @@ function sessionIndexCached(codexHome) {
   const file2 = codexPaths(codexDir(codexHome)).sessionIndex;
   let mtimeMs = -1;
   try {
-    mtimeMs = fs17.statSync(file2).mtimeMs;
+    mtimeMs = fs18.statSync(file2).mtimeMs;
   } catch {
   }
   const hit = indexCache.get(file2);
@@ -31829,7 +33050,7 @@ async function parse4(source, options = {}) {
 function pickSlug(session, cwd) {
   if (session.projectSlug && session.projectSlug !== "unknown")
     return session.projectSlug;
-  return path14.basename(cwd) || "unknown";
+  return path15.basename(cwd) || "unknown";
 }
 var codexAdapter = {
   harness: "codex",
@@ -31872,7 +33093,7 @@ async function codexDoctor(options = {}) {
     harness: "codex",
     displayName: "Codex CLI",
     sourceDir: paths.sessions,
-    present: fs17.existsSync(paths.root),
+    present: fs18.existsSync(paths.root),
     sessions: sources.length,
     archived,
     bytes: bytes2,
@@ -31966,8 +33187,8 @@ __export(cursor_exports, {
   recoverCwd: () => recoverCwd,
   toolName: () => toolName
 });
-import fs18 from "node:fs";
-import path15 from "node:path";
+import fs19 from "node:fs";
+import path16 from "node:path";
 var TRANSCRIPTS_DIR = "agent-transcripts";
 var SIDECHAIN_DIR3 = "subagents";
 var CURSOR_DOCTOR_NOTE = "cursor: no timestamps on assistant turns (session times come from file mtime), no tool results recorded at all, and title/model/git-branch are unavailable \u2014 they live in VS Code's workspaceStorage, which potsherd does not read.";
@@ -31985,24 +33206,24 @@ function discover3(dirOverride) {
   const root = cursorProjectsDir(dirOverride);
   const out = [];
   for (const slug of readdirSafe4(root, "dir")) {
-    const transcripts = path15.join(root, slug, TRANSCRIPTS_DIR);
+    const transcripts = path16.join(root, slug, TRANSCRIPTS_DIR);
     for (const sessionId of readdirSafe4(transcripts, "dir")) {
-      const sessionDir = path15.join(transcripts, sessionId);
+      const sessionDir = path16.join(transcripts, sessionId);
       for (const file2 of readdirSafe4(sessionDir, "file")) {
         if (!file2.endsWith(".jsonl"))
           continue;
-        const source = statSource(path15.join(sessionDir, file2), slug, {
+        const source = statSource(path16.join(sessionDir, file2), slug, {
           sessionId: basenameId(file2),
           isSidechain: false
         });
         if (source)
           out.push(source);
       }
-      const sidechains = path15.join(sessionDir, SIDECHAIN_DIR3);
+      const sidechains = path16.join(sessionDir, SIDECHAIN_DIR3);
       for (const file2 of readdirSafe4(sidechains, "file")) {
         if (!file2.endsWith(".jsonl"))
           continue;
-        const source = statSource(path15.join(sidechains, file2), slug, {
+        const source = statSource(path16.join(sidechains, file2), slug, {
           sessionId: basenameId(file2),
           isSidechain: true,
           parentSessionId: sessionId
@@ -32020,7 +33241,7 @@ function basenameId(file2) {
 function readdirSafe4(dir, want) {
   let entries;
   try {
-    entries = fs18.readdirSync(dir, { withFileTypes: true });
+    entries = fs19.readdirSync(dir, { withFileTypes: true });
   } catch {
     return [];
   }
@@ -32036,7 +33257,7 @@ function readdirSafe4(dir, want) {
 function statSource(file2, projectSlug, rest) {
   let st;
   try {
-    st = fs18.statSync(file2);
+    st = fs19.statSync(file2);
   } catch {
     return null;
   }
@@ -32346,7 +33567,7 @@ function recoverCwd(projectSlug, candidates) {
         hits.set(dir, (hits.get(dir) ?? 0) + 1);
         break;
       }
-      const parent = path15.dirname(dir);
+      const parent = path16.dirname(dir);
       if (parent === dir)
         break;
       dir = parent;
@@ -32389,7 +33610,7 @@ function doctorLine3(dirOverride) {
   } catch {
     found = [];
   }
-  const exists = fs18.existsSync(dir);
+  const exists = fs19.existsSync(dir);
   const sidechains = found.filter((f) => f.isSidechain).length;
   const sessions = found.length - sidechains;
   const parts = [`${sessions} session${sessions === 1 ? "" : "s"}`];
@@ -32426,8 +33647,8 @@ __export(pi_exports, {
   sourceDir: () => sourceDir2,
   unslugifyPi: () => unslugifyPi
 });
-import fs19 from "node:fs";
-import path16 from "node:path";
+import fs20 from "node:fs";
+import path17 from "node:path";
 import crypto4 from "node:crypto";
 var HANDLED_TYPES2 = /* @__PURE__ */ new Set([
   "session",
@@ -32454,7 +33675,7 @@ function doctorLine4(override) {
   } catch {
     sessions = 0;
   }
-  const exists = fs19.existsSync(dir);
+  const exists = fs20.existsSync(dir);
   const status = exists ? "ready" : "absent";
   const note = exists ? `${sessions} session${sessions === 1 ? "" : "s"}` : "pi not installed";
   return formatDoctorLine({ harness: "pi", status, dir, note });
@@ -32464,27 +33685,27 @@ function discover4(override) {
   const out = [];
   let slugs;
   try {
-    slugs = fs19.readdirSync(root, { withFileTypes: true });
+    slugs = fs20.readdirSync(root, { withFileTypes: true });
   } catch {
     return out;
   }
   for (const slug of slugs) {
     if (!slug.isDirectory())
       continue;
-    const dir = path16.join(root, slug.name);
+    const dir = path17.join(root, slug.name);
     let files;
     try {
-      files = fs19.readdirSync(dir);
+      files = fs20.readdirSync(dir);
     } catch {
       continue;
     }
     for (const file2 of files) {
       if (!file2.endsWith(".jsonl"))
         continue;
-      const full = path16.join(dir, file2);
+      const full = path17.join(dir, file2);
       let stat;
       try {
-        stat = fs19.statSync(full);
+        stat = fs20.statSync(full);
       } catch {
         continue;
       }
@@ -32506,13 +33727,13 @@ function discover4(override) {
   return out;
 }
 function sessionIdFromFilename(file2) {
-  const base2 = path16.basename(file2, ".jsonl");
+  const base2 = path17.basename(file2, ".jsonl");
   const at = base2.lastIndexOf("_");
   return at === -1 ? base2 : base2.slice(at + 1);
 }
 async function parse6(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path16.resolve(typeof source === "string" ? source : source.path);
+  const absolute2 = path17.resolve(typeof source === "string" ? source : source.path);
   const unknownTypes = {};
   let malformedLines = 0;
   let endOffset = 0;
@@ -32589,7 +33810,7 @@ async function parse6(source, options = {}) {
       title = node.record.name;
     }
   }
-  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path16.basename(path16.dirname(absolute2));
+  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path17.basename(path17.dirname(absolute2));
   const headerCwd = header && typeof header.cwd === "string" ? header.cwd : void 0;
   const startedAt = header && typeof header.timestamp === "string" ? header.timestamp : nodes[0]?.ts ?? "";
   let endedAt = startedAt;
@@ -32761,7 +33982,7 @@ function unslugifyPi(slug) {
 }
 function statBytes3(absolute2) {
   try {
-    return fs19.statSync(absolute2).size;
+    return fs20.statSync(absolute2).size;
   } catch {
     return 0;
   }
@@ -32798,8 +34019,8 @@ __export(gemini_exports, {
   sessionIdFromFilename: () => sessionIdFromFilename2,
   sourceDir: () => sourceDir3
 });
-import fs20 from "node:fs";
-import path17 from "node:path";
+import fs21 from "node:fs";
+import path18 from "node:path";
 import crypto5 from "node:crypto";
 var DISPLAY_NAME2 = "Gemini CLI";
 var CHATS_DIR = "chats";
@@ -32816,27 +34037,27 @@ function discover5(override) {
   const out = [];
   let hashes;
   try {
-    hashes = fs20.readdirSync(root, { withFileTypes: true });
+    hashes = fs21.readdirSync(root, { withFileTypes: true });
   } catch {
     return out;
   }
   for (const hash2 of hashes) {
     if (!hash2.isDirectory())
       continue;
-    const dir = path17.join(root, hash2.name, CHATS_DIR);
+    const dir = path18.join(root, hash2.name, CHATS_DIR);
     let files;
     try {
-      files = fs20.readdirSync(dir);
+      files = fs21.readdirSync(dir);
     } catch {
       continue;
     }
     for (const file2 of files) {
       if (!file2.endsWith(".json"))
         continue;
-      const full = path17.join(dir, file2);
+      const full = path18.join(dir, file2);
       let stat;
       try {
-        stat = fs20.statSync(full);
+        stat = fs21.statSync(full);
       } catch {
         continue;
       }
@@ -32858,17 +34079,17 @@ function discover5(override) {
   return out;
 }
 function sessionIdFromFilename2(file2, projectHash) {
-  const base2 = path17.basename(file2, ".json").replace(/^checkpoint-/, "") || "checkpoint";
+  const base2 = path18.basename(file2, ".json").replace(/^checkpoint-/, "") || "checkpoint";
   return `${projectHash.slice(0, 12)}-${base2}`;
 }
 async function parse7(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path17.resolve(typeof source === "string" ? source : source.path);
+  const absolute2 = path18.resolve(typeof source === "string" ? source : source.path);
   const unknownTypes = {};
   let malformedLines = 0;
   let raw = "";
   try {
-    raw = fs20.readFileSync(absolute2, "utf8");
+    raw = fs21.readFileSync(absolute2, "utf8");
   } catch {
     raw = "";
   }
@@ -32884,7 +34105,7 @@ async function parse7(source, options = {}) {
   const { turns, meta: meta3 } = unwrap(doc);
   if (doc !== void 0 && turns.length === 0 && !meta3)
     malformedLines += 1;
-  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path17.basename(path17.dirname(path17.dirname(absolute2)));
+  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path18.basename(path18.dirname(path18.dirname(absolute2)));
   const sessionId = options.sessionId ?? (meta3 && typeof meta3.sessionId === "string" && meta3.sessionId.trim() ? meta3.sessionId : sessionIdFromFilename2(absolute2, projectSlug));
   const mtimeMs = options.mtimeMs ?? src?.mtimeMs ?? statMtime(absolute2);
   const fileTime = new Date(mtimeMs).toISOString();
@@ -33080,7 +34301,7 @@ function isHumanTurn(role, parts) {
 function projectHashes(cwd) {
   const sha = (s) => crypto5.createHash("sha256").update(s).digest("hex");
   const trimmed = cwd.length > 1 ? cwd.replace(/[/\\]+$/, "") : cwd;
-  return uniq([sha(cwd), sha(trimmed), sha(trimmed + path17.sep)]);
+  return uniq([sha(cwd), sha(trimmed), sha(trimmed + path18.sep)]);
 }
 function recoverCwd2(projectHash, candidates) {
   if (!/^[0-9a-f]{16,}$/i.test(projectHash))
@@ -33088,15 +34309,15 @@ function recoverCwd2(projectHash, candidates) {
   const seen = /* @__PURE__ */ new Set();
   const dirs = [];
   for (const c of candidates) {
-    if (!path17.isAbsolute(c))
+    if (!path18.isAbsolute(c))
       continue;
-    let dir = path17.dirname(path17.resolve(c));
+    let dir = path18.dirname(path18.resolve(c));
     for (let i = 0; i < 40; i += 1) {
       if (seen.has(dir))
         break;
       seen.add(dir);
       dirs.push(dir);
-      const up = path17.dirname(dir);
+      const up = path18.dirname(dir);
       if (up === dir)
         break;
       dir = up;
@@ -33112,7 +34333,7 @@ function recoverCwd2(projectHash, candidates) {
 }
 function statMtime(absolute2) {
   try {
-    return fs20.statSync(absolute2).mtimeMs;
+    return fs21.statSync(absolute2).mtimeMs;
   } catch {
     return 0;
   }
@@ -33126,8 +34347,8 @@ function doctorLine5(override) {
   } catch {
     found = [];
   }
-  const installed = fs20.existsSync(root);
-  const tmpExists = fs20.existsSync(tmp);
+  const installed = fs21.existsSync(root);
+  const tmpExists = fs21.existsSync(tmp);
   let status;
   let note;
   if (found.length > 0) {
@@ -33171,8 +34392,8 @@ __export(opencode_exports, {
   quoteIdent: () => quoteIdent,
   sourceDir: () => sourceDir4
 });
-import fs21 from "node:fs";
-import path18 from "node:path";
+import fs22 from "node:fs";
+import path19 from "node:path";
 var DISPLAY_NAME3 = "opencode";
 var DB_EXTENSIONS = [".db", ".sqlite", ".sqlite3"];
 var MAX_DEPTH = 3;
@@ -33286,19 +34507,19 @@ function findStores(override) {
       return;
     let entries;
     try {
-      entries = fs21.readdirSync(dir, { withFileTypes: true });
+      entries = fs22.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
-      const full = path18.join(dir, e.name);
+      const full = path19.join(dir, e.name);
       if (e.isDirectory()) {
         walk2(full, depth + 1);
         continue;
       }
       if (!e.isFile())
         continue;
-      if (DB_EXTENSIONS.includes(path18.extname(e.name).toLowerCase()))
+      if (DB_EXTENSIONS.includes(path19.extname(e.name).toLowerCase()))
         out.push(full);
     }
   };
@@ -33327,7 +34548,7 @@ function discoverIn(schema) {
   }
   let mtimeMs = 0;
   try {
-    mtimeMs = fs21.statSync(schema.dbPath).mtimeMs;
+    mtimeMs = fs22.statSync(schema.dbPath).mtimeMs;
   } catch {
     mtimeMs = 0;
   }
@@ -33357,7 +34578,7 @@ function discoverIn(schema) {
         sessionId: id,
         harness: "opencode",
         path: schema.dbPath,
-        projectSlug: directory ? path18.basename(directory) : "",
+        projectSlug: directory ? path19.basename(directory) : "",
         bytes: bytes2.get(id) ?? 0,
         mtimeMs,
         // opencode's `parent_id` marks a child session — a subagent
@@ -33376,7 +34597,7 @@ function discoverIn(schema) {
 }
 async function parse8(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
-  const dbPath2 = path18.resolve(typeof source === "string" ? source : source.path);
+  const dbPath2 = path19.resolve(typeof source === "string" ? source : source.path);
   const sessionId = options.sessionId ?? src?.sessionId ?? "";
   const unknownTypes = {};
   const empty = (reason) => {
@@ -33459,7 +34680,7 @@ async function parse8(source, options = {}) {
       harness: "opencode",
       sourcePath: dbPath2,
       project: directory ?? "",
-      projectSlug: options.projectSlug ?? src?.projectSlug ?? (directory ? path18.basename(directory) : ""),
+      projectSlug: options.projectSlug ?? src?.projectSlug ?? (directory ? path19.basename(directory) : ""),
       startedAt: isoOf(sessionRow?.["created"]) ?? firstTs ?? "",
       endedAt: isoOf(sessionRow?.["updated"]) ?? lastTs ?? isoOf(sessionRow?.["created"]) ?? "",
       ...str2("title") ? { title: str2("title") } : {},
@@ -33644,7 +34865,7 @@ function errText(e) {
 }
 function doctorLine6(override) {
   const dir = sourceDir4(override);
-  const installed = fs21.existsSync(dir);
+  const installed = fs22.existsSync(dir);
   if (!installed) {
     return formatDoctorLine({
       harness: "opencode",
@@ -33655,7 +34876,7 @@ function doctorLine6(override) {
   }
   const stores = findStores(override);
   if (stores.length === 0) {
-    const hasStorage = fs21.existsSync(path18.join(dir, "storage"));
+    const hasStorage = fs22.existsSync(path19.join(dir, "storage"));
     return formatDoctorLine({
       harness: "opencode",
       status: "empty",
@@ -33733,8 +34954,8 @@ __export(copilot_exports, {
   sourceDir: () => sourceDir5,
   stateFileIn: () => stateFileIn
 });
-import fs22 from "node:fs";
-import path19 from "node:path";
+import fs23 from "node:fs";
+import path20 from "node:path";
 var DISPLAY_NAME4 = "Copilot CLI";
 var STATE_FILES = [
   "state.json",
@@ -33745,7 +34966,7 @@ var STATE_FILES = [
   "messages.jsonl"
 ];
 var COPILOT_FORMAT_UNVERIFIED = true;
-var COPILOT_DOCTOR_NOTE = "copilot: format unverified \u2014 this adapter was written from documentation, not from a real session, so record coverage is a best guess until someone runs it on one. potsherd reads ~/.copilot only: Copilot's VS Code chats live in workspaceStorage, which is not one of the read-only inputs potsherd is allowed, so IDE sessions are not shown here.";
+var COPILOT_DOCTOR_NOTE = `copilot: format WRONG, measured \u2014 a real Copilot CLI 1.0.80 session was run against this adapter on 24 aug 2026. The directory it looks in is right and its contents are not: session-state/<id>/ holds workspace.yaml, checkpoints/ and rewind-file-snapshots/ and none of the files this adapter reads, so potsherd finds 0 sessions on a working install. The turns are in ~/.copilot/session-store.db, table turns(session_id, turn_index, user_message, assistant_response), which this adapter does not open. This is not "unverified"; it is verified and broken. potsherd reads ~/.copilot only: Copilot's VS Code chats live in workspaceStorage, which is not one of the read-only inputs potsherd is allowed.`;
 var HISTORY_KEYS2 = ["messages", "history", "turns", "events", "state"];
 var USER_ROLES2 = /* @__PURE__ */ new Set(["user", "human", "prompt"]);
 var ASSISTANT_ROLES2 = /* @__PURE__ */ new Set(["assistant", "model", "agent", "copilot"]);
@@ -33762,12 +34983,12 @@ function scan(override) {
   const unreadable = [];
   let entries;
   try {
-    entries = fs22.readdirSync(root, { withFileTypes: true });
+    entries = fs23.readdirSync(root, { withFileTypes: true });
   } catch {
     return { sources, unreadable };
   }
   for (const entry2 of entries) {
-    const full = path19.join(root, entry2.name);
+    const full = path20.join(root, entry2.name);
     if (entry2.isDirectory()) {
       const state = stateFileIn(full);
       if (!state) {
@@ -33783,10 +35004,10 @@ function scan(override) {
     }
     if (!entry2.isFile())
       continue;
-    const ext = path19.extname(entry2.name).toLowerCase();
+    const ext = path20.extname(entry2.name).toLowerCase();
     if (ext !== ".json" && ext !== ".jsonl")
       continue;
-    const src = sourceFor(full, path19.basename(entry2.name, ext));
+    const src = sourceFor(full, path20.basename(entry2.name, ext));
     if (src)
       sources.push(src);
   }
@@ -33796,9 +35017,9 @@ function scan(override) {
 }
 function stateFileIn(dir) {
   for (const name of STATE_FILES) {
-    const candidate = path19.join(dir, name);
+    const candidate = path20.join(dir, name);
     try {
-      if (fs22.statSync(candidate).isFile())
+      if (fs23.statSync(candidate).isFile())
         return candidate;
     } catch {
     }
@@ -33808,7 +35029,7 @@ function stateFileIn(dir) {
 function sourceFor(file2, sessionId) {
   let stat;
   try {
-    stat = fs22.statSync(file2);
+    stat = fs23.statSync(file2);
   } catch {
     return void 0;
   }
@@ -33830,12 +35051,12 @@ function sourceFor(file2, sessionId) {
 }
 async function parse9(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path19.resolve(typeof source === "string" ? source : source.path);
+  const absolute2 = path20.resolve(typeof source === "string" ? source : source.path);
   const unknownTypes = {};
   let malformedLines = 0;
   let raw = "";
   try {
-    raw = fs22.readFileSync(absolute2, "utf8");
+    raw = fs23.readFileSync(absolute2, "utf8");
   } catch {
     raw = "";
   }
@@ -33872,7 +35093,7 @@ async function parse9(source, options = {}) {
     // empty string because copilot's session-state directory is keyed by
     // session, not by project — and an empty string is not nullish, so `??`
     // would let it beat a slug we can actually derive from the cwd.
-    projectSlug: options.projectSlug || src?.projectSlug || (cwd ? path19.basename(cwd) : ""),
+    projectSlug: options.projectSlug || src?.projectSlug || (cwd ? path20.basename(cwd) : ""),
     startedAt,
     endedAt: endedAt < startedAt ? startedAt : endedAt,
     ...title ? { title } : {},
@@ -33891,17 +35112,17 @@ async function parse9(source, options = {}) {
   return { session, exchanges: built.exchanges, unknownTypes, endOffset, malformedLines };
 }
 function sessionIdFromPath2(file2) {
-  const ext = path19.extname(file2);
-  const base2 = path19.basename(file2, ext);
-  if (STATE_FILES.includes(path19.basename(file2))) {
-    return path19.basename(path19.dirname(file2));
+  const ext = path20.extname(file2);
+  const base2 = path20.basename(file2, ext);
+  if (STATE_FILES.includes(path20.basename(file2))) {
+    return path20.basename(path20.dirname(file2));
   }
   return base2;
 }
 function readDocument(file2, raw) {
   if (!raw.trim())
     return { turns: [], malformed: 0 };
-  if (path19.extname(file2).toLowerCase() === ".jsonl") {
+  if (path20.extname(file2).toLowerCase() === ".jsonl") {
     const turns = [];
     let meta3;
     let malformed = 0;
@@ -34144,7 +35365,7 @@ function isoOf2(value) {
 }
 function statMtime2(absolute2) {
   try {
-    return fs22.statSync(absolute2).mtimeMs;
+    return fs23.statSync(absolute2).mtimeMs;
   } catch {
     return 0;
   }
@@ -34158,8 +35379,8 @@ function doctorLine7(override) {
   } catch {
     found = { sources: [], unreadable: [] };
   }
-  const installed = fs22.existsSync(root);
-  const stateExists = fs22.existsSync(dir);
+  const installed = fs23.existsSync(root);
+  const stateExists = fs23.existsSync(dir);
   let status;
   let note;
   if (found.sources.length > 0) {
@@ -34167,12 +35388,12 @@ function doctorLine7(override) {
     if (found.unreadable.length) {
       parts.push(`${found.unreadable.length} unreadable`);
     }
-    parts.push("unverified format");
+    parts.push("format known wrong \u2014 see doctor --json");
     status = "ready";
     note = parts.join(" \xB7 ");
   } else if (installed || stateExists) {
     status = "empty";
-    note = stateExists ? "Copilot CLI installed, session-state/ holds no sessions \xB7 unverified format" : "Copilot CLI installed, but it has written no session-state/ \xB7 unverified format";
+    note = stateExists ? "Copilot CLI installed \xB7 the turns are in session-store.db, which this adapter does not read" : "Copilot CLI installed, but it has written no session-state/ \xB7 run it once outside server mode";
   } else {
     status = "absent";
     note = "Copilot CLI not installed";
@@ -34190,8 +35411,8 @@ var copilot_default = copilotAdapter;
 
 // ../core/dist/ingest.js
 import crypto6 from "node:crypto";
-import fs23 from "node:fs";
-import path20 from "node:path";
+import fs24 from "node:fs";
+import path21 from "node:path";
 
 // ../core/dist/threads.js
 var OVERLAP_THRESHOLD = 0.75;
@@ -34808,7 +36029,7 @@ async function indexHarness(db, spec, options, recordTypes) {
     harness: spec.harness,
     displayName: spec.displayName,
     sourceDir: spec.sourceDir,
-    present: fs23.existsSync(spec.sourceDir),
+    present: fs24.existsSync(spec.sourceDir),
     discovered: 0,
     parsed: 0,
     skipped: 0,
@@ -34859,7 +36080,7 @@ async function indexHarness(db, spec, options, recordTypes) {
       harness: spec.harness,
       done,
       total: sources.length,
-      note: path20.basename(source.path)
+      note: path21.basename(source.path)
     });
     const seen = known.get(source.sessionId);
     if (!options.full && seen && seen.mtime !== null && seen.mtime === Math.floor(source.mtimeMs) && seen.offset === source.bytes) {
@@ -34887,7 +36108,7 @@ async function indexHarness(db, spec, options, recordTypes) {
     try {
       await indexLineage(db, spec.harness, source, parsed.session.id);
     } catch (err) {
-      report.errors.push(`lineage ${path20.basename(source.path)}: ${err.message}`);
+      report.errors.push(`lineage ${path21.basename(source.path)}: ${err.message}`);
     }
     const version2 = spec.version(parsed);
     writeSessionRecordTypes(db, parsed.session.id, spec, version2, parsed.unknownTypes);
@@ -35141,8 +36362,8 @@ function sum(xs, f) {
 }
 
 // ../core/dist/cards/write.js
-import fs25 from "node:fs";
-import path21 from "node:path";
+import fs26 from "node:fs";
+import path22 from "node:path";
 
 // ../core/dist/cards/ghost.js
 var PROMPTS_ONLY = "prompts-only";
@@ -35242,7 +36463,7 @@ __export(sentinel_exports, {
   isErroredSentinel: () => isErroredSentinel,
   shouldQueueForCard: () => shouldQueueForCard
 });
-import fs24 from "node:fs";
+import fs25 from "node:fs";
 var ERROR_MARKER = "__ERRORED__";
 var ERROR_MARKER_PREFIX = `${ERROR_MARKER}
 `;
@@ -35267,7 +36488,7 @@ function getErrorRetryMs() {
 function hasRealCard(cardPath2) {
   let content;
   try {
-    content = fs24.readFileSync(cardPath2, "utf-8");
+    content = fs25.readFileSync(cardPath2, "utf-8");
   } catch {
     return false;
   }
@@ -35278,14 +36499,14 @@ function hasRealCard(cardPath2) {
 function shouldQueueForCard(cardPath2) {
   let content;
   try {
-    content = fs24.readFileSync(cardPath2, "utf-8");
+    content = fs25.readFileSync(cardPath2, "utf-8");
   } catch (error51) {
     return error51.code === "ENOENT";
   }
   if (!isErroredSentinel(content))
     return false;
   try {
-    return Date.now() - fs24.statSync(cardPath2).mtimeMs >= getErrorRetryMs();
+    return Date.now() - fs25.statSync(cardPath2).mtimeMs >= getErrorRetryMs();
   } catch {
     return false;
   }
@@ -35296,7 +36517,7 @@ function cardEmbeddingText(card) {
   return [card.title, card.summary, card.topics.join(", ")].filter((s) => s.trim()).join("\n");
 }
 function cardPath(root, harness, slug, id) {
-  return path21.join(cardsDir(root), harness, safeSlug(slug), `${id}.md`);
+  return path22.join(cardsDir(root), harness, safeSlug(slug), `${id}.md`);
 }
 function safeSlug(slug) {
   const segments = (slug ?? "").split(/[/\\]+/).map((part) => part.trim()).filter((part) => part.length > 0 && part !== "." && part !== "..");
@@ -35420,8 +36641,8 @@ function writeCard(db, root, record2, embedding) {
   });
   write();
   const file2 = cardPath(root, record2.harness, record2.projectSlug, record2.sessionId);
-  fs25.mkdirSync(path21.dirname(file2), { recursive: true });
-  fs25.writeFileSync(file2, md, { mode: 384 });
+  fs26.mkdirSync(path22.dirname(file2), { recursive: true });
+  fs26.writeFileSync(file2, md, { mode: 384 });
   return file2;
 }
 function vecCardsExist(db) {
@@ -35435,12 +36656,12 @@ function vecCardsExist(db) {
 function exportCards(root, dest) {
   const from = cardsDir(root);
   const result = { files: 0, bytes: 0, dest, skipped: 0 };
-  if (!fs25.existsSync(from))
+  if (!fs26.existsSync(from))
     return result;
   const walk2 = (dir, rel) => {
-    for (const entry2 of fs25.readdirSync(dir, { withFileTypes: true })) {
-      const source = path21.join(dir, entry2.name);
-      const relative = path21.join(rel, entry2.name);
+    for (const entry2 of fs26.readdirSync(dir, { withFileTypes: true })) {
+      const source = path22.join(dir, entry2.name);
+      const relative = path22.join(rel, entry2.name);
       if (entry2.isDirectory()) {
         walk2(source, relative);
         continue;
@@ -35449,7 +36670,7 @@ function exportCards(root, dest) {
         continue;
       let content;
       try {
-        content = fs25.readFileSync(source, "utf-8");
+        content = fs26.readFileSync(source, "utf-8");
       } catch {
         result.skipped += 1;
         continue;
@@ -35458,9 +36679,9 @@ function exportCards(root, dest) {
         result.skipped += 1;
         continue;
       }
-      const target = path21.join(dest, relative);
-      fs25.mkdirSync(path21.dirname(target), { recursive: true });
-      fs25.writeFileSync(target, content, { mode: 384 });
+      const target = path22.join(dest, relative);
+      fs26.mkdirSync(path22.dirname(target), { recursive: true });
+      fs26.writeFileSync(target, content, { mode: 384 });
       result.files += 1;
       result.bytes += Buffer.byteLength(content);
     }
@@ -35829,7 +37050,7 @@ function parseFiles(json2) {
 }
 
 // ../core/dist/stats.js
-import fs26 from "node:fs";
+import fs27 from "node:fs";
 function stats(db, options = {}) {
   const root = potsherdDir(options.root);
   const entries = options.all ? [] : [...options.ignore ?? readIgnoreList(root)];
@@ -35968,7 +37189,7 @@ function freshness(db, root, stat) {
     if (r.status === "archived" || r.archived_path)
       archived++;
     try {
-      const st = fs26.statSync(r.source_path);
+      const st = fs27.statSync(r.source_path);
       if (r.source_mtime !== null && Math.floor(st.mtimeMs) !== r.source_mtime)
         stale++;
     } catch {
@@ -35982,7 +37203,7 @@ function freshness(db, root, stat) {
   const file2 = dbPath(root);
   let dbBytes = 0;
   try {
-    dbBytes = fs26.statSync(file2).size;
+    dbBytes = fs27.statSync(file2).size;
   } catch {
     dbBytes = 0;
   }
@@ -37539,1205 +38760,6 @@ function utcRange(startMs, endExclusiveMs, label3) {
   };
 }
 
-// ../core/dist/markers.js
-var markers_exports = {};
-__export(markers_exports, {
-  EXCLUSION_MARKERS: () => EXCLUSION_MARKERS,
-  POTSHERD_CARD_MARKER: () => POTSHERD_CARD_MARKER,
-  SUMMARIZER_CONTEXT_MARKER: () => SUMMARIZER_CONTEXT_MARKER,
-  hasExclusionMarker: () => hasExclusionMarker
-});
-var SUMMARIZER_CONTEXT_MARKER = "Context: This summary will be shown in a list to help users and Claude choose which conversations are relevant";
-var POTSHERD_CARD_MARKER = "<INSTRUCTIONS-TO-POTSHERD>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-POTSHERD>";
-var EXCLUSION_MARKERS = [
-  "<INSTRUCTIONS-TO-EPISODIC-MEMORY>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-EPISODIC-MEMORY>",
-  "Only use NO_INSIGHTS_FOUND",
-  SUMMARIZER_CONTEXT_MARKER,
-  POTSHERD_CARD_MARKER
-];
-function hasExclusionMarker(text) {
-  return EXCLUSION_MARKERS.some((marker2) => text.includes(marker2));
-}
-
-// ../core/dist/llm.js
-import { createRequire as createRequire3 } from "node:module";
-import { spawn } from "node:child_process";
-import fs27 from "node:fs";
-import os3 from "node:os";
-import path22 from "node:path";
-import process11 from "node:process";
-var MODEL_CALL_VERBS = ["card", "ask", "graft"];
-var RUNTIME_FETCH_VERBS = ["index"];
-var OFFLINE_VERBS = [
-  "audit",
-  "rescue",
-  "guard",
-  // `index` WAS here, and phase 10 took it out. A2 made semantic search
-  // automatic: the first index fetches the embedding runtime from
-  // huggingface.co in the background, without being asked. The verb still
-  // calls no model -- that is a different property -- but it can no longer
-  // sit under the words "open no socket at all", which is the FOURTH false
-  // claim this receipt has published and the second one caused by a verb
-  // quietly acquiring a capability. See RUNTIME_FETCH_VERBS below.
-  "ls",
-  "show",
-  "stats",
-  "tag",
-  // T10.8 — `note` writes, and writes only into `~/.potsherd/potsherd.db`. It
-  // is on this list for the reason `unpin` and `setup` are: a verb missing
-  // from every list is a verb `doctor --privacy` has not accounted for, and
-  // the one verb that writes is the last one that should go unaccounted for.
-  "note",
-  "pin",
-  "unpin",
-  "link",
-  // `setup` writes MCP stanzas into other tools' config files, which is a
-  // consent-gated *local* write and not a model call. It belongs on this list
-  // for the same reason `unpin` does: `doctor --privacy` answers by omission
-  // otherwise, and an answer by omission is not one.
-  "setup",
-  // `stack` only detects which memory tools are installed: it stats directories
-  // and reads two of its own files. No model, no socket.
-  "stack",
-  // `ignore` / `unignore` read and write one file, `~/.potsherd/config.json`,
-  // and nothing else. They are on this list for the reason `unpin` and `setup`
-  // are: `doctor --privacy` answers by omission otherwise, and a verb missing
-  // from every list on that receipt is a verb the receipt has not accounted
-  // for. The file they write is named in the `writes:` block above.
-  "ignore",
-  "unignore",
-  "doctor"
-];
-var LOCAL_SOCKET_VERBS = ["find", "export"];
-var MODEL_ALIASES = ["haiku", "sonnet", "opus"];
-var CARD_MODEL = "haiku";
-var ASK_MODEL = "sonnet";
-var API_MODEL_IDS = {
-  haiku: "claude-haiku-4-5",
-  sonnet: "claude-sonnet-5",
-  opus: "claude-opus-5"
-};
-var PRICES = {
-  haiku: { inputPerMTok: 1, outputPerMTok: 5 },
-  sonnet: { inputPerMTok: 3, outputPerMTok: 15 },
-  opus: { inputPerMTok: 5, outputPerMTok: 25 }
-};
-function modelClass(model) {
-  const m = model.toLowerCase();
-  if (m.includes("haiku"))
-    return "haiku";
-  if (m.includes("sonnet"))
-    return "sonnet";
-  return "opus";
-}
-function isAlias(model) {
-  return MODEL_ALIASES.includes(model);
-}
-function resolveModel(model, backend2) {
-  if (backend2 === "api" && isAlias(model))
-    return API_MODEL_IDS[model];
-  return model;
-}
-var CHARS_PER_TOKEN = 3.6;
-function tokensForChars(chars) {
-  return Math.ceil(Math.max(0, chars) / CHARS_PER_TOKEN);
-}
-function tokensForText(text) {
-  return tokensForChars(text.length);
-}
-var CALL_PROFILES = {
-  "agent-sdk": {
-    baseMs: 46200,
-    msPerKChar: 915,
-    baseUsd: 0.016,
-    usdPerMChar: 1.057,
-    outputTokensPerCall: 2100,
-    parallelEfficiency: 0.8,
-    spread: { timeLow: 0.8, timeHigh: 2, usdLow: 0.8, usdHigh: 1.4 },
-    measured: true,
-    basis: "12 real calls, 3k\u201342k chars"
-  },
-  // Never measured on the reference machine: there is no key there and `04`
-  // Q4 made this the fallback. The shape is the agent-sdk fit with the
-  // harness taken out — no spawn, no reasoning-heavy harness loop — and the
-  // range is deliberately three times as wide, because a wide range that
-  // contains the truth beats a narrow one that does not.
-  api: {
-    baseMs: 8e3,
-    msPerKChar: 250,
-    baseUsd: 0,
-    usdPerMChar: null,
-    outputTokensPerCall: null,
-    parallelEfficiency: 0.9,
-    spread: { timeLow: 0.4, timeHigh: 3, usdLow: 0.7, usdHigh: 1.6 },
-    measured: false,
-    basis: "not measured \u2014 api list price and an assumed latency"
-  },
-  // The same binary the agent sdk drives, spawned directly, so it inherits
-  // that fit. **Not measured at card size** — the only real numbers on the
-  // reference machine are two probe calls (13.0 s and 8.7 s wall for a
-  // 30-character prompt), which say nothing about a 40,000-character one. The
-  // range is widened accordingly rather than the point estimate moved.
-  "claude-cli": {
-    baseMs: 46200,
-    msPerKChar: 915,
-    baseUsd: 0.016,
-    usdPerMChar: 1.057,
-    outputTokensPerCall: 2100,
-    parallelEfficiency: 0.8,
-    spread: { timeLow: 0.4, timeHigh: 3, usdLow: 0.7, usdHigh: 1.6 },
-    measured: false,
-    basis: "est. \u2014 the agent-sdk fit for the same binary, spawned directly"
-  },
-  // Likewise unverified: codex is not installed on the reference machine
-  // (`CodexTransport`'s note says the same). It spawns a CLI like the agent
-  // sdk does, so it inherits those timings and is priced from tokens.
-  codex: {
-    baseMs: 46200,
-    msPerKChar: 915,
-    baseUsd: 0,
-    usdPerMChar: null,
-    outputTokensPerCall: null,
-    parallelEfficiency: 0.8,
-    spread: { timeLow: 0.4, timeHigh: 3, usdLow: 0.7, usdHigh: 1.6 },
-    measured: false,
-    basis: "est. \u2014 argv verified at codex 0.149.0, timings assumed from the agent sdk"
-  }
-};
-function callProfile(backend2) {
-  return CALL_PROFILES[backend2 ?? "agent-sdk"] ?? CALL_PROFILES["agent-sdk"];
-}
-var HARNESS_OVERHEAD_USD = CALL_PROFILES["agent-sdk"].baseUsd;
-function effectiveConcurrency(n2, profile) {
-  const c = Math.max(1, Math.floor(n2));
-  return 1 + (c - 1) * profile.parallelEfficiency;
-}
-var CHUNK_CHARS = 4e4;
-var OUTPUT_CHARS_PER_CALL = 1400;
-var PROMPT_OVERHEAD_CHARS = 2e3;
-function estimate(input) {
-  const model = input.model ?? CARD_MODEL;
-  const cls = modelClass(model);
-  const price = PRICES[cls];
-  const profile = callProfile(input.backend);
-  const chunk = Math.max(1e3, input.chunkChars ?? CHUNK_CHARS);
-  const outChars = input.outputCharsPerCall ?? OUTPUT_CHARS_PER_CALL;
-  const overhead = input.promptOverheadChars ?? PROMPT_OVERHEAD_CHARS;
-  const concurrency = Math.max(1, Math.floor(input.concurrency ?? 1));
-  const chargeable = input.chargeable ?? (input.backend ? input.backend === "api" : true);
-  const priceScale = price.inputPerMTok / PRICES[CARD_MODEL].inputPerMTok;
-  const perSession = [];
-  let calls = 0;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let promptChars = 0;
-  for (const s of input.sessions) {
-    const chunks = Math.max(1, Math.ceil(Math.max(0, s.chars) / chunk));
-    const n2 = s.calls ?? (chunks === 1 ? 1 : chunks + 1);
-    const reduceChars = chunks === 1 ? 0 : chunks * outChars;
-    const chars = Math.max(0, s.chars) + n2 * overhead + reduceChars;
-    const inTok = tokensForChars(chars);
-    const outTok = profile.outputTokensPerCall !== null ? n2 * profile.outputTokensPerCall : tokensForChars(n2 * outChars);
-    perSession.push({
-      id: s.id,
-      calls: n2,
-      inputTokens: inTok,
-      outputTokens: outTok,
-      usd: callUsd(n2, chars, inTok, outTok, profile, price, priceScale)
-    });
-    calls += n2;
-    inputTokens += inTok;
-    outputTokens += outTok;
-    promptChars += chars;
-  }
-  const cal = input.calibration;
-  const usdRatio = cal && cal.samples > 0 ? cal.usdRatio : 1;
-  const timeRatio = cal && cal.samples > 0 ? cal.timeRatio : 1;
-  const rawUsd = calls === 0 ? 0 : callUsd(calls, promptChars, inputTokens, outputTokens, profile, price, priceScale);
-  const usd = rawUsd * usdRatio;
-  const serialMs = calls * profile.baseMs + promptChars / 1e3 * profile.msPerKChar;
-  const eff = effectiveConcurrency(concurrency, profile);
-  const seconds = calls === 0 ? 0 : serialMs / 1e3 / eff * timeRatio;
-  return {
-    sessions: input.sessions.length,
-    calls,
-    inputTokens,
-    outputTokens,
-    usd,
-    usdLow: usd * profile.spread.usdLow,
-    usdHigh: usd * profile.spread.usdHigh,
-    seconds,
-    secondsLow: seconds * profile.spread.timeLow,
-    secondsHigh: seconds * profile.spread.timeHigh,
-    model,
-    modelClass: cls,
-    ...input.backend ? { backend: input.backend } : {},
-    chargeable,
-    basis: profile.basis,
-    measured: profile.measured,
-    effectiveConcurrency: eff,
-    ...cal && cal.samples > 0 ? { calibration: cal } : {},
-    perSession
-  };
-}
-function callUsd(calls, chars, inputTokens, outputTokens, profile, price, priceScale) {
-  if (profile.usdPerMChar === null) {
-    return inputTokens / 1e6 * price.inputPerMTok + outputTokens / 1e6 * price.outputPerMTok + calls * profile.baseUsd * priceScale;
-  }
-  return (calls * profile.baseUsd + chars / 1e6 * profile.usdPerMChar) * priceScale;
-}
-function emptySpend() {
-  return { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0, ms: 0, estimatedInputCalls: 0 };
-}
-var BudgetError = class extends Error {
-  detail;
-  fix;
-  name = "BudgetError";
-  constructor(message2, detail, fix) {
-    super(message2);
-    this.detail = detail;
-    this.fix = fix;
-  }
-};
-var Budget = class {
-  limits;
-  spent = emptySpend();
-  done = 0;
-  total = 0;
-  /** Estimated cost of calls in flight: admitted, not yet recorded or released. */
-  reservedUsd = 0;
-  reservedTokens = 0;
-  constructor(limits = {}) {
-    this.limits = limits;
-  }
-  /** Dollars held for in-flight calls. For receipts and tests, not for display. */
-  get inFlightUsd() {
-    return this.reservedUsd;
-  }
-  get spend() {
-    return { ...this.spent };
-  }
-  get maxUsd() {
-    return this.limits.maxUsd;
-  }
-  get maxTokens() {
-    return this.limits.maxTokens;
-  }
-  /** How far the run has got, for the abort message. */
-  progress(done, total) {
-    this.done = done;
-    this.total = total;
-  }
-  /**
-   * Throws {@link BudgetError} when this call would cross a ceiling, counting
-   * what other calls already hold in flight; otherwise reserves the projection
-   * and returns the {@link Reservation} that must later be recorded or
-   * released.
-   *
-   * The return value is safe to ignore only where nothing is ever in flight (a
-   * strictly serial caller, or a test): an ignored reservation is held for the
-   * life of the `Budget`.
-   */
-  admit(projected = {}) {
-    const usd = projected.usd ?? 0;
-    const tokens = projected.tokens ?? 0;
-    const { maxUsd, maxTokens } = this.limits;
-    const committedUsd = this.spent.usd + this.reservedUsd;
-    if (maxUsd !== void 0 && committedUsd + usd > maxUsd) {
-      const inFlight = this.reservedUsd > 0 ? ` (${fmtUsd(this.reservedUsd)} of it in flight)` : "";
-      throw new BudgetError(`stopped at --max-usd ${maxUsd.toFixed(2)}: ${this.done} of ${this.total} done, ${fmtUsd(committedUsd)} committed${inFlight}, next call needs ${fmtUsd(usd)}`, {
-        kind: "usd",
-        limit: maxUsd,
-        projected: committedUsd + usd,
-        done: this.done,
-        total: this.total,
-        spend: this.spend
-      }, `potsherd card --all --max-usd ${Math.ceil(committedUsd + usd + 1)}`);
-    }
-    const spentTokens = this.spent.inputTokens + this.spent.outputTokens;
-    const committedTokens = spentTokens + this.reservedTokens;
-    if (maxTokens !== void 0 && committedTokens + tokens > maxTokens) {
-      throw new BudgetError(`stopped at --max-tokens ${maxTokens}: ${this.done} of ${this.total} done, ${committedTokens} tokens committed, next call needs ${tokens}`, {
-        kind: "tokens",
-        limit: maxTokens,
-        projected: committedTokens + tokens,
-        done: this.done,
-        total: this.total,
-        spend: this.spend
-      }, `potsherd card --all --max-tokens ${committedTokens + tokens + maxTokens}`);
-    }
-    this.reservedUsd += usd;
-    this.reservedTokens += tokens;
-    let live = true;
-    const self = this;
-    return {
-      usd,
-      tokens,
-      release() {
-        if (!live)
-          return;
-        live = false;
-        self.reservedUsd -= usd;
-        self.reservedTokens -= tokens;
-        if (self.reservedUsd < 1e-12)
-          self.reservedUsd = 0;
-        if (self.reservedTokens < 1e-9)
-          self.reservedTokens = 0;
-      }
-    };
-  }
-  /**
-   * The actual cost of a call that has returned. Pass the {@link Reservation}
-   * {@link admit} gave you and the estimate it held is dropped in the same
-   * step, so `spent + reserved` never double-counts one call.
-   */
-  record(r, reservation) {
-    reservation?.release();
-    this.spent.calls += 1;
-    this.spent.inputTokens += r.inputTokens;
-    this.spent.outputTokens += r.outputTokens;
-    this.spent.usd += r.usd;
-    this.spent.ms += r.ms;
-    if (r.inputTokensEstimated)
-      this.spent.estimatedInputCalls += 1;
-  }
-};
-function fmtUsd(n2) {
-  return n2 < 0.01 && n2 > 0 ? `$${n2.toFixed(4)}` : `$${n2.toFixed(2)}`;
-}
-var REENTRANCY_ENV = "POTSHERD_LLM_GUARD";
-function insidePotsherdCall(env = process11.env) {
-  return env[REENTRANCY_ENV] === "1";
-}
-var ReentrancyError = class extends Error {
-  name = "ReentrancyError";
-  fix = "run potsherd card from a shell, not from inside a potsherd model call";
-  constructor() {
-    super(`refusing to call a model from inside one (${REENTRANCY_ENV}=1). potsherd spawned this process; it must not spawn another.`);
-  }
-};
-function hostAgent(env = process11.env) {
-  const forced = env["POTSHERD_HARNESS"];
-  if (forced === "claude-code" || forced === "codex" || forced === "cursor")
-    return forced;
-  if (env["CLAUDECODE"] === "1" || (env["CLAUDE_CODE_ENTRYPOINT"] ?? "") !== "")
-    return "claude-code";
-  if (env["CODEX_HOME"] || env["CODEX_SANDBOX"])
-    return "codex";
-  if (env["CURSOR_AGENT"] || env["CURSOR_TRACE_ID"])
-    return "cursor";
-  return null;
-}
-var RESOLUTION_LADDER = [
-  {
-    id: "host-seam",
-    rung: 1,
-    backend: null,
-    label: "the host agent is the model",
-    ready: (a) => a.hostSeam
-  },
-  {
-    id: "claude-cli",
-    rung: 2,
-    backend: "claude-cli",
-    label: "the claude binary, spawned",
-    ready: (a) => a.claude !== null
-  },
-  {
-    id: "codex-cli",
-    rung: 2,
-    backend: "codex",
-    label: "the codex binary, spawned",
-    ready: (a) => a.codex !== null
-  },
-  {
-    id: "agent-sdk",
-    rung: 3,
-    backend: "agent-sdk",
-    label: "the agent sdk, already installed",
-    ready: (a) => a.claude !== null && a.agentSdk
-  },
-  {
-    id: "api-key",
-    rung: 3,
-    backend: "api",
-    label: "an api key, already set",
-    ready: (a) => a.apiKey && a.apiSdk
-  }
-];
-function ladderFor(a) {
-  if (a.host !== "codex")
-    return RESOLUTION_LADDER;
-  const codex = RESOLUTION_LADDER.find((r) => r.id === "codex-cli");
-  if (!codex)
-    return RESOLUTION_LADDER;
-  const rest = RESOLUTION_LADDER.filter((r) => r.id !== "codex-cli");
-  const at = rest.findIndex((r) => r.id === "claude-cli");
-  if (at < 0)
-    return RESOLUTION_LADDER;
-  return [...rest.slice(0, at), codex, ...rest.slice(at)];
-}
-function topRung(a) {
-  return ladderFor(a).find((r) => r.ready(a)) ?? null;
-}
-function transportRung(a) {
-  return ladderFor(a).find((r) => r.backend !== null && r.ready(a)) ?? null;
-}
-var NoBackendError = class _NoBackendError extends Error {
-  name = "NoBackendError";
-  fix;
-  availability;
-  /** The highest rung that *is* reachable, when one is. Null for none at all. */
-  rung;
-  constructor(availability2) {
-    super(_NoBackendError.message(availability2));
-    this.availability = availability2;
-    this.fix = _NoBackendError.fixFor(availability2);
-    this.rung = topRung(availability2)?.id ?? null;
-  }
-  static message(a) {
-    if (a.hostSeam) {
-      return `no model backend on this machine \u2014 and none is needed: potsherd is running inside ${a.host}, which is already a model on your own subscription.
-        Run the seam: potsherd emits the prompts, you answer them, potsherd filters the citations in code.`;
-    }
-    const key = a.apiKey ? "\n        ANTHROPIC_API_KEY is set but the Anthropic SDK is not installed." : "";
-    return "no way to reach a model: no `claude` binary on PATH, no `codex`, and no coding agent around this process." + key + "\n        potsherd runs on the Claude Code subscription you already have \u2014 installing Claude Code is enough.";
-  }
-  static fixFor(a) {
-    if (a.hostSeam) {
-      return 'potsherd ask "\u2026" --readers-out r.json   # then --readers-in / --synthesis-out / --filter-in';
-    }
-    if (a.apiKey && !a.apiSdk)
-      return "npm install -g @anthropic-ai/sdk";
-    return "https://claude.com/product/claude-code";
-  }
-};
-function resolvable(specifier) {
-  try {
-    createRequire3(import.meta.url).resolve(specifier);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function availability(o = {}) {
-  const env = o.env ?? process11.env;
-  const which = o.which ?? ((n2) => onPath(n2, env));
-  const key = env["ANTHROPIC_API_KEY"];
-  const canResolve = o.resolvable ?? resolvable;
-  const host = hostAgent(env);
-  return {
-    claude: which("claude"),
-    codex: which("codex"),
-    apiKey: typeof key === "string" && key.trim().length > 0,
-    codexHarness: host === "codex",
-    agentSdk: canResolve("@anthropic-ai/claude-agent-sdk"),
-    apiSdk: canResolve("@anthropic-ai/sdk"),
-    host,
-    hostSeam: host !== null
-  };
-}
-function detectBackend(o = {}) {
-  const env = o.env ?? process11.env;
-  const avail = availability(o);
-  const requested = o.model ?? env["POTSHERD_MODEL"] ?? CARD_MODEL;
-  const forced = o.backend ?? env["POTSHERD_LLM_BACKEND"];
-  const choose = (backend2, rung2, why2, bin) => ({
-    backend: backend2,
-    model: resolveModel(requested, backend2),
-    requested,
-    why: why2,
-    rung: rung2?.rung ?? 3,
-    rungId: rung2?.id ?? null,
-    ...bin ? { bin } : {},
-    chargeable: backend2 === "api",
-    availability: avail
-  });
-  const rungFor = (backend2) => RESOLUTION_LADDER.find((r) => r.backend === backend2) ?? null;
-  if (forced) {
-    const rung2 = rungFor(forced);
-    if (!rung2)
-      throw new NoBackendError(avail);
-    const bin = forced === "agent-sdk" || forced === "claude-cli" ? avail.claude ?? "claude" : forced === "codex" ? avail.codex ?? "codex" : void 0;
-    return choose(forced, rung2, "forced", bin);
-  }
-  const rung = transportRung(avail);
-  if (!rung || !rung.backend)
-    throw new NoBackendError(avail);
-  const seam = avail.hostSeam && rung.rung > 1 ? `; rung 1 (${avail.host}) is live too` : "";
-  const where = rung.backend === "api" ? "ANTHROPIC_API_KEY is set" : rung.backend === "codex" ? `codex on PATH (${avail.codex})` : `claude on PATH (${avail.claude})`;
-  return choose(rung.backend, rung, `rung ${rung.rung} \u2014 ${rung.label}: ${where}${seam}`, rung.backend === "codex" ? avail.codex ?? void 0 : avail.claude ?? void 0);
-}
-var LlmError = class extends Error {
-  fix;
-  cause;
-  name = "LlmError";
-  /**
-   * True when this error is a deadline, not a refusal.
-   *
-   * The distinction is the whole of {@link Llm.text}'s retry rule: a call that
-   * ran out of clock has told us nothing about whether it would ever have
-   * worked, and one more try is cheap. A call that came back `error_max_turns`
-   * or found no `claude` binary has told us, and retrying it just spends the
-   * clock twice.
-   */
-  timedOut;
-  /**
-   * What the child printed before it failed, when it was a spawned one.
-   *
-   * A CLI that fails by *answering* — `claude -p` exits non-zero and prints
-   * `{"is_error":true,"result":"Not logged in · Please run /login"}` on
-   * stdout — is a CLI whose exit code alone says nothing a user can act on.
-   * `potsherd: claude exited 1 / try: claude --version` was the message that
-   * came out of exactly that, and `claude --version` works fine, so the
-   * suggested fix confirmed the machine was healthy while the run stayed
-   * broken. The transport reads this and says the real sentence instead.
-   */
-  stdout;
-  constructor(message2, fix, cause, options = {}) {
-    super(message2);
-    this.fix = fix;
-    this.cause = cause;
-    this.timedOut = options.timedOut ?? false;
-    if (options.stdout !== void 0)
-      this.stdout = options.stdout;
-  }
-};
-function makeScratch(tmpRoot) {
-  return fs27.mkdtempSync(path22.join(tmpRoot ?? os3.tmpdir(), "potsherd-llm-"));
-}
-var CLAUDE_CWD_NAME = "potsherd-llm-cwd";
-function stableScratch(tmpRoot) {
-  const dir = path22.join(tmpRoot ?? os3.tmpdir(), CLAUDE_CWD_NAME);
-  fs27.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-function dropScratch(dir) {
-  if (!dir)
-    return;
-  try {
-    fs27.rmSync(dir, { recursive: true, force: true });
-  } catch {
-  }
-}
-var AgentSdkTransport = class {
-  opts;
-  backend = "agent-sdk";
-  scratch = null;
-  constructor(opts) {
-    this.opts = opts;
-  }
-  async send(req) {
-    let query;
-    try {
-      ({ query } = await import("@anthropic-ai/claude-agent-sdk"));
-    } catch (err) {
-      throw new LlmError("the Claude Agent SDK is not installed, so the subscription path cannot run", "npm i @anthropic-ai/claude-agent-sdk   # or set ANTHROPIC_API_KEY", err);
-    }
-    this.scratch ??= makeScratch(this.opts.tmpRoot);
-    const abort = new AbortController();
-    const onOuter = () => abort.abort();
-    req.signal?.addEventListener("abort", onOuter, { once: true });
-    const timer = setTimeout(() => abort.abort(), req.timeoutMs);
-    let text = "";
-    let result = null;
-    const stderr = [];
-    try {
-      const stream = query({
-        prompt: req.prompt,
-        options: {
-          model: req.model,
-          maxTurns: 1,
-          // Nothing to read, nothing to write, nothing to run. A summariser
-          // that can call Bash is a summariser that can be prompt-injected by
-          // the transcript it is summarising (`03` §11).
-          allowedTools: [],
-          permissionMode: "dontAsk",
-          cwd: this.scratch,
-          // No user, project or local settings, and therefore no CLAUDE.md.
-          settingSources: [],
-          // obra/episodic-memory#83: without this the SDK writes a fake
-          // session into ~/.claude/projects, which potsherd would then index.
-          persistSession: false,
-          abortController: abort,
-          env: { ...this.opts.env, [REENTRANCY_ENV]: "1" },
-          ...req.system ? { systemPrompt: req.system } : {},
-          ...this.opts.bin ? { pathToClaudeCodeExecutable: this.opts.bin } : {},
-          stderr: (d) => {
-            if (stderr.length < 40)
-              stderr.push(d);
-          }
-        }
-      });
-      for await (const message2 of stream) {
-        if (message2.type === "result") {
-          if (message2.subtype === "success") {
-            text = message2.result;
-            const ran = Object.keys(message2.modelUsage ?? {})[0];
-            result = {
-              text,
-              ...ran ? { model: ran } : {},
-              inputTokens: message2.usage?.input_tokens ?? 0,
-              outputTokens: message2.usage?.output_tokens ?? 0,
-              usd: message2.total_cost_usd ?? 0
-            };
-          } else {
-            throw new LlmError(`the model call ended as ${message2.subtype}` + (message2.errors?.length ? `: ${message2.errors[0]}` : ""), "potsherd card --dry-run --all   # to see the size of the run first");
-          }
-        }
-      }
-    } catch (err) {
-      if (err instanceof LlmError)
-        throw err;
-      if (abort.signal.aborted && !req.signal?.aborted) {
-        throw new LlmError(`the model call did not answer within ${Math.round(req.timeoutMs / 1e3)}s`, `POTSHERD_LLM_TIMEOUT_MS=${DEFAULT_TIMEOUT_MS * 2} potsherd card \u2026`, err, { timedOut: true });
-      }
-      throw new LlmError(`the Claude Agent SDK call failed: ${errMessage(err)}` + (stderr.length ? `
-        ${stderr.join("").trim().split("\n").slice(-2).join(" ")}` : ""), "claude  # check the subscription is active, then retry", err);
-    } finally {
-      clearTimeout(timer);
-      req.signal?.removeEventListener("abort", onOuter);
-    }
-    if (!result) {
-      throw new LlmError("the Claude Agent SDK returned no result message", "claude --version   # check the installed harness");
-    }
-    return result;
-  }
-  async close() {
-    dropScratch(this.scratch);
-    this.scratch = null;
-  }
-};
-var CLAUDE_CLI_ARGS = [
-  "--print",
-  "--output-format",
-  "json",
-  "--tools",
-  "",
-  "--permission-mode",
-  "dontAsk",
-  "--no-session-persistence",
-  "--setting-sources",
-  ""
-];
-var ClaudeCliTransport = class {
-  opts;
-  backend = "claude-cli";
-  scratch = null;
-  constructor(opts) {
-    this.opts = opts;
-  }
-  async send(req) {
-    this.scratch ??= stableScratch(this.opts.tmpRoot);
-    const extra = (this.opts.env["POTSHERD_CLAUDE_ARGS"] ?? "").split(" ").filter(Boolean);
-    const args = [
-      ...CLAUDE_CLI_ARGS,
-      "--model",
-      req.model,
-      ...req.system ? ["--system-prompt", req.system] : [],
-      ...extra
-    ];
-    let out;
-    try {
-      out = await run(this.opts.bin, args, {
-        input: req.prompt,
-        cwd: this.scratch,
-        env: { ...this.opts.env, [REENTRANCY_ENV]: "1" },
-        timeoutMs: req.timeoutMs,
-        ...req.signal ? { signal: req.signal } : {}
-      });
-    } catch (err) {
-      const reply = err instanceof LlmError ? parseClaudeCli(err.stdout ?? "") : null;
-      const said = reply?.said ?? reply?.text ?? "";
-      if (said) {
-        throw new LlmError(`claude --print could not answer: ${said.split("\n")[0]}`, /not logged in|\/login/i.test(said) ? "claude   # sign in once, then retry" : 'claude -p "hello"', err);
-      }
-      throw err;
-    }
-    const parsed = parseClaudeCli(out.stdout);
-    if (parsed.error) {
-      throw new LlmError(`claude --print ended as ${parsed.error}`, 'claude -p "hello"   # check the subscription is active, then retry');
-    }
-    if (!parsed.text) {
-      throw new LlmError(`claude --print produced no answer${out.stderr ? `: ${out.stderr.trim().split("\n").slice(-1)[0]}` : ""}`, 'claude -p "hello"   # check claude runs at all');
-    }
-    return {
-      text: parsed.text,
-      ...parsed.model ? { model: parsed.model } : {},
-      ...parsed.inputTokens !== void 0 ? { inputTokens: parsed.inputTokens } : {},
-      ...parsed.outputTokens !== void 0 ? { outputTokens: parsed.outputTokens } : {},
-      ...parsed.usd !== void 0 ? { usd: parsed.usd } : {}
-    };
-  }
-  /**
-   * Nothing to clean up, on purpose. See {@link CLAUDE_CWD_NAME}: removing the
-   * cwd would not remove the `~/.claude/projects` entry named after it, and
-   * the next call would then mint a second one. Keeping it is what holds the
-   * footprint at one directory instead of one per call.
-   */
-  async close() {
-    this.scratch = null;
-  }
-};
-function parseClaudeCli(stdout) {
-  const raw = stdout.trim();
-  if (!raw)
-    return { text: "" };
-  let obj = null;
-  try {
-    const v = JSON.parse(raw);
-    if (v && typeof v === "object" && !Array.isArray(v))
-      obj = v;
-  } catch {
-    obj = null;
-  }
-  if (!obj)
-    return { text: raw };
-  const said = typeof obj["result"] === "string" ? obj["result"].trim() : "";
-  const subtype = typeof obj["subtype"] === "string" ? obj["subtype"] : "";
-  if (obj["is_error"] === true || subtype !== "" && subtype !== "success") {
-    return { text: "", error: subtype || "an error", ...said ? { said } : {} };
-  }
-  const text = said;
-  const usage = asRecord(obj["usage"]);
-  const num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
-  const inputTokens = usage ? num2(usage["input_tokens"]) + num2(usage["cache_creation_input_tokens"]) + num2(usage["cache_read_input_tokens"]) : 0;
-  const outputTokens = usage ? num2(usage["output_tokens"]) : 0;
-  const modelUsage = asRecord(obj["modelUsage"]);
-  const model = modelUsage ? Object.keys(modelUsage)[0] : void 0;
-  const usd = typeof obj["total_cost_usd"] === "number" ? obj["total_cost_usd"] : void 0;
-  return {
-    text,
-    ...model ? { model } : {},
-    ...inputTokens > 0 ? { inputTokens } : {},
-    ...outputTokens > 0 ? { outputTokens } : {},
-    ...usd !== void 0 ? { usd } : {}
-  };
-}
-function asRecord(v) {
-  return v && typeof v === "object" && !Array.isArray(v) ? v : null;
-}
-var CodexTransport = class {
-  opts;
-  backend = "codex";
-  scratch = null;
-  constructor(opts) {
-    this.opts = opts;
-  }
-  async send(req) {
-    this.scratch ??= makeScratch(this.opts.tmpRoot);
-    const extra = (this.opts.env["POTSHERD_CODEX_ARGS"] ?? "").split(" ").filter(Boolean);
-    const lastMessage = path22.join(this.scratch, "last-message.txt");
-    const args = [
-      "exec",
-      "--skip-git-repo-check",
-      // Verified at 0.149.0: no session files on disk, so a model call cannot
-      // write into the archive potsherd reads.
-      "--ephemeral",
-      // Verified at 0.149.0: config.toml is not loaded, auth still is.
-      "--ignore-user-config",
-      "--cd",
-      this.scratch,
-      "--model",
-      req.model,
-      "--output-last-message",
-      lastMessage,
-      ...extra,
-      "-"
-    ];
-    const out = await run(this.opts.bin, args, {
-      input: req.system ? `${req.system}
-
-${req.prompt}` : req.prompt,
-      cwd: this.scratch,
-      env: { ...this.opts.env, [REENTRANCY_ENV]: "1" },
-      timeoutMs: req.timeoutMs,
-      ...req.signal ? { signal: req.signal } : {}
-    });
-    const text = readIfPresent(lastMessage) || lastAgentMessage(out.stdout);
-    if (!text) {
-      throw new LlmError(`codex exec produced no answer${out.stderr ? `: ${out.stderr.trim().split("\n").slice(-1)[0]}` : ""}`, 'codex exec "hello"   # check codex runs at all');
-    }
-    return { text, model: req.model };
-  }
-  async close() {
-    dropScratch(this.scratch);
-    this.scratch = null;
-  }
-};
-function readIfPresent(file2) {
-  try {
-    return fs27.readFileSync(file2, "utf8").trim();
-  } catch {
-    return "";
-  }
-}
-function lastAgentMessage(stdout) {
-  const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
-  const events = [];
-  let allJson = lines.length > 0;
-  for (const line of lines) {
-    if (!line.trimStart().startsWith("{")) {
-      allJson = false;
-      break;
-    }
-    try {
-      const ev = JSON.parse(line);
-      const text = pickText(ev);
-      if (text)
-        events.push(text);
-    } catch {
-      allJson = false;
-      break;
-    }
-  }
-  if (allJson && events.length > 0)
-    return events[events.length - 1].trim();
-  return stdout.trim();
-}
-function pickText(ev) {
-  for (const key of ["text", "message", "last_agent_message"]) {
-    const v = ev[key];
-    if (typeof v === "string" && v.trim())
-      return v;
-  }
-  for (const key of ["msg", "item", "payload"]) {
-    const v = ev[key];
-    if (v && typeof v === "object") {
-      const inner = pickText(v);
-      if (inner)
-        return inner;
-    }
-  }
-  return null;
-}
-var ApiTransport = class {
-  opts;
-  backend = "api";
-  constructor(opts) {
-    this.opts = opts;
-  }
-  async send(req) {
-    let Anthropic;
-    try {
-      ({ default: Anthropic } = await import("@anthropic-ai/sdk"));
-    } catch (err) {
-      throw new LlmError("the Anthropic SDK is not installed, so the api fallback cannot run", "npm i @anthropic-ai/sdk", err);
-    }
-    const apiKey = this.opts.env["ANTHROPIC_API_KEY"];
-    if (!apiKey) {
-      throw new LlmError("ANTHROPIC_API_KEY is not set", "export ANTHROPIC_API_KEY=\u2026");
-    }
-    const client = new Anthropic({ apiKey, timeout: req.timeoutMs, maxRetries: 1 });
-    const params = {
-      model: req.model,
-      max_tokens: req.maxOutputTokens,
-      ...req.system ? { system: req.system } : {},
-      messages: [{ role: "user", content: req.prompt }]
-    };
-    try {
-      const long = req.prompt.length > 4e4 || req.maxOutputTokens > 8192;
-      const message2 = long ? await client.messages.stream(params, req.signal ? { signal: req.signal } : {}).finalMessage() : await client.messages.create(params, req.signal ? { signal: req.signal } : {});
-      const text = message2.content.map((b) => b.type === "text" ? b.text : "").join("");
-      const price = PRICES[modelClass(message2.model ?? req.model)];
-      const inputTokens = message2.usage.input_tokens;
-      const outputTokens = message2.usage.output_tokens;
-      return {
-        text,
-        model: message2.model,
-        inputTokens,
-        outputTokens,
-        usd: inputTokens / 1e6 * price.inputPerMTok + outputTokens / 1e6 * price.outputPerMTok
-      };
-    } catch (err) {
-      throw new LlmError(`the Anthropic API call failed: ${errMessage(err)}`, "check ANTHROPIC_API_KEY and the network, then retry", err);
-    }
-  }
-  async close() {
-  }
-};
-function run(bin, args, o) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, {
-      env: o.env,
-      ...o.cwd ? { cwd: o.cwd } : {},
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled)
-        return;
-      settled = true;
-      child.kill("SIGKILL");
-      reject(new LlmError(`${path22.basename(bin)} did not answer within ${Math.round(o.timeoutMs / 1e3)}s`, `POTSHERD_LLM_TIMEOUT_MS=${DEFAULT_TIMEOUT_MS * 2} potsherd card \u2026`, void 0, { timedOut: true }));
-    }, o.timeoutMs);
-    const onAbort = () => {
-      if (settled)
-        return;
-      settled = true;
-      clearTimeout(timer);
-      child.kill("SIGKILL");
-      reject(new LlmError("the model call was cancelled"));
-    };
-    o.signal?.addEventListener("abort", onAbort, { once: true });
-    child.stdout.on("data", (d) => stdout += d.toString("utf8"));
-    child.stderr.on("data", (d) => stderr += d.toString("utf8"));
-    child.on("error", (err) => {
-      if (settled)
-        return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new LlmError(`could not run ${bin}: ${errMessage(err)}`, `which ${path22.basename(bin)}`, err));
-    });
-    child.on("close", (code) => {
-      if (settled)
-        return;
-      settled = true;
-      clearTimeout(timer);
-      o.signal?.removeEventListener("abort", onAbort);
-      if (code !== 0) {
-        reject(new LlmError(`${path22.basename(bin)} exited ${code}${stderr.trim() ? `: ${stderr.trim().split("\n").slice(-1)[0]}` : ""}`, `${path22.basename(bin)} --version`, void 0, { stdout }));
-        return;
-      }
-      resolve({ stdout, stderr, code: code ?? 0 });
-    });
-    child.stdin.on("error", () => {
-    });
-    if (o.input !== void 0)
-      child.stdin.end(o.input);
-    else
-      child.stdin.end();
-  });
-}
-function errMessage(err) {
-  return err instanceof Error ? err.message : String(err);
-}
-var IMPLAUSIBLE_TOKEN_FACTOR = 10;
-var DEFAULT_TIMEOUT_MS = 36e4;
-var TIMEOUT_RETRIES = 1;
-var DEFAULT_MAX_OUTPUT_TOKENS = 4096;
-var JSON_RULE = "Reply with one JSON object and nothing else. No prose before it, no prose after it, no markdown fence, no explanation. If a field has no value, use null or an empty array.";
-var Llm = class _Llm {
-  transport;
-  opts;
-  env;
-  backend;
-  model;
-  chargeable;
-  choice;
-  budget;
-  constructor(transport, choice, opts, env) {
-    this.transport = transport;
-    this.opts = opts;
-    this.env = env;
-    this.choice = choice;
-    this.backend = transport.backend;
-    this.model = choice?.model ?? opts.model ?? CARD_MODEL;
-    this.chargeable = choice?.chargeable ?? transport.backend === "api";
-    this.budget = opts.budget ?? new Budget({
-      ...opts.maxUsd !== void 0 ? { maxUsd: opts.maxUsd } : {},
-      ...opts.maxTokens !== void 0 ? { maxTokens: opts.maxTokens } : {}
-    });
-  }
-  /**
-   * Pick a backend and build it. Throws {@link NoBackendError} when there is
-   * none and {@link ReentrancyError} when potsherd spawned this process.
-   */
-  static open(opts = {}) {
-    const env = opts.env ?? process11.env;
-    if (insidePotsherdCall(env) && !opts.transport)
-      throw new ReentrancyError();
-    if (opts.transport) {
-      return new _Llm(opts.transport, null, opts, env);
-    }
-    const choice = detectBackend(opts);
-    const transport = choice.backend === "agent-sdk" ? new AgentSdkTransport({
-      env,
-      ...opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {},
-      ...env["POTSHERD_CLAUDE_BIN"] ? { bin: env["POTSHERD_CLAUDE_BIN"] } : {}
-    }) : choice.backend === "claude-cli" ? new ClaudeCliTransport({
-      env,
-      bin: env["POTSHERD_CLAUDE_BIN"] || choice.bin || "claude",
-      ...opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {}
-    }) : choice.backend === "codex" ? new CodexTransport({
-      env,
-      bin: choice.bin ?? "codex",
-      ...opts.tmpRoot ? { tmpRoot: opts.tmpRoot } : {}
-    }) : new ApiTransport({ env });
-    return new _Llm(transport, choice, opts, env);
-  }
-  get spend() {
-    return this.budget.spend;
-  }
-  /** Per-call deadline. A model call must never be able to hang a verb. */
-  timeoutFor(req) {
-    if (req.timeoutMs !== void 0)
-      return req.timeoutMs;
-    if (this.opts.timeoutMs !== void 0)
-      return this.opts.timeoutMs;
-    const fromEnv = Number(this.env["POTSHERD_LLM_TIMEOUT_MS"]);
-    return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_TIMEOUT_MS;
-  }
-  /**
-   * One call. **Redacts `prompt` and `system` itself** — a caller cannot reach
-   * a backend with raw text, and there is no flag that lets it.
-   */
-  async text(req) {
-    const prompt = redactOutgoing(req.prompt);
-    const system = req.system ? redactOutgoing(req.system) : null;
-    const redactions = prompt.hits + (system?.hits ?? 0);
-    const outgoing = `${POTSHERD_CARD_MARKER}
-
-${prompt.text}`;
-    const maxOutputTokens = req.maxOutputTokens ?? this.opts.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
-    const inTokens = tokensForText(outgoing) + (system ? tokensForText(system.text) : 0);
-    const price = PRICES[modelClass(this.model)];
-    const reservation = this.budget.admit({
-      usd: inTokens / 1e6 * price.inputPerMTok + maxOutputTokens / 1e6 * price.outputPerMTok,
-      tokens: inTokens + maxOutputTokens
-    });
-    try {
-      return await this.call(req, {
-        outgoing,
-        ...system ? { system: system.text } : {},
-        maxOutputTokens,
-        inTokens,
-        price,
-        redactions,
-        reservation
-      });
-    } finally {
-      reservation.release();
-    }
-  }
-  /** The body of {@link text}, split out so the reservation can be released in one place. */
-  async call(req, ctx) {
-    const { outgoing, system, maxOutputTokens, inTokens, price, redactions } = ctx;
-    const started = Date.now();
-    const sent = await this.send({
-      prompt: outgoing,
-      ...system ? { system } : {},
-      model: this.model,
-      maxOutputTokens,
-      timeoutMs: this.timeoutFor(req),
-      ...req.signal ? { signal: req.signal } : {}
-    }, req.signal);
-    const ms = Date.now() - started;
-    const outputTokensEstimated = typeof sent.outputTokens !== "number" || sent.outputTokens <= 0;
-    const outputTokens = outputTokensEstimated ? tokensForText(sent.text) : sent.outputTokens;
-    const reportedIn = sent.inputTokens;
-    const inputTokensEstimated = typeof reportedIn !== "number" || reportedIn <= 0 || reportedIn * IMPLAUSIBLE_TOKEN_FACTOR < inTokens;
-    const inputTokens = inputTokensEstimated ? inTokens : reportedIn;
-    const usd = sent.usd ?? inputTokens / 1e6 * price.inputPerMTok + outputTokens / 1e6 * price.outputPerMTok;
-    const result = {
-      text: sent.text,
-      backend: this.backend,
-      model: sent.model ?? this.model,
-      inputTokens,
-      outputTokens,
-      inputTokensEstimated,
-      outputTokensEstimated,
-      usd,
-      ms,
-      redactions,
-      chargeable: this.chargeable
-    };
-    this.budget.record(result, ctx.reservation);
-    return result;
-  }
-  /**
-   * The transport call, with {@link TIMEOUT_RETRIES} retries on a deadline.
-   *
-   * Only on a deadline. Every other failure — no binary, no key, a refusal, a
-   * cancelled run — is a fact about the call that trying again cannot change,
-   * and retrying it would double the time the user waits for the same error.
-   * A cancellation from the caller's own signal is never a retry either: the
-   * budget ceiling aborts the run through exactly that signal, and a retry
-   * there would spend past the line the abort exists to hold.
-   */
-  async send(req, outer) {
-    let last2;
-    for (let attempt = 0; attempt <= TIMEOUT_RETRIES; attempt++) {
-      try {
-        return await this.transport.send(req);
-      } catch (err) {
-        last2 = err;
-        const timedOut = err instanceof LlmError && err.timedOut;
-        if (!timedOut || outer?.aborted || attempt === TIMEOUT_RETRIES)
-          throw err;
-      }
-    }
-    throw last2;
-  }
-  /**
-   * A JSON answer, enforced by instruction, retried **once** on a parse
-   * failure, and falling back to {@link JsonRequest.fallback} rather than
-   * throwing away the run (`phase-2` risks: "json drift").
-   */
-  async json(req) {
-    const base2 = `${req.prompt}
-
-${JSON_RULE}
-
-Shape:
-${req.schema}`;
-    let last2 = null;
-    let firstError = "";
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      const prompt = attempt === 1 ? base2 : `${base2}
-
-Your previous reply could not be parsed as JSON (${firstError}). Reply again with only the JSON object.`;
-      const { prompt: _p, ...rest } = req;
-      const r = await this.text({ ...rest, prompt });
-      last2 = r;
-      const parsed = parseJsonish(r.text);
-      if (parsed.ok) {
-        const value = req.validate ? req.validate(parsed.value) : parsed.value;
-        if (value !== null && value !== void 0) {
-          return { ...r, value, attempts: attempt, parsed: true };
-        }
-        firstError = "the object did not match the shape";
-      } else {
-        firstError = parsed.error;
-      }
-    }
-    return {
-      ...last2,
-      value: req.fallback,
-      attempts: 2,
-      parsed: false
-    };
-  }
-  async close() {
-    await this.transport.close();
-  }
-};
-function redactOutgoing(text) {
-  const out = redact(elideBinary(text));
-  return { text: out.text, hits: out.hits.length };
-}
-function parseJsonish(raw) {
-  let s = raw.trim();
-  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/m.exec(s);
-  if (fence?.[1])
-    s = fence[1].trim();
-  if (!s.startsWith("{") && !s.startsWith("[")) {
-    const start = s.search(/[{[]/);
-    const end = Math.max(s.lastIndexOf("}"), s.lastIndexOf("]"));
-    if (start >= 0 && end > start)
-      s = s.slice(start, end + 1);
-  }
-  if (!s)
-    return { ok: false, error: "empty reply" };
-  try {
-    return { ok: true, value: JSON.parse(s) };
-  } catch (err) {
-    return { ok: false, error: errMessage(err) };
-  }
-}
-
 // ../core/dist/cards/transcript.js
 function loadSessionTranscript(db, sessionId) {
   const s = db.prepare(`SELECT id, harness, title, project, project_slug, is_sidechain
@@ -39056,24 +39078,45 @@ function renderEstimate(plan, t = new Theme(), o = {}) {
       value: compact(e.outputTokens),
       note: `est. ${t.sep} ${num(perCallOutput(e))} a call, measured`
     },
-    {
-      label: "estimated time",
-      value: time3,
-      tone: e.chargeable ? overTime ? "warn" : "none" : overTime ? "warn" : "accent",
-      note: `est. ${timeRange} ${t.sep} target ${duration3(TARGET_SECONDS * 1e3)}`
-    },
-    {
-      label: e.chargeable ? "estimated cost" : "equivalent cost",
-      value: money2,
-      tone: e.chargeable ? overMoney ? "warn" : "accent" : "dim",
-      note: e.chargeable ? `est. ${moneyRange} ${t.sep} target ${money(TARGET_USD)}` : `$0 charged ${t.sep} ${moneyRange} on an api key`
-    },
+    // On the host-agent seam potsherd makes NO model call, and both of these
+    // rows would be arithmetically true and misleading. `$0.00` reads as "this
+    // is free" when what is true is "potsherd is not the one spending" — the
+    // prompts still have to be answered, out of the host agent's context, on the
+    // user's own subscription. On a large `card --all` that context is the
+    // binding constraint and money is the one quantity that cannot bind, so a
+    // zero in the money row puts the reader's attention in the wrong place.
+    // The seconds are the host's turn and not something potsherd can predict,
+    // so that row goes rather than reading `~0s`.
+    ...e.hostSeam ? [
+      {
+        label: "model calls",
+        value: "none by potsherd",
+        tone: "accent",
+        note: `the host agent answers ${t.sep} ${compact(e.inputTokens)} tokens of its context`
+      }
+    ] : [
+      {
+        label: "estimated time",
+        value: time3,
+        tone: e.chargeable ? overTime ? "warn" : "none" : overTime ? "warn" : "accent",
+        note: `est. ${timeRange} ${t.sep} target ${duration3(TARGET_SECONDS * 1e3)}`
+      },
+      {
+        label: e.chargeable ? "estimated cost" : "equivalent cost",
+        value: money2,
+        tone: e.chargeable ? overMoney ? "warn" : "accent" : "dim",
+        note: e.chargeable ? `est. ${moneyRange} ${t.sep} target ${money(TARGET_USD)}` : `$0 charged ${t.sep} ${moneyRange} on an api key`
+      }
+    ],
     ...o.maxUsd !== void 0 ? [
       {
         label: "hard ceiling",
         value: money(o.maxUsd),
-        tone: e.usd > o.maxUsd ? "warn" : "dim",
-        note: e.usd > o.maxUsd ? "the run will stop part-way and say how far it got" : "--max-usd, checked before every call"
+        // The POINT estimate clearing the ceiling says nothing: the run can
+        // reach the top of its own range, and the refit exists because that
+        // top used to sit below both real outcomes.
+        tone: e.usdHigh > o.maxUsd ? "warn" : "dim",
+        note: e.usdHigh > o.maxUsd ? "the run will stop part-way and say how far it got" : "--max-usd, checked before every call"
       }
     ] : []
   ]);
@@ -43811,7 +43854,7 @@ function clip2(s, max2) {
 }
 
 // ../core/dist/version.js
-var VERSION = "1.1.0";
+var VERSION = "1.2.0";
 
 // src/context.ts
 import fs32 from "node:fs";

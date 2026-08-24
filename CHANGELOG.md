@@ -9,6 +9,158 @@ mattered: a figure measured by a phase's own verifier had nowhere legitimate to
 be cited from, and one was rounded and restated instead of quoted. If a number
 here cannot be traced to a file under `phases/`, it does not belong here.
 
+## v1.2.0 — 24 August 2026 · the audit's fix list, and a tool an agent can act on
+
+An agent audited potsherd on its own 428 MB archive and scored it **4/10**
+(`docs/AGENT-AUDIT-2026-08-23.md`). It failed the task potsherd exists for —
+*where did we leave off* — and then succeeded with `grep` and forty lines of
+Python. This release is that fix list. Every number below is traceable to a
+report under `phases/phase-10/`.
+
+### `find` returns nothing when it has nothing
+
+The fused score is **reciprocal rank fusion** — a function of rank alone, which
+has already discarded how well anything matched by the time the number exists.
+So the audit's own prescription, *normalise the score against its own
+distribution*, could not work: it maps the top row to 1.0 whether it is a
+bullseye or the least-bad of two bad rows.
+
+Calibration is now a **second, independent axis**, computed from the raw
+per-list evidence `recall.ts` was already carrying and throwing away:
+
+    calibrated = coverage x (0.60 + 0.25*strength + 0.15*agreement)
+
+The weights partition 1, which makes coverage a **ceiling**: nothing lifts a row
+whose words are absent from it. Every row and every result carries
+`confidence: strong | weak | none`, in the human view and in `--json` alike, and
+below a floor `find` prints `no match` and returns **zero rows**. The agent-facing
+MCP door runs at the same floor — an unlabelled least-bad row is
+indistinguishable from an answer to a caller that cannot glance at the titles.
+
+Measured on the real archive: a genuine phrase hit and a topic definitively
+absent from it differed by **1.12x** before. Four freshly-invented absent-topic
+controls now return `no match`; six true topics, including a natural-language
+question, return `strong`.
+
+### `ask`, `card` and `graft` run with no SDK and no API key
+
+The model is the subscription you already have. Inside a coding agent, potsherd
+emits the prompts and **the agent answers them** — `--synthesis-out` writes the
+synthesis prompt, `--filter-in` takes the answer back and runs the citation
+filter **in code**, so the guarantee never depends on trusting the model that
+produced the answer. In a bare terminal it uses the `claude` binary already
+installed. An SDK or API key is used if present and never asked for.
+
+Verified end to end with **zero model calls**: six readers, four of which
+honestly found nothing, then the same round trip with one invented quote —
+dropped, with the sentence citing it, `1 sentence dropped - no citation that
+resolves`.
+
+The subprocess rungs no longer write into the archive they read. potsherd's own
+probes had been landing in `~/.claude/projects` as ordinary sessions; `card
+--all` would have injected one per call.
+
+### semantic search, with no flag and no tier
+
+`--no-embed` stops being the default. On the first `index` the embedding runtime
+is fetched in the background, in WebAssembly, and `index` returns in under a
+second with text search live. `find` upgrades to hybrid when the vectors are
+ready and says `warming (N of M embedded)` until then.
+
+`sqlite-vec` is dropped as a search path: at 1,678 vectors a JS cosine scan is
+**4.7 ms** against vec0's **0.9 ms**, and 3.8 ms does not buy an entire native
+failure class. WASM costs **6.5x** native per exchange, so embedding runs
+**newest-first** — index to first hybrid `find`, **11 s**; all 439, **40 s**.
+
+### the thread is the unit, and work is dated by its content
+
+`claude --resume` writes a new transcript whose head is a copy of the old one.
+potsherd stored each as an independent document, so the session someone was
+working in grafted as **4 exchanges** when it held **123**, and `show` dated it
+eight days before the first exchange it printed *on the same screen*.
+
+Chains are derived at index time — two on the reference archive, which is
+exactly the number present; every other pair scores 0.000, so the threshold sits
+in an empty gap rather than on a slope. Claude Code's own resume metadata was
+checked first and is **wrong here**: alone it claims ten chains, eight false, one
+asserting 2,097 records from a 98-record file. It is used only where the records
+corroborate it. Lineage costs **+2.0 s** on 435 MB.
+
+### long sessions become answerable
+
+Readers received one contiguous window per session — for four of six, exchanges
+1-3, the opening of the conversation. They now receive up to five
+relevance-selected windows spanning the thread, each with its seq and timestamp.
+A gap prints a marker naming how many exchanges were skipped, emitted on
+transcript **positions** rather than window order, so a splice that reads as
+continuous is structurally impossible.
+
+### three tools, one skill, and fabrication refused in code
+
+The MCP server is `potsherd_recall`, `potsherd_read` and `potsherd_graft`.
+`find`, `ls`, `ask` and `tag` are retired into them. Six overlapping tools cost a
+model a decision on every call; three disjoint ones cost it none.
+
+The `session-archaeologist` agent loses filesystem `Read` — it had been citing
+repository markdown in a `SOURCES` block, in the correct format, with the
+session-id fields blank. v1.1.0's only citation check was a regex for `id8@seq`,
+and run over the block that agent actually produced it matches **nothing**: every
+fabricated row survived. `verifySources` now refuses in code, and a card-only
+thread gets **no citation at all** — checking an id is not checking a provenance.
+
+### cards route; they do not testify
+
+A card-only hit can no longer outrank a transcript hit, and that is structural:
+lanes are compared before scores, proved by sweeping the card weights **x1000**
+and watching the ordering not move. A card-only hit is capped at `weak`, labelled,
+and excluded from `SOURCES`. `--no-cards` turns the lane off. Cards keep routing:
+a query whose words appear in no transcript still finds the thread.
+
+### `note` — the archive can learn
+
+`potsherd note <thread> --decided ... --open ... --next ...`, the one verb that
+writes. An append-only lane beside the archive with no `UPDATE` and no `DELETE`
+in the module; a second note appends rather than superseding, because a changed
+mind is the most valuable thing in the lane. The transcript is never touched, and
+that is proved by hashing every transcript in the fixture tree before and after,
+through both the library and the CLI path.
+
+### the phrasing the skill mandates stops being the losing one
+
+The skill tells an agent to pass the user's own words, which against a bm25 index
+was the worst available strategy. Keyphrase extraction now happens in code: the
+query's content words are ranked by document frequency **on this index** and the
+more selective half is kept, so the rule is a ratio rather than a corpus-size
+constant. bm25 recall@5 moves **32 -> 40** on the 60-query set.
+
+### the measuring instrument
+
+The 25-query eval set decided its verdict on a margin of one against noise of
+about 2.2. It is now **60 queries** covering all twelve ghosts where the old
+covered five, built by a worker told nothing about what change prompted the
+widening. Hybrid beats bm25 at recall@5 with **p = 2.4e-7**; at recall@1 the two
+rankers disagree on only 4 of 60, **p = 0.625** — still a coin flip, and now
+labelled as one.
+
+The absolute floor becomes a **ratchet** at its measured value: it may tighten,
+never loosen. And per-query pass/fail is pinned, so a regression **names the query
+that fell** rather than only how many did.
+
+### and
+
+- **The real session id used as the `--help` example is gone** — from `tag`,
+  `pin`, `link`, `graft`, `card`, seven tests, two fixtures and both plugin
+  bundles. Unaccounted id-shaped tokens: **29 -> 19**; pinned occurrences
+  **130 -> 41**.
+- `doctor --privacy` listed `index` as opening no socket while it fetched 46 MB;
+  it now has its own category. That receipt has published four false claims, and
+  the guard cannot catch them because it proves *screen == live output*, never
+  *live output == truth*.
+- `--json` returned an absolute path where the terminal showed a short project
+  name, so a caller parsing JSON got a strictly worse object than a human.
+- Publishing moved to **npm trusted publishing over OIDC**. There is no npm token
+  and there should never be one.
+
 ## v1.1.0 — 22 August 2026 · hardening before the public moment
 
 **Nothing on the first screen reads as broken any more, and the guard that

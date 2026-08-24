@@ -190,7 +190,11 @@ describe('copilot adapter — doctor', () => {
     fs.mkdirSync(path.join(dir, 'session-state'), { recursive: true });
     const line = doctorLine(dir);
     expect(line).toContain('empty');
-    expect(line).toContain('holds no sessions');
+    // Phase 10 measured this case rather than describing it. `session-state/`
+    // being present and empty of anything THIS adapter reads is the normal
+    // state of a working Copilot install, because the turns are in
+    // `session-store.db`. The line names where they really are.
+    expect(line).toContain('session-store.db');
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -199,7 +203,10 @@ describe('copilot adapter — doctor', () => {
     expect(line).toContain('ready');
     expect(line).toContain('3 sessions');
     expect(line).toContain('1 unreadable');
-    expect(line).toContain('unverified format');
+    // Not `unverified` any more. A real 1.0.80 session was run against this
+    // adapter and the format is WRONG, which is a stronger and more useful
+    // claim than never having looked.
+    expect(line).toContain('format known wrong');
   });
 });
 
