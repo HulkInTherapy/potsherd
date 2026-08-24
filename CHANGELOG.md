@@ -146,6 +146,77 @@ The absolute floor becomes a **ratchet** at its measured value: it may tighten,
 never loosen. And per-query pass/fail is pinned, so a regression **names the query
 that fell** rather than only how many did.
 
+### what four independent verifications changed
+
+Every fix above was re-scored by a verifier that authored none of it, against the
+audit's own rubric, on the real archive. Four rounds: **4 → 6 → 7 → 7**. Three of
+those are FAILs on the record; no criterion was moved to meet a number. What the
+rounds found, and what changed because of it:
+
+- **`potsherd_read` could not see a thread, in the release that claims to fix
+  threads.** It probed for a core function that had been specified, asked for,
+  and never written, then degraded politely — so the missing capability announced
+  itself only to the model, in prose, at the moment it mattered. The probe, the
+  fallback and the function whose job was to report the gap are all deleted;
+  `via` has one legal value and two tests fail if a fallback ever returns.
+- **Every `index` spawned another embedder and they accumulated**, while the
+  code's own comment claimed the lock meant two of them never race. Six
+  concurrent `index --quiet` now leave one embedder: the pre-existing one.
+- **The quote filter and the prompt disagreed**, so a model that *obeyed* the
+  instruction to copy an excerpt exactly produced quotes the filter dropped as
+  fabrications. Fixed in the filter's normalisation — and only a leading label
+  comes off, because an interior `assistant:` is a fabrication of contiguity
+  rather than a label.
+- **Three strings at the model door told an agent to do something it cannot
+  do.** `potsherd_recall`'s caller has three tools and no shell. It was offered
+  `--vectors on` (a flag the schema does not accept), then `run potsherd index
+  --embed` (a shell command, on the branch **every fresh install** hits, whose
+  falseness the repository's own source comments already recorded), then
+  `potsherd ls --json | jq …` for a project that does not exist — a pipeline the
+  reader cannot run and which reports 5 projects where the database holds 18.
+  All three are gone: the shell verb is dead at its source, the counts carry a
+  denominator read from the same status the human verbs read, and a bad project
+  name is answered with **the projects the index holds**, tail disclosed.
+- **A no-match reply now says which half produced it.** "The archive does not
+  contain this" is a much stronger claim when both halves ran than when only
+  keyword search did, and the gap is measurable: bm25 alone answers 40 of 60
+  eval queries at recall@5 against hybrid's 51.
+- **The first row is the best row.** `hits[]` were ordered by the fused score and
+  labelled from calibration — and the fused score is reciprocal rank fusion, a
+  function of rank alone. The worst real case put a **card**, marked
+  `not-a-transcript` and labelled `none`, at the top of a reply whose envelope
+  said `strong`, above a real transcript. Ordering is by the label now, not by
+  the calibration number, because a routing row's score is deliberately not
+  rewritten when the ceiling caps its label. No row is added, dropped or
+  rescored; the same rows, moved.
+- **potsherd kills what it started, and what that started.** A model backend is a
+  shell script or a launcher that forks the real work, and `kill()` reaches one
+  pid — so a timed-out call, a cancelled call, and **a terminal Ctrl-C** each
+  left the forked process alive with `PPID 1`. Measured: two 'never hangs' test
+  cases left four orphans; a real Ctrl-C at a live call left the backend running.
+  Backends now get their own process group, and one signal handler — installed
+  with the first live child and removed with the last — kills every tree and
+  re-raises, so potsherd still dies of the signal and a shell still reads 130.
+
+### the guards that let those through
+
+- **A published screen still printed an instruction the product had deleted**,
+  because CI diffed two of seventeen screens against a live run. Ten are diffed
+  now. The two cheaper guards were tried and rejected in writing: both pass on
+  this exact violation, because the flag still exists and the command still
+  appears in the source — it is the *sentence* that died, and only running the
+  command catches that.
+- **The vendored-bundle freshness test compared file timestamps**, so a
+  `git checkout` away and back, a rebase, a `cp`, or a fresh clone turned it red
+  while nothing about the content had moved — and a test that is red for reasons
+  unrelated to its subject stops being read. It compares the bytes `pnpm vendor`
+  produces now, with the artifact list pinned to that script's own text so a
+  renamed or added bundle fails loudly rather than leaving the test checking a
+  path nothing writes.
+- **The README's copy of the privacy receipt had drifted from the receipt.** The
+  screen was regenerated when three paths were added; the published copy a reader
+  actually trusts was not.
+
 ### and
 
 - **The real session id used as the `--help` example is gone** — from `tag`,
