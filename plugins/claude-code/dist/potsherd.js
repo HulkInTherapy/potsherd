@@ -8777,13 +8777,65 @@ var ApiTransport = class {
   async close() {
   }
 };
+var liveBackends = /* @__PURE__ */ new Set();
+var FATAL_SIGNALS = ["SIGINT", "SIGTERM"];
+var signalHandlers = /* @__PURE__ */ new Map();
+function killBackendTree(child) {
+  const pid = child.pid;
+  if (pid !== void 0) {
+    try {
+      process8.kill(-pid, "SIGKILL");
+    } catch {
+    }
+  }
+  try {
+    child.kill("SIGKILL");
+  } catch {
+  }
+}
+function removeSignalHandlers() {
+  for (const [sig, handler] of signalHandlers)
+    process8.removeListener(sig, handler);
+  signalHandlers.clear();
+}
+function installSignalHandlers() {
+  if (signalHandlers.size > 0)
+    return;
+  for (const sig of FATAL_SIGNALS) {
+    const handler = () => {
+      for (const child of [...liveBackends])
+        killBackendTree(child);
+      liveBackends.clear();
+      removeSignalHandlers();
+      process8.kill(process8.pid, sig);
+    };
+    signalHandlers.set(sig, handler);
+    process8.on(sig, handler);
+  }
+}
+function trackBackend(child) {
+  liveBackends.add(child);
+  installSignalHandlers();
+  const untrack = () => {
+    liveBackends.delete(child);
+    if (liveBackends.size === 0)
+      removeSignalHandlers();
+  };
+  child.once("exit", untrack);
+  child.once("close", untrack);
+}
 function run(bin, args, o) {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, {
       env: o.env,
       ...o.cwd ? { cwd: o.cwd } : {},
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      // Its own process group, so the kills below reach what the backend
+      // spawned and not only the backend. Not `unref`ed: this promise is still
+      // waiting on it. See the block above for the Ctrl-C half of this.
+      detached: true
     });
+    trackBackend(child);
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -8791,7 +8843,7 @@ function run(bin, args, o) {
       if (settled)
         return;
       settled = true;
-      child.kill("SIGKILL");
+      killBackendTree(child);
       reject(new LlmError(`${path10.basename(bin)} did not answer within ${Math.round(o.timeoutMs / 1e3)}s`, `POTSHERD_LLM_TIMEOUT_MS=${DEFAULT_TIMEOUT_MS * 2} potsherd card \u2026`, void 0, { timedOut: true }));
     }, o.timeoutMs);
     const onAbort = () => {
@@ -8799,7 +8851,7 @@ function run(bin, args, o) {
         return;
       settled = true;
       clearTimeout(timer);
-      child.kill("SIGKILL");
+      killBackendTree(child);
       reject(new LlmError("the model call was cancelled"));
     };
     o.signal?.addEventListener("abort", onAbort, { once: true });

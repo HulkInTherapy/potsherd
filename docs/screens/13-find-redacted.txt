@@ -1,4 +1,4 @@
-potsherd find "redacted" · 1 session · strong · bm25 · 8ms
+potsherd find "redacted" · 1 session · strong · bm25 · 11ms
 
   Put the importer behind the pooler                              claude · ghost
   crm-ingest · 22 nov 2025 · 6 prompts recovered · feat/retry-b…  strong  0.0164
@@ -6,6 +6,6 @@ potsherd find "redacted" · 1 session · strong · bm25 · 8ms
     assistant side not recoverable · potsherd show 840f40a5
 
   1 ghost hit
-  text search only — no embeddings in the index — run potsherd index --embed
+  text search only — no embeddings in the index yet
   semantic search: warming (0 of 3,410 embedded)
   run  potsherd show <id8>  to read one, or  potsherd ask <words>

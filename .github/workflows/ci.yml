@@ -285,6 +285,102 @@ jobs:
           fi
           echo "the doctor screen names potsherd $version and schema v$schema"
 
+      # The two steps above guard `04-doctor.txt` and `05-doctor-privacy.txt`.
+      # Nothing guarded the other fifteen, and it cost exactly what it looks
+      # like it would: FIX-C deleted `no embeddings in the index — run potsherd
+      # index --embed` from `core/recall.ts` because `index` embeds by default
+      # and `--embed` only moves the same work into the foreground — and
+      # `13-find-redacted.txt` went on publishing that instruction to every
+      # reader of the readme, because the only way to notice was for a human to
+      # run `make-screens.sh` and read the diff. "Documented and does nothing"
+      # is a failure this project has now recorded nine times.
+      #
+      # So: rebuild the ten screens that are a single command and deterministic
+      # given the demo corpus, and diff them against the committed copies. The
+      # capture order is `make-screens.sh`'s own, because every screen reports
+      # on the state the one before it left.
+      #
+      # ## what this step does NOT cover — open items, not boilerplate
+      #
+      #   - **Seven of the seventeen screens.** `14-ask`, `15-graft` and
+      #     `17-ls-cards` need a model backend and carry model-written text.
+      #     `16-before-after` is two commands and a shell listing, not one
+      #     capture. `07-index` cannot be diffed here: `masked this run` counts
+      #     what *this* pass masked and a second index over the same store
+      #     masks fewer, and its `fetching 46.1 MB, once` line depends on
+      #     whether the embedding model is already cached on the machine, which
+      #     is a fact about the runner. `04` and `05` have the two steps above.
+      #   - **Durations and the heading date**, normalised away below. A screen
+      #     that published a wrong *number of milliseconds* would pass here.
+      #     They are real measurements of the machine that captured them and
+      #     move every run; pinning them would make this step a flake generator
+      #     rather than a guard.
+      #   - **Strings only a different corpus reaches.** This proves the
+      #     committed screen is what this build prints *for the demo corpus*.
+      #     A branch of the code the demo corpus never enters is not exercised
+      #     by any screen and so is not covered by any screen diff.
+      - name: the published screens still match what this build prints
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$PWD"
+          # A throwaway HOME, for the reason the privacy step above gives at
+          # length: this repository is public and no check here may read, write
+          # or render a real ~/.claude. `pwd -P` because /tmp is a symlink on
+          # macOS and `tildify` folds only the resolved path back to `~`.
+          home="$(cd "${RUNNER_TEMP:-/tmp}" && pwd -P)/screens-live"
+          rm -rf "$home"
+          node scripts/make-demo-corpus.mjs "$home/.claude" >/dev/null
+
+          # --width 80 --no-color on every capture, as make-screens.sh does:
+          # these are a fixed 80-column artefact, not whatever the runner's
+          # terminal claims to be.
+          run() {
+            ( cd "$home" \
+              && env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR -u XDG_CONFIG_HOME -u NO_COLOR -u FORCE_COLOR \
+                   HOME="$home" node "$repo/packages/cli/bin/potsherd.js" "$@" --width 80 --no-color )
+          }
+
+          # The two things on these screens that are real output and legitimately
+          # differ between one capture and the next — and nothing else.
+          norm() { sed -E -e 's/[0-9]+ms/<ms>/g' -e '1s/· [0-9]+ [a-z]+ [0-9]{4}$/· <date>/' "$1"; }
+
+          status=0
+          check() {
+            local screen="docs/screens/$1"; shift
+            run "$@" > "$home/live.txt"
+            if diff -u <(norm "$screen") <(norm "$home/live.txt") > "$home/diff.txt"; then
+              echo "  ok        $screen"
+            else
+              echo "  DRIFTED   $screen  <-  potsherd $*"
+              cat "$home/diff.txt"
+              status=1
+            fi
+          }
+
+          # make-screens.sh's capture order: audit before rescue and again
+          # after, and nothing that reads the index before `index` built it.
+          check 01-audit.txt         audit
+          check 06-audit-sweep.txt   audit --sweep
+          check 02-rescue.txt        rescue --yes
+          check 03-audit-after.txt   audit
+          run index --full >/dev/null
+          check 08-ls.txt            ls
+          check 09-find.txt          find pgbouncer
+          check 10-stats.txt         stats
+          check 11-show.txt          show 9c4d2f18
+          check 12-ls-ghosts.txt     ls --ghosts only
+          check 13-find-redacted.txt find redacted
+
+          if [ "$status" != 0 ]; then
+            echo
+            echo "A published screen is not what this build prints. Above, '-' is what"
+            echo "the committed screen claims and '+' is what the command actually says."
+            echo "Regenerate with:  bash scripts/make-screens.sh"
+            exit 1
+          fi
+          echo "ten published screens match what this build prints"
+
       # audit must agree with the standalone verifier on any corpus, including
       # an empty one and the committed fixture.
       - name: audit agrees with verify-audit.py

@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -2280,6 +2280,141 @@ interface RunOptions {
   cwd?: string;
 }
 
+// ------------------------------------------------- owning the spawned backend
+//
+// Everything between here and `run` exists for one measured defect: potsherd
+// left model backends running after it had exited.
+//
+// `child.kill()` signals **one pid**. Every harness CLI on these paths is a
+// shell script or a launcher that forks the real work, so on the timeout and
+// abort paths potsherd killed the launcher, the launcher's child was reparented
+// to init, and it kept running. Measured on this tree before the fix:
+// `vitest run tests/llm.test.ts -t "never hangs"` finished in 2.4 s and left
+// four `sleep 30` processes with PPID 1 behind it. The payload's own `sleep` is
+// the only reason those ever went away; a backend that does not exit on its own
+// lives until the machine reboots, which is how three orphaned model processes
+// came to be alive on a developer's machine for two days.
+//
+// So the child is spawned `detached: true` — its own process group — and the
+// kill paths signal the **group**, which reaches whatever the launcher forked.
+//
+// `detached` costs one thing, and this is the other half of the fix. A child in
+// potsherd's own process group is signalled by the terminal when the user hits
+// Ctrl-C, which is how the backend used to be cleaned up on that path — by
+// accident, not by code: there is no SIGINT handler anywhere else in the
+// product, and no caller of `Llm` wires `o.signal` to one. Taking the child out
+// of the foreground group without replacing that would have traded a background
+// leak for an interactive one, and `card --all` is ~39 calls.
+//
+// Hence the registry below: `llm.ts` owns its children for as long as they are
+// alive, and one lazily-installed handler per fatal signal — installed when the
+// first child starts, removed when the last one settles — kills every live tree
+// and then re-raises the signal with the default disposition, so potsherd still
+// dies the way the user asked it to and the shell still reads 130.
+
+/**
+ * The backend children that are alive right now. Almost always 0 or 1; `card
+ * --all` and the reader fan-out make it several.
+ */
+const liveBackends = new Set<ChildProcess>();
+
+/**
+ * The signals whose default action ends the process and that a user sends.
+ *
+ * Exported so a test can assert the handler bookkeeping against the list this
+ * module actually installs rather than against a copy of it.
+ */
+export const FATAL_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+type FatalSignal = (typeof FATAL_SIGNALS)[number];
+
+/**
+ * The installed handlers, or empty when none are installed.
+ *
+ * A map, and not one listener per child, deliberately: `process` warns at ten
+ * listeners for an event, this suite already prints one
+ * `MaxListenersExceededWarning`, and a fan-out of readers would have added
+ * dozens. Two listeners exist at most, whatever the fan-out.
+ */
+const signalHandlers = new Map<FatalSignal, () => void>();
+
+/**
+ * Kill a backend **and everything it started.**
+ *
+ * The negative pid is the process group `detached: true` gave the child.
+ * `child.kill` stays as the fallback for the race where the group has already
+ * gone (`process.kill` then throws ESRCH) and for a platform with no process
+ * groups.
+ */
+function killBackendTree(child: ChildProcess): void {
+  const pid = child.pid;
+  if (pid !== undefined) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // already gone, or no process groups here
+    }
+  }
+  try {
+    child.kill('SIGKILL');
+  } catch {
+    // already reaped
+  }
+}
+
+function removeSignalHandlers(): void {
+  for (const [sig, handler] of signalHandlers) process.removeListener(sig, handler);
+  signalHandlers.clear();
+}
+
+function installSignalHandlers(): void {
+  if (signalHandlers.size > 0) return;
+  for (const sig of FATAL_SIGNALS) {
+    const handler = (): void => {
+      // Synchronous, all of it. The MCP server registers its own SIGINT/SIGTERM
+      // handler (`packages/mcp/src/index.ts`) which ends in `process.exit`, and
+      // node runs listeners in registration order; anything deferred to a later
+      // tick here would lose the race with that exit and leak the child it was
+      // installed to kill.
+      for (const child of [...liveBackends]) killBackendTree(child);
+      liveBackends.clear();
+      // Uninstall before re-raising, so this handler cannot re-enter itself.
+      removeSignalHandlers();
+      // Re-raise rather than `process.exit`: with no listener left, node
+      // restores the signal's default disposition and the process dies *of the
+      // signal*, so a shell reads 130 for SIGINT instead of whatever code an
+      // exit inside a handler happened to pass. Any handler another module
+      // installed still runs — this one only adds the kill.
+      process.kill(process.pid, sig);
+    };
+    signalHandlers.set(sig, handler);
+    process.on(sig, handler);
+  }
+}
+
+/**
+ * Take ownership of a spawned backend until it exits.
+ *
+ * The one case this does not cover, said out loud rather than left to be
+ * found: a launcher that forks the real work and **exits immediately** leaves
+ * a live grandchild behind a dead child, and this untracks on the child's own
+ * exit, so a Ctrl-C after that point has nothing left to kill. The timeout and
+ * abort paths still reach it — they fire while the child is tracked — and the
+ * alternative, holding a process group that nothing owns for the lifetime of
+ * potsherd, kills work a harness deliberately backgrounded.
+ */
+function trackBackend(child: ChildProcess): void {
+  liveBackends.add(child);
+  installSignalHandlers();
+  const untrack = (): void => {
+    liveBackends.delete(child);
+    if (liveBackends.size === 0) removeSignalHandlers();
+  };
+  // Both, and idempotent: `exit` is the accurate one, and `close` is the only
+  // one that fires when the spawn itself failed and there was never a process.
+  child.once('exit', untrack);
+  child.once('close', untrack);
+}
+
 /** Spawn, feed stdin, collect stdout/stderr, and never hang. */
 function run(
   bin: string,
@@ -2291,14 +2426,20 @@ function run(
       env: o.env as NodeJS.ProcessEnv,
       ...(o.cwd ? { cwd: o.cwd } : {}),
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Its own process group, so the kills below reach what the backend
+      // spawned and not only the backend. Not `unref`ed: this promise is still
+      // waiting on it. See the block above for the Ctrl-C half of this.
+      detached: true,
     });
+    // From here until it exits, this child is potsherd's to kill.
+    trackBackend(child);
     let stdout = '';
     let stderr = '';
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill('SIGKILL');
+      killBackendTree(child);
       reject(
         new LlmError(
           `${path.basename(bin)} did not answer within ${Math.round(o.timeoutMs / 1000)}s`,
@@ -2312,7 +2453,7 @@ function run(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.kill('SIGKILL');
+      killBackendTree(child);
       reject(new LlmError('the model call was cancelled'));
     };
     o.signal?.addEventListener('abort', onAbort, { once: true });
