@@ -998,6 +998,8 @@ potsherd doctor --privacy · 24 aug 2026
     ~/work/demo-project/.potsherd/graft-<id8>.md
       only when you run graft, in the directory you run it in
     ~/work/demo-project/.potsherd/.gitignore
+      written once, the first time you run graft here, and never overwritten:
+      it is what keeps the briefs out of your commits
     <the path you give to  ask --readers-out>
       only when you pass the flag. it holds the same redacted excerpts a model
       would have been sent, and no model was called to write it
