@@ -448,9 +448,17 @@ true of four.
    bounded window, which I think is the better fix, but a verb would still be an improvement and
    would touch `packages/cli/src/index.ts`, which is RESERVED.
 
-7. **`~/.potsherd/potsherd.db` was never opened.** I took the orchestrator's schema dump as given
-   and reproduced the same schema in a sandbox instead. The 165 MB figure and the archive's real
-   contents are unverified by me by choice.
+7. **`~/.potsherd/potsherd.db` was never opened by me.** I took the orchestrator's schema dump as
+   given and rebuilt the same schema in a sandbox instead; its real contents are unverified by me
+   by choice. Every command in this report was scoped with `--potsherd-dir <sandbox>` or an
+   explicit path, and I checked the suite as well: every `cli([…])` invocation in `tests/` passes
+   `--potsherd-dir`, including my own.
+
+   **Its mtime did move during my session** (25 Aug 00:45), and it is worth saying who: **two
+   `potsherd 1.1.0` MCP servers are running against it right now**, started at 19:09 and 22:19
+   yesterday, from `~/.claude/plugins/cache/potsherd/potsherd/1.1.0/dist/mcp.js` — before I began.
+   That is the audit's *actual* §N2 (a session pinned to the old plugin) still live on this machine,
+   and it is what is holding that file open. Nothing in this worktree pointed at it.
 
 ### Boundary: one line I would want, if you want it exported
 
