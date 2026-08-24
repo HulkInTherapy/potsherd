@@ -652,3 +652,346 @@ concurrent suites), `5.0Gi` after. The scratch `HOME` (1.8 GB, APFS clones), the
 index (659 MB) and the small embedded corpus (47 MB) are mine and are deleted. Nothing of mine
 remains under `/Users/zebra/randomness/potsherd`: this report is written inside the worktree only,
 as instructed.
+
+---
+
+# ROUND 2 — the patches round 1 handed over, landed
+
+Branch `work/FIX-F2`. Five items: §4.1 and §4.3 together (the coupling round 1
+measured), §4.2 (the barrel), §4.5 (the two stale screens and the race under
+them), §4.4 closing as a consequence of §4.1, and §4.6.3's unmeasured half. Plus
+one item the orchestrator added mid-round: the version-vs-tag test whose premise
+was the checkout's tags rather than this repository's releases.
+
+## R0. A DISCREPANCY, FIRST — the branch I was told to cut does not exist
+
+The instruction was `git fetch origin && git checkout -b work/FIX-F2 origin/main`,
+on the grounds that FIX-F is merged at `03f2a84` and "your own commits are
+ancestors now". Both halves of that are true of a branch that is **not**
+`origin/main`:
+
+```
+$ git remote -v
+origin  https://github.com/HulkInTherapy/potsherd.git (fetch)
+
+$ git log --oneline -1 origin/main
+da13b2f phase 10: identity not counting, a pinned zone, and a database size …
+
+$ git merge-base --is-ancestor 8da99bf origin/main && echo YES || echo NO
+NO
+$ git show origin/main:packages/core/src/doctor-line.ts | grep -c working
+0
+```
+
+`origin` is GitHub and nothing has been pushed there since `da13b2f`. The merged
+tree is the **local** `main`, at `8da0015` — `4064c4e` + FIX-E round 2 + FIX-G +
+my three FIX-F commits + the integration commit. `03f2a84` exists as an object
+and carries the same subject as `8da0015`, so it is that integration commit
+before it was rewritten; it is not reachable from any branch now.
+
+Cutting from `origin/main` as instructed would have silently reverted all of
+FIX-F round 1 and then "re-landed" §4.1 on top of a tree that had never had C2,
+C3, C6 or C7 fixed. I cut `work/FIX-F2` from local `main` instead and verified
+the tree before writing a line: `doctor-line.ts` carries `working` (4 hits),
+`recall.ts` carries `SUMMARY_KINDS` (3), the MCP door carries `citableNote`,
+`make-screens.sh` carries FIX-E round 2's `TZ=UTC`.
+
+**Worth a rule of its own:** `origin/main` and "what the orchestrator merged"
+are different refs in this repository, and the phase has now had three workers
+told to branch from the first when it meant the second.
+
+## R1. §4.1 + §4.3 — and the coupling, measured in both directions
+
+The three edits, exactly as round 1 specified them, with one improvement to the
+third (below). Applied **without** the third edit first, so the coupling is
+evidence rather than prudence:
+
+```
+$ pnpm build && npx vitest run tests/index.test.ts tests/find-warming.test.ts
+ FAIL  index > never offers an upgrade, because there is no tier to buy
+   → expected 'potsherd index · /var/folders/…' to match /semantic search: warming/
+ FAIL  index > prints the count and how far it has to go, never a bare dash
+   → expected '…' to contain 'warming 1,294 of 1,678'
+ FAIL  index > fits 60 and 80 columns with the status on the end
+   → expected '…' to contain 'semantic search: warming (1,294 of 1,678 embedded)'
+      Tests  3 failed | 30 passed (33)
+```
+
+Three, in `tests/index.test.ts`, and nothing else — the number and the file round
+1 predicted. `tests/find-warming.test.ts` is already green at that point: the
+honest sentence reaches `find` the moment `statusLine` tells the truth.
+
+With the third edit the **real** `index` run goes green immediately (*"never
+offers an upgrade"* — a subprocess, a real spawn, a real lock). The other two
+stayed red one step longer, and that is worth the sentence: they are unit tests
+of `renderIndexReceipt` handed a status built by hand, and they pass
+`spawned: true` beside a status whose `working` is `false` — a world that no
+longer exists, because the product now corrects the report at the spawn. Fixing
+the fixture rather than the renderer is the honest direction, and then:
+
+```
+      Tests  33 passed (33)
+```
+
+**The third edit is better than the patch I wrote.** Round 1 proposed patching
+`warmingSentences` to call `warmingLine` when `spawned`. That fixes the
+*sentence* and leaves the `vectors` **row** — same receipt, same report, built
+by `vectorNote` — saying `stopped at 1,294 of 1,678` beside it. The receipt has
+three renderings of one report (`row`, the `semantic search:` sentence,
+`--json`), so the correction belongs on the report:
+
+```ts
+if (spawned) vec = readVectors(root, { working: true });
+```
+
+`index` reads its report *before* it spawns, which is the whole of the problem —
+the child needs a node boot to `mkdir` the lock — so it re-reads with what this
+run knows, once, and all three renderings follow. `vecStatus(db, root, opts)`
+gained the override and its docstring says the only caller entitled to pass it
+is the one that has just started a pass.
+
+`tests/index.test.ts`'s `statusFor()` helper now takes `working` too, defaulting
+to `true`: those fixtures are handed to `renderIndexReceipt` with
+`spawned: true`, which is a claim that a pass has just started, and the status
+beside it has to be a status of that same world. Pass `false` and the receipt
+correctly reads `stopped at 1,294 of 1,678`. There is a new test pinning exactly
+that, so the pair fails in both directions.
+
+**One more fixture said `warming` about a lane nobody held**, and the full suite
+found it rather than I did: `tests/vectors-lazy.test.ts`'s *"doctor and index
+read one source of truth"*, which pinned `a.line` to the literal warming
+sentence on a root with no `.lock.embed`, no worker and no runtime. Amended the
+same way and for the same reason — the rule that test exists for is that the
+report, the row and the sentence carry the same **numbers**, and it now checks
+that in both states, with the lane held and without, asserting the numbers equal
+across the two. Red on `main`'s `vec.ts`/`doctor-line.ts`:
+
+```
+   × doctor and index read one source of truth > renders the same vectors row …
+     → expected 'semantic search: warming (1 of 4 embe…'
+       to be 'semantic search: not running (1 of 4 …'
+```
+
+## R2. §4.4 — `find` gets its count back
+
+Round 1 could only *drop* the false sentence, because `vecStatus().line` was
+shared with `index`. So `find` said nothing at all about semantic search on the
+one index where the reader most needs to know, and `find --json` carried
+`semantic.line: "…warming…"` next to `semantic.working: false` — the C2 shape
+surviving inside the fix for C2. Both are closed by §4.1. The renderer
+workaround is reverted with it (`semanticNote` prints the line again;
+`supersededBySemantic` goes back to its original one-account-per-fact rule), and
+what the human reads is:
+
+```
+  semantic search: not running (1 of 4 embedded) — it stopped partway
+  semantic search: not running (0 of 3,410 embedded) — the 46.1 MB runtime has
+  not been fetched
+```
+
+The second is the published `09-find.txt`, verbatim. `find --json` now agrees
+with itself: `line` says `not running`, `working` says `false`.
+
+## R3. §4.5 — the race, then the screens
+
+**The race is not hypothetical and it was about to become a permanent CI red.**
+`make-screens.sh:213` shoots `07-index.txt` from `index --full`, which spawns a
+detached embedder — deliberately, because `--no-embed` would delete the
+`fetching 46.1 MB, once` line that screen exists to publish. Every screen below
+it reads the embed lane now. CI's guard runs `index --full --no-embed` and never
+has a worker at all. So `09-find.txt` and `13-find-redacted.txt` would have been
+captured in one state and compared in the other, permanently on a machine that
+can fetch and intermittently on one that cannot.
+
+The script now stops the one child it started, by **the pid the child wrote into
+`.lock.embed/owner.json` itself**, verified against this demo root before it is
+signalled:
+
+```
+  07-index.txt  <-  potsherd index --full
+  stopping the background embedder this capture started (pid 84364)
+  08-ls.txt  <-  potsherd ls
+  …
+$ ps -eo pid,command | grep "[i]ndex --quiet" | wc -l
+       0
+```
+
+That also closes the leak the script's own comment called "an open item and not
+this script's to close" — it is this script's to close for the child this script
+starts.
+
+**`10-stats.txt` was already DRIFTED, and it is not mine.** Run the CI step
+verbatim against `da13b2f` — the commit CI was believed green on, with none of
+FIX-F in it:
+
+```
+  ok        docs/screens/09-find.txt
+  DRIFTED   docs/screens/10-stats.txt  <-  potsherd stats
+-  database                  2.1 MB   ~/.potsherd/potsherd.db
++  database                  2.2 MB   ~/.potsherd/potsherd.db
+```
+
+FIX-E round 2 fixed the *measurement* — `page_count * page_size` rather than
+`fs.statSync().size`, so a WAL checkpoint no longer moves it — and that was
+right and it is not enough. Two capture orders, same corpus, same build:
+
+```
+guard's order   page_count 552  page_size 4096  freelist 0   →  2,260,992 B
+script's order  page_count 533  page_size 4096  freelist 0   →  2,183,168 B
+  identical content both times: 439 exchanges · 228 sessions · 299 ghosts
+                               · 2,971 prompts · 0 vectors · 0 cards
+```
+
+Page allocation is a function of the order rows arrived, and this step's
+sequence is a *miniature* of the script's, not a copy: the script also shoots
+`16-before-after` and `ls --ghosts only` between `index` and `stats`, and runs
+`index --full` where the guard runs `--no-embed`. So the guard normalises the
+size the way it already normalises `<ms>` and the date, and says why at length.
+The number stays on the published screen because it is real output. The row's
+shape and its path are still compared — §R6 seeds `~/.potsherd/OTHER.db` into
+the screen and the step still fails.
+
+## R4. §4.2 — `SUMMARY_KINDS` is spelled once
+
+On the barrel with `isSummaryHit`, `hasTranscriptEvidence` and `summaryRank`;
+the door imports it and its local copy is gone. Still not a deep relative import
+(`../../../core/src/recall.js`), which `cli/src/filters.js` shows would work:
+esbuild would bundle `core/src/recall.ts` beside the `core/dist/recall.js` the
+barrel already pulls in — two copies of one module in the shipped 1.6 MB bundle,
+two `WEIGHTS`, two caches, and nothing anywhere to say so.
+
+## R5. §4.6.3 — the cards control, measured changing a result set
+
+Round 1 proved `scope.cards` was accepted, forwarded and reported and could not
+prove it changed anything, because the real archive has never had `potsherd
+card` run on it. A flag proved only to be plumbed is the audit's own "documented
+and does nothing", one round later. So: the audit's F6 fixture in three rows —
+one session whose transcript says none of the query's words and whose card says
+all of them — driven at the **real MCP server**:
+
+```
+scope {}                cards=True  noMatch=False threads=1 routing=1 summaryOnly=1
+   lists: ['cards_fts', 'exchanges_fts', 'ghost_prompts_fts', 'ghosts_fts', 'titles']
+   lane=routing  evidence=not-a-transcript citable=False citation=null  conf=weak
+
+scope {"cards": false}  cards=False noMatch=True  threads=0 routing=0 summaryOnly=0
+   lists: ['exchanges_fts', 'ghost_prompts_fts', 'ghosts_fts', 'titles']
+   note: no match. The archive does not contain this. Only keyword search ran; the
+         semantic half did not, and nothing is embedding this index, …
+```
+
+Cards on and the card finds a conversation whose transcript never uses the
+words — routing working, testifying to nothing (`citable: false`,
+`citation: null`). Cards off and `cards_fts` leaves the list set: the rows are
+not filtered downstream, the two card lists never run, and the reply is the
+honest empty. There is a test pinning both halves, red on `4064c4e` where the
+scope had no `cards` field.
+
+## R6. The version-vs-tag test — the premise, not the symptom
+
+`git tag --list 'v[0-9]*'` counts every tag a checkout holds. This repository
+keeps a second remote by design (`upstream-episodic` → obra/episodic-memory, for
+the NOTICE), so a fetch of it puts that project's releases in `.git` under plain
+`v*` names. Scoped to `--merged HEAD`: a tag counts only if its commit is an
+ancestor of what is checked out, and a foreign project's release is not in
+potsherd's history and cannot be, however it got in. No network, unlike
+`git ls-remote origin --tags`. The tarball and shallow-clone escapes are
+unchanged, and the comment now records what happened so the next person to fetch
+upstream does not rediscover it.
+
+Both directions, each tag created and deleted **in one command** because
+worktrees share `.git`:
+
+```
+$ git tag v1.4.2 ac737a8 && npx vitest run tests/terminal.test.ts …; git tag -d v1.4.2
+   before:  × is not behind the newest git tag in this checkout
+              → VERSION is 1.2.0 but this checkout already has tag v1.4.2:
+                expected -2 to be greater than or equal to 0
+   after:   Tests  70 passed (70)
+
+$ git tag v9.9.9 HEAD && npx vitest run tests/terminal.test.ts …; git tag -d v9.9.9
+   after:   × is not behind the newest git tag this repository released
+              → VERSION is 1.2.0 but this repository already released v9.9.9:
+                expected -8 to be greater than or equal to 0
+```
+
+`ac737a8` is episodic-memory's own `v1.4.2` commit, still in the object store
+under `upstream-v1.4.2`, so the pollution was reconstructed exactly and with no
+fetch. `git tag --list 'v[0-9]*' | wc -l` is **9** before and after every run
+above.
+
+**One thing to check on your side:** my first command this round was
+`git fetch --all --prune`, before your message arrived, and its output includes
+`* [new tag] v1.4.0 -> v1.4.0` and `v1.4.1`. So some of the 23 you deleted may
+have been re-created by me minutes earlier rather than surviving from the
+original fetch. The checkout holds the right nine now. I have not run
+`git fetch --all` since, and will not.
+
+## R7. THE NUMBERS
+
+
+| | |
+|---|---|
+| `pnpm test` | **exit 0** · `Test Files 53 passed (53)` · `Tests 1932 passed (1932)` |
+| `POTSHERD_SQLITE=node pnpm test` | **exit 0** · `Test Files 53 passed (53)` · `Tests 1932 passed (1932)` |
+| `pnpm typecheck` | **4 of 4** — `core`, `bridges`, `cli`, `mcp` all `Done` |
+| `pnpm evals` (standalone) | **exit 0**, `PASS` — hybrid (auto) **recall@5 51/60 (85%)**, **recall@1 27/60 (45%)** |
+| `python3 scripts/check-privacy.py` | **exit 0, read from `$?`** *(output withheld — the guard prints the offending token)* |
+| `pnpm build && pnpm vendor` | `vendored 2 files, 2.6 MB total`; `git status --porcelain plugins/` → **0 lines** |
+| CI's screens step, run verbatim | **exit 0**, `ten published screens match what this build prints` |
+| CI's screens step, on a seeded drift | **exit 1**, `DRIFTED docs/screens/09-find.txt` |
+| diff vs `main` | packages +168 / −73 · tests +198 / −20 · scripts, ci and screens +101 / −8 |
+
+The merge you ran saw `1929 passed | 1 failed`; this is **1,932 passed, 0
+failed, 0 skipped, both drivers** — the tag test back from red, plus two new
+ones (the stopped receipt, and the cards A/B). Evals are byte-identical to round
+1 and to `4064c4e`: round 2 changed sentences, a lock read and a fixture's
+premise, and moved no ranking.
+
+`pnpm evals` still reports the same three `lost bm25` rows round 1 explained —
+they are C3's measured cost in the diagnostic mode with no vector list, and the
+mode the product runs is unchanged at 51/60 and 27/60.
+
+## R8. WHAT I DID NOT DO
+
+1. **`render/ask.ts` — no ripple, nothing to hand back.** It contains no
+   reference to `vecStatus`, `.line` or the semantic sentence; `grep` over the
+   file returns the word `nothing` only in its own prose. Your `nothing()`
+   headline patch is untouched, and `packages/cli/src/commands/ask.ts` and
+   `tests/{ask,synthesis-seam}.test.ts` were not opened.
+2. **`potsherd_graft` picked the fix up for free, and I did not test it.**
+   `packages/mcp/src/tools/graft.ts:151` publishes `line: r.line` from the same
+   `vecStatus`, so the model door's *second* tool now says `not running` where
+   it said `warming`. The suite is green over it and I did not write a fixture
+   for it; it is one field on one reply and it inherits `vec.ts`'s tests.
+3. **Linux and Windows.** Everything here is macOS/node 24. The new code paths
+   are `lock.holder` (already relied on), a `kill` by recorded pid in a bash
+   script, and `git tag --list --merged HEAD`.
+4. **Whether GitHub's CI is green.** The screens step runs verbatim and green
+   here, on a seeded drift red here, and I have no access to the four-way
+   matrix. Two things it will now behave differently about are worth watching:
+   the `<size>` normalisation (which can only turn a red green, never the
+   reverse) and the two regenerated screens.
+
+## R9. PROCESSES, TAGS, DISK
+
+**Processes.** One embedder started, by `make-screens.sh` itself, and stopped by
+the pid it wrote into its own lock (84364) after `ps -p` confirmed the command
+line named the demo root — `ps` proves a pid is alive, never that it is yours,
+which is the rule I earned last round. `ps -eo pid,command | grep "[i]ndex
+--quiet" | wc -l` is **0** at the end. Nothing else was signalled, by pid or
+otherwise.
+
+**Tags.** Two created and each deleted in the same command (`v1.4.2` at
+episodic-memory's own commit, `v9.9.9` at HEAD). `git tag --list 'v[0-9]*'`
+is nine before and after; `upstream-v*` is twenty-five and untouched. No
+`git fetch` of any remote after the first one, which is noted in §R6.
+
+**Disk.** 5.6 GiB free before, 5.5 GiB after, never below 5.5 during. The demo
+corpus under `.tmp/` and the guard's throwaway `RUNNER_TEMP` roots are the only
+things this round wrote outside the repository, and both are temporary
+directories.
+
+**The branch.** `work/FIX-F2`, six commits on local `main` (`8da0015`). Not
+pushed, not merged, and `origin/main` untouched — see §R0 for why that is not
+the same ref.
