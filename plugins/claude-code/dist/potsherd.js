@@ -9926,7 +9926,7 @@ async function recall(db, query, requested = {}, options = {}) {
     wanted.delete("vec_cards");
     wanted.delete("vec_ghost_prompts");
     const state = vectorState(db, options.root);
-    vectors.reason = state.vectors === 0 || !state.available ? "the words matched; semantic search adds to this as vectors land" : "the words matched; --vectors on adds semantic search";
+    vectors.reason = state.vectors === 0 || !state.available ? "the words matched; semantic search adds to this as vectors land" : "the words matched, so the vector half was not needed";
   }
   if (wanted.has("vec_exchanges") || wanted.has("vec_cards") || wanted.has("vec_ghost_prompts")) {
     try {
@@ -25372,10 +25372,22 @@ async function runDoctor(o) {
     // under-reported once already, when it still said "no network" after the
     // product had started calling a model. So it lists this one.
     nodePath.join(process15.cwd(), ".potsherd", "graft-<id8>.md"),
-    // And `ask --readers-out` is the second, at a path the user names. It
-    // holds the same redacted excerpts a model would have been sent, and no
-    // model was called to write it.
+    // `graft` writes a second file beside the brief, and the receipt named
+    // only the first. The ignore file is why `git status` stays clean after a
+    // graft, which is a kindness — but a path this receipt does not list is a
+    // path it under-reports, and under-reporting is the failure this surface
+    // has now committed six times.
+    nodePath.join(process15.cwd(), ".potsherd", ".gitignore"),
+    // And the seam files are next, at paths the user names. They hold the same
+    // redacted excerpts a model would have been sent, and no model was called
+    // to write them.
+    //
+    // BOTH halves, not just the first. `--synthesis-out` was added this phase
+    // and writes verbatim quotes and session ids exactly as `--readers-out`
+    // does; the receipt named only `--readers-out`, so the newer file was
+    // invisible on the screen whose whole job is to list what gets written.
     "<the path you give to  ask --readers-out>",
+    "<the path you give to  ask --synthesis-out>",
     // T6.6 D13 — and `export` is the third. `EXPORT_WRITE_PATHS` was declared
     // in `commands/export.ts` labelled "Exported for the registration file's
     // `doctor --privacy` line" and had zero consumers, so the one verb that
@@ -25766,6 +25778,9 @@ async function adapterStatus(o) {
     supported: true,
     phase: 6,
     unverified: gemini_exports.GEMINI_FORMAT_UNVERIFIED,
+    // gemini has no provenance object and should not: it refused at auth in
+    // phase 10, so `unverified: true` is the whole and accurate truth about
+    // it. Inventing a split here would claim a measurement nobody made.
     path: gemini_exports.sourceDir(),
     line: gemini_exports.doctorLine()
   });
@@ -25774,6 +25789,7 @@ async function adapterStatus(o) {
     supported: true,
     phase: 6,
     unverified: opencode_exports.OPENCODE_FORMAT_UNVERIFIED,
+    provenance: opencode_exports.OPENCODE_FORMAT_PROVENANCE,
     path: opencode_exports.sourceDir(),
     line: opencode_exports.doctorLine()
   });
@@ -25782,6 +25798,7 @@ async function adapterStatus(o) {
     supported: true,
     phase: 6,
     unverified: copilot_exports.COPILOT_FORMAT_UNVERIFIED,
+    provenance: copilot_exports.COPILOT_FORMAT_PROVENANCE,
     path: copilot_exports.sourceDir(),
     line: copilot_exports.doctorLine()
   });

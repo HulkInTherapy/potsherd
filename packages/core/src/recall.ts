@@ -1756,7 +1756,13 @@ export async function recall(
     vectors.reason =
       state.vectors === 0 || !state.available
         ? 'the words matched; semantic search adds to this as vectors land'
-        : 'the words matched; --vectors on adds semantic search';
+        // NOT `--vectors on`. This string reaches `potsherd_recall`, whose
+        // schema is `query, scope, want, budget` — an agent reading it is being
+        // told to pass a flag it has no way to pass, which is the "documented
+        // and does nothing" failure this project has now recorded eight times.
+        // The condition is also not a user's to change: vectors are already on
+        // and this branch means the query's own words carried the result.
+        : 'the words matched, so the vector half was not needed';
   }
 
   // One forward pass, two lists. The query embedding is the expensive part

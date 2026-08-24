@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import nodePath from 'node:path';
 import process from 'node:process';
 import {
+  type FormatProvenance,
   VERSION,
   audit,
   claude as claudeAdapter,
@@ -145,10 +146,22 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     // under-reported once already, when it still said "no network" after the
     // product had started calling a model. So it lists this one.
     nodePath.join(process.cwd(), '.potsherd', 'graft-<id8>.md'),
-    // And `ask --readers-out` is the second, at a path the user names. It
-    // holds the same redacted excerpts a model would have been sent, and no
-    // model was called to write it.
+    // `graft` writes a second file beside the brief, and the receipt named
+    // only the first. The ignore file is why `git status` stays clean after a
+    // graft, which is a kindness — but a path this receipt does not list is a
+    // path it under-reports, and under-reporting is the failure this surface
+    // has now committed six times.
+    nodePath.join(process.cwd(), '.potsherd', '.gitignore'),
+    // And the seam files are next, at paths the user names. They hold the same
+    // redacted excerpts a model would have been sent, and no model was called
+    // to write them.
+    //
+    // BOTH halves, not just the first. `--synthesis-out` was added this phase
+    // and writes verbatim quotes and session ids exactly as `--readers-out`
+    // does; the receipt named only `--readers-out`, so the newer file was
+    // invisible on the screen whose whole job is to list what gets written.
     '<the path you give to  ask --readers-out>',
+    '<the path you give to  ask --synthesis-out>',
     // T6.6 D13 — and `export` is the third. `EXPORT_WRITE_PATHS` was declared
     // in `commands/export.ts` labelled "Exported for the registration file's
     // `doctor --privacy` line" and had zero consumers, so the one verb that
@@ -686,6 +699,14 @@ interface AdapterStatus {
    * thousand real sessions from one that has read none.
    */
   unverified: boolean;
+  /**
+   * The measured split, when there is one. A bare `unverified: true` cannot
+   * distinguish *never looked* from *looked and it is wrong*, and phase 10
+   * measured both: gemini refused at auth, so its parse is genuinely unmeasured;
+   * opencode and copilot were run against real sessions and their formats are
+   * wrong. A caller deciding whether to trust a count needs to know which.
+   */
+  provenance?: FormatProvenance;
 }
 
 /**
@@ -739,8 +760,14 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     line: piAdapter.doctorLine(),
   });
 
-  // Phase 6, T6.1. All three are `unverified — documentation only`: none was
-  // present with sessions on the machine they were written on, so each was
+  // Phase 6, T6.1 wrote all three from documentation, because none was present
+  // with sessions on the machine they were written on. **Phase 10 installed all
+  // three and ran real sessions**, and the labels are no longer one word:
+  // gemini stays `unverified` (it refused at auth, so the parse is still
+  // unmeasured), while opencode and copilot are `verified and WRONG` — a
+  // stronger and more useful claim than never having looked, and the reason
+  // each carries a `provenance` object rather than one boolean. The `formats.md`
+  // history below is kept because it is how they came to be
   // built against `plans/research/formats.md` (which marks all three sections
   // **unmeasured**) and synthetic fixtures. Each adapter's own `doctorLine()`
   // says so, and distinguishes **not installed** from **installed with no
@@ -750,6 +777,9 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     supported: true,
     phase: 6,
     unverified: geminiAdapter.GEMINI_FORMAT_UNVERIFIED,
+    // gemini has no provenance object and should not: it refused at auth in
+    // phase 10, so `unverified: true` is the whole and accurate truth about
+    // it. Inventing a split here would claim a measurement nobody made.
     path: geminiAdapter.sourceDir(),
     line: geminiAdapter.doctorLine(),
   });
@@ -759,6 +789,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     supported: true,
     phase: 6,
     unverified: opencodeAdapter.OPENCODE_FORMAT_UNVERIFIED,
+    provenance: opencodeAdapter.OPENCODE_FORMAT_PROVENANCE,
     path: opencodeAdapter.sourceDir(),
     line: opencodeAdapter.doctorLine(),
   });
@@ -768,6 +799,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     supported: true,
     phase: 6,
     unverified: copilotAdapter.COPILOT_FORMAT_UNVERIFIED,
+    provenance: copilotAdapter.COPILOT_FORMAT_PROVENANCE,
     path: copilotAdapter.sourceDir(),
     line: copilotAdapter.doctorLine(),
   });

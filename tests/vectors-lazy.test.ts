@@ -177,8 +177,22 @@ describe('doctor and index read one source of truth', () => {
 
       // This is the call. Both verbs make it; neither computes anything else.
       const a = vecStatus(db, root);
-      const b = vecStatus(db, root);
-      expect(a.report).toEqual(b.report);
+
+      // NOT `vecStatus(...) === vecStatus(...)`. That was the assertion here
+      // and it cannot fail — a pure function called twice against an unchanged
+      // database agrees with itself no matter what it computes, so it would
+      // have stayed green through any wrong answer. It is the "benchmark that
+      // cannot fail" this project keeps finding, in the test written to prove
+      // the fix for two verbs disagreeing.
+      //
+      // What "one source of truth" actually claims is that the three RENDERINGS
+      // of the fact — the structured report, the table row, and the human
+      // sentence — carry the same numbers. So each is checked against the
+      // others, and any of them drifting breaks this.
+      expect(a.line).toContain(`${String(a.report?.embedded)} of ${String(a.report?.total)}`);
+      expect(a.row?.value).toBe(String(a.report?.embedded));
+      expect((a.report?.embedded ?? 0) + (a.report?.pending ?? 0)).toBe(a.report?.total);
+
       expect(a.report?.embedded).toBe(1);
       expect(a.report?.pending).toBe(3);
       expect(a.report?.total).toBe(4);

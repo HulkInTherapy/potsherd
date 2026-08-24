@@ -28344,7 +28344,7 @@ async function recall(db, query, requested = {}, options = {}) {
     wanted.delete("vec_cards");
     wanted.delete("vec_ghost_prompts");
     const state = vectorState(db, options.root);
-    vectors.reason = state.vectors === 0 || !state.available ? "the words matched; semantic search adds to this as vectors land" : "the words matched; --vectors on adds semantic search";
+    vectors.reason = state.vectors === 0 || !state.available ? "the words matched; semantic search adds to this as vectors land" : "the words matched, so the vector half was not needed";
   }
   if (wanted.has("vec_exchanges") || wanted.has("vec_cards") || wanted.has("vec_ghost_prompts")) {
     try {
