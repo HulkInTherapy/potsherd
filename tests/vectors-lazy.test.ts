@@ -479,3 +479,104 @@ beforeAll(() => {
   // home directory the constraint that makes it safe to run would be gone.
   expect(paths.modelsDir(tempDir('potsherd-guard-'))).not.toContain(os.homedir());
 });
+
+/**
+ * FIX-F C2 — the report says whether anybody is embedding, not just how far
+ * the index has got.
+ *
+ * `VectorPhase` is a fact about the rows: `pending` is 0-embedded-with-work-to-do
+ * and `warming` is partway through. Neither says whether a pass is **running**,
+ * and every surface assumed one was — `warmingLine`'s own docstring says "there
+ * is nothing for the reader to do; the work is already running". After
+ * `index --no-embed`, on a machine that cannot fetch the runtime, and after an
+ * embedder is killed, that is false, and `potsherd_recall` was telling an agent
+ * to wait for a pass that would never start.
+ *
+ * The evidence is the lock the worker holds for the whole pass. These pin that
+ * `vecStatus` reads it, and that a lock whose owner is dead reads as stopped —
+ * which is the crashed-embedder case and the only one the file alone cannot
+ * answer.
+ */
+describe('the report knows whether a worker is embedding (FIX-F C2)', () => {
+  function pendingRoot(): { root: string; db: ReturnType<typeof store.open> } {
+    const root = tempDir('potsherd-vec-working-');
+    const db = store.open({ root });
+    db.exec(`INSERT INTO sessions (id, harness, project, source_path, indexed_at)
+             VALUES ('s1', 'claude', '/tmp/p', '/tmp/p/s1.jsonl', '2026-08-23T00:00:00Z')`);
+    const ins = db.prepare(
+      `INSERT INTO exchanges (id, session_id, seq, user_text, assistant_text)
+       VALUES (?, 's1', ?, 'u', 'a')`,
+    );
+    for (let i = 0; i < 4; i += 1) ins.run(`e${String(i)}`, i);
+    return { root, db };
+  }
+
+  function writeOwner(root: string, pid: number): string {
+    const dir = path.join(root, '.lock.embed');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'owner.json'),
+      JSON.stringify({
+        pid,
+        op: 'embed',
+        at: new Date().toISOString(),
+        host: process.env.HOSTNAME ?? '',
+      }),
+    );
+    return dir;
+  }
+
+  it('is false when nothing holds the embed lane, whatever the phase says', () => {
+    const { root, db } = pendingRoot();
+    try {
+      const r = vecStatus(db, root).report!;
+      // The phase is unchanged — this is a new fact, not a re-labelling of an
+      // old one, and the numbers every other surface prints do not move.
+      expect(r.phase).toBe('pending');
+      expect(r.embedded).toBe(0);
+      expect(r.total).toBe(4);
+      expect(r.working).toBe(false);
+    } finally {
+      db.close();
+      rmrf(root);
+    }
+  });
+
+  it('is true while a live pid holds it', () => {
+    const { root, db } = pendingRoot();
+    try {
+      writeOwner(root, process.pid);
+      expect(vecStatus(db, root).report?.working).toBe(true);
+    } finally {
+      db.close();
+      rmrf(root);
+    }
+  });
+
+  it('a stale lock whose holder is gone reads as stopped, not as working', () => {
+    // The crashed-embedder case, and the reason the *pid* is the evidence
+    // rather than the file: `lock.isStale` decides a readable owner by whether
+    // that process is alive, and `lock.holder` returns null when it is not.
+    const { root, db } = pendingRoot();
+    try {
+      writeOwner(root, 0x7ffffffe);
+      expect(vecStatus(db, root).report?.working).toBe(false);
+    } finally {
+      db.close();
+      rmrf(root);
+    }
+  });
+
+  it('says nothing either way when there is no root to ask about', () => {
+    // `vecStatus(db)` is the cheap backend check `recall.ts` makes on every
+    // query. It has no root, so it has no lock to read, and `undefined` is
+    // not `false`: an absent measurement must never render as a claim.
+    const { root, db } = pendingRoot();
+    try {
+      expect(vecStatus(db).report).toBeUndefined();
+    } finally {
+      db.close();
+      rmrf(root);
+    }
+  });
+});

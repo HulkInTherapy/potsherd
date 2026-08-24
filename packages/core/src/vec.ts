@@ -14,6 +14,7 @@ import {
   type EmbeddingBackend,
 } from './embeddings.js';
 import { fitNote, vectorNote, vectorReport, warmingLine, type VectorReport } from './doctor-line.js';
+import { holder } from './lock.js';
 import { bytes as fmtBytes, num as fmtNum } from './format.js';
 
 /**
@@ -258,10 +259,22 @@ export function vecStatus(db: Db, root?: string): VecStatus {
   // one you happened to run — the exact failure this call exists to end. The
   // verb that knows it is offline says so in its own sentence.
   const reason = base.available ? undefined : base.reason;
+  // FIX-F C2 — is anybody actually embedding the rest?
+  //
+  // The counts say how far the index has got; they cannot say whether a pass
+  // is under way, and every surface used to assume one was. The background
+  // worker holds `<root>/.lock.embed` for the whole pass and writes its `pid`
+  // into it, so the lock is the evidence — and `lock.holder` already answers
+  // `null` for a lock whose owner is gone, which is exactly the crashed-embedder
+  // case that must read as stopped rather than as warming. It is a read: it
+  // never creates, removes or waits on anything, so asking it here cannot
+  // block a verb or lose a lock.
+  const working = holder({ root, lane: 'embed' }) !== null;
   const report = vectorReport({
     embedded: counts.embedded,
     pending: counts.pending,
     cacheDir,
+    working,
     ...(backend ? { backend } : {}),
     ...(reason ? { reason } : {}),
   });

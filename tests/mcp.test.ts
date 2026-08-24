@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { indexAll, paths } from '@potsherd/core';
+import { db as store, indexAll, paths } from '@potsherd/core';
 
 import { makeContext, resolveGraftCwd } from '../packages/mcp/src/context.js';
 import { TOOLS, WRITE_TOOLS } from '../packages/mcp/src/server.js';
@@ -242,12 +242,16 @@ describe('the tool list', () => {
       expect(Object.keys(props('potsherd_read')).sort()).toEqual(['from', 'thread', 'to']);
       expect(Object.keys(props('potsherd_graft')).sort()).toEqual(['about', 'budget', 'thread']);
 
-      // `scope` is one object rather than nine peers, which is what makes the
+      // `scope` is one object rather than ten peers, which is what makes the
       // schema readable as (what to look for, where, how much).
       const scope = (props('potsherd_recall')['scope'] as { properties: Record<string, unknown> })
         .properties;
+      // `cards` is FIX-F C3: `plans/phases/phase-10-agent-audit.md` §B8 asks
+      // for a `--no-cards`, the CLI has had one since T10.7, and the model
+      // door — the caller the whole finding is about — had no cards control at
+      // all. It is the tenth field and it is advertised, not undocumented.
       expect(Object.keys(scope).sort()).toEqual(
-        ['ghosts', 'harness', 'limit', 'pinned', 'project', 'sidechains', 'since', 'tag', 'until'].sort(),
+        ['cards', 'ghosts', 'harness', 'limit', 'pinned', 'project', 'sidechains', 'since', 'tag', 'until'].sort(),
       );
     } finally {
       await close();
@@ -1117,9 +1121,35 @@ describe('FIX-C — no instruction an agent cannot follow', () => {
     // "UNAVAILABLE" is a claim about a permanent state. An index that is 0%
     // embedded and climbing is transient, and the repo's own word for it —
     // `warmingLine` in `doctor-line.ts` — is `warming`.
-    const r = await runRecall(ctx(), { query: 'pgbouncer' });
-    expect(String(r['capability'])).toMatch(/warming/);
-    expect(String(r['capability'])).not.toMatch(/UNAVAILABLE/);
+    //
+    // **FIX-F C2 amended the fixture, not the rule.** This root is 0-embedded
+    // and nothing is embedding it — no `.lock.embed`, no worker, no runtime —
+    // so `warming` was never true here, which is the whole of C2. The claim
+    // this test exists to pin is that a *transient* state is not shouted at as
+    // a permanent one, and it is pinned in both directions now: with a worker
+    // holding the lane the word is `warming`, and without one it is neither
+    // `warming` nor `UNAVAILABLE`.
+    const dir = path.join(root, '.lock.embed');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'owner.json'),
+      JSON.stringify({
+        pid: process.pid,
+        op: 'embed',
+        at: new Date().toISOString(),
+        host: process.env.HOSTNAME ?? '',
+      }),
+    );
+    try {
+      const r = await runRecall(ctx(), { query: 'pgbouncer' });
+      expect(String(r['capability'])).toMatch(/warming/);
+      expect(String(r['capability'])).not.toMatch(/UNAVAILABLE/);
+    } finally {
+      rmrf(dir);
+    }
+    const stopped = await runRecall(ctx(), { query: 'pgbouncer' });
+    expect(String(stopped['capability'])).not.toMatch(/UNAVAILABLE/);
+    expect(String(stopped['capability'])).not.toMatch(/warming/);
   });
 
   it('C1 — a count is always `N of M`, never a bare numerator', async () => {
@@ -1289,6 +1319,343 @@ describe('FIX-D — the order agrees with the label', () => {
           `${query}: thread${String(i - 1)} is ${threads[i - 1]!.confidence} above thread${String(i)} ${threads[i]!.confidence}`,
         ).toBeLessThanOrEqual(RANK[threads[i]!.confidence]!);
       }
+    }
+  });
+});
+
+// --------------------------------------------------------------------- FIX-F
+
+/**
+ * FIX-F — the door stops claiming work that will never run, and stops handing
+ * out a citation for a session whose transcript it has never seen.
+ *
+ * Three findings, one shape: **a field that was true of one state was printed
+ * in every state.** `warming` was true of an index somebody is embedding and
+ * printed on one nobody is; `citable` was true of a thread with transcript
+ * evidence and printed on a thread that matched six model-written words of
+ * title; `readMore` was suppressed on an empty page, which is the one page it
+ * is the whole answer to.
+ *
+ * Everything here drives `runRecall` — the function the real server calls —
+ * against purpose-built roots, because the fixture corpus has neither a
+ * title-only match nor an exchange longer than the context budget.
+ */
+describe('FIX-F — the door stops claiming what it cannot know', () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const r of roots.splice(0)) rmrf(r);
+  });
+
+  function open(name: string): { root: string; db: ReturnType<typeof store.open> } {
+    const root = tempDir(name);
+    roots.push(root);
+    return { root, db: store.open({ root }) };
+  }
+
+  function session(
+    db: ReturnType<typeof store.open>,
+    id: string,
+    title: string,
+    body: string,
+  ): void {
+    db.prepare(
+      `INSERT INTO sessions (id, harness, project, source_path, indexed_at, started_at, ended_at, title)
+       VALUES (?, 'claude', '/tmp/fixf', ?, '2026-08-23T00:00:00Z', '2026-08-20T00:00:00Z', '2026-08-20T01:00:00Z', ?)`,
+    ).run(id, `/tmp/fixf/${id}.jsonl`, title);
+    db.prepare(
+      `INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text)
+       VALUES (?, ?, 0, '2026-08-20T00:10:00Z', ?, 'noted.')`,
+    ).run(`${id}-e0`, id, body);
+  }
+
+  /**
+   * One thread whose **title** matches the query and whose body does not, and
+   * one whose body does. The reference-archive shape, in eight rows.
+   */
+  function summaryRoot(): string {
+    const { root, db } = open('potsherd-fixf-summary-');
+    try {
+      // Matches on `titles` only: the body says none of the query's words.
+      session(db, 'ttt11111-1111-4111-8111-111111111111', 'kestrel migration notes',
+        'we spent the whole session on unrelated packaging questions');
+      // Matches on `exchanges_fts`: the body says both, the title says neither.
+      session(db, 'eee22222-2222-4222-8222-222222222222', 'packaging questions',
+        'the kestrel migration was postponed until the quarter after next');
+      // fts5 with `content='exchanges'` is an external-content index: rows put
+      // into `exchanges` by hand are invisible to `MATCH` until it is rebuilt.
+      // `ingest.ts` writes both sides; these fixtures write one, so they say so.
+      db.exec("INSERT INTO exchanges_fts(exchanges_fts) VALUES('rebuild')");
+    } finally {
+      db.close();
+    }
+    return root;
+  }
+
+  /** One thread whose only matching exchange is longer than the whole budget. */
+  function oversizedRoot(): string {
+    const { root, db } = open('potsherd-fixf-oversized-');
+    try {
+      // 60,000 chars against a 6,000-token (24,000-char) default ceiling.
+      session(db, 'ooo33333-3333-4333-8333-333333333333', 'packaging questions',
+        `kestrel ${'the same sentence again and again. '.repeat(1700)}`);
+      db.exec("INSERT INTO exchanges_fts(exchanges_fts) VALUES('rebuild')");
+    } finally {
+      db.close();
+    }
+    return root;
+  }
+
+  /**
+   * Hold the embed lane the way the background worker holds it: a `.lock.embed`
+   * directory with an `owner.json` naming a live pid. `lock.holder()` reads
+   * exactly this, and `lock.isStale` reads exactly this pid.
+   */
+  function holdEmbedLane(root: string): () => void {
+    const dir = path.join(root, '.lock.embed');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'owner.json'),
+      JSON.stringify({
+        pid: process.pid,
+        op: 'embed',
+        at: new Date().toISOString(),
+        host: process.env.HOSTNAME ?? '',
+      }),
+    );
+    return () => rmrf(dir);
+  }
+
+  const at = (r: string) => makeContext({ potsherdDir: r, env: { ...OFFLINE }, cwd: project });
+
+  // ------------------------------------------------------------------- C2
+
+  it('C2 — an index nobody is embedding is not called warming', async () => {
+    // The state of every `index --no-embed`, every offline first run, and every
+    // index whose embedder was killed: rows pending, `phase: "pending"`, and
+    // no holder of `<root>/.lock.embed` anywhere.
+    const r = await runRecall(at(summaryRoot()), { query: 'kestrel migration' });
+    expect(String(r['capability'])).toMatch(/not running/);
+    expect(String(r['capability'])).not.toMatch(/warming/);
+    // ...and it still carries the denominator FIX-C put there.
+    expect(String(r['capability'])).toMatch(/\d[\d,]* of \d[\d,]* embedded/);
+    // No command: the caller has three tools and no shell.
+    expect(String(r['capability'])).not.toMatch(/\brun\s|potsherd\s+index/);
+  });
+
+  it('C2 — and the same index IS called warming while a worker holds the lane', async () => {
+    // The distinction is the whole finding: one word for work in flight, a
+    // different one for work that has stopped, never one word widened over
+    // both. Same root, same query, same rows — only the lock changes.
+    const root = summaryRoot();
+    const release = holdEmbedLane(root);
+    try {
+      const r = await runRecall(at(root), { query: 'kestrel migration' });
+      expect(String(r['capability'])).toMatch(/warming/);
+      expect(String(r['capability'])).not.toMatch(/not running/);
+    } finally {
+      release();
+    }
+  });
+
+  it('C2 — a stale lock whose holder is dead reads as stopped, not as warming', async () => {
+    // `lock.isStale` decides a lock with a readable owner by whether that pid
+    // is alive. A crashed embedder leaves the directory behind; the evidence
+    // that matters is the pid, not the file.
+    const root = summaryRoot();
+    const dir = path.join(root, '.lock.embed');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'owner.json'),
+      JSON.stringify({ pid: 0x7ffffffe, op: 'embed', at: new Date().toISOString(), host: process.env.HOSTNAME ?? '' }),
+    );
+    const r = await runRecall(at(root), { query: 'kestrel migration' });
+    expect(String(r['capability'])).toMatch(/not running/);
+  });
+
+  it('C2 — the no-match note stops implying that a retry will do better', async () => {
+    // The compound failure the verifier named: the same reply said "The
+    // archive does not contain this — do not widen into a guess" and "semantic
+    // search is warming", i.e. *retry later and the other half will have run*.
+    const r = await runRecall(at(summaryRoot()), { query: 'zzzqqq flurblewomp aardvark' });
+    expect(r['noMatch']).toBe(true);
+    expect(String(r['note'])).toMatch(/nothing is embedding this index/);
+    expect(String(r['note'])).toMatch(/will not change/);
+  });
+
+  it('C2 — `vectors.reason` says never rather than yet, and carries the fact', async () => {
+    // The envelope's `vectors` object is what an agent parses when it wants
+    // more than the sentence, and `no embeddings in the index yet` is a
+    // promise: `yet` is true while somebody is embedding and false on all
+    // three indexes where nobody is.
+    const root = summaryRoot();
+    const stopped = (await runRecall(at(root), { query: 'kestrel migration' }))['vectors'] as {
+      reason?: string;
+      working?: boolean;
+    };
+    expect(stopped.working).toBe(false);
+    expect(String(stopped.reason)).toMatch(/is not running|nothing is embedding/);
+    expect(String(stopped.reason)).not.toMatch(/\byet\b|as vectors land/);
+
+    const release = holdEmbedLane(root);
+    try {
+      const warming = (await runRecall(at(root), { query: 'kestrel migration' }))['vectors'] as {
+        reason?: string;
+        working?: boolean;
+      };
+      expect(warming.working).toBe(true);
+      expect(String(warming.reason)).toMatch(/yet|as vectors land/);
+    } finally {
+      release();
+    }
+  });
+
+  it('C2 — capabilityLine: three states, three sentences, one count', () => {
+    const base = { phase: 'pending' as const, embedded: 0, pending: 4725, total: 4725, runtimeReady: false, acquireBytes: 46_100_000 };
+    const v = { used: false, available: false, vectors: 0 };
+    expect(capabilityLine(v, { ...base, working: false })).toBe(
+      'keyword search only — semantic search is not running (0 of 4,725 embedded)',
+    );
+    expect(capabilityLine(v, { ...base, working: true })).toBe(
+      'keyword search only — semantic search is warming (0 of 4,725 embedded)',
+    );
+    // A caller with no root cannot know, and must not guess: the old sentence
+    // stands rather than a claim in either direction.
+    expect(capabilityLine(v, base)).toBe(
+      'keyword search only — semantic search is warming (0 of 4,725 embedded)',
+    );
+  });
+
+  // ------------------------------------------------------------------- C3
+
+  it('C3 — a title-only thread is not citable and carries no citation', async () => {
+    const r = await runRecall(at(summaryRoot()), { query: 'kestrel migration' });
+    const threads = r['threads'] as Record<string, unknown>[];
+    const summary = threads.filter((t) => t['evidence'] === 'not-a-transcript');
+    expect(summary).toHaveLength(1);
+    expect(summary[0]!['citable']).toBe(false);
+    expect(summary[0]!['citation']).toBeNull();
+    // And it says why, in a sentence naming a tool the caller actually has.
+    expect(String(summary[0]!['citableNote'])).toMatch(/potsherd_read/);
+    // The thread with transcript evidence keeps everything it had.
+    const evidence = threads.filter((t) => t['evidence'] === 'transcript');
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]!['citable']).toBe(true);
+    expect(typeof evidence[0]!['citation']).toBe('string');
+  });
+
+  it('C3 — a summary never outranks a transcript, in threads[] and in hits[]', async () => {
+    const r = await runRecall(at(summaryRoot()), { query: 'kestrel migration' });
+    const threads = r['threads'] as { evidence: string }[];
+    const hits = r['hits'] as { evidence: string }[];
+    expect(threads.map((t) => t.evidence)).toEqual(['transcript', 'not-a-transcript']);
+    // Every transcript hit comes before every summary hit — the verifier
+    // measured `first transcript hit at index 18 of 28` on the real archive.
+    const first = hits.findIndex((h) => h.evidence === 'not-a-transcript');
+    expect(first).toBeGreaterThan(-1);
+    expect(hits.slice(0, first).every((h) => h.evidence === 'transcript')).toBe(true);
+    expect(hits.slice(first).every((h) => h.evidence === 'not-a-transcript')).toBe(true);
+  });
+
+  it('C3 — a summary-only thread is never labelled strong', async () => {
+    // `strong` is a licence to stop reading, and there is nothing here to
+    // read. Core caps it at ROUTING_CEILING, which is also what keeps the
+    // order above monotone in the confidence word (FIX-D's fence).
+    const r = await runRecall(at(summaryRoot()), { query: 'kestrel migration' });
+    for (const t of r['threads'] as { evidence: string; confidence: string }[]) {
+      if (t.evidence === 'not-a-transcript') expect(t.confidence).not.toBe('strong');
+    }
+  });
+
+  it('C3 — the agent gets the cards control the human has had', async () => {
+    const root = summaryRoot();
+    const on = await runRecall(at(root), { query: 'kestrel migration' });
+    expect(on['cards']).toBe(true);
+    const off = await runRecall(at(root), { query: 'kestrel migration', scope: { cards: false } });
+    expect(off['cards']).toBe(false);
+    // It is on the envelope so a caller can confirm the flag took, exactly as
+    // `find --json` reports it.
+    expect(off['routing']).toBe(0);
+  });
+
+  it('C3 — orderByLabel puts a summary row last without contradicting the label', () => {
+    const row = (evidence: string, confidence: string, cal: number, tag: string) => ({
+      evidence,
+      confidence,
+      calibration: { score: cal, confidence, coverage: 0, strength: 0, agreement: 0 },
+      score: 0.0164,
+      tag,
+    });
+    // A summary row with a better calibration than a weak transcript row: the
+    // cap stops it being `strong`, and this stops it being first.
+    const out = orderByLabel([
+      row('not-a-transcript', 'weak', 0.92, 'summary'),
+      row('transcript', 'weak', 0.41, 'transcript'),
+    ]);
+    expect(out.map((r) => r.tag)).toEqual(['transcript', 'summary']);
+    // Rows carrying no `evidence` field — every FIX-D fence above — are
+    // untouched: absent is not `not-a-transcript`.
+    const plain = [
+      { confidence: 'weak', calibration: { score: 0.4 }, score: 0.02, tag: 'a' },
+      { confidence: 'weak', calibration: { score: 0.9 }, score: 0.01, tag: 'b' },
+    ];
+    expect(orderByLabel(plain).map((r) => r.tag)).toEqual(['b', 'a']);
+  });
+
+  // ------------------------------------------------------------------- C6
+
+  it('C6 — an exchange longer than the budget comes back clipped, not missing', async () => {
+    const r = await runRecall(at(oversizedRoot()), { query: 'kestrel', want: 'context' });
+    expect(r['noMatch']).toBe(false);
+    expect((r['threads'] as unknown[]).length).toBe(1);
+    const windows = r['windows'] as { text: string; clipped?: boolean }[];
+    expect(windows).toHaveLength(1);
+    expect(windows[0]!.clipped).toBe(true);
+    expect(windows[0]!.text.length).toBeGreaterThan(0);
+    expect(r['windowsClipped']).toBe(1);
+    // The clip respects the ceiling it was clipped to fit.
+    expect(Number(r['windowTokens'])).toBeLessThanOrEqual(Number(r['windowBudget']));
+  });
+
+  it('C6 — readMore survives the empty page, and stays silent on a real no-match', async () => {
+    const root = oversizedRoot();
+    // Matched, and (before the clip) no text: the one case where "read the
+    // thread" is the whole answer, and the one case it used to be withheld in.
+    const hit = await runRecall(at(root), { query: 'kestrel', want: 'context' });
+    expect(hit['readMore']).not.toBeNull();
+    expect(String(hit['readMore'])).toMatch(/potsherd_read/);
+    // Nothing matched: there is no thread to read, and naming one would be an
+    // instruction the caller cannot carry out.
+    const miss = await runRecall(at(root), {
+      query: 'zzzqqq flurblewomp aardvark',
+      want: 'context',
+    });
+    expect(miss['noMatch']).toBe(true);
+    expect(miss['readMore']).toBeNull();
+  });
+
+  // ------------------------------------------------------------------- C7
+
+  it('C7 — one withheld row is one row, and it was withheld', async () => {
+    // `though 1 rows were withheld below the weak floor`, live at the model
+    // door. The project singularises through `f.plural` everywhere else.
+    const { root, db } = open('potsherd-fixf-plural-');
+    try {
+      session(db, 'ppp44444-4444-4444-8444-444444444444', 'packaging questions',
+        'kestrel appears here once and the rest of this line is about nothing else at all');
+      db.exec("INSERT INTO exchanges_fts(exchanges_fts) VALUES('rebuild')");
+    } finally {
+      db.close();
+    }
+    const r = await runRecall(at(root), { query: 'kestrel wombat parasol' });
+    if (r['noMatch'] === true && Number(r['belowFloor']) === 1) {
+      expect(String(r['note'])).toContain('1 row was withheld');
+      expect(String(r['note'])).not.toContain('1 rows were withheld');
+    } else {
+      // The fixture must produce the case the assertion is about.
+      expect({ noMatch: r['noMatch'], belowFloor: r['belowFloor'] }).toEqual({
+        noMatch: true,
+        belowFloor: 1,
+      });
     }
   });
 });
