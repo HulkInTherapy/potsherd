@@ -43261,7 +43261,7 @@ async function runRecall(ctx, args) {
     const noMatch = confidence === "none";
     const sessions = noMatch ? [] : result.sessions;
     const hits = noMatch ? [] : result.hits;
-    const threads = groupThreads(sessions);
+    const threads = orderByLabel(groupThreads(sessions));
     const envelope = {
       query: result.query,
       want,
@@ -43310,7 +43310,7 @@ async function runRecall(ctx, args) {
       envelope["windowsTruncated"] = truncated;
       envelope["readMore"] = windows2.length === 0 ? null : "these windows are discontiguous and relevance-selected. potsherd_read the thread for the exchanges around any of them.";
     } else {
-      envelope["hits"] = hits.map((h) => hitJson(h, sessions));
+      envelope["hits"] = orderByLabel(hits).map((h) => hitJson(h, sessions));
     }
     return envelope;
   });
@@ -43385,6 +43385,26 @@ function groupThreads(sessions) {
       })
     };
   });
+}
+var CONFIDENCE_RANK = { strong: 0, weak: 1, none: 2 };
+function orderByLabel(rows) {
+  const out = [...rows];
+  if (out.some((r) => confidenceOf(r) === null)) return out;
+  return out.map((row, i) => ({ row, i })).sort(
+    (a, b) => CONFIDENCE_RANK[confidenceOf(a.row)] - CONFIDENCE_RANK[confidenceOf(b.row)] || calibrationScoreOf(b.row) - calibrationScoreOf(a.row) || scoreOf(b.row) - scoreOf(a.row) || // Explicit, rather than leaning on the runtime's sort being stable.
+    a.i - b.i
+  ).map((r) => r.row);
+}
+function calibrationScoreOf(row) {
+  const c = calibrationOf(row);
+  if (!c || typeof c !== "object") return 0;
+  const s = c.score;
+  return typeof s === "number" && Number.isFinite(s) ? s : 0;
+}
+function scoreOf(row) {
+  if (!row || typeof row !== "object") return 0;
+  const s = row.score;
+  return typeof s === "number" && Number.isFinite(s) ? s : 0;
 }
 function hitJson(h, sessions) {
   const owner = sessions.find((s) => s.id === h.sessionId);

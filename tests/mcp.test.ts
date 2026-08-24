@@ -8,7 +8,7 @@ import { indexAll, paths } from '@potsherd/core';
 
 import { makeContext, resolveGraftCwd } from '../packages/mcp/src/context.js';
 import { TOOLS, WRITE_TOOLS } from '../packages/mcp/src/server.js';
-import { capabilityLine, runRecall } from '../packages/mcp/src/tools/recall.js';
+import { capabilityLine, orderByLabel, runRecall } from '../packages/mcp/src/tools/recall.js';
 import { describeError } from '../packages/mcp/src/errors.js';
 import { AGENT_FLOOR, CONFIDENCE_VALUES } from '../packages/mcp/src/tools/shapes.js';
 import * as shipped from '../packages/mcp/src/descriptions.js';
@@ -1179,5 +1179,116 @@ describe('FIX-C — no instruction an agent cannot follow', () => {
     // It states how many the index holds, so a truncated list is visibly
     // truncated rather than silently five-of-eighteen.
     expect(text).toMatch(/index holds \d+/);
+  });
+});
+
+/**
+ * FIX-D C5a — the first row is the best row.
+ *
+ * The third verifier caught `hit0 score 0.016393 conf weak` above
+ * `hit1 score 0.016393 conf strong` at this door. `hits[]` came back in the
+ * order core merged them — reciprocal rank fusion, a function of rank alone —
+ * and every row was labelled from `calibration`, which is computed from the
+ * evidence RRF throws away. Two right numbers, one wrong impression: the reader
+ * here is a model, and every consumer of a ranked list assumes the top row is
+ * the best one before it reads a single field.
+ *
+ * The order is now the label's. These are the fence, and they fail if the two
+ * ever drift apart again — which is the property the item asked for, not the
+ * one-off reshuffle.
+ */
+describe('FIX-D — the order agrees with the label', () => {
+  const RANK: Record<string, number> = { strong: 0, weak: 1, none: 2 };
+  const row = (confidence: string, cal: number, score: number, tag: string) => ({
+    confidence,
+    calibration: { score: cal, confidence, coverage: 0, strength: 0, agreement: 0 },
+    score,
+    tag,
+  });
+
+  it('C5a — the verifier\'s two rows come back the other way round', () => {
+    // Verbatim from VERIFICATION-3 §C5: same fused score, opposite labels,
+    // the weak one first because RRF put it there.
+    const merged = [row('weak', 0.5667, 0.016393, 'hit0'), row('strong', 0.85, 0.016393, 'hit1')];
+    expect(merged.map((r) => r.tag)).toEqual(['hit0', 'hit1']);
+    expect(orderByLabel(merged).map((r) => r.tag)).toEqual(['hit1', 'hit0']);
+  });
+
+  it('C5a — the word wins over the number, because the number can be capped', () => {
+    // A routing row is capped at ROUTING_CEILING (`weak`) however well it
+    // scores, so a sort on `calibration.score` alone would put a card back on
+    // top of a transcript. This is why the first key is the label.
+    const card = row('weak', 0.92, 0.016393, 'card');
+    const transcript = row('strong', 0.61, 0.008197, 'transcript');
+    expect(orderByLabel([card, transcript]).map((r) => r.tag)).toEqual(['transcript', 'card']);
+  });
+
+  it('C5a — inside one band it is calibration first, then the fused score', () => {
+    const rows = [
+      row('weak', 0.40, 0.016393, 'low-cal-high-rrf'),
+      row('weak', 0.55, 0.008197, 'high-cal-low-rrf'),
+      row('weak', 0.55, 0.009524, 'high-cal-higher-rrf'),
+    ];
+    expect(orderByLabel(rows).map((r) => r.tag)).toEqual([
+      'high-cal-higher-rrf',
+      'high-cal-low-rrf',
+      'low-cal-high-rrf',
+    ]);
+  });
+
+  it('C5a — it moves rows and never adds, drops or edits one', () => {
+    const rows = [row('none', 0.2, 0.01, 'a'), row('strong', 0.9, 0.002, 'b'), row('weak', 0.5, 0.03, 'c')];
+    const out = orderByLabel(rows);
+    expect(out).toHaveLength(rows.length);
+    expect([...out].sort((x, y) => x.tag.localeCompare(y.tag))).toEqual(
+      [...rows].sort((x, y) => x.tag.localeCompare(y.tag)),
+    );
+    // The same objects, not copies: nothing here rewrites a row.
+    for (const r of rows) expect(out).toContain(r);
+  });
+
+  it('C5a — a build whose core carries no label leaves the merge order alone', () => {
+    // `null` is not `none`. With no label there is nothing for the order to
+    // contradict, so the fused order — which is a real ordering — stands.
+    const rows = [
+      { calibration: null, score: 0.008 },
+      { calibration: null, score: 0.016 },
+    ];
+    expect(orderByLabel(rows)).toEqual(rows);
+  });
+
+  it('C5a — the real envelope: hits[] never labels the top row weaker than one below it', async () => {
+    // `statement` is the query that makes this falsifiable rather than
+    // decorative: on the committed fixture it returned `none, strong` — the
+    // verifier's shape exactly — before the ordering landed. Unwire
+    // `orderByLabel` and this case goes red, which is the whole point of it.
+    let sawTwoLabels = false;
+    for (const query of ['statement', 'pgbouncer', 'transaction pooling', 'the', 'and the']) {
+      const r = await runRecall(ctx(), { query });
+      const hits = (r['hits'] ?? []) as { confidence: string; calibration: { score: number } }[];
+      if (new Set(hits.map((h) => h.confidence)).size > 1) sawTwoLabels = true;
+      for (let i = 1; i < hits.length; i++) {
+        expect(
+          RANK[hits[i - 1]!.confidence]!,
+          `${query}: hit${String(i - 1)} is ${hits[i - 1]!.confidence} above hit${String(i)} ${hits[i]!.confidence}`,
+        ).toBeLessThanOrEqual(RANK[hits[i]!.confidence]!);
+      }
+    }
+    // ...and the fence is not vacuous: at least one of those queries really
+    // does return rows carrying two different labels.
+    expect(sawTwoLabels).toBe(true);
+  });
+
+  it('C5a — and threads[], which is the list an agent picks a thread from', async () => {
+    for (const query of ['statement', 'pgbouncer', 'transaction pooling', 'the', 'and the']) {
+      const r = await runRecall(ctx(), { query });
+      const threads = (r['threads'] ?? []) as { confidence: string }[];
+      for (let i = 1; i < threads.length; i++) {
+        expect(
+          RANK[threads[i - 1]!.confidence]!,
+          `${query}: thread${String(i - 1)} is ${threads[i - 1]!.confidence} above thread${String(i)} ${threads[i]!.confidence}`,
+        ).toBeLessThanOrEqual(RANK[threads[i]!.confidence]!);
+      }
+    }
   });
 });

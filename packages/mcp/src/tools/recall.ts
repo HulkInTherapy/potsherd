@@ -185,7 +185,14 @@ export async function runRecall(
 
     const sessions = noMatch ? [] : result.sessions;
     const hits = noMatch ? [] : result.hits;
-    const threads = groupThreads(sessions);
+    // C5a again, on the list the agent actually chooses a thread from. The
+    // verifier filed `hits[]`; `threads[]` carries the same two axes — a
+    // block score that is RRF's and a `calibration`/`confidence` that is not —
+    // so it is the same defect one field over, and leaving it would be fixing
+    // the half that was named. Measured over nine queries on the demo corpus
+    // this reorders nothing: core's block order and the block label already
+    // agree there. This is the fence, not a change of ranking.
+    const threads = orderByLabel(groupThreads(sessions));
 
     const envelope: Record<string, unknown> = {
       query: result.query,
@@ -249,7 +256,7 @@ export async function runRecall(
           : 'these windows are discontiguous and relevance-selected. potsherd_read the thread for ' +
             'the exchanges around any of them.';
     } else {
-      envelope['hits'] = hits.map((h) => hitJson(h, sessions));
+      envelope['hits'] = orderByLabel(hits).map((h) => hitJson(h, sessions));
     }
 
     return envelope;
@@ -347,6 +354,84 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
             }),
     };
   });
+}
+
+/** The three words, best first. `null` is not a rank — see {@link orderByLabel}. */
+const CONFIDENCE_RANK: Record<Confidence, number> = { strong: 0, weak: 1, none: 2 };
+
+/**
+ * C5a — the first row is the best row, by the number that carries the meaning.
+ *
+ * The third verifier caught `hit0 score 0.016393 conf weak` sitting **above**
+ * `hit1 score 0.016393 conf strong`. Both numbers were right and they were
+ * measuring different things:
+ *
+ *  - `score` is reciprocal rank fusion, `weight * 1/(k + rank)` — a function of
+ *    rank alone (`core/recall.ts`). Two rows at rank 1 of two different lists
+ *    are 0.016393 apart from nothing, and RRF is the *merge* order: it decides
+ *    which candidates survive, not how good any of them is.
+ *  - `calibration.score` — and the `confidence` word lifted off it — is
+ *    computed from the evidence RRF discards: `from[].raw`, how many of the
+ *    query's distinctive words the row can actually show, and how many lists
+ *    found it independently.
+ *
+ * Every field an agent needs to re-sort was already on the row, so this was
+ * never a hole. It was worse in one specific way: the reader at this door is a
+ * model, and **the first row is the best row** is the assumption every consumer
+ * of a ranked list makes before it reads a field. A default order that
+ * contradicts the default label spends that assumption on nothing.
+ *
+ * So the order is the label's, and the label's own tie-break beneath it:
+ *
+ *   1. `confidence` — the word, not the number, because the number can be
+ *      *capped*. A routing row scoring 0.9 is labelled `weak` by
+ *      `ROUTING_CEILING`, and sorting on `calibration.score` alone would
+ *      have put a `weak` card back above a `strong` transcript — the same
+ *      defect with a different arithmetic behind it.
+ *   2. `calibration.score`, within a band.
+ *   3. the fused `score`, which is the merge order, as the last tie-break —
+ *      so nothing here invents an order where the two axes are silent.
+ *
+ * F6 survives it. A card is capped at `weak` and can therefore never outrank a
+ * `strong` transcript, whatever it scores.
+ *
+ * **Nothing is recomputed.** This reads `confidence` and `calibration.score`
+ * off the rows core already labelled, exactly as the rest of this file does;
+ * it moves rows, it does not score them. And it changes no membership: the same
+ * hits come back, so the floor, `belowFloor` and the `noMatch` cliff are
+ * untouched.
+ */
+export function orderByLabel<T>(rows: readonly T[]): T[] {
+  const out = [...rows];
+  // A build whose core carries no label has nothing for the order to
+  // contradict, so the fused order stands untouched. `null` is not `none`.
+  if (out.some((r) => confidenceOf(r) === null)) return out;
+  return out
+    .map((row, i) => ({ row, i }))
+    .sort(
+      (a, b) =>
+        CONFIDENCE_RANK[confidenceOf(a.row)!] - CONFIDENCE_RANK[confidenceOf(b.row)!] ||
+        calibrationScoreOf(b.row) - calibrationScoreOf(a.row) ||
+        scoreOf(b.row) - scoreOf(a.row) ||
+        // Explicit, rather than leaning on the runtime's sort being stable.
+        a.i - b.i,
+    )
+    .map((r) => r.row);
+}
+
+/** `calibration.score`, or 0 when this build's core attaches none. */
+function calibrationScoreOf(row: unknown): number {
+  const c = calibrationOf(row);
+  if (!c || typeof c !== 'object') return 0;
+  const s = (c as { score?: unknown }).score;
+  return typeof s === 'number' && Number.isFinite(s) ? s : 0;
+}
+
+/** The fused RRF score, or 0 when a row carries none. */
+function scoreOf(row: unknown): number {
+  if (!row || typeof row !== 'object') return 0;
+  const s = (row as { score?: unknown }).score;
+  return typeof s === 'number' && Number.isFinite(s) ? s : 0;
 }
 
 function hitJson(h: Hit, sessions: readonly Session[]): Record<string, unknown> {
