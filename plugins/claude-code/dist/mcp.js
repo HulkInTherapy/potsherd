@@ -24110,13 +24110,30 @@ function vectorNote(r, opts = {}) {
         ],
         tone: "ok"
       };
+    // VERIFICATION-5 C-6 — the second branch used to read `working` not at all,
+    // so `doctor` printed one sentence for two different states:
+    //
+    //     no worker, 1,800 pending    vectors — 0 of 1,800 · 46.1 MB runtime not fetched yet
+    //     worker alive, lock held     vectors — 0 of    22 · 32.4 MB runtime not fetched yet
+    //
+    // and the moment a user is most likely to run `doctor` to ask *is anything
+    // happening* is the first run of a fresh install, which is exactly this
+    // branch. During the multi-minute acquisition there **is** work in flight
+    // and the honest word is not "not running"; after a killed or failed fetch
+    // there is not. `find` and `potsherd_recall` already separated the two, so
+    // FIX-F C2's claim that one flag drives all four surfaces was true of three.
+    // `undefined` keeps the old wording for the old reason: a caller who could
+    // not ask must not be made to claim.
     case "pending":
       return {
         value: dash,
         parts: r.runtimeReady ? [
           r.working === false ? `not running, 0 of ${num2(r.total)}` : `warming 0 of ${num2(r.total)}`,
           runtime
-        ] : [`0 of ${num2(r.total)}`, `${bytes2(r.acquireBytes)} runtime not fetched yet`],
+        ] : [
+          `0 of ${num2(r.total)}`,
+          r.working === true ? `fetching the ${bytes2(r.acquireBytes)} runtime` : r.working === false ? `not running \u2014 ${bytes2(r.acquireBytes)} runtime not fetched` : `${bytes2(r.acquireBytes)} runtime not fetched yet`
+        ],
         tone: "dim"
       };
     case "empty":
@@ -24146,6 +24163,7 @@ import fs3 from "node:fs";
 import path3 from "node:path";
 import process6 from "node:process";
 var STALE_MS = 5 * 6e4;
+var LIVE_STALE_MS = 10 * 6e4;
 function lockPathFor(root, lane) {
   return path3.join(root, lane === "embed" ? ".lock.embed" : ".lock");
 }
@@ -24158,12 +24176,17 @@ function readOwner(lockPath) {
 }
 function isStale(lockPath, holder2) {
   if (holder2 && holder2.pid && (!holder2.host || holder2.host === (process6.env.HOSTNAME ?? ""))) {
-    return !pidAlive(holder2.pid);
+    if (!pidAlive(holder2.pid))
+      return true;
+    return ageMs(lockPath) > LIVE_STALE_MS;
   }
+  return ageMs(lockPath) > STALE_MS;
+}
+function ageMs(lockPath) {
   try {
-    return Date.now() - fs3.statSync(lockPath).mtimeMs > STALE_MS;
+    return Date.now() - fs3.statSync(lockPath).mtimeMs;
   } catch {
-    return true;
+    return Number.POSITIVE_INFINITY;
   }
 }
 function holder(opts = {}) {
@@ -24188,7 +24211,9 @@ function pidAlive(pid) {
 
 // ../core/dist/vec.js
 var require_2 = createRequire2(import.meta.url);
-var loaded = /* @__PURE__ */ new WeakMap();
+var VEC_TABLES = ["vec_exchanges", "vec_cards", "vec_ghost_prompts"];
+var cores = /* @__PURE__ */ new WeakMap();
+var declines = /* @__PURE__ */ new WeakMap();
 var needles = /* @__PURE__ */ new WeakMap();
 function installVectorFunctions(db) {
   const fn = db.function;
@@ -24237,18 +24262,66 @@ function loadLegacyExtension(db) {
     return {};
   }
 }
-function loadVec(db) {
-  const cached3 = loaded.get(db);
+function installCore(db) {
+  const cached3 = cores.get(db);
   if (cached3)
     return cached3;
   const fns = installVectorFunctions(db);
-  const legacy = loadLegacyExtension(db);
-  const status = fns.ok ? { available: true, backend: "scan", ...legacy } : { available: false, reason: fns.reason, ...legacy };
-  loaded.set(db, status);
-  return status;
+  const ext = loadLegacyExtension(db);
+  const core = fns.ok ? { ok: true, ...ext } : { ok: false, reason: fns.reason, ...ext };
+  cores.set(db, core);
+  return core;
+}
+function loadVec(db) {
+  const core = installCore(db);
+  const ext = {
+    ...core.version ? { version: core.version } : {},
+    ...core.path ? { path: core.path } : {}
+  };
+  if (!core.ok)
+    return { available: false, ...core.reason ? { reason: core.reason } : {}, ...ext };
+  const stranded = strandedVecTables(db);
+  if (stranded.length > 0) {
+    return { available: false, legacy: stranded, reason: strandedReason(db), ...ext };
+  }
+  return { available: true, backend: "scan", ...ext };
+}
+function strandedVecTables(db) {
+  const out = [];
+  let rows;
+  try {
+    rows = db.prepare(`SELECT name, sql FROM sqlite_master
+          WHERE type = 'table' AND name IN ('vec_exchanges', 'vec_cards', 'vec_ghost_prompts')`).all();
+  } catch {
+    return out;
+  }
+  for (const row of rows) {
+    if (!/USING\s+vec0/i.test(row.sql ?? ""))
+      continue;
+    if (statementsCompile(db, row.name))
+      continue;
+    out.push(row.name);
+  }
+  return out;
+}
+function statementsCompile(db, name) {
+  try {
+    db.prepare(`SELECT 1 FROM "${name}" LIMIT 1`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function strandedReason(db) {
+  return declines.get(db) ?? "run potsherd index \u2014 it converts a vec0 store written by 1.1.0";
+}
+function vecTableUsable(db, table2 = "vec_exchanges") {
+  if (!loadVec(db).available)
+    return false;
+  return statementsCompile(db, table2);
 }
 function vecStatus(db, root, opts = {}) {
-  const base = loaded.get(db) ?? loadVec(db);
+  const base = loadVec(db);
   if (root === void 0)
     return base;
   const counts = vectorCounts(db);
@@ -24285,9 +24358,6 @@ function statusLine(r) {
   if (r.working === false)
     return stoppedLine(r, num, bytes);
   return warmingLine(r, num);
-}
-function vecAvailable(db) {
-  return vecStatus(db).available;
 }
 var EXCHANGE_STORE = `
 CREATE TABLE IF NOT EXISTS vec_blob_exchanges (
@@ -24362,25 +24432,123 @@ function createGhostVecTable(db) {
   }
 }
 function migrateToPortableVectors(db) {
-  loadVec(db);
-  const legacy = ["vec_exchanges", "vec_cards", "vec_ghost_prompts"].filter((t) => legacyVecTable(db, t));
+  installCore(db);
+  const legacy = VEC_TABLES.filter((t) => legacyVecTable(db, t));
+  if (legacy.length === 0) {
+    db.exec(EXCHANGE_STORE);
+    db.exec(GHOST_STORE);
+    declines.delete(db);
+    return true;
+  }
+  const stranded = [];
   try {
     for (const table2 of legacy) {
-      const key = table2 === "vec_cards" ? "session_id" : "id";
-      const blob = `vec_blob_${table2.slice("vec_".length)}`;
-      db.exec(table2 === "vec_ghost_prompts" ? `CREATE TABLE IF NOT EXISTS vec_blob_ghost_prompts (id TEXT PRIMARY KEY, embedding BLOB NOT NULL);` : `CREATE TABLE IF NOT EXISTS ${blob} (${key} TEXT PRIMARY KEY, embedding BLOB NOT NULL);`);
-      const rows = db.prepare(`SELECT ${key} AS k, embedding AS e FROM ${table2}`).all();
-      const insert = db.prepare(`INSERT OR REPLACE INTO ${blob} (${key}, embedding) VALUES (?, ?)`);
-      for (const row of rows)
-        insert.run(row.k, row.e);
-      db.exec(`DROP TABLE ${table2};`);
+      if (!copyVectorsAcross(db, table2))
+        stranded.push(table2);
     }
-  } catch (err) {
-    return false;
+  } catch {
+    return decline(db, "run POTSHERD_SQLITE=node potsherd index \u2014 this vec0 store could not be read");
+  }
+  if (stranded.length > 0 && !detachStranded(db, stranded)) {
+    return decline(db, "run POTSHERD_SQLITE=node potsherd index \u2014 this sqlite will not rewrite a schema");
   }
   db.exec(EXCHANGE_STORE);
   db.exec(GHOST_STORE);
+  if (stranded.length > 0)
+    forgetStrandedStamps(db, stranded);
+  declines.delete(db);
   return true;
+}
+function decline(db, reason) {
+  declines.set(db, reason);
+  return false;
+}
+function copyVectorsAcross(db, table2) {
+  const key = table2 === "vec_cards" ? "session_id" : "id";
+  const blob = `vec_blob_${table2.slice("vec_".length)}`;
+  db.exec(`CREATE TABLE IF NOT EXISTS ${blob} (${key} TEXT PRIMARY KEY, embedding BLOB NOT NULL);`);
+  let rows;
+  try {
+    rows = db.prepare(`SELECT ${key} AS k, embedding AS e FROM ${table2}`).all();
+  } catch {
+    return false;
+  }
+  try {
+    const insert = db.prepare(`INSERT OR REPLACE INTO ${blob} (${key}, embedding) VALUES (?, ?)`);
+    for (const row of rows)
+      insert.run(row.k, row.e);
+    db.exec(`DROP TABLE ${table2};`);
+  } catch {
+    db.exec(`DELETE FROM ${blob};`);
+    return false;
+  }
+  return true;
+}
+function detachStranded(db, tables) {
+  const restore = allowSchemaWrites(db);
+  try {
+    try {
+      db.pragma("writable_schema = ON");
+      db.prepare(`DELETE FROM sqlite_master WHERE type = 'table' AND name = ?`).run("__potsherd_probe_no_such_table__");
+    } catch {
+      return false;
+    } finally {
+      db.pragma("writable_schema = RESET");
+    }
+    for (const table2 of tables) {
+      try {
+        db.pragma("writable_schema = ON");
+        db.prepare(`DELETE FROM sqlite_master WHERE type = 'table' AND name = ?`).run(table2);
+      } finally {
+        db.pragma("writable_schema = RESET");
+      }
+      for (const shadow of shadowTables(db, table2))
+        db.exec(`DROP TABLE IF EXISTS "${shadow}"`);
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    restore();
+  }
+}
+function allowSchemaWrites(db) {
+  const fn = db.unsafeMode;
+  if (typeof fn !== "function")
+    return () => {
+    };
+  try {
+    fn.call(db, true);
+  } catch {
+    return () => {
+    };
+  }
+  return () => {
+    try {
+      fn.call(db, false);
+    } catch {
+    }
+  };
+}
+function shadowTables(db, table2) {
+  const like = `${table2.replace(/_/g, "\\_")}\\_%`;
+  try {
+    return db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE ? ESCAPE '\\'`).all(like).map((r) => r.name);
+  } catch {
+    return [];
+  }
+}
+function forgetStrandedStamps(db, stranded) {
+  const clear = (table2) => {
+    try {
+      db.exec(`UPDATE ${table2} SET embedding_version = NULL WHERE embedding_version IS NOT NULL;`);
+    } catch {
+    }
+  };
+  if (stranded.includes("vec_exchanges"))
+    clear("exchanges");
+  if (stranded.includes("vec_ghost_prompts"))
+    clear("ghost_prompts");
 }
 function legacyVecTable(db, name) {
   try {
@@ -24860,10 +25028,28 @@ CREATE INDEX IF NOT EXISTS card_runs_backend ON card_runs(backend, ran_at);
     //
     // Where an index already exists this copies every vector across before it
     // drops the virtual tables, so nobody loses embeddings they have already
-    // paid for. It declines — rather than throwing — on the one case it cannot
+    // paid for.
+    //
+    // It used to decline — rather than throw — on the one case it could not
     // handle: vec0 tables on a machine that has since lost the extension, where
-    // sqlite can neither read nor drop them. `doctor` says so, and the next
-    // open retries.
+    // sqlite can neither read nor drop them. That limitation was written down
+    // here as a limitation, and by `plans/09 §13.9` a guard's stated limitation
+    // is an open item. It was: **every database written by 1.1.0 is that case**,
+    // because 1.1.0 only built vec0 tables on a machine that had `sqlite-vec`,
+    // and 1.2.0 no longer installs it. The migration declined politely, migration
+    // 11 below cleared the incremental fingerprints so the next `index` re-read
+    // every transcript, and `clearExchanges` prepared `DELETE FROM vec_exchanges`
+    // for the first of them: `potsherd index` → `no such module: vec0`, with
+    // every fix in the release gated behind it (audit §N1, FIX-H).
+    //
+    // It no longer declines on that case. `DROP TABLE` on a moduleless virtual
+    // table calls the module's own destructor and cannot work — but the schema
+    // is data, so the row is deleted from `sqlite_master` under
+    // `PRAGMA writable_schema` and vec0's four storage tables, which are
+    // ordinary tables, drop normally. `vec.ts` owns that and documents the
+    // driver difference it probes for first. Declining is now reserved for a
+    // driver that refuses the rewrite, it changes nothing when it happens, and
+    // the reason it records names a driver that is measured to succeed.
     run: migrateToPortableVectors
   },
   {
@@ -32682,7 +32868,7 @@ function clearExchanges(db, sessionId) {
      VALUES ('delete', ?, ?, ?)`);
   for (const row of rows)
     unindex.run(row.rowid, row.user_text, row.assistant_text);
-  if (vecAvailable(db) && vecTablesExist(db)) {
+  if (vecTableUsable(db, "vec_exchanges")) {
     const dropVec = db.prepare("DELETE FROM vec_exchanges WHERE id = ?");
     for (const row of rows)
       dropVec.run(row.id);
@@ -33039,8 +33225,9 @@ async function embedExchanges(db, options, vec) {
     report.ms = Date.now() - started;
     return report;
   }
-  if (!vec.available) {
-    report.reason = vec.reason ?? "sqlite-vec unavailable";
+  const store = vec.available ? loadVec(db) : vec;
+  if (!store.available || !vecTableUsable(db, "vec_exchanges")) {
+    report.reason = store.reason ?? vec.reason ?? "sqlite-vec unavailable";
     report.ms = Date.now() - started;
     return report;
   }
@@ -33098,7 +33285,7 @@ async function embedExchanges(db, options, vec) {
   return report;
 }
 function ghostVecTable(db) {
-  return db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'vec_ghost_prompts'`).get().n > 0;
+  return vecTableUsable(db, "vec_ghost_prompts");
 }
 function pendingGhostPrompts(db) {
   try {

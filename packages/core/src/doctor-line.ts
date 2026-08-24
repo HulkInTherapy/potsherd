@@ -213,6 +213,20 @@ export function vectorNote(
         ],
         tone: 'ok',
       };
+    // VERIFICATION-5 C-6 — the second branch used to read `working` not at all,
+    // so `doctor` printed one sentence for two different states:
+    //
+    //     no worker, 1,800 pending    vectors — 0 of 1,800 · 46.1 MB runtime not fetched yet
+    //     worker alive, lock held     vectors — 0 of    22 · 32.4 MB runtime not fetched yet
+    //
+    // and the moment a user is most likely to run `doctor` to ask *is anything
+    // happening* is the first run of a fresh install, which is exactly this
+    // branch. During the multi-minute acquisition there **is** work in flight
+    // and the honest word is not "not running"; after a killed or failed fetch
+    // there is not. `find` and `potsherd_recall` already separated the two, so
+    // FIX-F C2's claim that one flag drives all four surfaces was true of three.
+    // `undefined` keeps the old wording for the old reason: a caller who could
+    // not ask must not be made to claim.
     case 'pending':
       return {
         value: dash,
@@ -223,9 +237,14 @@ export function vectorNote(
                 : `warming 0 of ${num(r.total)}`,
               runtime,
             ]
-          // Already honest, and already the doctor line the verifier called
-          // honest: it never used the word.
-          : [`0 of ${num(r.total)}`, `${bytes(r.acquireBytes)} runtime not fetched yet`],
+          : [
+              `0 of ${num(r.total)}`,
+              r.working === true
+                ? `fetching the ${bytes(r.acquireBytes)} runtime`
+                : r.working === false
+                  ? `not running — ${bytes(r.acquireBytes)} runtime not fetched`
+                  : `${bytes(r.acquireBytes)} runtime not fetched yet`,
+            ],
         tone: 'dim',
       };
     case 'empty':

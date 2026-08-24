@@ -29,6 +29,44 @@ import { potsherdDir } from './paths.js';
 const STALE_MS = 5 * 60_000;
 
 /**
+ * How long a lock whose owner **is alive** is honoured without a heartbeat.
+ *
+ * VERIFICATION-5 C-4. `isStale` used to answer `!pidAlive(holder.pid)` and stop
+ * there — *"a live owner is never stale"* — which made a live pid not merely
+ * necessary but sufficient. Two things follow, and both were measured:
+ *
+ *   1. `kill -9` leaves `.lock.embed` behind and nothing in the product removes
+ *      it. There is no `unlock` verb; all 22 were checked.
+ *   2. **A recycled pid poisons the lane for ever.** Once the operating system
+ *      hands that pid number to any unrelated process, `pidAlive` is true,
+ *      `isStale` is false, `index` refuses to spawn a replacement, and every
+ *      surface says *warming* with nothing embedding — which is FIX-F's C2 lie
+ *      coming back in through a door C2 did not close.
+ *
+ * So a live pid is necessary and not sufficient: an owner that is alive **and**
+ * has not touched its lock inside this window is stale. That is what the mtime
+ * test was always for, and the reason it could not be used before is that
+ * nothing refreshed the lock — a five-minute expiry on a pass that runs for
+ * hours is FIX-B's D3, where every `index` past minute five removed a working
+ * embedder's lock and started another beside it.
+ *
+ * The half that makes the timeout safe is therefore {@link HEARTBEAT_MS}: the
+ * holder stamps its own lock while it works, so a *working* owner is never more
+ * than one beat old and thirty consecutive misses is the threshold here. A
+ * timeout on a lock nobody refreshes would only move the failure.
+ */
+const LIVE_STALE_MS = 10 * 60_000;
+
+/**
+ * How often a holder stamps its own lock.
+ *
+ * On a timer that is `unref`'d, so it can never keep a process alive one tick
+ * longer than its work — the background embedder is detached and unwatched, and
+ * a lock that outlived its owner would be the bug this is fixing.
+ */
+const HEARTBEAT_MS = 20_000;
+
+/**
  * Lanes: one lock file per kind of work, rather than one file for the process.
  *
  * `index`, `rescue` and everything else share `.lock`, because they are the
@@ -52,6 +90,14 @@ function lockPathFor(root: string, lane: Lane | undefined): string {
 export interface LockHandle {
   path: string;
   release(): void;
+  /**
+   * Say that this holder is still working.
+   *
+   * Called on a timer for the whole life of the lock, and exposed so a caller
+   * in a long **synchronous** stretch — where no timer can fire — can say so
+   * itself. See {@link LIVE_STALE_MS} for why anybody has to.
+   */
+  touch(): void;
 }
 
 export class LockBusyError extends Error {
@@ -94,11 +140,27 @@ export function acquire(
       };
       fs.writeFileSync(path.join(lockPath, 'owner.json'), JSON.stringify(info), { mode: 0o600 });
       let released = false;
+      const touch = () => {
+        if (released) return;
+        try {
+          const now = new Date();
+          fs.utimesSync(lockPath, now, now);
+        } catch {
+          /* the lock was removed under us; `release` is about to find that out */
+        }
+      };
+      const beat = setInterval(touch, HEARTBEAT_MS);
+      // Never hold the event loop open for a heartbeat. The embedding worker is
+      // detached and nothing waits on it, so a timer that kept it alive would
+      // outlive the pass and hold the lane it is meant to be reporting on.
+      beat.unref?.();
       return {
         path: lockPath,
+        touch,
         release() {
           if (released) return;
           released = true;
+          clearInterval(beat);
           try {
             fs.rmSync(lockPath, { recursive: true, force: true });
           } catch { /* the process is exiting anyway */ }
@@ -163,18 +225,33 @@ function readOwner(lockPath: string): LockInfo | null {
  * beside it — the pile-up D3 measured, with the previous embedders still
  * running and still burning CPU.
  *
- * The mtime test survives for the one case it is the only answer to: a lock
- * whose `owner.json` is unreadable, or which was written on another host and
- * whose pid means nothing here.
+ * **And a live owner is not thereby a working one** (VERIFICATION-5 C-4). A pid
+ * the operating system has since handed to something else is alive and is not
+ * this lock's owner, and `kill -9` leaves a lock behind that nothing in the
+ * product removes — so the answer used to be *warming, for ever*. A live owner
+ * is honoured for {@link LIVE_STALE_MS} **since it last stamped its lock**,
+ * which is thirty heartbeats, and a holder that is working stamps it every
+ * {@link HEARTBEAT_MS}. D3's guarantee is untouched by that: a pass that runs
+ * for hours is refreshing the whole time, so its lock never ages at all.
+ *
+ * The plain mtime test survives for the one case it is the only answer to: a
+ * lock whose `owner.json` is unreadable, or which was written on another host
+ * and whose pid means nothing here.
  */
 function isStale(lockPath: string, holder: LockInfo | null): boolean {
   if (holder && holder.pid && (!holder.host || holder.host === (process.env.HOSTNAME ?? ''))) {
-    return !pidAlive(holder.pid);
+    if (!pidAlive(holder.pid)) return true;
+    return ageMs(lockPath) > LIVE_STALE_MS;
   }
+  return ageMs(lockPath) > STALE_MS;
+}
+
+/** How long since this lock was last stamped. `Infinity` when it is not there. */
+function ageMs(lockPath: string): number {
   try {
-    return Date.now() - fs.statSync(lockPath).mtimeMs > STALE_MS;
+    return Date.now() - fs.statSync(lockPath).mtimeMs;
   } catch {
-    return true;
+    return Number.POSITIVE_INFINITY;
   }
 }
 

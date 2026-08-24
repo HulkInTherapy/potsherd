@@ -388,10 +388,28 @@ CREATE INDEX IF NOT EXISTS card_runs_backend ON card_runs(backend, ran_at);
     //
     // Where an index already exists this copies every vector across before it
     // drops the virtual tables, so nobody loses embeddings they have already
-    // paid for. It declines — rather than throwing — on the one case it cannot
+    // paid for.
+    //
+    // It used to decline — rather than throw — on the one case it could not
     // handle: vec0 tables on a machine that has since lost the extension, where
-    // sqlite can neither read nor drop them. `doctor` says so, and the next
-    // open retries.
+    // sqlite can neither read nor drop them. That limitation was written down
+    // here as a limitation, and by `plans/09 §13.9` a guard's stated limitation
+    // is an open item. It was: **every database written by 1.1.0 is that case**,
+    // because 1.1.0 only built vec0 tables on a machine that had `sqlite-vec`,
+    // and 1.2.0 no longer installs it. The migration declined politely, migration
+    // 11 below cleared the incremental fingerprints so the next `index` re-read
+    // every transcript, and `clearExchanges` prepared `DELETE FROM vec_exchanges`
+    // for the first of them: `potsherd index` → `no such module: vec0`, with
+    // every fix in the release gated behind it (audit §N1, FIX-H).
+    //
+    // It no longer declines on that case. `DROP TABLE` on a moduleless virtual
+    // table calls the module's own destructor and cannot work — but the schema
+    // is data, so the row is deleted from `sqlite_master` under
+    // `PRAGMA writable_schema` and vec0's four storage tables, which are
+    // ordinary tables, drop normally. `vec.ts` owns that and documents the
+    // driver difference it probes for first. Declining is now reserved for a
+    // driver that refuses the rewrite, it changes nothing when it happens, and
+    // the reason it records names a driver that is measured to succeed.
     run: migrateToPortableVectors,
   },
   {

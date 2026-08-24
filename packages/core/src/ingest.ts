@@ -38,7 +38,7 @@ import {
   generateExchangeEmbedding,
   isModelCached,
 } from './embeddings.js';
-import { loadVec, vecAvailable, vecStatus, vecTablesExist, type VecStatus } from './vec.js';
+import { loadVec, vecStatus, vecTableUsable, type VecStatus } from './vec.js';
 import {
   GHOST_TITLE_MAX_CHARS,
   cutToCodePoints,
@@ -392,10 +392,16 @@ function clearExchanges(db: Db, sessionId: string): void {
   );
   for (const row of rows) unindex.run(row.rowid, row.user_text, row.assistant_text);
 
-  // Both conditions: the table can be in `sqlite_master` while this particular
-  // connection has not loaded vec0, and then the DELETE raises "no such module".
-  // `ingestSession` is exported and may be called without `indexAll`'s setup.
-  if (vecAvailable(db) && vecTablesExist(db)) {
+  // The guard here used to be `vecAvailable(db) && vecTablesExist(db)`, and both
+  // halves answered *true* on the database that crashed: `vecAvailable` means
+  // "this connection can score a vector" and has said yes on every machine since
+  // vectors stopped needing an extension, and `vecTablesExist` only asks whether
+  // the name is in `sqlite_master` — which a stranded vec0 table certainly is.
+  // So the `DELETE` was prepared, `prepare` raised `no such module: vec0`, and
+  // `potsherd index` died on the first session of every database written by
+  // 1.1.0 (FIX-H / audit N1). `vecTableUsable` asks the only question that
+  // matters: can sqlite compile a statement against this name, here, now.
+  if (vecTableUsable(db, 'vec_exchanges')) {
     const dropVec = db.prepare('DELETE FROM vec_exchanges WHERE id = ?');
     for (const row of rows) dropVec.run(row.id);
   }
@@ -1164,8 +1170,15 @@ async function embedExchanges(
     report.ms = Date.now() - started;
     return report;
   }
-  if (!vec.available) {
-    report.reason = vec.reason ?? 'sqlite-vec unavailable';
+  // Two questions, because `vec` was computed once at the top of the run and
+  // handed down. The first is about this machine; the second is about this
+  // database *now* — a stranded vec0 table (FIX-H / audit N1) makes the three
+  // `prepare`s further down throw `no such module: vec0`, and they sit outside
+  // every try/catch on this page. Both answers are the same shape: no vectors
+  // this run, said out loud, with the index and the text search untouched.
+  const store = vec.available ? loadVec(db) : vec;
+  if (!store.available || !vecTableUsable(db, 'vec_exchanges')) {
+    report.reason = store.reason ?? vec.reason ?? 'sqlite-vec unavailable';
     report.ms = Date.now() - started;
     return report;
   }
@@ -1275,15 +1288,16 @@ async function embedExchanges(
 /**
  * Migration 8 declines on a machine without `sqlite-vec`, so the ghost vector
  * table may simply not be there; that is `--no-embed` for ghosts, not an error.
+ *
+ * It asked `sqlite_master` for the name, which was the same mistake
+ * `clearExchanges` made: a vec0 table left behind by 1.1.0 is in `sqlite_master`
+ * and is not usable, and the two `prepare`s below this — `DELETE FROM
+ * vec_ghost_prompts` and its `INSERT` — are outside every try/catch on the page,
+ * so the whole embedding pass threw rather than skipping the lane. Ask whether a
+ * statement compiles instead of whether a row exists.
  */
 function ghostVecTable(db: Db): boolean {
-  return (
-    (
-      db
-        .prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'vec_ghost_prompts'`)
-        .get() as { n: number }
-    ).n > 0
-  );
+  return vecTableUsable(db, 'vec_ghost_prompts');
 }
 
 /**
