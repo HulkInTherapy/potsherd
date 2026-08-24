@@ -200,8 +200,26 @@ describe('doctor and index read one source of truth', () => {
       expect(a.row?.value).toBe('1');
       // The status line is the audit's wording: a status, not an apology, and
       // with no command in it.
-      expect(a.line).toBe('semantic search: warming (1 of 4 embedded)');
+      //
+      // **FIX-F round 2 amended the fixture, not the rule.** `phase` is a fact
+      // about the rows — one of four carries a vector — and `warming` is a
+      // claim about the *work*, which nothing in this root was doing: no
+      // `.lock.embed`, no worker, no runtime. So the word is asserted with a
+      // worker holding the lane and the other word without one, and the three
+      // renderings are checked against each other in both states. What "one
+      // source of truth" claims is that they agree, and they still do.
+      expect(a.line).toBe('semantic search: not running (1 of 4 embedded) — it stopped partway');
       expect(a.line).not.toMatch(/potsherd |install|unavailable|degraded/);
+      expect(a.row?.note(80)).toContain('stopped at 1 of 4');
+
+      const held = vecStatus(db, root, { working: true });
+      expect(held.line).toBe('semantic search: warming (1 of 4 embedded)');
+      expect(held.line).not.toMatch(/potsherd |install|unavailable|degraded/);
+      expect(held.row?.note(80)).toContain('warming 1 of 4');
+      // The numbers do not move with the word: same report, same row value.
+      expect(held.report?.embedded).toBe(a.report?.embedded);
+      expect(held.report?.phase).toBe(a.report?.phase);
+      expect(held.row?.value).toBe(a.row?.value);
     } finally {
       db.close();
       rmrf(root);
