@@ -112,6 +112,18 @@ export interface VecStatus {
   path?: string;
   /** One line, for `doctor`, when it is not available. */
   reason?: string;
+  /**
+   * The vec0 virtual tables a 1.1.0 index left behind that this connection
+   * cannot read — empty on every healthy database, and the whole of FIX-H's
+   * N1 when it is not.
+   *
+   * It is on the status object rather than behind a second call for the same
+   * reason everything else here is: `index`, `find` and `doctor` must not be
+   * able to describe this state differently, and `doctor` is the one verb that
+   * can *only* see it (it opens read-only, so it never runs the migration that
+   * clears it).
+   */
+  legacy?: readonly VecTable[];
 
   // Everything below is populated only when {@link vecStatus} is given a
   // potsherd root, which is the call `index`, `doctor` and `find` all make.
@@ -144,8 +156,35 @@ export interface VectorRow {
 
 const require_ = createRequire(import.meta.url);
 
-/** Per-connection: functions and extensions belong to a connection, not a process. */
-const loaded = new WeakMap<Db, VecStatus>();
+/** The three names `03 §3` gave the store, and the three 1.1.0 built as vec0. */
+export type VecTable = 'vec_exchanges' | 'vec_cards' | 'vec_ghost_prompts';
+
+const VEC_TABLES: readonly VecTable[] = ['vec_exchanges', 'vec_cards', 'vec_ghost_prompts'];
+
+/** What {@link installCore} establishes once per connection, and caches. */
+interface VecCore {
+  ok: boolean;
+  reason?: string;
+  version?: string;
+  path?: string;
+}
+
+/**
+ * Per-connection: functions and extensions belong to a connection, not a
+ * process — and **only** functions and extensions.
+ *
+ * What is deliberately *not* cached here is whether the vec tables can be used,
+ * because that is a fact about the file and it changes underneath a live
+ * connection: migration 10 converts three vec0 virtual tables into three views
+ * while `open()` is still running, on the same handle that asked the question a
+ * moment earlier. A cached "no" would then survive the repair and switch
+ * embedding off for the rest of the process — the fix hiding itself, which is
+ * the shape of the bug being fixed here. {@link strandedVecTables} is one
+ * `sqlite_master` read on a healthy database and is answered fresh every time.
+ */
+const cores = new WeakMap<Db, VecCore>();
+/** Why migration 10 could not convert, when it could not. See {@link strandedReason}. */
+const declines = new WeakMap<Db, string>();
 /** The query vector of the statement currently running, per connection. */
 const needles = new WeakMap<Db, Float32Array>();
 
@@ -228,21 +267,121 @@ function loadLegacyExtension(db: Db): { version?: string; path?: string } {
   }
 }
 
+/** The half of {@link loadVec} that is connection state: registered once, cached. */
+function installCore(db: Db): VecCore {
+  const cached = cores.get(db);
+  if (cached) return cached;
+  const fns = installVectorFunctions(db);
+  const ext = loadLegacyExtension(db);
+  const core: VecCore = fns.ok ? { ok: true, ...ext } : { ok: false, reason: fns.reason, ...ext };
+  cores.set(db, core);
+  return core;
+}
+
 /**
- * Prepare this connection for vector work. Idempotent, cached, and total: a
- * failure is a {@link VecStatus} with a reason, never an exception.
+ * Prepare this connection for vector work. Idempotent and total: a failure is a
+ * {@link VecStatus} with a reason, never an exception.
+ *
+ * Two things can be wrong, and they are different sentences:
+ *
+ *   1. **This driver cannot register functions.** Nothing can be scored, so
+ *      there is no vector search on this machine at all.
+ *   2. **A 1.1.0 index left vec0 virtual tables behind** and the extension that
+ *      made them readable is no longer on the machine. Every statement naming
+ *      one of them throws `no such module: vec0` at *prepare* time — which is
+ *      exactly where `potsherd index` died (`ingest.ts` `clearExchanges`).
+ *
+ * Case 2 reports `available: false` on purpose rather than being handled at
+ * each of the call sites that touch the store: every one of them already asks
+ * this question before writing a vector, so one honest answer here turns a
+ * crash into the degradation this file's contract promises. Migration 10 clears
+ * the state on the next write-open; until then the reason names the command
+ * that clears it.
  */
 export function loadVec(db: Db): VecStatus {
-  const cached = loaded.get(db);
-  if (cached) return cached;
+  const core = installCore(db);
+  const ext = {
+    ...(core.version ? { version: core.version } : {}),
+    ...(core.path ? { path: core.path } : {}),
+  };
+  if (!core.ok) return { available: false, ...(core.reason ? { reason: core.reason } : {}), ...ext };
+  const stranded = strandedVecTables(db);
+  if (stranded.length > 0) {
+    return { available: false, legacy: stranded, reason: strandedReason(db), ...ext };
+  }
+  return { available: true, backend: 'scan', ...ext };
+}
 
-  const fns = installVectorFunctions(db);
-  const legacy = loadLegacyExtension(db);
-  const status: VecStatus = fns.ok
-    ? { available: true, backend: 'scan', ...legacy }
-    : { available: false, reason: fns.reason, ...legacy };
-  loaded.set(db, status);
-  return status;
+/**
+ * The vec0 tables of a 1.1.0 index that this connection cannot read.
+ *
+ * Both halves are load-bearing. `type = 'table'` excludes the views migration
+ * 10 puts under the same three names, so a converted database answers with one
+ * cheap query and no `prepare` at all. `USING vec0` is then checked against the
+ * stored DDL, and only a name that passes both is *tried*: a `prepare` is
+ * enough, because "no such module" is raised while compiling, and it is the
+ * whole question — a statement that cannot be compiled cannot be run.
+ */
+function strandedVecTables(db: Db): VecTable[] {
+  const out: VecTable[] = [];
+  let rows: { name: string; sql: string | null }[];
+  try {
+    rows = db
+      .prepare(
+        `SELECT name, sql FROM sqlite_master
+          WHERE type = 'table' AND name IN ('vec_exchanges', 'vec_cards', 'vec_ghost_prompts')`,
+      )
+      .all() as { name: string; sql: string | null }[];
+  } catch {
+    return out;
+  }
+  for (const row of rows) {
+    if (!/USING\s+vec0/i.test(row.sql ?? '')) continue;
+    if (statementsCompile(db, row.name)) continue;
+    out.push(row.name as VecTable);
+  }
+  return out;
+}
+
+/** Can sqlite compile a statement against this name on this connection? */
+function statementsCompile(db: Db, name: string): boolean {
+  try {
+    db.prepare(`SELECT 1 FROM "${name}" LIMIT 1`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The sentence for a stranded vec0 index — and it must name a command that
+ * runs, because the whole finding is that the old one did not.
+ *
+ * The ordinary case is the first: the database has not been opened for writing
+ * since the upgrade, `doctor` opens read-only and therefore never migrates, and
+ * `potsherd index` is the verb that converts it. The second only appears after
+ * migration 10 has actually tried and been refused, and it names the driver
+ * that is measured to succeed — `node:sqlite` writes `sqlite_master` under
+ * `writable_schema`, and a `better-sqlite3` too old for `unsafeMode` cannot.
+ */
+function strandedReason(db: Db): string {
+  return (
+    declines.get(db) ??
+    'a vec0 index written by potsherd 1.1.0 — run potsherd index to convert it'
+  );
+}
+
+/**
+ * Can this connection run a statement against `table` right now?
+ *
+ * The predicate every write path should ask before naming one of the three, and
+ * the one `vecTablesExist` could not be: that one reads `sqlite_master`, and a
+ * stranded vec0 table is present in `sqlite_master` and unusable, which is
+ * precisely how `clearExchanges` came to prepare a `DELETE` that threw.
+ */
+export function vecTableUsable(db: Db, table: VecTable = 'vec_exchanges'): boolean {
+  if (!loadVec(db).available) return false;
+  return statementsCompile(db, table);
 }
 
 /**
@@ -275,7 +414,7 @@ export function vecStatus(
     working?: boolean;
   } = {},
 ): VecStatus {
-  const base = loaded.get(db) ?? loadVec(db);
+  const base = loadVec(db);
   if (root === undefined) return base;
   const counts = vectorCounts(db);
   const cacheDir = modelsDir(potsherdDir(root));
@@ -455,49 +594,248 @@ export function createGhostVecTable(db: Db): boolean {
 /**
  * Migration 10's body: move an existing index off the native extension.
  *
- * Three cases, and only one of them can decline:
+ * Three cases, and the third is FIX-H:
  *
  *   1. **Nothing to convert.** The usual case, and a fresh index. The portable
  *      objects are created and the migration is done.
  *   2. **vec0 tables that can be read.** `sqlite-vec` is installed, so every
  *      vector is copied into the blob tables before the virtual tables are
- *      dropped. Nobody loses an index they already paid for.
+ *      dropped. Nobody loses an index they already paid for. This path is tried
+ *      first for every table, always, precisely because it is the one that
+ *      keeps the vectors.
  *   3. **vec0 tables that cannot be read.** The extension is gone from a
- *      machine that once had it, so sqlite cannot open — or drop — the virtual
- *      tables at all. This declines rather than throwing, so it is retried on
- *      the next open, and `doctor` says what is in the way.
+ *      machine that once had it. This used to decline — and the comment said so
+ *      as a limitation, which by `plans/09 §13.9` makes it an open item and not
+ *      boilerplate. It was: the migration declined politely and then every verb
+ *      downstream threw `no such module: vec0`, because `index` re-reads every
+ *      transcript after migration 11 and `clearExchanges` prepares a `DELETE`
+ *      against `vec_exchanges` for each one. That is the whole of the audit's
+ *      N1, and it is release-blocking on every database written by 1.1.0.
+ *
+ * **Half of the stated blocker was true.** sqlite genuinely cannot `DROP` a
+ * virtual table whose module is missing — the drop calls the module's own
+ * destructor — and `ALTER TABLE … RENAME` fails for the same reason (both
+ * measured, both `no such module: vec0`). But the *schema is data*: under
+ * `PRAGMA writable_schema` the row can be deleted from `sqlite_master`
+ * directly, and vec0's storage is four **ordinary** tables (`_chunks`, `_info`,
+ * `_rowids`, `_vector_chunks00`) which then drop normally. See
+ * {@link detachStranded} for the driver difference that decides whether that is
+ * allowed, which is why it is asked rather than assumed.
+ *
+ * **What is lost, said plainly.** A vector inside a vec0 table this machine
+ * cannot read is already unreachable: no query can select it and no verb can
+ * use it. Dropping it therefore loses nothing that was still recoverable —
+ * whereas leaving it in place loses the entire product for that user. The
+ * exchange and ghost vectors are rebuilt for free by the background pass
+ * ({@link forgetStrandedStamps}); card vectors are not stamped and are rebuilt
+ * on the next `potsherd card`, with the card's own text, cost and mirror
+ * untouched in `cards` and on disk.
  */
 export function migrateToPortableVectors(db: Db): boolean {
-  loadVec(db);
-  const legacy = (['vec_exchanges', 'vec_cards', 'vec_ghost_prompts'] as const).filter((t) =>
-    legacyVecTable(db, t),
-  );
+  installCore(db);
+  const legacy = VEC_TABLES.filter((t) => legacyVecTable(db, t));
+  if (legacy.length === 0) {
+    db.exec(EXCHANGE_STORE);
+    db.exec(GHOST_STORE);
+    declines.delete(db);
+    return true;
+  }
+
+  const stranded: VecTable[] = [];
   try {
     for (const table of legacy) {
-      const key = table === 'vec_cards' ? 'session_id' : 'id';
-      const blob = `vec_blob_${table.slice('vec_'.length)}`;
-      db.exec(
-        table === 'vec_ghost_prompts'
-          ? `CREATE TABLE IF NOT EXISTS vec_blob_ghost_prompts (id TEXT PRIMARY KEY, embedding BLOB NOT NULL);`
-          : `CREATE TABLE IF NOT EXISTS ${blob} (${key} TEXT PRIMARY KEY, embedding BLOB NOT NULL);`,
-      );
-      const rows = db.prepare(`SELECT ${key} AS k, embedding AS e FROM ${table}`).all() as {
-        k: string;
-        e: Uint8Array;
-      }[];
-      const insert = db.prepare(`INSERT OR REPLACE INTO ${blob} (${key}, embedding) VALUES (?, ?)`);
-      for (const row of rows) insert.run(row.k, row.e);
-      db.exec(`DROP TABLE ${table};`);
+      if (!copyVectorsAcross(db, table)) stranded.push(table);
     }
-  } catch (err) {
-    // Case 3. Not an error the user caused and not one they can be asked to
-    // fix mid-migration; decline and try again next time.
-    void err;
-    return false;
+  } catch {
+    return decline(db, 'a vec0 index written by potsherd 1.1.0 that could not be read or converted');
   }
+
+  if (stranded.length > 0 && !detachStranded(db, stranded)) {
+    return decline(
+      db,
+      'a vec0 index written by potsherd 1.1.0 — this sqlite will not rewrite a schema; ' +
+        'run POTSHERD_SQLITE=node potsherd index',
+    );
+  }
+
   db.exec(EXCHANGE_STORE);
   db.exec(GHOST_STORE);
+  if (stranded.length > 0) forgetStrandedStamps(db, stranded);
+  declines.delete(db);
   return true;
+}
+
+/** Record why, then decline: nothing is stamped and the next open retries. */
+function decline(db: Db, reason: string): false {
+  declines.set(db, reason);
+  return false;
+}
+
+/**
+ * Case 2: copy every vector out of a readable vec0 table and drop it properly.
+ *
+ * `false` means the table could not be read — the module is missing — and says
+ * nothing about whether it can be dealt with, which is {@link detachStranded}'s
+ * question. Anything already copied is removed again so that a half-read table
+ * cannot leave a partial index behind claiming to be whole.
+ */
+function copyVectorsAcross(db: Db, table: VecTable): boolean {
+  const key = table === 'vec_cards' ? 'session_id' : 'id';
+  const blob = `vec_blob_${table.slice('vec_'.length)}`;
+  db.exec(`CREATE TABLE IF NOT EXISTS ${blob} (${key} TEXT PRIMARY KEY, embedding BLOB NOT NULL);`);
+  let rows: { k: string; e: Uint8Array }[];
+  try {
+    rows = db.prepare(`SELECT ${key} AS k, embedding AS e FROM ${table}`).all() as {
+      k: string;
+      e: Uint8Array;
+    }[];
+  } catch {
+    return false;
+  }
+  try {
+    const insert = db.prepare(`INSERT OR REPLACE INTO ${blob} (${key}, embedding) VALUES (?, ?)`);
+    for (const row of rows) insert.run(row.k, row.e);
+    db.exec(`DROP TABLE ${table};`);
+  } catch {
+    db.exec(`DELETE FROM ${blob};`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Case 3: take unreadable vec0 tables out of the schema by hand.
+ *
+ * **The driver difference, measured rather than assumed** — this is the whole
+ * reason the attempt is probed before anything is changed:
+ *
+ * ```
+ * node:sqlite      DELETE FROM sqlite_master …  ->  1 row, integrity_check ok
+ * better-sqlite3   DELETE FROM sqlite_master …  ->  table sqlite_master may not be modified
+ * better-sqlite3   + db.unsafeMode(true)        ->  1 row, integrity_check ok
+ * ```
+ *
+ * `better-sqlite3` turns `SQLITE_DBCONFIG_DEFENSIVE` **on** by default, and
+ * defensive mode refuses every write to `sqlite_master` however
+ * `writable_schema` is set; `unsafeMode` is its documented off switch.
+ * `node:sqlite` does not set defensive and has no such method. So the capability
+ * is *asked for* through {@link allowSchemaWrites} and then **probed with a
+ * delete that matches nothing**, which runs the identical authorizer check and
+ * changes not one byte. Only when that probe passes is anything actually
+ * removed — so a driver that refuses leaves the database exactly as it found
+ * it, the migration declines with a reason naming a driver that does not
+ * refuse, and no half-rewritten schema can outlive the attempt.
+ */
+function detachStranded(db: Db, tables: readonly VecTable[]): boolean {
+  const restore = allowSchemaWrites(db);
+  try {
+    try {
+      db.pragma('writable_schema = ON');
+      db.prepare(`DELETE FROM sqlite_master WHERE type = 'table' AND name = ?`).run(
+        '__potsherd_probe_no_such_table__',
+      );
+    } catch {
+      return false;
+    } finally {
+      // RESET is `OFF` plus a reload of the schema this connection has cached.
+      // The reload is the load-bearing half below: without it sqlite still
+      // believes the name is taken and `CREATE VIEW … vec_exchanges` is a
+      // silent no-op under `IF NOT EXISTS`.
+      db.pragma('writable_schema = RESET');
+    }
+    for (const table of tables) {
+      try {
+        db.pragma('writable_schema = ON');
+        db.prepare(`DELETE FROM sqlite_master WHERE type = 'table' AND name = ?`).run(table);
+      } finally {
+        db.pragma('writable_schema = RESET');
+      }
+      // Now ordinary tables, and they hold every byte the vectors occupied.
+      for (const shadow of shadowTables(db, table)) db.exec(`DROP TABLE IF EXISTS "${shadow}"`);
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    restore();
+  }
+}
+
+/**
+ * Ask this driver to allow a write to `sqlite_master`, and hand back the undo.
+ *
+ * Asked for by feature rather than by driver name: a driver with no
+ * `unsafeMode` either does not need one (`node:sqlite`) or cannot be persuaded,
+ * and both answers are the same here — try, and let the probe in
+ * {@link detachStranded} say which it was. The undo runs in a `finally`, so
+ * defensive mode is off for the deletes of one migration and for nothing else.
+ */
+function allowSchemaWrites(db: Db): () => void {
+  const fn = (db as unknown as { unsafeMode?: (on: boolean) => unknown }).unsafeMode;
+  if (typeof fn !== 'function') return () => {};
+  try {
+    fn.call(db, true);
+  } catch {
+    return () => {};
+  }
+  return () => {
+    try {
+      fn.call(db, false);
+    } catch {
+      /* the connection is closing, or never had it; either way nothing to undo */
+    }
+  };
+}
+
+/**
+ * vec0's own storage for one virtual table: `_chunks`, `_info`, `_rowids` and
+ * `_vector_chunks00` today, and whatever a later version added.
+ *
+ * Matched by prefix rather than by a list of suffixes so that a database
+ * written by a `sqlite-vec` this code has never seen still gets cleaned up
+ * rather than leaving orphan tables behind. Every underscore in the name is
+ * escaped, so `vec\_exchanges\_%` cannot reach `vec_blob_exchanges`, and
+ * `type = 'table'` keeps it away from the `vec_exchanges_insert` trigger the
+ * portable store is about to create under a matching name.
+ */
+function shadowTables(db: Db, table: VecTable): string[] {
+  const like = `${table.replace(/_/g, '\\_')}\\_%`;
+  try {
+    return (
+      db
+        .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE ? ESCAPE '\\'`)
+        .all(like) as { name: string }[]
+    ).map((r) => r.name);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Stop claiming to have vectors that were just thrown away.
+ *
+ * `exchanges.embedding_version` is the stamp *everything* reads —
+ * `vectorCounts`, `doctor`'s row, the pending queue and the background pass all
+ * ask it rather than the store — so leaving it set after a detach would report
+ * a full index with an empty one underneath, and no pass would ever refill it.
+ * Clearing it is what makes the next `index` rebuild them, locally and for
+ * free, from text potsherd already holds.
+ *
+ * `vec_cards` has no such column: a card's vector is written by `potsherd card`
+ * beside the card itself. It is not re-derived here, and it is not lost money —
+ * the card's text, model, cost and mirror are all still in `cards` — but until
+ * that session is carded again `find` scores it on `cards_fts` alone.
+ */
+function forgetStrandedStamps(db: Db, stranded: readonly VecTable[]): void {
+  const clear = (table: string) => {
+    try {
+      db.exec(`UPDATE ${table} SET embedding_version = NULL WHERE embedding_version IS NOT NULL;`);
+    } catch {
+      /* the column arrives with migration 7; an index older than that has none */
+    }
+  };
+  if (stranded.includes('vec_exchanges')) clear('exchanges');
+  if (stranded.includes('vec_ghost_prompts')) clear('ghost_prompts');
 }
 
 /** True when `name` exists and is a vec0 virtual table rather than our view. */

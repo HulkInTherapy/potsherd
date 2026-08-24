@@ -996,13 +996,28 @@ function sqliteNote(): string {
  * so it is safe to run while an index is in flight — so the fix is the verb
  * that does open for writing.
  *
- * The one case that still declines is a database that was built when vec0 was
- * real and is now on a machine that has lost the extension: sqlite can neither
- * read nor drop those virtual tables. That is worth its own sentence, because
- * it is the only one where the user has something to reinstall.
+ * The one case that still stops it is a database built when vec0 was real, on a
+ * machine that has since lost the extension. `doctor` is the only verb that can
+ * see that state and not fix it — it opens read-only on purpose, so it never
+ * runs the migration — and it is the state this sentence exists for.
+ *
+ * **The sentence is part of the fix, not decoration.** It read `schema v9 of
+ * v12 · run potsherd index` on exactly the database where `potsherd index` was
+ * the one command that could not run (audit §N1): an instruction aimed at a
+ * reader who cannot follow it, which this project has now recorded nine times.
+ * `potsherd index` *is* the answer again — it is the verb that opens for
+ * writing and therefore the verb that converts — so the wording says what it
+ * will do rather than leaving the reader to find out. When migration 10 has
+ * already tried and been refused by this driver, `vec.reason` carries the
+ * command that is measured to work instead, and it is printed verbatim rather
+ * than paraphrased here: two places wording one fact is how they come to
+ * disagree.
  */
 function schemaNote(schema: number, vec: VecStatus): string {
   if (schema >= store.latestSchemaVersion()) return '';
+  if (vec.legacy && vec.legacy.length > 0) {
+    return `  · ${vec.reason ?? 'a vec0 index from potsherd 1.1.0 — run potsherd index to convert it'}`;
+  }
   if (vec.reason && /vec0|extension/i.test(vec.reason)) {
     return '  · a vec0 index this machine can no longer read';
   }
