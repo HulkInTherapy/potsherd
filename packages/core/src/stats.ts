@@ -356,11 +356,47 @@ function freshness(db: Db, root: string, stat: boolean): FreshnessStats {
   const pending = report?.pending ?? 0;
 
   const file = dbPath(root);
+  /**
+   * How big the database is — **asked of sqlite, not of the filesystem.**
+   *
+   * This used to be `fs.statSync(file).size`, and the store is in WAL mode
+   * (`db.ts:542`). A file size therefore answers "how much of this database
+   * has been checkpointed into the main file *at this instant*", which is a
+   * fact about sqlite's housekeeping and about whatever else has the store
+   * open — not about the archive. Measured, with one writer holding the WAL:
+   *
+   *     writer still open    statSync 4,096   wal 453,232   pages 442,368
+   *     after a checkpoint   statSync 442,368 wal       0   pages 442,368
+   *
+   * The published `10-stats.txt` caught the mild version of this — the same
+   * demo corpus printing `2.1 MB` and `2.2 MB` depending on what had run
+   * before it, which is what made CI's new screen guard red — and the line
+   * above is the severe one: `stats` would have said **4.1 kB** for a store
+   * holding 442 kB. `plans/06` says a number a user reads must be measured;
+   * this one was, of the wrong thing.
+   *
+   * `page_count * page_size` is the size of the database sqlite actually
+   * holds, committed WAL pages included, so it does not move when a
+   * checkpoint does. It is a read, so it is safe on a read verb — the
+   * alternative, checkpointing here so the file size becomes true, would make
+   * `stats` write to a store another process may be reading.
+   */
   let dbBytes = 0;
   try {
-    dbBytes = fs.statSync(file).size;
+    const pageCount = (db.pragma('page_count') as { page_count?: number }[])[0]?.page_count ?? 0;
+    const pageSize = (db.pragma('page_size') as { page_size?: number }[])[0]?.page_size ?? 0;
+    dbBytes = pageCount * pageSize;
   } catch {
     dbBytes = 0;
+  }
+  // A database sqlite could not be asked about — no pragma, a driver without
+  // one — still has a file, and its size is a better answer than zero.
+  if (dbBytes === 0) {
+    try {
+      dbBytes = fs.statSync(file).size;
+    } catch {
+      dbBytes = 0;
+    }
   }
 
   return {

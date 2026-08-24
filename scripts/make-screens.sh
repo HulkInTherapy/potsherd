@@ -79,6 +79,31 @@ real_home="$HOME"
 export HOME="$demo"
 unset CLAUDE_CONFIG_DIR POTSHERD_DIR NO_COLOR FORCE_COLOR
 
+# THE ZONE IS PINNED, AND THESE SCREENS ARE NOT REPRODUCIBLE WITHOUT IT.
+#
+# Every date and time on these screens is rendered with `getDate()`,
+# `getMonth()` and `getHours()` (`core/format.ts`), which are *local* time. The
+# demo corpus's timestamps are fixed instants — `ANCHOR` in
+# make-demo-corpus.mjs is a literal `2026-08-21T14:00:00.000Z`, and the corpus
+# it generates is byte-identical in any zone — so the corpus is not the
+# problem: the rendering is. A session at 23:40 UTC is "16 jul" on a runner and
+# "17 jul" on a laptop at UTC+05:30, and `ls`, `show` and `ls --ghosts` then
+# disagree with the committed screens by one day on some rows and not others.
+#
+# That is not hypothetical. CI's screen guard went red on exactly this on both
+# ubuntu jobs the first time it ran, against screens captured at UTC+05:30.
+#
+# So the zone is fixed here and in the same guard in `.github/workflows/ci.yml`,
+# and the screens become a function of the build and the corpus and nothing
+# else. **UTC and not this machine's zone**: a published artefact in a public
+# repository should not encode which country its last regenerator was sitting
+# in, and every CI runner is already UTC, so the guard needs no per-runner
+# arrangement to reproduce what is committed.
+#
+# If you are regenerating these on a laptop somewhere else: this line is why
+# your diff is empty rather than a day wide. Do not remove it to "fix" a diff.
+export TZ=UTC
+
 # A stub `claude` inside the demo HOME, on the demo PATH.
 #
 # `doctor --privacy` now reports *which binary* would receive a model call
@@ -173,6 +198,18 @@ shot 03-audit-after.txt  audit
 # readme's prose described the DEFAULT. --no-embed also suppresses the
 # `index --embed` offer, on purpose, so the screen was missing the one line
 # that tells a reader semantic search exists.
+# NOTE: this capture leaves a background embedder behind, and it is left on
+# purpose. `index` spawns a detached, unref'ed child with no kill path
+# (`cli/src/commands/index.ts:258`, measured in phases/phase-10/FIX-E-REPORT.md
+# §4); the CI guard suppresses it with `--no-embed` because no screen it
+# compares shows the difference, but this capture cannot. `--no-embed` would
+# delete the `semantic search: warming … — fetching 46.1 MB, once` line that
+# `07-index.txt` exists to publish, and `POTSHERD_OFFLINE=1` would rewrite it
+# to `— offline`. So one run of this script starts one embedder that nothing
+# stops. It is real: `ps -eo pid,ppid,command | grep "[i]ndex --quiet"` after a
+# run will show it with PPID 1, fetching 46 MB into `.tmp/demo-home/.potsherd`.
+# A documented leak beats a screen that lies about the product; there is no
+# verb that stops one, which is an open item and not this script's to close.
 shot 07-index.txt        index --full
 
 # Everything below reads the index 07 just built.
