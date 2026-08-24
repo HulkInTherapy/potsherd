@@ -3466,8 +3466,8 @@ __export(db_exports, {
   sqliteAvailable: () => sqliteAvailable,
   sqliteDriverName: () => sqliteDriverName
 });
-import fs3 from "node:fs";
-import path3 from "node:path";
+import fs4 from "node:fs";
+import path4 from "node:path";
 
 // ../core/dist/sqlite-driver.js
 import { createRequire } from "node:module";
@@ -3648,7 +3648,7 @@ function wrap2(db) {
 
 // ../core/dist/vec.js
 import { createRequire as createRequire2 } from "node:module";
-import process4 from "node:process";
+import process5 from "node:process";
 
 // ../core/dist/embeddings.js
 var embeddings_exports = {};
@@ -4129,7 +4129,8 @@ function vectorReport(counts2) {
     total,
     runtimeReady,
     acquireBytes,
-    ...counts2.backend ? { backend: counts2.backend } : {}
+    ...counts2.backend ? { backend: counts2.backend } : {},
+    ...counts2.working === void 0 ? {} : { working: counts2.working }
   };
   if (counts2.reason)
     return { ...base2, phase: "unavailable", reason: counts2.reason };
@@ -4189,6 +4190,131 @@ function formatDoctorLine(o) {
   return `${o.harness.padEnd(12)}${o.status.padEnd(10)}${tildify(o.dir).padEnd(28)}  ${o.note}`;
 }
 
+// ../core/dist/lock.js
+var lock_exports = {};
+__export(lock_exports, {
+  LockBusyError: () => LockBusyError,
+  acquire: () => acquire2,
+  holder: () => holder,
+  withLock: () => withLock,
+  withLockAsync: () => withLockAsync
+});
+import fs3 from "node:fs";
+import path3 from "node:path";
+import process4 from "node:process";
+var STALE_MS = 5 * 6e4;
+function lockPathFor(root, lane) {
+  return path3.join(root, lane === "embed" ? ".lock.embed" : ".lock");
+}
+var LockBusyError = class extends Error {
+  holder;
+  constructor(holder3, lockPath) {
+    super(holder3 ? `another potsherd is running (pid ${holder3.pid}, ${holder3.op}, since ${holder3.at}). if that is wrong, remove ${lockPath}` : `another potsherd is running. if that is wrong, remove ${lockPath}`);
+    this.holder = holder3;
+    this.name = "LockBusyError";
+  }
+};
+function acquire2(op, opts = {}) {
+  const root = opts.root ?? potsherdDir();
+  const lockPath = lockPathFor(root, opts.lane);
+  const deadline = Date.now() + (opts.wait ?? 0);
+  fs3.mkdirSync(root, { recursive: true, mode: 448 });
+  for (; ; ) {
+    try {
+      fs3.mkdirSync(lockPath);
+      const info = {
+        pid: process4.pid,
+        op,
+        at: (/* @__PURE__ */ new Date()).toISOString(),
+        host: process4.env.HOSTNAME ?? ""
+      };
+      fs3.writeFileSync(path3.join(lockPath, "owner.json"), JSON.stringify(info), { mode: 384 });
+      let released = false;
+      return {
+        path: lockPath,
+        release() {
+          if (released)
+            return;
+          released = true;
+          try {
+            fs3.rmSync(lockPath, { recursive: true, force: true });
+          } catch {
+          }
+        }
+      };
+    } catch (err) {
+      if (err.code !== "EEXIST")
+        throw err;
+      const holder3 = readOwner(lockPath);
+      if (isStale(lockPath, holder3)) {
+        try {
+          fs3.rmSync(lockPath, { recursive: true, force: true });
+        } catch {
+        }
+        continue;
+      }
+      if (Date.now() >= deadline)
+        throw new LockBusyError(holder3, lockPath);
+      sleepSync(100);
+    }
+  }
+}
+function withLock(op, fn, opts = {}) {
+  const lock = acquire2(op, opts);
+  try {
+    return fn();
+  } finally {
+    lock.release();
+  }
+}
+async function withLockAsync(op, fn, opts = {}) {
+  const lock = acquire2(op, opts);
+  try {
+    return await fn();
+  } finally {
+    lock.release();
+  }
+}
+function readOwner(lockPath) {
+  try {
+    return JSON.parse(fs3.readFileSync(path3.join(lockPath, "owner.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function isStale(lockPath, holder3) {
+  if (holder3 && holder3.pid && (!holder3.host || holder3.host === (process4.env.HOSTNAME ?? ""))) {
+    return !pidAlive(holder3.pid);
+  }
+  try {
+    return Date.now() - fs3.statSync(lockPath).mtimeMs > STALE_MS;
+  } catch {
+    return true;
+  }
+}
+function holder(opts = {}) {
+  const lockPath = lockPathFor(opts.root ?? potsherdDir(), opts.lane);
+  try {
+    if (!fs3.existsSync(lockPath))
+      return null;
+  } catch {
+    return null;
+  }
+  const info = readOwner(lockPath);
+  return isStale(lockPath, info) ? null : info;
+}
+function pidAlive(pid) {
+  try {
+    process4.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 // ../core/dist/vec.js
 var require_2 = createRequire2(import.meta.url);
 var loaded = /* @__PURE__ */ new WeakMap();
@@ -4227,7 +4353,7 @@ function installVectorFunctions(db) {
   }
 }
 function loadLegacyExtension(db) {
-  const off = process4.env["POTSHERD_NO_VEC"];
+  const off = process5.env["POTSHERD_NO_VEC"];
   if (off && off !== "0")
     return {};
   try {
@@ -4258,10 +4384,12 @@ function vecStatus(db, root) {
   const cacheDir = modelsDir(potsherdDir(root));
   const backend2 = embeddingBackend();
   const reason = base2.available ? void 0 : base2.reason;
+  const working = holder({ root, lane: "embed" }) !== null;
   const report = vectorReport({
     embedded: counts2.embedded,
     pending: counts2.pending,
     cacheDir,
+    working,
     ...backend2 ? { backend: backend2 } : {},
     ...reason ? { reason } : {}
   });
@@ -5005,7 +5133,7 @@ function open(opts = {}) {
   const root = opts.root ?? potsherdDir();
   const file = opts.file ?? dbPath(root);
   if (file !== ":memory:") {
-    fs3.mkdirSync(path3.dirname(file), { recursive: true, mode: 448 });
+    fs4.mkdirSync(path4.dirname(file), { recursive: true, mode: 448 });
   }
   const db = openDatabase(file, { readonly: opts.readonly ?? false });
   if (!opts.readonly) {
@@ -5014,7 +5142,7 @@ function open(opts = {}) {
     if (file !== ":memory:") {
       for (const f of [file, `${file}-wal`, `${file}-shm`]) {
         try {
-          fs3.chmodSync(f, 384);
+          fs4.chmodSync(f, 384);
         } catch {
         }
       }
@@ -5080,131 +5208,6 @@ function count(db, table2) {
   } catch {
     return 0;
   }
-}
-
-// ../core/dist/lock.js
-var lock_exports = {};
-__export(lock_exports, {
-  LockBusyError: () => LockBusyError,
-  acquire: () => acquire2,
-  holder: () => holder,
-  withLock: () => withLock,
-  withLockAsync: () => withLockAsync
-});
-import fs4 from "node:fs";
-import path4 from "node:path";
-import process5 from "node:process";
-var STALE_MS = 5 * 6e4;
-function lockPathFor(root, lane) {
-  return path4.join(root, lane === "embed" ? ".lock.embed" : ".lock");
-}
-var LockBusyError = class extends Error {
-  holder;
-  constructor(holder2, lockPath) {
-    super(holder2 ? `another potsherd is running (pid ${holder2.pid}, ${holder2.op}, since ${holder2.at}). if that is wrong, remove ${lockPath}` : `another potsherd is running. if that is wrong, remove ${lockPath}`);
-    this.holder = holder2;
-    this.name = "LockBusyError";
-  }
-};
-function acquire2(op, opts = {}) {
-  const root = opts.root ?? potsherdDir();
-  const lockPath = lockPathFor(root, opts.lane);
-  const deadline = Date.now() + (opts.wait ?? 0);
-  fs4.mkdirSync(root, { recursive: true, mode: 448 });
-  for (; ; ) {
-    try {
-      fs4.mkdirSync(lockPath);
-      const info = {
-        pid: process5.pid,
-        op,
-        at: (/* @__PURE__ */ new Date()).toISOString(),
-        host: process5.env.HOSTNAME ?? ""
-      };
-      fs4.writeFileSync(path4.join(lockPath, "owner.json"), JSON.stringify(info), { mode: 384 });
-      let released = false;
-      return {
-        path: lockPath,
-        release() {
-          if (released)
-            return;
-          released = true;
-          try {
-            fs4.rmSync(lockPath, { recursive: true, force: true });
-          } catch {
-          }
-        }
-      };
-    } catch (err) {
-      if (err.code !== "EEXIST")
-        throw err;
-      const holder2 = readOwner(lockPath);
-      if (isStale(lockPath, holder2)) {
-        try {
-          fs4.rmSync(lockPath, { recursive: true, force: true });
-        } catch {
-        }
-        continue;
-      }
-      if (Date.now() >= deadline)
-        throw new LockBusyError(holder2, lockPath);
-      sleepSync(100);
-    }
-  }
-}
-function withLock(op, fn, opts = {}) {
-  const lock = acquire2(op, opts);
-  try {
-    return fn();
-  } finally {
-    lock.release();
-  }
-}
-async function withLockAsync(op, fn, opts = {}) {
-  const lock = acquire2(op, opts);
-  try {
-    return await fn();
-  } finally {
-    lock.release();
-  }
-}
-function readOwner(lockPath) {
-  try {
-    return JSON.parse(fs4.readFileSync(path4.join(lockPath, "owner.json"), "utf8"));
-  } catch {
-    return null;
-  }
-}
-function isStale(lockPath, holder2) {
-  if (holder2 && holder2.pid && (!holder2.host || holder2.host === (process5.env.HOSTNAME ?? ""))) {
-    return !pidAlive(holder2.pid);
-  }
-  try {
-    return Date.now() - fs4.statSync(lockPath).mtimeMs > STALE_MS;
-  } catch {
-    return true;
-  }
-}
-function holder(opts = {}) {
-  const lockPath = lockPathFor(opts.root ?? potsherdDir(), opts.lane);
-  try {
-    if (!fs4.existsSync(lockPath))
-      return null;
-  } catch {
-    return null;
-  }
-  const info = readOwner(lockPath);
-  return isStale(lockPath, info) ? null : info;
-}
-function pidAlive(pid) {
-  try {
-    process5.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === "EPERM";
-  }
-}
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 // ../core/dist/consent.js
@@ -9271,6 +9274,13 @@ var LISTS = [
 ];
 var LANES = { evidence: 0, routing: 1 };
 var ROUTING_KINDS = /* @__PURE__ */ new Set(["card"]);
+var SUMMARY_KINDS = /* @__PURE__ */ new Set(["card", "title"]);
+function isSummaryHit(kind) {
+  return SUMMARY_KINDS.has(kind);
+}
+function hasTranscriptEvidence(hits) {
+  return hits.some((h) => !isSummaryHit(h.kind));
+}
 var ROUTING_PER_SESSION = 1;
 var CARDS_SCORE_EVIDENCE_BLOCKS = true;
 function laneOfHit(kind) {
@@ -9278,6 +9288,9 @@ function laneOfHit(kind) {
 }
 function laneOfSession(hits) {
   return hits.some((h) => laneOfHit(h.kind) === "evidence") ? "evidence" : "routing";
+}
+function summaryRank(hits) {
+  return hasTranscriptEvidence(hits) ? 0 : 1;
 }
 function byLane(a, b) {
   return LANES[a.lane ?? "evidence"] - LANES[b.lane ?? "evidence"] || b.score - a.score;
@@ -9797,10 +9810,13 @@ function vecGhostPrompts(db, embedding, filters, depth) {
 }
 function vectorState(db, root) {
   const ext = vecStatus(db);
+  const working = root === void 0 ? void 0 : holder({ root, lane: "embed" }) !== null;
+  const stopped = working === false;
   if (!ext.available) {
     return {
       used: false,
       available: false,
+      ...working === void 0 ? {} : { working },
       reason: `no vector index \u2014 ${ext.reason ?? "sqlite-vec did not load"}`
     };
   }
@@ -9818,11 +9834,19 @@ function vectorState(db, root) {
       used: false,
       available: false,
       vectors: 0,
+      ...working === void 0 ? {} : { working },
       // NOT `run potsherd index --embed`. This string reaches `potsherd_recall`,
       // whose caller has no shell, and `render/find.ts:229` and `render/stats.ts:158`
       // both record that the instruction is false anyway: `index` embeds by default
       // now, so there is nothing for anyone to run.
-      reason: "no embeddings in the index yet"
+      //
+      // FIX-F C2 — and `yet` is a promise. It is true while an embedder is
+      // running and false after `index --no-embed`, on a machine that cannot
+      // fetch the runtime, and after a pass was killed. The agent reading this
+      // at the model door is being told the other half of its answer is on its
+      // way; on those three indexes it is not, and the word that says so is
+      // the only thing standing between it and a pointless retry.
+      reason: stopped ? "no embeddings in the index, and nothing is embedding them" : "no embeddings in the index yet"
     };
   }
   const cache = modelsDir(potsherdDir(root));
@@ -9831,10 +9855,11 @@ function vectorState(db, root) {
       used: false,
       available: false,
       vectors,
+      ...working === void 0 ? {} : { working },
       reason: "embedding model not downloaded \u2014 run  potsherd index  once online"
     };
   }
-  return { used: false, available: true, vectors };
+  return { used: false, available: true, vectors, ...working === void 0 ? {} : { working } };
 }
 async function recall(db, query, requested = {}, options = {}) {
   const started = Date.now();
@@ -9896,7 +9921,16 @@ async function recall(db, query, requested = {}, options = {}) {
     ms: Date.now() - started
   });
   const vecMode = options.vectors ?? "auto";
-  const vectors = vecMode === false ? { used: false, available: false, reason: "vectors off (--no-vec)" } : vectorState(db, options.root);
+  const vectors = vecMode === false ? {
+    used: false,
+    available: false,
+    reason: "vectors off (--no-vec)",
+    // FIX-F C2 — whether anybody is embedding this index is a fact about
+    // the index, not about this search's flags. `--no-vec` says the
+    // caller does not want the vector half *now*; it does not make
+    // `warming` true, and the renderer needs the fact either way.
+    ...options.root === void 0 ? {} : { working: holder({ root: options.root, lane: "embed" }) !== null }
+  } : vectorState(db, options.root);
   if (fts.tokens.length === 0)
     return empty(vectors);
   const wanted = new Set(options.lists ?? LISTS);
@@ -9982,7 +10016,7 @@ async function recall(db, query, requested = {}, options = {}) {
     wanted.delete("vec_cards");
     wanted.delete("vec_ghost_prompts");
     const state = vectorState(db, options.root);
-    vectors.reason = state.vectors === 0 || !state.available ? "the words matched; semantic search adds to this as vectors land" : "the words matched, so the vector half was not needed";
+    vectors.reason = state.vectors === 0 || !state.available ? state.working === false ? "the words matched; semantic search is not running, so nothing will be added" : "the words matched; semantic search adds to this as vectors land" : "the words matched, so the vector half was not needed";
   }
   if (wanted.has("vec_exchanges") || wanted.has("vec_cards") || wanted.has("vec_ghost_prompts")) {
     try {
@@ -10092,7 +10126,15 @@ async function recall(db, query, requested = {}, options = {}) {
       // coverage of the query inside it means the *summary* used those words
       // — which is the one thing an agent must not be allowed to read as "the
       // archive answers this". See `calibration.ts`.
-      ...lane === "routing" ? { ceiling: ROUTING_CEILING } : {}
+      //
+      // FIX-F C3 — and a Claude Code title is a model's *six* words about the
+      // session, which is the same thing with less of it. The cap is keyed on
+      // {@link SUMMARY_KINDS} rather than on the lane, because the lane governs
+      // five other things this must not move; see that constant. Measured on
+      // the reference archive: `potsherd_recall` on one word returned 28 hits
+      // of which the first 18 were titles, every one of them labelled
+      // `strong`, with the first transcript hit at index 18.
+      ...isSummaryHit(hit2.kind) ? { ceiling: ROUTING_CEILING } : {}
     });
     kept.push({
       kind: hit2.kind,
@@ -10168,6 +10210,7 @@ async function recall(db, query, requested = {}, options = {}) {
     const lane = laneOfSession(hits);
     const counted = lane === "evidence" ? hits.filter((h) => h.lane === "evidence") : hits;
     const blockText = (lane === "evidence" ? [m.displayTitle, m.title ?? ""] : []).concat(counted.map((h) => `${h.userText} ${h.assistantText ?? ""}`)).join(" ");
+    const transcript = hasTranscriptEvidence(hits);
     const calibration = calibrate({
       covered: coveredTerms(quotableTokens, blockText),
       terms: quotableTokens.length,
@@ -10175,7 +10218,7 @@ async function recall(db, query, requested = {}, options = {}) {
       keyTerms: requiredTerms.length,
       strength: Math.max(0, ...counted.map((h) => h.calibration.strength)),
       lists: new Set(counted.flatMap((h) => h.from.map((f) => f.list))).size,
-      ...lane === "routing" ? { ceiling: ROUTING_CEILING } : {}
+      ...lane === "routing" || !transcript ? { ceiling: ROUTING_CEILING } : {}
     });
     if (lane === "evidence" ? evidenceBuilt >= limit * 3 : routingBuilt >= limit)
       continue;
@@ -10205,10 +10248,10 @@ async function recall(db, query, requested = {}, options = {}) {
   const belowFloor = built - surviving.length;
   sessions.length = 0;
   sessions.push(...surviving);
-  sessions.sort(byLane);
+  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLane(a, b));
   sessions.length = Math.min(sessions.length, limit);
   const confidence = sessions.reduce((best, s) => maxConfidence(best, s.confidence), "none");
-  const flat = [...sessions.flatMap((s) => s.hits)].sort(byLane);
+  const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => summaryRank([a]) - summaryRank([b]) || byLane(a, b));
   return {
     query,
     sessions,
@@ -17022,7 +17065,7 @@ function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), o
       lines.push(...ignoreNote(result, t));
       return lines.join("\n");
     }
-    lines.push(...semanticNote(opts, t));
+    lines.push(...semanticNote(opts, t, result.vectors));
     lines.push(...ignoreNote(result, t));
     lines.push(nextVerbOnEmpty(result, t));
     return lines.join("\n");
@@ -17036,12 +17079,12 @@ function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), o
   const notes = footer(result, t);
   if (notes)
     lines.push(INDENT + t.dim(notes));
-  if (!result.vectors.used && result.vectors.reason && !supersededBySemantic(opts, result.vectors.reason)) {
+  if (!result.vectors.used && result.vectors.reason && !supersededBySemantic(opts, result.vectors.reason, result.vectors)) {
     for (const line of wrap(`text search only ${t.dash} ${result.vectors.reason}`, t.width - INDENT.length)) {
       lines.push(INDENT + t.dim(line));
     }
   }
-  lines.push(...semanticNote(opts, t));
+  lines.push(...semanticNote(opts, t, result.vectors));
   lines.push(...ignoreNote(result, t));
   lines.push(nextVerb(t));
   return lines.join("\n");
@@ -17084,12 +17127,16 @@ function ignoreNote(result, t) {
   const text = Theme.len(INDENT + wide) <= t.width ? wide : what;
   return wrap(text, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
 }
-function semanticNote(opts, t) {
+function semanticNote(opts, t, vectors) {
   if (!opts.semantic)
+    return [];
+  if (vectors?.working === false)
     return [];
   return wrap(opts.semantic, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
 }
-function supersededBySemantic(opts, reason) {
+function supersededBySemantic(opts, reason, vectors) {
+  if (vectors?.working === false)
+    return false;
   return Boolean(opts.semantic) && reason.startsWith("the words matched;");
 }
 function nextVerb(t) {
@@ -22959,9 +23006,9 @@ function removeStanza(spec, read, before) {
   if (!read.json)
     return before;
   const json = structuredClone(read.json);
-  const holder2 = getIn(json, spec.jsonPath ?? []);
-  if (holder2 && typeof holder2 === "object") {
-    delete holder2[SERVER_NAME];
+  const holder3 = getIn(json, spec.jsonPath ?? []);
+  if (holder3 && typeof holder3 === "object") {
+    delete holder3[SERVER_NAME];
   }
   return stringifySettings(json);
 }
@@ -27238,6 +27285,11 @@ function stripSlash2(s) {
 
 // ../core/src/vec.ts
 import { createRequire as createRequire4 } from "node:module";
+
+// ../core/src/lock.ts
+var STALE_MS2 = 5 * 6e4;
+
+// ../core/src/vec.ts
 var require_3 = createRequire4(import.meta.url);
 
 // ../core/src/cards/ghost.ts

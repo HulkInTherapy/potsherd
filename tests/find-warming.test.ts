@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { db as store, embeddings, vecStatus } from '@potsherd/core';
 import { runFind } from '../packages/cli/src/commands/find.js';
@@ -73,33 +75,138 @@ function expected(root: string): string {
   }
 }
 
+function report(root: string): { working?: boolean; embedded: number; total: number } {
+  const db = store.open({ root });
+  try {
+    return vecStatus(db, root).report!;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Hold the embed lane the way the background worker holds it.
+ *
+ * FIX-F C2. `.lock.embed` with an `owner.json` naming a live pid is exactly
+ * what `lock.holder()` reads and exactly what `runEmbedWorker` writes; the
+ * fixtures above never had one, which is why every one of them was described
+ * as `warming`.
+ */
+function holdEmbedLane(root: string): () => void {
+  const dir = path.join(root, '.lock.embed');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'owner.json'),
+    JSON.stringify({
+      pid: process.pid,
+      op: 'embed',
+      at: new Date().toISOString(),
+      host: process.env.HOSTNAME ?? '',
+    }),
+  );
+  return () => rmrf(dir);
+}
+
 describe('find says what semantic search is doing', () => {
   it('prints the warming line, in the wording every other verb uses', async () => {
+    // FIX-F C2 — with a worker actually holding the embed lane, which is the
+    // state the word `warming` has always claimed and which this fixture did
+    // not have. `expected()` is still `vecStatus().line`: the point of the
+    // original test was that `find` is inside the one source of truth, and it
+    // still is.
     const root = warmingRoot();
-    const out = await capture({ query: 'pgbouncer', potsherdDir: root, color: false });
-    expect(expected(root)).toBe('semantic search: warming (1 of 4 embedded)');
-    expect(out).toContain(expected(root));
-    // A status, not an apology and not an offer: nothing to run, nothing sold.
-    expect(out).not.toMatch(/index --embed|degraded|unavailable — install/);
+    const release = holdEmbedLane(root);
+    try {
+      const out = await capture({ query: 'pgbouncer', potsherdDir: root, color: false });
+      expect(expected(root)).toBe('semantic search: warming (1 of 4 embedded)');
+      expect(out).toContain(expected(root));
+      // A status, not an apology and not an offer: nothing to run, nothing sold.
+      expect(out).not.toMatch(/index --embed|degraded|unavailable — install/);
+    } finally {
+      release();
+    }
   });
 
   it('prints it even when nothing matched, because the shortfall is the point', async () => {
     const root = warmingRoot();
+    const release = holdEmbedLane(root);
+    try {
+      const out = await capture({
+        query: 'a topic this archive has never heard of',
+        potsherdDir: root,
+        color: false,
+      });
+      expect(out).toContain(expected(root));
+    } finally {
+      release();
+    }
+  });
+
+  /**
+   * FIX-F C2 — and the state the verifier actually found `find` in.
+   *
+   * After `index --no-embed`, on a machine that cannot fetch the runtime, and
+   * after an embedder was killed, nothing holds the embed lane and nothing
+   * will. `warming` says the work is already running — `warmingLine`'s own
+   * docstring says "there is nothing for the reader to do" — so on this index
+   * it is the one sentence on the screen that is false, and it sat directly
+   * above the line that says the true thing.
+   */
+  it('does not say warming when nothing is embedding, and says what is true instead', async () => {
+    const root = warmingRoot();
+    // No lock: nobody is embedding this index.
+    expect(report(root).working).toBe(false);
+    // `vectors: 'auto'` rather than the helper's `'off'`: `--no-vec` replaces
+    // `vectors.reason` with its own sentence, and this is about the default
+    // path — the one an ordinary `potsherd find` takes.
     const out = await capture({
-      query: 'a topic this archive has never heard of',
+      query: 'pgbouncer',
       potsherdDir: root,
       color: false,
+      vectors: 'auto',
     });
-    expect(out).toContain(expected(root));
+    expect(out).not.toContain('semantic search: warming');
+    expect(out).toMatch(/is not running|nothing is embedding/);
+    // And still no command the reader might not be able to run.
+    expect(out).not.toMatch(/index --embed/);
   });
 
   it('carries the same report on --json, so a script reads what a person reads', async () => {
     const root = warmingRoot();
-    const out = await capture({ query: 'pgbouncer', potsherdDir: root, json: true });
-    const j = JSON.parse(out) as { semantic?: { line: string | null; embedded: number; total: number } };
-    expect(j.semantic?.line).toBe(expected(root));
-    expect(j.semantic?.embedded).toBe(1);
-    expect(j.semantic?.total).toBe(4);
+    const release = holdEmbedLane(root);
+    try {
+      const out = await capture({ query: 'pgbouncer', potsherdDir: root, json: true });
+      const j = JSON.parse(out) as {
+        semantic?: { line: string | null; embedded: number; total: number; working?: boolean };
+        vectors?: { working?: boolean };
+      };
+      expect(j.semantic?.line).toBe(expected(root));
+      expect(j.semantic?.embedded).toBe(1);
+      expect(j.semantic?.total).toBe(4);
+      // FIX-F C2 — the fact, not just the sentence, so a script can tell
+      // *yet* from *never* without parsing English.
+      expect(j.semantic?.working).toBe(true);
+      expect(j.vectors?.working).toBe(true);
+    } finally {
+      release();
+    }
+  });
+
+  it('and the same script can see when nothing is running', async () => {
+    const root = warmingRoot();
+    const out = await capture({
+      query: 'pgbouncer',
+      potsherdDir: root,
+      json: true,
+      vectors: 'auto',
+    });
+    const j = JSON.parse(out) as {
+      semantic?: { working?: boolean };
+      vectors?: { working?: boolean; reason?: string };
+    };
+    expect(j.semantic?.working).toBe(false);
+    expect(j.vectors?.working).toBe(false);
+    expect(String(j.vectors?.reason)).toMatch(/is not running|nothing is embedding/);
   });
 
   it('says nothing at all once every row is embedded', async () => {

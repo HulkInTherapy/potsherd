@@ -11,7 +11,7 @@ import {
   type MaskSpan,
 } from '../search/snippet.js';
 import { explain, type Explain, type HitExplain, type SessionExplain } from '../search/explain.js';
-import type { RecallHit, RecallResult, RecallSession } from '../recall.js';
+import type { RecallHit, RecallResult, RecallSession, VectorState } from '../recall.js';
 
 /**
  * `potsherd find` — one block per session, exactly as `03` §7 specifies it:
@@ -97,7 +97,7 @@ export function renderFind(
       lines.push(...ignoreNote(result, t));
       return lines.join('\n');
     }
-    lines.push(...semanticNote(opts, t));
+    lines.push(...semanticNote(opts, t, result.vectors));
     lines.push(...ignoreNote(result, t));
     lines.push(nextVerbOnEmpty(result, t));
     return lines.join('\n');
@@ -117,12 +117,16 @@ export function renderFind(
   // never once fitted: every committed `find` screen ends `3 ghost hits · 1
   // from subagents · …`, an ellipsis standing in for the one note on the line
   // that tells the reader something they can act on.
-  if (!result.vectors.used && result.vectors.reason && !supersededBySemantic(opts, result.vectors.reason)) {
+  if (
+    !result.vectors.used &&
+    result.vectors.reason &&
+    !supersededBySemantic(opts, result.vectors.reason, result.vectors)
+  ) {
     for (const line of f.wrap(`text search only ${t.dash} ${result.vectors.reason}`, t.width - INDENT.length)) {
       lines.push(INDENT + t.dim(line));
     }
   }
-  lines.push(...semanticNote(opts, t));
+  lines.push(...semanticNote(opts, t, result.vectors));
   lines.push(...ignoreNote(result, t));
   lines.push(nextVerb(t));
   return lines.join('\n');
@@ -218,8 +222,28 @@ function ignoreNote(result: RecallResult, t: Theme): string[] {
  * FIX-B D9. Empty when the index is fully embedded or empty, which is the whole
  * of `vecStatus`'s contract: a verb with nothing to report prints nothing.
  */
-function semanticNote(opts: FindRenderOptions, t: Theme): string[] {
+function semanticNote(opts: FindRenderOptions, t: Theme, vectors?: VectorState): string[] {
   if (!opts.semantic) return [];
+  // FIX-F C2 — and the mirror of {@link supersededBySemantic}, for the same
+  // reason and by the same rule.
+  //
+  // `opts.semantic` is `vecStatus().line`, which says `warming` for any index
+  // with rows left to embed. `warming` is a claim that a pass is **in flight**
+  // — its own docstring in `doctor-line.ts` says "there is nothing for the
+  // reader to do; the work is already running" — and on an `index --no-embed`,
+  // on an offline first run, and after an embedder was killed, no pass is
+  // running and none will start. `result.vectors.working` is the lock read
+  // that settles it (`recall.vectorState`), and the line directly above this
+  // one already says the true thing: `text search only — no embeddings in the
+  // index, and nothing is embedding them`.
+  //
+  // So the contradicting sentence is dropped rather than printed beside the
+  // honest one. Two accounts of one fact on one screen is audit F2, and the
+  // account that goes is the one that is wrong. Nothing is invented here: this
+  // renderer has no denominator of its own, and a count with no total is the
+  // defect FIX-C closed — so when there is nothing true to say with the
+  // numbers to hand, it says nothing, which is the other half of the rule.
+  if (vectors?.working === false) return [];
   return f.wrap(opts.semantic, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
 }
 
@@ -238,7 +262,19 @@ function semanticNote(opts: FindRenderOptions, t: Theme): string[] {
  * dropped only when there is a warming line to replace it, so `--vectors off`
  * and a genuinely unavailable runtime still say so.
  */
-function supersededBySemantic(opts: FindRenderOptions, reason: string): boolean {
+function supersededBySemantic(
+  opts: FindRenderOptions,
+  reason: string,
+  vectors?: VectorState,
+): boolean {
+  // FIX-F C2 — the two rules are one rule, and they have to be read together.
+  // When nothing is embedding, {@link semanticNote} drops the warming line, so
+  // there is no longer a warming line for this clause to be superseded *by*:
+  // suppressing it here as well would leave the screen saying nothing at all
+  // about semantic search on the one index where the reader most needs to
+  // know. Whichever of the two sentences is true is the one that prints, and
+  // exactly one of them always is.
+  if (vectors?.working === false) return false;
   return Boolean(opts.semantic) && reason.startsWith('the words matched;');
 }
 

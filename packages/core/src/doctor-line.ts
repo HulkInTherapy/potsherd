@@ -64,6 +64,32 @@ export interface VectorReport {
   backend?: 'wasm' | 'native';
   /** One clause, present only when {@link phase} is `unavailable`. */
   reason?: string;
+  /**
+   * Whether an embedding worker is alive and holding the embed lane.
+   *
+   * **FIX-F C2.** {@link VectorPhase} is a fact about the *index* — how many
+   * rows carry a vector — and until this field there was nothing anywhere that
+   * asked the different question *is anybody embedding the rest?* So `pending`
+   * and `warming` were rendered with {@link warmingLine} unconditionally, whose
+   * own docstring says "there is nothing for the reader to do; the work is
+   * already running". After `index --no-embed`, on a machine that cannot fetch
+   * the runtime, or after an embedder crashed, that sentence is false: the
+   * index is 0-of-4,745 with nothing in flight, and the reader — an agent, at
+   * `potsherd_recall` — is being told to wait for a pass that will never run.
+   *
+   * The evidence is `<root>/.lock.embed`, which the background worker holds for
+   * the whole pass and which carries its `pid`. `lock.holder()` already answers
+   * it, already refuses a stale lock whose owner is gone (`lock.isStale`), and
+   * is already a pure read. `vec.ts` asks it once, here, so the three surfaces
+   * that render this report cannot disagree about it.
+   *
+   * `undefined` — not `false` — when the caller had no root to ask about, which
+   * is the one case where nothing may be claimed in either direction. A caller
+   * that has just *spawned* a worker knows better than the lock does for the
+   * next few milliseconds; see `cli/commands/index.ts`, which carries its own
+   * `spawned` flag for exactly that window.
+   */
+  working?: boolean;
 }
 
 /**
@@ -79,6 +105,8 @@ export function vectorReport(counts: {
   cacheDir: string;
   backend?: 'wasm' | 'native';
   reason?: string;
+  /** See {@link VectorReport.working}. Omitted when the caller cannot know. */
+  working?: boolean;
 }): VectorReport {
   const total = counts.embedded + counts.pending;
   const runtimeReady = isEmbeddingReady(counts.cacheDir);
@@ -90,6 +118,7 @@ export function vectorReport(counts: {
     runtimeReady,
     acquireBytes,
     ...(counts.backend ? { backend: counts.backend } : {}),
+    ...(counts.working === undefined ? {} : { working: counts.working }),
   };
   if (counts.reason) return { ...base, phase: 'unavailable', reason: counts.reason };
   if (total === 0) return { ...base, phase: 'empty' };

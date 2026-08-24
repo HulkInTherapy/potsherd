@@ -24,6 +24,7 @@ import {
   type Keyphrase,
 } from './keyphrase.js';
 import { vecStatus, vecTablesExist } from './vec.js';
+import { holder as lockHolder } from './lock.js';
 import {
   EMBEDDING_VERSION,
   embeddingToBlob,
@@ -187,6 +188,70 @@ export const LANES: Readonly<Record<Lane, number>> = { evidence: 0, routing: 1 }
 export const ROUTING_KINDS: ReadonlySet<RecallHit['kind']> = new Set(['card']);
 
 /**
+ * Hit kinds whose text is a **summary of a conversation**, not a line from one.
+ *
+ * FIX-F C3, and it is deliberately a *different* set from {@link ROUTING_KINDS}
+ * rather than a widening of it.
+ *
+ * ## why not just add `title` to ROUTING_KINDS
+ *
+ * That set is the **lane**, and the lane governs six things, all of which were
+ * measured for cards and none of which was measured for titles:
+ *
+ *  1. `laneOfHit` / `laneOfSession` → the published `lane` field, on every hit
+ *     and every block, at `find --json` and at `potsherd_recall`.
+ *  2. {@link byLane}, the comparator that orders blocks and hits.
+ *  3. The two-pass budget in `recall()`: evidence hits take {@link PER_SESSION}
+ *     (3) slots, routing hits take {@link ROUTING_PER_SESSION} (1) — a **shared**
+ *     one, so a session with both a card and a title hit would show only one of
+ *     them, and which one would be decided by fused rank.
+ *  4. {@link CARDS_SCORE_EVIDENCE_BLOCKS} and `counted`: what feeds a block's
+ *     coverage. A title is *already* folded into every evidence block's
+ *     calibration text by name (`m.displayTitle`), so moving the title *hit*
+ *     into the routing lane would not remove the title from the calculation —
+ *     it would only make the two disagree.
+ *  5. The separate build budget (`limit` routing blocks vs `limit * 3`).
+ *  6. `--no-cards`, which drops `cards_fts` and `vec_cards` and would **not**
+ *     drop the `titles` list — so `lane: 'routing'` rows would keep appearing
+ *     on a search that had asked for transcripts only.
+ *
+ * `tests/cards-lane.test.ts` pins `laneOfHit('title') === 'evidence'` in both
+ * directions. So the lane is left exactly where T10.7 put it, and the *other*
+ * property — is this row a model's summary or a person's and a model's actual
+ * words — is named here, separately, and used for the three things C3 is
+ * about: the confidence cap, the ordering against transcript evidence, and
+ * citability at the model door.
+ *
+ * ## why `title` is in it
+ *
+ * `T10.7-REPORT.md §5` scoped titles out on the grounds that "a title … has
+ * never been citable". That is not true of this build: `groupThreads` at
+ * `packages/mcp/src/tools/recall.ts` mints a citation for every thread whose
+ * lane is `evidence`, and a title-only thread's lane is `evidence`. And a
+ * Claude Code title is not a filename: it is an `ai-title` record, a model's
+ * six words written mid-session, of which `doctor` counts eighty in the
+ * reference archive. A search that matches one has matched a **summary**, and
+ * F6 is one sentence — *a generated summary beat primary evidence.*
+ */
+export const SUMMARY_KINDS: ReadonlySet<RecallHit['kind']> = new Set(['card', 'title']);
+
+/** Whether this hit's text is a summary of a conversation rather than from one. */
+export function isSummaryHit(kind: RecallHit['kind']): boolean {
+  return SUMMARY_KINDS.has(kind);
+}
+
+/**
+ * Whether anything in this set of hits is actual transcript text.
+ *
+ * The question `citable` should always have been asking, and the question the
+ * ordering asks first: a block with one exchange hit and one title hit has
+ * something a reader can quote, and a block with two title hits has not.
+ */
+export function hasTranscriptEvidence(hits: readonly { kind: RecallHit['kind'] }[]): boolean {
+  return hits.some((h) => !isSummaryHit(h.kind));
+}
+
+/**
  * How many routing hits one conversation may put on the page.
  *
  * One. A card is one row per session by construction (`cards.session_id` is
@@ -240,6 +305,18 @@ export function laneOfHit(kind: RecallHit['kind']): Lane {
  */
 export function laneOfSession(hits: readonly { kind: RecallHit['kind'] }[]): Lane {
   return hits.some((h) => laneOfHit(h.kind) === 'evidence') ? 'evidence' : 'routing';
+}
+
+/**
+ * 0 when these hits include transcript text, 1 when they are all summary.
+ *
+ * The first term of both comparators below — FIX-F C3. It is a function of the
+ * hits' `kind` alone, so it cannot be inverted by a weight, a corpus or a
+ * score, which is what makes "a summary never outranks a transcript" a property
+ * of the ranking rather than an arithmetic that happens to come out right.
+ */
+export function summaryRank(hits: readonly { kind: RecallHit['kind'] }[]): 0 | 1 {
+  return hasTranscriptEvidence(hits) ? 0 : 1;
 }
 
 /** Evidence before routing, then the fused score. The comparator, once. */
@@ -369,6 +446,16 @@ export interface VectorState {
   /** One line, printable, when `used` is false. */
   reason?: string;
   vectors?: number;
+  /**
+   * Whether an embedding worker is alive and holding the embed lane — FIX-F C2.
+   *
+   * The same fact `VectorReport.working` carries, read from the same file by
+   * the same function ({@link lockHolder}), and published here because this
+   * object is what `potsherd_recall` puts on the envelope: an agent told
+   * `no embeddings in the index yet` has no way, otherwise, to tell *yet* from
+   * *never*. `undefined` when there was no root to ask about.
+   */
+  working?: boolean;
 }
 
 export interface RecallResult {
@@ -1443,10 +1530,22 @@ export function vectorState(db: Db, root?: string): VectorState {
   // `vecStatus` is what actually loads vec0 into this connection; without it
   // `vec_exchanges` is a row in sqlite_master that no query can read.
   const ext = vecStatus(db);
+  // FIX-F C2 — *yet* and *never* are different answers, and every string below
+  // used to give the first one unconditionally.
+  //
+  // `working` is the same read `vec.vecStatus` makes, from the same lock file,
+  // through the same function: the background embedder holds `.lock.embed` for
+  // the whole pass and writes its pid into it, and `lock.holder` already
+  // answers `null` for a lock whose owner is gone. Two calls, one file, one
+  // rule — they cannot disagree. Without a root there is nothing to ask, and
+  // then nothing is claimed in either direction.
+  const working = root === undefined ? undefined : lockHolder({ root, lane: 'embed' }) !== null;
+  const stopped = working === false;
   if (!ext.available) {
     return {
       used: false,
       available: false,
+      ...(working === undefined ? {} : { working }),
       reason: `no vector index — ${ext.reason ?? 'sqlite-vec did not load'}`,
     };
   }
@@ -1464,11 +1563,21 @@ export function vectorState(db: Db, root?: string): VectorState {
       used: false,
       available: false,
       vectors: 0,
+      ...(working === undefined ? {} : { working }),
       // NOT `run potsherd index --embed`. This string reaches `potsherd_recall`,
       // whose caller has no shell, and `render/find.ts:229` and `render/stats.ts:158`
       // both record that the instruction is false anyway: `index` embeds by default
       // now, so there is nothing for anyone to run.
-      reason: 'no embeddings in the index yet',
+      //
+      // FIX-F C2 — and `yet` is a promise. It is true while an embedder is
+      // running and false after `index --no-embed`, on a machine that cannot
+      // fetch the runtime, and after a pass was killed. The agent reading this
+      // at the model door is being told the other half of its answer is on its
+      // way; on those three indexes it is not, and the word that says so is
+      // the only thing standing between it and a pointless retry.
+      reason: stopped
+        ? 'no embeddings in the index, and nothing is embedding them'
+        : 'no embeddings in the index yet',
     };
   }
   const cache = modelsDir(potsherdDir(root));
@@ -1477,10 +1586,11 @@ export function vectorState(db: Db, root?: string): VectorState {
       used: false,
       available: false,
       vectors,
+      ...(working === undefined ? {} : { working }),
       reason: 'embedding model not downloaded — run  potsherd index  once online',
     };
   }
-  return { used: false, available: true, vectors };
+  return { used: false, available: true, vectors, ...(working === undefined ? {} : { working }) };
 }
 
 // -------------------------------------------------------------------- fusion
@@ -1580,7 +1690,18 @@ export async function recall(
   const vecMode: boolean | 'auto' = options.vectors ?? 'auto';
   const vectors: VectorState =
     vecMode === false
-      ? { used: false, available: false, reason: 'vectors off (--no-vec)' }
+      ? {
+          used: false,
+          available: false,
+          reason: 'vectors off (--no-vec)',
+          // FIX-F C2 — whether anybody is embedding this index is a fact about
+          // the index, not about this search's flags. `--no-vec` says the
+          // caller does not want the vector half *now*; it does not make
+          // `warming` true, and the renderer needs the fact either way.
+          ...(options.root === undefined
+            ? {}
+            : { working: lockHolder({ root: options.root, lane: 'embed' }) !== null }),
+        }
       : vectorState(db, options.root);
 
   if (fts.tokens.length === 0) return empty(vectors);
@@ -1759,7 +1880,13 @@ export async function recall(
     const state = vectorState(db, options.root);
     vectors.reason =
       state.vectors === 0 || !state.available
-        ? 'the words matched; semantic search adds to this as vectors land'
+        // FIX-F C2 — `as vectors land` is the same promise one field over, and
+        // it is the one the verifier caught live at the model door. Vectors
+        // land when a worker is embedding; when the embed lane is empty they
+        // do not land at all.
+        ? state.working === false
+          ? 'the words matched; semantic search is not running, so nothing will be added'
+          : 'the words matched; semantic search adds to this as vectors land'
         // NOT `--vectors on`. This string reaches `potsherd_recall`, whose
         // schema is `query, scope, want, budget` — an agent reading it is being
         // told to pass a flag it has no way to pass, which is the "documented
@@ -1951,7 +2078,15 @@ export async function recall(
       // coverage of the query inside it means the *summary* used those words
       // — which is the one thing an agent must not be allowed to read as "the
       // archive answers this". See `calibration.ts`.
-      ...(lane === 'routing' ? { ceiling: ROUTING_CEILING } : {}),
+      //
+      // FIX-F C3 — and a Claude Code title is a model's *six* words about the
+      // session, which is the same thing with less of it. The cap is keyed on
+      // {@link SUMMARY_KINDS} rather than on the lane, because the lane governs
+      // five other things this must not move; see that constant. Measured on
+      // the reference archive: `potsherd_recall` on one word returned 28 hits
+      // of which the first 18 were titles, every one of them labelled
+      // `strong`, with the first transcript hit at index 18.
+      ...(isSummaryHit(hit.kind) ? { ceiling: ROUTING_CEILING } : {}),
     });
     kept.push({
       kind: hit.kind,
@@ -2057,6 +2192,13 @@ export async function recall(
     const blockText = (lane === 'evidence' ? [m.displayTitle, m.title ?? ''] : [])
       .concat(counted.map((h) => `${h.userText} ${h.assistantText ?? ''}`))
       .join(' ');
+    // FIX-F C3. A block with nothing but summaries in it is capped exactly as a
+    // card-only block is, and for the identical reason: `strong` is a licence
+    // to stop reading, and there is nothing here to read. The title is still
+    // folded into `blockText` above — a session *named* after the query is a
+    // real signal and the `titles` list is weighted 1.5 for it — but it can now
+    // only lift a block that has transcript evidence of its own to show for it.
+    const transcript = hasTranscriptEvidence(hits);
     const calibration = calibrate({
       covered: coveredTerms(quotableTokens, blockText),
       terms: quotableTokens.length,
@@ -2064,7 +2206,7 @@ export async function recall(
       keyTerms: requiredTerms.length,
       strength: Math.max(0, ...counted.map((h) => h.calibration.strength)),
       lists: new Set(counted.flatMap((h) => h.from.map((f) => f.list))).size,
-      ...(lane === 'routing' ? { ceiling: ROUTING_CEILING } : {}),
+      ...(lane === 'routing' || !transcript ? { ceiling: ROUTING_CEILING } : {}),
     });
     if (lane === 'evidence' ? evidenceBuilt >= limit * 3 : routingBuilt >= limit) continue;
     if (lane === 'evidence') evidenceBuilt++;
@@ -2109,7 +2251,18 @@ export async function recall(
   // The partition. `byLane` compares the lane first and the fused score only
   // when the lanes are equal, so no weight and no corpus can put a card-only
   // block above a block with transcript evidence in it. See {@link Lane}.
-  sessions.sort(byLane);
+  //
+  // FIX-F C3 — and the same sentence, applied to the other kind of summary.
+  // `plans/phases/phase-10-agent-audit.md §B8` asks for "never outranking a
+  // transcript hit"; the lane delivers that for cards and delivered nothing for
+  // titles, because a title hit's lane is `evidence`. On the reference archive
+  // five of ten threads matched **only** on their title and all five ranked
+  // above the one thread whose transcript actually used the words. So the first
+  // term of the comparator is now "does this block have anything quotable in
+  // it", and the lane is the second — a strict refinement: nothing that `byLane`
+  // ordered is reordered *within* a group, and a card-only block is
+  // summary-only by construction, so the two terms never disagree.
+  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLane(a, b));
   sessions.length = Math.min(sessions.length, limit);
   const confidence = sessions.reduce<Confidence>(
     (best, s) => maxConfidence(best, s.confidence),
@@ -2124,7 +2277,9 @@ export async function recall(
   // repo's own tests — undercounted a clustered conversation and never saw a
   // sidechain. Take the blocks' own hits instead, so the two views cannot
   // disagree and every hit still names the session it came from.
-  const flat = [...sessions.flatMap((s) => s.hits)].sort(byLane);
+  const flat = [...sessions.flatMap((s) => s.hits)].sort(
+    (a, b) => summaryRank([a]) - summaryRank([b]) || byLane(a, b),
+  );
   return {
     query,
     sessions,

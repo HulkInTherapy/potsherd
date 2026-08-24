@@ -61,11 +61,76 @@ import { threadIdOf } from './thread.js';
  * beat one 1,300-token window from its opening.*
  */
 
+/**
+ * Hit kinds whose text is a **summary of** a conversation, not a line from one.
+ *
+ * FIX-F C3. This door already knew the fact — `hitJson` spelled
+ * `h.kind === 'card' || h.kind === 'title'` to label a row `not-a-transcript`,
+ * and `windowsFrom` spelled it again to skip a hit with no exchange behind it —
+ * and then `groupThreads` minted a citation for the thread anyway, because
+ * citability was keyed on `lane` and a title's lane is `evidence`. So the fact
+ * was on the row and not on the thread, which is how a session an agent had
+ * only ever seen six model-written words of came back with a syntactically
+ * perfect, index-resolvable citation attached.
+ *
+ * It is named once here instead of spelled three times. The authority is
+ * `SUMMARY_KINDS` in `packages/core/src/recall.ts`, which this must agree with;
+ * it is not imported because it is not on the `@potsherd/core` barrel yet and
+ * that file is not this branch's to edit — the one line that closes the gap is
+ * in FIX-F-REPORT.md §4.
+ */
+const SUMMARY_KINDS: ReadonlySet<string> = new Set(['card', 'title']);
+
+/**
+ * What a row is: a line from a transcript, or a statement about one.
+ *
+ * The word an agent reads before it decides whether it may quote something.
+ */
+export function evidenceOf(kind: string): 'transcript' | 'not-a-transcript' {
+  return SUMMARY_KINDS.has(kind) ? 'not-a-transcript' : 'transcript';
+}
+
 /** Chars per token, for the `want: "context"` budget. `est.`, not measured. */
 export const CHARS_PER_TOKEN = 4;
 
 /** The context budget when the caller names none, in tokens. */
 export const DEFAULT_CONTEXT_BUDGET = 6_000;
+
+/**
+ * `scope`, plus the control the human has had since T10.7 and the agent has not.
+ *
+ * FIX-F C3. `plans/phases/phase-10-agent-audit.md §B8` asks for two things
+ * about cards: that they never outrank a transcript hit, and that there is a
+ * `--no-cards`. The CLI has `--no-cards  transcripts only — do not search
+ * session cards`; `potsherd_recall`'s scope was
+ * `project, harness, since, until, tag, sidechains, ghosts, pinned, limit` and
+ * had no cards control at all — so the one caller the whole finding is about
+ * was the one that could not switch it off.
+ *
+ * It is added here rather than in `shapes.ts` only because that file is not
+ * this branch's to edit; the field belongs beside the other eight and the
+ * move is a copy-paste. `false` is the only interesting value: `undefined`
+ * and `true` both mean cards on, exactly as `find` reads its flag, so an
+ * existing caller's object means what it has always meant.
+ *
+ * It removes `cards_fts` and `vec_cards` from the fusion outright, which is
+ * strictly stronger than the demotion: with it on there is nothing in the
+ * routing lane to demote. It does **not** switch off the `titles` list —
+ * `--no-cards` has never meant that on either surface, a title is not a card,
+ * and a title-only thread is now uncitable and ranked behind every transcript
+ * anyway, which is the part of C3 that a flag should not have to buy.
+ */
+const SCOPE_WITH_CARDS = SCOPE.unwrap()
+  .extend({
+    cards: z
+      .boolean()
+      .optional()
+      .describe(
+        'false: search transcripts only, and do not search session cards (model-written summaries). Default true — a card can route you to a thread whose transcript never uses your words, and it is never citable',
+      ),
+  })
+  .optional()
+  .describe(SCOPE.description ?? '');
 
 export const recallInput = {
   query: z
@@ -74,7 +139,7 @@ export const recallInput = {
     .describe(
       'what to look for. Two to four distinctive nouns beat a whole sentence: the index is keyword-first and a long question dilutes into stopwords',
     ),
-  scope: SCOPE,
+  scope: SCOPE_WITH_CARDS,
   want: WANT,
   budget: z
     .number()
@@ -101,6 +166,14 @@ export interface RecallWindow {
   calibration: unknown;
   citation: string;
   text: string;
+  /**
+   * True when `text` is the head of a longer exchange, cut to fit `budget`.
+   *
+   * FIX-F C6. Named on the window rather than only counted on the envelope,
+   * because the agent quoting from it has to know that what it is holding
+   * stops mid-exchange.
+   */
+  clipped?: boolean;
 }
 
 export async function runRecall(
@@ -146,6 +219,11 @@ export async function runRecall(
       limit,
       root,
       vectors: 'auto',
+      // FIX-F C3. `undefined` and `true` both mean cards on; only an explicit
+      // `false` takes the two card lists out of the fusion. Same expression as
+      // `cli/src/commands/find.ts`, so the two doors cannot mean different
+      // things by the same word.
+      cards: (scope as { cards?: boolean }).cards !== false,
       [MIN_CONFIDENCE_FIELD]: AGENT_FLOOR,
     } as Parameters<typeof recall>[3];
 
@@ -198,6 +276,14 @@ export async function runRecall(
       query: result.query,
       want,
       scope: filters,
+      // F6 on the envelope, in the words `find --json` already uses: whether
+      // the card lists ran at all, and how much of this page is a summary
+      // rather than something quotable. A caller that asked for transcripts
+      // only can confirm it took without walking `threads[]`, and a caller
+      // that did not can see what it is holding. FIX-F C3.
+      cards: (scope as { cards?: boolean }).cards !== false,
+      routing: sessions.filter((s) => (s as { lane?: string }).lane === 'routing').length,
+      summaryOnly: threads.filter((t) => t['evidence'] === 'not-a-transcript').length,
       // ---------------------------------------------------------- the cliff
       confidence,
       calibrated,
@@ -221,12 +307,31 @@ export async function runRecall(
       vectors: result.vectors,
       note: noMatch
         ? 'no match. The archive does not contain this' +
-          (belowFloor ? `, though ${String(belowFloor)} rows were withheld below the ${String(minConfidence ?? AGENT_FLOOR)} floor` : '') +
+          // FIX-F C7 — `1 rows were withheld`, live at the model door. The
+          // project singularises everywhere else through `f.plural`; this was
+          // the one call site that built the clause by concatenation instead.
+          (belowFloor
+            ? `, though ${String(belowFloor)} ${format.plural(belowFloor, 'row')} ` +
+              `${format.plural(belowFloor, 'was', 'were')} withheld below the ` +
+              `${String(minConfidence ?? AGENT_FLOOR)} floor`
+            : '') +
           // Which half of the search returned the empty. "The archive does not
           // contain this" is a much stronger claim when both halves ran than
           // when only bm25 did, and the gap is measured: the verifier's query
           // answers 1 session with vectors on and 0 with them off.
-          (result.vectors.used ? '' : '. Only keyword search ran; the semantic half did not') +
+          //
+          // FIX-F C2 — and *did not* is not *has not yet*. An agent told the
+          // semantic half is warming reads this whole note as "retry later";
+          // on an index nothing is embedding, the retry returns the identical
+          // empty. The clause that says so is the difference between a caller
+          // that stops and a caller that loops.
+          (result.vectors.used
+            ? ''
+            : '. Only keyword search ran; the semantic half did not' +
+              (vectorReport?.working === false && vectorReport.phase !== 'ready'
+                ? ', and nothing is embedding this index, so running the same search ' +
+                  'again will not change that'
+                : '')) +
           '. Say so — do not widen into a guess, and do not answer from the repository in ' +
           'front of you.'
         : calibrated
@@ -245,18 +350,48 @@ export async function runRecall(
 
     if (want === 'context') {
       const budget = Math.max(200, Math.floor(args.budget ?? DEFAULT_CONTEXT_BUDGET));
-      const { windows, truncated, tokens } = windowsFrom(sessions, budget);
+      const { windows, truncated, tokens, clipped } = windowsFrom(sessions, budget);
       envelope['windows'] = windows;
       envelope['windowBudget'] = budget;
       envelope['windowTokens'] = tokens;
       envelope['windowsTruncated'] = truncated;
+      envelope['windowsClipped'] = clipped;
+      /**
+       * FIX-F C6 — and it used to be `null` in exactly the case where it is the
+       * only useful thing to say.
+       *
+       * `readMore` was `windows.length === 0 ? null : '…'`. An agent that asked
+       * for context, was told `threads: 1` and `noMatch: false`, and got zero
+       * windows and no `hits` key — because `want: "context"` replaces it — was
+       * also denied the one sentence naming the tool that would have got it the
+       * text. The empty page is the page that most needs the next step on it.
+       *
+       * So it is unconditional, and it says which of the three things happened:
+       * a clipped window is a fragment, a truncated page is missing threads,
+       * and an empty page is a page where `potsherd_read` is the whole answer.
+       */
       envelope['readMore'] =
-        windows.length === 0
-          ? null
-          : 'these windows are discontiguous and relevance-selected. potsherd_read the thread for ' +
-            'the exchanges around any of them.';
+        noMatch
+          ? // Nothing matched, so there is no thread to read and naming one
+            // would be an instruction the caller cannot carry out — which is
+            // the failure this whole phase is about. `note` has already said
+            // what happened.
+            null
+          : windows.length === 0
+          ? 'no window could be returned for this page. potsherd_read the thread to read it — ' +
+            'threads[] names each one.'
+          : (clipped > 0
+              ? 'one window is the opening of an exchange longer than the whole budget, cut to ' +
+                'fit and marked "clipped": do not read its end as the end of the exchange. '
+              : '') +
+            'these windows are discontiguous and relevance-selected. potsherd_read the thread for ' +
+            'the exchanges around any of them.' +
+            (truncated ? ' Some matching exchanges did not fit the budget.' : '');
     } else {
-      envelope['hits'] = orderByLabel(hits).map((h) => hitJson(h, sessions));
+      // Labelled first, then ordered: `orderByLabel`'s first key is the
+      // `evidence` field `hitJson` attaches, so ordering the raw core rows
+      // would sort on a field that is not there yet. FIX-F C3.
+      envelope['hits'] = orderByLabel(hits.map((h) => hitJson(h, sessions)));
     }
 
     return envelope;
@@ -327,7 +462,7 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
       resume: lead.resume,
       score: lead.score,
       /**
-       * F6 — a card-only thread gets no citation.
+       * F6 — a thread the agent has only seen a summary of gets no citation.
        *
        * `mintCitation` exists so a model copies a source line instead of
        * composing one. Minting one for a thread the agent has only ever seen a
@@ -335,13 +470,32 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
        * citation for a claim no transcript supports — and `verifySources`
        * would keep it, because the session really is in the index. Checking
        * the id is not checking the provenance, so the refusal has to happen
-       * where the line is minted. `lane` is read off the core row; a build
-       * whose core predates the lane carries none and mints as before.
+       * where the line is minted.
+       *
+       * **FIX-F C3 — and until now it never fired for a title.** The refusal
+       * was keyed on `lane === 'routing'`, `ROUTING_KINDS` is `{card}`, and a
+       * title hit's lane is `evidence`. On the reference archive, five of ten
+       * threads returned by one query had matched **only** on their session
+       * title, and every one came back `lane: "evidence"`, `citable: true`,
+       * carrying `<id8> · <project> · claude · N exchanges · <date>`. A Claude
+       * Code title is an `ai-title` record — a model's six words, written
+       * mid-session — so that is the audit's F6 sentence reached through the
+       * other door, and the human CLI printed *"the session title matched; the
+       * body does not use those words"* on the identical query.
+       *
+       * So the question is no longer *which lane is this* but *has the agent
+       * been shown anything it could quote*, which is what `citable` always
+       * meant. Both are published: `lane` is core's routing decision, read and
+       * never recomputed here, and `evidence` is this thread's own hits. A
+       * build whose core predates the lane carries none and mints as before;
+       * a build whose core carries no hits on the block does the same, because
+       * an absent fact must not become a refusal.
        */
       lane: lead.lane ?? 'evidence',
-      citable: (lead.lane ?? 'evidence') === 'evidence',
+      evidence: threadEvidence(members),
+      citable: (lead.lane ?? 'evidence') === 'evidence' && threadEvidence(members) !== 'not-a-transcript',
       citation:
-        (lead.lane ?? 'evidence') === 'routing'
+        (lead.lane ?? 'evidence') === 'routing' || threadEvidence(members) === 'not-a-transcript'
           ? null
           : mintCitation({
               sessionId: key,
@@ -352,8 +506,35 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
               prompts,
               date: (ended ?? started)?.slice(0, 10) ?? null,
             }),
+      // Why there is no citation, in the words the human view uses for the
+      // same row. A `null` field an agent cannot explain is a field it works
+      // around; this one says what would have to happen for a citation to
+      // exist, and `potsherd_read` is a tool it actually has.
+      ...(threadEvidence(members) === 'not-a-transcript'
+        ? {
+            citableNote:
+              'nothing here is a transcript: the session title or its card matched, the body did ' +
+              'not use those words. Not citable. potsherd_read the thread if you want to know ' +
+              'what it actually says.',
+          }
+        : {}),
     };
   });
+}
+
+/**
+ * Whether a thread has shown the agent any transcript text at all.
+ *
+ * `'transcript'` when at least one hit under this thread is a line somebody
+ * actually wrote; `'not-a-transcript'` when every hit is a card or a title.
+ * A thread whose core build attaches no hits answers `'transcript'` — the
+ * pre-existing behaviour — because an absent fact is not evidence of absence
+ * and this field must never invent a refusal.
+ */
+function threadEvidence(members: readonly Session[]): 'transcript' | 'not-a-transcript' {
+  const hits = members.flatMap((m) => (m as { hits?: readonly { kind: string }[] }).hits ?? []);
+  if (hits.length === 0) return 'transcript';
+  return hits.some((h) => evidenceOf(h.kind) === 'transcript') ? 'transcript' : 'not-a-transcript';
 }
 
 /** The three words, best first. `null` is not a rank — see {@link orderByLabel}. */
@@ -410,6 +591,24 @@ export function orderByLabel<T>(rows: readonly T[]): T[] {
     .map((row, i) => ({ row, i }))
     .sort(
       (a, b) =>
+        // FIX-F C3, and it is the first key rather than a tie-break.
+        //
+        // Core partitions its own two lists the same way (`recall.summaryRank`),
+        // and this is the fence that stops the re-sort at this door undoing it:
+        // `orderByLabel` reads only `confidence` and two scores, so a
+        // summary-only row with a better `calibration.score` than a weak
+        // transcript row would be lifted straight back over it. That is not
+        // hypothetical — it is what a card could already do here, since the
+        // {@link ROUTING_CEILING} only stops a card beating a *strong* row.
+        //
+        // It does not contradict the label, because core now caps a
+        // summary-only row at `weak` (FIX-F C3): every row above the summaries
+        // is at least as confident as every row below them, so `hits[]` and
+        // `threads[]` stay monotone in the confidence word, which is the
+        // property FIX-D's fences pin. A row carrying no `evidence` field —
+        // any caller passing plain rows, and every unit test written before
+        // this — counts as `transcript` and nothing about its order changes.
+        evidenceRank(a.row) - evidenceRank(b.row) ||
         CONFIDENCE_RANK[confidenceOf(a.row)!] - CONFIDENCE_RANK[confidenceOf(b.row)!] ||
         calibrationScoreOf(b.row) - calibrationScoreOf(a.row) ||
         scoreOf(b.row) - scoreOf(a.row) ||
@@ -417,6 +616,19 @@ export function orderByLabel<T>(rows: readonly T[]): T[] {
         a.i - b.i,
     )
     .map((r) => r.row);
+}
+
+/**
+ * 0 for a row with transcript evidence behind it, 1 for a summary-only row.
+ *
+ * Read off the published `evidence` field — the one `hitJson` and
+ * `groupThreads` already put on every row — rather than recomputed from
+ * `kind`, so what the agent is shown and what the order is built from are one
+ * value. An unlabelled row is 0: absent is not `not-a-transcript`.
+ */
+function evidenceRank(row: unknown): 0 | 1 {
+  if (!row || typeof row !== 'object') return 0;
+  return (row as { evidence?: unknown }).evidence === 'not-a-transcript' ? 1 : 0;
 }
 
 /** `calibration.score`, or 0 when this build's core attaches none. */
@@ -452,7 +664,7 @@ function hitJson(h: Hit, sessions: readonly Session[]): Record<string, unknown> 
     match: h.snippet.match ?? null,
     // A card is a routing aid, never evidence (audit F6, plan §B8). Named on
     // the row so a model cannot quote one as a transcript.
-    evidence: h.kind === 'card' || h.kind === 'title' ? 'not-a-transcript' : 'transcript',
+    evidence: evidenceOf(h.kind),
   };
 }
 
@@ -466,12 +678,31 @@ function hitJson(h: Hit, sessions: readonly Session[]): Record<string, unknown> 
 function windowsFrom(
   sessions: readonly Session[],
   budgetTokens: number,
-): { windows: RecallWindow[]; truncated: boolean; tokens: number } {
+): { windows: RecallWindow[]; truncated: boolean; tokens: number; clipped: number } {
   const queues = sessions.map((s) => ({ s, hits: [...s.hits] }));
   const windows: RecallWindow[] = [];
   let chars = 0;
   const ceiling = budgetTokens * CHARS_PER_TOKEN;
   let truncated = false;
+  let clipped = 0;
+  /**
+   * The one hit that would have been returned if anything fitted.
+   *
+   * FIX-F C6 — `want: "context"` could return `threads: 1`, `windows: 0`,
+   * `windowTokens: 0` and no `hits` key, because the single matching exchange
+   * was longer than the whole ceiling and the loop below `continue`d past it.
+   * The agent asked for context, was told it matched, and got no text at all.
+   *
+   * The fix is a clip, and it is deliberately taken **only when the page would
+   * otherwise be empty**. Clipping the first oversized window mid-round would
+   * let one 139,000-token exchange — the reference archive has one — eat a
+   * budget that F5 exists to spread across five threads. So the round-robin is
+   * unchanged, and this is the floor underneath it: if nothing fitted, return
+   * the best hit's opening rather than nothing, marked `clipped` so the agent
+   * knows it is holding a fragment.
+   */
+  let firstSkipped: { q: (typeof queues)[number]; h: Session['hits'][number]; text: string } | null =
+    null;
 
   for (let round = 0; ; round++) {
     let any = false;
@@ -479,12 +710,13 @@ function windowsFrom(
       const h = q.hits[round];
       if (!h) continue;
       any = true;
-      // A card hit has no exchange behind it, so it has no window to return.
-      if (h.kind === 'card' || h.kind === 'title') continue;
+      // A summary hit has no exchange behind it, so it has no window to return.
+      if (SUMMARY_KINDS.has(h.kind)) continue;
       const text = [h.userText, h.assistantText].filter(Boolean).join('\n\n').trim();
       if (!text) continue;
       if (chars + text.length > ceiling) {
         truncated = true;
+        if (!firstSkipped) firstSkipped = { q, h, text };
         continue;
       }
       chars += text.length;
@@ -513,9 +745,42 @@ function windowsFrom(
     if (!any) break;
   }
 
+  // The floor. Nothing fitted, and something matched: return the head of the
+  // best hit rather than an empty page. `budgetTokens` is a ceiling on what
+  // the caller wants to read, not a rule that it would rather read nothing.
+  if (windows.length === 0 && firstSkipped) {
+    const { q, h, text } = firstSkipped;
+    clipped = 1;
+    const cut = text.slice(0, ceiling);
+    chars += cut.length;
+    windows.push({
+      thread: threadIdOf(q.s) ?? q.s.id,
+      sessionId: h.sessionId,
+      id8: h.sessionId.slice(0, 8),
+      seq: h.seq ?? null,
+      ts: h.ts ?? null,
+      kind: h.kind,
+      isSidechain: h.isSidechain,
+      confidence: confidenceOf(h),
+      calibration: calibrationOf(h),
+      citation: mintCitation({
+        sessionId: h.sessionId,
+        kind: q.s.kind,
+        harness: q.s.harness,
+        project: q.s.projectName,
+        exchanges: q.s.exchanges,
+        prompts: q.s.prompts,
+        date: (q.s.endedAt ?? q.s.startedAt)?.slice(0, 10) ?? null,
+      }),
+      text: cut,
+      clipped: true,
+    });
+  }
+
   return {
     windows,
     truncated,
+    clipped,
     // `est.` — chars divided by CHARS_PER_TOKEN, not a tokeniser's count.
     tokens: Math.ceil(chars / CHARS_PER_TOKEN),
   };
@@ -551,8 +816,27 @@ export function capabilityLine(v: Result['vectors'], report?: VecStatus['report'
   if (v.used) return `keyword + semantic search${counts}`;
   // `pending` is 0-embedded-with-work-queued and `warming` is partway through.
   // Both are transient and both are what `doctor-line.ts` calls warming.
-  if (report && (report.phase === 'warming' || report.phase === 'pending'))
+  if (report && (report.phase === 'warming' || report.phase === 'pending')) {
+    // FIX-F C2 — *transient* was an assumption, and on three ordinary indexes
+    // it is false.
+    //
+    // `warming` tells this reader that the other half of its answer is on its
+    // way, which is an instruction to retry: the same reply says *"The archive
+    // does not contain this … do not widen into a guess"* and *"semantic search
+    // is warming"*. After `index --no-embed`, on a machine that cannot fetch
+    // the 46 MB runtime, and after an embedder was killed, no pass is running
+    // and none will start — the phase is still `pending`, because the phase is
+    // a fact about the rows and not about the work. `report.working` is the
+    // fact about the work: a live holder of `<root>/.lock.embed`, whose pid the
+    // lock carries and whose death `lock.isStale` already detects.
+    //
+    // Two states, two sentences, and the count in both — never one word
+    // widened to cover both, which is `09 §9`. `undefined` keeps the old
+    // sentence: a caller with no root cannot know, and must not guess.
+    if (report.working === false)
+      return `keyword search only — semantic search is not running${counts}`;
     return `keyword search only — semantic search is warming${counts}`;
+  }
   if (!v.available)
     return `semantic search unavailable — results are keyword-only${because(v.reason)}`;
   return `keyword search answered this one${because(v.reason)}`;
