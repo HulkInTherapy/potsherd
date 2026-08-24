@@ -185,6 +185,37 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
       'potsherd ask "…" --readers-out r.json   # run your readers, then --readers-in r.json --synthesis-out s.json',
     );
   }
+  // FIX-G C5. `--help` says of this flag: *"write the synthesis prompt to this
+  // file; makes no model call"*. On its own that sentence was false. With no
+  // recorded readers there is nothing to build a prompt out of, so the run
+  // shortlists k sessions and sends **one reader call per session** before it
+  // has a prompt to write — six calls, measured, on a machine whose backend
+  // could not even answer them. On a machine that can, those six are spent.
+  //
+  // `--readers-out`'s identical clause is true because that flag returns
+  // before a reader runs. This one was not, and the code already knew: the
+  // `modelless` expression below read `(synthesisOut && readersIn)`, i.e. the
+  // composition is free and the bare flag is not.
+  //
+  // Two honest repairs: qualify the sentence, or make it true. Qualifying it
+  // means editing the `.option()` line in `packages/cli/src/index.ts`, which
+  // is reserved to another worker this phase — the exact patch is in
+  // `phases/phase-10/FIX-G-REPORT.md` §1 for whoever owns it. Making it true
+  // is this guard, and it is the better of the two anyway: the flag belongs to
+  // the seam, the seam's second leg is `--readers-in … --synthesis-out …`, and
+  // the paying composition was never a documented shape. Its own receipt would
+  // have printed `no model call was made (6)`.
+  //
+  // **This changes what the flag does.** `ask "…" --synthesis-out s.json` used
+  // to run the readers and now refuses. That is stated plainly in the report,
+  // and the refusal names the two commands that do the same work for free.
+  if (synthesisOut && !readersIn) {
+    throw new UserError(
+      '--synthesis-out makes no model call only when the readers are already recorded; on its own ' +
+        'it would spend one reader call per shortlisted session before it had a prompt to write',
+      `potsherd ask "${question}" --readers-out r.json   # run your readers, then --readers-in r.json --synthesis-out ${synthesisOut}`,
+    );
+  }
 
   // The runs that **structurally cannot** call a model, and the exact reason
   // each one cannot, since this list is the whole of `A1` rung 1 from the
@@ -192,7 +223,8 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
   //
   //   --readers-out           the recorder answers every reader itself, so
   //                           `ask()` returns before the synthesizer exists.
-  //   --readers-in + --out    the readers are recorded and the synthesizer is
+  //   --synthesis-out         only reachable with `--readers-in` (guard above):
+  //                           the readers are recorded and the synthesizer is
   //                           a capture function; `ask()` opens neither.
   //   --filter-in             both halves are recorded; the only work left is
   //                           `filterAnswer`, which is arithmetic.
@@ -201,7 +233,11 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
   // a backend for a run that cannot use one would be this file telling the
   // user something untrue about it — and it would put a `claude` binary
   // between a skill and the one path that needs no model at all.
-  const modelless = Boolean(readersOut || filterIn || (synthesisOut && readersIn));
+  //
+  // FIX-G C5: this used to read `(synthesisOut && readersIn)`. The guard above
+  // now makes the two spellings equivalent, and one name per free run is the
+  // shape a reader can check against `--help`.
+  const modelless = Boolean(readersOut || filterIn || synthesisOut);
   if (!modelless) {
     try {
       detectBackend({ ...(o.model ? { model: o.model } : {}) });
@@ -260,7 +296,11 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
     }
 
     const result = filterIn
-      ? await filterHostAnswer(db, question, base, filterIn)
+      ? await filterHostAnswer(db, question, base, filterIn, (line) => {
+          // Same rule as `--readers-in`'s provenance below: above the answer,
+          // and never on stdout under `--json`.
+          if (!o.json && !o.quiet) print(`  ${t.dim(line)}`);
+        })
       : readersIn
         ? await replayReaders(db, question, base, readersIn, (line) => {
             // Provenance goes above the answer, not below it: a reader who has
@@ -821,6 +861,34 @@ export const SYNTHESIS_FILE_KIND = 'potsherd.ask.synthesis';
 /** The envelope's own version. See {@link READERS_FILE_VERSION}. */
 export const SYNTHESIS_FILE_VERSION = 1;
 
+/**
+ * What the host agent is told to put in `reply`, in the file and on the screen.
+ *
+ * FIX-G C4(c). The old sentence was *"answer "prompt" in the shape of "schema",
+ * add it to the file as "reply""* — and "it" is the ambiguity. A model answers
+ * a prompt with **text**; a host agent that captured that text and stored it
+ * verbatim wrote `"reply": "{\"evidence\":…}"`, which is a string, and which
+ * the seam then reported as *"the readers found nothing that answers the
+ * question"*. The instruction is part of that defect: `schema` is itself a
+ * JSON string in the file, so "the shape of schema" does not obviously mean
+ * "a JSON value, not the text of one".
+ *
+ * So the shape is named rather than referred to, the two spellings potsherd
+ * accepts are both stated, and the one it does not accept — prose — is stated
+ * too. The same string is written **into** the file, because the agent that
+ * gets handed a path never sees the terminal receipt.
+ *
+ * This is FIX-C's D7 in the other direction: there, a prompt and a filter
+ * disagreed and a model that obeyed produced output the code rejected. Here a
+ * prompt was vague and a model that obeyed one reading of it produced output
+ * the code silently discarded.
+ */
+export const REPLY_INSTRUCTION =
+  'answer "prompt" in the shape of "schema" and store that answer here as "reply". ' +
+  '"reply" is the JSON object itself — {"evidence":[…],"answer":[…]} — or the JSON text ' +
+  'of that object, which potsherd will parse. Prose, or a JSON value that is not that ' +
+  'object, is refused rather than read as an empty answer.';
+
 /** The `AskSynthInput` `ask()` hands a host synthesizer, without importing the name. */
 type SynthInput = Parameters<NonNullable<AskOptions['synthFn']>>[0];
 
@@ -855,6 +923,11 @@ export interface SynthesisFile {
   sessions: SynthInput['sessions'];
   /** The reader outputs this prompt was built from. */
   readers: RecordedOutput[];
+  /**
+   * {@link REPLY_INSTRUCTION}, in the file, for the agent that only ever sees
+   * the file. Informational: `--filter-in` neither reads it back nor checks it.
+   */
+  instruction: string;
   /** Added by whoever answered `prompt`. Absent in a fresh recording. */
   reply?: unknown;
 }
@@ -884,12 +957,20 @@ function synthCapture(): {
 /**
  * The whole of `--synthesis-out`, without the printing, so a test can drive it.
  *
- * `readersPath` is the `--readers-in` file when there is one. With it, the run
- * costs zero model calls end to end. Without it the readers run on whatever
- * rung of the ladder this machine reached — which is a legitimate thing to
- * want (a bare terminal recording a prompt for a colleague's agent) and is why
- * it is allowed rather than refused. `probe.spend.calls` is the number the
- * receipt prints either way, so the difference is never hidden.
+ * `readersPath` is the `--readers-in` file. With it, the run costs zero model
+ * calls end to end.
+ *
+ * It used to be optional, and without it the readers ran on whatever rung of
+ * the ladder this machine reached. That was defended here as "a legitimate
+ * thing to want (a bare terminal recording a prompt for a colleague's agent)",
+ * with `probe.spend.calls` printed so the difference was never hidden — but
+ * `--help` said the flag *makes no model call*, and a receipt reading
+ * `no model call was made (6)` hides it by contradicting itself. FIX-G C5:
+ * `runAsk` now refuses `--synthesis-out` without `--readers-in`, so every run
+ * that reaches here is the free one. This function still takes the path as an
+ * argument rather than assuming it, because it is exported and driven directly
+ * by tests, and {@link synthesisOutReceipt} still reads the real call count
+ * rather than printing a zero it has assumed.
  */
 export async function writeSynthesisFile(
   db: Parameters<typeof ask>[0],
@@ -951,6 +1032,7 @@ export async function writeSynthesisFile(
     prompt: redactOutgoing(input.prompt).text,
     sessions: input.sessions,
     readers: staged ? staged.outputs : [],
+    instruction: REPLY_INSTRUCTION,
   };
   fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
@@ -989,6 +1071,10 @@ async function recordSynthesis(
       sessionIds: file?.sessionIds ?? [],
       sessions: file?.sessions ?? [],
       promptChars: file?.prompt.length ?? 0,
+      // FIX-G C4(c). The `--json` receipt is what an agent reads, and it is
+      // the surface on which the shape of `reply` was least well stated: the
+      // instruction only ever existed in the human receipt.
+      instruction: REPLY_INSTRUCTION,
       matching: probe.matching,
       searched: probe.searched,
       modelCalls: probe.spend.calls,
@@ -1024,11 +1110,26 @@ function synthesisOutReceipt(
     );
   }
   lines.push('');
+  // FIX-G C5, the second half. `no model call was made (N)` is a sentence that
+  // contradicts its own parenthesis whenever N is not zero, and before the
+  // guard in `runAsk` this path could print it with N = 6. The guard makes that
+  // unreachable from the CLI; this makes the sentence true by construction
+  // rather than true by precondition, for any caller of the exported
+  // `writeSynthesisFile` that reaches this renderer.
+  const calls = probe.spend.calls;
   lines.push(
-    `  ${t.dim(`no model call was made (${probe.spend.calls}). the prompt is redacted, as sent.`)}`,
+    `  ${t.dim(
+      calls === 0
+        ? 'no model call was made (0). the prompt is redacted, as sent.'
+        : `${calls} model ${calls === 1 ? 'call was' : 'calls were'} made — the readers ran here. ` +
+          'the prompt is redacted, as sent.',
+    )}`,
   );
   lines.push('');
-  lines.push('  answer "prompt" in the shape of "schema", add it to the file as "reply", then:');
+  // FIX-G C4(c). See {@link REPLY_INSTRUCTION} for why "add it to the file as
+  // reply" was not a specific enough sentence to be obeyed.
+  lines.push('  answer "prompt" in the shape of "schema" and add that answer to the file as "reply" —');
+  lines.push('  the JSON object {"evidence":[…],"answer":[…]}, or the JSON text of it. then:');
   lines.push(`    potsherd ask "${file.question}" --filter-in ${abs}`);
   return lines.join('\n');
 }
@@ -1062,6 +1163,7 @@ export async function filterHostAnswer(
   question: string,
   base: AskOptions,
   path: string,
+  onNote?: (line: string) => void,
 ): Promise<AskResult> {
   const abs = nodePath.resolve(path);
   const file = readSynthesisFile(abs);
@@ -1082,12 +1184,9 @@ export async function filterHostAnswer(
       `potsherd ask "${q}" --k ${file.k} --filter-in ${abs}`,
     );
   }
-  if (file.reply === undefined || file.reply === null) {
-    throw new UserError(
-      `${abs} has no "reply" — it is a --synthesis-out recording that nobody has answered yet`,
-      'answer its "prompt" in the shape of its "schema", then add the object as "reply"',
-    );
-  }
+  // FIX-G C4. Every shape of `reply` that this run cannot use is refused here,
+  // by name, before `ask()` is entered. See {@link hostReply}.
+  const { reply, note: replyNote } = hostReply(abs, file.reply);
 
   // ---- pass one: the recorded shortlist, resolved against the live index, at
   // zero model calls.
@@ -1128,13 +1227,244 @@ export async function filterHostAnswer(
 
   // ---- pass two: the real run. Both halves recorded, so `ask()` contains no
   // expression that can construct a backend, and `filterAnswer` does the work.
+  // The parse is provenance, not decoration: an answer built from a string this
+  // command turned into an object is a fact the reader is owed before they act
+  // on it. It goes through `onNote` rather than onto `AskResult`, because
+  // `--json` prints `AskResult` verbatim and a field that appears only on the
+  // seam path would make the two paths' JSON differ for no reason a consumer
+  // could use. `replayReaders` reports its provenance the same way.
+  if (replyNote) onNote?.(replyNote);
+
   return ask(db, question, {
     ...base,
     pin,
     readerFn,
-    synthFn: async () => file.reply,
+    synthFn: async () => reply,
     openThreads: false,
   });
+}
+
+// ============================================ the reply, before it is believed
+//
+// FIX-G C4. `filterHostAnswer` used to check `reply === undefined || null` and
+// hand whatever else it found to `synthFn`. Everything downstream of that is
+// tolerant by design — `validateSynth` returns `null` for a value it cannot
+// read, `hostSynthesize` turns that `null` into `{evidence:[],answer:[]}`, and
+// `filterAnswer` correctly keeps nothing out of nothing — so a `reply` that
+// was a **JSON string**, which is what a model returns and what the
+// instruction as written invited, came out the far end as:
+//
+//     no grounded answer in 6 sessions searched
+//     the readers found nothing that answers the question.
+//     6 of 6 sessions read · 1 answered · 323ms
+//
+// A capability failure wearing the honest empty's clothes, contradicted by the
+// count on the line below it. The honest empty is the one signal this release
+// asks an agent to trust — the MCP tool description says *TRUST ITS SILENCE* —
+// so a run that cannot use its input must say that, in those words, and must
+// not be reachable through the same exit as a run that read the archive and
+// found nothing.
+
+/** {@link hostReply}'s answer: the value `synthFn` will return, and why. */
+interface HostReply {
+  /** The reply as an object, parsed out of a JSON string when it was one. */
+  reply: unknown;
+  /** Provenance to print, when this run had to parse. Empty otherwise. */
+  note: string;
+}
+
+/**
+ * What a value is, said without printing it.
+ *
+ * Deliberate: this repository is public, `reply` is a model's prose about the
+ * user's own transcripts, and an error message that echoed it would put a
+ * sentence from a private session into a terminal, a CI log or a bug report.
+ * The type is enough to fix the mistake.
+ */
+function shapeOf(v: unknown): string {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'an array';
+  return `a ${typeof v}`;
+}
+
+/**
+ * The two necessary conditions {@link ProposedEvidence} and
+ * {@link ProposedSentence} are built from, copied from `validateSynth`'s own
+ * filters in `packages/core/src/ask.ts`.
+ *
+ * This is a **usability probe, not a second validator**, and the distinction
+ * is the one `readSynthesisFile`'s docstring insists on. It never decides what
+ * is valid — `validateSynth` still does that, unchanged, on the same call it
+ * always did. It decides only whether there is anything here for that function
+ * to keep, because "nothing to keep" is the case that was being rendered as an
+ * empty archive. Being a strict subset of `validateSynth`'s conditions, it
+ * cannot refuse a reply the binary path would have accepted.
+ */
+function usableEvidence(x: unknown): boolean {
+  if (!isRecord(x)) return false;
+  return (
+    String(x['session_id'] ?? '').length > 0 &&
+    Number.isInteger(Number(x['seq'])) &&
+    typeof x['quote'] === 'string' &&
+    x['quote'].length > 0
+  );
+}
+
+function usableSentence(x: unknown): boolean {
+  return isRecord(x) && typeof x['text'] === 'string' && x['text'].trim().length > 0;
+}
+
+/**
+ * The exit code every one of these refusals carries, and why it is not 1.
+ *
+ * `ask`'s codes are `0` a grounded answer, `1` the archive was read and had
+ * nothing, `2` potsherd declined to answer (`--strict`, phase-4 T4.1 §4). The
+ * whole of C4 is that a broken input was being reported in the vocabulary of
+ * `1`, so `1` is the one code these must not use: a caller that branches on
+ * the exit status would go on treating a file it must fix as a fact about the
+ * user's archive. `2` already means *this run declined to answer, and that is
+ * not a statement about your corpus*, which is exactly what this is. Both
+ * refusals about the `reply` field share it — a missing reply and an unusable
+ * one are the same problem at two stages, and giving them two codes would be a
+ * distinction with nothing behind it.
+ */
+const REPLY_EXIT = 2;
+
+/**
+ * Turn the recorded `reply` into the object `synthFn` must return, or refuse.
+ *
+ * Accepted, in order:
+ *
+ *   - **the object** — `{"evidence":[…],"answer":[…]}`, the documented shape.
+ *   - **a JSON string of that object** — what a model produces when a host
+ *     agent captures its text and stores it. Parsed. A ```` ```json ```` fence
+ *     around it is stripped first, because that is what a model produces when
+ *     it is being helpful, and stripping it is still an explicit parse: if
+ *     what is inside is not JSON the run refuses, loudly, below.
+ *   - **an object with both arrays empty** — the host's own honest empty. A
+ *     synthesizer that read the evidence and concluded nothing is supportable
+ *     is answering, not failing, and it must keep reaching the empty-answer
+ *     render. This is the one case where an empty result is the truth.
+ *
+ * Refused, each naming what was found and how to fix it:
+ *
+ *   - a string that is not JSON (prose, a fenced block that is not JSON, an
+ *     empty string).
+ *   - a JSON string that parses to something other than an object.
+ *   - any other non-object: a number, a boolean, an array.
+ *   - an object carrying neither an `evidence` array nor an `answer` array.
+ *   - an object whose arrays hold entries but **not one** of which meets the
+ *     schema's necessary conditions — the case that would reach
+ *     `validateSynth`, come back `null`, and print as an empty archive.
+ *
+ * The ruling this was written under: if accepting the string form would let
+ * something through that the object form catches, reject it loudly instead. It
+ * does not. The parsed value re-enters at exactly the point the object form
+ * enters — `validateSynth`, then `filterAnswer`, against the transcript bytes —
+ * so a fabricated quote inside a JSON string dies in the same line of code as a
+ * fabricated quote inside an object. `tests/synthesis-seam.test.ts` plants the
+ * same fabrication in both spellings and compares the two results field for
+ * field.
+ */
+export function hostReply(abs: string, raw: unknown): HostReply {
+  const fix = 'answer its "prompt" in the shape of its "schema", then store that object as "reply"';
+  if (raw === undefined || raw === null) {
+    throw new UserError(
+      `${abs} has no "reply" — it is a --synthesis-out recording that nobody has answered yet`,
+      fix,
+      REPLY_EXIT,
+    );
+  }
+
+  let value = raw;
+  let note = '';
+  if (typeof raw === 'string') {
+    const text = unfence(raw).trim();
+    if (text === '') {
+      throw new UserError(
+        `${abs}'s "reply" is an empty string, so there is no answer in it to filter — ` +
+          'that is a file nobody has answered, not an archive with nothing in it',
+        fix,
+        REPLY_EXIT,
+      );
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // The parser's own message is **not** printed, and this is the one place
+      // in the file where that rule bites. `JSON.parse` reports a failure as
+      // `Unexpected token 'T', "The alloca"… is not valid JSON` — ten
+      // characters of the value, quoted back. For `readSynthesisFile` that is
+      // the head of an envelope potsherd wrote itself; here it is a model's
+      // prose about the user's own transcripts, on its way into a terminal, a
+      // CI log or a pasted bug report. The fix line says what to do, and the
+      // ten characters add nothing to it.
+      throw new UserError(
+        `${abs}'s "reply" is a string and it is not JSON. potsherd will parse a JSON string ` +
+          'for you, but this is prose, and prose carries no quote it can check',
+        fix,
+        REPLY_EXIT,
+      );
+    }
+    if (!isRecord(parsed)) {
+      throw new UserError(
+        `${abs}'s "reply" is a JSON string containing ${shapeOf(parsed)}, and the shape ` +
+          '"schema" asks for is an object',
+        fix,
+        REPLY_EXIT,
+      );
+    }
+    value = parsed;
+    note = 'the recorded "reply" was a JSON string; parsed it into the object the filter checks.';
+  }
+
+  if (!isRecord(value)) {
+    throw new UserError(
+      `${abs}'s "reply" is ${shapeOf(value)}, and the shape "schema" asks for is an object`,
+      fix,
+      REPLY_EXIT,
+    );
+  }
+
+  const ev = Array.isArray(value['evidence']) ? value['evidence'] : null;
+  const ans = Array.isArray(value['answer']) ? value['answer'] : null;
+  if (ev === null && ans === null) {
+    throw new UserError(
+      `${abs}'s "reply" is an object with neither an "evidence" array nor an "answer" array, ` +
+        'so there is nothing in it for the citation filter to check',
+      fix,
+      REPLY_EXIT,
+    );
+  }
+  const n = (ev?.length ?? 0) + (ans?.length ?? 0);
+  if (n > 0 && !(ev ?? []).some(usableEvidence) && !(ans ?? []).some(usableSentence)) {
+    throw new UserError(
+      `${abs}'s "reply" holds ${ev?.length ?? 0} evidence ${
+        (ev?.length ?? 0) === 1 ? 'entry' : 'entries'
+      } and ${ans?.length ?? 0} ${(ans?.length ?? 0) === 1 ? 'sentence' : 'sentences'}, and not ` +
+        'one of them is usable: evidence needs "session_id", an integer "seq" and a "quote"; ' +
+        'a sentence needs "text"',
+      fix,
+      REPLY_EXIT,
+    );
+  }
+
+  return { reply: value, note };
+}
+
+/**
+ * Strip one ```` ``` ```` fence, when the whole string is inside it.
+ *
+ * A model asked for JSON very often returns it fenced, and a host agent that
+ * captured the text verbatim stored the fence with it. Nothing is guessed
+ * here: what comes out still has to parse as JSON or the run refuses. Only a
+ * fence wrapping the *entire* value is removed, so a fence inside a JSON
+ * string cannot be disturbed.
+ */
+function unfence(s: string): string {
+  const m = /^\s*```[a-zA-Z0-9_-]*\r?\n([\s\S]*?)\r?\n?```\s*$/.exec(s);
+  return m ? (m[1] ?? '') : s;
 }
 
 /**
@@ -1148,6 +1478,12 @@ export async function filterHostAnswer(
  * would refuse a host answer that a model is allowed to give. Both are the
  * same bug — the two paths disagreeing — so there is one validator and it
  * lives beside the filter it feeds.
+ *
+ * FIX-G C4 leaves that ruling exactly as it is. {@link hostReply} runs in
+ * `filterHostAnswer`, not here, and it decides one question `validateSynth`
+ * does not answer for a caller — *is there anything here at all* — because the
+ * answer `null` was being rendered as a fact about the archive. What counts as
+ * valid is still decided in one place.
  */
 function readSynthesisFile(abs: string): SynthesisFile {
   let raw: string;
@@ -1222,6 +1558,10 @@ function readSynthesisFile(abs: string): SynthesisFile {
     prompt: typeof parsed['prompt'] === 'string' ? parsed['prompt'] : '',
     sessions: Array.isArray(parsed['sessions']) ? (parsed['sessions'] as SynthesisFile['sessions']) : [],
     readers,
+    // Read back for completeness only. It is advice to the host agent, not an
+    // input to anything here, so a file written by an older build that has no
+    // `instruction` is read without complaint.
+    instruction: typeof parsed['instruction'] === 'string' ? parsed['instruction'] : '',
     ...(parsed['reply'] !== undefined ? { reply: parsed['reply'] } : {}),
   };
 }
