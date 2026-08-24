@@ -9,7 +9,7 @@ potsherd stats · ~/.potsherd · 24 aug 2026
   secrets masked                 5   aws 1 · gcp 1 · github 1 · stripe 1 · …
 
   indexed                   24 aug   228 transcripts · up to date
-  vectors                        0   bge-small · 439 pending · index --embed to…
+  vectors                        —   0 of 3,410
   database                  2.1 MB   ~/.potsherd/potsherd.db
 
   run  potsherd ls  to read the archive by title, newest first.

@@ -13,7 +13,7 @@ potsherd index · ~/.potsherd · 24 aug 2026
   masked this run                5   aws 1 · gcp 1 · github 1 · stripe 1 · …
   vectors                        —   0 of 3,410
 
-  full index                 363ms   228 parsed · 0 unchanged · 546 KB
+  full index                 338ms   228 parsed · 0 unchanged · 546 KB
 
   semantic search: warming (0 of 3,410 embedded) — fetching 46.1 MB, once
 
