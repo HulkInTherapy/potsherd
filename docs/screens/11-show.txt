@@ -3,6 +3,7 @@ potsherd show · Pool the ingest workers through pgbouncer
   claude · live · data-pipeline · 21 aug 09:14 · main
   9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43
   8 exchanges
+  thread  242 exchanges across 31 sessions  · potsherd graft 9c4d2f18
   run  claude --resume 9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43
 
     1  21 aug 09:14  you

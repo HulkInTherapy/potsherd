@@ -1,7 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { db as store, indexAll, listSessions, showSession, type Db } from '@potsherd/core';
+import {
+  db as store,
+  indexAll,
+  listSessions,
+  renderShow,
+  showSession,
+  Theme,
+  type Db,
+} from '@potsherd/core';
 import {
   MIN_SHARED_RECORDS,
   OVERLAP_THRESHOLD,
@@ -660,5 +668,55 @@ describe('cold and incremental derive the same chains', () => {
     // ids were already on disk from the run three weeks ago.
     expect(second.harnesses[0]!.parsed).toBe(1);
     expect(second.threads.threads.map((t) => t.sessions)).toEqual([[ID.parent, ID.child]]);
+  });
+  /**
+   * Audit F4, the half `show` still owed after T10.3.
+   *
+   * The audit's complaint was not only that the DATE was wrong. It was that a
+   * session holding a stub of a much longer chain gave *"no hint that 1,660
+   * records of context live one hop away"*. Threads fixed `graft`, `ls` and the
+   * dating; `show` still printed this file's exchange count and stopped.
+   *
+   * The count is deliberately NOT changed — `show` prints this file's
+   * transcript, and a header number that disagreed with the exchanges under it
+   * would trade one lie for another. The thread is named beside it, with the
+   * verb that opens the whole chain.
+   */
+  it('show names the thread beside this file, and the verb that opens it', async () => {
+    const { claudeDir, root } = scratch();
+    const parent: Rec[] = [];
+    for (let n = 1; n <= 10; n += 1) parent.push(...pair(ID.parent, n, '2026-08-12', 'p'));
+    writeSession(claudeDir, ID.parent, parent);
+    const child = resumeCopy(parent, ID.child, ID.parent);
+    for (let n = 1; n <= 3; n += 1) child.push(...pair(ID.child, n, '2026-08-20', 'pc'));
+    writeSession(claudeDir, ID.child, child);
+    await indexAll({ claudeDir, root, harnesses: ['claude'], embed: false });
+
+    const db = store.open({ root });
+    try {
+      const shown = showSession(db, ID.child)!;
+      // The chain is bigger than the file, which is the whole condition.
+      expect(shown.session.thread).not.toBeNull();
+      expect(shown.session.thread!.exchanges).toBeGreaterThan(shown.total);
+      expect(shown.session.thread!.sessions.length).toBe(2);
+
+      const out = renderShow(shown, new Theme({ color: false, width: 80 }));
+      expect(out).toContain('thread');
+      expect(out).toContain(String(shown.session.thread!.exchanges));
+      // The verb, not just the diagnosis. `plans/05`: a line that reports a gap
+      // names the thing that closes it.
+      expect(out).toContain(`potsherd graft ${ID.child.slice(0, 8)}`);
+      for (const line of out.split('\n')) expect(line.length).toBeLessThanOrEqual(80);
+
+      // The PARENT names the chain too, and that is correct rather than
+      // sloppy: it holds ten of the thread's thirteen exchanges, so it is a
+      // fragment as well and a reader landing on it has the same gap. What
+      // must not happen is the line appearing where there is nothing to say.
+      const alone = showSession(db, ID.parent)!;
+      const soloOut = renderShow(alone, new Theme({ color: false, width: 80 }));
+      expect(soloOut).toContain(`potsherd graft ${ID.parent.slice(0, 8)}`);
+    } finally {
+      db.close();
+    }
   });
 });

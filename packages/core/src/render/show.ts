@@ -43,6 +43,36 @@ export function renderShow(r: ShowResult, t: Theme = new Theme(), now = new Date
       : `${f.num(r.from)}–${f.num(r.to)} of ${f.num(total)}`;
   lines.push(INDENT + t.dim(range + (s.pinned ? `  ${t.star} pinned` : '')));
 
+  // Audit F4, the half `show` still owed.
+  //
+  // `claude --resume` writes a NEW transcript whose head is a copy of the old
+  // one, and potsherd's dedup correctly attributes the shared records to the
+  // session that had them first. So the count above is honest about THIS FILE
+  // and silent about the work: the audit's own fixture reads `4 exchanges`
+  // here while its thread holds 123 one hop away, which is precisely the
+  // complaint — *"no hint that 1,660 records of context live one hop away"*.
+  //
+  // The count is not changed, because `show` prints this file's transcript and
+  // a number that disagreed with what follows it would be worse. The thread is
+  // named instead, with the verb that opens it.
+  if (s.thread && s.thread.sessions.length > 1 && s.thread.exchanges > r.total) {
+    // `plans/05`: a line that reports a gap names the verb that closes it.
+    // Saying "one of two" would describe the problem; naming `graft` hands the
+    // reader the whole chain.
+    lines.push(
+      fitLine(
+        t,
+        t.dim('thread') +
+          `  ${f.num(s.thread.exchanges)} exchanges across ${f.num(s.thread.sessions.length)} sessions` +
+          t.dim(`  ${t.sep} potsherd graft ${s.id.slice(0, 8)}`),
+        t.dim('thread') +
+          `  ${f.num(s.thread.exchanges)} exchanges` +
+          t.dim(`  ${t.sep} potsherd graft ${s.id.slice(0, 8)}`),
+        t.dim('thread') + `  ${f.num(s.thread.exchanges)} exchanges in the chain`,
+      ),
+    );
+  }
+
   // The caveat on the title, in the one place the title is largest. A carded
   // ghost's heading is a card title — written by a model from the prompts
   // below and nothing else — and `show` is where a reader decides how much to

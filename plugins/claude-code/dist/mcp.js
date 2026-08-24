@@ -37949,6 +37949,9 @@ function renderShow(r, t = new Theme(), now = /* @__PURE__ */ new Date()) {
   const total = r.total;
   const range = r.from === 1 && r.to >= total ? `${num(total)} ${plural(total, r.ghostPrompts ? "prompt" : "exchange")}` : `${num(r.from)}\u2013${num(r.to)} of ${num(total)}`;
   lines.push(INDENT + t.dim(range + (s.pinned ? `  ${t.star} pinned` : "")));
+  if (s.thread && s.thread.sessions.length > 1 && s.thread.exchanges > r.total) {
+    lines.push(fitLine(t, t.dim("thread") + `  ${num(s.thread.exchanges)} exchanges across ${num(s.thread.sessions.length)} sessions` + t.dim(`  ${t.sep} potsherd graft ${s.id.slice(0, 8)}`), t.dim("thread") + `  ${num(s.thread.exchanges)} exchanges` + t.dim(`  ${t.sep} potsherd graft ${s.id.slice(0, 8)}`), t.dim("thread") + `  ${num(s.thread.exchanges)} exchanges in the chain`));
+  }
   if (s.cardSource === "prompts-only") {
     const note = clip("\u2014 written from these prompts; the assistant side is gone", width - 22);
     lines.push(INDENT + t.dim("card") + `  ${t.accent("prompts-only")}` + t.dim(`  ${note}`));
