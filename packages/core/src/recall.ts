@@ -1755,7 +1755,7 @@ export async function recall(
     const state = vectorState(db, options.root);
     vectors.reason =
       state.vectors === 0 || !state.available
-        ? 'the words matched; index --embed adds semantic search'
+        ? 'the words matched; semantic search adds to this as vectors land'
         : 'the words matched; --vectors on adds semantic search';
   }
 
