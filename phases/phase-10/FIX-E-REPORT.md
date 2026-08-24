@@ -804,7 +804,7 @@ statSync moved by 438272 bytes;  page_count*page_size moved by 0
 | `make-screens.sh`, pristine worktree | 3 files, 3 millisecond timings, **no content change** |
 | embedders started per guard run | **1 → 0** (`--no-embed`); per `make-screens.sh` run, still **1**, documented |
 | `MaxListenersExceededWarning` | 2 on each driver, the same two `[Socket]` ones, neither ours |
-| disk | 4.5 GiB free before, 4.5 GiB after; the pristine worktree and every scratch tree removed |
+| disk | **4.2 GiB free at the start of round 2, 5.1 GiB at the end** — the pristine worktree and its install removed, `.tmp/` removed, and 1,105 `$TMPDIR` directories (1.6 GB) that no run had touched for over two hours swept, which is the suite's own subprocess litter and not this branch's |
 
 Evidence directory, outside the repository, absolute path handed over directly:
 `…/fix-e2` — the two green suites and the red one, the three-zone guard runs,
