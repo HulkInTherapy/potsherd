@@ -17,6 +17,7 @@ import {
   CARD_MODEL,
   CHARS_PER_TOKEN,
   ESTIMATOR_FIT,
+  FATAL_SIGNALS,
   HOST_SEAM_BASIS,
   PIPELINE_COST_FACTOR,
   Llm,
@@ -1864,12 +1865,11 @@ describe('codex backend plumbing', () => {
  */
 describe('a killed backend takes what it started with it', () => {
   /**
-   * The signals `llm.ts` installs a handler for while a backend is live.
-   * Restated here rather than imported: `packages/core/src/index.ts` is not
-   * this branch's to add an export to, and what is being asserted is the
-   * observable contract on `process` rather than the constant's spelling.
+   * The signals `llm.ts` installs a handler for while a backend is live —
+   * the module's own list, so a signal added there without the bookkeeping to
+   * match fails here rather than passing against a copy.
    */
-  const FATAL = ['SIGINT', 'SIGTERM'] as const;
+  const FATAL = FATAL_SIGNALS;
 
   /** Is this pid alive? Signal 0 sends nothing and throws ESRCH if not. */
   function alive(pid: number): boolean {

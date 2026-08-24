@@ -2318,8 +2318,13 @@ interface RunOptions {
  */
 const liveBackends = new Set<ChildProcess>();
 
-/** The signals whose default action ends the process and that a user sends. */
-const FATAL_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+/**
+ * The signals whose default action ends the process and that a user sends.
+ *
+ * Exported so a test can assert the handler bookkeeping against the list this
+ * module actually installs rather than against a copy of it.
+ */
+export const FATAL_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
 type FatalSignal = (typeof FATAL_SIGNALS)[number];
 
 /**
