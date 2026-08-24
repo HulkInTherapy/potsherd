@@ -353,17 +353,29 @@ const CONFIDENCE_RANK: Readonly<Record<Confidence, number>> = { strong: 0, weak:
  * (FIX-F C3): a summary never outranks a transcript, whatever it scores. Under
  * it:
  *
- *   1. `confidence` — **the word, not the number**, and this is FIX-D's
+ *   1. the **lane** — {@link LANES}, the first term of {@link byLane}, and it
+ *      stays in front of everything the label says. A card is a routing aid
+ *      and never evidence (F6), and that is a property of what the row *is*
+ *      rather than of how well it scored: `laneOfHit('title')` is `evidence`
+ *      while a title is summary-only, so on the flat `hits[]` list the lane
+ *      and `summaryRank` genuinely disagree, and without this term a card
+ *      labelled `weak` would sort above a title labelled `none`.
+ *      `tests/cards-lane.test.ts` fails in exactly that case.
+ *   2. `confidence` — **the word, not the number**, and this is FIX-D's
  *      load-bearing reasoning rather than a stylistic choice. A row's
  *      `calibration.score` is deliberately *not* rewritten when
  *      {@link ROUTING_CEILING} caps its label, so a routing row scoring 0.9 is
  *      labelled `weak` and sorting on the number alone would put a card back
  *      on top of a `strong` transcript. Sorting on the word cannot: the cap is
  *      in the word.
- *   2. `calibration.score`, within a band — the number that carries the
+ *   3. `calibration.score`, within a band — the number that carries the
  *      meaning, once the cap has been respected.
- *   3. {@link byLane}: the lane, then the fused score, which is the merge
- *      order and the last thing left to say when both axes are silent.
+ *   4. the fused score — {@link byLane}'s second term, the merge order, and
+ *      the last thing left to say when the two label axes are silent.
+ *
+ * So this is {@link byLane}'s two terms with the label's two placed between
+ * them: nothing `byLane` decided is reversed, and everything it left to RRF is
+ * decided by the label first.
  *
  * ## what it does not do
  *
@@ -381,7 +393,12 @@ export function byLabel<
 >(a: T, b: T): number {
   const wa = a.confidence, wb = b.confidence;
   const word = wa && wb ? CONFIDENCE_RANK[wa] - CONFIDENCE_RANK[wb] : 0;
-  return word || (b.calibration?.score ?? 0) - (a.calibration?.score ?? 0) || byLane(a, b);
+  return (
+    LANES[a.lane ?? 'evidence'] - LANES[b.lane ?? 'evidence'] ||
+    word ||
+    (b.calibration?.score ?? 0) - (a.calibration?.score ?? 0) ||
+    b.score - a.score
+  );
 }
 
 /**
