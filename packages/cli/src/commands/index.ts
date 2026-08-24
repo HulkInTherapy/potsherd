@@ -132,6 +132,21 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
     vec = await embedInForeground(root, showProgress);
   } else if (o.embed !== false && (vec.report?.pending ?? 0) > 0) {
     spawned = startBackgroundEmbedding(root, o);
+    // FIX-F round 2, and the half of C2 that could not land in round 1.
+    //
+    // `vec` was read a few lines above — **before** the spawn — and the report
+    // now carries `working`, a read of `<root>/.lock.embed`. The child we have
+    // just started needs a node boot to `mkdir` that lock, so for this window
+    // the lock says `false` and it is wrong: a pass is starting. Every one of
+    // this receipt's renderings comes off that report (`vectors` row, the
+    // `semantic search:` sentence, `--json`), so the correction belongs on the
+    // report and not on any one of them — re-read it with what this run knows.
+    //
+    // Three assertions in `tests/index.test.ts` are the fence: without this
+    // line the receipt of a run that has just started an embedder reads
+    // `stopped at 1,294 of 1,678` and `not running`, which is a new lie in the
+    // other direction and exactly what `find` used to tell.
+    if (spawned) vec = readVectors(root, { working: true });
   }
 
   if (o.json) {
@@ -169,11 +184,11 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
 // ------------------------------------------------------------ the embed pass
 
 /** The one read of the vector state, used by the receipt, `--json`, and both paths. */
-function readVectors(root: string): VecStatus {
+function readVectors(root: string, opts: { working?: boolean } = {}): VecStatus {
   let db: Db | null = null;
   try {
     db = store.open({ root });
-    return vecStatus(db, root);
+    return vecStatus(db, root, opts);
   } catch (err) {
     return { available: false, reason: firstLine((err as Error)?.message ?? String(err)) };
   } finally {

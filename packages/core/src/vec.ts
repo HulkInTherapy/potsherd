@@ -13,7 +13,14 @@ import {
   isEmbeddingReady,
   type EmbeddingBackend,
 } from './embeddings.js';
-import { fitNote, vectorNote, vectorReport, warmingLine, type VectorReport } from './doctor-line.js';
+import {
+  fitNote,
+  stoppedLine,
+  vectorNote,
+  vectorReport,
+  warmingLine,
+  type VectorReport,
+} from './doctor-line.js';
 import { holder } from './lock.js';
 import { bytes as fmtBytes, num as fmtNum } from './format.js';
 
@@ -246,7 +253,28 @@ export function loadVec(db: Db): VecStatus {
  * cannot disagree in print the way audit F2 caught them doing. Without one it
  * is the cheap, cached backend check that `recall.ts` calls on every query.
  */
-export function vecStatus(db: Db, root?: string): VecStatus {
+export function vecStatus(
+  db: Db,
+  root?: string,
+  opts: {
+    /**
+     * Override the lock read — FIX-F round 2.
+     *
+     * Exactly one caller may pass this and it is the one that has just
+     * **started** a pass: `cli/commands/index.ts` spawns a detached embedder
+     * and then prints its receipt microseconds later, before the child has had
+     * time to `mkdir` the lock. For that window the spawner knows something the
+     * lock does not, and this is where it says so — once, into the report every
+     * one of the receipt's three renderings (`row`, `line`, `--json`) is built
+     * from, so they cannot disagree about it.
+     *
+     * It is deliberately not a way to *silence* the fact: `working: false` is
+     * what the lock already says whenever nobody holds the lane, and no caller
+     * has any reason to assert it.
+     */
+    working?: boolean;
+  } = {},
+): VecStatus {
   const base = loaded.get(db) ?? loadVec(db);
   if (root === undefined) return base;
   const counts = vectorCounts(db);
@@ -269,7 +297,7 @@ export function vecStatus(db: Db, root?: string): VecStatus {
   // case that must read as stopped rather than as warming. It is a read: it
   // never creates, removes or waits on anything, so asking it here cannot
   // block a verb or lose a lock.
-  const working = holder({ root, lane: 'embed' }) !== null;
+  const working = opts.working ?? holder({ root, lane: 'embed' }) !== null;
   const report = vectorReport({
     embedded: counts.embedded,
     pending: counts.pending,
@@ -307,6 +335,18 @@ function statusLine(r: VectorReport): string | null {
   if (r.phase === 'unavailable') {
     return `semantic search: ${r.reason ?? 'not running on this machine'}`;
   }
+  // FIX-F round 2 — the sentence a verb prints while it *waits* is only true
+  // while something is running. The lock says which; see
+  // {@link VectorReport.working}. `undefined` keeps the old sentence, because
+  // a caller with no root could not ask and must not guess.
+  //
+  // `index` does not read this branch when it has just spawned a worker: it
+  // computes this report *before* the spawn, so for a few milliseconds the
+  // lock has not caught up and it knows better. It passes its own `spawned`
+  // flag to {@link warmingLine} instead — `cli/commands/index.ts`, and there
+  // are three assertions in `tests/index.test.ts` that go red if that is
+  // undone.
+  if (r.working === false) return stoppedLine(r, fmtNum, fmtBytes);
   return warmingLine(r, fmtNum);
 }
 
@@ -516,7 +556,7 @@ export function vectorCounts(db: Db): { embedded: number; pending: number } {
   return { embedded, pending };
 }
 
-export { fitNote, vectorNote, vectorReport, warmingLine };
+export { fitNote, stoppedLine, vectorNote, vectorReport, warmingLine };
 export type { VectorReport };
 
 // ------------------------------------------------------------------ embedding

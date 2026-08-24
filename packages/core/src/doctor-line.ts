@@ -140,6 +140,46 @@ export function warmingLine(r: VectorReport, num: (n: number) => string = String
 }
 
 /**
+ * The other half of {@link warmingLine}: rows left to embed, and **nobody
+ * embedding them**.
+ *
+ * FIX-F round 2, closing C2. `warming` is a claim that a pass is in flight, and
+ * the docstring above says so in as many words — *the work is already
+ * happening*. After `index --no-embed`, on a machine that cannot fetch the
+ * runtime, and after an embedder was killed, it is not, and the agent at
+ * `potsherd_recall` was being told to wait for something that would never
+ * start. {@link VectorReport.working} is the lock read that separates the two;
+ * this is the sentence for the other side of it.
+ *
+ * **Still no command in it, in either direction.** FIX-C deleted
+ * `run  potsherd index --embed` from every string that can reach the model
+ * door, whose caller has no shell, and `find` prints this same sentence to a
+ * human and to an agent from one function. What the reader can *do* differs by
+ * reader; what is *true* does not. So this says only what is true, and the two
+ * verbs that own the remedy — `index`, which starts the pass, and `doctor`,
+ * which reports the lane — name it in their own words.
+ *
+ * The clause order is deliberate. `embedded > 0` is tested **first**: if
+ * anything in this index carries a vector then a pass ran at some point, and
+ * *"the runtime has not been fetched"* would be a strange thing to say about a
+ * machine that has plainly used it, even when the cache directory is gone now.
+ */
+export function stoppedLine(
+  r: VectorReport,
+  num: (n: number) => string = String,
+  bytes: (n: number) => string = (n) => `${Math.round(n / 1_000_000)} MB`,
+): string {
+  const head = `semantic search: not running (${num(r.embedded)} of ${num(r.total)} embedded)`;
+  // Something embedded these rows and then stopped: interrupted, killed, or
+  // finished with the machine offline.
+  if (r.embedded > 0) return `${head} — it stopped partway`;
+  // The ordinary offline / first-run case, and the one the fourth verifier
+  // filed: `doctor` already said this much and `find` did not.
+  if (!r.runtimeReady) return `${head} — the ${bytes(r.acquireBytes)} runtime has not been fetched`;
+  return head;
+}
+
+/**
  * The `vectors` row's value and note, as parts.
  *
  * The note is returned as an array so the renderer can drop clauses from the
@@ -158,17 +198,33 @@ export function vectorNote(
   switch (r.phase) {
     case 'ready':
       return { value: num(r.embedded), parts: [runtime, 'every exchange'], tone: 'ok' };
+    // FIX-F round 2 §4.3 — the row says `warming` for the same reason the
+    // sentence did, and it is wrong in the same state. `working === false` is
+    // a live worker's absence; `undefined` is a caller who could not ask, and
+    // an absent measurement must not become a claim, so it keeps the old word.
     case 'warming':
       return {
         value: num(r.embedded),
-        parts: [`warming ${num(r.embedded)} of ${num(r.total)}`, runtime],
+        parts: [
+          r.working === false
+            ? `stopped at ${num(r.embedded)} of ${num(r.total)}`
+            : `warming ${num(r.embedded)} of ${num(r.total)}`,
+          runtime,
+        ],
         tone: 'ok',
       };
     case 'pending':
       return {
         value: dash,
         parts: r.runtimeReady
-          ? [`warming 0 of ${num(r.total)}`, runtime]
+          ? [
+              r.working === false
+                ? `not running, 0 of ${num(r.total)}`
+                : `warming 0 of ${num(r.total)}`,
+              runtime,
+            ]
+          // Already honest, and already the doctor line the verifier called
+          // honest: it never used the word.
           : [`0 of ${num(r.total)}`, `${bytes(r.acquireBytes)} runtime not fetched yet`],
         tone: 'dim',
       };
