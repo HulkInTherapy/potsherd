@@ -2379,18 +2379,29 @@ export async function recall(
   // it", and the lane is the second — a strict refinement: nothing that `byLane`
   // ordered is reordered *within* a group, and a card-only block is
   // summary-only by construction, so the two terms never disagree.
-  //
-  // FIX-I C-1 — and the second term is now {@link byLabel} rather than
-  // {@link byLane}. The lane and the fused score are still in it, at the end;
-  // what is in front of them is the confidence word and the calibration score,
-  // so the page's first row is its best row on the axis its own header
-  // reports. Before this, `find --json`'s `sessions[0]` could be the sixth
-  // best-calibrated row on the page while `potsherd_recall`, which applied
-  // FIX-D's rule at its own door, returned the same nine blocks in a different
-  // order. It is a strict refinement: within a confidence band and a
-  // calibration score, `byLane`'s order is untouched.
-  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLabel(a, b));
+  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLane(a, b));
   sessions.length = Math.min(sessions.length, limit);
+  // ---- and then the page is ordered by its own labels
+  //
+  // FIX-I C-1, and it is deliberately **after** the cut rather than instead of
+  // the sort above.
+  //
+  // The defect: `find --json`'s `sessions[0]` could be the sixth
+  // best-calibrated row on a page whose header reported the first row's
+  // neighbour, while `potsherd_recall` — which applied FIX-D's rule at its own
+  // door, to rows core had already chosen — returned the same blocks in a
+  // different order. Two comparators, one of them updated. So the rule moves
+  // here, where both doors read from, and neither door keeps a copy.
+  //
+  // What it must not do on the way is change **which** rows are on the page.
+  // Hence two sorts: *selection* is {@link byLane}, untouched, so the set this
+  // returns is the set `7396c3e` returned — measured, 40 queries on the demo
+  // corpus, membership identical on every one and the order different on 12 —
+  // and *presentation* is {@link byLabel} over the survivors. Sorting once,
+  // before the cut, would have made the label a selector as well as an order;
+  // it was written that way first and `pnpm evals` measured the difference.
+  // `FIX-I-REPORT.md §3` carries both sets of numbers.
+  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLabel(a, b));
   const confidence = sessions.reduce<Confidence>(
     (best, s) => maxConfidence(best, s.confidence),
     'none',

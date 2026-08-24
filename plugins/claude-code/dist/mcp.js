@@ -27774,6 +27774,9 @@ function laneOfSession(hits) {
 function summaryRank(hits) {
   return hasTranscriptEvidence(hits) ? 0 : 1;
 }
+function byLane(a, b) {
+  return LANES[a.lane ?? "evidence"] - LANES[b.lane ?? "evidence"] || b.score - a.score;
+}
 var CONFIDENCE_RANK = { strong: 0, weak: 1, none: 2 };
 function byLabel(a, b) {
   const wa = a.confidence, wb = b.confidence;
@@ -28740,8 +28743,9 @@ async function recall(db, query, requested = {}, options = {}) {
   const belowFloor = built - surviving.length;
   sessions.length = 0;
   sessions.push(...surviving);
-  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLabel(a, b));
+  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLane(a, b));
   sessions.length = Math.min(sessions.length, limit);
+  sessions.sort((a, b) => summaryRank(a.hits) - summaryRank(b.hits) || byLabel(a, b));
   const confidence = sessions.reduce((best, s) => maxConfidence(best, s.confidence), "none");
   const flat = [...sessions.flatMap((s) => s.hits)].sort((a, b) => summaryRank([a]) - summaryRank([b]) || byLabel(a, b));
   return {
