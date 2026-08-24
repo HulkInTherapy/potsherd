@@ -212,6 +212,70 @@ shot 03-audit-after.txt  audit
 # verb that stops one, which is an open item and not this script's to close.
 shot 07-index.txt        index --full
 
+# ...and then this script stops the one child it started, which IS its to close.
+#
+# FIX-F round 2. Two reasons, and the second is the one that turns a leak into
+# a broken guard.
+#
+#   1. The leak above is real and this script is the thing that produces it. It
+#      cannot avoid *starting* one — `--no-embed` would delete the
+#      `semantic search: warming … — fetching 46.1 MB, once` line that
+#      `07-index.txt` exists to publish — but once that screen is captured the
+#      line is on disk and the child has no further job here.
+#
+#   2. **Every screen below reads the embed lane, and now says so.** `find`
+#      prints `semantic search: warming (0 of 3,410 embedded)` while a worker
+#      holds `<root>/.lock.embed` and `semantic search: not running (…)` when
+#      nothing does (FIX-F C2). So `09-find.txt` and `13-find-redacted.txt`
+#      depended on whether that detached child was still alive when they were
+#      shot — which depends on how fast this machine can fetch 46 MB, i.e. on
+#      the network. And CI's guard runs `index --full --no-embed`, so it never
+#      has a worker at all: the two would have disagreed by construction, and
+#      the published screens would have recorded whichever side of the race
+#      this particular run landed on. That is C1's pinned database size again,
+#      one file over.
+#
+# So: wait briefly for the child to take the lock, kill it **by the pid it
+# wrote there itself**, and clear the lock. Killing by a recorded pid and never
+# by a name pattern is the rule this repository learned the hard way; the pid
+# in `owner.json` is the child's own, written by `runEmbedWorker` under the
+# lock it holds, and the root it names is this throwaway demo HOME's. If the
+# child never appears — an offline machine, where it gives up before it starts
+# — there is nothing to kill and this costs a second.
+stop_demo_embedder() {
+  local lock="$demo/.potsherd/.lock.embed"
+  local owner="$lock/owner.json" pid=''
+  # Up to ~3s for the child to boot node and mkdir the lock. It must be killed
+  # long before it could finish a 46 MB fetch, so that no screen below sees a
+  # partially embedded index either.
+  for _ in $(seq 1 60); do
+    [ -f "$owner" ] && break
+    sleep 0.05
+  done
+  if [ -f "$owner" ]; then
+    pid=$(node -e 'try{process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).pid||""))}catch{}' "$owner" 2>/dev/null || true)
+  fi
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    # Verified as ours before it is signalled: the command line has to name
+    # this demo root. `ps` proves a pid is alive, never that it is yours.
+    if ps -p "$pid" -o command= 2>/dev/null | grep -q -- "$demo/.potsherd"; then
+      echo "  stopping the background embedder this capture started (pid $pid)"
+      kill "$pid" 2>/dev/null || true
+      for _ in $(seq 1 40); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.05
+      done
+    else
+      echo "  pid $pid does not name $demo/.potsherd — left alone" >&2
+    fi
+  fi
+  # A lock whose owner is gone already reads as stopped (`lock.isStale`), so
+  # this is tidiness rather than correctness — but a demo root with a dead
+  # lock in it is a confusing thing to leave behind.
+  rm -rf "$lock"
+}
+stop_demo_embedder
+
 # Everything below reads the index 07 just built.
 shot 08-ls.txt           ls
 

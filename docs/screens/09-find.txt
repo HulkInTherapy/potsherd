@@ -1,4 +1,4 @@
-potsherd find "pgbouncer" · 4 sessions · strong · bm25 · 9ms
+potsherd find "pgbouncer" · 4 sessions · strong · bm25 · 10ms
 
   Pool the ingest workers through pgbouncer                        claude · live
   data-pipeline · 21 aug · 8 exchanges · main                     strong  0.0275
@@ -24,5 +24,6 @@ potsherd find "pgbouncer" · 4 sessions · strong · bm25 · 9ms
     assistant side not recoverable · potsherd show 9f9d323a
 
   3 ghost hits · 1 from subagents
-  semantic search: warming (0 of 3,410 embedded)
+  semantic search: not running (0 of 3,410 embedded) — the 46.1 MB runtime has
+  not been fetched
   run  potsherd show <id8>  to read one, or  potsherd ask <words>

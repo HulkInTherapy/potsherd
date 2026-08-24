@@ -579,18 +579,54 @@ describe('the version a user reads', () => {
     }
   });
 
-  it('is not behind the newest git tag in this checkout', () => {
+  /**
+   * **The premise is the tags this repository actually released** — `09` rule 7,
+   * and this one was a landmine on the tag rather than a flake.
+   *
+   * This used to read `git tag --list 'v[0-9]*'`, which counts every tag the
+   * checkout happens to hold. potsherd has a second remote by design —
+   * `upstream-episodic` → `github.com/obra/episodic-memory`, kept for the
+   * NOTICE — and a fetch of it landed **that** project's tags under plain `v*`
+   * names beside the `upstream-v*` copies that were the intended form. So
+   * `v1.0.1` … `v1.4.2` sat in the checkout, none of them potsherd's, and this
+   * assertion read `VERSION is 1.2.0 but this checkout already has tag v1.4.2`
+   * and went red on a release that had not happened.
+   *
+   * Deleting them fixed that afternoon. The remote is still there and will be
+   * fetched again, so the premise is scoped instead: **`--merged HEAD`**, which
+   * is every tag whose commit is an ancestor of what is checked out. A foreign
+   * project's release is not in potsherd's history and cannot be, so it cannot
+   * be counted here however it got into `.git`. It needs no network, which
+   * `git ls-remote origin --tags` would have.
+   *
+   * (The worse half of the same story is why this is worth a paragraph:
+   * `v1.2.0` — the version in every manifest above — was one of the names
+   * taken, so `git tag v1.2.0` would have failed at release time, and forcing
+   * it would have pointed the publish workflow's tag/manifest agreement check
+   * at another project's `packages/cli/package.json`.)
+   *
+   * The two escapes it already had are kept, and they are the same rule: a
+   * published tarball has no `.git`, and a shallow clone has no reachable tags.
+   * Both skip rather than assert something the environment established.
+   */
+  it('is not behind the newest git tag this repository released', () => {
     if (!fs.existsSync(path.join(repo, '.git'))) return; // a packed tarball
     let tags: string[];
     try {
-      tags = execFileSync('git', ['tag', '--list', 'v[0-9]*'], { cwd: repo, encoding: 'utf8' })
+      tags = execFileSync('git', ['tag', '--list', 'v[0-9]*', '--merged', 'HEAD'], {
+        cwd: repo,
+        encoding: 'utf8',
+      })
         .split('\n')
         .map((t) => t.trim())
         .filter(Boolean);
     } catch {
       return; // no git binary
     }
-    if (tags.length === 0) return; // a shallow clone with no tags
+    // A shallow clone reaches no tag from HEAD, and neither does a checkout of
+    // a commit older than every release. Both are the environment, not a
+    // finding.
+    if (tags.length === 0) return;
 
     const parse = (s: string): [number, number, number] => {
       const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(s);
@@ -603,7 +639,7 @@ describe('the version a user reads', () => {
     const here = parse(VERSION);
     expect(
       cmp(here, newest),
-      `VERSION is ${VERSION} but this checkout already has tag v${newest.join('.')}`,
+      `VERSION is ${VERSION} but this repository already released v${newest.join('.')}`,
     ).toBeGreaterThanOrEqual(0);
   });
 });

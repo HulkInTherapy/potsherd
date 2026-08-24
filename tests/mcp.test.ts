@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { db as store, indexAll, paths } from '@potsherd/core';
+import { db as store, indexAll, paths, writeCard } from '@potsherd/core';
 
 import { makeContext, resolveGraftCwd } from '../packages/mcp/src/context.js';
 import { TOOLS, WRITE_TOOLS } from '../packages/mcp/src/server.js';
@@ -1564,6 +1564,82 @@ describe('FIX-F — the door stops claiming what it cannot know', () => {
     for (const t of r['threads'] as { evidence: string; confidence: string }[]) {
       if (t.evidence === 'not-a-transcript') expect(t.confidence).not.toBe('strong');
     }
+  });
+
+  /**
+   * The corpus with a card in it — FIX-F round 2, closing round 1's §4.6.3.
+   *
+   * Round 1 proved `scope.cards` was accepted, forwarded to
+   * `RecallOptions.cards` and reported back on the envelope, and could not
+   * prove it changed a result set: the real archive has never had
+   * `potsherd card` run on it, so `routing` was 0 with the flag and 0 without
+   * it. A flag proved only to be *plumbed* is the audit's own "documented and
+   * does nothing" shape, one round later.
+   *
+   * So: the audit's F6 fixture, in three rows. One session whose transcript
+   * says none of the query's words and whose **card** says all of them.
+   */
+  function cardedRoot(): { root: string; query: string } {
+    const { root, db } = open('potsherd-fixf-carded-');
+    try {
+      session(db, 'ccc55555-5555-4555-8555-555555555555', 'csv import notes',
+        'we spent this session on the csv importer and nothing else whatsoever');
+      db.exec("INSERT INTO exchanges_fts(exchanges_fts) VALUES('rebuild')");
+      writeCard(db, root, {
+        sessionId: 'ccc55555-5555-4555-8555-555555555555',
+        harness: 'claude',
+        project: '/tmp/fixf',
+        projectSlug: 'fixf',
+        card: {
+          title: 'zonal drain cutover review',
+          summary: 'the session covered the zonal drain cutover in detail.',
+          topics: ['zonal drain cutover'],
+          decisions: [],
+          files: [],
+          outcome: 'unknown',
+          open_threads: [],
+          tags: [],
+        },
+        verified: { kept: 0, dropped: 0 },
+        model: 'seeded-by-hand',
+        costUsd: 0,
+        createdAt: '2026-08-24T00:00:00.000Z',
+        source: 'transcript',
+      });
+    } finally {
+      db.close();
+    }
+    // Words no transcript in this root contains. Only the card says them.
+    return { root, query: 'zonal drain cutover' };
+  }
+
+  it('C3 — the cards control changes the result set, not just the envelope', async () => {
+    const { root, query } = cardedRoot();
+
+    // Cards on, which is the default: the card finds a conversation whose
+    // transcript never uses these words. That is routing working, and it is
+    // why cards are demoted rather than switched off.
+    const on = await runRecall(at(root), { query });
+    expect(on['cards']).toBe(true);
+    expect(on['noMatch']).toBe(false);
+    expect(on['routing']).toBe(1);
+    const onThreads = on['threads'] as Record<string, unknown>[];
+    expect(onThreads).toHaveLength(1);
+    expect(onThreads[0]!['lane']).toBe('routing');
+    // ...and it testifies to nothing: F6 in one field.
+    expect(onThreads[0]!['evidence']).toBe('not-a-transcript');
+    expect(onThreads[0]!['citable']).toBe(false);
+    expect(onThreads[0]!['citation']).toBeNull();
+    expect((on['lists'] as { list: string }[]).some((l) => l.list === 'cards_fts')).toBe(true);
+
+    // Cards off: the same query over the same index returns the honest empty.
+    // The rows are not filtered out downstream — the two card lists never run.
+    const off = await runRecall(at(root), { query, scope: { cards: false } });
+    expect(off['cards']).toBe(false);
+    expect(off['routing']).toBe(0);
+    expect(off['threads']).toHaveLength(0);
+    expect(off['noMatch']).toBe(true);
+    expect((off['lists'] as { list: string }[]).some((l) => l.list === 'cards_fts')).toBe(false);
   });
 
   it('C3 — the agent gets the cards control the human has had', async () => {

@@ -644,7 +644,24 @@ describe('potsherd index acquires semantic search by itself (phase 10 §A2)', ()
    * "`doctor` reports `vectors —` on one line while `index` reports
    * `vectors 1,561` on another").
    */
-  function statusFor(embedded: number, total: number) {
+  /**
+   * `working` is not decoration — FIX-F round 2.
+   *
+   * The report carries a lock read now: *is anybody actually embedding the
+   * rest?* These fixtures are handed to `renderIndexReceipt` with
+   * `spawned: true`, which is a claim that this run has **just started** a
+   * pass, so the status handed in beside it has to be a status of that same
+   * world. The product does exactly this and in the same place: `index`
+   * re-reads its report with `{ working: true }` immediately after
+   * `startBackgroundEmbedding` returns, because the child it just spawned
+   * needs a node boot before it can take the lock and the lock would otherwise
+   * report `false` for that window.
+   *
+   * Pass `false` and the receipt correctly says `stopped at 1,294 of 1,678`
+   * and `not running` — which is what a receipt should say about an index
+   * nobody is embedding, and what `find` says about the same one.
+   */
+  function statusFor(embedded: number, total: number, working = true) {
     const root = tempDir('potsherd-index-vec-');
     dirs.push(root);
     const db = store.open({ root });
@@ -657,7 +674,7 @@ describe('potsherd index acquires semantic search by itself (phase 10 §A2)', ()
     for (let i = 0; i < total; i += 1) {
       ins.run(`e${i}`, i, i < embedded ? 1 : null);
     }
-    const status = vecStatus(db, root);
+    const status = vecStatus(db, root, { working });
     db.close();
     return status;
   }
@@ -672,6 +689,32 @@ describe('potsherd index acquires semantic search by itself (phase 10 §A2)', ()
     expect(out).toContain('warming 1,294 of 1,678');
     expect(out).toContain('semantic search: warming (1,294 of 1,678 embedded)');
     expect(out).not.toContain('--embed');
+  });
+
+  /**
+   * FIX-F round 2 §4.3 — the row and the sentence stop saying `warming` about
+   * an index nobody is embedding.
+   *
+   * The mirror of the test above, and the pair is the point: the receipt of a
+   * run that has just started a pass says `warming`, and the receipt of a run
+   * that has not says what is true instead. One word for work in flight, a
+   * different one for work that has stopped — never one word widened over both,
+   * which is `09 §9`.
+   */
+  it('says stopped, not warming, when nothing is embedding the rest', () => {
+    const t = themeFrom({ json: false, width: 80 });
+    const out = renderIndexReceipt(report({ enabled: false, upToDate: 0 }), t, '/tmp/p', {
+      vec: statusFor(1294, 1678, false),
+      spawned: false,
+    });
+    expect(out).toContain('stopped at 1,294 of 1,678');
+    expect(out).toContain('semantic search: not running (1,294 of 1,678 embedded)');
+    expect(out).not.toContain('warming');
+    // The count survives either way: a sentence with no denominator is the
+    // defect FIX-C closed.
+    expect(out).toContain('1,294');
+    // And still no command, on either side of the branch.
+    expect(out).not.toMatch(/--embed|run {2}potsherd index/);
   });
 
   it('says nothing about semantic search over an empty index', () => {

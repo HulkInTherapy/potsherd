@@ -152,21 +152,21 @@ describe('find says what semantic search is doing', () => {
    * it is the one sentence on the screen that is false, and it sat directly
    * above the line that says the true thing.
    */
-  it('does not say warming when nothing is embedding, and says what is true instead', async () => {
+  it('does not say warming when nothing is embedding, and prints the count anyway', async () => {
+    // FIX-F round 2, and this is §4.4 closing. Round 1 could only *drop* the
+    // false sentence — `vecStatus().line` was shared with `index`, which
+    // legitimately says `warming` the instant it spawns a worker — so `find`
+    // said nothing at all here and the reader lost the count. `statusLine` is
+    // honest now, so the line is printed and it carries `N of M` again.
     const root = warmingRoot();
     // No lock: nobody is embedding this index.
     expect(report(root).working).toBe(false);
-    // `vectors: 'auto'` rather than the helper's `'off'`: `--no-vec` replaces
-    // `vectors.reason` with its own sentence, and this is about the default
-    // path — the one an ordinary `potsherd find` takes.
-    const out = await capture({
-      query: 'pgbouncer',
-      potsherdDir: root,
-      color: false,
-      vectors: 'auto',
-    });
+    const out = await capture({ query: 'pgbouncer', potsherdDir: root, color: false });
     expect(out).not.toContain('semantic search: warming');
-    expect(out).toMatch(/is not running|nothing is embedding/);
+    expect(out).toContain('semantic search: not running (1 of 4 embedded) — it stopped partway');
+    // The count is the point: a sentence with no denominator is the defect
+    // FIX-C closed, and saying nothing at all was the price round 1 paid.
+    expect(out).toMatch(/1 of 4 embedded/);
     // And still no command the reader might not be able to run.
     expect(out).not.toMatch(/index --embed/);
   });
@@ -201,12 +201,17 @@ describe('find says what semantic search is doing', () => {
       vectors: 'auto',
     });
     const j = JSON.parse(out) as {
-      semantic?: { working?: boolean };
+      semantic?: { working?: boolean; line?: string | null };
       vectors?: { working?: boolean; reason?: string };
     };
     expect(j.semantic?.working).toBe(false);
     expect(j.vectors?.working).toBe(false);
     expect(String(j.vectors?.reason)).toMatch(/is not running|nothing is embedding/);
+    // FIX-F round 2 — the C2 shape that survived inside the fix for C2. The
+    // sentence and the fact beside it now agree; they did not in round 1,
+    // where `line` said `warming` and `working` said `false` on one object.
+    expect(String(j.semantic?.line)).toMatch(/not running/);
+    expect(String(j.semantic?.line)).not.toMatch(/warming/);
   });
 
   it('says nothing at all once every row is embedded', async () => {
