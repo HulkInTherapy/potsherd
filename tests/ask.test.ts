@@ -2206,19 +2206,21 @@ describe('T5.6 --readers-in', () => {
     db.close();
   });
 
-  it('refuses a shortlist the file does not cover — a partial match is a failure, not an answer', async () => {
+  it('refuses a recorded session this index can no longer read', async () => {
     const { root, db } = seedDb();
-    // The file knows about a session the index no longer shortlists, and does
-    // not know about the one it does. Answering from the overlap would print
-    // the live shortlist's "n of m sessions read" over a file that covers
-    // less than it, and `filterAnswer` cannot see a quote nobody produced.
+    // FIX-B D4 narrowed this check and did not remove it. The shortlist is
+    // pinned now, so a session that merely dropped out of the live *ranking*
+    // is answered from — that is what made the round trip survive a warming
+    // index. A session the index cannot read at all is a different fact:
+    // `filterAnswer` is about to hold every quote against live transcript
+    // bytes at the `(sessionId, seq)` it names, and there are none.
     const target = await recordWithOutputs(db, root, QUESTION, [{ ...RECORDED, sessionId: 'sess-gone-0001' }], {
       sessionIds: ['sess-gone-0001'],
     });
     const transport = new Throwing();
     const llm = Llm.open({ transport, model: 'sonnet' });
     await expect(replayReaders(db, QUESTION, { root, llm, openThreads: false }, target)).rejects.toThrow(
-      /does not match the shortlist this question produces now/,
+      /can no longer read/,
     );
     expect(transport.sent).toHaveLength(0);
     db.close();

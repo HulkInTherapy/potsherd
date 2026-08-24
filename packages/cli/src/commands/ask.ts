@@ -14,6 +14,7 @@ import {
   readerLine,
   redactOutgoing,
   renderAsk,
+  vecStatus,
   type AskDrop,
   type AskOptions,
   type AskProgress,
@@ -261,7 +262,12 @@ export async function runAsk(o: AskCommandOptions): Promise<number> {
     const result = filterIn
       ? await filterHostAnswer(db, question, base, filterIn)
       : readersIn
-        ? await replayReaders(db, question, base, readersIn)
+        ? await replayReaders(db, question, base, readersIn, (line) => {
+            // Provenance goes above the answer, not below it: a reader who has
+            // already read the ANSWER block has already acted on it. `--json`
+            // carries the same facts on the file's own `index` object.
+            if (!o.json && !o.quiet) print(`  ${t.dim(line)}`);
+          })
         : await ask(db, question, { ...base, onProgress });
 
     if (o.debug) reportDrops(drops);
@@ -334,6 +340,30 @@ export interface ReadersFile {
   targets: AskReaderInput[];
   /** Added by whoever ran the readers. Absent in a fresh recording. */
   outputs?: RecordedOutput[];
+  /**
+   * The index as it was when this shortlist was built — FIX-B D4.
+   *
+   * `sessionIds` says *which* sessions; this says *why those*, in the only
+   * terms that move on their own. The embedding pass keeps landing vectors
+   * while a host agent runs the readers, and the ranking a question produces
+   * is a function of how much of the index carries one — which is why the two
+   * halves of a round trip run seconds apart could produce two different
+   * shortlists, and why the replay used to refuse.
+   *
+   * It is recorded so the replay can say what moved instead of guessing, and
+   * so `matching` — the count printed under the answer — belongs to the run
+   * that built the shortlist rather than to the run that replayed it. Optional
+   * because a file written by an older build has none, and such a file is
+   * replayable: the pin only needs `sessionIds`.
+   */
+  index?: {
+    /** Rows carrying a current vector when the shortlist was built. */
+    vectorsEmbedded: number;
+    /** Rows in the index then, embedded or not. */
+    vectorsTotal: number;
+    /** Readable sessions the question matched then. `AskResult.matching`. */
+    matching: number;
+  };
 }
 
 export type RecordedOutput = AskReaderOutput & { sessionId: string };
@@ -468,6 +498,12 @@ export async function writeReadersFile(
     k: base.k ?? ASK_K,
     sessionIds: targets.map((x) => x.sessionId),
     targets: targets.map((x) => ({ ...x, question: q })),
+    // Deliberately no timestamp. Two recordings of one question over one
+    // index are byte-identical — `tests/ask.test.ts` pins it, and the reason
+    // it is worth pinning is that a diff of two recordings is then a diff of
+    // the *index*. A clock in the envelope would make every diff non-empty and
+    // that property worthless. Everything here is a function of the index.
+    index: { ...indexState(db, base.root), matching: probe.matching },
   };
 
   const abs = nodePath.resolve(path);
@@ -508,6 +544,15 @@ function readersOutReceipt(
   lines.push('');
   // The claim this flag exists to make, stated where the user can check it.
   lines.push(`  ${t.dim(`no model call was made (${probe.spend.calls}). the excerpts are redacted, as sent.`)}`);
+  // FIX-B D4. The half of the round trip a user cannot see is the half that
+  // used to fail: `--readers-in` rebuilt the shortlist and refused when it had
+  // moved, and it moves on its own while the embedding pass runs. It is pinned
+  // now, and the receipt says so here rather than leaving the reader to
+  // discover it from an error — or to find the `--no-vec`-on-both-halves
+  // workaround, which was never written down anywhere and is no longer needed.
+  lines.push(
+    `  ${t.dim(`these ${n} ${n === 1 ? 'session is' : 'sessions are'} the shortlist. --readers-in reads exactly ${n === 1 ? 'it' : 'them'}, however much the index has embedded since.`)}`,
+  );
   lines.push('');
   lines.push('  run your readers, add an "outputs" array to the file, then:');
   lines.push(`    potsherd ask "${file.question}" --readers-in ${abs}`);
@@ -547,10 +592,12 @@ export async function replayReaders(
   question: string,
   base: AskOptions,
   path: string,
+  onNote?: (line: string) => void,
 ): Promise<AskResult> {
   const staged = await stageReaders(db, question, base, path);
+  for (const line of staged.notes) onNote?.(line);
   // ---- pass two: the real run, with the recorded readers in place of the SDK.
-  return ask(db, question, { ...base, readerFn: staged.readerFn });
+  return ask(db, question, { ...base, pin: staged.pin, readerFn: staged.readerFn });
 }
 
 /**
@@ -571,7 +618,14 @@ async function stageReaders(
   question: string,
   base: AskOptions,
   path: string,
-): Promise<{ readerFn: AskReaderFn; outputs: RecordedOutput[]; live: string[]; abs: string }> {
+): Promise<{
+  readerFn: AskReaderFn;
+  outputs: RecordedOutput[];
+  live: string[];
+  abs: string;
+  pin: NonNullable<AskOptions['pin']>;
+  notes: string[];
+}> {
   const abs = nodePath.resolve(path);
   const file = readReadersFile(abs);
   const q = redactOutgoing(question).text;
@@ -600,13 +654,39 @@ async function stageReaders(
     );
   }
 
-  // ---- pass one: the live shortlist, at zero model calls.
+  // The recording is only replayable against outputs that cover it, and that
+  // is a property of the file alone — checked before anything touches the
+  // index, so a file nobody has finished reading fails the same way whatever
+  // the index has been doing.
+  matchOrFail(abs, q, '"outputs"', outputs.map((x) => x.sessionId), file.sessionIds);
+
+  const pin: NonNullable<AskOptions['pin']> = {
+    sessionIds: file.sessionIds,
+    ...(file.index ? { matching: file.index.matching } : {}),
+  };
+
+  // ---- pass one: the recorded shortlist, resolved against the live index, at
+  // zero model calls.
+  //
+  // This used to build the shortlist the question produces *now* and demand it
+  // equal the recorded one. It refused on three of four round trips run
+  // seconds apart, because the embedding pass keeps landing vectors and the
+  // ranking is a function of how many have landed — nothing was stale, the
+  // shortlist had got better. So the recorded ids are pinned instead, and what
+  // this pass answers is the question that was actually worth asking: can this
+  // index still read every session the recording was made from?
+  //
+  // An id that has been deleted, or whose transcript no longer yields a single
+  // readable unit, does not come back — and that is the staleness the check
+  // was always about, because `filterAnswer` is about to hold every quote
+  // against the live bytes at the `(sessionId, seq)` it names.
   const rec = recorder();
-  await ask(db, question, { ...base, concurrency: 1, openThreads: false, readerFn: rec.fn });
+  await ask(db, question, { ...base, pin, concurrency: 1, openThreads: false, readerFn: rec.fn });
   const live = rec.seen.map((x) => x.sessionId);
 
-  matchOrFail(abs, q, 'recorded shortlist', file.sessionIds, live);
-  matchOrFail(abs, q, '"outputs"', outputs.map((x) => x.sessionId), live);
+  goneOrFail(abs, q, file.sessionIds, live);
+
+  const notes = replayNotes(db, base, file, abs);
 
   const byId = new Map<string, AskReaderOutput>();
   for (const out of outputs) byId.set(out.sessionId, out);
@@ -621,7 +701,95 @@ async function stageReaders(
     if (!out) throw new Error(`no recorded output for ${input.sessionId}`);
     return out;
   };
-  return { readerFn, outputs, live, abs };
+  return { readerFn, outputs, live, abs, pin, notes };
+}
+
+/**
+ * What a replay says out loud about the file it is answering from.
+ *
+ * FIX-B D4's other half: the pin makes the round trip work, and this is what
+ * stops it working *silently*. The answer below these lines was built from a
+ * shortlist that may no longer be the one this question produces, and the
+ * reader is entitled to know that before they act on it — including the one
+ * number that explains why, which is how much of the index carried a vector
+ * then against now.
+ *
+ * Nothing here is a warning and nothing here is a flag to type. The old advice
+ * — run both halves with `--no-vec` and they will agree — was a workaround for
+ * a check that has been fixed, and repeating it would send people to turn off
+ * the retrieval that makes `ask` worth running.
+ */
+function replayNotes(
+  db: Parameters<typeof ask>[0],
+  base: AskOptions,
+  file: ReadersFile,
+  abs: string,
+): string[] {
+  const n = file.sessionIds.length;
+  const head = `answered over the ${n} ${n === 1 ? 'session' : 'sessions'} recorded in ${abs}`;
+  const then = file.index;
+  const tail = ', not the shortlist this question produces now';
+  if (!then) return [`${head}${tail}`];
+  const now = indexState(db, base.root);
+  if (now.vectorsTotal === 0 || now.vectorsEmbedded === then.vectorsEmbedded) {
+    return [`${head}${tail}`];
+  }
+  return [
+    `${head}${tail}`,
+    `  semantic search moved in between: ${then.vectorsEmbedded} of ${then.vectorsTotal} embedded then, ` +
+      `${now.vectorsEmbedded} of ${now.vectorsTotal} now — re-record to ask the index as it is`,
+  ];
+}
+
+/**
+ * The vector state, from `vecStatus(db, root)` — the one call `index`,
+ * `doctor`, `find` and `stats` make.
+ *
+ * Never throws and never blocks: a recording that could not read the state is
+ * a recording with a zeroed one, and a replay that cannot compare simply says
+ * less. Neither is worth failing a round trip over.
+ */
+function indexState(
+  db: Parameters<typeof ask>[0],
+  root: string | undefined,
+): { vectorsEmbedded: number; vectorsTotal: number } {
+  if (!root) return { vectorsEmbedded: 0, vectorsTotal: 0 };
+  try {
+    const report = vecStatus(db as never, root).report;
+    return { vectorsEmbedded: report?.embedded ?? 0, vectorsTotal: report?.total ?? 0 };
+  } catch {
+    return { vectorsEmbedded: 0, vectorsTotal: 0 };
+  }
+}
+
+/**
+ * Every session the recording named, still readable in this index — or refuse.
+ *
+ * The half of the freshness check that survives FIX-B D4, and the half that
+ * was always the point. A recorded session the index can no longer read means
+ * `filterAnswer` is about to check quotes against transcript bytes that have
+ * moved or gone, and the answer would come out quietly thinner with no line
+ * anywhere saying why. Re-recording is the only honest repair, so it is the
+ * fix on the error.
+ *
+ * A session that merely *dropped out of the live ranking* is no longer an
+ * error: the shortlist is pinned, so the ranking has no vote.
+ */
+function goneOrFail(
+  abs: string,
+  question: string,
+  recorded: readonly string[],
+  resolved: readonly string[],
+): void {
+  const have = new Set(resolved);
+  const gone = recorded.filter((id) => !have.has(id));
+  if (gone.length === 0) return;
+  throw new UserError(
+    `${abs} was recorded from ${gone.length} ${gone.length === 1 ? 'session' : 'sessions'} this ` +
+      `index can no longer read (${id8s(gone)}). answering from it would check quotes against ` +
+      'a transcript that is not there any more',
+    `potsherd ask "${question}" --readers-out ${abs}    # re-record, then run your readers again`,
+  );
 }
 
 // ======================================================== the synthesis file
@@ -1168,6 +1336,32 @@ function readReadersFile(abs: string): ReadersFile {
     sessionIds: sessionIds as string[],
     targets,
     ...(outputs ? { outputs } : {}),
+    ...(indexBlock(parsed['index']) ? { index: indexBlock(parsed['index'])! } : {}),
+  };
+}
+
+/**
+ * The recorded index state, when the file has a usable one.
+ *
+ * Never throws and never refuses a file over it. It is a **provenance** field,
+ * not a mismatch detector: a recording written by an older build has none, and
+ * one that is malformed tells a replay nothing rather than making it fail —
+ * the round trip's job is to answer, and a half-typed number in a field whose
+ * only consumer is one printed sentence is not a reason to stop.
+ */
+function indexBlock(raw: unknown): ReadersFile['index'] | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const n = (k: string): number | undefined =>
+    typeof o[k] === 'number' && Number.isFinite(o[k]) ? (o[k] as number) : undefined;
+  const embedded = n('vectorsEmbedded');
+  const total = n('vectorsTotal');
+  const matching = n('matching');
+  if (embedded === undefined || total === undefined || matching === undefined) return undefined;
+  return {
+    vectorsEmbedded: embedded,
+    vectorsTotal: total,
+    matching,
   };
 }
 
