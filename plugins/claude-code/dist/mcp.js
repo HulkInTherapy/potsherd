@@ -43715,11 +43715,11 @@ function coverageGlyph(c, ascii = false) {
 
 // ../core/dist/link-suggest.js
 var MEASURED_PRECISION = {
-  raised: 8,
-  absent: 8,
-  worthLow: 1,
-  worthHigh: 2,
-  note: "measured in phase 4 on the reference corpus, on the same rule pass this uses. expect most of these to be wrong."
+  raised: 18,
+  absent: 18,
+  worthLow: 12,
+  worthHigh: 12,
+  note: "measured in phase 10 (T10.13) over 46 cards and 15 projects, on this verb. expect a screenful to cover fewer relationships than rows."
 };
 var DEFAULT_LIMIT = 5;
 function suggestLinks(db, o = {}) {
@@ -43839,7 +43839,7 @@ function renderSuggestions(r, t, wrap3) {
     L.push(`     ${t.dim("accept  ")}${s.command}`);
     L.push("");
   }
-  const measured = `measured: on the reference corpus this same rule raised ${p.raised} candidates. ${p.absent} of ${p.raised} were genuinely absent from the other project, but only ${worth} of ${p.raised} were worth raising. expect most of these to be wrong.`;
+  const measured = `measured: on the reference corpus this verb raised ${p.raised} suggestions. ${p.absent} of ${p.raised} named a pair that really was two different projects, and ${worth} of ${p.raised} were worth accepting. a screenful covers fewer relationships than it has rows, so expect repeats of the strongest pair.`;
   for (const l of wrap3(measured, t.width - 4))
     L.push(t.warn(`  ${l}`));
   L.push("");
