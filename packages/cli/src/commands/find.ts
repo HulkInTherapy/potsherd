@@ -3,6 +3,7 @@ import {
   recall,
   renderFind,
   search as searchNs,
+  vecStatus,
   type RecallOptions,
 } from '@potsherd/core';
 import {
@@ -118,6 +119,17 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
   try {
     const filters = parseFilters(db, o);
     const limit = parseLimit(o.limit, 10);
+    // §A2 item 2, and FIX-B D9: *while pending, **every** `find` prints one
+    // line*. It was written on `index` and on `doctor` and never here, so
+    // `vecStatus().line` had one consumer and the test that covered it
+    // asserted the string builder rather than a verb — a missing call site
+    // could not fail anything, and one did not.
+    //
+    // The same call `index`, `doctor` and `stats` make, on the connection this
+    // query runs on, so the number in the sentence is the number this search
+    // was answered with and not one read a moment later from somewhere else.
+    // `null` when there is nothing to say, and then nothing is printed.
+    const semantic = vecStatus(db, root);
     const result = await recall(db, query, filters, {
       limit,
       root,
@@ -210,6 +222,11 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
         cards: o.cards !== false,
         routing: result.sessions.filter((s) => s.lane === 'routing').length,
         vectors: result.vectors,
+        // `vectors` above says whether the vector lists ran for **this query**.
+        // `semantic` says what the index holds, which is the different question
+        // the human view's status line answers — and `--json` parity (audit F9)
+        // means a script gets the sentence too, not a worse object.
+        semantic: semantic.report ? { ...semantic.report, line: semantic.line ?? null } : null,
         ignored: result.ignored,
         lists: result.lists,
         relaxed: result.relaxed,
@@ -301,7 +318,16 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
     }
 
     const t = themeFrom(o);
-    print(renderFind(result, t, new Date(), { explain: Boolean(o.explain) }));
+    // A status, not a degradation apology: no command in it, because the work
+    // is already running and there is nothing for the reader to do. It is
+    // handed to the renderer rather than printed after it, because `05` says
+    // every verb ends with the next verb and a status line is not a next verb.
+    print(
+      renderFind(result, t, new Date(), {
+        explain: Boolean(o.explain),
+        semantic: semantic.line ?? null,
+      }),
+    );
     if (federated) {
       // T6.6 D8 — this line was printed at whatever length it came out, and
       // came out at 84 characters under `--width 80` while every other line on
