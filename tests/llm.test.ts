@@ -1846,6 +1846,194 @@ describe('codex backend plumbing', () => {
   });
 });
 
+/**
+ * **The backend potsherd kills has to stay dead, and so does what it started.**
+ *
+ * `child.kill()` signals one pid. Every harness CLI on this path is a shell
+ * script or a launcher that forks the real work — `fakeBin` above writes
+ * `#!/bin/sh\n${body}\n` with no `exec` for exactly that reason — so killing
+ * the direct child used to leave its child reparented to init and running.
+ * Measured on the unfixed tree: the two `never hangs` cases alone left four
+ * `sleep 30` processes with PPID 1 behind them, and they only went away
+ * because the payload was a `sleep`. A backend that does not exit on its own
+ * lived until the machine rebooted.
+ *
+ * These drive a **real spawn** with a payload that outlives its own shell —
+ * the same mechanism, not a mock — and then ask the operating system whether
+ * the grandchild is still there.
+ */
+describe('a killed backend takes what it started with it', () => {
+  /**
+   * The signals `llm.ts` installs a handler for while a backend is live.
+   * Restated here rather than imported: `packages/core/src/index.ts` is not
+   * this branch's to add an export to, and what is being asserted is the
+   * observable contract on `process` rather than the constant's spelling.
+   */
+  const FATAL = ['SIGINT', 'SIGTERM'] as const;
+
+  /** Is this pid alive? Signal 0 sends nothing and throws ESRCH if not. */
+  function alive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * A payload that backgrounds a long sleep, records its pid, and then waits.
+   * The recorded pid is the grandchild: potsherd never learns it, and nothing
+   * but a process-group kill can reach it once the shell is gone.
+   *
+   * `>>` and not `>`: a timed-out call is retried ({@link TIMEOUT_RETRIES}),
+   * so one `text()` spawns the stub twice and both grandchildren must die.
+   */
+  function orphanMaker(pidFile: string): string {
+    return `sleep 30 & echo $! >> '${pidFile}'\nwait`;
+  }
+
+  function readPids(pidFile: string): number[] {
+    if (!fs.existsSync(pidFile)) return [];
+    return fs
+      .readFileSync(pidFile, 'utf8')
+      .split('\n')
+      .map((l) => Number(l.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+  }
+
+  /**
+   * The pids the stub recorded, once it has recorded at least `want`.
+   *
+   * `want` is 1 and not `TIMEOUT_RETRIES + 1`: a timed-out call is retried, so
+   * the stub usually runs twice, but which attempt has reached its `echo` when
+   * the rejection lands is a race and pinning it would make this test flaky
+   * about something it is not testing. Every pid the file ends up holding has
+   * to be dead either way.
+   */
+  async function recordedPids(pidFile: string, want = 1): Promise<number[]> {
+    for (let i = 0; i < 400; i++) {
+      const pids = readPids(pidFile);
+      if (pids.length >= want) return pids;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error(`the stub never recorded a grandchild pid in ${pidFile}`);
+  }
+
+  /** Everything the kill path was supposed to reach, gone within `ms`. */
+  async function allGoneWithin(pids: readonly number[], ms: number): Promise<number[]> {
+    const until = Date.now() + ms;
+    for (;;) {
+      const left = pids.filter(alive);
+      if (left.length === 0 || Date.now() > until) return left;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  }
+
+  /** Never leave one behind, however the assertion went. */
+  function reap(pids: readonly number[]): void {
+    for (const pid of pids) {
+      try {
+        if (alive(pid)) process.kill(pid, 'SIGKILL');
+      } catch {
+        // gone between the check and the kill
+      }
+    }
+  }
+
+  it('on the timeout path: the grandchild is dead, not reparented to init', async () => {
+    const dir = scratch('potsherd-orphan-');
+    const pidFile = path.join(dir, 'grandchildren');
+    const bin = fakeBin('codex', orphanMaker(pidFile));
+    const llm = Llm.open({
+      backend: 'codex',
+      env: { ...process.env, PATH: bin },
+      tmpRoot: scratch(),
+      // A second, and not the 300 ms the `never hangs` cases use. That margin
+      // is not decoration: at 300 ms the deadline can beat `/bin/sh`'s own
+      // exec under a loaded machine, the stub is killed before it has run a
+      // line, and the test then fails for having nothing to measure rather
+      // than for the defect. Measured flaky ~1 run in 3 before this.
+      timeoutMs: 1_000,
+    });
+    let pids: number[] = [];
+    try {
+      const call = expect(llm.text({ prompt: 'q' })).rejects.toThrow(/did not answer within/);
+      // The stub has forked its own child and told us the pid — while the
+      // call is still in flight, so the kill path below has something to miss.
+      pids = await recordedPids(pidFile);
+      await call;
+      // Everything the file ended up holding — this attempt's grandchild and
+      // the retry's — has to be gone.
+      pids = readPids(pidFile);
+      expect(pids.length).toBeGreaterThan(0);
+      expect(await allGoneWithin(pids, 5_000)).toEqual([]);
+    } finally {
+      reap(pids);
+      await llm.close();
+    }
+  }, 30_000);
+
+  it('on the abort path: the same, when the caller cancels', async () => {
+    const dir = scratch('potsherd-orphan-');
+    const pidFile = path.join(dir, 'grandchildren');
+    const bin = fakeBin('codex', orphanMaker(pidFile));
+    const llm = Llm.open({
+      backend: 'codex',
+      env: { ...process.env, PATH: bin },
+      tmpRoot: scratch(),
+    });
+    const ac = new AbortController();
+    let pids: number[] = [];
+    try {
+      const call = llm.text({ prompt: 'q', signal: ac.signal });
+      const pending = expect(call).rejects.toThrow(/cancelled/);
+      pids = await recordedPids(pidFile, 1);
+      ac.abort();
+      await pending;
+      expect(await allGoneWithin(pids, 5_000)).toEqual([]);
+    } finally {
+      reap(pids);
+      await llm.close();
+    }
+  }, 20_000);
+
+  /**
+   * The Ctrl-C half of the same fix, and the reason it is not one listener per
+   * child. `process` warns at ten listeners for an event and this suite
+   * already prints a `MaxListenersExceededWarning` of its own; a reader
+   * fan-out registering one apiece would have buried the real one in noise.
+   *
+   * The handler is also required not to outlive the calls: an `llm.ts` that
+   * left a SIGINT listener installed would keep changing how a long-running
+   * potsherd dies long after the last model call returned.
+   */
+  it('installs one signal handler however many backends are live, and takes it back off', async () => {
+    const before = FATAL.map((s) => process.listenerCount(s));
+    const bin = fakeBin('codex', `cat > /dev/null; sleep 2; echo done`);
+    const llms = [0, 1, 2].map(() =>
+      Llm.open({ backend: 'codex', env: { ...process.env, PATH: bin }, tmpRoot: scratch() }),
+    );
+    try {
+      const calls = llms.map((l) => l.text({ prompt: 'q' }));
+      // Wait for the first backend to be live rather than for a fixed number
+      // of milliseconds — a spawn is not instant on a loaded machine, and a
+      // sampling point that can land before it is a flake, not a measurement.
+      for (let i = 0; i < 400 && process.listenerCount('SIGINT') === before[0]; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      // …then a beat for the other two, which are still inside their `sleep`.
+      await new Promise((r) => setTimeout(r, 600));
+      // Three children alive at once; still one handler per signal.
+      expect(FATAL.map((s) => process.listenerCount(s))).toEqual(before.map((n) => n + 1));
+      for (const r of await Promise.all(calls)) expect(r.text).toBe('done');
+      expect(FATAL.map((s) => process.listenerCount(s))).toEqual(before);
+    } finally {
+      for (const l of llms) await l.close();
+    }
+  }, 20_000);
+});
+
 describe('lastAgentMessage', () => {
   it('takes the last agent message out of jsonl', () => {
     const out = ['{"msg":{"text":"first"}}', '{"msg":{"text":"last"}}'].join('\n');
