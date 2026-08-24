@@ -60,6 +60,7 @@ export type {
   ParseResult,
   Adapter,
   AdapterStub,
+  FormatProvenance,
 } from './adapters/types.js';
 export { HARNESSES, isAdapter } from './adapters/types.js';
 

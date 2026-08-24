@@ -9,6 +9,9 @@ import {
   doctorLine,
   findStores,
   isoOf,
+  OPENCODE_DOCTOR_NOTE,
+  OPENCODE_FORMAT_PROVENANCE,
+  OPENCODE_FORMAT_UNVERIFIED,
   opencodeAdapter,
   parse,
   parseContent,
@@ -287,7 +290,10 @@ describe('opencode adapter — doctor', () => {
     const line = doctorLine(root);
     expect(line).toContain('ready');
     expect(line).toContain('3 sessions');
-    expect(line).toContain('unverified format');
+    // Was `unverified format`. T10.12 ran a real 1.18.21 store through this
+    // path; what it found was a measured defect, which is a stronger claim
+    // than never having looked. See the D8 block at the foot of this file.
+    expect(line).toContain('content unread at 1.18.21');
   });
 });
 
@@ -391,5 +397,59 @@ describe('opencode adapter — a real opencode-ai 1.18.21 store (T10.12)', () =>
     // what landed instead: the metadata blob, verbatim.
     expect(whole).toContain('finish');
     expect(Object.keys(r.unknownTypes).some((t) => /no role/i.test(t))).toBe(true);
+  });
+});
+
+/**
+ * D8 — the relabelling, applied to the surface a caller actually reads.
+ *
+ * T10.12 measured this adapter against a real opencode-ai 1.18.21 and split
+ * its label in two: discovery and session metadata **verified correct**,
+ * message content **verified unread**. Only copilot's human line was updated.
+ * `OPENCODE_DOCTOR_NOTE` still opened with *"this adapter was written from
+ * documentation, not from a real store"* — a sentence the same phase had
+ * falsified — and all four `doctorLine()` notes still ended `unverified
+ * format`, so the one word a caller greps for said "nobody looked" about the
+ * only one of the four harnesses that got a full round trip.
+ *
+ * Every claim asserted here is from `phases/phase-10/T10.12-LABELS.md` §4.
+ */
+describe('the opencode label says what was measured (D8)', () => {
+  it('the doctor note no longer claims nobody ran this against a real store', () => {
+    expect(OPENCODE_DOCTOR_NOTE).not.toMatch(/not from a real store/);
+    expect(OPENCODE_DOCTOR_NOTE).not.toMatch(/written from documentation/);
+    // What replaced it: the version, and both halves of the split label.
+    expect(OPENCODE_DOCTOR_NOTE).toContain('1.18.21');
+    expect(OPENCODE_DOCTOR_NOTE).toMatch(/discovery/i);
+    expect(OPENCODE_DOCTOR_NOTE).toMatch(/part/);
+  });
+
+  it('no doctor line calls the format unverified any more', () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'potsherd-oc-label-'));
+    const alien = fs.mkdtempSync(path.join(os.tmpdir(), 'potsherd-oc-alien2-'));
+    fs.copyFileSync(path.join(root, 'alien.db'), path.join(alien, 'alien.db'));
+    try {
+      for (const line of [doctorLine(root), doctorLine(empty), doctorLine(alien)]) {
+        expect(line, line).not.toContain('unverified');
+      }
+      // The ready line carries the measurement instead, and names the defect
+      // rather than a state of ignorance.
+      expect(doctorLine(root)).toContain('1.18.21');
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+      fs.rmSync(alien, { recursive: true, force: true });
+    }
+  });
+
+  it('exports the provenance as data, not only as a sentence', () => {
+    // `doctor --json` is the documented API and the line it carries is
+    // width-clipped, so the split label has to exist as fields. This is the
+    // constant `doctor.ts` needs one line to publish.
+    expect(OPENCODE_FORMAT_PROVENANCE.measured).toContain('1.18.21');
+    expect(OPENCODE_FORMAT_PROVENANCE.verified.length).toBeGreaterThan(0);
+    expect(OPENCODE_FORMAT_PROVENANCE.wrong.length).toBeGreaterThan(0);
+    // Still a form of unverified, per T10.12 §6: two of five keep one.
+    expect(OPENCODE_FORMAT_UNVERIFIED).toBe(true);
+    expect(OPENCODE_FORMAT_PROVENANCE.unverified).toBe(OPENCODE_FORMAT_UNVERIFIED);
   });
 });

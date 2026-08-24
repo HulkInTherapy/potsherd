@@ -13869,6 +13869,7 @@ var opencode_exports = {};
 __export(opencode_exports, {
   DISPLAY_NAME: () => DISPLAY_NAME3,
   OPENCODE_DOCTOR_NOTE: () => OPENCODE_DOCTOR_NOTE,
+  OPENCODE_FORMAT_PROVENANCE: () => OPENCODE_FORMAT_PROVENANCE,
   OPENCODE_FORMAT_UNVERIFIED: () => OPENCODE_FORMAT_UNVERIFIED,
   columnsOf: () => columnsOf,
   default: () => opencode_default,
@@ -13890,7 +13891,14 @@ var DISPLAY_NAME3 = "opencode";
 var DB_EXTENSIONS = [".db", ".sqlite", ".sqlite3"];
 var MAX_DEPTH = 3;
 var OPENCODE_FORMAT_UNVERIFIED = true;
-var OPENCODE_DOCTOR_NOTE = 'opencode: format unverified \u2014 this adapter was written from documentation, not from a real store, so its schema is discovered at runtime (pragma table_info) rather than assumed, and it degrades to "unsupported version" rather than half-parsing a store it does not recognise. The database is opened read-only.';
+var OPENCODE_DOCTOR_NOTE = 'opencode: measured against opencode-ai 1.18.21 (T10.12, 24 aug 2026) \u2014 a real session was run and indexed, and the label splits in two. DISCOVERY AND SESSION METADATA ARE CORRECT: the store is at ~/.local/share/opencode/opencode.db exactly where this adapter looks, describeStore accepts it, and the session row parses with title, directory and both timestamps right. MESSAGE CONTENT IS NOT READ: at 1.18.21 the `message` table carries neither a role column nor a text column \u2014 the role is inside a `data` JSON blob, and the turn text is in the child `part` table, which this adapter does not join \u2014 so a real session indexes with 0 prompts and its answer does not reach the index. Schema is still discovered at runtime (pragma table_info) rather than assumed, and an unrecognised store degrades to "unsupported version" rather than half-parsing. The database is opened read-only.';
+var OPENCODE_FORMAT_PROVENANCE = {
+  measured: "opencode-ai 1.18.21, 24 aug 2026",
+  verified: ["store discovery", "session metadata (title, directory, timestamps)"],
+  wrong: ["message role \u2014 it is inside message.data, not a column", "turn text \u2014 it is in part.data, which is not joined"],
+  unverified: OPENCODE_FORMAT_UNVERIFIED,
+  note: OPENCODE_DOCTOR_NOTE
+};
 var SESSION_COLUMNS = {
   id: ["id", "session_id", "sessionid", "sessionID", "uuid"],
   title: ["title", "name", "summary", "label"],
@@ -14373,7 +14381,7 @@ function doctorLine6(override) {
       harness: "opencode",
       status: "empty",
       dir,
-      note: hasStorage ? "opencode installed, no sqlite store \u2014 this install uses storage/ json, which potsherd does not read yet" : "opencode installed, no sessions yet \xB7 unverified format"
+      note: hasStorage ? "opencode installed, no sqlite store \u2014 this install uses storage/ json, which potsherd does not read yet" : "opencode installed, no sessions yet"
     });
   }
   const failures = [];
@@ -14396,7 +14404,7 @@ function doctorLine6(override) {
       harness: "opencode",
       status: "unsupported",
       dir,
-      note: `${failures[0] ?? "unsupported version"} \xB7 unverified format`
+      note: `${failures[0] ?? "unsupported version"} \xB7 schema not recognised`
     });
   }
   if (sessions === 0) {
@@ -14404,13 +14412,13 @@ function doctorLine6(override) {
       harness: "opencode",
       status: "empty",
       dir,
-      note: "opencode installed, store readable, no sessions yet \xB7 unverified format"
+      note: "opencode installed, store readable, no sessions yet"
     });
   }
   const note = [`${sessions} session${sessions === 1 ? "" : "s"}`];
   if (failures.length)
     note.push(`${failures.length} store${failures.length === 1 ? "" : "s"} unsupported`);
-  note.push("unverified format");
+  note.push("content unread at 1.18.21 \u2014 text is in part.data");
   return formatDoctorLine({
     harness: "opencode",
     status: "ready",
@@ -14431,6 +14439,7 @@ var opencode_default = opencodeAdapter;
 var copilot_exports = {};
 __export(copilot_exports, {
   COPILOT_DOCTOR_NOTE: () => COPILOT_DOCTOR_NOTE,
+  COPILOT_FORMAT_PROVENANCE: () => COPILOT_FORMAT_PROVENANCE,
   COPILOT_FORMAT_UNVERIFIED: () => COPILOT_FORMAT_UNVERIFIED,
   DISPLAY_NAME: () => DISPLAY_NAME4,
   copilotAdapter: () => copilotAdapter,
@@ -14459,6 +14468,16 @@ var STATE_FILES = [
 ];
 var COPILOT_FORMAT_UNVERIFIED = true;
 var COPILOT_DOCTOR_NOTE = `copilot: format WRONG, measured \u2014 a real Copilot CLI 1.0.80 session was run against this adapter on 24 aug 2026. The directory it looks in is right and its contents are not: session-state/<id>/ holds workspace.yaml, checkpoints/ and rewind-file-snapshots/ and none of the files this adapter reads, so potsherd finds 0 sessions on a working install. The turns are in ~/.copilot/session-store.db, table turns(session_id, turn_index, user_message, assistant_response), which this adapter does not open. This is not "unverified"; it is verified and broken. potsherd reads ~/.copilot only: Copilot's VS Code chats live in workspaceStorage, which is not one of the read-only inputs potsherd is allowed.`;
+var COPILOT_FORMAT_PROVENANCE = {
+  measured: "Copilot CLI 1.0.80, 24 aug 2026",
+  verified: ["session-state/<id>/ is the right directory and is created on first CLI run"],
+  wrong: [
+    "none of STATE_FILES is written there \u2014 the directory holds workspace.yaml, checkpoints/ and rewind-file-snapshots/",
+    "the turns are in ~/.copilot/session-store.db, table turns(session_id, turn_index, user_message, assistant_response), which this adapter does not open"
+  ],
+  unverified: COPILOT_FORMAT_UNVERIFIED,
+  note: COPILOT_DOCTOR_NOTE
+};
 var HISTORY_KEYS2 = ["messages", "history", "turns", "events", "state"];
 var USER_ROLES2 = /* @__PURE__ */ new Set(["user", "human", "prompt"]);
 var ASSISTANT_ROLES2 = /* @__PURE__ */ new Set(["assistant", "model", "agent", "copilot"]);
@@ -14880,7 +14899,7 @@ function doctorLine7(override) {
     if (found.unreadable.length) {
       parts.push(`${found.unreadable.length} unreadable`);
     }
-    parts.push("format known wrong \u2014 see doctor --json");
+    parts.push("format known wrong at 1.0.80 \u2014 turns are in session-store.db");
     status3 = "ready";
     note = parts.join(" \xB7 ");
   } else if (installed || stateExists) {
