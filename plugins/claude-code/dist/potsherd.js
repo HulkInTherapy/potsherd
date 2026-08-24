@@ -25455,6 +25455,10 @@ async function runDoctor(o) {
         note("your settings: the ignore list, written by potsherd ignore / unignore");
       } else if (p.endsWith("graft-<id8>.md")) {
         note("only when you run graft, in the directory you run it in");
+      } else if (p.endsWith(nodePath.join(".potsherd", ".gitignore"))) {
+        note(
+          "written once, the first time you run graft here, and never overwritten: it is what keeps the briefs out of your commits"
+        );
       } else if (p.startsWith("<the path you give")) {
         note(
           "only when you pass the flag. it holds the same redacted excerpts a model would have been sent, and no model was called to write it"

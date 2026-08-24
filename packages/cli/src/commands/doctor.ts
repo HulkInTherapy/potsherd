@@ -273,6 +273,16 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
         note('your settings: the ignore list, written by potsherd ignore / unignore');
       } else if (p.endsWith('graft-<id8>.md')) {
         note('only when you run graft, in the directory you run it in');
+      } else if (p.endsWith(nodePath.join('.potsherd', '.gitignore'))) {
+        // C5b. This was the only entry under `writes:` with no sub-line, sat
+        // between two that have one — so the one path here a reader did not
+        // ask for was also the one path with no explanation. It is a
+        // three-line file that ignores the directory it sits in, written once,
+        // beside the first brief.
+        note(
+          'written once, the first time you run graft here, and never ' +
+            'overwritten: it is what keeps the briefs out of your commits',
+        );
       } else if (p.startsWith('<the path you give')) {
         note(
           'only when you pass the flag. it holds the same redacted excerpts a model ' +

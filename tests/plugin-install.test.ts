@@ -12,7 +12,7 @@
 // environment that reproduces the install, not the one that hides it.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -65,28 +65,93 @@ describe('the plugin directory, installed on its own under a commonjs parent', (
    * establishes (`09 §7.2`, the recurring one). If the bundles are stale this
    * fails HERE, naming the command, rather than passing on last release's
    * behaviour under this release's name.
+   *
+   * ## it used to compare mtimes, and that made its premise the filesystem
+   *
+   * This test took the newest mtime under `packages/**​/*.ts` and required the
+   * bundle to be at least that new. The third verifier restored one source file
+   * **byte for byte** with `cp` — content identical, mtime bumped — and the
+   * test went red while `pnpm vendor` reported no diff at all. A `git checkout`
+   * away and back, a `touch`, a rebase, a fresh clone (git stamps every file
+   * with the checkout time) flips it the same way. That is rule 7 exactly: *a
+   * test's premise must be something the test establishes, not something the
+   * machine provides.* It was noise in one direction and, worse, an alarm
+   * nobody could trust in the other.
+   *
+   * ## what it compares now
+   *
+   * Content, and specifically **the content `pnpm vendor` itself computes**.
+   * `scripts/vendor-plugin.mjs` is a `copyFileSync` per entry of one `ARTIFACTS`
+   * list; "the bundle this build produces" is its left-hand column, and the
+   * committed bundle is its right-hand one. So the assertion is that the two are
+   * byte-identical — the same property CI states as *"the vendored plugin
+   * bundles are the ones this build produces"* by running the vendor script and
+   * diffing `plugins/`, reproduced here without writing into the working tree.
+   *
+   * The pair list is restated rather than imported, because that script is a
+   * top-level program that copies files and calls `process.exit` on import. So
+   * the list is **pinned to the script's own text** first: a third artefact, a
+   * renamed bundle or a moved output path fails on the pin, loudly, instead of
+   * leaving this test quietly checking a pair that no longer exists.
+   *
+   * ## the one hop this does not cover, said out loud
+   *
+   * source -> `packages/*​/dist` is the build; `packages/*​/dist` -> `plugins/`
+   * is the vendor. This pins the second. The first is pinned by `pnpm build`
+   * running before `pnpm test` in CI, and by `tests/plugin-bundle.test.ts`
+   * requiring the vendored bundle's own `VERSION` string to equal the one in
+   * `packages/cli/package.json` and in each plugin manifest. A source change
+   * that has been built and not vendored is red here; one that has not been
+   * built either is red at the CI step above, which builds first.
    */
-  it('the vendored bundles are not older than the source they claim to be', () => {
-    const newest = (dir: string): number => {
-      let latest = 0;
-      for (const e of readdirSync(dir, { withFileTypes: true })) {
-        const f = join(dir, e.name);
-        if (e.isDirectory()) {
-          if (e.name === 'dist' || e.name === 'node_modules') continue;
-          latest = Math.max(latest, newest(f));
-        } else if (e.name.endsWith('.ts')) {
-          latest = Math.max(latest, statSync(f).mtimeMs);
+  it('the vendored bundles are byte-for-byte the bundles this build produces', () => {
+    /** `ARTIFACTS` from `scripts/vendor-plugin.mjs`: [built, where the plugin wants it]. */
+    const ARTIFACTS: readonly (readonly [string, string])[] = [
+      ['packages/cli/dist/potsherd.js', 'dist/potsherd.js'],
+      ['packages/mcp/dist/index.js', 'dist/mcp.js'],
+    ];
+    const vendorScript = join(REPO, 'scripts', 'vendor-plugin.mjs');
+    const script = readFileSync(vendorScript, 'utf8');
+    // The pin. If the vendor script's list moves, this list is wrong and says
+    // so here rather than checking two paths nothing copies any more.
+    for (const [from, to] of ARTIFACTS) {
+      expect(script, `scripts/vendor-plugin.mjs no longer copies ${from}`).toContain(`'${from}'`);
+      expect(script, `scripts/vendor-plugin.mjs no longer writes ${to}`).toContain(`'${to}'`);
+    }
+    const pairs = script.match(/^ {2}\['[^']+', *'[^']+'\],$/gm) ?? [];
+    expect(
+      pairs,
+      'scripts/vendor-plugin.mjs vendors a different number of files than this test checks',
+    ).toHaveLength(ARTIFACTS.length);
+
+    for (const [from, to] of ARTIFACTS) {
+      const built = join(REPO, from);
+      const vendored = join(PLUGIN_SRC, to);
+      expect(existsSync(built), `${from} is missing — run: pnpm build && pnpm vendor`).toBe(true);
+      expect(existsSync(vendored), `${vendored} is missing — run: pnpm build && pnpm vendor`).toBe(
+        true,
+      );
+      const fresh = readFileSync(built);
+      const committed = readFileSync(vendored);
+      // A 1.6 MB buffer diff is unreadable, so the message carries the two
+      // sizes and the first byte that differs — enough to tell "a stale bundle"
+      // from "the wrong file" without printing either of them.
+      let at = -1;
+      const n = Math.min(fresh.length, committed.length);
+      for (let i = 0; i < n; i++) {
+        if (fresh[i] !== committed[i]) {
+          at = i;
+          break;
         }
       }
-      return latest;
-    };
-    const srcRoot = join(REPO, 'packages');
-    const bundle = join(PLUGIN_SRC, 'dist', 'mcp.js');
-    expect(existsSync(bundle), `${bundle} is missing — run: pnpm build && pnpm vendor`).toBe(true);
-    expect(
-      statSync(bundle).mtimeMs,
-      'the vendored plugin bundle is older than packages/**/*.ts — run: pnpm build && pnpm vendor',
-    ).toBeGreaterThanOrEqual(newest(srcRoot));
+      if (at === -1 && fresh.length !== committed.length) at = n;
+      expect(
+        at,
+        `plugins/claude-code/${to} is not what ${from} builds ` +
+          `(${String(committed.length)} bytes committed, ${String(fresh.length)} built, ` +
+          `first difference at byte ${String(at)}) — run: pnpm build && pnpm vendor`,
+      ).toBe(-1);
+    }
   });
 
   it('the bundled MCP server answers tools/list with all three tools', () => {
