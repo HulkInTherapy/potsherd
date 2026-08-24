@@ -568,15 +568,6 @@ function nothing(r: AskResult, t: Theme): string[] {
     out.push('');
     return out;
   }
-  out.push(
-    INDENT +
-      f.clip(
-        `no grounded answer in ${f.num(r.searched)} ${f.plural(r.searched, 'session')} searched`,
-        t.width - 2,
-        t,
-      ),
-  );
-  out.push('');
   // "Did not answer" and "read it and found nothing" are different facts, and
   // this line conflated them. A run where **every** reader errored — a dead
   // backend, a harness that is not logged in, a timeout — printed *"the readers
@@ -584,8 +575,26 @@ function nothing(r: AskResult, t: Theme): string[] {
   // user's archive made by a verb that never read it. Found by recording the
   // demo cast under a relocated HOME, where `claude` is on PATH and not logged
   // in: six readers failed in 3.2 s and the screen said the archive had nothing.
+  //
+  // Phase 10, round 4 (VERIFICATION-4 §C7): fixing the sub-line was not enough.
+  // The **headline** above it stayed `no grounded answer in N sessions
+  // searched` — an emptiness frame over a capability failure — and the headline
+  // is what a reader acts on, so the exact line beneath it was rescuing a claim
+  // the first line had already made. It is the same frame the seam wore on the
+  // `--filter-in` path, and this is the third place it has been found.
   const failed = r.readers.filter((x) => x.error);
   const allFailed = r.readers.length > 0 && failed.length === r.readers.length;
+  out.push(
+    INDENT +
+      f.clip(
+        allFailed
+          ? `nothing was read — all ${f.num(r.readers.length)} ${f.plural(r.readers.length, 'reader')} failed`
+          : `no grounded answer in ${f.num(r.searched)} ${f.plural(r.searched, 'session')} searched`,
+        t.width - 2,
+        t,
+      ),
+  );
+  out.push('');
   out.push(
     INDENT +
       t.dim(
@@ -593,7 +602,13 @@ function nothing(r: AskResult, t: Theme): string[] {
           ? `no reader could run, so nothing was read: ${f.clip(failed[0]?.error ?? 'the backend did not answer', t.width - 30, t)}`
           : r.dropped.length > 0
             ? `every sentence was dropped for want of a citation that resolves (${f.num(r.dropped.length)}).`
-            : 'the readers found nothing that answers the question.',
+            : // A third instance of the same frame, found by FIX-G while it was
+              // fixing the second: when the readers DO answer and the
+              // synthesizer legitimately returns an empty result, this said
+              // "the readers found nothing" about readers that found plenty.
+              r.readers.some((x) => x.found)
+              ? 'the readers found material, and the answer built from it was empty.'
+              : 'the readers found nothing that answers the question.',
       ),
   );
   out.push('');

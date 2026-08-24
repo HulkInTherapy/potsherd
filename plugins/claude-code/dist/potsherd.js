@@ -21674,11 +21674,17 @@ function nothing(r, t) {
     out.push("");
     return out;
   }
-  out.push(INDENT + clip(`no grounded answer in ${num(r.searched)} ${plural(r.searched, "session")} searched`, t.width - 2, t));
-  out.push("");
   const failed = r.readers.filter((x) => x.error);
   const allFailed = r.readers.length > 0 && failed.length === r.readers.length;
-  out.push(INDENT + t.dim(allFailed ? `no reader could run, so nothing was read: ${clip(failed[0]?.error ?? "the backend did not answer", t.width - 30, t)}` : r.dropped.length > 0 ? `every sentence was dropped for want of a citation that resolves (${num(r.dropped.length)}).` : "the readers found nothing that answers the question."));
+  out.push(INDENT + clip(allFailed ? `nothing was read \u2014 all ${num(r.readers.length)} ${plural(r.readers.length, "reader")} failed` : `no grounded answer in ${num(r.searched)} ${plural(r.searched, "session")} searched`, t.width - 2, t));
+  out.push("");
+  out.push(INDENT + t.dim(allFailed ? `no reader could run, so nothing was read: ${clip(failed[0]?.error ?? "the backend did not answer", t.width - 30, t)}` : r.dropped.length > 0 ? `every sentence was dropped for want of a citation that resolves (${num(r.dropped.length)}).` : (
+    // A third instance of the same frame, found by FIX-G while it was
+    // fixing the second: when the readers DO answer and the
+    // synthesizer legitimately returns an empty result, this said
+    // "the readers found nothing" about readers that found plenty.
+    r.readers.some((x) => x.found) ? "the readers found material, and the answer built from it was empty." : "the readers found nothing that answers the question."
+  )));
   out.push("");
   return out;
 }
@@ -30377,7 +30383,10 @@ filters, one example each \u2014 they compose, and all of them are AND:
       new Option("--concurrency <n>", "model calls in flight at once").argParser(Number).default(ASK_CONCURRENCY)
     ).addOption(
       new Option("--vectors <mode>", "the vector half of the shortlist (default on)").choices(["auto", "on", "off"])
-    ).option("--no-vec", "text search only \u2014 the same as --vectors off").option("--readers-out <path>", "write what the readers would be given to this file; makes no model call").option("--readers-in <path>", "answer from reader outputs recorded in this file, filter and all").option("--synthesis-out <path>", "write the synthesis prompt to this file; makes no model call").option("--filter-in <path>", "filter the answer recorded in this file and print it, cited")
+    ).option("--no-vec", "text search only \u2014 the same as --vectors off").option("--readers-out <path>", "write what the readers would be given to this file; makes no model call").option("--readers-in <path>", "answer from reader outputs recorded in this file, filter and all").option(
+      "--synthesis-out <path>",
+      "with --readers-in: write the synthesis prompt to this file; makes no model call"
+    ).option("--filter-in <path>", "filter the answer recorded in this file and print it, cited")
   ).addHelpText("after", `
 example:
   potsherd ask "how did we handle pgbouncer with prepared statements?"

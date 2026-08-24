@@ -387,7 +387,16 @@ filters, one example each — they compose, and all of them are AND:
       // synthesizer, the citation filter and --strict all run unchanged.
       .option('--readers-out <path>', 'write what the readers would be given to this file; makes no model call')
       .option('--readers-in <path>', 'answer from reader outputs recorded in this file, filter and all')
-      .option('--synthesis-out <path>', 'write the synthesis prompt to this file; makes no model call')
+      // FIX-G C5. The old sentence was `write the synthesis prompt to this
+      // file; makes no model call`, and on its own the flag made six -- one
+      // reader call per shortlisted session, before it had a prompt to write.
+      // The flag now refuses without --readers-in, so the sentence is true;
+      // this names the composition as well, because a reader should learn the
+      // shape from --help rather than discover it from an error.
+      .option(
+        '--synthesis-out <path>',
+        'with --readers-in: write the synthesis prompt to this file; makes no model call',
+      )
       .option('--filter-in <path>', 'filter the answer recorded in this file and print it, cited'),
   ).addHelpText('after', `
 example:

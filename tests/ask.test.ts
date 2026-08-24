@@ -1582,10 +1582,40 @@ describe('the ask block is built to fit 80x24', () => {
     // ...and a run where the readers genuinely answered and found nothing still
     // says so. The distinction is the point; a message that always blamed the
     // backend would be the same defect pointing the other way.
-    const empty: AskResult = { ...r, sentences: [], answer: '', evidence: [] };
+    //
+    // Phase 10, round 4: this half used to assert `found nothing that answers`
+    // against `shape()`, whose reader 0 carries `found: true` — so it was
+    // pinning that sentence over a run in which a reader HAD found material.
+    // That is the same conflation one layer in, and FIX-G found it while
+    // fixing the seam. The assertion moved, not the code: `empty` now really
+    // has readers that found nothing, and the case it used to cover gets its
+    // own sentence below.
+    const empty: AskResult = {
+      ...r,
+      sentences: [],
+      answer: '',
+      evidence: [],
+      readers: r.readers.map((x) => ({ ...x, found: false })),
+    };
     const quiet = stripAnsi(renderAsk(empty, t80, NOW));
     expect(quiet).toContain('found nothing that answers');
     expect(quiet).not.toContain('no reader could run');
+
+    // ...and readers that found material whose synthesis came back empty are a
+    // third fact, not either of the first two. Reachable from the model-free
+    // seam, where the host synthesizer legitimately returns
+    // {"evidence":[],"answer":[]}, and from a backend that declines.
+    const barren: AskResult = {
+      ...r,
+      sentences: [],
+      answer: '',
+      evidence: [],
+      readers: r.readers.map((x, i) => ({ ...x, found: i === 0 })),
+    };
+    const built = stripAnsi(renderAsk(barren, t80, NOW));
+    expect(built).toContain('the readers found material');
+    expect(built).not.toContain('found nothing that answers');
+    expect(built).not.toContain('no reader could run');
   });
 
   it('does not print the same two numbers twice in its footer', () => {
