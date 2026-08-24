@@ -43506,6 +43506,7 @@ function groupThreads(sessions) {
     const lead = members[0];
     const exchanges = members.reduce((n, m) => n + m.exchanges, 0);
     const prompts = members.reduce((n, m) => n + m.prompts, 0);
+    const evidence = threadEvidence(members);
     const started = members.map((m) => m.startedAt).filter(Boolean).sort()[0] ?? null;
     const ended = members.map((m) => m.endedAt).filter(Boolean).sort().pop() ?? null;
     return {
@@ -43566,9 +43567,9 @@ function groupThreads(sessions) {
        * an absent fact must not become a refusal.
        */
       lane: lead.lane ?? "evidence",
-      evidence: threadEvidence(members),
-      citable: (lead.lane ?? "evidence") === "evidence" && threadEvidence(members) !== "not-a-transcript",
-      citation: (lead.lane ?? "evidence") === "routing" || threadEvidence(members) === "not-a-transcript" ? null : mintCitation({
+      evidence,
+      citable: (lead.lane ?? "evidence") === "evidence" && evidence !== "not-a-transcript",
+      citation: (lead.lane ?? "evidence") === "routing" || evidence === "not-a-transcript" ? null : mintCitation({
         sessionId: key,
         kind: lead.kind,
         harness: lead.harness,
@@ -43581,7 +43582,7 @@ function groupThreads(sessions) {
       // same row. A `null` field an agent cannot explain is a field it works
       // around; this one says what would have to happen for a citation to
       // exist, and `potsherd_read` is a tool it actually has.
-      ...threadEvidence(members) === "not-a-transcript" ? {
+      ...evidence === "not-a-transcript" ? {
         citableNote: "nothing here is a transcript: the session title or its card matched, the body did not use those words. Not citable. potsherd_read the thread if you want to know what it actually says."
       } : {}
     };
