@@ -975,6 +975,9 @@ potsherd doctor --privacy · 24 aug 2026
     ~/.gemini/tmp  (absent)
     ~/.local/share/opencode  (absent)
     ~/.copilot/session-state  (absent)
+    potsherd only ever reads these. one directory appears under claude's own
+    projects/ anyway — claude code creates it for the cwd potsherd spawns it
+    in, and it is named under writes.
     …and these, only when you name them with  --with / --to:
     ~/.claude-mem/claude-mem.db
       claude-mem, or wherever CLAUDE_MEM_DATA_DIR points. read-only.
@@ -994,7 +997,11 @@ potsherd doctor --privacy · 24 aug 2026
       your settings: the ignore list, written by potsherd ignore / unignore
     ~/work/demo-project/.potsherd/graft-<id8>.md
       only when you run graft, in the directory you run it in
+    ~/work/demo-project/.potsherd/.gitignore
     <the path you give to  ask --readers-out>
+      only when you pass the flag. it holds the same redacted excerpts a model
+      would have been sent, and no model was called to write it
+    <the path you give to  ask --synthesis-out>
       only when you pass the flag. it holds the same redacted excerpts a model
       would have been sent, and no model was called to write it
     <the dir you give to  export --to markdown>
@@ -1002,6 +1009,13 @@ potsherd doctor --privacy · 24 aug 2026
     <your agentmemory store>  — export --to agentmemory --yes
       rows into another tool's store. never without --yes, and never at all
       unless you asked for that target
+    ~/.claude/projects/<slug of the…h cwd, ending potsherd-llm-cwd>/
+      created by claude code, not by potsherd, because potsherd spawned it
+      there — only on the verbs that call a model, and only when the model is
+      the claude cli. one directory however many calls, because the cwd has a
+      fixed name. it stays empty: potsherd passes --no-session-persistence, so
+      no transcript is written and nothing it creates can be indexed. potsherd
+      never removes it.
 
   writes only after an explicit y at a diff:
     ~/.claude/settings.json
