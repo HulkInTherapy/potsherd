@@ -335,10 +335,34 @@ jobs:
           # --width 80 --no-color on every capture, as make-screens.sh does:
           # these are a fixed 80-column artefact, not whatever the runner's
           # terminal claims to be.
+          #
+          # TZ=UTC, and this is the whole reason this step was red on both
+          # ubuntu jobs the first time it ran. Every date and time on these
+          # screens is rendered with local-time getters (`core/format.ts`), so
+          # a corpus timestamp near midnight renders a day earlier on a UTC
+          # runner than on a laptop at UTC+05:30 — `08-ls`, `11-show` and
+          # `12-ls-ghosts` drifted by one day on some rows and not others. The
+          # corpus is not the problem: it is byte-identical in any zone, its
+          # instants pinned to a literal `ANCHOR` in make-demo-corpus.mjs. It
+          # is the rendering. `scripts/make-screens.sh` pins the same zone at
+          # the top for the same reason, and the two must never disagree.
+          #
+          # POTSHERD_OFFLINE=1 and --no-embed below are not redundant with each
+          # other. `index` spawns a detached, unref'ed background embedder with
+          # no kill path (`cli/src/commands/index.ts:258`, measured in FIX-E
+          # §4): OFFLINE makes that child give up instead of fetching 46.1 MB,
+          # but the parent's decision to spawn never consults it, so a process
+          # is still started and the fourth verifier found five of them alive
+          # with PPID 1 after a handful of runs. `--no-embed` is what stops one
+          # being started at all. A guard must not be a new producer of a lane
+          # the product cannot stop — four matrix jobs, four unowned processes,
+          # every run. Neither flag changes a screen this step compares; both
+          # were checked with and without.
           run() {
             ( cd "$home" \
               && env -u CLAUDE_CONFIG_DIR -u POTSHERD_DIR -u XDG_CONFIG_HOME -u NO_COLOR -u FORCE_COLOR \
-                   HOME="$home" node "$repo/packages/cli/bin/potsherd.js" "$@" --width 80 --no-color )
+                   HOME="$home" POTSHERD_OFFLINE=1 TZ=UTC \
+                   node "$repo/packages/cli/bin/potsherd.js" "$@" --width 80 --no-color )
           }
 
           # The two things on these screens that are real output and legitimately
@@ -364,7 +388,7 @@ jobs:
           check 06-audit-sweep.txt   audit --sweep
           check 02-rescue.txt        rescue --yes
           check 03-audit-after.txt   audit
-          run index --full >/dev/null
+          run index --full --no-embed >/dev/null
           check 08-ls.txt            ls
           check 09-find.txt          find pgbouncer
           check 10-stats.txt         stats

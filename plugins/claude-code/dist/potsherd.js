@@ -8779,6 +8779,7 @@ var ApiTransport = class {
 };
 var liveBackends = /* @__PURE__ */ new Set();
 var FATAL_SIGNALS = ["SIGINT", "SIGTERM"];
+var OUR_SIGNAL_HANDLER = Symbol("potsherd backend signal handler");
 var signalHandlers = /* @__PURE__ */ new Map();
 function killBackendTree(child) {
   const pid = child.pid;
@@ -8809,6 +8810,7 @@ function installSignalHandlers() {
       removeSignalHandlers();
       process8.kill(process8.pid, sig);
     };
+    handler[OUR_SIGNAL_HANDLER] = true;
     signalHandlers.set(sig, handler);
     process8.on(sig, handler);
   }
@@ -16816,9 +16818,18 @@ function freshness(db, root, stat) {
   const file = dbPath(root);
   let dbBytes = 0;
   try {
-    dbBytes = fs27.statSync(file).size;
+    const pageCount = db.pragma("page_count")[0]?.page_count ?? 0;
+    const pageSize = db.pragma("page_size")[0]?.page_size ?? 0;
+    dbBytes = pageCount * pageSize;
   } catch {
     dbBytes = 0;
+  }
+  if (dbBytes === 0) {
+    try {
+      dbBytes = fs27.statSync(file).size;
+    } catch {
+      dbBytes = 0;
+    }
   }
   return {
     lastIndexedAt: db.prepare("SELECT MAX(indexed_at) AS v FROM sessions").get()?.v ?? null,
@@ -27764,6 +27775,7 @@ var CALL_PROFILES2 = {
   }
 };
 var HARNESS_OVERHEAD_USD2 = CALL_PROFILES2["agent-sdk"].baseUsd;
+var OUR_SIGNAL_HANDLER2 = Symbol("potsherd backend signal handler");
 
 // ../core/src/calibration.ts
 var MAX_RATIO2 = 5;

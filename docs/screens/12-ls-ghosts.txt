@@ -6,15 +6,15 @@ potsherd ls · 15 of 299
   19 jul  claude   payments-api    add a feature flag around the cache…   ghost
   18 jul  claude   crm-ingest      turn the rss parser into a backgroun…  ghost
   17 jul  claude   agent-runner    the migration runner regressed after…  ghost
-  17 jul  claude   portfolio-site  add metrics to the event replayer so…  ghost
-  16 jul  claude   infant-vision   review the dead-letter queue for rac…  ghost
+  16 jul  claude   portfolio-site  add metrics to the event replayer so…  ghost
+  15 jul  claude   infant-vision   review the dead-letter queue for rac…  ghost
   15 jul  claude   hive-scheduler  the rss parser leaks a file handle s…  ghost
   14 jul  claude   webhook-relay   port the event replayer to the new c…  ghost
   13 jul  claude   plugin-host     port the auth middleware to the new…   ghost
   12 jul  claude   mesh-router     show me the diff before you write an…  ghost
   11 jul  claude   form-builder    the health check is failing in CI bu…  ghost
   11 jul  claude   chat-widget     commit this with a message that expl…  ghost
-  10 jul  claude   payments-api    show me the diff before you write an…  ghost
+   9 jul  claude   payments-api    show me the diff before you write an…  ghost
    9 jul  claude   payments-api    add input validation to the mock ser…  ghost
 
   299 ghosts, prompts only

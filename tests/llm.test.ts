@@ -18,6 +18,7 @@ import {
   CHARS_PER_TOKEN,
   ESTIMATOR_FIT,
   FATAL_SIGNALS,
+  backendSignalListeners,
   HOST_SEAM_BASIS,
   PIPELINE_COST_FACTOR,
   Llm,
@@ -1998,6 +1999,19 @@ describe('a killed backend takes what it started with it', () => {
     }
   }, 20_000);
 
+  /** How many of `process`'s listeners for each fatal signal are `llm.ts`'s. */
+  const ours = (): number[] => FATAL.map((s) => backendSignalListeners(s));
+
+  /** Wait until `ours()` is `want`, then return whatever it actually is. */
+  async function oursSettlesAt(want: readonly number[]): Promise<number[]> {
+    for (let i = 0; i < 400; i++) {
+      const now = ours();
+      if (now.every((n, k) => n === want[k])) return now;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return ours();
+  }
+
   /**
    * The Ctrl-C half of the same fix, and the reason it is not one listener per
    * child. `process` warns at ten listeners for an event and this suite
@@ -2007,31 +2021,104 @@ describe('a killed backend takes what it started with it', () => {
    * The handler is also required not to outlive the calls: an `llm.ts` that
    * left a SIGINT listener installed would keep changing how a long-running
    * potsherd dies long after the last model call returned.
+   *
+   * **This asks which listeners are ours, and never how many there are.**
+   * It used to take `process.listenerCount(sig)` as a baseline and assert
+   * `baseline + 1`, and that is a test whose premise is its environment
+   * (`09 §7.2` / rule 7): the counter is process-global, vitest runs several
+   * files in one worker, and CI caught it — the baseline sampled at `[1, 1]`
+   * and the assertion read `[0, 0]`, *below where it started*, because
+   * somebody else's `SIGINT` listener was removed while this test was in
+   * flight. Nothing was wrong with the product. `backendSignalListeners`
+   * filters `process.listeners(sig)` by a mark only this module sets, so a
+   * third party's listener cannot move the number in either direction and
+   * there is no baseline left to move.
+   *
+   * Both waits below are for a **state**, not for a duration: that our handler
+   * has appeared, and that all three stubs have actually started. A fixed
+   * `setTimeout` here would be the same class of defect wearing a stopwatch.
    */
   it('installs one signal handler however many backends are live, and takes it back off', async () => {
-    const before = FATAL.map((s) => process.listenerCount(s));
-    const bin = fakeBin('codex', `cat > /dev/null; sleep 2; echo done`);
+    // The precondition, established rather than assumed: an earlier test's
+    // child may still be a beat from its `exit`.
+    expect(await oursSettlesAt([0, 0])).toEqual([0, 0]);
+
+    const started = path.join(scratch('potsherd-fanout-'), 'started');
+    const bin = fakeBin('codex', `echo up >> '${started}'\ncat > /dev/null; sleep 2; echo done`);
     const llms = [0, 1, 2].map(() =>
       Llm.open({ backend: 'codex', env: { ...process.env, PATH: bin }, tmpRoot: scratch() }),
     );
     try {
       const calls = llms.map((l) => l.text({ prompt: 'q' }));
-      // Wait for the first backend to be live rather than for a fixed number
-      // of milliseconds — a spawn is not instant on a loaded machine, and a
-      // sampling point that can land before it is a flake, not a measurement.
-      for (let i = 0; i < 400 && process.listenerCount('SIGINT') === before[0]; i++) {
+      // Three backends genuinely running — each is two seconds into a `sleep`,
+      // so none of them can have gone away before the assertion below.
+      for (let i = 0; i < 400; i++) {
+        const up = fs.existsSync(started)
+          ? fs.readFileSync(started, 'utf8').split('\n').filter(Boolean).length
+          : 0;
+        if (up >= 3) break;
         await new Promise((r) => setTimeout(r, 25));
       }
-      // …then a beat for the other two, which are still inside their `sleep`.
-      await new Promise((r) => setTimeout(r, 600));
-      // Three children alive at once; still one handler per signal.
-      expect(FATAL.map((s) => process.listenerCount(s))).toEqual(before.map((n) => n + 1));
+      expect(
+        fs.readFileSync(started, 'utf8').split('\n').filter(Boolean).length,
+      ).toBeGreaterThanOrEqual(3);
+
+      // Three children alive at once; still exactly one handler per signal.
+      expect(ours()).toEqual([1, 1]);
+
       for (const r of await Promise.all(calls)) expect(r.text).toBe('done');
-      expect(FATAL.map((s) => process.listenerCount(s))).toEqual(before);
+      // And it does not outlive them.
+      expect(await oursSettlesAt([0, 0])).toEqual([0, 0]);
     } finally {
       for (const l of llms) await l.close();
     }
-  }, 20_000);
+  }, 30_000);
+
+  /**
+   * The failure CI found, planted on purpose.
+   *
+   * On `macos / node 24` and `macos / node 22`, under `POTSHERD_SQLITE=node`,
+   * the previous version of the test above sampled a baseline of `[1, 1]` and
+   * then asserted against `[0, 0]` — a *lower* number than it had started
+   * from, because a `SIGINT` listener belonging to something else in that
+   * vitest worker was removed while this file was mid-test. Nothing was wrong
+   * with `llm.ts`.
+   *
+   * So: a listener that is not ours arrives, and another one leaves, while a
+   * backend of ours is live. Neither may move the answer. Against a
+   * `process.listenerCount` baseline this is red by construction — it is the
+   * CI failure, reproduced on demand — and against the mark it cannot be.
+   */
+  it('is not disturbed by listeners that are not ours arriving and leaving', async () => {
+    expect(await oursSettlesAt([0, 0])).toEqual([0, 0]);
+
+    const leaves = (): void => undefined;
+    const arrives = (): void => undefined;
+    for (const sig of FATAL) process.on(sig, leaves);
+
+    const started = path.join(scratch('potsherd-foreign-'), 'started');
+    const bin = fakeBin('codex', `echo up >> '${started}'\ncat > /dev/null; sleep 2; echo done`);
+    const llm = Llm.open({ backend: 'codex', env: { ...process.env, PATH: bin }, tmpRoot: scratch() });
+    try {
+      const call = llm.text({ prompt: 'q' });
+      expect(await oursSettlesAt([1, 1])).toEqual([1, 1]);
+
+      // The event that broke the old assertion: somebody else's listener is
+      // taken away mid-flight. And the mirror image, for the same reason.
+      for (const sig of FATAL) process.removeListener(sig, leaves);
+      for (const sig of FATAL) process.on(sig, arrives);
+      expect(ours()).toEqual([1, 1]);
+
+      expect((await call).text).toBe('done');
+      expect(await oursSettlesAt([0, 0])).toEqual([0, 0]);
+    } finally {
+      for (const sig of FATAL) {
+        process.removeListener(sig, leaves);
+        process.removeListener(sig, arrives);
+      }
+      await llm.close();
+    }
+  }, 30_000);
 });
 
 describe('lastAgentMessage', () => {

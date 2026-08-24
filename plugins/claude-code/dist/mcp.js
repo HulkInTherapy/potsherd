@@ -27263,6 +27263,7 @@ var ApiTransport = class {
 };
 var liveBackends = /* @__PURE__ */ new Set();
 var FATAL_SIGNALS = ["SIGINT", "SIGTERM"];
+var OUR_SIGNAL_HANDLER = Symbol("potsherd backend signal handler");
 var signalHandlers = /* @__PURE__ */ new Map();
 function killBackendTree(child) {
   const pid = child.pid;
@@ -27293,6 +27294,7 @@ function installSignalHandlers() {
       removeSignalHandlers();
       process8.kill(process8.pid, sig);
     };
+    handler[OUR_SIGNAL_HANDLER] = true;
     signalHandlers.set(sig, handler);
     process8.on(sig, handler);
   }

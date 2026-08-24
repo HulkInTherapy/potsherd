@@ -2325,7 +2325,41 @@ const liveBackends = new Set<ChildProcess>();
  * module actually installs rather than against a copy of it.
  */
 export const FATAL_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
-type FatalSignal = (typeof FATAL_SIGNALS)[number];
+export type FatalSignal = (typeof FATAL_SIGNALS)[number];
+
+/**
+ * The mark that says a listener on `process` is one of **ours**.
+ *
+ * `process.listenerCount(sig)` is a process-global number, and this module is
+ * not the only thing in a node process that installs a `SIGINT` listener: the
+ * MCP server installs its own shutdown handler, and under vitest a second test
+ * file in the same worker installs and removes others. A test that counted
+ * would be asserting about its environment rather than about this module
+ * (`09 §7.2` / rule 7), and one did — CI's baseline moved underneath it
+ * *between the sample and the assertion*, so the count read lower than the
+ * value it had started from and the test failed on a machine where nothing was
+ * wrong. So the handlers carry a mark and {@link backendSignalListeners} asks
+ * how many of the listeners `process` is actually holding are this module's.
+ * A third party's listener cannot move that number in either direction.
+ *
+ * A module-local `Symbol()` and deliberately **not** `Symbol.for()`: vitest can
+ * hold two instances of this module in one process, and each instance is
+ * answerable for its own handlers and no one else's.
+ */
+const OUR_SIGNAL_HANDLER = Symbol('potsherd backend signal handler');
+
+type MarkedHandler = (() => void) & { [OUR_SIGNAL_HANDLER]?: true };
+
+/**
+ * How many of the listeners `process` currently holds for `sig` were installed
+ * by this module. The contract is that it is 1 while any backend is live,
+ * whatever the fan-out, and 0 once the last one has settled.
+ */
+export function backendSignalListeners(sig: FatalSignal): number {
+  return process
+    .listeners(sig)
+    .filter((fn) => (fn as MarkedHandler)[OUR_SIGNAL_HANDLER] === true).length;
+}
 
 /**
  * The installed handlers, or empty when none are installed.
@@ -2369,7 +2403,7 @@ function removeSignalHandlers(): void {
 function installSignalHandlers(): void {
   if (signalHandlers.size > 0) return;
   for (const sig of FATAL_SIGNALS) {
-    const handler = (): void => {
+    const handler: MarkedHandler = (): void => {
       // Synchronous, all of it. The MCP server registers its own SIGINT/SIGTERM
       // handler (`packages/mcp/src/index.ts`) which ends in `process.exit`, and
       // node runs listeners in registration order; anything deferred to a later
@@ -2386,6 +2420,7 @@ function installSignalHandlers(): void {
       // installed still runs — this one only adds the kill.
       process.kill(process.pid, sig);
     };
+    handler[OUR_SIGNAL_HANDLER] = true;
     signalHandlers.set(sig, handler);
     process.on(sig, handler);
   }
