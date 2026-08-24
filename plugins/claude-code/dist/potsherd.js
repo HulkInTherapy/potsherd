@@ -17574,8 +17574,10 @@ function ignoreNote2(r, t) {
 function summary(r, t) {
   const parts = [];
   const top = r.total - r.ghosts - r.sidechains;
-  if (top > 0)
-    parts.push(`${num(top)} ${plural(top, "session")}`);
+  if (top > 0) {
+    const onDisk = top + r.threaded;
+    parts.push(r.threaded > 0 ? `${num(top)} of ${num(onDisk)} ${plural(onDisk, "session")}` : `${num(top)} ${plural(top, "session")}`);
+  }
   if (r.sidechains > 0)
     parts.push(`${num(r.sidechains)} sidechains`);
   if (r.rolledUp > 0)
