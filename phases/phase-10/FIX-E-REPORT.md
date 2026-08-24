@@ -354,9 +354,9 @@ regenerated screen the same step exits 0 and prints
 
 | | |
 |---|---|
-| files changed vs `cd55cb8` | **6** — 1 source, 1 test, `docs/screens/13-find-redacted.txt`, `.github/workflows/ci.yml`, 2 vendored bundles |
-| diff | `+535 / −11` |
-| **effective code lines** (comments and blanks excluded) | `llm.ts` **49** · `llm.test.ts` **111** · `ci.yml` **+97 lines, 38 of them not comment** |
+| files changed vs `cd55cb8` | **6** besides this report — 1 source, 1 test, `docs/screens/13-find-redacted.txt`, `.github/workflows/ci.yml`, 2 vendored bundles |
+| diff | `+540 / −11`, this report excluded |
+| **effective code lines** (comments and blanks excluded) | `llm.ts` **49** · `llm.test.ts` **112** · `ci.yml` **96 lines added, 45 of them not comment** |
 | `pnpm test` | `Test Files 53 passed (53)` / **`Tests 1893 passed (1893)`** — was 1,890, **+3 new, 0 regressions** |
 | `pnpm typecheck` | **4 of 4** packages `Done`, exit 0 |
 | `python3 scripts/check-privacy.py` | **EXIT CODE 0** *(read from `$?`; its last line is the id-inventory caveat, not a verdict)*, and `--selftest` exit 0 |
