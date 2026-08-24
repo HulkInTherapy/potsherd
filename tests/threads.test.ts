@@ -5,11 +5,13 @@ import {
   db as store,
   indexAll,
   listSessions,
+  renderLs,
   renderShow,
   showSession,
   Theme,
   type Db,
 } from '@potsherd/core';
+import { stripAnsi } from '../packages/core/src/theme.js';
 import {
   MIN_SHARED_RECORDS,
   OVERLAP_THRESHOLD,
@@ -546,6 +548,72 @@ describe('the thread is the unit', () => {
       // still the last activity, which is the session's own.
       expect(row.startedAt!.slice(0, 10)).toBe('2026-08-12');
       expect(row.endedAt!.slice(0, 10)).toBe('2026-08-20');
+    } finally {
+      db.close();
+    }
+  });
+
+  /**
+   * **VERIFICATION-5 C-3, pinned** — and the reason it is pinned here is the
+   * fifth verifier's most damning measurement: its own two-line CLI/MCP fix
+   * left 1,931 tests passing *before and after*, because nothing asserted the
+   * field it changed. C-3 was in exactly that position — `ls` printed
+   * `1 session` where `doctor` and `stats` printed `31`, on three published
+   * screenshots, and the only guard on the fix was the CI screen diff.
+   *
+   * The screen diff is a good guard and it is not this one: it pins the demo
+   * corpus, at one width, in one shape. This pins the *rule* — a listing that
+   * folds rows into a thread says how many sessions its rows stand for — on a
+   * two-session chain, where the number is small enough to read.
+   */
+  it('ls says how many sessions the one row stands for', async () => {
+    const { claudeDir, root } = scratch();
+    writeChain(claudeDir, {
+      parentId: ID.parent,
+      childId: ID.child,
+      parentPairs: 10,
+      copiedRecords: 20,
+      ownPairs: 3,
+    });
+    const { db } = await index(claudeDir, root);
+    try {
+      const result = listSessions(db, {}, { limit: 10 });
+      // The premise, established rather than assumed: one row, one folded.
+      expect(result.sessions).toHaveLength(1);
+      expect(result.threaded).toBe(1);
+
+      const screen = stripAnsi(renderLs(result, new Theme({ width: 80, color: false })));
+      // 1 row for 2 sessions — the number `doctor` and `stats` count.
+      expect(screen).toContain('1 of 2 sessions');
+      // And not the sentence that was wrong: `1 session` as a whole claim,
+      // which is what silently dropped the folded one.
+      expect(screen).not.toMatch(/\n\s+1 session\b/);
+    } finally {
+      db.close();
+    }
+  });
+
+  /**
+   * The other half of the same rule: an archive with nothing folded must print
+   * exactly what it always printed. `n of n sessions` on every listing would be
+   * a worse screen than the one this replaced.
+   */
+  it('says nothing about threads when no row folds one', async () => {
+    const { claudeDir, root } = scratch();
+    writeChain(claudeDir, {
+      parentId: ID.parent,
+      childId: ID.child,
+      parentPairs: 10,
+      copiedRecords: 0,
+      ownPairs: 3,
+    });
+    const { db } = await index(claudeDir, root);
+    try {
+      const result = listSessions(db, {}, { limit: 10 });
+      expect(result.threaded).toBe(0);
+      const screen = stripAnsi(renderLs(result, new Theme({ width: 80, color: false })));
+      expect(screen).toContain('2 sessions');
+      expect(screen).not.toContain(' of ');
     } finally {
       db.close();
     }

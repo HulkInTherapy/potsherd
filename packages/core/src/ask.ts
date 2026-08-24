@@ -245,6 +245,25 @@ export interface AskEvidence {
   isGhost: boolean;
 }
 
+/**
+ * {@link AskResult.searched}: the shortlist minus the readers that errored.
+ *
+ * A free function rather than an inline expression because **two** paths
+ * construct a result — the early return when nothing answered, and the full
+ * one — and FIX-J's finding was that a fact recorded in one place and re-derived
+ * in another is a fact two doors will eventually disagree about. `readers` is a
+ * sparse array while the run is in flight; a slot that is not there yet is a
+ * reader that has not failed.
+ */
+export function sessionsRead(
+  shortlisted: number,
+  readers: readonly (AskReaderReport | undefined)[],
+): number {
+  let failed = 0;
+  for (const r of readers) if (r?.error) failed += 1;
+  return Math.max(0, shortlisted - failed);
+}
+
 /** `cites` index into {@link AskResult.evidence}. Never empty on a kept sentence. */
 export interface AskSentence {
   text: string;
@@ -306,7 +325,27 @@ export interface AskResult {
   trimmed: string[];
   evidence: AskEvidence[];
   openThreads: OpenThread[];
-  /** Sessions actually read by a reader. */
+  /**
+   * Sessions a reader actually read: the shortlist minus the readers that
+   * errored.
+   *
+   * **FIX-J §4.1, and it used to be `targets.length`** — the shortlist handed
+   * *to* readers, whether or not any of them answered. On a run with no
+   * reachable backend that made `ask`'s own screen contradict itself twice in
+   * six lines: `nothing was read — all 4 readers failed`, then `4 of 4 sessions
+   * read`, then `4 readers did not answer · not counted as searched` asserting
+   * the exclusion the number above it had not made. A reader that errored read
+   * nothing, and this verb has no other reader.
+   *
+   * FIX-J round 1 fixed the printed line in `render/ask.ts` and left this
+   * field, so `--json` and the terminal disagreed by exactly the number of
+   * failed readers — the F2 family, one door over. This is that closed at the
+   * source: **both doors now read the same number off this field**, and
+   * `render/ask.ts` subtracts nothing.
+   *
+   * `readers[].error` is where a failure is recorded, and `matching` is
+   * unchanged: it is what the shortlist was drawn from, not what was read.
+   */
   searched: number;
   /** Sessions that matched before the k cap. */
   matching: number;
@@ -1427,8 +1466,12 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
       .map((out, i) => ({ out, t: targets[i]! }))
       .filter((x): x is { out: AskReaderOutput; t: Target } => Boolean(x.out?.found));
 
+    // `sessionsRead`, not `targets.length`, on both of the two paths that
+    // construct a result — this one and the full return below. See
+    // {@link AskResult.searched}. The all-readers-failed run reaches *this*
+    // one, so it is the load-bearing of the two.
     const base = (extra: Partial<AskResult>): AskResult =>
-      empty({ searched: targets.length, readers: readers.filter(Boolean), ...extra });
+      empty({ searched: sessionsRead(targets.length, readers), readers: readers.filter(Boolean), ...extra });
 
     if (answered.length === 0) {
       return base({ refused: strict, refusal: strict ? 'no-answer' : null });
@@ -1507,7 +1550,7 @@ export async function ask(db: Db, question: string, o: AskOptions = {}): Promise
       trimmed: refused ? [] : filtered.trimmed,
       evidence: refused ? [] : filtered.evidence,
       openThreads,
-      searched: targets.length,
+      searched: sessionsRead(targets.length, readers),
       matching,
       readers: readers.filter(Boolean),
       refused,
