@@ -357,6 +357,15 @@ function statementsCompile(db: Db, name: string): boolean {
  * The sentence for a stranded vec0 index — and it must name a command that
  * runs, because the whole finding is that the old one did not.
  *
+ * **The command comes first, and that is a measurement, not a preference.**
+ * `doctor`'s note column is 43 characters at width 80 and 63 at its maximum, and
+ * a row is elided from the right. Written the other way round — *"a vec0 index
+ * written by potsherd 1.1.0 — run potsherd index"* — a real `doctor` printed
+ * `a vec0 index written by potsherd 1.1.0 — r…` at *both* widths, which is the
+ * `plans/04` truncation defect in its worst form: the clause that survives is
+ * the one the reader can do nothing with. The verb is 18 characters and fits
+ * everywhere, so it leads and the explanation is what gets dropped.
+ *
  * The ordinary case is the first: the database has not been opened for writing
  * since the upgrade, `doctor` opens read-only and therefore never migrates, and
  * `potsherd index` is the verb that converts it. The second only appears after
@@ -366,8 +375,7 @@ function statementsCompile(db: Db, name: string): boolean {
  */
 function strandedReason(db: Db): string {
   return (
-    declines.get(db) ??
-    'a vec0 index written by potsherd 1.1.0 — run potsherd index to convert it'
+    declines.get(db) ?? 'run potsherd index — it converts a vec0 store written by 1.1.0'
   );
 }
 
@@ -647,14 +655,13 @@ export function migrateToPortableVectors(db: Db): boolean {
       if (!copyVectorsAcross(db, table)) stranded.push(table);
     }
   } catch {
-    return decline(db, 'a vec0 index written by potsherd 1.1.0 that could not be read or converted');
+    return decline(db, 'run POTSHERD_SQLITE=node potsherd index — this vec0 store could not be read');
   }
 
   if (stranded.length > 0 && !detachStranded(db, stranded)) {
     return decline(
       db,
-      'a vec0 index written by potsherd 1.1.0 — this sqlite will not rewrite a schema; ' +
-        'run POTSHERD_SQLITE=node potsherd index',
+      'run POTSHERD_SQLITE=node potsherd index — this sqlite will not rewrite a schema',
     );
   }
 

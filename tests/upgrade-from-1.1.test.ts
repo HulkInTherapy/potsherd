@@ -359,10 +359,17 @@ describe('doctor, on a database it can see is stranded and cannot repair itself'
     // in flight — so it is the one verb that sees this state and never clears
     // it. It used to print `schema v9 of v12 · run potsherd index` on the one
     // database where `potsherd index` was the command that crashed.
+    //
+    // Both rows are asserted **with their prefix**, because the note column is
+    // 43 characters at width 80 and elides from the right: an earlier draft of
+    // this sentence put the command last, `doctor` printed
+    // `a vec0 index written by potsherd 1.1.0 — r…`, and a bare
+    // `/run potsherd index/` passed anyway — off the *record types* header
+    // further down the same screen. A regex that can match another line is not
+    // an assertion about this one.
     const before = cli(['doctor', '--potsherd-dir', root]);
-    expect(before.stdout).toMatch(/schema v9 of v12/);
-    expect(before.stdout).toMatch(/vec0 index written by potsherd 1\.1\.0/);
-    expect(before.stdout).toMatch(/run potsherd index/);
+    expect(before.stdout).toMatch(/schema v9 of v12 {2}· run potsherd index/);
+    expect(before.stdout).toMatch(/\n {2}vectors +\d+ +run potsherd index — it converts a vec0 st/);
 
     // And the sentence is true: the command it named is the one that works.
     const fix = cli([
@@ -379,6 +386,6 @@ describe('doctor, on a database it can see is stranded and cannot repair itself'
 
     const after = cli(['doctor', '--potsherd-dir', root]);
     expect(after.stdout).toMatch(/schema v12 of v12/);
-    expect(after.stdout).not.toMatch(/vec0 index written by potsherd 1\.1\.0/);
+    expect(after.stdout).not.toMatch(/converts a vec0 store/);
   });
 });

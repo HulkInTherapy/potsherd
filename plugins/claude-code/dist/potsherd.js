@@ -4437,7 +4437,7 @@ function statementsCompile(db, name) {
   }
 }
 function strandedReason(db) {
-  return declines.get(db) ?? "a vec0 index written by potsherd 1.1.0 \u2014 run potsherd index to convert it";
+  return declines.get(db) ?? "run potsherd index \u2014 it converts a vec0 store written by 1.1.0";
 }
 function vecTableUsable(db, table2 = "vec_exchanges") {
   if (!loadVec(db).available)
@@ -4574,10 +4574,10 @@ function migrateToPortableVectors(db) {
         stranded.push(table2);
     }
   } catch {
-    return decline(db, "a vec0 index written by potsherd 1.1.0 that could not be read or converted");
+    return decline(db, "run POTSHERD_SQLITE=node potsherd index \u2014 this vec0 store could not be read");
   }
   if (stranded.length > 0 && !detachStranded(db, stranded)) {
-    return decline(db, "a vec0 index written by potsherd 1.1.0 \u2014 this sqlite will not rewrite a schema; run POTSHERD_SQLITE=node potsherd index");
+    return decline(db, "run POTSHERD_SQLITE=node potsherd index \u2014 this sqlite will not rewrite a schema");
   }
   db.exec(EXCHANGE_STORE);
   db.exec(GHOST_STORE);
@@ -25914,7 +25914,7 @@ async function runDoctor(o) {
     {
       label: "database",
       value: "",
-      note: dbExists ? `schema v${schema} of v${db_exports.latestSchemaVersion()}${schemaNote(schema, vec)}` : "not created yet \u2014 run potsherd rescue"
+      note: dbExists ? `schema v${schema} of v${db_exports.latestSchemaVersion()}${schemaNote(schema, vec, card.noteWidth())}` : "not created yet \u2014 run potsherd rescue"
     },
     { label: "sqlite", value: "", note: sqliteNote() }
   ]);
@@ -26206,10 +26206,13 @@ function sqliteNote() {
   if (kind === "node:sqlite") return "node:sqlite \u2014 Node's own, no install needed";
   return "none \u2014 nothing that reads the index can run";
 }
-function schemaNote(schema, vec) {
+function schemaNote(schema, vec, room) {
   if (schema >= db_exports.latestSchemaVersion()) return "";
+  const head = `schema v${schema} of v${db_exports.latestSchemaVersion()}  \xB7 `;
   if (vec.legacy && vec.legacy.length > 0) {
-    return `  \xB7 ${vec.reason ?? "a vec0 index from potsherd 1.1.0 \u2014 run potsherd index to convert it"}`;
+    const command = (vec.reason ?? "run potsherd index").split(" \u2014 ")[0] ?? "run potsherd index";
+    if (head.length + command.length <= room) return `  \xB7 ${vec.reason ?? command}`;
+    return "  \xB7 a vec0 index from potsherd 1.1.0";
   }
   if (vec.reason && /vec0|extension/i.test(vec.reason)) {
     return "  \xB7 a vec0 index this machine can no longer read";
