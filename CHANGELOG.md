@@ -146,11 +146,11 @@ The absolute floor becomes a **ratchet** at its measured value: it may tighten,
 never loosen. And per-query pass/fail is pinned, so a regression **names the query
 that fell** rather than only how many did.
 
-### what four independent verifications changed
+### what five independent verifications changed
 
 Every fix above was re-scored by a verifier that authored none of it, against the
-audit's own rubric, on the real archive. Four rounds: **4 → 6 → 7 → 7**. Three of
-those are FAILs on the record; no criterion was moved to meet a number. What the
+audit's own rubric, on the real archive, scoring it **4 → 6 → 7 → 7 → …** —
+every FAIL kept on the record, and no criterion moved to meet a number. What the
 rounds found, and what changed because of it:
 
 - **`potsherd_read` could not see a thread, in the release that claims to fix
@@ -198,7 +198,67 @@ rounds found, and what changed because of it:
   with the first live child and removed with the last — kills every tree and
   re-raises, so potsherd still dies of the signal and a shell still reads 130.
 
+- **The model door said "semantic search is warming" when nothing was
+  warming.** After `index --no-embed`, or on any offline first run, with no
+  worker alive and the model directory never created — in the same reply that
+  told the agent the archive did not contain what it had asked for. So an agent
+  was told to wait for a half that would never run. The lock file has always
+  carried the worker's pid; `git grep` for it found **one line in the whole
+  product**, deciding whether to spawn. `doctor`, `index`, `find` and both model
+  tools now read one flag derived from that lock, and say `not running` when
+  nothing is.
+- **A session that matched only on its title was citable, and outranked the
+  transcripts.** On one real query, eighteen of twenty-eight hits were not
+  transcripts and the first one that was sat at position eighteen; five of ten
+  threads matched on nothing but their title, and each carried a ready-made
+  citation. Claude Code writes those titles with a model, so a citation for one
+  is a citation for a summary of a session nobody read. A summary-only result is
+  capped, sorted behind anything with transcript evidence, and carries no
+  citation at all. Afterwards the first transcript hit is position one, and the
+  page carries eight threads with real evidence instead of five. Agents also get
+  the `--no-cards` control the terminal has always had.
+- **Asking for context could return nothing at all.** An exchange longer than the
+  whole token budget was skipped rather than clipped, so a reply said it had
+  matched, contained no text, and withheld the one sentence worth printing —
+  *read the thread*. It is clipped and marked now.
+- **The model-free seam reported a capability failure as an empty archive.** If a
+  host agent stored its model's answer as JSON text rather than as a JSON object
+  — which is what a model returns, and what potsherd's own instruction invited —
+  the run said *"the readers found nothing that answers the question"* and
+  printed *"1 answered"* on the next line. The honest empty is what this release
+  asks an agent to trust, so a failure wearing its clothes is the one bug that
+  poisons the rest. Text is parsed and checked exactly as an object is; anything
+  genuinely unusable is refused **by name**, and never reported as an absence.
+  The instruction that caused it is rewritten, and now travels inside the file
+  as well as on the screen, because an agent handed a path never sees a terminal.
+- **`--synthesis-out` said it made no model call and made six.** It now refuses
+  unless the readers are already recorded, which is the composition that is
+  genuinely free. **This changes what the flag does**: a script calling it alone
+  used to get a file and six calls, and now gets an error naming the two
+  commands that produce the same file for nothing.
+- **`ask` blamed the archive for a dead backend.** `no grounded answer in 6
+  sessions searched` was the headline over a run in which no session was read at
+  all. An earlier release fixed the line beneath it and left the headline, which
+  is the line a reader acts on.
+
 ### the guards that let those through
+
+- **Another project's git tags were sitting in this checkout, and one of them
+  held the name of this release.** The repository fetches `obra/episodic-memory`
+  on purpose, for the upstream comparison, and twenty-three of its tags had
+  landed under plain `v*` names — including a `v1.2.0`. The test that checks the
+  version is not behind the newest tag counted every tag the checkout held; it
+  counts only this repository's now.
+- **A published screen pinned a number that was not a property of anything.**
+  `stats` reported the database size with a filesystem call on a write-ahead-log
+  store, which answers *how much has been checkpointed*: measured with one writer
+  holding the log, it reported 4,096 bytes for a database holding 442,368. It
+  measures the database now — and the remaining wobble, which is real, is normalised in the
+  check rather than published as if it were stable.
+- **The screen-capture script raced its own background worker.** Two screens
+  showed a semantic-search line only if an embedding worker happened to still be
+  alive when they were taken, so CI compared them in a state they had never been
+  captured in. The script waits for the lane, and kills the worker it started.
 
 - **A published screen still printed an instruction the product had deleted**,
   because CI diffed two of seventeen screens against a live run. Ten are diffed
