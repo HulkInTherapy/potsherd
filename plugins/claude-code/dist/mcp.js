@@ -24110,13 +24110,30 @@ function vectorNote(r, opts = {}) {
         ],
         tone: "ok"
       };
+    // VERIFICATION-5 C-6 — the second branch used to read `working` not at all,
+    // so `doctor` printed one sentence for two different states:
+    //
+    //     no worker, 1,800 pending    vectors — 0 of 1,800 · 46.1 MB runtime not fetched yet
+    //     worker alive, lock held     vectors — 0 of    22 · 32.4 MB runtime not fetched yet
+    //
+    // and the moment a user is most likely to run `doctor` to ask *is anything
+    // happening* is the first run of a fresh install, which is exactly this
+    // branch. During the multi-minute acquisition there **is** work in flight
+    // and the honest word is not "not running"; after a killed or failed fetch
+    // there is not. `find` and `potsherd_recall` already separated the two, so
+    // FIX-F C2's claim that one flag drives all four surfaces was true of three.
+    // `undefined` keeps the old wording for the old reason: a caller who could
+    // not ask must not be made to claim.
     case "pending":
       return {
         value: dash,
         parts: r.runtimeReady ? [
           r.working === false ? `not running, 0 of ${num2(r.total)}` : `warming 0 of ${num2(r.total)}`,
           runtime
-        ] : [`0 of ${num2(r.total)}`, `${bytes2(r.acquireBytes)} runtime not fetched yet`],
+        ] : [
+          `0 of ${num2(r.total)}`,
+          r.working === true ? `fetching the ${bytes2(r.acquireBytes)} runtime` : r.working === false ? `not running \u2014 ${bytes2(r.acquireBytes)} runtime not fetched` : `${bytes2(r.acquireBytes)} runtime not fetched yet`
+        ],
         tone: "dim"
       };
     case "empty":
@@ -24146,6 +24163,7 @@ import fs3 from "node:fs";
 import path3 from "node:path";
 import process6 from "node:process";
 var STALE_MS = 5 * 6e4;
+var LIVE_STALE_MS = 10 * 6e4;
 function lockPathFor(root, lane) {
   return path3.join(root, lane === "embed" ? ".lock.embed" : ".lock");
 }
@@ -24158,12 +24176,17 @@ function readOwner(lockPath) {
 }
 function isStale(lockPath, holder2) {
   if (holder2 && holder2.pid && (!holder2.host || holder2.host === (process6.env.HOSTNAME ?? ""))) {
-    return !pidAlive(holder2.pid);
+    if (!pidAlive(holder2.pid))
+      return true;
+    return ageMs(lockPath) > LIVE_STALE_MS;
   }
+  return ageMs(lockPath) > STALE_MS;
+}
+function ageMs(lockPath) {
   try {
-    return Date.now() - fs3.statSync(lockPath).mtimeMs > STALE_MS;
+    return Date.now() - fs3.statSync(lockPath).mtimeMs;
   } catch {
-    return true;
+    return Number.POSITIVE_INFINITY;
   }
 }
 function holder(opts = {}) {
