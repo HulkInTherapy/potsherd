@@ -6,8 +6,9 @@
 # gitignored — so `node` died with a module-not-found stack trace before the
 # server ever spoke MCP, every tool vanished from the client, and the only
 # symptom was a tool list that was simply shorter. `session-archaeologist`,
-# whose `tools:` are five `mcp__plugin_potsherd_potsherd__*` entries plus
-# `Read`, was left holding `Read` and answered "not found" to everything.
+# whose `tools:` line is two `mcp__plugin_potsherd_potsherd__*` entries and
+# nothing else since T10.6, was left with no tools at all and answered
+# "not found" to everything.
 #
 # An MCP server that fails to start is invisible by design, so the least this
 # can do is put a sentence a human can act on into the server log instead of a
