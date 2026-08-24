@@ -411,44 +411,23 @@ function headline(r: AskResult, t: Theme): string {
 
 /** The second line: what was read, how long it took, what it cost. */
 /**
- * How many of the shortlisted sessions a reader actually **read** — C-9.
+ * `r.searched` is read straight, and that is the point — FIX-J §4.1.
  *
- * `AskResult.searched` is `targets.length`: the sessions handed to a reader,
- * whether or not one answered. On a run with no reachable backend that made
- * this screen contradict itself twice in six lines —
+ * Round 1 of this fix computed the honest number here, in the renderer,
+ * because `AskResult.searched` was the shortlist handed to readers rather than
+ * what a reader read: on a dead backend the screen said `nothing was read` and
+ * `4 of 4 sessions read` three lines apart. That fixed the terminal and left
+ * `--json` saying the old thing — the same two-doors-disagree defect, moved.
  *
- * ```
- *   nothing was read — all 4 readers failed
- *   4 of 4 sessions read · 0 answered · 6.4s
- *   4 readers did not answer · not counted as searched
- * ```
- *
- * — the headline saying nothing was read, the counts saying all four were, and
- * the note under them asserting the very exclusion the counts had not made.
- * The headline is the true one: a reader that errored read nothing, and the
- * verb has no other reader.
- *
- * So the count is the shortlist minus the readers that errored, which is the
- * number the note below it already promised. A run where no reader is recorded
- * at all — the `--filter-in` seam, where the host agent did the reading — keeps
- * `searched`, because there is no per-reader outcome to subtract.
- *
- * **The residue, deliberately left:** `--json` still serialises `searched: 4`
- * for the run above, so the machine-readable door and the human one now differ
- * by exactly the number of failed readers. Closing that means changing
- * `searched` in `packages/core/src/ask.ts`, which is outside this fix's remit;
- * the patch is written out in `phases/phase-10/FIX-J-REPORT.md` §4.
+ * `ask.ts` now records it once, at the source (see {@link AskResult.searched}),
+ * and the local helper that used to live here is **deleted rather than kept as
+ * a second source of truth**: a renderer that subtracted again would print
+ * `-4 of 4` the day the field became right.
  */
-function sessionsRead(r: AskResult): number {
-  if (r.readers.length === 0) return r.searched;
-  const failed = r.readers.filter((x) => x.error).length;
-  return Math.max(0, r.searched - failed);
-}
-
 function counts(r: AskResult, t: Theme): string {
   const answered = r.readers.filter((x) => x.found).length;
   const parts = [
-    `${f.num(sessionsRead(r))} of ${f.num(r.matching)} ${f.plural(r.matching, 'session')} read`,
+    `${f.num(r.searched)} of ${f.num(r.matching)} ${f.plural(r.matching, 'session')} read`,
     `${f.num(answered)} answered`,
     f.duration(r.ms),
   ];
@@ -596,7 +575,27 @@ function why(r: AskResult, answered: number, t: Theme): string {
 /** Not strict, and everything the model wrote was dropped. */
 function nothing(r: AskResult, t: Theme): string[] {
   const out: string[] = [];
-  if (r.searched === 0) {
+  // **"Nothing matched" is `no reader ran at all`, not `searched === 0`.**
+  //
+  // This branch used to test `r.searched === 0`, which was safe only while
+  // `searched` meant "sessions handed to a reader" — it could not be 0 with a
+  // shortlist. FIX-J §4.1 made it mean "sessions a reader read", and the first
+  // real run under a backend that is not logged in came back
+  //
+  //   nothing in the index matches "what did we decide about the pooler".
+  //   0 of 58 sessions read · 0 answered · 998ms
+  //   4 readers did not answer · not counted as searched
+  //
+  // — an archive-shaped empty over a capability failure, which is precisely
+  // the frame VERIFICATION-4 §C7 removed and the third place it has appeared.
+  // Caught by running both doors of the same `ask` side by side rather than by
+  // a test, which is why this comment exists.
+  //
+  // The premise this branch actually wants is that **no reader ran**:
+  // `ask.ts` returns early with `readers: []` when the shortlist is empty, and
+  // every path that reaches a reader records one. `searched === 0` alone is now
+  // ambiguous; the two together are not.
+  if (r.searched === 0 && r.readers.length === 0) {
     out.push(INDENT + f.clip(`nothing in the index matches ${JSON.stringify(r.question)}.`, t.width - 2, t));
     out.push('');
     out.push(INDENT + t.dim('run') + '  potsherd find  ' + t.dim('to check the shortlist, or  potsherd index'));
@@ -624,14 +623,13 @@ function nothing(r: AskResult, t: Theme): string[] {
       f.clip(
         allFailed
           ? `nothing was read — all ${f.num(r.readers.length)} ${f.plural(r.readers.length, 'reader')} failed`
-          : // `sessionsRead`, not `searched`, for the reason C-9 gives: on a
-            // run where two of six readers died, "no grounded answer in 6
-            // sessions searched" is a claim about four sessions nobody read.
-            // `r.searched === 0` above stays `searched` — that branch is "the
-            // shortlist was empty", which is a different fact and the one the
-            // round-4 fix was careful to keep separate from a capability
-            // failure.
-              `no grounded answer in ${f.num(sessionsRead(r))} ${f.plural(sessionsRead(r), 'session')} searched`,
+          : // `searched` now excludes the readers that errored (FIX-J §4.1), so
+            // "no grounded answer in 6 sessions searched" can no longer be a
+            // claim about four sessions nobody read. The `r.searched === 0`
+            // branch above is untouched and means something else — "the
+            // shortlist was empty" — which round 4 was careful to keep separate
+            // from a capability failure, and which is still reached first.
+              `no grounded answer in ${f.num(r.searched)} ${f.plural(r.searched, 'session')} searched`,
         t.width - 2,
         t,
       ),

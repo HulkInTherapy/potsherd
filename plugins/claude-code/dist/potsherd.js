@@ -20899,6 +20899,13 @@ var ASK_SCAN = 50;
 var ANSWER_MAX_WORDS = 150;
 var STRICT_MIN_EVIDENCE = 2;
 var MIN_QUOTE_CHARS = 16;
+function sessionsRead(shortlisted, readers) {
+  let failed = 0;
+  for (const r of readers)
+    if (r?.error)
+      failed += 1;
+  return Math.max(0, shortlisted - failed);
+}
 function normaliseQuote(s) {
   return normaliseIndexed(s).text;
 }
@@ -21293,7 +21300,7 @@ async function ask(db, question, o = {}) {
       }
     })));
     const answered = outputs.map((out, i) => ({ out, t: targets[i] })).filter((x) => Boolean(x.out?.found));
-    const base2 = (extra) => empty({ searched: targets.length, readers: readers.filter(Boolean), ...extra });
+    const base2 = (extra) => empty({ searched: sessionsRead(targets.length, readers), readers: readers.filter(Boolean), ...extra });
     if (answered.length === 0) {
       return base2({ refused: strict, refusal: strict ? "no-answer" : null });
     }
@@ -21341,7 +21348,7 @@ async function ask(db, question, o = {}) {
       trimmed: refused ? [] : filtered.trimmed,
       evidence: refused ? [] : filtered.evidence,
       openThreads,
-      searched: targets.length,
+      searched: sessionsRead(targets.length, readers),
       matching: matching2,
       readers: readers.filter(Boolean),
       refused,
@@ -21871,16 +21878,10 @@ function headline3(r, t) {
   const parts = [`potsherd ask ${JSON.stringify(r.question)}`];
   return clip(parts.join(` ${t.sep} `), t.width, t);
 }
-function sessionsRead(r) {
-  if (r.readers.length === 0)
-    return r.searched;
-  const failed = r.readers.filter((x) => x.error).length;
-  return Math.max(0, r.searched - failed);
-}
 function counts(r, t) {
   const answered = r.readers.filter((x) => x.found).length;
   const parts = [
-    `${num(sessionsRead(r))} of ${num(r.matching)} ${plural(r.matching, "session")} read`,
+    `${num(r.searched)} of ${num(r.matching)} ${plural(r.matching, "session")} read`,
     `${num(answered)} answered`,
     duration(r.ms)
   ];
@@ -21953,7 +21954,7 @@ function why(r, answered, t) {
 }
 function nothing(r, t) {
   const out = [];
-  if (r.searched === 0) {
+  if (r.searched === 0 && r.readers.length === 0) {
     out.push(INDENT + clip(`nothing in the index matches ${JSON.stringify(r.question)}.`, t.width - 2, t));
     out.push("");
     out.push(INDENT + t.dim("run") + "  potsherd find  " + t.dim("to check the shortlist, or  potsherd index"));
@@ -21963,14 +21964,13 @@ function nothing(r, t) {
   const failed = r.readers.filter((x) => x.error);
   const allFailed = r.readers.length > 0 && failed.length === r.readers.length;
   out.push(INDENT + clip(allFailed ? `nothing was read \u2014 all ${num(r.readers.length)} ${plural(r.readers.length, "reader")} failed` : (
-    // `sessionsRead`, not `searched`, for the reason C-9 gives: on a
-    // run where two of six readers died, "no grounded answer in 6
-    // sessions searched" is a claim about four sessions nobody read.
-    // `r.searched === 0` above stays `searched` — that branch is "the
-    // shortlist was empty", which is a different fact and the one the
-    // round-4 fix was careful to keep separate from a capability
-    // failure.
-    `no grounded answer in ${num(sessionsRead(r))} ${plural(sessionsRead(r), "session")} searched`
+    // `searched` now excludes the readers that errored (FIX-J §4.1), so
+    // "no grounded answer in 6 sessions searched" can no longer be a
+    // claim about four sessions nobody read. The `r.searched === 0`
+    // branch above is untouched and means something else — "the
+    // shortlist was empty" — which round 4 was careful to keep separate
+    // from a capability failure, and which is still reached first.
+    `no grounded answer in ${num(r.searched)} ${plural(r.searched, "session")} searched`
   ), t.width - 2, t));
   out.push("");
   out.push(INDENT + t.dim(allFailed ? `no reader could run, so nothing was read: ${clip(failed[0]?.error ?? "the backend did not answer", t.width - 30, t)}` : r.dropped.length > 0 ? `every sentence was dropped for want of a citation that resolves (${num(r.dropped.length)}).` : (
