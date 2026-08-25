@@ -631,6 +631,14 @@ export interface ThreadResolution {
   exchanges: number;
   /** Set when the reference matched more than one thread it could mean. */
   ambiguous?: SessionCandidate[];
+  /**
+   * The subagent transcripts this reference also matched, when a parent uuid
+   * was taken over its own children. VERIFICATION-8 C8-1: carried through for
+   * the same reason {@link ThreadResolution.ambiguous} is — the caller is the
+   * layer that knows how to say it, and saying nothing is what made
+   * `show`'s *"any unambiguous prefix"* false.
+   */
+  collapsed?: SessionCandidate[];
 }
 
 export function resolveThread(db: Db, ref: string): ThreadResolution | null {
@@ -645,5 +653,6 @@ export function resolveThread(db: Db, ref: string): ThreadResolution | null {
     endedAt: totals.endedAt,
     exchanges: totals.exchanges,
     ...(found.ambiguous ? { ambiguous: found.ambiguous } : {}),
+    ...(found.collapsed ? { collapsed: found.collapsed } : {}),
   };
 }

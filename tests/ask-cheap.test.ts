@@ -133,7 +133,7 @@ describe('one line per reader, as it returns', () => {
     const t = new Theme({ color: false, width: 80 });
     // The id column is 11 wide, not 8: a sidechain reader prints
     // `<parent>↳<tag>`, because `idTag` alone returns `01` for an id like
-    // `<uuid>:agent-01` and `01` is not something a reader can pass to
+    // `<uuid>:agent-<tag>` and a two-character tag is not something a reader can pass to
     // `show` — it matched six sessions when this was checked by hand.
     expect(readerLine(report(), 3, 6, t)).toBe('  reader 3/6 · 9c4d2f18    · found   ·  12.1s');
   });

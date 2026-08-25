@@ -1,5 +1,6 @@
 import type { EmbeddingsOptions } from '../embeddings.js';
 import type { Llm } from '../llm.js';
+import { idTag } from '../recall.js';
 import { measureCoverage, mergeSupplement, type CoverageReport } from './coverage.js';
 import { dedupeCard } from './dedupe.js';
 import { extractCard, supplementCard, type ExtractSpend } from './extract.js';
@@ -178,7 +179,7 @@ export async function cardTranscript(
   // A degraded card asserts nothing, so it must not carry a title that claims
   // the session was something. `fallbackCard` already writes one that says so.
   if (!card.title.trim()) {
-    card = normaliseCard({ ...card, title: transcript.title ?? transcript.id.slice(0, 8) });
+    card = normaliseCard({ ...card, title: transcript.title ?? idTag(transcript.id) });
   }
 
   // A ghost's outcome is `unknown`, always, and it is taken rather than asked

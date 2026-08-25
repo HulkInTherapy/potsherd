@@ -56,6 +56,7 @@
  * to skip one.
  */
 import { openThreadCandidates, type OpenThreadCandidate } from './open-threads.js';
+import { idTag } from './recall.js';
 import type { Db } from './db.js';
 
 /**
@@ -245,7 +246,7 @@ export function suggestLinks(db: Db, o: SuggestOptions = {}): SuggestResult {
 }
 
 function toSuggestion(c: OpenThreadCandidate, b: string): LinkSuggestion {
-  const b8 = b.slice(0, 8);
+  const b8 = idTag(b);
   return {
     a: c.sessionId,
     a8: c.id8,

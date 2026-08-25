@@ -248,6 +248,29 @@ export const SOURCE_OF_LIST: Readonly<Record<ListName, EvidenceSource>> = {
  * keeps: `calibration.ts` owns what `agreement` means, `recall.ts` owns which
  * lists are the same evidence.
  */
+/**
+ * Did the keyword half of the search produce any candidate at all?
+ *
+ * **VERIFICATION-8 C8-2.** `find`'s no-match screen said *"31 sessions matched
+ * some of those words and none of them enough"* on a query built from three
+ * invented words, on a run whose every FTS list returned **0** candidates and
+ * whose 31 withheld rows came, all of them, from the vector lane — and then
+ * captioned those same rows, one flag later, *"no words in common — this one
+ * matched on meaning"*. Two sentences, one page, opposite claims.
+ *
+ * `belowFloor` counts rows and cannot tell which lane found them; the per-list
+ * candidate counts can, and they are already on the result for `--json`. This
+ * is that read, named once and exported, so the human screen and the model
+ * door cannot come to differ about which half of the search ran.
+ */
+export function keywordCandidates(
+  lists: readonly { list: ListName; candidates: number }[],
+): number {
+  let n = 0;
+  for (const l of lists) if (!l.list.startsWith('vec_')) n += l.candidates;
+  return n;
+}
+
 export function evidenceSources(lists: Iterable<ListName>): number {
   const sources = new Set<EvidenceSource>();
   for (const l of lists) sources.add(SOURCE_OF_LIST[l]);

@@ -1,4 +1,4 @@
-import { resolveSession, showSession, type db as dbNs } from '@potsherd/core';
+import { idTag, resolveSession, showSession, type db as dbNs } from '@potsherd/core';
 
 type Db = dbNs.Db;
 
@@ -81,7 +81,15 @@ export interface CitationFacts {
  * agent copies them instead of composing them.
  */
 export function mintCitation(f: CitationFacts): string {
-  const id8 = f.sessionId.slice(0, 8);
+  // VERIFICATION-8 C8-1. `slice(0, 8)` was the *parent's* eight characters for
+  // every subagent transcript in the index — 311 of 369 sessions on the
+  // reference archive minted a citation whose id resolved to a different
+  // thread, and the largest such group was forty-one sessions wearing one id.
+  // `idTag` is the identity: the left eight for an ordinary session, the agent
+  // tag for a subagent, unique across all 369 and all 299 ghosts, and the same
+  // eight characters `find`, `ls` and `show` have always printed. A citation is
+  // only a citation if it resolves to what it was minted from.
+  const id8 = idTag(f.sessionId);
   const project = f.project?.split('/').filter(Boolean).pop() || '(no project)';
   const count =
     f.kind === 'ghost'

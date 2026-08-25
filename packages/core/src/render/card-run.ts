@@ -2,6 +2,7 @@ import { Card, table } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
 import { tildify } from '../paths.js';
+import { idTag } from '../recall.js';
 import type { CardRunReport } from '../cards/run.js';
 import { compact, TARGET_SECONDS, TARGET_USD } from './estimate.js';
 import { accuracyShort } from '../calibration.js';
@@ -198,7 +199,7 @@ export function renderCardRun(
     for (const line of table(
       t,
       listed.map((c) => [
-        c.title || c.id.slice(0, 8),
+        c.title || idTag(c.id),
         c.outcome,
         `${c.decisions}d ${c.openThreads}o`,
         c.dropped ? `-${c.dropped}` : t.g('·', '.'),
@@ -214,7 +215,7 @@ export function renderCardRun(
     card.blank();
     card.text(`${f.num(report.errors.length)} failed:`, 'warn');
     for (const e of report.errors.slice(0, 3)) {
-      card.text(`  ${e.id.slice(0, 8)}  ${f.clip(e.message, Math.max(20, t.width - 16), t)}`, 'dim');
+      card.text(`  ${idTag(e.id)}  ${f.clip(e.message, Math.max(20, t.width - 16), t)}`, 'dim');
     }
   }
 

@@ -12,6 +12,7 @@ import { readCard, type StoredCard } from './cards/write.js';
 import {
   fromGhostRow,
   fromSessionRow,
+  idTag,
   type GhostRow,
   type RecallSession,
   type SessionRow,
@@ -476,6 +477,19 @@ export interface ResolvedSession {
   kind: 'session' | 'ghost';
   /** Set when the reference matched more than one session it could mean. */
   ambiguous?: SessionCandidate[];
+  /**
+   * Set when the reference also matched this session's **own** subagent
+   * transcripts and the parent was taken.
+   *
+   * VERIFICATION-8 C8-1. `show`'s help says *"by id or by any unambiguous
+   * prefix"* and a parent uuid is a prefix of every subagent it spawned — on
+   * the reference archive, of forty of them. Taking the parent is right (see
+   * {@link resolveSession}) and taking it **in silence** is what made the help
+   * text false. This is the list that lets a caller say so; it is never a
+   * refusal, because every one of these sessions has an id8 of its own
+   * ({@link idTag}) and the caller is one sentence away from it.
+   */
+  collapsed?: SessionCandidate[];
 }
 
 /**
@@ -492,6 +506,25 @@ export interface ResolvedSession {
  * session and of the 32 subagent transcripts it spawned, because their ids all
  * start with its uuid. Calling that ambiguous would make every session with
  * subagents unshowable. The conversation is what the user meant.
+ *
+ * **And only over its *own*.** VERIFICATION-8 C8-1: the rule used to be
+ * "exactly one candidate is top-level, take it", which is a different rule and
+ * a wrong one. A reference that names one top-level session **and** a subagent
+ * of some other parent — reachable through the agent-tag and substring lanes
+ * below — matched the first test and was answered, in silence, with a session
+ * the caller had not named. The descendant check is what makes the sentence
+ * above true as written: `others.every(c => c.id.startsWith(p.id + ':'))`.
+ * Anything else is ambiguous, and ambiguous refuses.
+ *
+ * **An id8 is looked up as an id8, not only as a prefix.** {@link idTag} — the
+ * eight characters every surface in this project prints and every citation
+ * carries — is the *right* half of a subagent id, so a prefix scan alone can
+ * never find one and the substring fallback would only find it once the prefix
+ * scan had already come back empty. It does not always come back empty: an
+ * agent tag that happens to also open some unrelated session id would have
+ * resolved to that session and never to the subagent it names. So the agent-tag
+ * lane runs beside the prefix lane, and when the two disagree the answer is
+ * ambiguous rather than whichever ran first.
  *
  * **Anything still ambiguous lists the candidates rather than guessing.**
  * Showing someone the wrong conversation, confidently, is the one failure mode
@@ -513,7 +546,14 @@ export function resolveSession(db: Db, ref: string): ResolvedSession | null {
   // `_` and `%` in a reference would otherwise be LIKE wildcards. Session ids
   // are uuids today, but the adapters do not promise it.
   const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
-  let candidates = matching(db, `${escaped}%`);
+  // Two lanes, both exact in their own vocabulary: a prefix of an id, and an
+  // agent tag — the thing `idTag` prints and a citation carries. Deduped by id
+  // because a full subagent id is both.
+  const byId = new Map<string, SessionCandidate>();
+  for (const c of [...matching(db, `${escaped}%`), ...matching(db, `%:agent-${escaped}%`)]) {
+    if (!byId.has(c.id)) byId.set(c.id, c);
+  }
+  let candidates = [...byId.values()];
   if (candidates.length === 0) candidates = matching(db, `%${escaped}%`);
   if (candidates.length === 0) return null;
 
@@ -521,9 +561,18 @@ export function resolveSession(db: Db, ref: string): ResolvedSession | null {
   if (candidates.length === 1) return { id: first.id, kind: first.kind };
 
   const topLevel = candidates.filter((c) => !c.isSidechain);
-  if (topLevel.length === 1) return { id: topLevel[0]!.id, kind: topLevel[0]!.kind };
+  if (topLevel.length === 1) {
+    const parent = topLevel[0]!;
+    const others = candidates.filter((c) => c.id !== parent.id);
+    // Its own subagents, and nothing else. `<parent-uuid>:` is the whole of
+    // what "its own" means: an adapter builds a subagent id by appending
+    // `:agent-<hash>` to the parent's, so the prefix test is the lineage test.
+    if (others.every((c) => c.id.startsWith(`${parent.id}:`))) {
+      return { id: parent.id, kind: parent.kind, ...(others.length ? { collapsed: others } : {}) };
+    }
+  }
 
-  const pick = topLevel.length > 0 ? topLevel : candidates;
+  const pick = topLevel.length > 1 ? topLevel : candidates;
   return { id: pick[0]!.id, kind: pick[0]!.kind, ambiguous: pick };
 }
 
@@ -540,7 +589,11 @@ function matching(db: Db, pattern: string): SessionCandidate[] {
               0 AS is_sidechain,
               COALESCE(g.last_ts, g.first_ts) AS when_
          FROM ghosts g WHERE g.session_id LIKE ? ESCAPE '\\'
-       ORDER BY is_sidechain, when_ DESC LIMIT 25`,
+       -- The cap is a guard against a pathological reference, not a page size:
+       -- every count built from this list (the ambiguity refusal's, the
+       -- collapsed-subagent note's) is only true if the list is complete, and
+       -- at 25 a parent with forty subagents disclosed twenty-four of them.
+       ORDER BY is_sidechain, when_ DESC LIMIT 1000`,
     )
     .all(pattern, pattern) as {
     id: string;

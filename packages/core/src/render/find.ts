@@ -1,7 +1,7 @@
 import { INDENT } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
-import { idTag } from '../recall.js';
+import { idTag, keywordCandidates } from '../recall.js';
 import { sessionDate } from '../threads.js';
 import {
   clipToWords,
@@ -163,7 +163,15 @@ export function renderFind(
 function withheldNote(result: RecallResult, t: Theme): string[] {
   const n = result.belowFloor;
   if (n <= 0) return [];
-  const what = `${f.num(n)} ${f.plural(n, 'session')} matched some of those words and none of them enough`;
+  // VERIFICATION-8 C8-2 — which half of the search found the rows this screen
+  // is withholding. `belowFloor` counts rows; it has never known which lane
+  // produced them, and this sentence asserted one. `keywordCandidates` is the
+  // read that does know, and when it is zero the honest sentence is the same
+  // one `--min-confidence none` prints under every row it then shows.
+  const what =
+    keywordCandidates(result.lists) === 0
+      ? `${f.num(n)} ${f.plural(n, 'session')} matched on meaning alone — none of them uses those words`
+      : `${f.num(n)} ${f.plural(n, 'session')} matched some of those words and none of them enough`;
   const flag = '--min-confidence none';
   const wide = `${what}  ${t.sep}  ${flag}`;
   const out: string[] = [];

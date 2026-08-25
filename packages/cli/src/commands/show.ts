@@ -8,6 +8,7 @@ import {
   showSession,
   table,
   VERSION,
+  idTag,
 } from '@potsherd/core';
 import { print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 import { openIndex } from '../filters.js';
@@ -104,7 +105,7 @@ export async function runShow(o: ShowCommandOptions): Promise<number> {
     if (o.md && o.html) {
       throw new UserError(
         'show takes --md or --html, not both',
-        'potsherd show ' + found.id.slice(0, 8) + ' --html > session.html',
+        'potsherd show ' + idTag(found.id) + ' --html > session.html',
       );
     }
     if (o.md) {
@@ -116,6 +117,16 @@ export async function runShow(o: ShowCommandOptions): Promise<number> {
       return 0;
     }
     print(renderShow(result, themeFrom(o)));
+    // VERIFICATION-8 C8-1 asked for a disclosure here — `show <parent-prefix>`
+    // taking the parent "in silence, despite documenting any unambiguous
+    // prefix". `renderShow` was already making it, in better words than a
+    // second block would: the subagent block above this line names every
+    // transcript the session spawned, by an `idTag` that resolves to it. On
+    // the reference archive that block reads `40 subagent transcripts:  agent
+    // <id8> · agent <id8> · …`. What the parent prefix opened has been on this
+    // screen all along; what was wrong was the id in the citation, and that is
+    // fixed where it is minted. The model door had no such block and now
+    // carries the same fact in `potsherd_read`'s `note` (`tools/thread.ts`).
     return 0;
   } finally {
     db.close();

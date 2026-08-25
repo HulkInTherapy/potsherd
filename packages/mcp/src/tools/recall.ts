@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   SUMMARY_KINDS,
   format,
+  idTag,
   recall,
   sessionDate,
   vecStatus,
@@ -357,6 +358,10 @@ export async function runRecall(
     // (`evidence`, `confidence`, `calibration.score`), which is the property
     // FIX-D's fences asserted about the helper — asserted now about the reply.
     const threads = groupThreads(sessions);
+    // VERIFICATION-8 C8-5 — how many published rows are labelled `none`,
+    // counted off the rows this reply actually carries rather than off the
+    // envelope above them. Drives the caveat in `note` below.
+    const uncitedNone = threads.filter((r) => r.confidence === 'none').length;
 
     /**
      * ROUND 3 — the nearest rows, on a key of their own.
@@ -509,10 +514,24 @@ export async function runRecall(
             'the archive to your words, not an answer to your question. Read them to judge ' +
             'for yourself, do not cite them as a source, and do not report them to the user ' +
             'as what was decided.'
-          : calibrated
-            ? null
-            : 'this build of potsherd does not calibrate its scores yet, so "confidence" is null ' +
-              'rather than a measurement. Treat a low-scoring row as unproven.',
+          : !calibrated
+            ? 'this build of potsherd does not calibrate its scores yet, so "confidence" is null ' +
+              'rather than a measurement. Treat a low-scoring row as unproven.'
+            : // VERIFICATION-8 C8-5. The envelope is the archive's best label
+              // for the question; it is not a label on any row. When rows
+              // under a `weak` or better envelope carry `none` of their own —
+              // six of seven, on the reference archive, under a `weak`
+              // envelope and a `note` of `null` — the caveat that used to
+              // depend on the envelope has to be said anyway, or the reply the
+              // tool tells an agent to ask for is the one reply that omits it.
+              // `citable: false` is the enforcement; this is the sentence.
+              uncitedNone > 0
+              ? `${String(uncitedNone)} of these ${String(threads.length)} ` +
+                `${format.plural(threads.length, 'row')} ${format.plural(uncitedNone, 'is', 'are')} ` +
+                'labelled none: the closest text in the archive to your words, not an answer to ' +
+                'your question. They carry no citation and may not be cited. Read them to judge ' +
+                'for yourself, and do not report them to the user as what was decided.'
+              : null,
       ignored: result.ignored,
       lists: result.lists,
       relaxed: result.relaxed,
@@ -624,7 +643,25 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
     // own `evidence` cannot disagree. `=== true` for the reason
     // `packages/cli/src/commands/find.ts` gives: a permission that is absent is
     // withheld.
-    const citable = lead.citable === true;
+    // VERIFICATION-8 C8-5, and VERIFICATION-7 C7-7 before it — the same F6
+    // family, closed a third time and this time at the row.
+    //
+    // Every previous spelling of this rule was keyed on the **envelope**: the
+    // reply-level `note` warned about rows labelled `none`, and the withhold
+    // fired only when the envelope itself was `none`. An envelope is the
+    // archive's best label for the question, and the best row can clear the
+    // floor while the rows under it do not — so on the reference archive one
+    // `weak` envelope carried six rows labelled `none`, every one of them
+    // `citable: true` with a minted citation, under a `note` of `null`.
+    //
+    // A row's own label is the only fact about that row. `none` is the word
+    // this project uses for *not an answer*, the escape hatch that returns
+    // these rows says so in the sentence that offers it, and a citation is a
+    // claim that a source supports something. So the permission is now the
+    // conjunction, computed here where the citation is minted, and there is no
+    // envelope state in which it can come apart.
+    const label = confidenceOf(lead);
+    const citable = lead.citable === true && label !== 'none';
     const started = members.map((m) => m.startedAt).filter(Boolean).sort()[0] ?? null;
     const ended =
       members
@@ -634,10 +671,11 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
         .pop() ?? null;
     return {
       thread: key,
-      id8: key.slice(0, 8),
+      // VERIFICATION-8 C8-1 — `idTag`, never `slice(0, 8)`. See `mintCitation`.
+      id8: idTag(key),
       threadOf: threadIdOf(lead) === null ? 'session' : 'chain',
-      links: members.map((m) => ({ sessionId: m.id, id8: m.id.slice(0, 8), exchanges: m.exchanges })),
-      confidence: confidenceOf(lead),
+      links: members.map((m) => ({ sessionId: m.id, id8: idTag(m.id), exchanges: m.exchanges })),
+      confidence: label,
       calibration: calibrationOf(lead),
       kind: lead.kind,
       harness: lead.harness,
@@ -721,7 +759,16 @@ function groupThreads(sessions: readonly Session[]): Record<string, unknown>[] {
               'not use those words. Not citable. potsherd_read the thread if you want to know ' +
               'what it actually says.',
           }
-        : {}),
+        : label === 'none'
+          ? {
+              // C8-5. Said in the same words as the reply-level note and the
+              // CLI's caption, because they are one rule.
+              citableNote:
+                'labelled none: this is the closest text in the archive to your words, not an ' +
+                'answer to your question. Not citable. Read it to judge for yourself, and do ' +
+                'not report it to the user as what was decided.',
+            }
+          : {}),
     };
   });
 }
@@ -936,7 +983,25 @@ export function capabilityLine(v: Result['vectors'], report?: VecStatus['report'
     ? ` (${format.num(report.embedded)} of ${format.num(report.total)} embedded)`
     : '';
   const because = (why?: string) => (why ? ` (${why})` : '');
-  if (v.used) return `keyword + semantic search${counts}`;
+  if (v.used) {
+    // **VERIFICATION-8 C8-7.** This `return` used to be unconditional, which
+    // made the `report.working === false` branch below unreachable on every
+    // index that has any vectors at all — so on one archive, in one second,
+    // `find` said *"semantic search: not running (4,589 of 4,774 embedded) —
+    // it stopped partway"* and this door said *"keyword + semantic search
+    // (4,589 of 4,774 embedded)"*: a fraction with no verdict, from which the
+    // reasonable inference is that the other 185 are coming. They are not, and
+    // FIX-F C2 exists to stop exactly that retry.
+    //
+    // Both facts are true at once and both are said. The lane ran — dropping
+    // that would be the opposite lie — and nothing is embedding the rest.
+    const stalled =
+      report !== undefined &&
+      report.total > 0 &&
+      report.embedded < report.total &&
+      report.working === false;
+    return `keyword + semantic search${counts}${stalled ? ' — the rest is not being embedded' : ''}`;
+  }
   // `pending` is 0-embedded-with-work-queued and `warming` is partway through.
   // Both are transient and both are what `doctor-line.ts` calls warming.
   if (report && (report.phase === 'warming' || report.phase === 'pending')) {

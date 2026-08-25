@@ -167,7 +167,7 @@ fs.writeFileSync(
 
 // ------------------------------------------------------------------- sidechain
 fs.writeFileSync(
-  path.join(root, 'projects', slug(ALPHA), ALIVE, 'subagents', 'agent-01.jsonl'),
+  path.join(root, 'projects', slug(ALPHA), ALIVE, 'subagents', 'agent-01f3a5c7e9b2d4608.jsonl'),
   jsonl([
     { type: 'agent-name', sessionId: ALIVE, agentName: 'db-reviewer', isSidechain: true },
     {
@@ -196,7 +196,7 @@ fs.writeFileSync(
 // subagent transcript is part of its parent session, not a session of its own,
 // and counting it would inflate "still on disk" and deflate "deleted".
 fs.writeFileSync(
-  path.join(root, 'projects', slug(BETA), 'subagents', 'agent-02.jsonl'),
+  path.join(root, 'projects', slug(BETA), 'subagents', 'agent-02e4b6d8fa1c3e579.jsonl'),
   jsonl([
     { type: 'agent-name', sessionId: SDK, agentName: 'changelog-reader', isSidechain: true },
     {

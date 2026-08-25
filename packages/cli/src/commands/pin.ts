@@ -1,4 +1,4 @@
-import { fitLine, format as fmt, pinSession, sessionTags, Theme, unpinSession } from '@potsherd/core';
+import { fitLine, format as fmt, idTag, pinSession, sessionTags, Theme, unpinSession } from '@potsherd/core';
 import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
 import { openIndex } from '../filters.js';
 import { mustResolve } from '../session-ref.js';
@@ -45,7 +45,7 @@ export async function runPin(o: PinCommandOptions): Promise<number> {
     const lines = [
       t.dim(
         fmt.clip(
-          `potsherd ${verb} ${t.sep} ${found.id.slice(0, 8)} ${t.sep} ${found.title}`,
+          `potsherd ${verb} ${t.sep} ${idTag(found.id)} ${t.sep} ${found.title}`,
           t.width,
           t,
         ),

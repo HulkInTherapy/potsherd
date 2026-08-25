@@ -1,4 +1,4 @@
-import { fitLine, format as fmt, Theme } from '@potsherd/core';
+import { fitLine, format as fmt, idTag, Theme } from '@potsherd/core';
 // `notes.ts` is not in core's barrel (`packages/core/src/index.ts` belongs to
 // the orchestrator this phase), so it is imported by path. The subgraph that
 // comes with it — `notes.ts` and `threads.ts` — holds no module-level state and
@@ -171,7 +171,7 @@ function laneFor(
 function heading(t: Theme, found: { id: string; title: string }, chain: number): string {
   const unit = chain > 1 ? `thread of ${chain} sessions` : 'thread of 1 session';
   return t.dim(
-    fmt.clip(`potsherd note ${t.sep} ${found.id.slice(0, 8)} ${t.sep} ${unit}`, t.width, t) +
+    fmt.clip(`potsherd note ${t.sep} ${idTag(found.id)} ${t.sep} ${unit}`, t.width, t) +
       '\n' +
       fmt.clip(`  ${found.title}`, t.width, t),
   );
@@ -218,7 +218,7 @@ function receipt(
   chain: number,
   previous: number,
 ): string {
-  const id8 = found.id.slice(0, 8);
+  const id8 = idTag(found.id);
   const lines = [heading(t, found, chain), '', provenance(t, n), '', ...fields(t, n), ''];
 
   // The two sentences that make this safe to type. Never "saved" alone: what a
@@ -260,7 +260,7 @@ function listing(
   chain: number,
   notes: NoteRow[],
 ): string {
-  const id8 = found.id.slice(0, 8);
+  const id8 = idTag(found.id);
   const lines = [heading(t, found, chain), ''];
 
   if (notes.length === 0) {

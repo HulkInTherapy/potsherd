@@ -1,5 +1,6 @@
 import type { Db } from './db.js';
 import { threadOf, type Thread } from './threads.js';
+import { idTag } from './recall.js';
 
 /**
  * L6½ — the notes lane. **The only place potsherd writes prose.**
@@ -227,7 +228,7 @@ export function addNote(db: Db, input: NoteInput): NoteWrite {
   if (!decided && !open && !next) {
     throw new NoteFieldError(
       'a note needs something to say — give at least one of --decided, --open, --next',
-      `potsherd note ${input.sessionId.slice(0, 8)} --decided "..." --next "..."`,
+      `potsherd note ${idTag(input.sessionId)} --decided "..." --next "..."`,
     );
   }
 
