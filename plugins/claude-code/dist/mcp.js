@@ -43765,6 +43765,7 @@ var SCOPE_WITH_CARDS = SCOPE.unwrap().extend({
     "false: search transcripts only, and do not search session cards (model-written summaries). Default true \u2014 a card can route you to a thread whose transcript never uses your words, and it is never citable"
   )
 }).optional().describe(SCOPE.description ?? "");
+var NEAREST_THREADS = 5;
 var recallInput = {
   query: external_exports.string().min(1).describe(
     "what to look for. Two to four distinctive nouns beat a whole sentence: the index is keyword-first and a long question dilutes into stopwords"
@@ -43849,6 +43850,16 @@ async function runRecall(ctx, args) {
     const sessions = withhold ? [] : result.sessions;
     const hits = withhold ? [] : result.hits;
     const threads = groupThreads(sessions);
+    const nearest = withhold && (belowFloor ?? 0) > 0 ? (await recall(db, query, filters, {
+      ...options,
+      [MIN_CONFIDENCE_FIELD]: "none"
+    })).sessions.slice(0, NEAREST_THREADS).map((s) => ({
+      thread: s.id,
+      title: s.displayTitle,
+      project: s.projectName,
+      startedAt: s.startedAt,
+      confidence: "none"
+    })) : [];
     const envelope = {
       query: result.query,
       want,
@@ -43936,7 +43947,13 @@ async function runRecall(ctx, args) {
       k: result.k,
       weights: result.weights,
       ms: result.ms,
-      threads
+      threads,
+      // ROUND 3. Present only when rows were withheld, so its absence is not a
+      // fact a caller has to interpret. See its construction above.
+      ...nearest.length > 0 ? {
+        nearest,
+        nearestNote: "the archive's nearest text to your words, and NOT an answer to your question. The verdict is still no match. Use these to decide what to ask next \u2014 a title here may name the thread you want \u2014 not as a source: they carry no citation and must not be quoted or reported as what was decided."
+      } : {}
     };
     if (want === "context") {
       const budget = Math.max(200, Math.floor(args.budget ?? DEFAULT_CONTEXT_BUDGET));

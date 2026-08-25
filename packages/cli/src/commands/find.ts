@@ -2,6 +2,7 @@ import {
   projectName,
   recall,
   renderFind,
+  NEAREST_ROWS,
   search as searchNs,
   vecStatus,
   type RecallOptions,
@@ -339,10 +340,59 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
     // is already running and there is nothing for the reader to do. It is
     // handed to the renderer rather than printed after it, because `05` says
     // every verb ends with the next verb and a status line is not a next verb.
+    /**
+     * ROUND 3 — the nearest rows for the divider, fetched only for an empty
+     * page.
+     *
+     * The verdict is already decided and is not revisited: `result` is the
+     * object the whole rest of this function has used, `result.sessions` is
+     * still `[]`, `--json` above is untouched and the exit code below is still
+     * 1. This is a second read of the same index at the floor the CLI already
+     * offers on that screen's own last line — `--min-confidence none` — so
+     * that a human who typed a sentence once is shown what the archive's
+     * nearest text was instead of being sent away to type a second command.
+     *
+     * Three guards, and each one is why this costs nothing anybody notices:
+     *
+     *   * only when the page is **empty**, so no answered query pays for it;
+     *   * only when `belowFloor > 0`, so an index that genuinely matched
+     *     nothing — the nonsense case on a text-only index — still renders the
+     *     screen it rendered before, with no rows under any rule;
+     *   * never for `--json`, which returned above: a machine reading `--json`
+     *     gets `sessions: []` and nothing that could be mistaken for a row.
+     *
+     * It is a re-search rather than a field on `RecallResult` because
+     * `recall()` discards the withheld blocks after counting them, and adding
+     * a second page to every result would make every caller of the library pay
+     * for a screen only this one draws.
+     */
+    const nearest =
+      !o.json && result.sessions.length === 0 && result.belowFloor > 0
+        ? (
+            await recall(db, query, filters, {
+              // The SAME limit the answering search used, not
+              // {@link NEAREST_ROWS}. `recall()` builds `limit * 3` evidence
+              // blocks before it sorts and cuts, so a smaller limit is a
+              // smaller candidate pool and a different ordering — measured:
+              // at limit 5 the correct session for *we exhausted our
+              // allowance of open channels* fell off the page it is fourth on
+              // at limit 10. The renderer does the cutting, because how many
+              // rows fit under a rule is a fact about the screen and how many
+              // blocks are considered is a fact about the search.
+              limit,
+              root,
+              vectors: vectorMode(o),
+              all: Boolean(o.all),
+              minConfidence: 'none',
+              cards: o.cards !== false,
+            })
+          ).sessions
+        : [];
     print(
       renderFind(result, t, new Date(), {
         explain: Boolean(o.explain),
         semantic: semantic.line ?? null,
+        nearest,
       }),
     );
     if (federated) {

@@ -17459,6 +17459,7 @@ function marginOf(sessions) {
 }
 
 // ../core/dist/render/find.js
+var NEAREST_ROWS = 5;
 function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), opts = {}) {
   if (opts.explain && result.sessions.length > 0)
     return renderExplain(result, t);
@@ -17477,6 +17478,7 @@ function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), o
       lines.push(...ignoreNote(result, t));
       return lines.join("\n");
     }
+    lines.push(...nearestNote(result, opts, t));
     lines.push(...semanticNote(opts, t));
     lines.push(...ignoreNote(result, t));
     lines.push(nextVerbOnEmpty(result, t));
@@ -17515,6 +17517,29 @@ function withheldNote(result, t) {
     for (const line of wrap(what, t.width - INDENT.length))
       out.push(INDENT + t.dim(line));
     out.push(INDENT + t.dim(`${flag}  shows them anyway`));
+  }
+  out.push("");
+  return out;
+}
+function nearestNote(result, opts, t) {
+  const rows = (opts.nearest ?? []).slice(0, NEAREST_ROWS);
+  if (rows.length === 0)
+    return [];
+  const out = [];
+  const caption = `nearest by meaning ${t.sep} not an answer`;
+  const bar = t.g("\u2500", "-");
+  const drawn = `${bar}${bar} ${caption} `;
+  const fill = Math.max(0, t.width - INDENT.length - Theme.len(drawn));
+  out.push(INDENT + t.dim(drawn + bar.repeat(fill)));
+  for (const s of rows) {
+    const when2 = s.startedAt ? date(s.startedAt) : t.dash;
+    const where = `${s.projectName} ${t.sep} ${when2}`;
+    const label4 = s.confidence.padEnd(5);
+    const room = t.width - INDENT.length - 2 - label4.length - 1 - Theme.len(where) - 2;
+    const title = elide(s.displayTitle, Math.max(12, room), t.ellip);
+    const line = `  ${label4} ${title}`;
+    const pad4 = Math.max(1, t.width - INDENT.length - Theme.len(line) - Theme.len(where));
+    out.push(INDENT + t.dim(line + " ".repeat(pad4) + where));
   }
   out.push("");
   return out;
@@ -27179,10 +27204,28 @@ async function runFind(o) {
       return result.sessions.length ? 0 : 1;
     }
     const t = themeFrom(o);
+    const nearest = !o.json && result.sessions.length === 0 && result.belowFloor > 0 ? (await recall(db, query, filters, {
+      // The SAME limit the answering search used, not
+      // {@link NEAREST_ROWS}. `recall()` builds `limit * 3` evidence
+      // blocks before it sorts and cuts, so a smaller limit is a
+      // smaller candidate pool and a different ordering — measured:
+      // at limit 5 the correct session for *we exhausted our
+      // allowance of open channels* fell off the page it is fourth on
+      // at limit 10. The renderer does the cutting, because how many
+      // rows fit under a rule is a fact about the screen and how many
+      // blocks are considered is a fact about the search.
+      limit,
+      root,
+      vectors: vectorMode(o),
+      all: Boolean(o.all),
+      minConfidence: "none",
+      cards: o.cards !== false
+    })).sessions : [];
     print(
       renderFind(result, t, /* @__PURE__ */ new Date(), {
         explain: Boolean(o.explain),
-        semantic: semantic.line ?? null
+        semantic: semantic.line ?? null,
+        nearest
       })
     );
     if (federated) {

@@ -48,7 +48,28 @@ export interface FindRenderOptions {
    * with the next verb and a status line is not a next verb.
    */
   semantic?: string | null;
+  /**
+   * ROUND 3 — the rows the floor withheld, to be shown **under a divider**,
+   * below a verdict that is still empty.
+   *
+   * The whole design is the separation this field makes possible: `find`'s
+   * answer to the question is unchanged and still *nothing in the index
+   * answers this*, and these rows are not offered as an answer to it. They are
+   * offered as the evidence that the silence was not laziness — the nearest
+   * text the archive holds, named as such, under a rule that says so.
+   *
+   * Empty or absent means the screen is exactly the screen it was before, so
+   * every caller that does not opt in is byte-identical. The caller supplies
+   * them (`runFind` re-runs the search at `none` only when the page came back
+   * empty) rather than the renderer fetching them, for the same reason
+   * {@link semantic} is passed in: a renderer that can open a connection is a
+   * renderer that can disagree with the module that already did.
+   */
+  nearest?: readonly RecallSession[];
 }
+
+/** How many nearest rows a `no match` screen will show. See {@link nearestNote}. */
+export const NEAREST_ROWS = 5;
 
 export function renderFind(
   result: RecallResult,
@@ -98,6 +119,7 @@ export function renderFind(
       lines.push(...ignoreNote(result, t));
       return lines.join('\n');
     }
+    lines.push(...nearestNote(result, opts, t));
     lines.push(...semanticNote(opts, t));
     lines.push(...ignoreNote(result, t));
     lines.push(nextVerbOnEmpty(result, t));
@@ -155,6 +177,70 @@ function withheldNote(result: RecallResult, t: Theme): string[] {
     // silent degradation this task exists to remove.
     for (const line of f.wrap(what, t.width - INDENT.length)) out.push(INDENT + t.dim(line));
     out.push(INDENT + t.dim(`${flag}  shows them anyway`));
+  }
+  out.push('');
+  return out;
+}
+
+/**
+ * ROUND 3 — the nearest rows, under a rule that says what they are not.
+ *
+ * ## The thing this is not
+ *
+ * It is not the floor coming off. C-1 round 2 measured that: with the floor
+ * off, `flimberzork quaddlepan` returns ten ordinary-looking sessions on any
+ * embedded index, every page's label collapses to `none`, and a genuinely
+ * absent topic outscores a true paraphrase answer by 0.0006. The label stops
+ * carrying information because it is asked to carry the verdict as well.
+ *
+ * Here the verdict is carried by the headline and the headline is still empty.
+ * `result.sessions` is still `[]`, `find` still exits 1, `--json` still has no
+ * rows, and every caller that does not pass `nearest` sees the same screen it
+ * saw before. What is added is a second region of the page, below a rule, whose
+ * caption says in four words what everything under it is: **nearest by meaning
+ * · not an answer**.
+ *
+ * ## Why a rule and not a note
+ *
+ * `05` §3: a screen may not make a claim it cannot support, and the unit of a
+ * claim is a *region*, not a row. A row under a caption that names the region
+ * is not making the region's claim on its own — which is exactly the property
+ * option 4 could not have, because it put these rows into the answer region
+ * and left one dimmed word to argue with seven signals pointing the other way.
+ *
+ * ## The shape, and why each part of it
+ *
+ * One line per session, never a block: no snippet, no resume command, no
+ * citation. A resume command is an instruction and an instruction under this
+ * rule would be the page recommending something. {@link NEAREST_ROWS} of them,
+ * because five is what leaves the verdict, the count, the rule and the next
+ * verb all on one 80x24 screen — the region must never be the majority of the
+ * page it is disclaiming. The label is printed on every row so that the one
+ * fact that could still mislead — that these are `none` — is on the row and
+ * not only in the caption.
+ */
+function nearestNote(result: RecallResult, opts: FindRenderOptions, t: Theme): string[] {
+  const rows = (opts.nearest ?? []).slice(0, NEAREST_ROWS);
+  if (rows.length === 0) return [];
+  const out: string[] = [];
+  const caption = `nearest by meaning ${t.sep} not an answer`;
+  const bar = t.g('\u2500', '-');
+  // The rule is drawn to the terminal's width, so the region reads as a region
+  // at 60 columns as well as at 120. `asciiLine` folds the glyph to `-`.
+  const drawn = `${bar}${bar} ${caption} `;
+  const fill = Math.max(0, t.width - INDENT.length - Theme.len(drawn));
+  out.push(INDENT + t.dim(drawn + bar.repeat(fill)));
+  for (const s of rows) {
+    // `where` is dropped before the title is, because the title is the thing a
+    // reader scans for and a truncated project name is still a project name.
+    const when = s.startedAt ? f.date(s.startedAt) : t.dash;
+    const where = `${s.projectName} ${t.sep} ${when}`;
+    const label = s.confidence.padEnd(5);
+    const room = t.width - INDENT.length - 2 - label.length - 1 - Theme.len(where) - 2;
+    const title = f.elide(s.displayTitle, Math.max(12, room), t.ellip);
+    const line = `  ${label} ${title}`;
+    const pad = Math.max(1, t.width - INDENT.length - Theme.len(line) - Theme.len(where));
+    out.push(INDENT + t.dim(line + ' '.repeat(pad) + where));
   }
   out.push('');
   return out;

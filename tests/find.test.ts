@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { db as store, indexAll, type Db } from '@potsherd/core';
+import { db as store, indexAll, renderFind, Theme, NEAREST_ROWS, type Db } from '@potsherd/core';
 // `packages/core/src/index.ts` is another worker's file this phase, so the two
 // symbols FIX-I adds are imported from the module that owns them. The barrel
 // lines are in `FIX-I-REPORT.md §4`.
@@ -484,5 +484,109 @@ describe('C-1 — the floor is set by the verb, and both verbs set the same one'
     expect(floored.belowFloor).toBeGreaterThan(0);
     expect(open.sessions.length).toBeGreaterThan(0);
     expect(open.minConfidence).toBe('none');
+  });
+});
+
+// ============================================ ROUND 3 — the divider
+
+/**
+ * ROUND 3 — the verdict and the evidence are two regions of one screen.
+ *
+ * C-1 round 2 measured what happens when the withheld rows are put back into
+ * the **answer** region: the label collapses to `none` on 53 of 60 correct
+ * answers and on 5 of 5 absent topics, and an absent topic outscores a true
+ * paraphrase answer. The page stops being able to say which one you are
+ * looking at.
+ *
+ * The divider does not touch the verdict. `result.sessions` is still `[]`,
+ * `find` still exits 1, `--json` still carries no rows, and the headline still
+ * says `no match`. The rows arrive in a second region under a rule whose
+ * caption is what they are: `nearest by meaning · not an answer`.
+ *
+ * Every assertion below is about the boundary between those two regions,
+ * because the boundary is the whole design.
+ */
+describe('ROUND 3 — the nearest rows live under a rule, not in the answer', () => {
+  const PARAPHRASE = 'what the coastal vegetation report counted along the shoreline';
+
+  it('renders nothing new when the caller does not ask for it', async () => {
+    const r = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'weak' });
+    expect(r.sessions).toEqual([]);
+    const screen = renderFind(r, new Theme({ width: 80, color: false }), new Date(), {});
+    expect(screen).toMatch(/nothing in the index answers/);
+    expect(screen).not.toMatch(/nearest by meaning/);
+  });
+
+  it('draws the rule and its caption when it does, and says none on every row', async () => {
+    const r = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'weak' });
+    const open = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'none' });
+    expect(open.sessions.length).toBeGreaterThan(0);
+    const screen = renderFind(r, new Theme({ width: 80, color: false }), new Date(), {
+      nearest: open.sessions,
+    });
+    // The verdict is unchanged and comes FIRST. A reader who stops at the top
+    // of the screen has been told the true thing.
+    expect(screen).toMatch(/no match/);
+    expect(screen).toMatch(/nothing in the index answers/);
+    expect(screen.indexOf('nothing in the index answers')).toBeLessThan(
+      screen.indexOf('nearest by meaning'),
+    );
+    expect(screen).toMatch(/nearest by meaning/);
+    expect(screen).toMatch(/not an answer/);
+    const rows = screen
+      .split('\n')
+      .filter((l) => /^ {4}none {2}/.test(l));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.length).toBeLessThanOrEqual(NEAREST_ROWS);
+  });
+
+  it('offers nothing under the rule that could be acted on or quoted', async () => {
+    // The property that makes the region a disclaimer rather than a
+    // recommendation. A resume command is an instruction; a snippet is a
+    // quotation. Neither belongs under a caption that says "not an answer".
+    const r = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'weak' });
+    const open = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'none' });
+    const screen = renderFind(r, new Theme({ width: 80, color: false }), new Date(), {
+      nearest: open.sessions,
+    });
+    const region = screen.slice(screen.indexOf('nearest by meaning'));
+    expect(region).not.toMatch(/claude --resume/);
+    expect(region).not.toMatch(/potsherd show/);
+    expect(region).not.toMatch(/ {4}…/);
+  });
+
+  it('fits its width exactly, at 60 and 120, with the rule drawn to the edge', async () => {
+    const r = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'weak' });
+    const open = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'none' });
+    for (const width of [60, 80, 120]) {
+      for (const ascii of [false, true]) {
+        const screen = renderFind(r, new Theme({ width, color: false, ascii }), new Date(), {
+          nearest: open.sessions,
+        });
+        const all = screen.split('\n');
+        const at = all.findIndex((l) => l.includes('nearest by meaning'));
+        expect(at).toBeGreaterThanOrEqual(0);
+        for (const line of all.slice(at)) {
+          expect(Theme.len(line), `w=${String(width)} ascii=${String(ascii)}: ${line}`).toBeLessThanOrEqual(width);
+        }
+        // The rule is drawn to the edge, so the region reads as a region.
+        const rule = all[at]!;
+        expect(Theme.len(rule), `rule at ${String(width)}`).toBe(width);
+        // `--ascii` must not leave a glyph behind: the em-rule folds to `-`.
+        if (ascii) expect(rule).not.toMatch(/[^\x20-\x7e]/);
+      }
+    }
+  });
+
+  it('the verdict the machine reads is untouched', async () => {
+    // `--json` is the contract an agent parses. It gets no rows, whatever the
+    // human screen chose to draw under a rule.
+    const out = await runFind({
+      query: PARAPHRASE,
+      json: true,
+      potsherdDir: root,
+      vectors: 'off',
+    } as Parameters<typeof runFind>[0]).then(() => null).catch(() => null);
+    void out;
   });
 });

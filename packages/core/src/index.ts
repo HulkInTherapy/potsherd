@@ -244,7 +244,7 @@ export {
   type SessionLink,
   type TagChange,
 } from './tags.js';
-export { renderFind, snippetLine } from './render/find.js';
+export { NEAREST_ROWS, renderFind, snippetLine, type FindRenderOptions } from './render/find.js';
 export { renderLs, renderResumeMenu, marker } from './render/ls.js';
 export { renderShow, renderShowMarkdown } from './render/show.js';
 export { renderShowHtml, esc as escapeHtml } from './render/show-html.js';
