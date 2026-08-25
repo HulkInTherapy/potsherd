@@ -7,6 +7,7 @@ import {
   sessionTags,
   Theme,
   type db as dbNs,
+  idTag,
 } from '@potsherd/core';
 import { print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 import { openIndex } from '../filters.js';
@@ -49,7 +50,7 @@ export async function runTag(o: TagCommandOptions): Promise<number> {
     if (rejected.length > 0 && add.length === 0 && remove.length === 0) {
       throw new UserError(
         `nothing usable in ${rejected.map((r) => `"${r}"`).join(', ')} — a tag is letters, digits, - . _ or /`,
-        `potsherd tag ${found.id.slice(0, 8)} +postgres -mysql`,
+        `potsherd tag ${idTag(found.id)} +postgres -mysql`,
       );
     }
 
@@ -84,7 +85,7 @@ function summary(found: { id: string; kind: string; title: string }): {
 
 function heading(t: Theme, verb: string, found: { id: string; title: string }): string {
   return t.dim(
-    fmt.clip(`potsherd ${verb} ${t.sep} ${found.id.slice(0, 8)} ${t.sep} ${found.title}`, t.width, t),
+    fmt.clip(`potsherd ${verb} ${t.sep} ${idTag(found.id)} ${t.sep} ${found.title}`, t.width, t),
   );
 }
 
@@ -100,8 +101,8 @@ function listing(t: Theme, found: { id: string; title: string }, tags: string[])
     lines.push(
       fitLine(
         t,
-        `${t.dim('run')}  potsherd tag ${found.id.slice(0, 8)} +postgres  ${t.dim('to add one')}`,
-        `${t.dim('run')}  potsherd tag ${found.id.slice(0, 8)} +postgres`,
+        `${t.dim('run')}  potsherd tag ${idTag(found.id)} +postgres  ${t.dim('to add one')}`,
+        `${t.dim('run')}  potsherd tag ${idTag(found.id)} +postgres`,
       ),
     );
     return lines.join('\n');

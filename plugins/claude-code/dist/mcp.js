@@ -24610,6 +24610,23 @@ function forgetStrandedStamps(db, stranded) {
   if (stranded.includes("vec_ghost_prompts"))
     clear("ghost_prompts");
 }
+function legacyVectorCount(db, legacy, rows, key) {
+  if (!legacyVecTable(db, legacy))
+    return 0;
+  if (!loadVec(db).available)
+    return 0;
+  try {
+    return db.prepare(`SELECT COUNT(*) AS n FROM ${legacy} v JOIN ${rows} r ON r.${key} = v.${key}`).get().n;
+  } catch {
+    try {
+      const n = db.prepare(`SELECT COUNT(*) AS n FROM ${legacy}`).get().n;
+      const total = db.prepare(`SELECT COUNT(*) AS n FROM ${rows}`).get().n;
+      return Math.min(n, total);
+    } catch {
+      return 0;
+    }
+  }
+}
 function legacyVecTable(db, name) {
   try {
     const row = db.prepare(`SELECT type, sql FROM sqlite_master WHERE name = ?`).get(name);
@@ -24627,8 +24644,13 @@ function vecTablesExist(db) {
   }
 }
 var STAMPED_LANES = [
-  { rows: "exchanges", blob: "vec_blob_exchanges", key: "id" },
-  { rows: "ghost_prompts", blob: "vec_blob_ghost_prompts", key: "id" }
+  { rows: "exchanges", blob: "vec_blob_exchanges", key: "id", legacy: "vec_exchanges" },
+  {
+    rows: "ghost_prompts",
+    blob: "vec_blob_ghost_prompts",
+    key: "id",
+    legacy: "vec_ghost_prompts"
+  }
 ];
 var STORE_VERSION_KEY = "vectors:store-version";
 function storeVersion(db) {
@@ -24663,7 +24685,7 @@ function vectorCounts(db) {
         have = db.prepare(`SELECT COUNT(*) AS n FROM ${lane.blob} b
                  JOIN ${lane.rows} r ON r.${lane.key} = b.${lane.key}`).get().n;
       } catch {
-        have = 0;
+        have = legacyVectorCount(db, lane.legacy, lane.rows, lane.key);
       }
     }
     embedded += have;
@@ -32633,7 +32655,12 @@ function resolveSession(db, ref) {
   if (exactGhost)
     return { id: exactGhost.session_id, kind: "ghost" };
   const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
-  let candidates = matching(db, `${escaped}%`);
+  const byId = /* @__PURE__ */ new Map();
+  for (const c of [...matching(db, `${escaped}%`), ...matching(db, `%:agent-${escaped}%`)]) {
+    if (!byId.has(c.id))
+      byId.set(c.id, c);
+  }
+  let candidates = [...byId.values()];
   if (candidates.length === 0)
     candidates = matching(db, `%${escaped}%`);
   if (candidates.length === 0)
@@ -32642,9 +32669,14 @@ function resolveSession(db, ref) {
   if (candidates.length === 1)
     return { id: first.id, kind: first.kind };
   const topLevel = candidates.filter((c) => !c.isSidechain);
-  if (topLevel.length === 1)
-    return { id: topLevel[0].id, kind: topLevel[0].kind };
-  const pick3 = topLevel.length > 0 ? topLevel : candidates;
+  if (topLevel.length === 1) {
+    const parent = topLevel[0];
+    const others = candidates.filter((c) => c.id !== parent.id);
+    if (others.every((c) => c.id.startsWith(`${parent.id}:`))) {
+      return { id: parent.id, kind: parent.kind, ...others.length ? { collapsed: others } : {} };
+    }
+  }
+  const pick3 = topLevel.length > 1 ? topLevel : candidates;
   return { id: pick3[0].id, kind: pick3[0].kind, ambiguous: pick3 };
 }
 function matching(db, pattern) {
@@ -32658,7 +32690,11 @@ function matching(db, pattern) {
               0 AS is_sidechain,
               COALESCE(g.last_ts, g.first_ts) AS when_
          FROM ghosts g WHERE g.session_id LIKE ? ESCAPE '\\'
-       ORDER BY is_sidechain, when_ DESC LIMIT 25`).all(pattern, pattern);
+       -- The cap is a guard against a pathological reference, not a page size:
+       -- every count built from this list (the ambiguity refusal's, the
+       -- collapsed-subagent note's) is only true if the list is complete, and
+       -- at 25 a parent with forty subagents disclosed twenty-four of them.
+       ORDER BY is_sidechain, when_ DESC LIMIT 1000`).all(pattern, pattern);
   return rows.map((r) => ({
     id: r.id,
     kind: r.kind,
@@ -32981,7 +33017,8 @@ function resolveThread(db, ref) {
     startedAt: totals.startedAt,
     endedAt: totals.endedAt,
     exchanges: totals.exchanges,
-    ...found.ambiguous ? { ambiguous: found.ambiguous } : {}
+    ...found.ambiguous ? { ambiguous: found.ambiguous } : {},
+    ...found.collapsed ? { collapsed: found.collapsed } : {}
   };
 }
 
@@ -34346,15 +34383,13 @@ function citationResolves(db, id8, seq, expected) {
   if (!Number.isSafeInteger(seq) || seq < 0)
     return false;
   const needle = id8.toLowerCase();
-  if (expected && expected.toLowerCase().startsWith(needle)) {
+  if (expected && (idTag(expected) === needle || expected.toLowerCase().startsWith(needle))) {
     return seqExists(db, expected, seq);
   }
-  const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
-  const row = db.prepare(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\'
-       UNION ALL
-       SELECT session_id AS id FROM ghosts WHERE session_id LIKE ? ESCAPE '\\'
-       LIMIT 8`).all(`${escaped}%`, `${escaped}%`);
-  return row.some((r) => seqExists(db, r.id, seq));
+  const found = resolveSession(db, needle);
+  if (!found || found.ambiguous)
+    return false;
+  return seqExists(db, found.id, seq);
 }
 function seqExists(db, sessionId, seq) {
   const ex = db.prepare("SELECT 1 AS ok FROM exchanges WHERE session_id = ? AND seq = ? LIMIT 1").get(sessionId, seq);
@@ -34443,11 +34478,11 @@ function sliceText(userText, assistantText, isGhost) {
 async function collectSource(db, sessionId, o = {}) {
   const show = showSession(db, sessionId);
   if (!show) {
-    throw new GraftError(`session ${sessionId.slice(0, 8)} is in the index but has no body`, "potsherd index --full");
+    throw new GraftError(`session ${idTag(sessionId)} is in the index but has no body`, "potsherd index --full");
   }
   const isGhost = show.session.status === "ghost" || Boolean(show.ghostPrompts);
   const card = readCard(db, sessionId);
-  const id8 = sessionId.slice(0, 8);
+  const id8 = idTag(sessionId);
   const thread = threadOf(db, sessionId);
   const totals = threadTotals(db, thread);
   const chained = thread.sessions.length > 1;
@@ -34463,7 +34498,7 @@ async function collectSource(db, sessionId, o = {}) {
       for (const h of wanted.slice(0, perSession)) {
         const text = sliceText(h.userText ?? "", h.assistantText ?? "", isGhost);
         if (text)
-          found.push({ seq: h.seq, ts: h.ts ?? null, text, id8: member.slice(0, 8) });
+          found.push({ seq: h.seq, ts: h.ts ?? null, text, id8: idTag(member) });
       }
     }
     found.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? "") || a.seq - b.seq);
@@ -34476,7 +34511,7 @@ async function collectSource(db, sessionId, o = {}) {
       ts: p.ts,
       user: p.text,
       assistant: "",
-      id8: sessionId.slice(0, 8)
+      id8: idTag(sessionId)
     })) : threadUnits(db, thread);
     for (const u of units.slice(-Math.max(1, o.k ?? RECENT_K))) {
       const text = sliceText(u.user, u.assistant, isGhost);
@@ -34519,7 +34554,7 @@ function threadUnits(db, thread) {
     ts: r.ts,
     user: r.user_text ?? "",
     assistant: r.assistant_text ?? "",
-    id8: r.session_id.slice(0, 8)
+    id8: idTag(r.session_id)
   }));
 }
 var GRAFT_SYSTEM = "You compress one past coding session into a re-entry brief for a different agent that has never seen it. You are not summarising for a human reader; you are handing a colleague the facts they need to continue work.";
@@ -34534,7 +34569,7 @@ function buildPrompt(src, o) {
   lines.push(`Session ${src.id8} \xB7 ${src.harness} \xB7 project ${src.project || "unknown"} \xB7 ${src.date}`);
   lines.push(`Title: ${src.title}`);
   if (chained) {
-    lines.push(`This session is the newest link of a ${src.thread.sessions.length}-transcript chain (${src.thread.sessions.map((id) => id.slice(0, 8)).join(" \u2192 ")}), ${src.exchanges} exchanges of one continuous piece of work. Treat it as one session.`);
+    lines.push(`This session is the newest link of a ${src.thread.sessions.length}-transcript chain (${src.thread.sessions.map((id) => idTag(id)).join(" \u2192 ")}), ${src.exchanges} exchanges of one continuous piece of work. Treat it as one session.`);
   }
   if (src.isGhost) {
     lines.push("THIS SESSION IS A GHOST: only the user prompts survive. The assistant side was deleted and is not recoverable. Never state what the assistant answered, decided or did.");
@@ -35273,12 +35308,19 @@ function resolveProject(db, needle) {
   const partial2 = projects.filter((p) => p.project.toLowerCase().includes(want));
   if (partial2.length === 1) return partial2[0].project;
   if (partial2.length > 1) throw ambiguous(needle, partial2.map((p) => p.project));
+  const names = shortNames(projects.map((p) => p.project));
+  const held = names.length === projects.length ? String(projects.length) : `${String(projects.length)} projects under ${String(names.length)} names`;
   throw new UserError(
-    `no indexed project matches "${needle}". The index holds ${projects.length}: ` + nameList(projects.map((p) => p.project))
+    `no indexed project matches "${needle}". The index holds ${held}: ` + nameList(names)
   );
 }
 function ambiguous(needle, candidates) {
-  return new UserError(`"${needle}" matches ${candidates.length} projects: ${nameList(candidates)}`);
+  return new UserError(
+    `"${needle}" matches ${candidates.length} projects: ${nameList(candidates.map((c) => paths_exports.tildify(c)))}`
+  );
+}
+function shortNames(dirs) {
+  return [...new Set(dirs.map((d) => last(d)))];
 }
 function nameList(names, cap2 = 12) {
   const shown = names.slice(0, cap2);
@@ -43382,7 +43424,7 @@ async function guarded(fn) {
 var SEP = " \xB7 ";
 var ID8 = /^[0-9a-f]{8}/i;
 function mintCitation(f) {
-  const id8 = f.sessionId.slice(0, 8);
+  const id8 = idTag(f.sessionId);
   const project = f.project?.split("/").filter(Boolean).pop() || "(no project)";
   const count2 = f.kind === "ghost" ? "ghost, prompts only" : `${String(f.exchanges)} exchange${f.exchanges === 1 ? "" : "s"}`;
   return [id8, project, f.harness, count2, f.date ?? "undated"].join(SEP);
@@ -43517,7 +43559,9 @@ function resolveThreadRef(db, ref, verb = "read") {
     const total = probe.total;
     links.push({
       sessionId: id,
-      id8: id.slice(0, 8),
+      // VERIFICATION-8 C8-1 — `idTag`, never `slice(0, 8)`. A subagent link's
+      // eight characters are its own, not its parent's.
+      id8: idTag(id),
       kind: probe.session.kind,
       total,
       offset,
@@ -43528,7 +43572,7 @@ function resolveThreadRef(db, ref, verb = "read") {
   }
   if (links.length === 0) {
     throw new UserError(
-      `thread ${threadId.slice(0, 8)} is in the index but has no body`,
+      `thread ${idTag(threadId)} is in the index but has no body`,
       "potsherd index --full"
     );
   }
@@ -43540,7 +43584,11 @@ function resolveThreadRef(db, ref, verb = "read") {
     // time from the harness's own record identity. There is no other path to
     // this value any more, and a test fails if one reappears.
     via: "core",
-    note: null
+    // VERIFICATION-8 C8-1. A parent uuid is a prefix of every subagent
+    // transcript it spawned, and taking the parent is right — but taking it in
+    // silence is what let one id8 stand for forty-one threads. The subagents
+    // are named by their own id8s so the caller can reach them.
+    note: thread.collapsed?.length ? `"${needle}" is also a prefix of ${String(thread.collapsed.length)} subagent transcript${thread.collapsed.length === 1 ? "" : "s"} this session spawned; the parent conversation is what was read. Each subagent has an id8 of its own: ` + thread.collapsed.slice(0, 5).map((c) => idTag(c.id)).join(", ") + (thread.collapsed.length > 5 ? `, and ${String(thread.collapsed.length - 5)} more` : "") : null
   };
 }
 
@@ -43579,7 +43627,8 @@ async function runGraft(ctx, args) {
         const t = resolveThreadRef(db, report.sessionId, "graft");
         thread = {
           id: t.threadId,
-          id8: t.threadId.slice(0, 8),
+          // VERIFICATION-8 C8-1 — `idTag`, never `slice(0, 8)`.
+          id8: idTag(t.threadId),
           via: t.via,
           note: t.note,
           links: t.links.length,
@@ -43761,7 +43810,7 @@ function runRead(ctx, args) {
     if (requestedTo < from) {
       throw new UserError(
         `to (${requestedTo}) is before from (${from})`,
-        `potsherd_read {"thread":"${thread.threadId.slice(0, 8)}","from":${from},"to":${from + READ_PAGE - 1}}`
+        `potsherd_read {"thread":"${idTag(thread.threadId)}","from":${from},"to":${from + READ_PAGE - 1}}`
       );
     }
     const to = Math.min(requestedTo, from + READ_MAX_SPAN - 1, thread.total);
@@ -43826,7 +43875,8 @@ function runRead(ctx, args) {
     return {
       thread: {
         id: thread.threadId,
-        id8: thread.threadId.slice(0, 8),
+        // VERIFICATION-8 C8-1 — `idTag`, never `slice(0, 8)`. See `mintCitation`.
+        id8: idTag(thread.threadId),
         via: thread.via,
         note: thread.note,
         links: thread.links
@@ -43977,6 +44027,7 @@ async function runRecall(ctx, args) {
     const sessions = withhold ? [] : result.sessions;
     const hits = withhold ? [] : result.hits;
     const threads = groupThreads(sessions);
+    const uncitedNone = threads.filter((r) => r.confidence === "none").length;
     const nearest = withhold && (belowFloor ?? 0) > 0 ? (await recall(db, query, filters, {
       ...options,
       [MIN_CONFIDENCE_FIELD]: "none"
@@ -44074,7 +44125,17 @@ async function runRecall(ctx, args) {
         // the one thing this note must do is stop the caller reading the
         // rows as the answer the envelope has just said it does not have.
         `these ${String(sessions.length)} ${format_exports.plural(sessions.length, "row")} are below the confidence floor and are labelled none: they are the closest text in the archive to your words, not an answer to your question. Read them to judge for yourself, do not cite them as a source, and do not report them to the user as what was decided.`
-      ) : calibrated ? null : 'this build of potsherd does not calibrate its scores yet, so "confidence" is null rather than a measurement. Treat a low-scoring row as unproven.',
+      ) : !calibrated ? 'this build of potsherd does not calibrate its scores yet, so "confidence" is null rather than a measurement. Treat a low-scoring row as unproven.' : (
+        // VERIFICATION-8 C8-5. The envelope is the archive's best label
+        // for the question; it is not a label on any row. When rows
+        // under a `weak` or better envelope carry `none` of their own —
+        // six of seven, on the reference archive, under a `weak`
+        // envelope and a `note` of `null` — the caveat that used to
+        // depend on the envelope has to be said anyway, or the reply the
+        // tool tells an agent to ask for is the one reply that omits it.
+        // `citable: false` is the enforcement; this is the sentence.
+        uncitedNone > 0 ? `${String(uncitedNone)} of these ${String(threads.length)} ${format_exports.plural(threads.length, "row")} ${format_exports.plural(uncitedNone, "is", "are")} labelled none: the closest text in the archive to your words, not an answer to your question. They carry no citation and may not be cited. Read them to judge for yourself, and do not report them to the user as what was decided.` : null
+      ),
       ignored: result.ignored,
       lists: result.lists,
       relaxed: result.relaxed,
@@ -44128,15 +44189,17 @@ function groupThreads(sessions) {
     const exchanges = members.reduce((n, m) => n + m.exchanges, 0);
     const prompts = members.reduce((n, m) => n + m.prompts, 0);
     const evidence = threadEvidence(members);
-    const citable = lead.citable === true;
+    const label2 = confidenceOf(lead);
+    const citable = lead.citable === true && label2 !== "none";
     const started = members.map((m) => m.startedAt).filter(Boolean).sort()[0] ?? null;
     const ended = members.map((m) => m.endedAt).filter(Boolean).sort().pop() ?? null;
     return {
       thread: key,
-      id8: key.slice(0, 8),
+      // VERIFICATION-8 C8-1 — `idTag`, never `slice(0, 8)`. See `mintCitation`.
+      id8: idTag(key),
       threadOf: threadIdOf(lead) === null ? "session" : "chain",
-      links: members.map((m) => ({ sessionId: m.id, id8: m.id.slice(0, 8), exchanges: m.exchanges })),
-      confidence: confidenceOf(lead),
+      links: members.map((m) => ({ sessionId: m.id, id8: idTag(m.id), exchanges: m.exchanges })),
+      confidence: label2,
       calibration: calibrationOf(lead),
       kind: lead.kind,
       harness: lead.harness,
@@ -44213,6 +44276,10 @@ function groupThreads(sessions) {
       // exist, and `potsherd_read` is a tool it actually has.
       ...evidence === "not-a-transcript" ? {
         citableNote: "nothing here is a transcript: the session title or its card matched, the body did not use those words. Not citable. potsherd_read the thread if you want to know what it actually says."
+      } : label2 === "none" ? {
+        // C8-5. Said in the same words as the reply-level note and the
+        // CLI's caption, because they are one rule.
+        citableNote: "labelled none: this is the closest text in the archive to your words, not an answer to your question. Not citable. Read it to judge for yourself, and do not report it to the user as what was decided."
       } : {}
     };
   });
@@ -44329,7 +44396,10 @@ function windowsFrom(sessions, budgetTokens) {
 function capabilityLine(v, report) {
   const counts = report && report.total > 0 ? ` (${format_exports.num(report.embedded)} of ${format_exports.num(report.total)} embedded)` : "";
   const because = (why) => why ? ` (${why})` : "";
-  if (v.used) return `keyword + semantic search${counts}`;
+  if (v.used) {
+    const stalled = report !== void 0 && report.total > 0 && report.embedded < report.total && report.working === false;
+    return `keyword + semantic search${counts}${stalled ? " \u2014 the rest is not being embedded" : ""}`;
+  }
   if (report && (report.phase === "warming" || report.phase === "pending")) {
     if (report.working === false)
       return `keyword search only \u2014 semantic search is not running${counts}`;

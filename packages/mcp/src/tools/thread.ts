@@ -1,4 +1,5 @@
 import {
+  idTag,
   resolveThread,
   showSession,
   type ThreadResolution,
@@ -81,7 +82,12 @@ export interface ResolvedThread {
    * derived lineage, never the caller's reference standing in for a chain.
    */
   via: 'core';
-  /** Reserved for a caveat this path no longer has. Always null. */
+  /**
+   * The one caveat this path can have: VERIFICATION-8 C8-1's collapsed
+   * subagents. `null` whenever the reference named exactly one thing, which is
+   * every reference minted by this server — a citation carries {@link idTag},
+   * and an `idTag` is unique across the index.
+   */
   note: string | null;
 }
 
@@ -129,7 +135,9 @@ export function resolveThreadRef(db: Db, ref: string, verb = 'read'): ResolvedTh
     const total = probe.total;
     links.push({
       sessionId: id,
-      id8: id.slice(0, 8),
+      // VERIFICATION-8 C8-1 — `idTag`, never `slice(0, 8)`. A subagent link's
+      // eight characters are its own, not its parent's.
+      id8: idTag(id),
       kind: probe.session.kind,
       total,
       offset,
@@ -141,7 +149,7 @@ export function resolveThreadRef(db: Db, ref: string, verb = 'read'): ResolvedTh
 
   if (links.length === 0) {
     throw new UserError(
-      `thread ${threadId.slice(0, 8)} is in the index but has no body`,
+      `thread ${idTag(threadId)} is in the index but has no body`,
       'potsherd index --full',
     );
   }
@@ -154,6 +162,19 @@ export function resolveThreadRef(db: Db, ref: string, verb = 'read'): ResolvedTh
     // time from the harness's own record identity. There is no other path to
     // this value any more, and a test fails if one reappears.
     via: 'core',
-    note: null,
+    // VERIFICATION-8 C8-1. A parent uuid is a prefix of every subagent
+    // transcript it spawned, and taking the parent is right — but taking it in
+    // silence is what let one id8 stand for forty-one threads. The subagents
+    // are named by their own id8s so the caller can reach them.
+    note: thread.collapsed?.length
+      ? `"${needle}" is also a prefix of ${String(thread.collapsed.length)} subagent ` +
+        `transcript${thread.collapsed.length === 1 ? '' : 's'} this session spawned; the parent ` +
+        'conversation is what was read. Each subagent has an id8 of its own: ' +
+        thread.collapsed
+          .slice(0, 5)
+          .map((c) => idTag(c.id))
+          .join(', ') +
+        (thread.collapsed.length > 5 ? `, and ${String(thread.collapsed.length - 5)} more` : '')
+      : null,
   };
 }

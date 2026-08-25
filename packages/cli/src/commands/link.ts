@@ -7,6 +7,7 @@ import {
   unlinkSessions,
   renderSuggestions,
   suggestLinks,
+  idTag,
 } from '@potsherd/core';
 import { print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 import { openIndex } from '../filters.js';
@@ -68,7 +69,7 @@ export async function runLink(o: LinkCommandOptions): Promise<number> {
     if (a.id === b.id) {
       throw new UserError(
         'a session cannot be linked to itself',
-        `potsherd link ${a.id.slice(0, 8)} <other-id8>`,
+        `potsherd link ${idTag(a.id)} <other-id8>`,
       );
     }
 
@@ -130,7 +131,7 @@ function receipt(
   for (const side of [a, b]) {
     lines.push(
       '  ' +
-        t.dim(side.id.slice(0, 8)) +
+        t.dim(idTag(side.id)) +
         '  ' +
         fmt.elide(side.title, Math.max(12, t.width - 12), t),
     );
@@ -143,8 +144,8 @@ function receipt(
   lines.push(
     fitLine(
       t,
-      `${t.dim('run')}  potsherd ls --linked-to ${a.id.slice(0, 8)}  ${t.dim('to list both ends')}`,
-      `${t.dim('run')}  potsherd ls --linked-to ${a.id.slice(0, 8)}`,
+      `${t.dim('run')}  potsherd ls --linked-to ${idTag(a.id)}  ${t.dim('to list both ends')}`,
+      `${t.dim('run')}  potsherd ls --linked-to ${idTag(a.id)}`,
     ),
   );
   return lines.join('\n');

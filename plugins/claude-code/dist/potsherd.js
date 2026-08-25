@@ -4774,6 +4774,23 @@ function forgetStrandedStamps(db, stranded) {
   if (stranded.includes("vec_ghost_prompts"))
     clear("ghost_prompts");
 }
+function legacyVectorCount(db, legacy, rows, key) {
+  if (!legacyVecTable(db, legacy))
+    return 0;
+  if (!loadVec(db).available)
+    return 0;
+  try {
+    return db.prepare(`SELECT COUNT(*) AS n FROM ${legacy} v JOIN ${rows} r ON r.${key} = v.${key}`).get().n;
+  } catch {
+    try {
+      const n2 = db.prepare(`SELECT COUNT(*) AS n FROM ${legacy}`).get().n;
+      const total = db.prepare(`SELECT COUNT(*) AS n FROM ${rows}`).get().n;
+      return Math.min(n2, total);
+    } catch {
+      return 0;
+    }
+  }
+}
 function legacyVecTable(db, name) {
   try {
     const row2 = db.prepare(`SELECT type, sql FROM sqlite_master WHERE name = ?`).get(name);
@@ -4791,8 +4808,13 @@ function vecTablesExist(db) {
   }
 }
 var STAMPED_LANES = [
-  { rows: "exchanges", blob: "vec_blob_exchanges", key: "id" },
-  { rows: "ghost_prompts", blob: "vec_blob_ghost_prompts", key: "id" }
+  { rows: "exchanges", blob: "vec_blob_exchanges", key: "id", legacy: "vec_exchanges" },
+  {
+    rows: "ghost_prompts",
+    blob: "vec_blob_ghost_prompts",
+    key: "id",
+    legacy: "vec_ghost_prompts"
+  }
 ];
 var STORE_VERSION_KEY = "vectors:store-version";
 function storeVersion(db) {
@@ -4827,7 +4849,7 @@ function vectorCounts(db) {
         have = db.prepare(`SELECT COUNT(*) AS n FROM ${lane.blob} b
                  JOIN ${lane.rows} r ON r.${lane.key} = b.${lane.key}`).get().n;
       } catch {
-        have = 0;
+        have = legacyVectorCount(db, lane.legacy, lane.rows, lane.key);
       }
     }
     embedded += have;
@@ -9721,6 +9743,13 @@ var SOURCE_OF_LIST = {
   cards_fts: "card",
   vec_cards: "card"
 };
+function keywordCandidates(lists) {
+  let n2 = 0;
+  for (const l of lists)
+    if (!l.list.startsWith("vec_"))
+      n2 += l.candidates;
+  return n2;
+}
 function evidenceSources(lists) {
   const sources = /* @__PURE__ */ new Set();
   for (const l of lists)
@@ -11712,7 +11741,7 @@ function renderSweepList(r, t = new Theme(), limit = 10) {
   card.blank().text("sessions the sweep takes next:");
   for (const s of r.nextSweep.slice(0, limit)) {
     const when2 = s.daysLeft <= 0 ? "at next startup" : s.daysLeft === 1 ? "in 1 day" : `in ${s.daysLeft} days`;
-    const label4 = s.title ?? `${basename2(s.project)}-${s.id.slice(0, 8)}`;
+    const label4 = s.title ?? `${basename2(s.project)}-${idTag(s.id)}`;
     card.raw(`    ${t.warn(pad(when2, 16))}${elide(label4, Math.max(20, t.width - 24))}`);
   }
   if (r.nextSweep.length > limit) {
@@ -16164,7 +16193,12 @@ function resolveSession(db, ref2) {
   if (exactGhost)
     return { id: exactGhost.session_id, kind: "ghost" };
   const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
-  let candidates = matching(db, `${escaped}%`);
+  const byId = /* @__PURE__ */ new Map();
+  for (const c of [...matching(db, `${escaped}%`), ...matching(db, `%:agent-${escaped}%`)]) {
+    if (!byId.has(c.id))
+      byId.set(c.id, c);
+  }
+  let candidates = [...byId.values()];
   if (candidates.length === 0)
     candidates = matching(db, `%${escaped}%`);
   if (candidates.length === 0)
@@ -16173,9 +16207,14 @@ function resolveSession(db, ref2) {
   if (candidates.length === 1)
     return { id: first.id, kind: first.kind };
   const topLevel = candidates.filter((c) => !c.isSidechain);
-  if (topLevel.length === 1)
-    return { id: topLevel[0].id, kind: topLevel[0].kind };
-  const pick3 = topLevel.length > 0 ? topLevel : candidates;
+  if (topLevel.length === 1) {
+    const parent = topLevel[0];
+    const others = candidates.filter((c) => c.id !== parent.id);
+    if (others.every((c) => c.id.startsWith(`${parent.id}:`))) {
+      return { id: parent.id, kind: parent.kind, ...others.length ? { collapsed: others } : {} };
+    }
+  }
+  const pick3 = topLevel.length > 1 ? topLevel : candidates;
   return { id: pick3[0].id, kind: pick3[0].kind, ambiguous: pick3 };
 }
 function matching(db, pattern) {
@@ -16189,7 +16228,11 @@ function matching(db, pattern) {
               0 AS is_sidechain,
               COALESCE(g.last_ts, g.first_ts) AS when_
          FROM ghosts g WHERE g.session_id LIKE ? ESCAPE '\\'
-       ORDER BY is_sidechain, when_ DESC LIMIT 25`).all(pattern, pattern);
+       -- The cap is a guard against a pathological reference, not a page size:
+       -- every count built from this list (the ambiguity refusal's, the
+       -- collapsed-subagent note's) is only true if the list is complete, and
+       -- at 25 a parent with forty subagents disclosed twenty-four of them.
+       ORDER BY is_sidechain, when_ DESC LIMIT 1000`).all(pattern, pattern);
   return rows.map((r) => ({
     id: r.id,
     kind: r.kind,
@@ -17634,7 +17677,7 @@ function withheldNote(result, t) {
   const n2 = result.belowFloor;
   if (n2 <= 0)
     return [];
-  const what = `${num(n2)} ${plural(n2, "session")} matched some of those words and none of them enough`;
+  const what = keywordCandidates(result.lists) === 0 ? `${num(n2)} ${plural(n2, "session")} matched on meaning alone \u2014 none of them uses those words` : `${num(n2)} ${plural(n2, "session")} matched some of those words and none of them enough`;
   const flag = "--min-confidence none";
   const wide = `${what}  ${t.sep}  ${flag}`;
   const out = [];
@@ -19900,7 +19943,7 @@ function blockTag(transcript) {
 function fallbackCard(transcript) {
   const first = transcript.units.find((u) => u.text.trim().length > 0);
   const opening = (first?.text ?? "").replace(/^user:\s*/i, "").replace(/\s+/g, " ").trim();
-  const title = transcript.title?.trim() || opening || `session ${transcript.id.slice(0, 8)}`;
+  const title = transcript.title?.trim() || opening || `session ${idTag(transcript.id)}`;
   const summary3 = opening ? `Could not be summarised; the session opened with: ${opening}` : "Could not be summarised from this transcript.";
   return minimalCard(title, summary3);
 }
@@ -19957,7 +20000,7 @@ async function extractCard(llm, transcript, options = {}) {
       transcriptBlock(chunks[0], blockTag(transcript)),
       priorBlock(options.prior)
     ].join("\n");
-    const { card, parsed: parsed2 } = await call(`extract ${transcript.id.slice(0, 8)}`, prompt2);
+    const { card, parsed: parsed2 } = await call(`extract ${idTag(transcript.id)}`, prompt2);
     return { card, chunks: 1, spend, parsed: parsed2, model: llm.model };
   }
   const mapped = await Promise.all(chunks.map((chunk, i) => {
@@ -19968,7 +20011,7 @@ async function extractCard(llm, transcript, options = {}) {
       "",
       transcriptBlock(chunk, blockTag(transcript))
     ].join("\n");
-    return call(`extract ${transcript.id.slice(0, 8)} ${i + 1}/${chunks.length}`, prompt2);
+    return call(`extract ${idTag(transcript.id)} ${i + 1}/${chunks.length}`, prompt2);
   }));
   const partials = mapped.map((m) => m.card);
   let parsed = mapped.every((m) => m.parsed);
@@ -19984,7 +20027,7 @@ async function extractCard(llm, transcript, options = {}) {
     JSON.stringify(partials, null, 1),
     "</partial-cards>"
   ].join("\n");
-  const reduced = await call(`reduce ${transcript.id.slice(0, 8)}`, prompt);
+  const reduced = await call(`reduce ${idTag(transcript.id)}`, prompt);
   if (!reduced.parsed)
     parsed = false;
   return { card: reduced.card, chunks: chunks.length, spend, parsed, model: llm.model };
@@ -20019,7 +20062,7 @@ async function supplementCard(llm, transcript, uncoveredSeqs, card, options = {}
     // The supplement has no title and no summary by design, so the card
     // validator — which needs one of them — would reject every good answer.
     validate: (v) => validateCard(withPlaceholderTitle(v)),
-    label: `supplement ${transcript.id.slice(0, 8)}`,
+    label: `supplement ${idTag(transcript.id)}`,
     maxOutputTokens: options.maxOutputTokens ?? 1536,
     ...options.signal ? { signal: options.signal } : {}
   }));
@@ -20186,7 +20229,7 @@ async function cardTranscript(llm, transcript, options = {}) {
   card = normaliseCard(deduped.card);
   options.onStep?.("dedupe", `${deduped.report.removed} removed`);
   if (!card.title.trim()) {
-    card = normaliseCard({ ...card, title: transcript.title ?? transcript.id.slice(0, 8) });
+    card = normaliseCard({ ...card, title: transcript.title ?? idTag(transcript.id) });
   }
   if (transcript.kind === "ghost" && card.outcome !== "unknown") {
     card = { ...card, outcome: "unknown" };
@@ -20523,7 +20566,7 @@ function renderCardRun(report, t = new Theme(), o = {}) {
     card.text(listed.length < report.cards.length ? `${listed.length} of ${report.cards.length} cards, most-filtered first:` : "the cards:");
     card.blank();
     for (const line of table(t, listed.map((c) => [
-      c.title || c.id.slice(0, 8),
+      c.title || idTag(c.id),
       c.outcome,
       `${c.decisions}d ${c.openThreads}o`,
       c.dropped ? `-${c.dropped}` : t.g("\xB7", "."),
@@ -20536,7 +20579,7 @@ function renderCardRun(report, t = new Theme(), o = {}) {
     card.blank();
     card.text(`${num(report.errors.length)} failed:`, "warn");
     for (const e of report.errors.slice(0, 3)) {
-      card.text(`  ${e.id.slice(0, 8)}  ${clip(e.message, Math.max(20, t.width - 16), t)}`, "dim");
+      card.text(`  ${idTag(e.id)}  ${clip(e.message, Math.max(20, t.width - 16), t)}`, "dim");
     }
   }
   card.blank();
@@ -22557,15 +22600,13 @@ function citationResolves(db, id8, seq, expected) {
   if (!Number.isSafeInteger(seq) || seq < 0)
     return false;
   const needle = id8.toLowerCase();
-  if (expected && expected.toLowerCase().startsWith(needle)) {
+  if (expected && (idTag(expected) === needle || expected.toLowerCase().startsWith(needle))) {
     return seqExists(db, expected, seq);
   }
-  const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
-  const row2 = db.prepare(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\'
-       UNION ALL
-       SELECT session_id AS id FROM ghosts WHERE session_id LIKE ? ESCAPE '\\'
-       LIMIT 8`).all(`${escaped}%`, `${escaped}%`);
-  return row2.some((r) => seqExists(db, r.id, seq));
+  const found = resolveSession(db, needle);
+  if (!found || found.ambiguous)
+    return false;
+  return seqExists(db, found.id, seq);
 }
 function seqExists(db, sessionId, seq) {
   const ex = db.prepare("SELECT 1 AS ok FROM exchanges WHERE session_id = ? AND seq = ? LIMIT 1").get(sessionId, seq);
@@ -22654,11 +22695,11 @@ function sliceText(userText, assistantText, isGhost) {
 async function collectSource(db, sessionId, o = {}) {
   const show2 = showSession(db, sessionId);
   if (!show2) {
-    throw new GraftError(`session ${sessionId.slice(0, 8)} is in the index but has no body`, "potsherd index --full");
+    throw new GraftError(`session ${idTag(sessionId)} is in the index but has no body`, "potsherd index --full");
   }
   const isGhost = show2.session.status === "ghost" || Boolean(show2.ghostPrompts);
   const card = readCard(db, sessionId);
-  const id8 = sessionId.slice(0, 8);
+  const id8 = idTag(sessionId);
   const thread = threadOf(db, sessionId);
   const totals = threadTotals(db, thread);
   const chained = thread.sessions.length > 1;
@@ -22674,7 +22715,7 @@ async function collectSource(db, sessionId, o = {}) {
       for (const h of wanted.slice(0, perSession)) {
         const text = sliceText(h.userText ?? "", h.assistantText ?? "", isGhost);
         if (text)
-          found.push({ seq: h.seq, ts: h.ts ?? null, text, id8: member.slice(0, 8) });
+          found.push({ seq: h.seq, ts: h.ts ?? null, text, id8: idTag(member) });
       }
     }
     found.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? "") || a.seq - b.seq);
@@ -22687,7 +22728,7 @@ async function collectSource(db, sessionId, o = {}) {
       ts: p.ts,
       user: p.text,
       assistant: "",
-      id8: sessionId.slice(0, 8)
+      id8: idTag(sessionId)
     })) : threadUnits(db, thread);
     for (const u of units.slice(-Math.max(1, o.k ?? RECENT_K))) {
       const text = sliceText(u.user, u.assistant, isGhost);
@@ -22730,7 +22771,7 @@ function threadUnits(db, thread) {
     ts: r.ts,
     user: r.user_text ?? "",
     assistant: r.assistant_text ?? "",
-    id8: r.session_id.slice(0, 8)
+    id8: idTag(r.session_id)
   }));
 }
 var GRAFT_SYSTEM = "You compress one past coding session into a re-entry brief for a different agent that has never seen it. You are not summarising for a human reader; you are handing a colleague the facts they need to continue work.";
@@ -22745,7 +22786,7 @@ function buildPrompt(src, o) {
   lines.push(`Session ${src.id8} \xB7 ${src.harness} \xB7 project ${src.project || "unknown"} \xB7 ${src.date}`);
   lines.push(`Title: ${src.title}`);
   if (chained) {
-    lines.push(`This session is the newest link of a ${src.thread.sessions.length}-transcript chain (${src.thread.sessions.map((id) => id.slice(0, 8)).join(" \u2192 ")}), ${src.exchanges} exchanges of one continuous piece of work. Treat it as one session.`);
+    lines.push(`This session is the newest link of a ${src.thread.sessions.length}-transcript chain (${src.thread.sessions.map((id) => idTag(id)).join(" \u2192 ")}), ${src.exchanges} exchanges of one continuous piece of work. Treat it as one session.`);
   }
   if (src.isGhost) {
     lines.push("THIS SESSION IS A GHOST: only the user prompts survive. The assistant side was deleted and is not recoverable. Never state what the assistant answered, decided or did.");
@@ -23992,7 +24033,7 @@ function suggestLinks(db, o = {}) {
   };
 }
 function toSuggestion(c, b) {
-  const b8 = b.slice(0, 8);
+  const b8 = idTag(b);
   return {
     a: c.sessionId,
     a8: c.id8,
@@ -27122,12 +27163,19 @@ function resolveProject(db, needle) {
   const partial = projects.filter((p) => p.project.toLowerCase().includes(want));
   if (partial.length === 1) return partial[0].project;
   if (partial.length > 1) throw ambiguous(needle, partial.map((p) => p.project));
+  const names = shortNames(projects.map((p) => p.project));
+  const held = names.length === projects.length ? String(projects.length) : `${String(projects.length)} projects under ${String(names.length)} names`;
   throw new UserError(
-    `no indexed project matches "${needle}". The index holds ${projects.length}: ` + nameList(projects.map((p) => p.project))
+    `no indexed project matches "${needle}". The index holds ${held}: ` + nameList(names)
   );
 }
 function ambiguous(needle, candidates) {
-  return new UserError(`"${needle}" matches ${candidates.length} projects: ${nameList(candidates)}`);
+  return new UserError(
+    `"${needle}" matches ${candidates.length} projects: ${nameList(candidates.map((c) => paths_exports.tildify(c)))}`
+  );
+}
+function shortNames(dirs) {
+  return [...new Set(dirs.map((d) => last(d)))];
 }
 function nameList(names, cap2 = 12) {
   const shown = names.slice(0, cap2);
@@ -27562,7 +27610,7 @@ async function runShow(o) {
     if (o.md && o.html) {
       throw new UserError(
         "show takes --md or --html, not both",
-        "potsherd show " + found.id.slice(0, 8) + " --html > session.html"
+        "potsherd show " + idTag(found.id) + " --html > session.html"
       );
     }
     if (o.md) {
@@ -27683,7 +27731,7 @@ async function runCard(o) {
         concurrency,
         force: Boolean(o.force),
         onProgress: (p) => {
-          if (p.phase === "start") bar.update(p.done, p.total, p.target.id.slice(0, 8));
+          if (p.phase === "start") bar.update(p.done, p.total, idTag(p.target.id));
           else bar.update(p.done, p.total, p.detail ?? "");
         }
       });
@@ -28621,6 +28669,11 @@ var QUOTE_STOPWORDS2 = /* @__PURE__ */ new Set([
   "you",
   "your"
 ]);
+function idTag2(id) {
+  const colon = id.lastIndexOf(":");
+  if (colon === -1) return id.slice(0, 8);
+  return id.slice(colon + 1).replace(/^agent-/, "").slice(0, 8);
+}
 
 // ../core/src/threads.ts
 function threadOf2(db, sessionId) {
@@ -28667,7 +28720,7 @@ function addNote(db, input) {
   if (!decided && !open2 && !next) {
     throw new NoteFieldError(
       "a note needs something to say \u2014 give at least one of --decided, --open, --next",
-      `potsherd note ${input.sessionId.slice(0, 8)} --decided "..." --next "..."`
+      `potsherd note ${idTag2(input.sessionId)} --decided "..." --next "..."`
     );
   }
   const thread = threadOf2(db, input.sessionId);
@@ -28853,7 +28906,7 @@ function laneFor(db, sessionId) {
 function heading(t, found, chain) {
   const unit = chain > 1 ? `thread of ${chain} sessions` : "thread of 1 session";
   return t.dim(
-    format_exports.clip(`potsherd note ${t.sep} ${found.id.slice(0, 8)} ${t.sep} ${unit}`, t.width, t) + "\n" + format_exports.clip(`  ${found.title}`, t.width, t)
+    format_exports.clip(`potsherd note ${t.sep} ${idTag(found.id)} ${t.sep} ${unit}`, t.width, t) + "\n" + format_exports.clip(`  ${found.title}`, t.width, t)
   );
 }
 function provenance(t, n2) {
@@ -28881,7 +28934,7 @@ function fields(t, n2) {
   return out;
 }
 function receipt(t, found, n2, chain, previous) {
-  const id8 = found.id.slice(0, 8);
+  const id8 = idTag(found.id);
   const lines = [heading(t, found, chain), "", provenance(t, n2), "", ...fields(t, n2), ""];
   lines.push(
     fitLine(
@@ -28913,7 +28966,7 @@ function receipt(t, found, n2, chain, previous) {
   return lines.join("\n");
 }
 function listing(t, found, chain, notes) {
-  const id8 = found.id.slice(0, 8);
+  const id8 = idTag(found.id);
   const lines = [heading(t, found, chain), ""];
   if (notes.length === 0) {
     lines.push(`  ${t.dim("no notes on this thread yet.")}`);
@@ -28989,7 +29042,7 @@ async function runTag(o) {
     if (rejected.length > 0 && add.length === 0 && remove.length === 0) {
       throw new UserError(
         `nothing usable in ${rejected.map((r) => `"${r}"`).join(", ")} \u2014 a tag is letters, digits, - . _ or /`,
-        `potsherd tag ${found.id.slice(0, 8)} +postgres -mysql`
+        `potsherd tag ${idTag(found.id)} +postgres -mysql`
       );
     }
     const result = applyTags(db, found.id, { add, remove });
@@ -29015,7 +29068,7 @@ function summary2(found) {
 }
 function heading2(t, verb, found) {
   return t.dim(
-    format_exports.clip(`potsherd ${verb} ${t.sep} ${found.id.slice(0, 8)} ${t.sep} ${found.title}`, t.width, t)
+    format_exports.clip(`potsherd ${verb} ${t.sep} ${idTag(found.id)} ${t.sep} ${found.title}`, t.width, t)
   );
 }
 function tagList(tags) {
@@ -29029,8 +29082,8 @@ function listing2(t, found, tags) {
     lines.push(
       fitLine(
         t,
-        `${t.dim("run")}  potsherd tag ${found.id.slice(0, 8)} +postgres  ${t.dim("to add one")}`,
-        `${t.dim("run")}  potsherd tag ${found.id.slice(0, 8)} +postgres`
+        `${t.dim("run")}  potsherd tag ${idTag(found.id)} +postgres  ${t.dim("to add one")}`,
+        `${t.dim("run")}  potsherd tag ${idTag(found.id)} +postgres`
       )
     );
     return lines.join("\n");
@@ -29151,7 +29204,7 @@ async function runPin(o) {
     const lines = [
       t.dim(
         format_exports.clip(
-          `potsherd ${verb} ${t.sep} ${found.id.slice(0, 8)} ${t.sep} ${found.title}`,
+          `potsherd ${verb} ${t.sep} ${idTag(found.id)} ${t.sep} ${found.title}`,
           t.width,
           t
         )
@@ -29336,7 +29389,7 @@ async function runLink(o) {
     if (a.id === b.id) {
       throw new UserError(
         "a session cannot be linked to itself",
-        `potsherd link ${a.id.slice(0, 8)} <other-id8>`
+        `potsherd link ${idTag(a.id)} <other-id8>`
       );
     }
     if (o.remove) {
@@ -29378,7 +29431,7 @@ function receipt3(t, verb, a, b, what, note) {
   const lines = [t.dim(format_exports.clip(`potsherd ${verb} ${t.sep} ${what}`, t.width, t)), ""];
   for (const side of [a, b]) {
     lines.push(
-      "  " + t.dim(side.id.slice(0, 8)) + "  " + format_exports.elide(side.title, Math.max(12, t.width - 12), t)
+      "  " + t.dim(idTag(side.id)) + "  " + format_exports.elide(side.title, Math.max(12, t.width - 12), t)
     );
   }
   if (note) {
@@ -29389,8 +29442,8 @@ function receipt3(t, verb, a, b, what, note) {
   lines.push(
     fitLine(
       t,
-      `${t.dim("run")}  potsherd ls --linked-to ${a.id.slice(0, 8)}  ${t.dim("to list both ends")}`,
-      `${t.dim("run")}  potsherd ls --linked-to ${a.id.slice(0, 8)}`
+      `${t.dim("run")}  potsherd ls --linked-to ${idTag(a.id)}  ${t.dim("to list both ends")}`,
+      `${t.dim("run")}  potsherd ls --linked-to ${idTag(a.id)}`
     )
   );
   return lines.join("\n");
@@ -30077,7 +30130,7 @@ function matchOrFail(abs, question, what, recorded, live) {
   );
 }
 function id8s(ids) {
-  return ids.slice(0, 4).map((id) => id.slice(0, 8)).join(" ").concat(ids.length > 4 ? ` +${ids.length - 4}` : "");
+  return ids.slice(0, 4).map((id) => idTag(id)).join(" ").concat(ids.length > 4 ? ` +${ids.length - 4}` : "");
 }
 function readReadersFile(abs) {
   let raw;
@@ -30165,10 +30218,10 @@ function readerOutput(abs, entry, i) {
     throw new UserError(`${where} has no "sessionId"`, 'copy it from the matching entry in "targets"');
   }
   if (typeof entry["found"] !== "boolean") {
-    throw new UserError(`${where} ("${sessionId.slice(0, 8)}") has no boolean "found"`, 'a reader that found nothing records "found": false \u2014 it is not omitted');
+    throw new UserError(`${where} ("${idTag(sessionId)}") has no boolean "found"`, 'a reader that found nothing records "found": false \u2014 it is not omitted');
   }
   const rawQuotes = entry["quotes"];
-  if (!Array.isArray(rawQuotes)) throw new UserError(`${where} ("${sessionId.slice(0, 8)}") has no "quotes" array`, '"quotes": [] when found is false');
+  if (!Array.isArray(rawQuotes)) throw new UserError(`${where} ("${idTag(sessionId)}") has no "quotes" array`, '"quotes": [] when found is false');
   const quotes = rawQuotes.map((qq, j) => {
     if (!isRecord2(qq)) throw new UserError(`${where}.quotes[${j}] is not an object`, '{ "seq": n, "ts": "\u2026"|null, "text": "\u2026" }');
     const seq = qq["seq"];
@@ -30207,7 +30260,7 @@ function reportDrops(drops) {
   process19.stderr.write(`  filter: ${drops.length} dropped
 `);
   for (const d of drops) {
-    const where = d.sessionId ? `${d.sessionId.slice(0, 8)}@${d.seq}` : "";
+    const where = d.sessionId ? `${idTag(d.sessionId)}@${d.seq}` : "";
     const text = d.text.replace(/\s+/g, " ").slice(0, 90);
     process19.stderr.write(`    ${d.kind.padEnd(8)} ${d.reason.padEnd(16)} ${where.padEnd(14)} ${text}
 `);

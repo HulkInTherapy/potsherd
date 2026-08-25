@@ -151,6 +151,7 @@ export {
   fallbackTitle,
   displayTitleOf,
   idTag,
+  keywordCandidates,
   sessionMeta,
   fromSessionRow,
   fromGhostRow,

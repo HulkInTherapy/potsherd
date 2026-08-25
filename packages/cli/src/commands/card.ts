@@ -15,6 +15,7 @@ import {
   type BackendChoice,
   type CardPlan,
   type CardRunReport,
+  idTag,
 } from '@potsherd/core';
 import {
   Progress,
@@ -213,7 +214,7 @@ export async function runCard(o: CardCommandOptions): Promise<number> {
         concurrency,
         force: Boolean(o.force),
         onProgress: (p) => {
-          if (p.phase === 'start') bar.update(p.done, p.total, p.target.id.slice(0, 8));
+          if (p.phase === 'start') bar.update(p.done, p.total, idTag(p.target.id));
           else bar.update(p.done, p.total, p.detail ?? '');
         },
       });

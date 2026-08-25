@@ -1,4 +1,5 @@
 import type { Llm } from '../llm.js';
+import { idTag } from '../recall.js';
 import type { ExtractedCard } from './schema.js';
 import { CARD_SCHEMA, minimalCard, validateCard } from './schema.js';
 import { GHOST_SYSTEM } from './ghost.js';
@@ -155,7 +156,7 @@ export function fallbackCard(transcript: Transcript): ExtractedCard {
     .replace(/^user:\s*/i, '')
     .replace(/\s+/g, ' ')
     .trim();
-  const title = transcript.title?.trim() || opening || `session ${transcript.id.slice(0, 8)}`;
+  const title = transcript.title?.trim() || opening || `session ${idTag(transcript.id)}`;
   const summary = opening
     ? `Could not be summarised; the session opened with: ${opening}`
     : 'Could not be summarised from this transcript.';
@@ -237,7 +238,7 @@ export async function extractCard(
       transcriptBlock(chunks[0]!, blockTag(transcript)),
       priorBlock(options.prior),
     ].join('\n');
-    const { card, parsed } = await call(`extract ${transcript.id.slice(0, 8)}`, prompt);
+    const { card, parsed } = await call(`extract ${idTag(transcript.id)}`, prompt);
     return { card, chunks: 1, spend, parsed, model: llm.model };
   }
 
@@ -254,7 +255,7 @@ export async function extractCard(
         '',
         transcriptBlock(chunk, blockTag(transcript)),
       ].join('\n');
-      return call(`extract ${transcript.id.slice(0, 8)} ${i + 1}/${chunks.length}`, prompt);
+      return call(`extract ${idTag(transcript.id)} ${i + 1}/${chunks.length}`, prompt);
     }),
   );
   const partials = mapped.map((m) => m.card);
@@ -273,7 +274,7 @@ export async function extractCard(
     JSON.stringify(partials, null, 1),
     '</partial-cards>',
   ].join('\n');
-  const reduced = await call(`reduce ${transcript.id.slice(0, 8)}`, prompt);
+  const reduced = await call(`reduce ${idTag(transcript.id)}`, prompt);
   if (!reduced.parsed) parsed = false;
 
   return { card: reduced.card, chunks: chunks.length, spend, parsed, model: llm.model };
@@ -332,7 +333,7 @@ export async function supplementCard(
     // The supplement has no title and no summary by design, so the card
     // validator — which needs one of them — would reject every good answer.
     validate: (v) => validateCard(withPlaceholderTitle(v)),
-    label: `supplement ${transcript.id.slice(0, 8)}`,
+    label: `supplement ${idTag(transcript.id)}`,
     maxOutputTokens: options.maxOutputTokens ?? 1_536,
     ...(options.signal ? { signal: options.signal } : {}),
   }));

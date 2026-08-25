@@ -957,6 +957,42 @@ function forgetStrandedStamps(db: Db, stranded: readonly VecTable[]): void {
 }
 
 /** True when `name` exists and is a vec0 virtual table rather than our view. */
+/**
+ * The same count, read out of the `vec0` virtual table 1.1.0 left behind.
+ *
+ * VERIFICATION-8 C8-8. Two conditions, both necessary: the name must actually
+ * be a 1.1.0 vec0 table (a *missing* blob table on a database that never had
+ * vectors must keep counting zero), and this connection must be able to read
+ * it — without `sqlite-vec` the rows exist and no query can reach them, and
+ * `0` is then the true answer to *how much of this index can search answer
+ * from*. The join is the same join, for the same reason: a vector whose row is
+ * gone is not coverage.
+ */
+function legacyVectorCount(db: Db, legacy: string, rows: string, key: string): number {
+  if (!legacyVecTable(db, legacy)) return 0;
+  if (!loadVec(db).available) return 0;
+  try {
+    return (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM ${legacy} v JOIN ${rows} r ON r.${key} = v.${key}`,
+        )
+        .get() as { n: number }
+    ).n;
+  } catch {
+    try {
+      // A vec0 table that will not join still counts: `COUNT(*)` over it is
+      // the number of vectors, and the join above only ever removes rows, so
+      // clamping to the row count cannot overstate coverage.
+      const n = (db.prepare(`SELECT COUNT(*) AS n FROM ${legacy}`).get() as { n: number }).n;
+      const total = (db.prepare(`SELECT COUNT(*) AS n FROM ${rows}`).get() as { n: number }).n;
+      return Math.min(n, total);
+    } catch {
+      return 0;
+    }
+  }
+}
+
 function legacyVecTable(db: Db, name: string): boolean {
   try {
     const row = db
@@ -984,8 +1020,13 @@ export function vecTablesExist(db: Db): boolean {
 
 /** The two lanes that carry a stamp, and the blob table each one is stored in. */
 const STAMPED_LANES = [
-  { rows: 'exchanges', blob: 'vec_blob_exchanges', key: 'id' },
-  { rows: 'ghost_prompts', blob: 'vec_blob_ghost_prompts', key: 'id' },
+  { rows: 'exchanges', blob: 'vec_blob_exchanges', key: 'id', legacy: 'vec_exchanges' },
+  {
+    rows: 'ghost_prompts',
+    blob: 'vec_blob_ghost_prompts',
+    key: 'id',
+    legacy: 'vec_ghost_prompts',
+  },
 ] as const;
 
 /**
@@ -1067,7 +1108,16 @@ export function vectorCounts(db: Db): { embedded: number; pending: number } {
             .get() as { n: number }
         ).n;
       } catch {
-        have = 0; // The store has not been created on this database yet.
+        // **VERIFICATION-8 C8-8.** `catch { have = 0 }` is right for a
+        // database that has never embedded anything and wrong for the one
+        // screen a 1.1.0 user is most likely to run first: 1.1.0 wrote its
+        // vectors into `vec0` **virtual tables**, migration 10 converts them
+        // into these blob tables, and `doctor` opens read-only — so between
+        // installing 1.2.0 and running `index`, `doctor` reported `0 of 4,774`
+        // over a file holding 4,589 vectors it goes on to keep (§B.1). The
+        // store is the same store either side of the migration; only its
+        // spelling changes, and this is the other spelling.
+        have = legacyVectorCount(db, lane.legacy, lane.rows, lane.key);
       }
     }
     embedded += have;

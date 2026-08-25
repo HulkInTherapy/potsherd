@@ -8,7 +8,7 @@ import type { Harness } from './adapters/types.js';
 import { resolveSession, showSession, type ShowResult } from './browse.js';
 import { readCard, type StoredCard } from './cards/write.js';
 import { PROMPTS_ONLY } from './cards/ghost.js';
-import { projectName } from './recall.js';
+import { idTag, projectName } from './recall.js';
 import { sessionDay, threadOf, threadTotals, type Thread } from './threads.js';
 import { recall } from './recall.js';
 import {
@@ -625,19 +625,24 @@ function citationResolves(db: Db, id8: string, seq: number, expected?: string): 
   if (!Number.isSafeInteger(seq) || seq < 0) return false;
   const needle = id8.toLowerCase();
   // The common case by far: the model cited the session it was given.
-  if (expected && expected.toLowerCase().startsWith(needle)) {
+  //
+  // **VERIFICATION-8 C8-1 — and this test used to be `startsWith`.** A
+  // subagent id is `<parent-uuid>:agent-<hash>` and its id8 is the *right*
+  // half, so the brief the model was handed carried an id that is not a prefix
+  // of the session it names. Under `startsWith` the fast path missed, the
+  // prefix scan below found nothing, and every citation in a subagent's brief
+  // would have been deleted as unresolvable. `idTag` is the same function that
+  // minted the id, which is the point: one identity, checked against itself.
+  if (expected && (idTag(expected) === needle || expected.toLowerCase().startsWith(needle))) {
     return seqExists(db, expected, seq);
   }
-  const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
-  const row = db
-    .prepare(
-      `SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\'
-       UNION ALL
-       SELECT session_id AS id FROM ghosts WHERE session_id LIKE ? ESCAPE '\\'
-       LIMIT 8`,
-    )
-    .all(`${escaped}%`, `${escaped}%`) as { id: string }[];
-  return row.some((r) => seqExists(db, r.id, seq));
+  // One resolver. `resolveSession` is what `show`, `graft`, `read` and
+  // `verifySources` already use, it knows both lanes an id8 can arrive in, and
+  // an ambiguous reference is one it refuses rather than guesses — so a
+  // citation whose id names two threads is not silently kept here either.
+  const found = resolveSession(db, needle);
+  if (!found || found.ambiguous) return false;
+  return seqExists(db, found.id, seq);
 }
 
 function seqExists(db: Db, sessionId: string, seq: number): boolean {
@@ -862,13 +867,15 @@ export async function collectSource(
   const show = showSession(db, sessionId);
   if (!show) {
     throw new GraftError(
-      `session ${sessionId.slice(0, 8)} is in the index but has no body`,
+      `session ${idTag(sessionId)} is in the index but has no body`,
       'potsherd index --full',
     );
   }
   const isGhost = show.session.status === 'ghost' || Boolean(show.ghostPrompts);
   const card = readCard(db, sessionId);
-  const id8 = sessionId.slice(0, 8);
+  // VERIFICATION-8 C8-1 — `idTag`, never `slice(0, 8)`: this is the id every
+  // `[id8@seq]` in the brief carries and `citationResolves` checks.
+  const id8 = idTag(sessionId);
 
   // **F4.** The unit is the chain, not the file. `claude --resume` writes a
   // new transcript whose head is a copy of the old one, and potsherd's dedup
@@ -899,7 +906,7 @@ export async function collectSource(
       const wanted = hits.hits.filter((h) => h.sessionId === member && typeof h.seq === 'number');
       for (const h of wanted.slice(0, perSession)) {
         const text = sliceText(h.userText ?? '', h.assistantText ?? '', isGhost);
-        if (text) found.push({ seq: h.seq as number, ts: h.ts ?? null, text, id8: member.slice(0, 8) });
+        if (text) found.push({ seq: h.seq as number, ts: h.ts ?? null, text, id8: idTag(member) });
       }
     }
     // Chronological across the chain, then cut: the newest link's exchanges
@@ -931,7 +938,7 @@ export async function collectSource(
           ts: p.ts,
           user: p.text,
           assistant: '',
-          id8: sessionId.slice(0, 8),
+          id8: idTag(sessionId),
         }))
       : threadUnits(db, thread);
     for (const u of units.slice(-Math.max(1, o.k ?? RECENT_K))) {
@@ -999,7 +1006,7 @@ function threadUnits(
     ts: r.ts,
     user: r.user_text ?? '',
     assistant: r.assistant_text ?? '',
-    id8: r.session_id.slice(0, 8),
+    id8: idTag(r.session_id),
   }));
 }
 
@@ -1044,7 +1051,7 @@ export function buildPrompt(src: GraftSource, o: { about?: string | null; budget
   if (chained) {
     lines.push(
       `This session is the newest link of a ${src.thread.sessions.length}-transcript chain ` +
-        `(${src.thread.sessions.map((id) => id.slice(0, 8)).join(' → ')}), ` +
+        `(${src.thread.sessions.map((id) => idTag(id)).join(' → ')}), ` +
         `${src.exchanges} exchanges of one continuous piece of work. Treat it as one session.`,
     );
   }

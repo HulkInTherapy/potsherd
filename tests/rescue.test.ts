@@ -50,12 +50,12 @@ describe('rescue', () => {
 
     const archived = path.join(root, 'archive', 'claude', '-tmp-potsherd-alpha');
     expect(fs.existsSync(path.join(archived, `${IDS.alive}.jsonl`))).toBe(true);
-    expect(fs.existsSync(path.join(archived, IDS.alive, 'subagents', 'agent-01.jsonl'))).toBe(true);
+    expect(fs.existsSync(path.join(archived, IDS.alive, 'subagents', 'agent-01f3a5c7e9b2d4608.jsonl'))).toBe(true);
     expect(fs.existsSync(path.join(archived, 'sessions-index.json'))).toBe(true);
     expect(fs.existsSync(path.join(archived, 'memory', 'decisions.md'))).toBe(true);
     // <project>/subagents/, the layout in plans/phases/phase-0-rescue.md T0.1.
     const beta = path.join(root, 'archive', 'claude', '-tmp-potsherd-beta');
-    expect(fs.existsSync(path.join(beta, 'subagents', 'agent-02.jsonl'))).toBe(true);
+    expect(fs.existsSync(path.join(beta, 'subagents', 'agent-02e4b6d8fa1c3e579.jsonl'))).toBe(true);
   });
 
   it('copies byte-exactly and does not redact the archive', async () => {

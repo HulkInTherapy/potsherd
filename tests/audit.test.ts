@@ -255,7 +255,7 @@ describe('sidechains are not sessions', () => {
 
   it('finds both sidechain layouts and counts neither as a session', async () => {
     const r = await audit(FIXTURE_CLAUDE, NOW);
-    // agent-01 under <session>/subagents/, agent-02 under <project>/subagents/.
+    // one under <session>/subagents/, one under <project>/subagents/.
     expect(r.sidechainFiles).toBe(2);
     expect(r.onDisk).toBe(2);
     expect(r.onDiskFiles).toBe(2);

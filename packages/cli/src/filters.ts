@@ -215,14 +215,46 @@ export function resolveProject(db: Db, needle: string): string {
   // caller has three tools and no shell — it can neither run `potsherd ls` nor
   // pipe anything through `jq`. Naming the projects serves the reader in the
   // terminal just as well, and saves them the round trip.
+  const names = shortNames(projects.map((p) => p.project));
+  // Two numbers when two directories share a leaf, because "holds 55" over a
+  // list of 54 is the kind of one-off a reader is right not to trust.
+  const held =
+    names.length === projects.length
+      ? String(projects.length)
+      : `${String(projects.length)} projects under ${String(names.length)} names`;
   throw new UserError(
-    `no indexed project matches "${needle}". The index holds ${projects.length}: ` +
-      nameList(projects.map((p) => p.project)),
+    `no indexed project matches "${needle}". The index holds ${held}: ` + nameList(names),
   );
 }
 
 function ambiguous(needle: string, candidates: string[]): UserError {
-  return new UserError(`"${needle}" matches ${candidates.length} projects: ${nameList(candidates)}`);
+  // Short names cannot disambiguate here — this list exists *because* the
+  // short names collide — so the paths are printed, with the home directory
+  // elided. `tildify` is the same function the audit card uses for the same
+  // reason: what disambiguates two projects is the directories above them, and
+  // the user's home directory name is never one of them.
+  return new UserError(
+    `"${needle}" matches ${candidates.length} projects: ${nameList(candidates.map((c) => paths.tildify(c)))}`,
+  );
+}
+
+/**
+ * Project names as the caller should type them, never as paths.
+ *
+ * **VERIFICATION-7 C7-8 and VERIFICATION-8 C8-6.** This message is read at the
+ * model door — `potsherd_recall`'s `scope.project` — and it answered a bad
+ * project name with twelve absolute paths under the user's home directory: the
+ * home directory's name, and twelve project names nobody asked for, into an
+ * agent's context. Round 5's fix was right about *what* to say (the projects,
+ * not a `jq` pipeline) and wrong about the form. `resolveProject` matches on
+ * the last path segment, so the short name is both the thing that discloses
+ * least and the thing the caller's next call should carry.
+ *
+ * Deduplicated, because two directories may share a leaf and printing one name
+ * twice reads as an error in the tool rather than a fact about the machine.
+ */
+function shortNames(dirs: string[]): string[] {
+  return [...new Set(dirs.map((d) => last(d)))];
 }
 
 /**

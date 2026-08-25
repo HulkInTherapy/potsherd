@@ -32,8 +32,8 @@ import { FIXTURE_CLAUDE, IDS, rmrf, tempDir } from '../helpers.js';
 
 const ALIVE_REL = path.join('-tmp-potsherd-alpha', `${IDS.alive}.jsonl`);
 const SDK_REL = path.join('-tmp-potsherd-beta', `${IDS.sdk}.jsonl`);
-const NESTED_SIDECHAIN_REL = path.join('-tmp-potsherd-alpha', IDS.alive, 'subagents', 'agent-01.jsonl');
-const FLAT_SIDECHAIN_REL = path.join('-tmp-potsherd-beta', 'subagents', 'agent-02.jsonl');
+const NESTED_SIDECHAIN_REL = path.join('-tmp-potsherd-alpha', IDS.alive, 'subagents', 'agent-01f3a5c7e9b2d4608.jsonl');
+const FLAT_SIDECHAIN_REL = path.join('-tmp-potsherd-beta', 'subagents', 'agent-02e4b6d8fa1c3e579.jsonl');
 
 function fixtureSources(): ClaudeSessionSource[] {
   return discover({ claudeDir: FIXTURE_CLAUDE, archive: false });
@@ -104,12 +104,12 @@ describe('claude parse', () => {
 
     // The `sessionId` field *inside* a subagent transcript holds the PARENT's
     // id. Using it raw would make every sidechain overwrite its parent row.
-    expect(nested.session.id).toBe(`${IDS.alive}:agent-01`);
+    expect(nested.session.id).toBe(`${IDS.alive}:agent-01f3a5c7e9b2d4608`);
     expect(nested.session.parentSessionId).toBe(IDS.alive);
     expect(nested.session.id).not.toBe(parent.session.id);
 
     // Same rule when the path names no parent: the records supply it.
-    expect(flat.session.id).toBe(`${IDS.sdk}:agent-02`);
+    expect(flat.session.id).toBe(`${IDS.sdk}:agent-02e4b6d8fa1c3e579`);
     expect(flat.session.parentSessionId).toBe(IDS.sdk);
 
     expect(nested.session.isSidechain).toBe(true);
@@ -408,7 +408,7 @@ describe('archive fallback', () => {
 
     // A sidechain in the archive still gets the parent-derived id.
     const archivedSidechain = await parse(bySlug(sources, FLAT_SIDECHAIN_REL));
-    expect(archivedSidechain.session.id).toBe(`${IDS.sdk}:agent-02`);
+    expect(archivedSidechain.session.id).toBe(`${IDS.sdk}:agent-02e4b6d8fa1c3e579`);
     expect(archivedSidechain.session.status).toBe('archived');
 
     rmrf(root);

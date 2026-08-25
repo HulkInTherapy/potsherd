@@ -8,6 +8,7 @@ import {
   ReentrancyError,
   graft,
   graftJson,
+  idTag,
   type Llm as LlmType,
 } from '@potsherd/core';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -130,7 +131,8 @@ export async function runGraft(
         const t = resolveThreadRef(db, report.sessionId, 'graft');
         thread = {
           id: t.threadId,
-          id8: t.threadId.slice(0, 8),
+          // VERIFICATION-8 C8-1 — `idTag`, never `slice(0, 8)`.
+          id8: idTag(t.threadId),
           via: t.via,
           note: t.note,
           links: t.links.length,

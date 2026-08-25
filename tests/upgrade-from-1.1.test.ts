@@ -40,7 +40,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { db as store, embeddings, indexAll, vecStatus, type Db } from '@potsherd/core';
+import { db as store, embeddings, indexAll, vecStatus, vectorCounts, type Db } from '@potsherd/core';
 import { rmrf, tempDir } from './helpers.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -687,3 +687,72 @@ describe('a stranded database no migration will touch again', () => {
   });
 });
 
+
+/**
+ * **VERIFICATION-8 C8-8** — on a 1.1.0 database, `doctor` reported `0 of N`
+ * over a store holding every one of them.
+ *
+ * This is VERIFICATION-7 C7-3's shape surviving on the read-only path, on the
+ * exact screen a 1.1.0 user is most likely to run first. `vectorCounts` reads
+ * the blob tables migration 10 creates; on a schema-9 database those tables do
+ * not exist yet and the vectors are still in the `vec0` virtual tables 1.1.0
+ * wrote — so the count fell into `catch { have = 0 }` and every status surface
+ * said `not running, 0 of N` about a file whose vectors the very next writable
+ * open goes on to keep in full (§B.1, and the two tests above).
+ *
+ * The vectors survive; the number shown *before* the migration did not
+ * describe them. The release's upgrade note is *"Everything else is additive.
+ * The index migrates itself"*, and a first screen that reports the user's paid
+ * work as absent is the one thing that makes that sentence unbelievable.
+ *
+ * `readonly: true` and no `index` run first are both load-bearing: the question
+ * is what the *unmigrated* file reports, not what the next open can repair.
+ */
+describe('C8-8 — the pre-migration screen counts the vectors the file actually holds', () => {
+  it('vectorCounts reads the 1.1.0 store when the portable one does not exist yet', async () => {
+    const { root, ids } = await buildOneOneDatabase();
+    const db = store.open({ root, readonly: true });
+    try {
+      // The premise, read rather than assumed: schema 9, no blob table, real
+      // vec0 tables holding the vectors.
+      expect(
+        (db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as { v: number }).v,
+      ).toBeLessThan(10);
+      expect(objects(db, 'vec_blob_exchanges')).toBeUndefined();
+      expect(objects(db, 'vec_exchanges')?.type).toBe('table');
+
+      const counts = vectorCounts(db);
+      expect(counts.embedded).toBe(ids.length);
+      expect(counts.pending).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('and doctor says so, through the binary, with the extension present', async () => {
+    const { root, ids } = await buildOneOneDatabase();
+    const doctor = cliWithVec(['doctor', '--potsherd-dir', root]);
+    expect(doctor.code).toBe(0);
+    expect(doctor.stdout).not.toMatch(new RegExp(`0 of ${String(ids.length)}`));
+    expect(doctor.stdout).toMatch(new RegExp(`\\n {2}vectors +${String(ids.length)} +`));
+    // The schema line is unchanged: the file really is unmigrated, and the
+    // screen still says so. Only the vector count stopped being wrong.
+    expect(doctor.stdout).toMatch(/schema v9 of v/);
+  });
+
+  it('but a machine that cannot read a vec0 store still counts zero, which is true there', async () => {
+    const { root } = await buildOneOneDatabase();
+    await withoutTheExtension(() => {
+      const db = store.open({ root, readonly: true });
+      try {
+        // Without the extension these vectors exist and no query can reach
+        // them, so nothing search can answer from is embedded. Reporting a
+        // number the lane cannot use would be the same defect pointing the
+        // other way.
+        expect(vectorCounts(db).embedded).toBe(0);
+      } finally {
+        db.close();
+      }
+    });
+  });
+});

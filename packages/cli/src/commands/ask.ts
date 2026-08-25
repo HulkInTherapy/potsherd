@@ -22,6 +22,7 @@ import {
   type AskReaderInput,
   type AskReaderOutput,
   type AskResult,
+  idTag,
 } from '@potsherd/core';
 import {
   UserError,
@@ -1745,7 +1746,7 @@ function matchOrFail(
 function id8s(ids: readonly string[]): string {
   return ids
     .slice(0, 4)
-    .map((id) => id.slice(0, 8))
+    .map((id) => idTag(id))
     .join(' ')
     .concat(ids.length > 4 ? ` +${ids.length - 4}` : '');
 }
@@ -1874,10 +1875,10 @@ function readerOutput(abs: string, entry: unknown, i: number): RecordedOutput {
     throw new UserError(`${where} has no "sessionId"`, 'copy it from the matching entry in "targets"');
   }
   if (typeof entry['found'] !== 'boolean') {
-    throw new UserError(`${where} ("${sessionId.slice(0, 8)}") has no boolean "found"`, 'a reader that found nothing records "found": false — it is not omitted');
+    throw new UserError(`${where} ("${idTag(sessionId)}") has no boolean "found"`, 'a reader that found nothing records "found": false — it is not omitted');
   }
   const rawQuotes = entry['quotes'];
-  if (!Array.isArray(rawQuotes)) throw new UserError(`${where} ("${sessionId.slice(0, 8)}") has no "quotes" array`, '"quotes": [] when found is false');
+  if (!Array.isArray(rawQuotes)) throw new UserError(`${where} ("${idTag(sessionId)}") has no "quotes" array`, '"quotes": [] when found is false');
   const quotes = rawQuotes.map((qq, j) => {
     if (!isRecord(qq)) throw new UserError(`${where}.quotes[${j}] is not an object`, '{ "seq": n, "ts": "…"|null, "text": "…" }');
     const seq = qq['seq'];
@@ -1932,7 +1933,7 @@ function reportDrops(drops: readonly AskDrop[]): void {
   }
   process.stderr.write(`  filter: ${drops.length} dropped\n`);
   for (const d of drops) {
-    const where = d.sessionId ? `${d.sessionId.slice(0, 8)}@${d.seq}` : '';
+    const where = d.sessionId ? `${idTag(d.sessionId)}@${d.seq}` : '';
     const text = d.text.replace(/\s+/g, ' ').slice(0, 90);
     process.stderr.write(`    ${d.kind.padEnd(8)} ${d.reason.padEnd(16)} ${where.padEnd(14)} ${text}\n`);
   }

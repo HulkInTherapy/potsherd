@@ -18,8 +18,8 @@ const {
 const P = path.join(FIXTURE_CLAUDE, 'projects');
 const ALIVE = path.join(P, '-tmp-potsherd-alpha', `${IDS.alive}.jsonl`);
 const SDK = path.join(P, '-tmp-potsherd-beta', `${IDS.sdk}.jsonl`);
-const SIDECHAIN_NESTED = path.join(P, '-tmp-potsherd-alpha', IDS.alive, 'subagents', 'agent-01.jsonl');
-const SIDECHAIN_FLAT = path.join(P, '-tmp-potsherd-beta', 'subagents', 'agent-02.jsonl');
+const SIDECHAIN_NESTED = path.join(P, '-tmp-potsherd-alpha', IDS.alive, 'subagents', 'agent-01f3a5c7e9b2d4608.jsonl');
+const SIDECHAIN_FLAT = path.join(P, '-tmp-potsherd-beta', 'subagents', 'agent-02e4b6d8fa1c3e579.jsonl');
 
 describe('jsonl reader', () => {
   it('reports the exact byte range of every line', async () => {

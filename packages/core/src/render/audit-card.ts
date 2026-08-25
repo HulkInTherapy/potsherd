@@ -3,6 +3,7 @@ import { Card, noteWidth, type Row } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
 import { tildify } from '../paths.js';
+import { idTag } from '../recall.js';
 
 /**
  * The audit card. This is the product's face: the one screenshot a stranger
@@ -214,7 +215,7 @@ export function renderSweepList(r: AuditReport, t: Theme = new Theme(), limit = 
   card.blank().text('sessions the sweep takes next:');
   for (const s of r.nextSweep.slice(0, limit)) {
     const when = s.daysLeft <= 0 ? 'at next startup' : s.daysLeft === 1 ? 'in 1 day' : `in ${s.daysLeft} days`;
-    const label = s.title ?? `${basename(s.project)}-${s.id.slice(0, 8)}`;
+    const label = s.title ?? `${basename(s.project)}-${idTag(s.id)}`;
     card.raw(`    ${t.warn(pad(when, 16))}${f.elide(label, Math.max(20, t.width - 24))}`);
   }
   if (r.nextSweep.length > limit) {

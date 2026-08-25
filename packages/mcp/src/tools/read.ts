@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { showSession } from '@potsherd/core';
+import { idTag, showSession } from '@potsherd/core';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { UserError } from '../../../cli/src/output.js';
@@ -74,7 +74,7 @@ export function runRead(ctx: ServerContext, args: ReadArgs): Record<string, unkn
     if (requestedTo < from) {
       throw new UserError(
         `to (${requestedTo}) is before from (${from})`,
-        `potsherd_read {"thread":"${thread.threadId.slice(0, 8)}","from":${from},"to":${from + READ_PAGE - 1}}`,
+        `potsherd_read {"thread":"${idTag(thread.threadId)}","from":${from},"to":${from + READ_PAGE - 1}}`,
       );
     }
     const to = Math.min(requestedTo, from + READ_MAX_SPAN - 1, thread.total);
@@ -149,7 +149,8 @@ export function runRead(ctx: ServerContext, args: ReadArgs): Record<string, unkn
     return {
       thread: {
         id: thread.threadId,
-        id8: thread.threadId.slice(0, 8),
+        // VERIFICATION-8 C8-1 — `idTag`, never `slice(0, 8)`. See `mintCitation`.
+        id8: idTag(thread.threadId),
         via: thread.via,
         note: thread.note,
         links: thread.links,
