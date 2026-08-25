@@ -62,6 +62,36 @@ Three properties are worth stating plainly, because they are what the release is
 - **No string an agent reads asks it to run a shell command.** It has three tools and no shell. This
   was wrong in four separate places at the start of the phase.
 
+## what `find` does and does not answer — read this before you judge it
+
+**potsherd answers questions asked in words the archive uses, and stays silent on questions asked
+in words it does not.** Ask it about `pgbouncer` and it finds the session. Ask it *"database handles
+ran out during heavy traffic"* about the same session and it returns nothing.
+
+That is a real limit and this release does not fix it. The measurement, on a 60-query set built by
+someone told nothing about which way any number should go: **the ranker puts the right session
+first for 42 of 60 questions; `find` prints it for 7.** Fifty-two pages come back empty.
+
+It is not a threshold that wants nudging — an exhaustive search over every scoring feature bounds
+what any tuning could recover at 16 of 60. The cause is that a dense vector is blind to
+composition: on a question the archive genuinely cannot answer, a *wrong* session reaches a higher
+similarity than 90% of correct ones. Literal word overlap is the only evidence that separates the
+two, which is exactly why silence is trustworthy here and exactly why paraphrase is lost. Closing
+it needs term-level semantic matching — an index change, and the named target of the next release
+(`phases/phase-12/FIRST-JOB.md`).
+
+**What you get instead of a wrong answer:**
+
+- an empty verdict that shows its work — the closest sessions appear under a rule that says
+  *nearest by meaning · not an answer*, with nothing quotable and nothing to act on;
+- `potsherd find --min-confidence none`, which prints what was withheld;
+- and for an agent, `potsherd_recall`'s new `minConfidence`, so the tool told to trust the silence
+  can ask what the silence hid.
+
+The trade is deliberate. A tool that answers eight questions in ten and invents the ninth is worse
+than one that answers seven and says so — that was the audit's own finding, and it is the reason
+this release exists.
+
 ## what did not change
 
 - **No auto-injection.** Nothing enters your context unless you ask.
@@ -144,6 +174,8 @@ evals, 60 queries, blind — the set was built by someone told nothing about whi
          vectors only  recall@5 57/60   recall@1 40/60
          hybrid        recall@5 57/60   recall@1 42/60   ← strictly above both
        and the set still fails, on two independent clauses, with the vector lists removed
+       the same run reports what `find` returns, not only what the ranker finds: 7/60, with
+       52 of 60 pages empty — the gap is stated on the screen and is the next release's target
 ten published screens diffed against what this build actually prints, in CI
 a database written by 1.1.0 upgraded and indexed, on both SQLite drivers, on a Node
        where the schema pragma is silently ignored and on one where it is not
