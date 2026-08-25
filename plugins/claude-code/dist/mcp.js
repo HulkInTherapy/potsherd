@@ -23585,7 +23585,25 @@ function loadNodeSqlite() {
         // It enables the API, not a load: `vec.ts` is the only caller and
         // it passes `sqlite-vec`'s own `getLoadablePath()`. No path from a
         // transcript, a config file or an argument reaches `loadExtension`.
-        allowExtension: true
+        allowExtension: true,
+        // FIX-H2, and it is a **Node version** difference, not a platform
+        // one. From v24.19.0 `node:sqlite` turns `SQLITE_DBCONFIG_DEFENSIVE`
+        // **on** by default; v24.9.0 did not. Under defensive mode
+        // `PRAGMA writable_schema = ON` is **accepted and silently ignored**
+        // — it reads back as 0 — and the `DELETE FROM sqlite_master` that
+        // migration 10 needs is then refused outright:
+        //
+        //   node v24.9.0    writable_schema -> 1   delete -> 1 row
+        //   node v24.19.0   writable_schema -> 0   delete -> table sqlite_master may not be modified
+        //
+        // So the schema rewrite is impossible on a connection opened the
+        // ordinary way, and there is no runtime toggle: `defensive` can only
+        // be set here. The key is written only when the caller has asked, so
+        // every other connection keeps Node's own default — the surgery is
+        // one connection, on one database, once. On a Node that predates the
+        // option it is an unknown key and is ignored, which is exactly right:
+        // those builds are not defensive in the first place.
+        ...o.schemaWritable ? { defensive: false } : {}
       }))
     };
   } catch (err) {
@@ -24447,10 +24465,10 @@ function migrateToPortableVectors(db) {
         stranded.push(table2);
     }
   } catch {
-    return decline(db, "run POTSHERD_SQLITE=node potsherd index \u2014 this vec0 store could not be read");
+    return decline(db, `${otherDriverCommand()} \u2014 this vec0 store could not be read`);
   }
   if (stranded.length > 0 && !detachStranded(db, stranded)) {
-    return decline(db, "run POTSHERD_SQLITE=node potsherd index \u2014 this sqlite will not rewrite a schema");
+    return decline(db, `${otherDriverCommand()} \u2014 this sqlite will not rewrite a schema`);
   }
   db.exec(EXCHANGE_STORE);
   db.exec(GHOST_STORE);
@@ -24458,6 +24476,9 @@ function migrateToPortableVectors(db) {
     forgetStrandedStamps(db, stranded);
   declines.delete(db);
   return true;
+}
+function otherDriverCommand() {
+  return sqliteDriverName() === "node:sqlite" ? "run POTSHERD_SQLITE=better-sqlite3 potsherd index" : "run POTSHERD_SQLITE=node potsherd index";
 }
 function decline(db, reason) {
   declines.set(db, reason);
@@ -24489,6 +24510,8 @@ function detachStranded(db, tables) {
   try {
     try {
       db.pragma("writable_schema = ON");
+      if (!schemaIsWritable(db))
+        return false;
       db.prepare(`DELETE FROM sqlite_master WHERE type = 'table' AND name = ?`).run("__potsherd_probe_no_such_table__");
     } catch {
       return false;
@@ -24510,6 +24533,18 @@ function detachStranded(db, tables) {
     return false;
   } finally {
     restore();
+  }
+}
+function schemaIsWritable(db) {
+  try {
+    const rows = db.pragma("writable_schema");
+    if (!Array.isArray(rows) || rows.length === 0)
+      return false;
+    const row = rows[0];
+    const value = row["writable_schema"] ?? Object.values(row)[0];
+    return value === 1 || value === true || value === "1";
+  } catch {
+    return false;
   }
 }
 function allowSchemaWrites(db) {
@@ -25194,7 +25229,7 @@ function open(opts = {}) {
   if (file2 !== ":memory:") {
     fs4.mkdirSync(path4.dirname(file2), { recursive: true, mode: 448 });
   }
-  const db = openDatabase(file2, { readonly: opts.readonly ?? false });
+  let db = openDatabase(file2, { readonly: opts.readonly ?? false });
   if (!opts.readonly) {
     db.pragma("journal_mode = WAL");
     db.pragma("synchronous = NORMAL");
@@ -25210,9 +25245,33 @@ function open(opts = {}) {
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
   loadVec(db);
-  if (!opts.readonly)
+  if (!opts.readonly) {
+    db = reopenForSchemaSurgery(db, file2, opts);
     migrate(db);
+  }
   return db;
+}
+function reopenForSchemaSurgery(db, file2, opts) {
+  if (file2 === ":memory:")
+    return db;
+  if ((loadVec(db).legacy ?? []).length === 0)
+    return db;
+  let next;
+  try {
+    next = openDatabase(file2, { readonly: false, schemaWritable: true });
+  } catch {
+    return db;
+  }
+  try {
+    db.close();
+  } catch {
+  }
+  next.pragma("journal_mode = WAL");
+  next.pragma("synchronous = NORMAL");
+  next.pragma("foreign_keys = ON");
+  next.pragma("busy_timeout = 5000");
+  loadVec(next);
+  return next;
 }
 function openSqliteReadOnly(file2) {
   return openDatabase(file2, { readonly: true, fileMustExist: true });
