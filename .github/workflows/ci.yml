@@ -217,8 +217,14 @@ jobs:
             echo "::error::the phase-3 gate was not judged in this run"
             fail=1
           fi
-          if ! grep -q 'the amended phase-3 gate would merge this fusion' "$out"; then
-            echo "::error::no PASS line from the amended phase-3 gate"
+          # The wording moved when the gate was re-scoped in phase 11 to judge
+          # both surfaces, and this grep did not move with it -- so the step
+          # reddened on a run whose gate had passed, which is the "premise
+          # asserted from the output" guard failing at its own job. Matched on
+          # the stable half of the sentence now, and the sentence itself is
+          # pinned by tests/evals-gate.test.ts so it cannot drift silently.
+          if ! grep -q 'gate would merge this fusion' "$out"; then
+            echo "::error::no PASS line from the retrieval gate"
             fail=1
           fi
           if [ "$fail" != 0 ]; then

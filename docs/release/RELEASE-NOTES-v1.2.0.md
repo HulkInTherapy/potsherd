@@ -165,8 +165,8 @@ Vincent (MIT). What was taken, what was adapted and what was refused is in
 ## verified at this tag
 
 ```
-1,985 tests, 55 files · macOS and Ubuntu × Node 22 and 24
-the same suite again on Node's own SQLite (POTSHERD_SQLITE=node) — 1,985, 0 skipped
+2,027 tests, 55 files · macOS and Ubuntu × Node 22 and 24
+the same suite again on Node's own SQLite (POTSHERD_SQLITE=node) — 2,027, 0 skipped
 privacy guard: 0 pinned violations, 25 probes, 19 unaccounted ids (ceiling 19)
 evals, 60 queries, blind — the set was built by someone told nothing about which way
        any number needed to move:
