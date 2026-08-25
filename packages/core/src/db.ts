@@ -2,7 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { dbPath, potsherdDir } from './paths.js';
 import { openDatabase, type Db } from './sqlite-driver.js';
-import { createGhostVecTable, createVecTables, loadVec, migrateToPortableVectors } from './vec.js';
+import {
+  createGhostVecTable,
+  createVecTables,
+  loadVec,
+  migrateToPortableVectors,
+  reconcileVectorStamps,
+} from './vec.js';
 
 /**
  * One SQLite file, `~/.potsherd/potsherd.db`, WAL mode.
@@ -581,6 +587,17 @@ export function open(opts: OpenOptions = {}): Db {
   if (!opts.readonly) {
     db = reopenForSchemaSurgery(db, file, opts);
     migrate(db);
+    // VERIFICATION-7 C7-1. The stamp and the vector store are two records of
+    // one fact, and until this call nothing on any code path compared them —
+    // so a re-index that dropped a stamp without dropping the vector left an
+    // archive whose every status surface said `0 of 4,774` while `find` fused
+    // 4,589 of them on the same screen. `reconcileVectorStamps` is that
+    // comparison, and it repairs rather than reports because the store is the
+    // half search can actually use. It is here, beside `migrate`, because this
+    // is the single point every writable connection passes through — the same
+    // reason `loadVec` is above — and because `doctor` opens read-only and
+    // must be able to *see* drift it cannot fix (`vectorDrift`).
+    reconcileVectorStamps(db);
   }
   return db;
 }

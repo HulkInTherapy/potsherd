@@ -225,8 +225,28 @@ async function withVecEnv<T>(value: string | undefined, fn: () => Promise<T> | T
   }
 }
 
-function cli(args: string[]): { code: number; stdout: string; stderr: string } {
+/**
+ * The binary, on the machine the CHANGELOG's upgrade note is addressed to.
+ *
+ * VERIFICATION-7 C7-3. Every other run through the binary in this file sets
+ * `POTSHERD_NO_VEC=1`, because every other test here is about the machine that
+ * has *lost* the extension — and that is why nothing in this file could see the
+ * defect. The sentence *"it copies every vector across first, so nothing anybody
+ * has already paid for is lost"* is a promise about the machine that still has
+ * `sqlite-vec`, and on that machine the promise was false: the migration copied
+ * two vectors into the portable store and the re-index that followed it deleted
+ * both. This runner states the premise the sentence is about.
+ */
+function cliWithVec(args: string[]): { code: number; stdout: string; stderr: string } {
+  return cli(args, { vec: true });
+}
+
+function cli(
+  args: string[],
+  opts: { vec?: boolean } = {},
+): { code: number; stdout: string; stderr: string } {
   const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: '1', COLUMNS: '100', POTSHERD_NO_VEC: '1' };
+  if (opts.vec) delete env['POTSHERD_NO_VEC'];
   delete env['NODE_PATH'];
   delete env['CLAUDE_CONFIG_DIR'];
   delete env['POTSHERD_DIR'];
@@ -407,6 +427,107 @@ describe('a database written by potsherd 1.1.0, opened without sqlite-vec', () =
     );
   });
 
+  /**
+   * **VERIFICATION-7 C7-3, and the reason the suite could not see it.**
+   *
+   * Two tests in this file were between the defect and the record, and neither
+   * could reach it. `keeps every vector when the extension IS on the machine`
+   * asserts the copy through `store.open()` from source — and the copy is not
+   * where the vectors go; the re-index *after* it is.
+   * `the whole verb: potsherd index completes on it, through the binary` goes
+   * through the binary, which is the path that loses them, and asserts only
+   * that the verb exits 0. The one assertion and the one code path never met.
+   *
+   * This is both at once: the whole verb, through the binary, with the
+   * extension present, counting what is left afterwards. `readonly: true` is
+   * load-bearing — a writable open runs `reconcileVectorStamps`, and the
+   * question here is what the *product* left behind, not what the next open
+   * can repair.
+   */
+  it('keeps every vector across the upgrade, through the binary, with sqlite-vec present', async () => {
+    const { root, claudeDir, ids } = await buildOneOneDatabase();
+
+    const r = cliWithVec([
+      'index',
+      '--no-embed',
+      '--harness',
+      'claude',
+      '--claude-dir',
+      claudeDir,
+      '--potsherd-dir',
+      root,
+    ]);
+    expect(r.stderr + r.stdout).not.toMatch(/no such module/);
+    expect(r.code).toBe(0);
+
+    const db = store.open({ root, readonly: true });
+    try {
+      // The CHANGELOG's sentence, as a number: nothing anybody has already
+      // paid for is lost.
+      expect(db.prepare('SELECT COUNT(*) AS n FROM vec_blob_exchanges').get()).toEqual({
+        n: ids.length,
+      });
+      // And the stamp survives with it, or the next pass buys them all again
+      // and every status surface says `0 of 2` over a store holding two
+      // (VERIFICATION-7 C7-1 is that same seam, seen from the other side).
+      expect(
+        db.prepare('SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version IS NOT NULL').get(),
+      ).toEqual({ n: ids.length });
+    } finally {
+      db.close();
+    }
+
+    // What the reader is told, from the binary, on the same database. The row
+    // is the count, not a promise: `every exchange` is the `ready` phase, which
+    // is only reachable because nothing was dropped.
+    const doctor = cliWithVec(['doctor', '--potsherd-dir', root]);
+    expect(doctor.stdout).toMatch(new RegExp(`\\n {2}vectors +${String(ids.length)} +`));
+    expect(doctor.stdout).toMatch(/vectors +\d+ +bge-small[^\n]*every exchange/);
+    expect(doctor.stdout).not.toMatch(/0 of 2/);
+  });
+
+  it('drops the vector of an exchange whose text the re-index changed', async () => {
+    // The other half of the rule, and the reason it is not simply "never
+    // delete": a vector is a function of the text it was computed from, so an
+    // exchange that came back with different words must not keep the old one.
+    const { root, claudeDir, ids } = await buildOneOneDatabase();
+    const file = path.join(
+      claudeDir,
+      'projects',
+      '-tmp-potsherd-upgrade',
+      `${SESSION}.jsonl`,
+    );
+    const lines = fs.readFileSync(file, 'utf8').trimEnd().split('\n');
+    fs.writeFileSync(
+      file,
+      lines
+        .map((l) => l.replace(/"text":"[^"]*"/, '"text":"a completely different question"'))
+        .join('\n') + '\n',
+    );
+
+    const r = cliWithVec([
+      'index',
+      '--no-embed',
+      '--harness',
+      'claude',
+      '--claude-dir',
+      claudeDir,
+      '--potsherd-dir',
+      root,
+    ]);
+    expect(r.code).toBe(0);
+
+    const db = store.open({ root, readonly: true });
+    try {
+      const kept = (
+        db.prepare('SELECT COUNT(*) AS n FROM vec_blob_exchanges').get() as { n: number }
+      ).n;
+      expect(kept).toBeLessThan(ids.length);
+    } finally {
+      db.close();
+    }
+  });
+
   it('index re-reads every transcript after the conversion, which is where it used to die', async () => {
     const { root, claudeDir } = await buildOneOneDatabase();
 
@@ -459,7 +580,14 @@ describe('doctor, on a database it can see is stranded and cannot repair itself'
     // an assertion about this one.
     const before = cli(['doctor', '--potsherd-dir', root]);
     expect(before.stdout).toMatch(/schema v9 of v12 {2}· run potsherd index/);
-    expect(before.stdout).toMatch(/\n {2}vectors +\d+ +run potsherd index — it converts a vec0 st/);
+    // **VERIFICATION-7 C7-1 moved the value column, and this is the amendment.**
+    // It used to be `\d+` — the count of `embedding_version` stamps, which on
+    // this database is 2 — beside a note saying the store cannot be read at all.
+    // Two vectors sealed inside a vec0 table this machine has no module for are
+    // not two vectors anybody has; `vectorCounts` counts the store now, the
+    // store here is unreadable, and the honest value is the dash. The note is
+    // unchanged and is still the whole point of the row.
+    expect(before.stdout).toMatch(/\n {2}vectors +— +run potsherd index — it converts a vec0 st/);
 
     // And the sentence is true: the command it named is the one that works.
     const fix = cli([

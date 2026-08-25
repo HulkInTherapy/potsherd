@@ -38,7 +38,14 @@ import {
   generateExchangeEmbedding,
   isModelCached,
 } from './embeddings.js';
-import { loadVec, vecStatus, vecTableUsable, type VecStatus } from './vec.js';
+import {
+  beginVectorCarry,
+  endVectorCarry,
+  loadVec,
+  vecStatus,
+  vecTableUsable,
+  type VecStatus,
+} from './vec.js';
 import {
   GHOST_TITLE_MAX_CHARS,
   cutToCodePoints,
@@ -269,8 +276,18 @@ export function ingestSession(
 
   const run = db.transaction(() => {
     upsertSession(db, session, parsed, options);
+    // **VERIFICATION-7 C7-3.** A vector belongs to the text it was computed
+    // from, not to the row it was computed for, and the three statements below
+    // delete every row of this session and write them again. Until this pair
+    // that threw the session's vectors away — on a 1.1.0 upgrade, where
+    // migration 11 makes `index` re-read every transcript, it threw away all of
+    // them, in the same run whose changelog entry promises it does not. The
+    // snapshot is taken before the delete and settled after the insert, inside
+    // this transaction, so no reader can observe a half-carried session.
+    const carry = beginVectorCarry(db, session.id);
     clearExchanges(db, session.id);
     for (const exchange of redacted) insertExchange(db, exchange);
+    endVectorCarry(db, carry);
     // **F4, the dating half.** `started_at` as the parser reports it is the
     // timestamp of the first *record in the file*, and on a `--resume`
     // transcript that record was written by a different session days earlier:
@@ -392,19 +409,25 @@ function clearExchanges(db: Db, sessionId: string): void {
   );
   for (const row of rows) unindex.run(row.rowid, row.user_text, row.assistant_text);
 
-  // The guard here used to be `vecAvailable(db) && vecTablesExist(db)`, and both
-  // halves answered *true* on the database that crashed: `vecAvailable` means
-  // "this connection can score a vector" and has said yes on every machine since
-  // vectors stopped needing an extension, and `vecTablesExist` only asks whether
-  // the name is in `sqlite_master` — which a stranded vec0 table certainly is.
-  // So the `DELETE` was prepared, `prepare` raised `no such module: vec0`, and
-  // `potsherd index` died on the first session of every database written by
-  // 1.1.0 (FIX-H / audit N1). `vecTableUsable` asks the only question that
-  // matters: can sqlite compile a statement against this name, here, now.
-  if (vecTableUsable(db, 'vec_exchanges')) {
-    const dropVec = db.prepare('DELETE FROM vec_exchanges WHERE id = ?');
-    for (const row of rows) dropVec.run(row.id);
-  }
+  // **The vectors are not deleted here any more — VERIFICATION-7 C7-3/C7-1.**
+  //
+  // This used to be a `DELETE FROM vec_exchanges WHERE id = ?` per row, and it
+  // was wrong in both directions at once. When it ran it destroyed the vector of
+  // an exchange that was about to be re-inserted **byte-identical**, which is
+  // what every row of a re-read transcript is — so a 1.1.0 upgrade ended with
+  // zero vectors in the same run whose changelog entry promises it keeps them.
+  // When it did not run — its guard was `vecTableUsable`, false on any machine
+  // without `sqlite-vec` — it left the vector behind while the row it belonged
+  // to was deleted and replaced with `embedding_version` NULL, which is the
+  // drift C7-1 found on a real archive: 4,589 live vectors that every status
+  // surface reported as none.
+  //
+  // {@link beginVectorCarry}/{@link endVectorCarry} in `vec.ts` own the
+  // question now, they answer it by comparing the *text* rather than the row,
+  // and they work on the ordinary blob table, so the answer no longer depends
+  // on whether an extension happens to be installed. The prepare that raised
+  // `no such module: vec0` and killed `potsherd index` on every 1.1.0 database
+  // (FIX-H / audit N1) is simply gone: nothing here names `vec_exchanges`.
   db.prepare('DELETE FROM exchanges WHERE session_id = ?').run(sessionId);
 }
 

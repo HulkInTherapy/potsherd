@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { SUMMARY_KINDS, format, recall, vecStatus, type VecStatus } from '@potsherd/core';
+import {
+  SUMMARY_KINDS,
+  format,
+  recall,
+  sessionDate,
+  vecStatus,
+  type VecStatus,
+} from '@potsherd/core';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { parseFilters, parseLimit, type FilterFlags } from '../../../cli/src/filters.js';
@@ -384,6 +391,14 @@ export async function runRecall(
             title: s.displayTitle,
             project: s.projectName,
             startedAt: s.startedAt,
+            // **VERIFICATION-7 C7-5 at the model door.** These rows carried
+            // `startedAt` alone, so an agent reading them dated a session at the
+            // head of its interval while every other key it gets from this
+            // server — and both terminal surfaces — date it at the tail, four
+            // days apart on the real archive. `sessionDate` is the one function
+            // and it prefers the end; the key is named for what the column it
+            // matches is called, so nothing has to infer which end it is.
+            lastActive: sessionDate(s),
             confidence: 'none' as const,
           }))
         : [];

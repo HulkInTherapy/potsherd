@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   db as store,
+  embeddings,
   indexAll,
   ingestGhosts,
   storedRecordTypes,
@@ -671,8 +672,16 @@ describe('potsherd index acquires semantic search by itself (phase 10 §A2)', ()
       `INSERT INTO exchanges (id, session_id, seq, user_text, assistant_text, embedding_version)
        VALUES (?, 's1', ?, 'u', 'a', ?)`,
     );
+    // The vector goes in beside the stamp — VERIFICATION-7 C7-1. `vectorCounts`
+    // counts the store now, because the store is what the search lane can
+    // return and the stamp is only the queue's bookkeeping; a fixture that
+    // stamps and writes nothing describes an index in the drifted state rather
+    // than a warming one.
+    const put = db.prepare('INSERT OR REPLACE INTO vec_exchanges (id, embedding) VALUES (?, ?)');
+    const blob = embeddings.embeddingToBlob([1, 0, 0]);
     for (let i = 0; i < total; i += 1) {
       ins.run(`e${i}`, i, i < embedded ? 1 : null);
+      if (i < embedded) put.run(`e${i}`, blob);
     }
     const status = vecStatus(db, root, { working });
     db.close();

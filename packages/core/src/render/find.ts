@@ -223,8 +223,20 @@ function nearestNote(result: RecallResult, opts: FindRenderOptions, t: Theme): s
   const rows = (opts.nearest ?? []).slice(0, NEAREST_ROWS);
   if (rows.length === 0) return [];
   const out: string[] = [];
-  const caption = `nearest by meaning ${t.sep} not an answer`;
   const bar = t.g('\u2500', '-');
+  // The caption names the date column — VERIFICATION-7 C7-5's second half.
+  // `ls` heads its column `last active` and `find`'s hit rows say the same two
+  // words in their meta line; this region had no header at all, so a reader had
+  // nothing on the page telling them which end of a session's interval they
+  // were looking at. It goes in the caption rather than on every row because
+  // the region is five rows and one rule, and a row that overflows stops the
+  // region reading as a region (VERIFICATION-7 C7-6 is that failure). It is
+  // dropped whole when the terminal cannot hold it, which is what keeps the
+  // rule exactly `width` characters wide at 40 columns as well as at 120.
+  const plain = `nearest by meaning ${t.sep} not an answer`;
+  const headed = `${plain} ${t.sep} last active`;
+  const room = t.width - INDENT.length - 3;
+  const caption = Theme.len(headed) + 1 <= room ? headed : plain;
   // The rule is drawn to the terminal's width, so the region reads as a region
   // at 60 columns as well as at 120. `asciiLine` folds the glyph to `-`.
   const drawn = `${bar}${bar} ${caption} `;
@@ -233,7 +245,18 @@ function nearestNote(result: RecallResult, opts: FindRenderOptions, t: Theme): s
   for (const s of rows) {
     // `where` is dropped before the title is, because the title is the thing a
     // reader scans for and a truncated project name is still a project name.
-    const when = s.startedAt ? f.date(s.startedAt) : t.dash;
+    //
+    // **{@link sessionDate}, not `s.startedAt` — VERIFICATION-7 C7-5.** This
+    // line was written in the same phase as the fix for VERIFICATION-6's C-6,
+    // four lines below the comment recording that spelling this question at the
+    // call site is what let two verbs date one session a week apart. It dated
+    // its rows at the head of the interval while the hit rows six lines above
+    // dated theirs at the tail, four days apart on the real archive, and the
+    // region has no column header to say which. One function, which prefers the
+    // **end** because the head of a forked transcript is inherited and the tail
+    // never is (audit F4).
+    const at = sessionDate(s);
+    const when = at ? f.date(at) : t.dash;
     const where = `${s.projectName} ${t.sep} ${when}`;
     const label = s.confidence.padEnd(5);
     const room = t.width - INDENT.length - 2 - label.length - 1 - Theme.len(where) - 2;

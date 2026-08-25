@@ -13,6 +13,31 @@ import {
   vecStatus,
 } from '@potsherd/core';
 import { rmrf, tempDir } from './helpers.js';
+import type { Db } from '../packages/core/src/db.js';
+import {
+  reconcileVectorStamps,
+  vectorDrift,
+  vectorInventory,
+} from '../packages/core/src/vec.js';
+
+/**
+ * One vector, in the store, the way the embedding pass writes one.
+ *
+ * Through the `vec_exchanges` view and its `INSTEAD OF` trigger rather than
+ * into `vec_blob_exchanges` directly, so the fixture exercises the same
+ * surface the product does.
+ */
+function embed(db: Db, table: 'vec_exchanges' | 'vec_ghost_prompts', id: string): void {
+  db.prepare(`INSERT OR REPLACE INTO ${table} (id, embedding) VALUES (?, ?)`).run(
+    id,
+    embeddings.embeddingToBlob([1, 0, 0]),
+  );
+  const rows = table === 'vec_exchanges' ? 'exchanges' : 'ghost_prompts';
+  db.prepare(`UPDATE ${rows} SET embedding_version = ? WHERE id = ?`).run(
+    embeddings.EMBEDDING_VERSION,
+    id,
+  );
+}
 
 /**
  * Semantic search is always on, acquired lazily, and never native.
@@ -170,10 +195,13 @@ describe('doctor and index read one source of truth', () => {
          VALUES (?, 's1', ?, ?, ?, '')`,
       );
       for (let i = 0; i < 4; i += 1) ex.run(`x${i}`, i, `2026-08-2${i}T00:00:00Z`, `text ${i}`);
-      db.prepare('UPDATE exchanges SET embedding_version = ? WHERE id = ?').run(
-        embeddings.EMBEDDING_VERSION,
-        'x0',
-      );
+      // **VERIFICATION-7 C7-1 amended this fixture, not the rule.** It used to
+      // stamp `x0` and stop, which describes a row the search lane cannot
+      // return: `embedding_version` is the queue's bookkeeping and
+      // `vec_blob_exchanges` is the storage, and it was exactly that gap the
+      // real archive fell into. A row that counts as embedded is one with a
+      // vector, so the fixture writes one.
+      embed(db, 'vec_exchanges', 'x0');
 
       // This is the call. Both verbs make it; neither computes anything else.
       const a = vecStatus(db, root);
@@ -270,14 +298,8 @@ describe('doctor and index read one source of truth', () => {
         `INSERT INTO ghost_prompts (id, session_id, seq, ts, text) VALUES (?, 'g1', ?, ?, ?)`,
       );
       for (let i = 0; i < 4; i += 1) gp.run(`g${i}`, i, `2026-08-1${i}T00:00:00Z`, `prompt ${i}`);
-      db.prepare('UPDATE exchanges SET embedding_version = ? WHERE id = ?').run(
-        embeddings.EMBEDDING_VERSION,
-        'x0',
-      );
-      db.prepare('UPDATE ghost_prompts SET embedding_version = ? WHERE id = ?').run(
-        embeddings.EMBEDDING_VERSION,
-        'g0',
-      );
+      embed(db, 'vec_exchanges', 'x0');
+      embed(db, 'vec_ghost_prompts', 'g0');
 
       const truth = vecStatus(db, root).report!;
       expect(truth.embedded).toBe(2);
@@ -310,6 +332,169 @@ describe('doctor and index read one source of truth', () => {
       db.close();
       rmrf(root);
     }
+  });
+
+  /**
+   * **VERIFICATION-7 C7-1.** The release's headline property is that `find`
+   * says *which half of the search produced that verdict*. On this machine's
+   * archive it said the wrong half at every door at once: `doctor`, `stats`,
+   * `find`'s status line and `potsherd_recall`'s `capability` all printed
+   * `not running, 0 of 4,774` while the same `find` page's header said
+   * `bm25 + vectors`, its `--json` said `vectors: 1649`, and the semantic lane
+   * returned 204 candidates that built the entire `nearest` region.
+   *
+   * The cause is that the two halves counted different things and nothing ever
+   * compared them: `vectorCounts` read `exchanges.embedding_version` and the
+   * search lane read `vec_blob_exchanges`. Every assertion below is about that
+   * comparison, and none of them is reachable on a clean install — which is
+   * why six verifications did not see it.
+   */
+  describe('the stamp and the store cannot drift (VERIFICATION-7 C7-1)', () => {
+    /** An archive whose vectors are all there and whose stamps are all gone. */
+    function driftedRoot(): { root: string; db: Db } {
+      const root = tempDir('potsherd-vec-drift-');
+      const db = store.open({ root });
+      db.exec(`INSERT INTO sessions (id, harness, project, source_path, indexed_at)
+               VALUES ('s1', 'claude', '/tmp/p', '/tmp/p/s1.jsonl', '2026-08-23T00:00:00Z')`);
+      const ex = db.prepare(
+        `INSERT INTO exchanges (id, session_id, seq, ts, user_text, assistant_text)
+         VALUES (?, 's1', ?, ?, ?, '')`,
+      );
+      for (let i = 0; i < 4; i += 1) ex.run(`x${i}`, i, `2026-08-2${i}T00:00:00Z`, `text ${i}`);
+      db.exec(`INSERT INTO ghosts (session_id, harness, project, prompt_count)
+               VALUES ('g1', 'claude', '/tmp/p', 2)`);
+      const gp = db.prepare(
+        `INSERT INTO ghost_prompts (id, session_id, seq, ts, text) VALUES (?, 'g1', ?, ?, ?)`,
+      );
+      for (let i = 0; i < 2; i += 1) gp.run(`g${i}`, i, `2026-08-1${i}T00:00:00Z`, `prompt ${i}`);
+      // The state a re-index used to leave behind: the vector is still in the
+      // store and the stamp on its row is gone. Written here by hand because
+      // reaching it through `index` needs a 1.1.0 database — `tests/upgrade-
+      // from-1.1.test.ts` does that half, through the binary.
+      for (const id of ['x0', 'x1', 'x2']) embed(db, 'vec_exchanges', id);
+      embed(db, 'vec_ghost_prompts', 'g0');
+      db.exec(`UPDATE exchanges SET embedding_version = NULL`);
+      db.exec(`UPDATE ghost_prompts SET embedding_version = NULL`);
+      return { root, db };
+    }
+
+    it('counts the vectors the search lane can use, not the stamps nothing reads', () => {
+      const { root, db } = driftedRoot();
+      try {
+        // Four exchanges and two recovered prompts; four of the six carry a
+        // vector and none of the six carries a stamp. The old count said 0.
+        expect(vectorInventory(db).total).toBe(4);
+        const report = vecStatus(db, root).report!;
+        expect(report.embedded).toBe(4);
+        expect(report.pending).toBe(2);
+        expect(report.total).toBe(6);
+        // And the three renderings still agree with each other, which is the
+        // property `doctor and index read one source of truth` already claims.
+        expect(vecStatus(db, root).line).toContain('4 of 6');
+        expect(vecStatus(db, root).row?.value).toBe('4');
+      } finally {
+        db.close();
+        rmrf(root);
+      }
+    });
+
+    it('reports the drift it finds, in the three shapes it can take', () => {
+      const { root, db } = driftedRoot();
+      try {
+        // A stamp with nothing behind it, and a vector whose row is gone.
+        db.prepare('UPDATE exchanges SET embedding_version = ? WHERE id = ?').run(
+          embeddings.EMBEDDING_VERSION,
+          'x3',
+        );
+        embed(db, 'vec_exchanges', 'ghost-of-a-row');
+        const drift = vectorDrift(db);
+        expect(drift.unstamped).toBe(4);
+        expect(drift.phantom).toBe(1);
+        expect(drift.orphans).toBe(1);
+      } finally {
+        db.close();
+        rmrf(root);
+      }
+    });
+
+    it('adopts a vector that outlived its stamp rather than throwing it away', () => {
+      const { root, db } = driftedRoot();
+      try {
+        const done = reconcileVectorStamps(db);
+        expect(done.adopted).toBe(4);
+        expect(vectorDrift(db)).toEqual({ unstamped: 0, phantom: 0, orphans: 0 });
+        // The count did not move: the repair is to the record, not the index.
+        expect(vecStatus(db, root).report?.embedded).toBe(4);
+        // And the queue now agrees, so the next pass embeds the two that are
+        // genuinely owed rather than re-buying all four.
+        expect(
+          db.prepare(`SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version IS NULL`).get(),
+        ).toEqual({ n: 1 });
+      } finally {
+        db.close();
+        rmrf(root);
+      }
+    });
+
+    it('clears a stamp with no vector behind it, and deletes a vector with no row', () => {
+      const { root, db } = driftedRoot();
+      try {
+        db.prepare('UPDATE exchanges SET embedding_version = ? WHERE id = ?').run(
+          embeddings.EMBEDDING_VERSION,
+          'x3',
+        );
+        embed(db, 'vec_exchanges', 'ghost-of-a-row');
+        const done = reconcileVectorStamps(db);
+        expect(done.cleared).toBe(1);
+        expect(done.orphans).toBe(1);
+        expect(vectorDrift(db)).toEqual({ unstamped: 0, phantom: 0, orphans: 0 });
+        expect(vecStatus(db, root).report?.embedded).toBe(4);
+      } finally {
+        db.close();
+        rmrf(root);
+      }
+    });
+
+    it('empties a store a superseded embedding version wrote, rather than adopting it', () => {
+      const { root, db } = driftedRoot();
+      try {
+        // Adoption is only sound while every blob in the store answers the
+        // current model. The recorded version is what makes that an invariant
+        // instead of an assumption, and a bump must degrade to *nothing
+        // embedded*, never to *four embedded, silently wrong*.
+        db.prepare(
+          `INSERT OR REPLACE INTO sync_state (key, value, updated_at)
+             VALUES ('vectors:store-version', ?, ?)`,
+        ).run(String(embeddings.EMBEDDING_VERSION + 1), '2026-08-25T00:00:00Z');
+        expect(vecStatus(db, root).report?.embedded).toBe(0);
+        reconcileVectorStamps(db);
+        expect(vectorInventory(db).total).toBe(0);
+        expect(vecStatus(db, root).report?.pending).toBe(6);
+      } finally {
+        db.close();
+        rmrf(root);
+      }
+    });
+
+    it('repairs on the next writable open, and doctor can see drift it cannot fix', () => {
+      const { root, db } = driftedRoot();
+      try {
+        db.close();
+        // `doctor` opens read-only: it never runs the repair, so it is the one
+        // surface that has to be able to *report* the state. It still counts
+        // the store, so the number it prints is the one `find` is using.
+        const ro = store.open({ root, readonly: true });
+        expect(vectorDrift(ro).unstamped).toBe(4);
+        expect(vecStatus(ro, root).report?.embedded).toBe(4);
+        ro.close();
+
+        const rw = store.open({ root });
+        expect(vectorDrift(rw)).toEqual({ unstamped: 0, phantom: 0, orphans: 0 });
+        rw.close();
+      } finally {
+        rmrf(root);
+      }
+    });
   });
 });
 

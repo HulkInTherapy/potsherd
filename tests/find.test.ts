@@ -555,6 +555,52 @@ describe('ROUND 3 — the nearest rows live under a rule, not in the answer', ()
     expect(region).not.toMatch(/ {4}…/);
   });
 
+  /**
+   * **VERIFICATION-7 C7-5.** `nearestNote` was written this phase and spelled
+   * `s.startedAt` four lines below the comment recording that the *opposite*
+   * spelling was VERIFICATION-6's C-6 — one session dated a week apart by two
+   * verbs in one terminal. On the real archive the same session read
+   * `20 aug 2026` under the rule and `last active 24 aug` in the hit rows above
+   * it, four days apart, on one page.
+   *
+   * `sessionDate` is the one function and it prefers the **end**, because the
+   * head of a forked transcript is inherited and the tail never is (audit F4).
+   */
+  it('dates a nearest row at the end of the interval, like every other surface', async () => {
+    const r = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'weak' });
+    const open = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'none' });
+    expect(open.sessions.length).toBeGreaterThan(0);
+    // One session that really ran across an interval, so the two ends are
+    // different dates rather than the same one twice.
+    const spread = open.sessions.map((s) => ({
+      ...s,
+      startedAt: '2026-05-04T09:00:00.000Z',
+      endedAt: '2026-08-20T09:00:00.000Z',
+    }));
+    const screen = renderFind(r, new Theme({ width: 100, color: false }), new Date(), {
+      nearest: spread,
+    });
+    const region = screen.slice(screen.indexOf('nearest by meaning'));
+    expect(region).toMatch(/20 aug/);
+    expect(region).not.toMatch(/4 may/);
+    // And the region says which end it is showing, because it has no column
+    // header and the page above it does say so — C-6's second half, which was
+    // the half this region was missing entirely.
+    expect(region).toMatch(/last active/);
+  });
+
+  it('never lets the caption push the rule past the terminal', async () => {
+    const r = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'weak' });
+    const open = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'none' });
+    for (const width of [40, 50, 60, 80, 120]) {
+      const screen = renderFind(r, new Theme({ width, color: false }), new Date(), {
+        nearest: open.sessions,
+      });
+      const rule = screen.split('\n').find((l) => l.includes('nearest by meaning'))!;
+      expect(Theme.len(rule), `w=${String(width)}`).toBe(width);
+    }
+  });
+
   it('fits its width exactly, at 60 and 120, with the rule drawn to the edge', async () => {
     const r = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'weak' });
     const open = await recall(db, PARAPHRASE, {}, { root, vectors: false, minConfidence: 'none' });

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import process from 'node:process';
 import type { Db } from './db.js';
@@ -924,12 +925,19 @@ function shadowTables(db: Db, table: VecTable): string[] {
 /**
  * Stop claiming to have vectors that were just thrown away.
  *
- * `exchanges.embedding_version` is the stamp *everything* reads —
- * `vectorCounts`, `doctor`'s row, the pending queue and the background pass all
- * ask it rather than the store — so leaving it set after a detach would report
- * a full index with an empty one underneath, and no pass would ever refill it.
- * Clearing it is what makes the next `index` rebuild them, locally and for
- * free, from text potsherd already holds.
+ * `exchanges.embedding_version` is the **queue's** bookkeeping: the pending
+ * queue and the background pass ask it, so leaving it set after a detach would
+ * leave rows nothing would ever refill. Clearing it is what makes the next
+ * `index` rebuild them, locally and for free, from text potsherd already holds.
+ *
+ * **VERIFICATION-7 C7-1 corrected the sentence that used to be here.** It said
+ * the stamp was *"the stamp everything reads"*, and that was false: the search
+ * lane reads {@link vec_blob_exchanges}, never the stamp, so on an archive
+ * where the two had drifted `doctor` said `0 of 4,774` while `find` fused
+ * 4,589 live vectors on the same screen. The store is the source of truth for
+ * *how many vectors exist* ({@link vectorCounts}); the stamp is the source of
+ * truth for *which version wrote them*; and {@link reconcileVectorStamps} is
+ * the cross-check that keeps them from ever disagreeing again.
  *
  * `vec_cards` has no such column: a card's vector is written by `potsherd card`
  * beside the card itself. It is not re-derived here, and it is not lost money —
@@ -974,34 +982,344 @@ export function vecTablesExist(db: Db): boolean {
 
 // -------------------------------------------------------------------- counts
 
+/** The two lanes that carry a stamp, and the blob table each one is stored in. */
+const STAMPED_LANES = [
+  { rows: 'exchanges', blob: 'vec_blob_exchanges', key: 'id' },
+  { rows: 'ghost_prompts', blob: 'vec_blob_ghost_prompts', key: 'id' },
+] as const;
+
 /**
- * How much of the index carries a current vector, and how much is waiting.
+ * `sync_state`'s record of which {@link EMBEDDING_VERSION} wrote the store.
  *
- * Counted from `exchanges.embedding_version` and `ghost_prompts.embedding_version`
- * — the stamp the embedding pass writes — rather than from the vector tables,
- * because that is the number that decides whether there is work left to do. A
- * vector whose `EMBEDDING_VERSION` no longer matches is pending, not embedded.
+ * The store is countable — {@link vectorCounts} can say "this row has a
+ * vector" from the blob table alone — only because every blob in it was
+ * written by one version. This key is what makes that an invariant rather than
+ * an assumption: {@link reconcileVectorStamps} empties the store the moment it
+ * finds the key disagreeing with the constant, so a version bump degrades to
+ * *nothing embedded* rather than to *4,589 embedded, silently wrong*.
+ *
+ * `null` means the key predates this code, which is every database written
+ * before VERIFICATION-7. Those stores hold version-1 vectors — the constant has
+ * never moved (`embeddings.ts` {@link EMBEDDING_VERSION}) — so they are adopted
+ * and stamped on the first writable open.
+ */
+const STORE_VERSION_KEY = 'vectors:store-version';
+
+function storeVersion(db: Db): number | null {
+  try {
+    const row = db
+      .prepare(`SELECT value FROM sync_state WHERE key = ?`)
+      .get(STORE_VERSION_KEY) as { value: string } | undefined;
+    if (!row) return null;
+    const n = Number(row.value);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when the store on this connection was written by a version we can still use. */
+function storeIsCurrent(db: Db): boolean {
+  const v = storeVersion(db);
+  return v === null || v === EMBEDDING_VERSION;
+}
+
+/**
+ * How much of the index carries a vector, and how much is waiting.
+ *
+ * **Counted from the store, joined to the rows that still exist** — not from
+ * `exchanges.embedding_version`. VERIFICATION-7 C7-1: the search lane fuses
+ * whatever is in `vec_blob_exchanges` and `vec_blob_ghost_prompts` and has
+ * never once consulted a stamp, so counting the stamp here meant `doctor`,
+ * `stats`, `find`'s status line and `potsherd_recall`'s `capability` were all
+ * answering a *different question* from the one the same `find` page answered
+ * in its header. On this machine's archive they differed by 4,589.
+ *
+ * The join is not decoration: a blob whose row has been deleted is not
+ * something the search lane can return, so it is not embedded coverage either.
+ * {@link reconcileVectorStamps} removes those, and this counts as though it
+ * already had, so the number is right even on the read-only connection
+ * `doctor` opens.
+ *
+ * A store written by a superseded {@link EMBEDDING_VERSION} counts as zero:
+ * see {@link STORE_VERSION_KEY}.
  */
 export function vectorCounts(db: Db): { embedded: number; pending: number } {
   let embedded = 0;
   let pending = 0;
-  for (const table of ['exchanges', 'ghost_prompts'] as const) {
+  const current = storeIsCurrent(db);
+  for (const lane of STAMPED_LANES) {
+    let total = 0;
     try {
-      const row = db
-        .prepare(
-          `SELECT
-             SUM(CASE WHEN embedding_version = ? THEN 1 ELSE 0 END) AS ok,
-             SUM(CASE WHEN embedding_version IS NULL OR embedding_version != ? THEN 1 ELSE 0 END) AS todo
-           FROM ${table}`,
-        )
-        .get(EMBEDDING_VERSION, EMBEDDING_VERSION) as { ok: number | null; todo: number | null };
-      embedded += row.ok ?? 0;
-      pending += row.todo ?? 0;
+      total = (db.prepare(`SELECT COUNT(*) AS n FROM ${lane.rows}`).get() as { n: number }).n;
     } catch {
-      // No such table yet, or no such column. Nothing to count.
+      continue; // No such table yet. Nothing to count either way.
     }
+    let have = 0;
+    if (current) {
+      try {
+        have = (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS n FROM ${lane.blob} b
+                 JOIN ${lane.rows} r ON r.${lane.key} = b.${lane.key}`,
+            )
+            .get() as { n: number }
+        ).n;
+      } catch {
+        have = 0; // The store has not been created on this database yet.
+      }
+    }
+    embedded += have;
+    pending += Math.max(0, total - have);
   }
   return { embedded, pending };
+}
+
+/**
+ * One session's vectors, held across the delete-and-reinsert an `index` does.
+ *
+ * **VERIFICATION-7 C7-3.** The CHANGELOG's upgrade note says *"it copies every
+ * vector across first, so nothing anybody has already paid for is lost"*, and
+ * migration 10 does exactly that. What then happened is that migration 11
+ * clears every source fingerprint — deliberately, so threads are rebuilt — so
+ * `index` re-reads every transcript, and `ingest.clearExchanges` deletes each
+ * session's exchange rows and inserts them again with `embedding_version` NULL.
+ * On a machine with `sqlite-vec` the vectors went with them: the shipped binary
+ * ended a 1.1.0 upgrade with **zero** vectors while `potsherd stats` on the
+ * identical fixture kept them, because `stats` migrates and does not re-ingest.
+ *
+ * The rule this pair implements is the only one that is true of a vector: **it
+ * belongs to the text it was computed from, not to the row it was computed
+ * for.** So an exchange that comes back byte-identical keeps its vector and its
+ * stamp, and one that comes back changed — or does not come back at all — loses
+ * both. A hash rather than the text itself, because a session is unbounded and
+ * this must not double what `index` already holds per session.
+ *
+ * The blob table is ordinary SQL, so both halves work on a machine that has no
+ * extension at all. That matters: `clearExchanges` used to guard its vector
+ * delete with `vecTableUsable`, so on those machines the row went and the
+ * vector stayed — which is where C7-1's 4,589 unstamped vectors came from. The
+ * two defects are one seam seen from two sides, and this is the seam.
+ */
+export interface VectorCarry {
+  sessionId: string;
+  rows: { id: string; digest: string; version: number | null }[];
+}
+
+function exchangeDigest(user: string, assistant: string): string {
+  return createHash('sha1').update(user).update(' ').update(assistant).digest('hex');
+}
+
+/** Snapshot the vectors this session owns, immediately before it is rewritten. */
+export function beginVectorCarry(db: Db, sessionId: string): VectorCarry {
+  try {
+    const rows = db
+      .prepare(
+        `SELECT e.id AS id, e.user_text AS u, e.assistant_text AS a, e.embedding_version AS v
+           FROM exchanges e
+           JOIN vec_blob_exchanges b ON b.id = e.id
+          WHERE e.session_id = ?`,
+      )
+      .all(sessionId) as { id: string; u: string; a: string | null; v: number | null }[];
+    return {
+      sessionId,
+      rows: rows.map((r) => ({
+        id: r.id,
+        digest: exchangeDigest(r.u ?? '', r.a ?? ''),
+        version: r.v,
+      })),
+    };
+  } catch {
+    return { sessionId, rows: [] };
+  }
+}
+
+/** Keep what came back unchanged; delete the vector of everything else. */
+export function endVectorCarry(db: Db, carry: VectorCarry): { kept: number; dropped: number } {
+  let kept = 0;
+  let dropped = 0;
+  if (carry.rows.length === 0) return { kept, dropped };
+  try {
+    const read = db.prepare(
+      `SELECT user_text AS u, assistant_text AS a FROM exchanges WHERE id = ?`,
+    );
+    const drop = db.prepare(`DELETE FROM vec_blob_exchanges WHERE id = ?`);
+    const stamp = db.prepare(`UPDATE exchanges SET embedding_version = ? WHERE id = ?`);
+    for (const row of carry.rows) {
+      const now = read.get(row.id) as { u: string; a: string | null } | undefined;
+      if (!now || exchangeDigest(now.u ?? '', now.a ?? '') !== row.digest) {
+        drop.run(row.id);
+        dropped += 1;
+        continue;
+      }
+      if (row.version !== null) stamp.run(row.version, row.id);
+      kept += 1;
+    }
+  } catch {
+    /* No store on this database. Nothing was carried and nothing is owed. */
+  }
+  return { kept, dropped };
+}
+
+/** Live vectors in the store, per lane and in total. The number `find` fuses. */
+export function vectorInventory(db: Db): {
+  exchanges: number;
+  ghostPrompts: number;
+  cards: number;
+  total: number;
+} {
+  const current = storeIsCurrent(db);
+  const count = (sql: string): number => {
+    if (!current) return 0;
+    try {
+      return (db.prepare(sql).get() as { n: number }).n;
+    } catch {
+      return 0;
+    }
+  };
+  const exchanges = count(
+    `SELECT COUNT(*) AS n FROM vec_blob_exchanges b JOIN exchanges r ON r.id = b.id`,
+  );
+  const ghostPrompts = count(
+    `SELECT COUNT(*) AS n FROM vec_blob_ghost_prompts b JOIN ghost_prompts r ON r.id = b.id`,
+  );
+  const cards = count(`SELECT COUNT(*) AS n FROM vec_blob_cards`);
+  return { exchanges, ghostPrompts, cards, total: exchanges + ghostPrompts };
+}
+
+/**
+ * The cross-check whose absence let the two halves drift — VERIFICATION-7 C7-1.
+ *
+ * Three ways the stamp and the store can disagree, counted separately because
+ * they mean different things:
+ *
+ *   * `unstamped` — a live row with a vector and no current stamp. The search
+ *     lane uses it and the queue thinks it is still owed. This is the shape the
+ *     real archive was in: 4,589 of them, and every status surface reported
+ *     zero.
+ *   * `phantom` — a current stamp with no vector behind it. The queue thinks it
+ *     is done and the search lane has nothing to fuse.
+ *   * `orphans` — a vector whose row is gone. Storage nothing can return.
+ *
+ * A read: it opens nothing, writes nothing and never throws, so `doctor` can
+ * call it on the read-only connection it holds.
+ */
+export function vectorDrift(db: Db): { unstamped: number; phantom: number; orphans: number } {
+  let unstamped = 0;
+  let phantom = 0;
+  let orphans = 0;
+  for (const lane of STAMPED_LANES) {
+    const n = (sql: string, ...args: unknown[]): number => {
+      try {
+        return (db.prepare(sql).get(...(args as never[])) as { n: number }).n;
+      } catch {
+        return 0;
+      }
+    };
+    unstamped += n(
+      `SELECT COUNT(*) AS n FROM ${lane.blob} b JOIN ${lane.rows} r ON r.${lane.key} = b.${lane.key}
+        WHERE r.embedding_version IS NULL OR r.embedding_version != ?`,
+      EMBEDDING_VERSION,
+    );
+    phantom += n(
+      `SELECT COUNT(*) AS n FROM ${lane.rows} r
+        WHERE r.embedding_version = ?
+          AND NOT EXISTS (SELECT 1 FROM ${lane.blob} b WHERE b.${lane.key} = r.${lane.key})`,
+      EMBEDDING_VERSION,
+    );
+    orphans += n(
+      `SELECT COUNT(*) AS n FROM ${lane.blob} b
+        WHERE NOT EXISTS (SELECT 1 FROM ${lane.rows} r WHERE r.${lane.key} = b.${lane.key})`,
+    );
+  }
+  return { unstamped, phantom, orphans };
+}
+
+/**
+ * Make the stamp agree with the store, once, on every writable open.
+ *
+ * VERIFICATION-7 C7-1 is what happens without it. `ingest.clearExchanges`
+ * deletes an exchange row and re-inserts it with `embedding_version` NULL, and
+ * on a machine where `vecTableUsable` answered `false` it left the blob behind
+ * — so a re-index silently converted a fully embedded archive into one whose
+ * every status surface said `0 of 4,774` while `find` kept fusing the vectors
+ * that were still there. Nothing anywhere compared the two numbers.
+ *
+ * The repair takes the **store** as the truth, because the store is what search
+ * can actually use, and because a vector that exists was paid for:
+ *
+ *   * a live row with a vector is stamped current (`unstamped` above);
+ *   * a stamp with no vector is cleared, so the queue picks the row up again
+ *     (`phantom`);
+ *   * a vector whose row is gone is deleted (`orphans`).
+ *
+ * Adopting an unstamped vector is only sound while the store holds one
+ * version, which {@link STORE_VERSION_KEY} is what enforces: a store written by
+ * a superseded {@link EMBEDDING_VERSION} is emptied here rather than adopted,
+ * and every row goes back on the queue.
+ *
+ * Idempotent, cheap (three primary-key anti-joins per lane), and silent — a
+ * database that has no store, no stamp column or no `sync_state` yet is left
+ * exactly as it was.
+ */
+export function reconcileVectorStamps(db: Db): {
+  adopted: number;
+  cleared: number;
+  orphans: number;
+} {
+  let adopted = 0;
+  let cleared = 0;
+  let orphans = 0;
+  const run = (sql: string, ...args: unknown[]): number => {
+    try {
+      const info = db.prepare(sql).run(...(args as never[]));
+      return Number((info as { changes?: number | bigint }).changes ?? 0);
+    } catch {
+      return 0;
+    }
+  };
+
+  const known = storeVersion(db);
+  if (known !== null && known !== EMBEDDING_VERSION) {
+    // The model behind the store has been replaced. Every blob in it answers a
+    // question nobody is asking any more, and no amount of stamping makes it
+    // comparable with a vector the current model would write.
+    for (const lane of STAMPED_LANES) {
+      run(`DELETE FROM ${lane.blob}`);
+      cleared += run(`UPDATE ${lane.rows} SET embedding_version = NULL WHERE embedding_version IS NOT NULL`);
+    }
+    run(`DELETE FROM vec_blob_cards`);
+  } else {
+    for (const lane of STAMPED_LANES) {
+      orphans += run(
+        `DELETE FROM ${lane.blob}
+          WHERE NOT EXISTS (SELECT 1 FROM ${lane.rows} r WHERE r.${lane.key} = ${lane.blob}.${lane.key})`,
+      );
+      adopted += run(
+        `UPDATE ${lane.rows} SET embedding_version = ?
+          WHERE (embedding_version IS NULL OR embedding_version != ?)
+            AND EXISTS (SELECT 1 FROM ${lane.blob} b WHERE b.${lane.key} = ${lane.rows}.${lane.key})`,
+        EMBEDDING_VERSION,
+        EMBEDDING_VERSION,
+      );
+      cleared += run(
+        `UPDATE ${lane.rows} SET embedding_version = NULL
+          WHERE embedding_version IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM ${lane.blob} b WHERE b.${lane.key} = ${lane.rows}.${lane.key})`,
+      );
+    }
+  }
+
+  try {
+    db.prepare(
+      `INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).run(STORE_VERSION_KEY, String(EMBEDDING_VERSION), new Date().toISOString());
+  } catch {
+    /* no `sync_state` yet — migration 3 has not run. Nothing to record. */
+  }
+  return { adopted, cleared, orphans };
 }
 
 export { fitNote, stoppedLine, vectorNote, vectorReport, warmingHead, warmingLine };
