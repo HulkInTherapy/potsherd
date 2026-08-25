@@ -313,8 +313,14 @@ export function compareToEstimate(
  *      produced for this same query. Relative, never absolute: a bm25 of -13
  *      means nothing across corpora and everything against the -18 the same
  *      query got from the same index.
- *   3. **agreement** — how many of the eight lists independently put this row
- *      in their candidates. One list is a claim; three are a corroboration.
+ *   3. **agreement** — how many **independent bodies of evidence** put this
+ *      row in their candidates. One is a claim; three are a corroboration.
+ *      *Independent* is load-bearing and was, until P11, only aspirational:
+ *      `recall()` passed a count of *lists*, and `exchanges_fts` beside
+ *      `vec_exchanges` is one exchange retrieved twice rather than two things
+ *      agreeing. `recall.ts`'s `SOURCE_OF_LIST` is where the eight lists are
+ *      mapped onto the four bodies of text they read, and it carries the
+ *      measurement that made this necessary.
  *
  * and combines them **multiplicatively on coverage**:
  *
@@ -367,13 +373,29 @@ export const WEIGHT_STRENGTH = 0.25;
 export const WEIGHT_AGREEMENT = 0.15;
 
 /**
- * Lists that have to agree before agreement is worth its full share.
+ * Independent bodies of evidence that have to agree before agreement is worth
+ * its full share.
  *
  * Three, not eight: on a text-only index four of the eight lists cannot run at
  * all, and a rule that needed all of them would score every result on a
  * `--no-embed` machine as uncorroborated. Three is the most a bm25-only index
- * can produce for one row (`exchanges_fts` + `titles` + `cards_fts`, or the
- * two ghost lists plus a title).
+ * can produce for one row: `exchanges_fts` + `titles` + `cards_fts`.
+ *
+ * **This number never moved, and P11 did not move it.** What changed is the
+ * quantity it is the denominator of. The three lists named above are three
+ * different *bodies of text* — a transcript, a session name, a summary — and
+ * that is how the value 3 was derived; the code was dividing a count of
+ * **lists** by it, and the two agree only while the semantic lane is off. The
+ * second of the two examples this docstring used to give, *"or the two ghost
+ * lists plus a title"*, is the sentence that gives the confusion away: it
+ * counts `ghosts_fts` and `ghost_prompts_fts` as two, and they are one ghost
+ * read at two granularities. It has been removed rather than corrected,
+ * because it was never a second way of reaching three.
+ *
+ * `recall.ts`'s `SOURCE_OF_LIST` is the mapping, and it is there rather than
+ * here for the reason `ROUTING_CEILING` is here rather than there: this file
+ * owns what `agreement` *means*, `recall.ts` owns which of its lists are
+ * looking at the same words.
  */
 export const AGREEMENT_LISTS = 3;
 
@@ -504,12 +526,25 @@ export interface RowEvidence {
   covered: number;
   terms: number;
   /**
-   * The best `from[].raw` this row earned, as a fraction of the best raw the
-   * same list produced for the same query. 1 means "this list found nothing
-   * better"; 0.4 means "four rows above it in its own list matched harder".
+   * How hard the evidence behind this row matched, as a fraction of the best
+   * the same list produced for the same query. 1 means "this list found
+   * nothing better"; 0.4 means "four rows above it in its own list matched
+   * harder".
+   *
+   * Where one row is found by several lists the caller decides how to combine
+   * them, and `recall()`'s rule is *mean within a body of evidence, max across
+   * them*: two methods scoring one document are two readings to be averaged,
+   * two different documents are alternatives of which the best counts. See
+   * `strengthOf` in `recall.ts` for the measurement behind that.
    */
   strength: number;
-  /** Distinct lists that put this row in their candidates. */
+  /**
+   * Distinct **independent** bodies of evidence that put this row in their
+   * candidates — not distinct indexes. `exchanges_fts` and `vec_exchanges`
+   * finding the same exchange is 1, not 2; a transcript hit and a session
+   * title is 2. `recall.ts`'s `SOURCE_OF_LIST` is the partition, and
+   * {@link AGREEMENT_LISTS} is what this is measured against.
+   */
   lists: number;
   /**
    * The best label this row is allowed to carry, whatever it scores.

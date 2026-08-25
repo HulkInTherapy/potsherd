@@ -497,7 +497,7 @@
         "hit1": false
       },
       "we made the background job defer to the webhook": {
-        "hit": true,
+        "hit": false,
         "hit1": false
       },
       "charged the customer twice because the client retried": {
@@ -546,7 +546,7 @@
       },
       "some traffic kept reaching the previous version after we switched over": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "the pod kept getting killed even though the app was fine": {
         "hit": true,
@@ -586,7 +586,7 @@
       },
       "the upload that repeated itself when the app died halfway": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "the button that looked broken while a lookup was still running": {
         "hit": true,
@@ -614,11 +614,11 @@
       },
       "why the pictures were suddenly twice as tall": {
         "hit": true,
-        "hit1": true
+        "hit1": false
       },
       "the dependency that shipped every language it had ever supported": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "it scored well in testing and badly for real users": {
         "hit": false,
@@ -626,7 +626,7 @@
       },
       "the search box that only worked if you got the word exactly right": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "old documentation coming above the page people actually needed": {
         "hit": true,
@@ -674,7 +674,7 @@
       },
       "how many a second before the latency went off a cliff": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "how many required columns the loader was not filling in": {
         "hit": true,
@@ -682,10 +682,10 @@
       },
       "the batch job that overran the backup window": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "the machine that kept running out of space because old images piled up": {
-        "hit": false,
+        "hit": true,
         "hit1": false
       },
       "the submission that came back over a missing label": {
@@ -739,7 +739,7 @@
         "hit1": false
       },
       "we made the background job defer to the webhook": {
-        "hit": true,
+        "hit": false,
         "hit1": false
       },
       "charged the customer twice because the client retried": {
@@ -788,7 +788,7 @@
       },
       "some traffic kept reaching the previous version after we switched over": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "the pod kept getting killed even though the app was fine": {
         "hit": true,
@@ -828,7 +828,7 @@
       },
       "the upload that repeated itself when the app died halfway": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "the button that looked broken while a lookup was still running": {
         "hit": true,
@@ -856,11 +856,11 @@
       },
       "why the pictures were suddenly twice as tall": {
         "hit": true,
-        "hit1": true
+        "hit1": false
       },
       "the dependency that shipped every language it had ever supported": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "it scored well in testing and badly for real users": {
         "hit": false,
@@ -868,7 +868,7 @@
       },
       "the search box that only worked if you got the word exactly right": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "old documentation coming above the page people actually needed": {
         "hit": true,
@@ -916,7 +916,7 @@
       },
       "how many a second before the latency went off a cliff": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "how many required columns the loader was not filling in": {
         "hit": true,
@@ -924,10 +924,10 @@
       },
       "the batch job that overran the backup window": {
         "hit": true,
-        "hit1": false
+        "hit1": true
       },
       "the machine that kept running out of space because old images piled up": {
-        "hit": false,
+        "hit": true,
         "hit1": false
       },
       "the submission that came back over a missing label": {

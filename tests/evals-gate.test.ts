@@ -24,12 +24,12 @@ import { PHASE_3_FLOOR, PHASE_3_GATE, judge, ruleLine, type GateInput } from '..
  *      needs no model, no index and no corpus. Each case below is a *shape* of
  *      result that must be refused, and each one is refused by a different
  *      clause — so relaxing any single clause turns exactly one test red.
- *   2. **The whole eval, run with the vector weight forced to 0.** Runs only
- *      where the 34 MB embedding model is already on disk, because without
- *      vectors there are no vector modes, and with no vector modes there is no
- *      gate to judge at all. That is a premise this test cannot establish
- *      without a 34 MB download inside `pnpm test`, so it is honest about
- *      needing it and names the one-line command in its skip message.
+ *   2. **The whole eval, run with the semantic lane removed.** Runs only where
+ *      the 34 MB embedding model is already on disk, because without vectors
+ *      there are no vector modes, and with no vector modes there is no gate to
+ *      judge at all. That is a premise this test cannot establish without a
+ *      34 MB download inside `pnpm test`, so it is honest about needing it and
+ *      names the one-line command in its skip message.
  *
  * The numbers in layer 1 are not invented. They are the two runs measured on
  * this checkout on **25 aug 2026**, against `evals/queries.jsonl` as it stands
@@ -37,52 +37,68 @@ import { PHASE_3_FLOOR, PHASE_3_GATE, judge, ruleLine, type GateInput } from '..
  * set T10.10 widened it to.
  *
  * ```
- * pnpm evals                        -> exit 0   @5 bm25 39 vec 51 hyb 51 · @1 bm25 24 vec 24 hyb 27
- * pnpm evals -- --vector-weight 0   -> exit 1   @5 bm25 39 vec 12 hyb 40 · @1 bm25 24 vec  9 hyb 24
+ * pnpm evals                       -> exit 0   @5 bm25 40 vec 57 hyb 57 · @1 bm25 31 vec 40 hyb 42
+ * pnpm evals -- --no-vector-lists  -> exit 1   @5 bm25 40 vec  0 hyb 40 · @1 bm25 31 vec  0 hyb 31
  * ```
  *
- * **VERIFICATION-5 C-11.** What was written here before was a 25-query run
- * from 22 aug (`@5 bm25 12 vec 22 hyb 22 · @1 bm25 10 vec 6 hyb 11`) against a
- * set that has held 60 queries since phase 10 — and `PHASE_3_FLOOR` had already
- * been moved to `{ hits: 51, of: 60 }` for that set while this comment went on
- * describing the instrument it replaced. This paragraph's own rule, quoted
- * below and then broken by it: *a comment that describes a run nobody can
- * reproduce is the failure this project keeps finding.* Both commands above
- * were run, in that order, on this commit; either can be run again.
+ * **VERIFICATION-5 C-11, and P11 after it.** This paragraph has now been wrong
+ * twice, both times the same way, and the rule it keeps breaking is its own:
+ * *a comment that describes a run nobody can reproduce is the failure this
+ * project keeps finding.* The first time it described a 25-query run against a
+ * set that had held 60 queries since phase 10. The second time — corrected
+ * here — it described `--vector-weight 0` as a probe that "collapses hybrid
+ * onto bm25", which stopped being true at FIX-I and had drifted by twelve
+ * queries at recall@5 by the time anyone re-ran it. See the `REGRESSION`
+ * docstring below and `evals/gate.ts`'s header. **Both commands above were run,
+ * in that order, on this commit; either can be run again.**
  *
  * These numbers are a RECORD of a run, not an input to one: the assertions
  * below are written against numbers this file states itself, so that a shift in
  * the corpus cannot quietly satisfy them. When they move, move them — and move
  * this paragraph with them.
  *
- * NOTE the margin at recall@1 is THREE on the wider set: hybrid 27 against
- * bm25 24 and vectors 24. On the old 25-query set it was one. The wider set
- * covers all twelve ghosts where the old covered five, so the gate is judged on
- * more of the corpus and by a margin that a single query flipping no longer
- * decides — which is the trade the widening bought, and the reason the floor
- * moved with it rather than staying at 22/25.
- *
- * `--vector-weight 0` does not collapse hybrid exactly onto bm25 (40 against
- * 39 at recall@5): with the semantic half weighted to nothing the fusion still
- * reorders on the RRF ranks. It ties bm25 at recall@1, which is the clause
- * that fails it, and it lands 11 under the floor, which is the second.
+ * NOTE the margin at recall@1 is TWO over the better single: hybrid 42 against
+ * vectors 40 and bm25 31. It was three *against* before P11 fixed what
+ * `agreement` counts, and the whole of that swing is decomposed, query by
+ * query, in `phases/phase-11/P11-REPORT.md`. Two on 60 queries is not a
+ * statistically significant margin and this file does not claim it is; the
+ * gate is a stopping rule, not a hypothesis test.
  */
 
 // The measured release run: the shape the amended gate is supposed to pass.
 const MEASURED: GateInput = {
-  bm25: { at1: 24, atK: 39 },
-  vectors: { at1: 24, atK: 51 },
-  hybrid: { at1: 27, atK: 51 },
+  bm25: { at1: 31, atK: 40 },
+  vectors: { at1: 40, atK: 57 },
+  hybrid: { at1: 42, atK: 57 },
 };
 
-// The measured `--vector-weight 0` run: fusion with its semantic half removed.
-// It does not collapse *exactly* onto bm25 — 40 against 39 at recall@5, because
-// the fusion still reorders on the RRF ranks — but it ties it where the gate
-// looks hardest, at recall@1, and lands 11 under the floor.
+/**
+ * The measured `--no-vector-lists` run: the fusion with its semantic lane
+ * genuinely absent, on the same embedded index.
+ *
+ * **This replaces a record of `--vector-weight 0` (`bm25 39/24 · vectors 12/9
+ * · hybrid 40/24`) that was already a record of a retired build when it was
+ * written, and of a command that no longer does what the sentence beside it
+ * said.** P11 §0 has the whole account; the short version is that since FIX-I
+ * a weight of 0 removes a list's *contribution to the fused score* and not the
+ * list, and the calibrator — which orders the page — never reads a weight. A
+ * zero-weighted semantic lane still buys twelve queries at recall@5 (52
+ * against bm25's 40) and the probe was down to failing on one clause.
+ *
+ * With the lists actually dropped, hybrid is bm25 to the digit, so both of the
+ * clauses this file has always claimed for the control are true again:
+ * `tight.beatsBm25` is false because 31 ties 31, and `clearsBar` is false
+ * because 40/60 is eleven under the ratchet.
+ */
 const REGRESSION: GateInput = {
-  bm25: { at1: 24, atK: 39 },
-  vectors: { at1: 9, atK: 12 },
-  hybrid: { at1: 24, atK: 40 },
+  bm25: { at1: 31, atK: 40 },
+  // No vector list left to search, so the semantic-only mode answers nothing.
+  // That is the honest reading of "there is no semantic lane" and not a bug:
+  // it is also why this probe cannot fail on the `> vectors` clause, which is
+  // the clause the shipped build already fails — a control that reddened only
+  // that one would prove nothing the release run did not.
+  vectors: { at1: 0, atK: 0 },
+  hybrid: { at1: 31, atK: 40 },
 };
 
 const TOTAL = 60;
@@ -96,15 +112,15 @@ describe('the amended phase-3 fusion gate', () => {
     // not pass on `>`. That tie is the whole reason the gate was amended.
     expect(g.wide.hybrid).toBe(g.wide.vectors);
     expect(g.wide.comparison).toBe('>=');
-    // recall@1 is where the fusion is actually worth something: 27 against 24
-    // and 24. It passes strictly.
+    // recall@1 is where the fusion is actually worth something: 42 against 31
+    // and 40. It passes strictly.
     expect(g.tight.comparison).toBe('>');
     expect(g.tight.hybrid).toBeGreaterThan(g.tight.bm25);
     expect(g.tight.hybrid).toBeGreaterThan(g.tight.vectors);
     expect(g.clearsBar).toBe(true);
   });
 
-  it('FAILS the vector-weight-0 regression, and fails it on recall@1', () => {
+  it('FAILS the no-semantic-lane regression, on two independent clauses', () => {
     const g = judge('hybrid', REGRESSION, TOTAL, K);
     expect(g.pass).toBe(false);
     // The load-bearing one: with no vector half, hybrid *ties* bm25 at
@@ -114,6 +130,14 @@ describe('the amended phase-3 fusion gate', () => {
     // right number for a regression this total, but the recall@1 clause is the
     // one that would still catch a subtler one.
     expect(g.clearsBar).toBe(false);
+    // And the two really are independent — they come from different halves of
+    // the rule. `wide` is satisfied here; if this ever starts failing too, the
+    // control has stopped isolating what it claims to isolate.
+    expect(g.wide.beatsBm25 && g.wide.beatsVectors).toBe(true);
+    // Pinned as a fact about the *control*, not about the corpus: hybrid with
+    // no semantic lane must be bm25 exactly. A control that merely scores
+    // "near" bm25 is one that could drift into passing.
+    expect(REGRESSION.hybrid).toEqual(REGRESSION.bm25);
   });
 
   /**
@@ -125,12 +149,16 @@ describe('the amended phase-3 fusion gate', () => {
    */
   it('refuses a tie at recall@1, against either single', () => {
     expect(
-      judge('hybrid', { ...MEASURED, hybrid: { at1: 24, atK: 51 } }, TOTAL, K).pass,
+      // Tied against bm25 — the fusion putting the answer first exactly as
+      // often as the lexical lane alone, for the price of a forward pass.
+      judge('hybrid', { ...MEASURED, hybrid: { at1: 31, atK: 57 } }, TOTAL, K).pass,
     ).toBe(false);
     expect(
       judge(
         'hybrid',
-        { bm25: { at1: 10, atK: 30 }, vectors: { at1: 27, atK: 51 }, hybrid: { at1: 27, atK: 51 } },
+        // …and tied against vectors-only, which is the shape this build
+        // actually failed on for the whole of phase 10.
+        { bm25: { at1: 10, atK: 30 }, vectors: { at1: 40, atK: 57 }, hybrid: { at1: 40, atK: 57 } },
         TOTAL,
         K,
       ).pass,
@@ -239,7 +267,13 @@ const MODEL = cachedModel();
 
 interface EvalJson {
   pass: boolean;
-  weights: { vectorWeight: number; shipped: number; overridden: boolean };
+  weights: {
+    vectorWeight: number;
+    shipped: number;
+    overridden: boolean;
+    /** FIX-I made the lane and its weight two different facts. */
+    semanticLane: 'present' | 'removed';
+  };
   gates: {
     phase3: {
       mode: string;
@@ -249,6 +283,7 @@ interface EvalJson {
       pass: boolean;
     }[];
   };
+  modes: { mode: string; hits: number; hits1: number }[];
   index: { skipped: string | null } | null;
 }
 
@@ -287,28 +322,60 @@ function runEvals(args: string[]): { code: number; json: EvalJson } {
  * be the exact "benchmark that cannot fail" this file exists to prevent. Where
  * the model is absent, run it by hand:
  *
- *     POTSHERD_EVALS_EMBED=1 pnpm evals -- --vector-weight 0     # must exit 1
+ *     POTSHERD_EVALS_EMBED=1 pnpm evals -- --no-vector-lists     # must exit 1
  */
 describe.skipIf(MODEL === null)('pnpm evals, end to end (needs a cached model)', () => {
-  it('exits 0 as shipped and 1 with the vector weight forced to 0', () => {
+  it('exits 0 as shipped and 1 with the semantic lane removed', () => {
     const shipped = runEvals([]);
     // The premise, established rather than assumed: the vector modes really
     // did run in this process, so there really was a gate to judge.
     expect(shipped.json.index?.skipped ?? null).toBe(null);
     expect(shipped.json.weights.overridden).toBe(false);
+    expect(shipped.json.weights.semanticLane).toBe('present');
     expect(shipped.json.weights.vectorWeight).toBe(shipped.json.weights.shipped);
     expect(shipped.json.gates.phase3.length).toBeGreaterThan(0);
     expect(shipped.code).toBe(0);
     expect(shipped.json.pass).toBe(true);
 
-    const regressed = runEvals(['--vector-weight', '0']);
+    const regressed = runEvals(['--no-vector-lists']);
     expect(regressed.json.index?.skipped ?? null).toBe(null);
-    expect(regressed.json.weights.overridden).toBe(true);
-    expect(regressed.json.weights.vectorWeight).toBe(0);
+    expect(regressed.json.weights.semanticLane).toBe('removed');
+    // The lane is gone; the *weight* is untouched, which is the distinction
+    // this control exists to make. A future edit that goes back to expressing
+    // the control as a weight turns this line red.
+    expect(regressed.json.weights.overridden).toBe(false);
     expect(regressed.code).toBe(1);
     expect(regressed.json.pass).toBe(false);
-    // And it fails for the reason the amendment cares about, not by accident.
+    // And it fails for the reason the amendment cares about, not by accident —
+    // on both of the clauses `gate.ts` records for it.
     const hybrid = regressed.json.gates.phase3.find((g) => g.mode === 'hybrid');
     expect(hybrid?.tight.beatsBm25).toBe(false);
+    expect(hybrid?.clearsBar).toBe(false);
+  }, 240_000);
+
+  /**
+   * The finding that made this file wrong, kept as an assertion so that it
+   * cannot quietly stop being true and leave the paragraph above stale a
+   * second time.
+   *
+   * `--vector-weight 0` is a real weight probe and stays one. What it is NOT
+   * is a proof that the gate can fail: it removes the semantic lane's
+   * contribution to the fused score and nothing else, and the fused score is
+   * `byLabel`'s fourth key. If a future change ever makes a zero weight
+   * genuinely collapse hybrid onto bm25, this test goes red and whoever
+   * changed it can decide which control the repository wants.
+   */
+  it('records that a zero vector WEIGHT is not the same thing as no lane', () => {
+    const zeroed = runEvals(['--vector-weight', '0']);
+    expect(zeroed.json.index?.skipped ?? null).toBe(null);
+    expect(zeroed.json.weights.overridden).toBe(true);
+    expect(zeroed.json.weights.vectorWeight).toBe(0);
+    expect(zeroed.json.weights.semanticLane).toBe('present');
+    const hybrid = zeroed.json.modes.find((m) => m.mode === 'hybrid');
+    const bm25 = zeroed.json.modes.find((m) => m.mode === 'bm25');
+    // The measurement: zero-weighted lists still buy queries, because they
+    // still feed `strength` and `agreement` to the primary sort key.
+    expect(hybrid!.hits).toBeGreaterThan(bm25!.hits);
+    expect(hybrid!.hits1).toBeGreaterThan(bm25!.hits1);
   }, 240_000);
 });

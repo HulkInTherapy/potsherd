@@ -9498,6 +9498,36 @@ var LISTS = [
   "vec_cards"
 ];
 var LANES = { evidence: 0, routing: 1 };
+var SOURCE_OF_LIST = {
+  titles: "title",
+  exchanges_fts: "exchange",
+  vec_exchanges: "exchange",
+  ghosts_fts: "ghost",
+  ghost_prompts_fts: "ghost",
+  vec_ghost_prompts: "ghost",
+  cards_fts: "card",
+  vec_cards: "card"
+};
+function evidenceSources(lists) {
+  const sources = /* @__PURE__ */ new Set();
+  for (const l of lists)
+    sources.add(SOURCE_OF_LIST[l]);
+  return sources.size;
+}
+function combinedStrength(parts) {
+  const perSource = /* @__PURE__ */ new Map();
+  for (const p of parts) {
+    const source = SOURCE_OF_LIST[p.list];
+    const acc = perSource.get(source) ?? { sum: 0, n: 0 };
+    acc.sum += p.value;
+    acc.n += 1;
+    perSource.set(source, acc);
+  }
+  let best = 0;
+  for (const { sum: sum2, n: n2 } of perSource.values())
+    best = Math.max(best, sum2 / n2);
+  return best;
+}
 var ROUTING_KINDS = /* @__PURE__ */ new Set(["card"]);
 var SUMMARY_KINDS = /* @__PURE__ */ new Set(["card", "title"]);
 function isSummaryHit(kind) {
@@ -10383,14 +10413,10 @@ async function recall(db, query, requested = {}, options = {}) {
       best = kind === "bm25" ? Math.min(best, h.raw) : Math.max(best, h.raw);
     bestRaw.set(name, best);
   }
-  const strengthOf = (from) => {
-    let best = 0;
-    for (const f of from) {
-      const kind = rawKind(f.list);
-      best = Math.max(best, relativeStrength(f.raw, bestRaw.get(f.list) ?? 0, kind));
-    }
-    return best;
-  };
+  const strengthOf = (from) => combinedStrength(from.map((f) => ({
+    list: f.list,
+    value: relativeStrength(f.raw, bestRaw.get(f.list) ?? 0, rawKind(f.list))
+  })));
   const conversationOf = conversationKeys(db, ranked.map((h) => h.sessionId));
   const perSessionCount = /* @__PURE__ */ new Map();
   const routingCount = /* @__PURE__ */ new Map();
@@ -10402,7 +10428,8 @@ async function recall(db, query, requested = {}, options = {}) {
       covered: coveredTerms(quotableTokens, hitText),
       terms: quotableTokens.length,
       strength: strengthOf(hit2.from),
-      lists: new Set(hit2.from.map((f) => f.list)).size,
+      // Independent bodies of evidence, not indexes. See {@link SOURCE_OF_LIST}.
+      lists: evidenceSources(hit2.from.map((f) => f.list)),
       // F8's second half. Coverage above is a uniform partition over every
       // word the user typed; this says which of those words the question was
       // actually *about*. A row that shows none of them is not an answer to
@@ -10504,7 +10531,7 @@ async function recall(db, query, requested = {}, options = {}) {
       keyCovered: coveredTerms(requiredTerms, blockText),
       keyTerms: requiredTerms.length,
       strength: Math.max(0, ...counted.map((h) => h.calibration.strength)),
-      lists: new Set(counted.flatMap((h) => h.from.map((f) => f.list))).size,
+      lists: evidenceSources(counted.flatMap((h) => h.from.map((f) => f.list))),
       ...lane === "routing" || !transcript ? { ceiling: ROUTING_CEILING } : {}
     });
     if (lane === "evidence" ? evidenceBuilt >= limit * 3 : routingBuilt >= limit)
