@@ -20,6 +20,7 @@ import {
   vectorState,
   WEIGHTS,
   writeCard,
+  type Confidence,
   type ListName,
   type RecallResult,
 } from '../packages/core/src/index.js';
@@ -128,6 +129,52 @@ export { PHASE_1_GATE, PHASE_3_GATE };
  */
 const OVERLAP_FLAG = 0.6;
 
+/**
+ * The floor `potsherd find` actually runs at — C-1 step 1.
+ *
+ * ## The defect this constant exists for
+ *
+ * `recall()`'s library default is `minConfidence: 'none'`, which withholds
+ * nothing, because `recall()` is also the shortlist builder for `ask` and
+ * `graft` and those hand their rows to a reader who can judge. **The verb is
+ * not the library.** `potsherd find` passes `weak`
+ * (`packages/cli/src/commands/find.ts`'s `minConfidence()`), `potsherd_recall`
+ * passes `weak`, and until this constant existed `runMode` called `recall()`
+ * with no floor at all — so every recall@k number this project has published
+ * measured the **ranking**, and nothing measured **what the verb returns**.
+ * The gap was not small: 42/60 at recall@1 against 7/60, with 52 of the 60
+ * queries returning an empty page through the binary. `runControls`'s
+ * docstring below has claimed since T10.1 that what is measured here is *"what
+ * a person or an agent typing `potsherd find` gets"*; it was true of six
+ * control queries and of none of the sixty.
+ *
+ * ## What is measured now
+ *
+ * Both, side by side, every run, in both views:
+ *
+ *   * **find** — `recall()` at this floor. The row the user is actually shown.
+ *     This is the number the phase-3 gate is judged on, because the gate's own
+ *     rule line says *"the row the user actually sees"*.
+ *   * **ranking** — `recall()` at `none`. Every row the fusion found, in the
+ *     order it found them. This is the old number, kept and labelled, because
+ *     it is the only way to read the floor's cost at a glance: the difference
+ *     between the two lines *is* what the cliff costs.
+ *
+ * Two calls per query per mode rather than one call filtered afterwards. A
+ * post-hoc filter is not the same measurement — `recall()` applies the floor
+ * **before** it cuts to `limit`, so a survivor ranked 21st with the floor off
+ * can be on the first page with it on — and the whole point of this change is
+ * that the instrument stops approximating the product.
+ *
+ * It is spelled `weak` here and read off `find`'s own `minConfidence()` by
+ * `tests/evals-gate.test.ts`, which goes red if the verb's floor and the
+ * benchmark's floor ever stop being the same word.
+ */
+export const VERB_FLOOR: Confidence = 'weak';
+
+/** The library default: no floor, every row the ranker produced. */
+export const RANKING_FLOOR: Confidence = 'none';
+
 interface EvalQuery {
   query: string;
   expected_session_prefix: string;
@@ -165,20 +212,27 @@ interface ControlOutcome {
 }
 
 /**
- * The three controls, at the floor `potsherd find` actually uses.
+ * The controls, at {@link VERB_FLOOR} — the floor `potsherd find` actually uses.
  *
- * `minConfidence: 'weak'` and not the library default, which withholds
- * nothing: the floor is set by the *verb*, because `recall()` is also the
- * shortlist builder for `ask` and `graft`, and those hand their rows to a
- * reader who can judge for themselves. What is measured here is what a person
- * or an agent typing `potsherd find` gets.
+ * Not the library default, which withholds nothing: the floor is set by the
+ * *verb*, because `recall()` is also the shortlist builder for `ask` and
+ * `graft`, and those hand their rows to a reader who can judge for themselves.
+ * What is measured here is what a person or an agent typing `potsherd find`
+ * gets — and since C-1 step 1 that is true of the sixty recall queries too,
+ * which is the sentence this docstring was making on behalf of the whole file
+ * while only six queries were keeping it.
  */
 async function runControls(root: string, controls: EvalQuery[]): Promise<ControlOutcome[]> {
   const db = store.open({ root });
   const out: ControlOutcome[] = [];
   try {
     for (const q of controls) {
-      const r = await recall(db, q.query, {}, { limit: 10, root, vectors: false, minConfidence: 'weak' });
+      const r = await recall(
+        db,
+        q.query,
+        {},
+        { limit: 10, root, vectors: false, minConfidence: VERB_FLOOR },
+      );
       const want = q.control!;
       const pass =
         want === 'no-match'
@@ -201,11 +255,26 @@ async function runControls(root: string, controls: EvalQuery[]): Promise<Control
 
 interface Outcome {
   query: EvalQuery;
-  /** 1-based position of the expected session, or 0 when it never appeared. */
+  /**
+   * 1-based position of the expected session **on the page the verb returns**
+   * — `recall()` at {@link VERB_FLOOR} — or 0 when it never appeared.
+   *
+   * This is `rank` with no qualifier because it is the product's rank. The
+   * ranking view is the one that now has to say which it is.
+   */
   rank: number;
+  /**
+   * The same position with the floor **off** ({@link RANKING_FLOOR}) — what
+   * the fusion ranked, before the cliff decided whether anybody sees it.
+   */
+  rankingRank: number;
   harness: string | null;
+  /** Milliseconds for the verb's call. The ranking call is not a user path. */
   ms: number;
+  /** The verb's result, so `--json` reports the object the user is handed. */
   result: RecallResult;
+  /** The ranking call's result, for the floor's cost per query. */
+  ranking: RecallResult;
 }
 
 type ModeKey = 'bm25' | 'vectors' | 'hybrid' | 'always';
@@ -632,20 +701,27 @@ async function runMode(
   const outcomes: Outcome[] = [];
   try {
     for (const q of queries) {
+      const call = async (floor: Confidence): Promise<RecallResult> =>
+        recall(
+          db,
+          q.query,
+          {},
+          {
+            limit: Math.max(k, DEPTH),
+            root,
+            lists: mode.lists,
+            vectors: mode.vectors,
+            minConfidence: floor,
+            ...(weights ? { weights } : {}),
+          },
+        );
+      // The verb first, and timed on its own: it is the call a user waits for,
+      // and folding the ranking call's latency into p50 would report a number
+      // no user experiences. See {@link VERB_FLOOR} for why there are two.
       const t0 = Date.now();
-      const result = await recall(
-        db,
-        q.query,
-        {},
-        {
-          limit: Math.max(k, DEPTH),
-          root,
-          lists: mode.lists,
-          vectors: mode.vectors,
-          ...(weights ? { weights } : {}),
-        },
-      );
+      const result = await call(VERB_FLOOR);
       const ms = Date.now() - t0;
+      const ranking = await call(RANKING_FLOOR);
       // `expected_sidechain` asks whether the *subagent transcript* is what
       // came back, not merely a session whose id starts the same way — a
       // claude sidechain id is `<parent>:agent-<hash>`, so a prefix test alone
@@ -654,17 +730,21 @@ async function runMode(
       // `recall` rolls subagents up under their parent and both spellings mean
       // the same thing to the reader: the answer on the screen is the
       // subagent's text.
-      const at = result.sessions.findIndex(
-        (s) =>
-          s.id.startsWith(q.expected_session_prefix) &&
-          (q.expected_sidechain ? s.isSidechain || s.hits.some((h) => h.isSidechain) : true),
-      );
+      const positionIn = (r: RecallResult): number =>
+        r.sessions.findIndex(
+          (s) =>
+            s.id.startsWith(q.expected_session_prefix) &&
+            (q.expected_sidechain ? s.isSidechain || s.hits.some((h) => h.isSidechain) : true),
+        );
+      const at = positionIn(result);
       outcomes.push({
         query: q,
         rank: at + 1,
+        rankingRank: positionIn(ranking) + 1,
         harness: at >= 0 ? result.sessions[at]!.harness : null,
         ms,
         result,
+        ranking,
       });
     }
   } finally {
@@ -676,6 +756,26 @@ async function runMode(
 const hitAt = (o: Outcome, k: number): boolean => o.rank > 0 && o.rank <= k;
 const scoreAt = (outcomes: Outcome[], k: number): number =>
   outcomes.filter((o) => hitAt(o, k)).length;
+
+/** The same two, over the ranking view. See {@link VERB_FLOOR}. */
+const rankingHitAt = (o: Outcome, k: number): boolean =>
+  o.rankingRank > 0 && o.rankingRank <= k;
+const rankingScoreAt = (outcomes: Outcome[], k: number): number =>
+  outcomes.filter((o) => rankingHitAt(o, k)).length;
+
+/**
+ * Queries whose answer the ranker found and the floor then withheld.
+ *
+ * The floor's cost, as one number per mode: a query counted here is one where
+ * `potsherd find` prints *nothing in the index answers this* over an index
+ * that ranked the answer inside the top `k`.
+ */
+const withheldAt = (outcomes: Outcome[], k: number): number =>
+  outcomes.filter((o) => rankingHitAt(o, k) && !hitAt(o, k)).length;
+
+/** Queries where the verb returns an empty page. */
+const emptyPages = (outcomes: Outcome[]): number =>
+  outcomes.filter((o) => o.result.sessions.length === 0).length;
 
 // ------------------------------------------------------------ overlap check
 //
@@ -777,6 +877,13 @@ function overlaps(root: string, queries: EvalQuery[], threshold: number): Overla
  * screenshots — the fusion has now been measured losing three separate times,
  * and every one of those took somebody comparing numbers by hand. The rule
  * itself is in `evals/gate.ts`, which is where its rationale and its test are.
+ *
+ * **C-1 step 1: it is judged on the verb.** `scoreAt` reads `Outcome.rank`,
+ * which since this change is the answer's position on the page `recall()`
+ * returns at {@link VERB_FLOOR}. No clause of the rule moved and no line of
+ * `evals/gate.ts` moved; what moved is which of two measurements is fed to it.
+ * The rule's own sentence — *"strictly > both at recall@1 (the row the user
+ * actually sees)"* — names the verb, and it was being handed the ranking.
  */
 function gateFor(
   runs: { mode: Mode; outcomes: Outcome[] }[],
@@ -947,6 +1054,10 @@ async function main(): Promise<void> {
               flagged: r.flagged,
             })),
           },
+          // Which floor the top-level numbers were measured at, so a `--json`
+          // blob can never again be read as "what find returns" when it was
+          // the ranking. See {@link VERB_FLOOR}.
+          floor: { judged: VERB_FLOOR, ranking: RANKING_FLOOR },
           modes: runs.map(({ mode, outcomes }) => ({
             mode: mode.key,
             hits: scoreAt(outcomes, o.k),
@@ -955,6 +1066,17 @@ async function main(): Promise<void> {
             recall1: total ? scoreAt(outcomes, 1) / total : 0,
             p50: percentile(sorted(outcomes), 50),
             p95: percentile(sorted(outcomes), 95),
+            // The ranking view, beside the verb's, per mode — and the floor's
+            // cost as two counts a reader does not have to derive.
+            ranking: {
+              hits: rankingScoreAt(outcomes, o.k),
+              recall: total ? rankingScoreAt(outcomes, o.k) / total : 0,
+              hits1: rankingScoreAt(outcomes, 1),
+              recall1: total ? rankingScoreAt(outcomes, 1) / total : 0,
+              emptyPages: emptyPages(outcomes),
+              withheld: withheldAt(outcomes, o.k),
+              withheld1: withheldAt(outcomes, 1),
+            },
             results: outcomes.map((r) => ({
               query: r.query.query,
               expected: r.query.expected_session_prefix,
@@ -964,6 +1086,14 @@ async function main(): Promise<void> {
               hit: hitAt(r, o.k),
               hit1: hitAt(r, 1),
               rank: r.rank,
+              rankingHit: rankingHitAt(r, o.k),
+              rankingHit1: rankingHitAt(r, 1),
+              rankingRank: r.rankingRank,
+              // What the verb told the caller, per query: the envelope label,
+              // how many blocks it returned, and how many it withheld.
+              rows: r.result.sessions.length,
+              confidence: r.result.confidence,
+              belowFloor: r.result.belowFloor,
               harness: r.harness,
               ms: r.ms,
               vectorsUsed: r.result.vectors.used,
@@ -1040,18 +1170,69 @@ async function main(): Promise<void> {
   );
   out.push('');
 
-  for (const { mode, outcomes } of runs) {
-    const wide = scoreAt(outcomes, o.k);
-    const tight = scoreAt(outcomes, 1);
-    const pct = total ? Math.round((wide / total) * 100) : 0;
+  // Two lines per mode, and the second one is not decoration.
+  //
+  // `find` is `recall()` at the floor the verb runs at — the row the user is
+  // shown, and the number the gate is judged on. `ranking` is the same call at
+  // the library default — every row the fusion found. The gap between the two
+  // lines is exactly what the cliff costs, per mode, in the same run that
+  // scored it, which is the property a reader of one number could never have.
+  const scoreLine = (
+    label: string,
+    wide: number,
+    tight: number,
+    tail: string,
+    judged: boolean,
+  ): string => {
+    const pct = `${total ? Math.round((wide / total) * 100) : 0}%`.padEnd(5);
     const ok3 = total > 0 && wide / total >= PHASE_3_GATE;
+    const body =
+      `  ${label.padEnd(23)}` +
+      `recall@${o.k} ${String(wide).padStart(3)}/${total}  ` +
+      // Only the judged line is scored green or amber against the ratchet. The
+      // ranking line is a reference number and colouring it would say the bar
+      // applies to it, which is the confusion this whole change is undoing.
+      (judged ? (ok3 ? t.ok(pct) : t.warn(pct)) : pct) +
+      `   recall@1 ${String(tight).padStart(3)}/${total}  ` +
+      `${total ? Math.round((tight / total) * 100) : 0}%`.padEnd(5) +
+      tail;
+    return judged ? body : t.dim(body);
+  };
+  out.push(
+    INDENT +
+      t.dim(
+        `find ${t.sep} recall() at --min-confidence ${VERB_FLOOR}, what the verb returns ` +
+          `${t.sep} the gate is judged on this line`,
+      ),
+  );
+  out.push(
+    INDENT +
+      t.dim(
+        `ranking ${t.sep} the same call at ${RANKING_FLOOR} ${t.sep} what the fusion found, ` +
+          'before the floor decided who sees it',
+      ),
+  );
+  out.push('');
+  for (const { mode, outcomes } of runs) {
     out.push(
-      `  ${mode.label.padEnd(16)}` +
-        `recall@${o.k} ${String(wide).padStart(3)}/${total}  ` +
-        (ok3 ? t.ok(`${pct}%`.padEnd(5)) : t.warn(`${pct}%`.padEnd(5))) +
-        `   recall@1 ${String(tight).padStart(3)}/${total}  ` +
-        t.dim(`${total ? Math.round((tight / total) * 100) : 0}%`.padEnd(5)) +
+      scoreLine(
+        `${mode.label} · find`,
+        scoreAt(outcomes, o.k),
+        scoreAt(outcomes, 1),
         t.dim(`  p50 ${percentile(sorted(outcomes), 50)}ms  p95 ${percentile(sorted(outcomes), 95)}ms`),
+        true,
+      ),
+    );
+    const withheld = withheldAt(outcomes, o.k);
+    out.push(
+      scoreLine(
+        '  ranking',
+        rankingScoreAt(outcomes, o.k),
+        rankingScoreAt(outcomes, 1),
+        `  ${emptyPages(outcomes)}/${total} empty pages` +
+          (withheld > 0 ? `, ${withheld} answers ranked and withheld` : ''),
+        false,
+      ),
     );
   }
   out.push('');
@@ -1225,8 +1406,17 @@ function coverage(queries: EvalQuery[]): Record<string, number> {
 const shortLabel = (k: ModeKey): string =>
   ({ bm25: 'bm25', vectors: 'vec', hybrid: 'hyb', always: 'alw' })[k];
 
+/**
+ * One cell of the per-query table: where the **verb** put the answer.
+ *
+ * When the floor withheld a row the ranker had found, the cell says so and
+ * says where it was — `↓1` is *"the fusion ranked this first and `find`
+ * returns nothing"*. That is C-1 in one character per query, and it is the
+ * reason the table is worth reading at all: a column of dashes beside a column
+ * of `#1`s is the finding.
+ */
 function rankCell(t: Theme, o: Outcome, k: number): string {
-  if (o.rank === 0) return t.warn('—');
+  if (o.rank === 0) return o.rankingRank > 0 ? t.warn(`↓${o.rankingRank}`) : t.warn('—');
   const cell = `#${o.rank}`;
   if (o.rank === 1) return t.ok(cell);
   return o.rank <= k ? cell : t.warn(cell);
@@ -1247,7 +1437,22 @@ function percentile(s: number[], p: number): number {
   return s[i]!;
 }
 
-main().catch((err) => {
-  process.stderr.write(`evals: ${(err as Error).message}\n`);
-  process.exit(1);
-});
+/**
+ * Run only when this file is the thing that was invoked.
+ *
+ * `tests/evals-gate.test.ts` imports {@link VERB_FLOOR} from here to prove the
+ * benchmark's floor and the verb's floor are the same word, and an unguarded
+ * `main()` would have made that import build a fixture index and embed a
+ * corpus inside `pnpm test`. `pnpm evals` reaches this with `process.argv[1]`
+ * pointing at this file and is unaffected.
+ */
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+
+if (invokedDirectly) {
+  main().catch((err) => {
+    process.stderr.write(`evals: ${(err as Error).message}\n`);
+    process.exit(1);
+  });
+}
