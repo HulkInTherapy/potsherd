@@ -251,6 +251,51 @@ describe('a database written by potsherd 1.1.0, opened without sqlite-vec', () =
     });
   });
 
+  /**
+   * **The capability, not the outcome — FIX-H2.**
+   *
+   * Everything else in this file passed on the machine it was written on and
+   * failed in CI, and the premise it had quietly inherited was not `sqlite-vec`
+   * at all: it was the **Node version**. From v24.19.0 `node:sqlite` opens every
+   * connection with `SQLITE_DBCONFIG_DEFENSIVE` on, and under defensive mode
+   * `PRAGMA writable_schema = ON` is *accepted and ignored* — it reads back as
+   * 0 — so the `sqlite_master` delete migration 10 needs is refused. On
+   * v24.9.0, where this was written, defensive was off and the same code did
+   * the surgery happily. A green test that means "this machine happened to
+   * allow it" is `plans/09 §7.2` in a new coat.
+   *
+   * So this asserts the mechanism directly: on a database that is actually
+   * stranded, the connection `open()` hands back must be one where the schema
+   * really is writable — read back from sqlite, not assumed from the fact that
+   * the pragma did not throw. It is red on any machine where that is false,
+   * which is what the outcome assertions could not be.
+   */
+  it('hands back a connection whose schema is really writable, read back from sqlite', async () => {
+    const { root } = await buildOneOneDatabase();
+
+    await withoutTheExtension(() => {
+      const db = store.open({ root });
+      try {
+        // `open()` has already converted it, so ask the connection it gave us
+        // whether it *could* have: the same acquisition, on the same handle.
+        const restore = (db as unknown as { unsafeMode?: (on: boolean) => void }).unsafeMode;
+        if (typeof restore === 'function') restore.call(db, true);
+        db.pragma('writable_schema = ON');
+        const rows = db.pragma('writable_schema') as { writable_schema?: number }[];
+        expect(rows[0]?.writable_schema, 'PRAGMA writable_schema = ON was silently ignored').toBe(1);
+        // And the write itself, not merely the flag: a delete that matches
+        // nothing runs the identical authorizer check and changes no byte.
+        expect(() =>
+          db.prepare(`DELETE FROM sqlite_master WHERE type='table' AND name = ?`).run('__none__'),
+        ).not.toThrow();
+        db.pragma('writable_schema = RESET');
+        if (typeof restore === 'function') restore.call(db, false);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
   it('migration 10 converts it instead of declining, and nothing is left of vec0', async () => {
     const { root } = await buildOneOneDatabase();
 
