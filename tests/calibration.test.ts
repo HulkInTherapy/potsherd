@@ -285,3 +285,69 @@ describe('the ordering of the three words', () => {
     expect(maxConfidence('none', 'none')).toBe('none');
   });
 });
+
+/**
+ * C-1 §1 — the structural claim, made permanent.
+ *
+ * VERIFICATION-6 C-1 asserted that `potsherd find`'s emptiness on 52 of 60
+ * benchmark queries is *structural, not a tuning accident*, and gave the
+ * mechanism in one line: `score = coverage x (BASE + …)`, the bracket is a
+ * partition of 1, therefore **`score <= coverage` always** — so `weak` at 0.5
+ * demands that at least half of the query's literal terms appear in the row,
+ * and no cosine, no bm25 magnitude and no amount of corroboration can change
+ * that.
+ *
+ * That claim was verified and it is the reason C-1 could not be closed by
+ * moving a constant. It is pinned here because it is now load-bearing in three
+ * places — this file's arithmetic, `recall.ts`'s two `calibrate` call sites,
+ * and `packages/mcp/src/tools/recall.ts`'s `note`, which tells an agent in
+ * words that the floor measures wording rather than contents. If the shape of
+ * the score ever stops implying it, all three become lies at once and this
+ * goes red first.
+ */
+describe('C-1 — coverage is a ceiling, and that is the whole finding', () => {
+  it('never scores a row above its own literal coverage, over the whole input space', () => {
+    // Exhaustive on a grid rather than illustrative on three cases: the claim
+    // is universally quantified and a handful of examples cannot carry it.
+    for (let covered = 0; covered <= 8; covered++) {
+      for (let terms = Math.max(covered, 1); terms <= 8; terms++) {
+        for (const strength of [0, 0.25, 0.5, 0.75, 1]) {
+          for (let lists = 1; lists <= AGREEMENT_LISTS + 2; lists++) {
+            const c = calibrate({ covered, terms, strength, lists });
+            expect(c.score).toBeLessThanOrEqual(c.coverage + 1e-12);
+          }
+        }
+      }
+    }
+  });
+
+  it('cannot reach the weak floor below half the query, at any strength or agreement', () => {
+    // The consequence a reader has to be able to see: the best possible row —
+    // top of every list, corroborated by every independent source there is —
+    // is still refused when it repeats fewer than half of the words typed.
+    const best = { strength: 1, lists: AGREEMENT_LISTS + 5 };
+    expect(calibrate({ covered: 1, terms: 3, ...best }).confidence).toBe('none');
+    expect(calibrate({ covered: 2, terms: 5, ...best }).confidence).toBe('none');
+    expect(calibrate({ covered: 3, terms: 4, ...best }).confidence).not.toBe('none');
+    // And the bracket really is a partition of 1, which is what makes the
+    // sentence above a theorem rather than an observation about these numbers.
+    expect(WEIGHT_BASE + WEIGHT_STRENGTH + WEIGHT_AGREEMENT).toBeCloseTo(1, 12);
+  });
+
+  it('is blind to the semantic lane: only literal coverage is an input', () => {
+    // The half of the finding that F8 is about. `calibrate` has no argument
+    // that can carry "a vector found this and nothing else did" — `strength`
+    // is a *relative* magnitude, so the top row of a list donates 1.0 whether
+    // it is a bullseye or the least-bad of a bad list. A row the semantic lane
+    // alone found therefore scores exactly what its wording earns.
+    const semanticOnly = { covered: 1, terms: 4, strength: 1, lists: 1 };
+    const nothingButWording = { covered: 1, terms: 4, strength: 0, lists: 1 };
+    expect(calibrate(semanticOnly).coverage).toBe(calibrate(nothingButWording).coverage);
+    expect(calibrate(semanticOnly).confidence).toBe('none');
+    // A full 0.25 of strength is worth less than a quarter of one term of a
+    // four-term query, which is the arithmetic reason the lane cannot rescue.
+    expect(calibrate(semanticOnly).score - calibrate(nothingButWording).score).toBeLessThan(
+      1 / 4,
+    );
+  });
+});

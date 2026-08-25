@@ -7,7 +7,8 @@ import { db as store, indexAll, type Db } from '@potsherd/core';
 // symbols FIX-I adds are imported from the module that owns them. The barrel
 // lines are in `FIX-I-REPORT.md §4`.
 import { byLabel, citableBlock, recall, summaryRank } from '../packages/core/src/recall.js';
-import { runFind } from '../packages/cli/src/commands/find.js';
+import { minConfidence, runFind } from '../packages/cli/src/commands/find.js';
+import { AGENT_FLOOR } from '../packages/mcp/src/tools/shapes.js';
 import { makeContext } from '../packages/mcp/src/context.js';
 import { runRecall } from '../packages/mcp/src/tools/recall.js';
 import { rmrf, tempDir } from './helpers.js';
@@ -431,5 +432,57 @@ describe('both doors, one index, one query', () => {
     expect(thread.citable).toBe(false);
     expect(thread.evidence).toBe('not-a-transcript');
     expect(cli.citable).toBe(thread.citable);
+  });
+});
+
+// ================================================ C-1 step 1 — the two doors' floor
+
+/**
+ * C-1 — the verb's floor, pinned where the verb sets it.
+ *
+ * Two facts that were true, undocumented and unasserted when VERIFICATION-6
+ * measured C-1, and whose being unasserted is most of why it went unnoticed for
+ * three phases:
+ *
+ *   1. `recall()`'s library default withholds **nothing**, because it is also
+ *      the shortlist builder for `ask` and `graft`.
+ *   2. `potsherd find` and `potsherd_recall` both run at `weak`.
+ *
+ * Nothing measured (1) against (2), so `pnpm evals` called `recall()` with no
+ * floor and reported the **ranking** as the release number for three phases,
+ * while the verb returned an empty page on 52 of the same 60 queries.
+ * `evals/run.ts` now measures the verb, and `evals/run.ts`'s `VERB_FLOOR` is
+ * asserted against `minConfidence()` — this function — in
+ * `tests/evals-gate.test.ts`. This is the other end of that pin.
+ */
+describe('C-1 — the floor is set by the verb, and both verbs set the same one', () => {
+  it('defaults to weak, and only an explicit none turns the cliff off', () => {
+    expect(minConfidence({} as Parameters<typeof minConfidence>[0])).toBe('weak');
+    expect(minConfidence({ minConfidence: 'none' } as Parameters<typeof minConfidence>[0])).toBe('none');
+    expect(minConfidence({ minConfidence: 'strong' } as Parameters<typeof minConfidence>[0])).toBe('strong');
+    // A typo must not silently open the floor on the one command line that was
+    // trying to raise it. This is the second wall behind commander's choices.
+    expect(minConfidence({ minConfidence: 'weakish' } as Parameters<typeof minConfidence>[0])).toBe('weak');
+  });
+
+  it('the model door runs at the same floor the human door does', () => {
+    // The asymmetry C-1 step 3 closes is about the *override*, never about the
+    // default: an agent must not be handed rows a human was spared.
+    expect(AGENT_FLOOR).toBe(minConfidence({} as Parameters<typeof minConfidence>[0]));
+  });
+
+  it('and the CLI escape hatch really does return what the floor withheld', async () => {
+    // The half the model door did not have until C-1 step 3. Measured on this
+    // fixture rather than asserted in the abstract: a query the floor empties
+    // must come back non-empty at `none`, or the flag is decoration.
+    // A sentence about the same conversation in words it does not use — the
+    // shape F8 is about, and the shape the floor deletes.
+    const q = 'what the coastal vegetation report counted along the shoreline';
+    const floored = await recall(db, q, {}, { root, vectors: false, minConfidence: 'weak' });
+    const open = await recall(db, q, {}, { root, vectors: false, minConfidence: 'none' });
+    expect(floored.sessions).toEqual([]);
+    expect(floored.belowFloor).toBeGreaterThan(0);
+    expect(open.sessions.length).toBeGreaterThan(0);
+    expect(open.minConfidence).toBe('none');
   });
 });

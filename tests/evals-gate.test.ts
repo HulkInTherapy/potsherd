@@ -7,6 +7,11 @@ import { describe, expect, it } from 'vitest';
 import { embeddings } from '@potsherd/core';
 
 import { PHASE_3_FLOOR, PHASE_3_GATE, judge, ruleLine, type GateInput } from '../evals/gate.js';
+// C-1 step 1. `evals/run.ts` only calls `main()` when it is the file that was
+// invoked, so these two constants can be imported without building an index.
+import { RANKING_FLOOR, VERB_FLOOR } from '../evals/run.js';
+import { minConfidence } from '../packages/cli/src/commands/find.js';
+import { AGENT_FLOOR } from '../packages/mcp/src/tools/shapes.js';
 
 /**
  * T8.5 — the fusion gate, and the proof that it can still fail.
@@ -283,7 +288,29 @@ interface EvalJson {
       pass: boolean;
     }[];
   };
-  modes: { mode: string; hits: number; hits1: number }[];
+  /**
+   * C-1 step 1 — which floor the top-level numbers were measured at.
+   *
+   * `judged` is the verb's; `ranking` is the library default. Before C-1 the
+   * blob carried neither, and the numbers in it were the ranking's while every
+   * label around them said `find`.
+   */
+  floor: { judged: string; ranking: string };
+  modes: {
+    mode: string;
+    /** The verb: `recall()` at `floor.judged`. */
+    hits: number;
+    hits1: number;
+    /** The ranking: the same call at `floor.ranking`, reported beside it. */
+    ranking: {
+      hits: number;
+      hits1: number;
+      emptyPages: number;
+      withheld: number;
+      withheld1: number;
+    };
+  }[];
+  queries: number;
   index: { skipped: string | null } | null;
 }
 
@@ -325,7 +352,31 @@ function runEvals(args: string[]): { code: number; json: EvalJson } {
  *     POTSHERD_EVALS_EMBED=1 pnpm evals -- --no-vector-lists     # must exit 1
  */
 describe.skipIf(MODEL === null)('pnpm evals, end to end (needs a cached model)', () => {
-  it('exits 0 as shipped and 1 with the semantic lane removed', () => {
+  /**
+   * C-1 step 1 — **the shipped run now fails, and that is the finding.**
+   *
+   * Until 25 aug 2026 this test asserted `exit 0 as shipped`, and it was
+   * measuring `recall()` at the library default, which withholds nothing. The
+   * verb runs at `weak`. So the number the phase-3 gate had been judging for
+   * three phases was the **ranking** — 57/60 at recall@5, published in the
+   * release notes as this build's verified retrieval quality — while
+   * `potsherd find` returned an empty page for 52 of the same 60 queries.
+   *
+   * The instrument was corrected, no clause of `evals/gate.ts` was touched,
+   * and the gate went red on all five clauses. Reported as a finding rather
+   * than repaired, per the ruling on C-1: *if step 1 alone makes the gate
+   * unmeetable, that is a finding, not a failure.* The floor cannot be lowered
+   * to meet it without giving up F1 — C-1 §1 has the exhaustive search: over
+   * every threshold on every scale-free quantity the index carries, the most
+   * that can be returned while every no-match control still comes back empty
+   * is 16 of 60.
+   *
+   * This test therefore pins **both** numbers and the gap between them. If a
+   * later change closes the gap honestly, the `pass: false` line goes red and
+   * whoever closed it has to come here and say how. If a later change quietly
+   * re-points the gate at the ranking, `floor.judged` goes red first.
+   */
+  it('is judged on the verb, and the verb does not clear the gate', () => {
     const shipped = runEvals([]);
     // The premise, established rather than assumed: the vector modes really
     // did run in this process, so there really was a gate to judge.
@@ -334,8 +385,24 @@ describe.skipIf(MODEL === null)('pnpm evals, end to end (needs a cached model)',
     expect(shipped.json.weights.semanticLane).toBe('present');
     expect(shipped.json.weights.vectorWeight).toBe(shipped.json.weights.shipped);
     expect(shipped.json.gates.phase3.length).toBeGreaterThan(0);
-    expect(shipped.code).toBe(0);
-    expect(shipped.json.pass).toBe(true);
+
+    // What is being judged: the floor the verb runs at, not the library's.
+    expect(shipped.json.floor.judged).toBe('weak');
+    expect(shipped.json.floor.ranking).toBe('none');
+
+    // And the two numbers, side by side. The ranking clears the 51/60 ratchet
+    // comfortably; the verb is nowhere near it, and the difference is the rows
+    // the floor withheld.
+    const hybrid = shipped.json.modes.find((m) => m.mode === 'hybrid')!;
+    expect(hybrid.ranking.hits).toBeGreaterThanOrEqual(51);
+    expect(hybrid.hits).toBeLessThan(hybrid.ranking.hits);
+    expect(hybrid.ranking.withheld).toBeGreaterThan(30);
+    expect(hybrid.ranking.emptyPages).toBeGreaterThan(shipped.json.queries / 2);
+
+    expect(shipped.code).toBe(1);
+    expect(shipped.json.pass).toBe(false);
+    const gate = shipped.json.gates.phase3.find((g) => g.mode === 'hybrid');
+    expect(gate?.clearsBar).toBe(false);
 
     const regressed = runEvals(['--no-vector-lists']);
     expect(regressed.json.index?.skipped ?? null).toBe(null);
@@ -348,10 +415,10 @@ describe.skipIf(MODEL === null)('pnpm evals, end to end (needs a cached model)',
     expect(regressed.json.pass).toBe(false);
     // And it fails for the reason the amendment cares about, not by accident —
     // on both of the clauses `gate.ts` records for it.
-    const hybrid = regressed.json.gates.phase3.find((g) => g.mode === 'hybrid');
-    expect(hybrid?.tight.beatsBm25).toBe(false);
-    expect(hybrid?.clearsBar).toBe(false);
-  }, 240_000);
+    const regressedGate = regressed.json.gates.phase3.find((g) => g.mode === 'hybrid');
+    expect(regressedGate?.tight.beatsBm25).toBe(false);
+    expect(regressedGate?.clearsBar).toBe(false);
+  }, 480_000);
 
   /**
    * The finding that made this file wrong, kept as an assertion so that it
@@ -375,7 +442,48 @@ describe.skipIf(MODEL === null)('pnpm evals, end to end (needs a cached model)',
     const bm25 = zeroed.json.modes.find((m) => m.mode === 'bm25');
     // The measurement: zero-weighted lists still buy queries, because they
     // still feed `strength` and `agreement` to the primary sort key.
-    expect(hybrid!.hits).toBeGreaterThan(bm25!.hits);
-    expect(hybrid!.hits1).toBeGreaterThan(bm25!.hits1);
-  }, 240_000);
+    //
+    // C-1 step 1 — read off the RANKING view, which is the half of the run
+    // P11's claim was ever about. `hits` is now the verb's, and at the floor
+    // the semantic lane does not buy queries at all: it is the fused ORDER
+    // that a zero weight fails to erase, and the floor is computed from
+    // wording, which no lane and no weight can change. That is not a
+    // contradiction of P11, it is C-1, and it is asserted below so the two
+    // findings stay legible next to each other.
+    expect(hybrid!.ranking.hits).toBeGreaterThan(bm25!.ranking.hits);
+    expect(hybrid!.ranking.hits1).toBeGreaterThan(bm25!.ranking.hits1);
+    expect(hybrid!.hits).toBeLessThanOrEqual(hybrid!.ranking.hits);
+  }, 480_000);
+});
+
+
+/**
+ * C-1 step 1 — the benchmark and the product must agree about the floor.
+ *
+ * This is the assertion whose absence let the defect live for three phases.
+ * `runControls`'s docstring said what was measured was *"what a person or an
+ * agent typing `potsherd find` gets"*; it applied the real floor to six control
+ * queries and to none of the sixty recall queries, and nothing anywhere
+ * compared the benchmark's floor to the verb's. Three separate constants say
+ * `weak` — `find`'s `minConfidence()` default, `AGENT_FLOOR`, and now
+ * `VERB_FLOOR` — and this is the only place all three are read together.
+ *
+ * It needs no index, no model and no corpus: it is three imports and an
+ * equality, which is the point. It goes red the moment any one of the three
+ * moves without the others.
+ */
+describe('C-1 — the instrument measures the product', () => {
+  it('runs the recall set at exactly the floor potsherd find runs at', () => {
+    expect(VERB_FLOOR).toBe(minConfidence({} as Parameters<typeof minConfidence>[0]));
+    expect(VERB_FLOOR).toBe(AGENT_FLOOR);
+    expect(VERB_FLOOR).toBe('weak');
+  });
+
+  it('keeps the ranking view, at the library default that withholds nothing', () => {
+    // Both, or the run cannot show what the floor costs. The ranking number is
+    // the one five phases of notes point at and it is not deleted — it is
+    // labelled, which is the whole of step 1.
+    expect(RANKING_FLOOR).toBe('none');
+    expect(RANKING_FLOOR).not.toBe(VERB_FLOOR);
+  });
 });

@@ -373,6 +373,40 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
  * turn the floor off on the one command line that was trying to raise it. The
  * option is registered with `.choices([...])` so commander refuses it first;
  * this is the second wall, for the callers that reach `runFind` directly.
+ *
+ * ## What this default costs, measured — C-1
+ *
+ * The word `weak` here is the most expensive constant in the product and until
+ * 25 aug 2026 nothing measured it. `pnpm evals` called `recall()` at the
+ * library default, which withholds nothing, so every recall number this project
+ * has published — including the 42/60 in the release notes — measured the
+ * **ranking** rather than what this verb returns. Measured at the floor, on the
+ * committed 60-query fixture set, same build, same index:
+ *
+ * ```
+ *                              find (this default)      ranking (none)
+ *   hybrid (auto)   recall@5        7/60                    57/60
+ *                   recall@1        7/60                    42/60
+ *   queries returning an empty page   52/60
+ *   answers ranked in the top five and withheld    50
+ * ```
+ *
+ * It is **structural, not a tuning accident**, and no constant here can fix it:
+ * `calibrate()` is `coverage x (BASE + …)` with a bracket that is a partition
+ * of 1, so `score <= coverage` always, and `coverage` is the fraction of the
+ * query's **literal** terms the row repeats. `weak` at 0.5 therefore demands
+ * half the words typed, whatever the cosine says — which deletes exactly the
+ * paraphrase questions the semantic lane exists to answer.
+ *
+ * **The default does not move, and the reason is measured too.** Lowering it
+ * gives back F1: over every threshold on every scale-free quantity this index
+ * carries — calibrated score, coverage, absolute cosine, cosine relative to the
+ * query's own best, and the z-score of the best cosine against the query's own
+ * candidate distribution — the most that can be returned while every no-match
+ * control still comes back empty is **16 of 60**, and that best was fitted to
+ * the controls it was tested against. `phases/phase-11/C1-REPORT.md` §1 has the
+ * exhaustive search and §2 has the design change that would be needed instead.
+ * `tests/find.test.ts` fails if this default moves in either direction.
  */
 export function minConfidence(o: FindCommandOptions): Confidence {
   switch (o.minConfidence) {
