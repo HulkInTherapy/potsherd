@@ -45,17 +45,64 @@
  * `plans/08` rule 4: *a benchmark that cannot fail is worse than no
  * benchmark.* Four separate conditions here can still go red, and the one that
  * matters most is `recall@1 strictly above both singles` — that is the number
- * fusion actually buys (11 against 9 and 6) and the number a regression in the
- * fusion destroys first. `tests/evals-gate.test.ts` pins each of them with the
- * shape of numbers that breaks it, including the measured shape of the
- * `--vector-weight 0` regression:
+ * fusion actually buys and the number a regression in the fusion destroys
+ * first. `tests/evals-gate.test.ts` pins each of them with the shape of
+ * numbers that breaks it, and one end-to-end run proves the whole instrument
+ * can still go red on demand.
+ *
+ * ## The regression control, corrected 25 aug 2026 (P11 step 1)
+ *
+ * **The control is `--no-vector-lists`, and until this correction this file
+ * named `--vector-weight 0` instead, with numbers from a build that no longer
+ * exists.** Both statements this paragraph used to make — that the probe
+ * "collapses hybrid onto bm25 and therefore ties it at recall@1", and the
+ * companion claim in `tests/evals-gate.test.ts` that it "lands 11 under the
+ * floor" — were true of the pre-FIX-I ordering and are false of this build.
+ *
+ * Why they stopped being true: before FIX-I the fused score was the only thing
+ * that ordered the page, so zeroing a list's weight erased everything that
+ * list could do. Since FIX-I the page is ordered by `byLabel` — lane,
+ * confidence word, `calibration.score`, then the fused score — and
+ * `calibrate()` reads `from[].raw` and how many lists found the row, neither
+ * of which is a weight. A zero-weighted list therefore still runs, still
+ * admits candidates, and still corroborates. Measured on this commit, on the
+ * committed 60-query fixture set:
  *
  * ```
- * pnpm evals -- --vector-weight 0        # measured 22 aug 2026: exits 1
+ * pnpm evals -- --vector-weight 0     # exits 1, but on ONE clause
+ *   bm25    @5 40/60  @1 31/60
+ *   vectors @5 52/60  @1 37/60
+ *   hybrid  @5 52/60  @1 33/60
+ *   ✓ ≥ bm25 (40)  ✓ ≥ vectors (52)  ✓ ≥ 51/60 · ✓ > bm25 (31)  ✗ > vectors (37)
  * ```
  *
- * which collapses hybrid onto bm25 and therefore ties it at recall@1, where
- * the amended gate demands a strict win.
+ * Hybrid does not collapse onto bm25: 52 against 40 at recall@5. **Twelve
+ * queries are bought by lists whose weight is zero**, it clears the floor by
+ * one, and it beats bm25 at recall@1. The probe was down to a single clause,
+ * and the single clause it fails is the one the *shipped* build already fails
+ * — so it proved nothing the release run did not already prove.
+ *
+ * `--no-vector-lists` drops the three vector lists from every mode, the way
+ * `--no-cards` drops the two card lists, on the same embedded index. Measured
+ * on this commit:
+ *
+ * ```
+ * pnpm evals -- --no-vector-lists     # exits 1, on TWO independent clauses
+ *   bm25    @5 40/60  @1 31/60
+ *   vectors @5  0/60  @1  0/60        (no lists left to search)
+ *   hybrid  @5 40/60  @1 31/60
+ *   ✓ ≥ bm25 (40)  ✓ ≥ vectors (0)  ✗ ≥ 51/60 · ✗ > bm25 (31)  ✓ > vectors (0)
+ * ```
+ *
+ * Hybrid is now bm25, exactly and to the digit, so:
+ *
+ *   1. **`tight.beatsBm25` is false** — 31 against 31 is a tie, and the
+ *      amended gate demands a strict win at the metric fusion exists for.
+ *   2. **`clearsBar` is false** — 40/60 is eleven under the 51/60 ratchet.
+ *
+ * Two clauses, from two different halves of the rule, on one probe. That is
+ * what makes this a gate rather than a rubber stamp, and it is reproducible
+ * today by anyone who runs the command.
  */
 
 /** `plans/06`: phase 1's gate is ≥ 8/10 on bm25 alone. */
@@ -84,7 +131,9 @@ export const PHASE_1_GATE = 0.8;
  * the P2 list and blocks nothing.
  *
  * What did NOT move, by the same ruling: both fusion clauses, and the
- * `--vector-weight 0` regression check. The ratchet is the floor alone.
+ * requirement that a regression check exist at all. The ratchet is the floor
+ * alone. (Which *command* is that check was corrected on 25 aug 2026 — see the
+ * header. The clause it has to redden did not change.)
  */
 export const PHASE_3_FLOOR = { hits: 51, of: 60 } as const;
 

@@ -289,6 +289,52 @@ interface Options {
    * run cannot be mistaken for a screenshot of the release run.
    */
   vectorWeight: number | null;
+  /**
+   * `--no-vector-lists`: drop `vec_exchanges`, `vec_ghost_prompts` and
+   * `vec_cards` from every mode, exactly as `--no-cards` drops the two card
+   * lists. **This is the regression control.**
+   *
+   * ## why this flag exists rather than `--vector-weight 0`
+   *
+   * `plans/08` rule 4 — *a benchmark that cannot fail is worse than no
+   * benchmark* — needs a switch that provably turns the fusion back into
+   * bm25-only, so that a red gate can be produced on demand. `gate.ts` and
+   * `tests/evals-gate.test.ts` both recorded `--vector-weight 0` as that
+   * switch, and described it correctly for the build it was written on: it
+   * *did* collapse hybrid onto bm25, because before FIX-I the fused score was
+   * the only thing that ordered the page, so zeroing a list's weight erased
+   * everything the list could do.
+   *
+   * Since FIX-I the page is ordered by `byLabel` — lane, confidence word,
+   * `calibration.score`, and only then the fused score — and `calibrate()`
+   * reads `from[].raw` and how many lists found the row. Neither reads a
+   * weight. So a zero-weighted list still runs, still admits candidates, and
+   * still supplies `strength` and `agreement` to the primary sort key.
+   * Measured on this commit: `--vector-weight 0` scores hybrid **52/60 ·
+   * 33/60** where bm25-only scores **40/60 · 31/60**. Twelve queries at
+   * recall@5 are bought by lists weighted to nothing, and the probe fails the
+   * gate on **one** clause (`> vectors`), not the two `gate.ts` recorded.
+   *
+   * ## and why `--vector-weight 0` was not simply redefined to mean this
+   *
+   * Two reasons, both about not making a number lie somewhere else.
+   *
+   * 1. `FIX-K-REPORT.md §0` swept the whole one-parameter lexical:semantic
+   *    family and its exhaustiveness argument is *RRF is linear in the
+   *    weights*. That argument needs `w = 0` to be a genuine member of the
+   *    family — the limit of the points either side of it. A flag named
+   *    `--vector-weight` that silently stops setting a weight at one end of
+   *    its own range puts a discontinuity into the family the next sweep will
+   *    trust.
+   * 2. At `w = 0` the **`vectors only`** column is degenerate on its own
+   *    terms: all three of its lists are weighted 0, every fused score is 0,
+   *    and its order falls through to a tiebreak. A control whose comparison
+   *    mode is meaningless cannot be the thing that proves the gate works.
+   *
+   * So the weight stays a weight and the lane removal gets a flag that says
+   * what it does. What it produces, measured, is recorded in `gate.ts`.
+   */
+  noVectorLists: boolean;
 }
 
 /** The three lists `--vector-weight` moves: the whole semantic half. */
@@ -314,6 +360,7 @@ function parseArgs(argv: string[]): Options {
     json: false,
     keep: false,
     vectorWeight: null,
+    noVectorLists: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -323,6 +370,7 @@ function parseArgs(argv: string[]): Options {
     else if (a === '--overlap') o.overlap = Number(argv[++i]);
     else if (a === '--vector-weight') o.vectorWeight = Number(argv[++i]);
     else if (a === '--no-cards') o.noCards = true;
+    else if (a === '--no-vector-lists') o.noVectorLists = true;
     else if (a === '--modes') {
       o.modes = String(argv[++i])
         .split(',')
@@ -359,11 +407,18 @@ potsherd evals — recall@1 and recall@5 over a known-answer query set
   --vectors auto|on|off legacy single-mode switch
   --keep                do not delete the temporary fixture index, and print it
   --vector-weight <n>   override the weight of vec_exchanges, vec_ghost_prompts
-                        and vec_cards for this run. NOT a tuning knob: the
-                        release gate is judged at the shipped 1.5, which is the
-                        phase-3 stopping rule. It is here so the gate can be
-                        shown to still fail —
-                          pnpm evals -- --vector-weight 0    must exit 1
+                        and vec_cards for this run. NOT a tuning knob and NOT
+                        the regression control: the release gate is judged at
+                        the shipped weight, and since FIX-I a zero weight
+                        removes only a list's contribution to the fused score,
+                        not the list. Zero-weighted vector lists still buy 12
+                        queries at recall@5 because the page is ordered by the
+                        calibrator, which never reads a weight.
+  --no-vector-lists     drop vec_exchanges, vec_ghost_prompts and vec_cards
+                        from every mode, the way --no-cards drops the card
+                        lists. THIS is the check that proves the gate can go
+                        red: with no semantic lane, hybrid IS bm25 —
+                          pnpm evals -- --no-vector-lists   must exit 1
   --json                machine-readable
 
 The vector modes need the 34 MB bge-small model on disk. It is looked for in
@@ -791,12 +846,21 @@ async function main(): Promise<void> {
   let controlOutcomes: ControlOutcome[] = [];
   try {
     for (const key of wanted) {
-      const mode = o.noCards
-        ? {
-            ...MODES[key],
-            lists: MODES[key].lists.filter((l) => l !== 'cards_fts' && l !== 'vec_cards'),
-          }
-        : MODES[key];
+      // Both list filters are applied to the *same* index, which is the rule
+      // `--no-cards`'s own docstring states: the honest A/B for "did this half
+      // of the fusion help" is the same corpus and the same queries with the
+      // lists on and off, never a differently-built index. So
+      // `--no-vector-lists` still embeds — it removes the lane from the
+      // *search*, not from the archive.
+      let lists: readonly ListName[] = MODES[key].lists;
+      if (o.noCards) lists = lists.filter((l) => l !== 'cards_fts' && l !== 'vec_cards');
+      if (o.noVectorLists) lists = lists.filter((l) => !VECTOR_LISTS.includes(l as never));
+      const mode: Mode = o.noVectorLists
+        ? // With no semantic list left to fuse, `vectors: 'auto'` would still
+          // pay for a forward pass whose result nothing reads. Turning it off
+          // makes the control's latency column honest too.
+          { ...MODES[key], lists, vectors: false }
+        : { ...MODES[key], lists };
       runs.push({ mode, outcomes: await runMode(root, queries, mode, o.k, weights) });
     }
     overlap = overlaps(root, queries, o.overlap);
@@ -857,6 +921,10 @@ async function main(): Promise<void> {
             shipped: DEFAULT_VECTOR_WEIGHT,
             overridden: weights !== null,
             lists: VECTOR_LISTS,
+            // The lane, separately from its weight, because since FIX-I those
+            // are two different facts about a run and the old field could only
+            // report one of them.
+            semanticLane: o.noVectorLists ? 'removed' : 'present',
           },
           pass: ok,
           index: built
@@ -937,6 +1005,18 @@ async function main(): Promise<void> {
       : t.dim(
           `  vector weight ${DEFAULT_VECTOR_WEIGHT} ${t.sep} the phase-3 stopping rule, unchanged by the §8.5 amendment`,
         ),
+  );
+  // The lane's presence is on the screen of every run for the same reason the
+  // weight is: a line that only appears when something is unusual is a line
+  // nobody learns to read. And a zero weight is *not* this line — that was the
+  // whole confusion `--no-vector-lists` exists to end.
+  out.push(
+    o.noVectorLists
+      ? t.warn(
+          `  semantic lane REMOVED ${t.sep} vec_exchanges, vec_ghost_prompts, vec_cards dropped from every mode ` +
+            `${t.sep} this is the regression control, not the release gate`,
+        )
+      : t.dim(`  semantic lane present ${t.sep} all eight lists available to every mode that asks for them`),
   );
   out.push('');
 
