@@ -146,7 +146,7 @@ The absolute floor becomes a **ratchet** at its measured value: it may tighten,
 never loosen. And per-query pass/fail is pinned, so a regression **names the query
 that fell** rather than only how many did.
 
-### what five independent verifications changed
+### what eight independent verifications changed
 
 Every fix above was re-scored by a verifier that authored none of it, against the
 audit's own rubric, on the real archive, scoring it **4 → 6 → 7 → 7 → …** —
@@ -281,8 +281,7 @@ rounds found, and what changed because of it:
 - **`ls` said `1 session` where `doctor` and `stats` said `31`**, on three published screenshots.
   The rollup was right — thirty of them are one thread — but the footer dropped them silently and
   called the remainder sessions. It reads `1 of 31 sessions` now.
-- **Semantic search got substantially better as a result.** On the 60-query set, recall@5 went from
-  51 to 57 and recall@1 from 27 to 37, and the weight behind it was re-derived over the whole
+- **Semantic search got substantially better as a result.** On the 60-query set, recall@5 went from 51 to 57 and recall@1 from 27 to 37, and the weight behind it was re-derived over the whole
   parameter family with the grid written down before it was run.
 
 ### the guards that let those through

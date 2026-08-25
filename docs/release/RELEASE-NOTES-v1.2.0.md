@@ -142,8 +142,8 @@ Everything else is additive. The index migrates itself.
 **The claim is not "a search tool". The claim is that potsherd's output can be checked** — and this
 release is the first one where that claim was tested by something other than its authors.
 
-Independent verifiers — five of them, none of whom wrote any of it — re-ran the audit's own command
-list on the real archive and re-scored its rubric. The first four **found twenty-seven defects the
+Independent verifiers — eight of them, none of whom wrote any of it — re-ran the audit's own command
+list on the real archive and re-scored its rubric. The first seven **found fifty-seven defects the
 authors had reported as green**, including three of the worst in the project's history: a tool that
 could not see a thread in the release that claimed to fix threads; a citation minted for a session
 whose transcript nobody had read; and a capability failure that reported itself as an honest empty,
@@ -172,8 +172,8 @@ Vincent (MIT). What was taken, what was adapted and what was refused is in
 ## verified at this tag
 
 ```
-2,027 tests, 55 files · macOS and Ubuntu × Node 22 and 24
-the same suite again on Node's own SQLite (POTSHERD_SQLITE=node) — 2,027, 0 skipped
+2,038 tests, 55 files · macOS and Ubuntu × Node 22 and 24
+the same suite again on Node's own SQLite (POTSHERD_SQLITE=node) — 2,038 on both, of which 4 are loud environment skips
 privacy guard: 0 pinned violations, 25 probes, 19 unaccounted ids (ceiling 19)
 evals, 60 queries, blind — the set was built by someone told nothing about which way
        any number needed to move:
