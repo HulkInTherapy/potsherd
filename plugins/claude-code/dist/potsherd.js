@@ -24120,7 +24120,7 @@ function clip2(s, max2) {
 }
 
 // ../core/dist/version.js
-var VERSION = "1.2.0";
+var VERSION = "1.2.1";
 
 // ../bridges/dist/types.js
 var SCHEMA_UNRECOGNISED = "schema not recognised";

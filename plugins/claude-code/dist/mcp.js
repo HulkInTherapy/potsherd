@@ -35163,7 +35163,7 @@ function episodicIndexPath(env = process12.env) {
 }
 
 // ../core/dist/version.js
-var VERSION = "1.2.0";
+var VERSION = "1.2.1";
 
 // src/context.ts
 import fs20 from "node:fs";

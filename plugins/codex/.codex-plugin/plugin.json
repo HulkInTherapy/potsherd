@@ -1,6 +1,6 @@
 {
   "name": "potsherd",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Rescue, index, search, interrogate and re-enter every coding-agent session on your machine. Indexes each Codex thread as it ends, and exposes the whole archive over MCP.",
   "author": {
     "name": "HulkInTherapy",
