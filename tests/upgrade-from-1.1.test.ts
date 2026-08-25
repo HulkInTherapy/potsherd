@@ -34,6 +34,7 @@
 // `package.json` saying `commonjs` rather than asserting about one — applied to
 // the other install failure 1.1.0 shipped.
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -116,17 +117,17 @@ async function buildOneOneDatabase(opts: { rewindSchema?: boolean } = {}): Promi
   await indexAll({ root, claudeDir, harnesses: ['claude'], embed: false, full: true });
 
   const db = store.open({ root });
-  // The premise this helper exists to establish. `vecStatus().version` is
-  // `vec_version()`, and it is set only when the extension actually loaded, so
-  // this cannot pass by accident on a machine that has no vec0 to build with.
-  const version = vecStatus(db).version;
-  if (!version) {
-    db.close();
-    throw new Error(
-      'this test builds real vec0 virtual tables and needs sqlite-vec to do it: ' +
-        'pnpm install (it is an optionalDependency of @potsherd/core)',
-    );
-  }
+  // The premise this helper exists to establish, and it is established **here**
+  // rather than inherited from the environment — FIX-H2. It used to read
+  // `vecStatus(db).version`, which is the *product's* loader and therefore
+  // obeys `POTSHERD_NO_VEC`; under a suite run with the extension switched off
+  // (CI's condition, and the one neither of us had been testing) that made the
+  // fixture unbuildable and every test here fail for a reason that has nothing
+  // to do with what they assert. Building the trap is not the same act as
+  // exercising the product against it: the fixture loads vec0 itself, on this
+  // handle, whatever the environment says, and every `open()` below still goes
+  // through the product's loader and still sees nothing.
+  loadVec0Directly(db);
 
   db.exec(`
 DROP TRIGGER IF EXISTS vec_exchanges_insert;
@@ -170,10 +171,52 @@ DROP TABLE IF EXISTS vec_blob_ghost_prompts;
   return { root, claudeDir, ids };
 }
 
+/**
+ * vec0 on this connection, by the test's own hand.
+ *
+ * Resolved from `packages/core`, because that is where `sqlite-vec` is
+ * installed — it is an `optionalDependency` of that package and there is no
+ * copy at the workspace root, so `createRequire(import.meta.url)` from `tests/`
+ * cannot see it. What the fixture is avoiding is the product's *loader*, which
+ * obeys `POTSHERD_NO_VEC`; the module resolution is the same one the product
+ * uses because it is the only one that finds the file.
+ */
+function loadVec0Directly(db: Db): void {
+  const require_ = createRequire(path.join(repoRoot, 'packages', 'core', 'src', 'index.ts'));
+  let loadable: string;
+  try {
+    loadable = (require_('sqlite-vec') as { getLoadablePath(): string }).getLoadablePath();
+  } catch (err) {
+    db.close();
+    throw new Error(
+      'this test builds real vec0 virtual tables and needs sqlite-vec to do it: ' +
+        `pnpm install (it is an optionalDependency of @potsherd/core) — ${(err as Error).message}`,
+    );
+  }
+  (db as unknown as { loadExtension(p: string): void }).loadExtension(loadable);
+}
+
 /** Everything below runs on the machine that has lost the extension. */
 async function withoutTheExtension<T>(fn: () => Promise<T> | T): Promise<T> {
+  return withVecEnv('1', fn);
+}
+
+/**
+ * …and this is the other half, stated rather than assumed.
+ *
+ * The one test here that is *about* the extension being present must say so:
+ * inheriting it meant that a suite run with `POTSHERD_NO_VEC=1` — which is what
+ * CI does to the whole product, and what neither of us had run — silently
+ * turned that test into a second copy of the stranded case.
+ */
+async function withTheExtension<T>(fn: () => Promise<T> | T): Promise<T> {
+  return withVecEnv(undefined, fn);
+}
+
+async function withVecEnv<T>(value: string | undefined, fn: () => Promise<T> | T): Promise<T> {
   const previous = process.env['POTSHERD_NO_VEC'];
-  process.env['POTSHERD_NO_VEC'] = '1';
+  if (value === undefined) delete process.env['POTSHERD_NO_VEC'];
+  else process.env['POTSHERD_NO_VEC'] = value;
   try {
     return await fn();
   } finally {
@@ -326,18 +369,20 @@ describe('a database written by potsherd 1.1.0, opened without sqlite-vec', () =
 
   it('keeps every vector when the extension IS on the machine', async () => {
     const { root, ids } = await buildOneOneDatabase();
-    // No `POTSHERD_NO_VEC` here: this is the other half of the promise —
-    // where the vectors can be read, they are copied across rather than
-    // dropped, exactly as migration 10 already did.
-    const db = store.open({ root });
-    expect(store.schemaVersion(db)).toBe(store.latestSchemaVersion());
-    expect(objects(db, 'vec_exchanges')?.type).toBe('view');
-    expect(db.prepare('SELECT COUNT(*) AS n FROM vec_exchanges').get()).toEqual({ n: ids.length });
-    expect(db.prepare('SELECT COUNT(*) AS n FROM vec_cards').get()).toEqual({ n: 1 });
-    expect(
-      db.prepare('SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version IS NOT NULL').get(),
-    ).toEqual({ n: ids.length });
-    db.close();
+    // The other half of the promise: where the vectors can be read they are
+    // copied across rather than dropped. `withTheExtension` states that premise
+    // instead of inheriting it — see its docstring.
+    await withTheExtension(() => {
+      const db = store.open({ root });
+      expect(store.schemaVersion(db)).toBe(store.latestSchemaVersion());
+      expect(objects(db, 'vec_exchanges')?.type).toBe('view');
+      expect(db.prepare('SELECT COUNT(*) AS n FROM vec_exchanges').get()).toEqual({ n: ids.length });
+      expect(db.prepare('SELECT COUNT(*) AS n FROM vec_cards').get()).toEqual({ n: 1 });
+      expect(
+        db.prepare('SELECT COUNT(*) AS n FROM exchanges WHERE embedding_version IS NOT NULL').get(),
+      ).toEqual({ n: ids.length });
+      db.close();
+    });
   });
 
   it('the whole verb: potsherd index completes on it, through the binary', async () => {
