@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import process from 'node:process';
 import type { Db } from './db.js';
+import { sqliteDriverName } from './sqlite-driver.js';
 import { modelsDir, potsherdDir } from './paths.js';
 import {
   EMBEDDING_VERSION,
@@ -655,13 +656,13 @@ export function migrateToPortableVectors(db: Db): boolean {
       if (!copyVectorsAcross(db, table)) stranded.push(table);
     }
   } catch {
-    return decline(db, 'run POTSHERD_SQLITE=node potsherd index — this vec0 store could not be read');
+    return decline(db, `${otherDriverCommand()} — this vec0 store could not be read`);
   }
 
   if (stranded.length > 0 && !detachStranded(db, stranded)) {
     return decline(
       db,
-      'run POTSHERD_SQLITE=node potsherd index — this sqlite will not rewrite a schema',
+      `${otherDriverCommand()} — this sqlite will not rewrite a schema`,
     );
   }
 
@@ -670,6 +671,23 @@ export function migrateToPortableVectors(db: Db): boolean {
   if (stranded.length > 0) forgetStrandedStamps(db, stranded);
   declines.delete(db);
   return true;
+}
+
+/**
+ * The command for the driver that is **not** the one that just refused.
+ *
+ * It used to name `POTSHERD_SQLITE=node` unconditionally, and FIX-H2 is the
+ * proof that a hardcoded answer here becomes a lie: from Node v24.19.0 it is
+ * `node:sqlite` that refuses the schema rewrite, so on that build the sentence
+ * told the reader to re-run on the driver they were already on and had just
+ * watched fail. Neither driver is *the* answer; the other one is, and which
+ * one that is is a fact this process knows. `plans/05`: never print a command
+ * the reader cannot follow, and never one that cannot work.
+ */
+function otherDriverCommand(): string {
+  return sqliteDriverName() === 'node:sqlite'
+    ? 'run POTSHERD_SQLITE=better-sqlite3 potsherd index'
+    : 'run POTSHERD_SQLITE=node potsherd index';
 }
 
 /** Record why, then decline: nothing is stamped and the next open retries. */
@@ -738,6 +756,16 @@ function detachStranded(db: Db, tables: readonly VecTable[]): boolean {
   try {
     try {
       db.pragma('writable_schema = ON');
+      // **Read it back.** `PRAGMA writable_schema = ON` is not a request that
+      // fails — under `SQLITE_DBCONFIG_DEFENSIVE` sqlite accepts it and does
+      // nothing, and it reads back as 0. That is a phantom flag, and this
+      // project has now recorded seven of them: a setting that looks applied,
+      // succeeds, and has no effect. Trusting it is what sent v1.2.0's
+      // migration into the `DELETE` below on Node v24.19.0, where it was
+      // refused. The delete that matches nothing stays as the second check —
+      // it proves the *write* is permitted, not merely the flag — but the
+      // readback is what names the reason.
+      if (!schemaIsWritable(db)) return false;
       db.prepare(`DELETE FROM sqlite_master WHERE type = 'table' AND name = ?`).run(
         '__potsherd_probe_no_such_table__',
       );
@@ -777,6 +805,25 @@ function detachStranded(db: Db, tables: readonly VecTable[]): boolean {
  * {@link detachStranded} say which it was. The undo runs in a `finally`, so
  * defensive mode is off for the deletes of one migration and for nothing else.
  */
+/**
+ * Did `PRAGMA writable_schema = ON` actually take?
+ *
+ * `0` means defensive mode swallowed it. Anything unreadable is treated as
+ * "no", because a pragma this connection cannot even report on is not one to
+ * bet a schema rewrite on.
+ */
+function schemaIsWritable(db: Db): boolean {
+  try {
+    const rows = db.pragma('writable_schema') as unknown;
+    if (!Array.isArray(rows) || rows.length === 0) return false;
+    const row = rows[0] as Record<string, unknown>;
+    const value = row['writable_schema'] ?? Object.values(row)[0];
+    return value === 1 || value === true || value === '1';
+  } catch {
+    return false;
+  }
+}
+
 function allowSchemaWrites(db: Db): () => void {
   const fn = (db as unknown as { unsafeMode?: (on: boolean) => unknown }).unsafeMode;
   if (typeof fn !== 'function') return () => {};

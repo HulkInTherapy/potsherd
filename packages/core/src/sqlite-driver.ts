@@ -61,7 +61,22 @@ export type DriverKind = 'better-sqlite3' | 'node:sqlite';
 
 export interface Driver {
   kind: DriverKind;
-  open(file: string, opts: { readonly?: boolean; fileMustExist?: boolean }): Db;
+  open(
+    file: string,
+    opts: {
+      readonly?: boolean;
+      fileMustExist?: boolean;
+      /**
+       * This connection will rewrite `sqlite_master` by hand — migration 10,
+       * and nothing else, ever.
+       *
+       * It is a **construction** option because on `node:sqlite` that is the
+       * only place it can be set, which is the whole of FIX-H2. See
+       * {@link loadNodeSqlite}.
+       */
+      schemaWritable?: boolean;
+    },
+  ): Db;
 }
 
 /** The one sentence a user with no SQLite at all should see. */
@@ -121,7 +136,7 @@ export function sqliteDriverName(): DriverKind | null {
 
 export function openDatabase(
   file: string,
-  opts: { readonly?: boolean; fileMustExist?: boolean } = {},
+  opts: { readonly?: boolean; fileMustExist?: boolean; schemaWritable?: boolean } = {},
 ): Db {
   const d = driver();
   if (!d) throw new NoSqliteError([...tried]);
@@ -237,6 +252,24 @@ function loadNodeSqlite(): Driver | null {
             // it passes `sqlite-vec`'s own `getLoadablePath()`. No path from a
             // transcript, a config file or an argument reaches `loadExtension`.
             allowExtension: true,
+            // FIX-H2, and it is a **Node version** difference, not a platform
+            // one. From v24.19.0 `node:sqlite` turns `SQLITE_DBCONFIG_DEFENSIVE`
+            // **on** by default; v24.9.0 did not. Under defensive mode
+            // `PRAGMA writable_schema = ON` is **accepted and silently ignored**
+            // — it reads back as 0 — and the `DELETE FROM sqlite_master` that
+            // migration 10 needs is then refused outright:
+            //
+            //   node v24.9.0    writable_schema -> 1   delete -> 1 row
+            //   node v24.19.0   writable_schema -> 0   delete -> table sqlite_master may not be modified
+            //
+            // So the schema rewrite is impossible on a connection opened the
+            // ordinary way, and there is no runtime toggle: `defensive` can only
+            // be set here. The key is written only when the caller has asked, so
+            // every other connection keeps Node's own default — the surgery is
+            // one connection, on one database, once. On a Node that predates the
+            // option it is an unknown key and is ignored, which is exactly right:
+            // those builds are not defensive in the first place.
+            ...(o.schemaWritable ? { defensive: false } : {}),
           }),
         ),
     };

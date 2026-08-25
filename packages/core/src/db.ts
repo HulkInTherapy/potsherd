@@ -555,7 +555,7 @@ export function open(opts: OpenOptions = {}): Db {
   if (file !== ':memory:') {
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   }
-  const db = openDatabase(file, { readonly: opts.readonly ?? false });
+  let db = openDatabase(file, { readonly: opts.readonly ?? false });
   if (!opts.readonly) {
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
@@ -578,8 +578,60 @@ export function open(opts: OpenOptions = {}): Db {
   // alternative is each call site remembering. `loadVec` is idempotent, costs
   // two closures, and never throws.
   loadVec(db);
-  if (!opts.readonly) migrate(db);
+  if (!opts.readonly) {
+    db = reopenForSchemaSurgery(db, file, opts);
+    migrate(db);
+  }
   return db;
+}
+
+/**
+ * The one database that needs a connection ordinary code may not have.
+ *
+ * Migration 10 converts a 1.1.0 index by deleting three rows from
+ * `sqlite_master` (see `vec.ts`), and from Node v24.19.0 `node:sqlite` opens
+ * every connection with `SQLITE_DBCONFIG_DEFENSIVE` **on**, where that is
+ * refused and `PRAGMA writable_schema = ON` is *silently ignored*. Defensive
+ * mode has no runtime switch on that driver — it is a construction option — so
+ * a connection that has already been opened cannot be talked into it. The only
+ * answer is to open a second one, and the only honest place to decide that is
+ * here, where the file, the mode and the driver are all still in hand.
+ *
+ * It costs an extra `open()` **only on a database that is actually stranded**,
+ * which is a database written by 1.1.0 on a machine that has since lost
+ * `sqlite-vec` — once, because the migration it enables is what stops it being
+ * stranded. Every other connection in the product, on every driver, keeps its
+ * driver's own defaults: this is not a global loosening, it is one connection,
+ * one database, one migration.
+ *
+ * `:memory:` is excluded because reopening it would open a *different*,
+ * empty database and silently discard the caller's. A stranded vec0 store
+ * cannot exist in a fresh in-memory database anyway — it has no 1.1.0 past —
+ * and a test that builds one in memory keeps the connection it built it on.
+ */
+function reopenForSchemaSurgery(db: Db, file: string, opts: OpenOptions): Db {
+  if (file === ':memory:') return db;
+  if ((loadVec(db).legacy ?? []).length === 0) return db;
+  let next: Db;
+  try {
+    next = openDatabase(file, { readonly: false, schemaWritable: true });
+  } catch {
+    // Nothing is worse than before: the migration will decline on the
+    // connection we already have, and say so in a sentence naming a way out.
+    return db;
+  }
+  try {
+    db.close();
+  } catch {
+    /* already gone; the new handle is the one that matters */
+  }
+  next.pragma('journal_mode = WAL');
+  next.pragma('synchronous = NORMAL');
+  next.pragma('foreign_keys = ON');
+  next.pragma('busy_timeout = 5000');
+  loadVec(next);
+  void opts;
+  return next;
 }
 
 /**
