@@ -176,6 +176,132 @@ export type Lane = 'evidence' | 'routing';
 export const LANES: Readonly<Record<Lane, number>> = { evidence: 0, routing: 1 };
 
 /**
+ * The **body of text** a list searches, as opposed to the method it searches
+ * it with.
+ *
+ * ## the defect this exists for, measured
+ *
+ * `calibration.ts` defines `agreement` as *how many of the eight lists
+ * **independently** put this row in their candidates. One list is a claim;
+ * three are a corroboration.* `AGREEMENT_LISTS`'s own docstring derives
+ * its value of three by naming three of them — *`exchanges_fts` + `titles` +
+ * `cards_fts`* — which are three different **bodies of evidence**. The code
+ * counted `new Set(from.map(f => f.list)).size`, which is a different
+ * quantity, and the two only agree on a text-only index. Add the semantic
+ * lane and `exchanges_fts` + `vec_exchanges` counts as two corroborating
+ * lists — when it is one exchange, retrieved twice, by two methods, out of one
+ * table.
+ *
+ * P11 measured the consequence on the committed 60-query set, at the corner of
+ * weight space where the lexical lane contributes nothing to the fused score
+ * (so that nothing here can be a weight artefact). Hybrid's page holds exactly
+ * the same rows as vectors-only on all sixty queries and disagrees about the
+ * top row on eight. **On eight of eight, the two candidate rows had identical
+ * `coverage`, and the row hybrid promoted was the one that had picked up
+ * `agreement = 0.5` from a lexical list paired with a semantic list over the
+ * same table** — `exchanges_fts` beside `vec_exchanges` five times,
+ * `ghost_prompts_fts` beside `vec_ghost_prompts` three times. Not once was it
+ * two different bodies of evidence. The margins were 0.013 to 0.024 of a
+ * calibrated score.
+ *
+ * So a row corroborated by two lists outranks a better row found by one, which
+ * is what `agreement` is *for* — but on this corpus the corroboration it was
+ * paying for was the archive having two indexes, not the conversation having
+ * two kinds of evidence.
+ *
+ * ## the partition
+ *
+ * Four sources, and the grouping is a fact about the schema rather than a
+ * judgement: `exchanges_fts` and `vec_exchanges` read `exchanges`; the three
+ * ghost lists read the ghost prompts (`ghosts_fts` at whole-ghost granularity,
+ * the other two per prompt); `cards_fts` and `vec_cards` read the card;
+ * `titles` reads the session title. Two lists in one row of this table cannot
+ * corroborate each other because they are looking at the same words.
+ *
+ * `calibration.ts`'s `AGREEMENT_LISTS` does not move, and is still reachable: an evidence
+ * block can hold a title, a transcript hit and a ghost hit — three sources —
+ * exactly as its docstring says a bm25-only index can.
+ *
+ * `tests/recall.test.ts` fails when a row of this table moves, in both
+ * directions (`plans/09` rule 3).
+ */
+export type EvidenceSource = 'title' | 'exchange' | 'ghost' | 'card';
+
+/** Which body of text each list reads. See {@link EvidenceSource}. */
+export const SOURCE_OF_LIST: Readonly<Record<ListName, EvidenceSource>> = {
+  titles: 'title',
+  exchanges_fts: 'exchange',
+  vec_exchanges: 'exchange',
+  ghosts_fts: 'ghost',
+  ghost_prompts_fts: 'ghost',
+  vec_ghost_prompts: 'ghost',
+  cards_fts: 'card',
+  vec_cards: 'card',
+};
+
+/**
+ * How many **independent** bodies of evidence a set of lists represents.
+ *
+ * This is the number `calibrate()`'s `lists` field has always asked for — see
+ * its docstring, and the word *independently* in it — and the number
+ * `recall()` now passes. The policy split is the one this module already
+ * keeps: `calibration.ts` owns what `agreement` means, `recall.ts` owns which
+ * lists are the same evidence.
+ */
+export function evidenceSources(lists: Iterable<ListName>): number {
+  const sources = new Set<EvidenceSource>();
+  for (const l of lists) sources.add(SOURCE_OF_LIST[l]);
+  return sources.size;
+}
+
+/**
+ * One row's `strength` from its per-list relative magnitudes: **mean within a
+ * body of evidence, max across them.**
+ *
+ * The second consequence of {@link SOURCE_OF_LIST}, and the same sentence
+ * applied to the other calibration input.
+ *
+ * Two lists over different bodies of text are different evidence, and the best
+ * of it is what the row can show — so `max` across sources is right and stays.
+ *
+ * Two lists over the *same* body of text are two methods scoring one document,
+ * and their disagreement is information. `max` discards it, and discards it in
+ * one direction only: `relativeStrength` normalises each list against that
+ * list's own best, so every list donates a 1.0 to its own rank-1 row whether
+ * that row is a bullseye or the least-bad of a bad list. Taking the max over
+ * lists therefore means **adding a lane can raise a row's strength and can
+ * never lower it**, and it raises it most for the rows the added lane happens
+ * to top. That is the same asymmetry `agreement` had, in the term worth 0.25
+ * rather than the term worth 0.15.
+ *
+ * Measured on the committed 60-query set at the zero-lexical corner: *the
+ * search box that only worked if you got the word exactly right* has a row at
+ * cosine strength 0.793 which becomes 1.000 in hybrid because it tops
+ * `exchanges_fts` — a list on which nothing matched that query well — and it
+ * then outranks the correct answer's 0.969 by 0.0023 of a calibrated score.
+ *
+ * The mean is not a choice between two arbitrary operators. It is the only one
+ * of the three that treats the two methods symmetrically: `max` believes
+ * whichever is more optimistic and `min` whichever is more pessimistic, and
+ * neither is a defensible thing to say about two views of one document.
+ *
+ * `tests/recall.test.ts` fails when this operator moves.
+ */
+export function combinedStrength(parts: readonly { list: ListName; value: number }[]): number {
+  const perSource = new Map<EvidenceSource, { sum: number; n: number }>();
+  for (const p of parts) {
+    const source = SOURCE_OF_LIST[p.list];
+    const acc = perSource.get(source) ?? { sum: 0, n: 0 };
+    acc.sum += p.value;
+    acc.n += 1;
+    perSource.set(source, acc);
+  }
+  let best = 0;
+  for (const { sum, n } of perSource.values()) best = Math.max(best, sum / n);
+  return best;
+}
+
+/**
  * Hit kinds that are a *statement about* a conversation rather than text *from*
  * one.
  *
@@ -2177,14 +2303,16 @@ export async function recall(
     for (const h of hits) best = kind === 'bm25' ? Math.min(best, h.raw) : Math.max(best, h.raw);
     bestRaw.set(name as ListName, best);
   }
-  const strengthOf = (from: RecallHit['from']): number => {
-    let best = 0;
-    for (const f of from) {
-      const kind = rawKind(f.list);
-      best = Math.max(best, relativeStrength(f.raw, bestRaw.get(f.list) ?? 0, kind));
-    }
-    return best;
-  };
+  // `strength` is combined across lists by {@link combinedStrength} — mean
+  // within a body of evidence, max across them. The argument, and the
+  // measurement that required it, are on that function.
+  const strengthOf = (from: RecallHit['from']): number =>
+    combinedStrength(
+      from.map((f) => ({
+        list: f.list,
+        value: relativeStrength(f.raw, bestRaw.get(f.list) ?? 0, rawKind(f.list)),
+      })),
+    );
 
   // ---- one conversation, one block
   //
@@ -2233,7 +2361,8 @@ export async function recall(
       covered: coveredTerms(quotableTokens, hitText),
       terms: quotableTokens.length,
       strength: strengthOf(hit.from),
-      lists: new Set(hit.from.map((f) => f.list)).size,
+      // Independent bodies of evidence, not indexes. See {@link SOURCE_OF_LIST}.
+      lists: evidenceSources(hit.from.map((f) => f.list)),
       // F8's second half. Coverage above is a uniform partition over every
       // word the user typed; this says which of those words the question was
       // actually *about*. A row that shows none of them is not an answer to
@@ -2371,7 +2500,7 @@ export async function recall(
       keyCovered: coveredTerms(requiredTerms, blockText),
       keyTerms: requiredTerms.length,
       strength: Math.max(0, ...counted.map((h) => h.calibration.strength)),
-      lists: new Set(counted.flatMap((h) => h.from.map((f) => f.list))).size,
+      lists: evidenceSources(counted.flatMap((h) => h.from.map((f) => f.list))),
       ...(lane === 'routing' || !transcript ? { ceiling: ROUTING_CEILING } : {}),
     });
     if (lane === 'evidence' ? evidenceBuilt >= limit * 3 : routingBuilt >= limit) continue;

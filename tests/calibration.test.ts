@@ -184,6 +184,38 @@ describe('the constants', () => {
       1,
     );
   });
+
+  /**
+   * P11 — what `lists` is a count *of*, pinned as arithmetic.
+   *
+   * The constant did not move and this test would fail if it did. What P11
+   * changed is one caller: `recall()` used to pass a count of indexes, and
+   * `agreement`'s docstring has always said *independent*. On a hybrid index
+   * those are different numbers — `exchanges_fts` beside `vec_exchanges` is
+   * one exchange retrieved twice — and the difference is worth exactly the
+   * step below, which is what decided the top row on eight queries of the
+   * committed 60-query set.
+   *
+   * The partition itself lives in `recall.ts` (`SOURCE_OF_LIST`) and is pinned
+   * in `tests/recall.test.ts`; this is the other half of the contract, stated
+   * where the meaning is defined.
+   */
+  it('one extra body of evidence is worth exactly half the agreement term', () => {
+    const one = calibrate({ covered: 1, terms: 1, strength: 0, lists: 1 });
+    const two = calibrate({ covered: 1, terms: 1, strength: 0, lists: 2 });
+    expect(one.agreement).toBe(0);
+    expect(two.agreement).toBe(0.5);
+    // The number a mis-counted list was buying, on a row whose coverage is 1.
+    expect(two.score - one.score).toBeCloseTo(WEIGHT_AGREEMENT / 2, 12);
+    // Scaled by coverage, because coverage is the ceiling — which is why the
+    // measured margins on the eight queries were 0.013–0.024 rather than
+    // 0.075: every one of those rows covered a quarter to a half of what was
+    // asked.
+    const thin = { covered: 1, terms: 4, strength: 0 };
+    expect(
+      calibrate({ ...thin, lists: 2 }).score - calibrate({ ...thin, lists: 1 }).score,
+    ).toBeCloseTo((WEIGHT_AGREEMENT / 2) * 0.25, 12);
+  });
 });
 
 describe('relativeStrength', () => {

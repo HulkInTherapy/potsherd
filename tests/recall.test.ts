@@ -29,7 +29,16 @@ import { rmrf, tempDir } from './helpers.js';
 // re-export the keyphrase yet, so it is imported from the modules that own it.
 // `T10.9-REPORT.md` carries the barrel lines.
 import { KEYPHRASE_RULE } from '../packages/core/src/keyphrase.js';
-import { KEY_TERMS_REQUIRED } from '../packages/core/src/calibration.js';
+import { AGREEMENT_LISTS, KEY_TERMS_REQUIRED, calibrate } from '../packages/core/src/calibration.js';
+// P11's source partition. `packages/core/src/index.ts` is reserved this phase,
+// so these come from the module that owns them, as `byLabel` and `citableBlock`
+// already do (`FIX-I-REPORT.md §4.2`).
+import {
+  LISTS,
+  SOURCE_OF_LIST,
+  combinedStrength,
+  evidenceSources,
+} from '../packages/core/src/recall.js';
 
 /**
  * L6 — `find`, `ls`, `show`, `stats`.
@@ -1386,5 +1395,137 @@ describe('a row must show the distinctive word before it may be labelled (F8)', 
     expect(r.sessions.length).toBeGreaterThan(0);
     expect(r.sessions[0]!.confidence).toBe('strong');
     expect(r.sessions[0]!.calibration.ceiling).toBeUndefined();
+  });
+});
+
+/**
+ * P11 — `agreement` counts independent bodies of evidence, not indexes.
+ *
+ * `plans/09` rule 3: *a constant encoding a measured trade-off needs a test
+ * that fails when it moves.* {@link SOURCE_OF_LIST} is that constant here —
+ * eight lists partitioned onto the four bodies of text they read — and it is
+ * pinned in both directions below, because the two ways to break it are
+ * opposite: merge two sources that are genuinely different evidence, and a row
+ * stops being able to earn corroboration it deserves; split one source into
+ * two, and the defect P11 measured comes straight back.
+ *
+ * The defect, in one sentence: `calibrate()`'s `agreement` is documented as
+ * *how many lists **independently** put this row in their candidates*, and
+ * `recall()` was passing a raw list count — so on a hybrid index
+ * `exchanges_fts` beside `vec_exchanges` scored as two lists corroborating
+ * each other when it is one exchange retrieved twice. Measured over the
+ * committed 60-query set at the corner of weight space where the lexical lane
+ * contributes nothing to the fused score, hybrid and vectors-only hold exactly
+ * the same rows on all sixty queries and disagree about the top row on eight;
+ * on **eight of eight** the two candidates had identical coverage and the
+ * promoted row's entire advantage was `agreement = 0.5` bought by a lexical
+ * list paired with a semantic list over the same table.
+ */
+describe('the corroboration reward counts sources, not lists (P11)', () => {
+  it('maps every list to a source, and only these four', () => {
+    // Exhaustive by construction: a new list cannot be added to `LISTS`
+    // without deciding what body of text it reads.
+    expect(Object.keys(SOURCE_OF_LIST).sort()).toEqual([...LISTS].sort());
+    expect(new Set(Object.values(SOURCE_OF_LIST))).toEqual(
+      new Set(['title', 'exchange', 'ghost', 'card']),
+    );
+  });
+
+  it('a lexical and a semantic list over the same table are ONE source', () => {
+    // The measured defect, as arithmetic. These are the exact pairs that
+    // produced all eight top-row disagreements.
+    expect(evidenceSources(['exchanges_fts', 'vec_exchanges'])).toBe(1);
+    expect(evidenceSources(['ghost_prompts_fts', 'vec_ghost_prompts'])).toBe(1);
+    expect(evidenceSources(['cards_fts', 'vec_cards'])).toBe(1);
+    // …and the ghost lists differ in granularity, not in what they read.
+    expect(evidenceSources(['ghosts_fts', 'ghost_prompts_fts', 'vec_ghost_prompts'])).toBe(1);
+  });
+
+  it('different bodies of evidence still corroborate, up to AGREEMENT_LISTS', () => {
+    expect(evidenceSources(['exchanges_fts', 'titles'])).toBe(2);
+    // The combination `AGREEMENT_LISTS`'s docstring derives its value from,
+    // and the proof the constant is still reachable on a text-only index.
+    expect(evidenceSources(['exchanges_fts', 'titles', 'cards_fts'])).toBe(AGREEMENT_LISTS);
+    expect(
+      calibrate({ covered: 1, terms: 1, strength: 0, lists: AGREEMENT_LISTS }).agreement,
+    ).toBe(1);
+  });
+
+  it('is what recall() actually passes — the whole semantic lane cannot lift agreement alone', async () => {
+    // End to end rather than by construction: a hybrid search over the fixture
+    // must not contain a block whose corroboration is only ever one table read
+    // twice. For every block, the agreement recorded is the one the source
+    // partition implies.
+    const r = await recall(db, 'timezone drift', {}, { vectors: false, minConfidence: 'none', limit: 20 });
+    expect(r.sessions.length).toBeGreaterThan(0);
+    for (const s of r.sessions) {
+      const counted = s.lane === 'evidence' ? s.hits.filter((h) => h.lane === 'evidence') : s.hits;
+      const sources = evidenceSources(counted.flatMap((h) => h.from.map((f) => f.list)));
+      const expected = Math.min(1, Math.max(0, (sources - 1) / (AGREEMENT_LISTS - 1)));
+      expect(s.calibration.agreement).toBeCloseTo(expected, 10);
+    }
+  });
+});
+
+/**
+ * P11 — the same sentence, applied to `strength`.
+ *
+ * `plans/09` rule 3 again: the operator is the thing that encodes the measured
+ * trade-off, so the test is written against the operator rather than against a
+ * corpus that happens to exercise it. Every case below is a number this file
+ * states itself.
+ *
+ * The defect it closes: `relativeStrength` normalises each list against that
+ * list's own best, so every list donates a 1.0 to its own rank-1 row whether
+ * or not anything in that list matched well. Combining lists with `max` then
+ * means adding a lane can raise a row's strength and can never lower it, and
+ * raises it most for the rows the added lane happens to top — the same
+ * one-directional asymmetry `agreement` had, in the term worth 0.25 instead of
+ * the term worth 0.15. Measured: `the search box that only worked if you got
+ * the word exactly right` promotes a row from cosine strength 0.793 to 1.000
+ * purely because it tops `exchanges_fts` on a query the lexical lane answers
+ * badly, and it then beats the correct answer's 0.969 by 0.0023.
+ */
+describe('strength averages within a source and maxes across (P11)', () => {
+  it('averages two methods that read the same table', () => {
+    // The measured case, as arithmetic. Under the old `max` this was 1.
+    expect(
+      combinedStrength([
+        { list: 'exchanges_fts', value: 1 },
+        { list: 'vec_exchanges', value: 0.793 },
+      ]),
+    ).toBeCloseTo(0.8965, 10);
+    // And it is symmetric — the pessimistic method cannot win either, which
+    // is the property `min` would have broken in the other direction.
+    expect(
+      combinedStrength([
+        { list: 'exchanges_fts', value: 0 },
+        { list: 'vec_exchanges', value: 1 },
+      ]),
+    ).toBeCloseTo(0.5, 10);
+  });
+
+  it('takes the best of genuinely different evidence, unchanged', () => {
+    // Across sources `max` is right and stays: a strong transcript hit is not
+    // diluted by a weak title, because they are not two readings of one thing.
+    expect(
+      combinedStrength([
+        { list: 'exchanges_fts', value: 0.9 },
+        { list: 'titles', value: 0.1 },
+      ]),
+    ).toBeCloseTo(0.9, 10);
+    expect(combinedStrength([{ list: 'vec_exchanges', value: 0.42 }])).toBeCloseTo(0.42, 10);
+    expect(combinedStrength([])).toBe(0);
+  });
+
+  it('a lane can now lower a row as well as raise it', () => {
+    // The whole point, stated as the property rather than as a number. Under
+    // `max` the left-hand side could never be below the right.
+    const semanticOnly = combinedStrength([{ list: 'vec_exchanges', value: 0.8 }]);
+    const bothLanes = combinedStrength([
+      { list: 'vec_exchanges', value: 0.8 },
+      { list: 'exchanges_fts', value: 0.2 },
+    ]);
+    expect(bothLanes).toBeLessThan(semanticOnly);
   });
 });
