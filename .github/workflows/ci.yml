@@ -533,9 +533,23 @@ jobs:
           # 3.0 MB`, `2.1 -> 2.1 kB`, `2.1 -> 2.1 GB`, `2.1 -> 21 MB` and a
           # `database` row that vanishes, moves or names the wrong file all
           # fail. Seeded and shown red in phases/phase-10/FIX-J-REPORT.md §2.
+          #      A THIRD THING THIS HIDES, ADDED 25 AUG. The heading date was
+          #      normalised on line 1 only, and two covered screens carry the
+          #      capture day in their BODY: `03-audit-after.txt`'s `last rescue
+          #      <day>` and `10-stats.txt`'s `indexed <day>`. Both are written by
+          #      the capture run itself, so both were correct on the day they
+          #      were regenerated and wrong every day after -- a guard that goes
+          #      red tomorrow for a reason nobody changed. It did, and this is
+          #      the fix. The day a rescue ran is a fact about the machine's
+          #      clock, which is what a normaliser is allowed to hide; the rest
+          #      of both lines -- the counts, the sizes, the words -- is compared
+          #      as normal, and a screen that stopped printing the clause at all
+          #      still fails.
           norm() {
             sed -E -e 's/[0-9]+ms/<ms>/g' \
                    -e '1s/· [0-9]+ [a-z]+ [0-9]{4}$/· <date>/' \
+                   -e 's/last rescue [0-9]+ [a-z]+ [0-9]{4}/last rescue <date>/' \
+                   -e 's/^(  indexed +)[0-9]+ [a-z]+/\1<date>/' \
                    -e 's/^(  database +[0-9]+)\.[0-9]( +[kMG]?B)/\1.<tenth>\2/' "$1"
           }
 

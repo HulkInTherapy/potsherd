@@ -940,3 +940,77 @@ not boilerplate** — is the rule this project has written down and broken more 
 
 FIX-I's brief carries the standing instruction this round earned: **one implementation, not two that
 agree.** The whole family exists because a rule was written twice and one copy was updated.
+
+## the round-5 wave, and the finding at the end of it
+
+**FIX-H closed the release blocker.** Half my stated blocker was true — `DROP TABLE` and
+`ALTER TABLE … RENAME` both call the missing module — but **the schema is data**, so migration 10
+deletes the `sqlite_master` row under `PRAGMA writable_schema` and drops vec0's four storage tables,
+which are ordinary. Same real database, same command: `no such module: vec0` and exit 1 before,
+**370 transcripts and 1,707 exchanges in 18.4 s** after.
+
+Two things it did better than the brief asked. It **measured `writable_schema` on both drivers
+rather than picking one**: `node:sqlite` deletes the row, `better-sqlite3` refuses with *"table
+sqlite_master may not be modified"* because defensive mode is on by default, and succeeds after
+`unsafeMode(true)`. So the code asks for the capability and then **probes it with a delete that
+matches nothing** — same authorizer check, zero bytes touched — and a driver that refuses leaves the
+file untouched and declines with a reason naming a driver that works. And **the root cause was a
+predicate, not a missing guard**: `clearExchanges` was already guarded by
+`vecAvailable && vecTablesExist` and *both answered true*. The question nobody asked is whether
+sqlite can **compile** a statement against that name. Nine sites swept.
+
+Its trap test copies the trap — a database with real vec0 virtual tables, opened without the
+extension — and five of its seven cases are red on `efc5f47`, the two green ones there to establish
+the trap itself. C-4 folded in: **nothing refreshed the lock**, so a timeout alone would have moved
+the failure rather than fixed it; holders stamp every 20 s and a live owner is honoured 10 minutes
+since its last stamp, with D3's six-concurrent-`index` property re-proved against a held lane.
+
+**FIX-J's real contribution was a root cause nobody had.** C-8's wobbling page count was **neither
+capture order nor `--no-embed`** — all three index variants give 548 pages. It is **path depth**:
+the same build, corpus and sequence give **521 / 533 / 578** pages at three different `HOME` depths.
+So the guard's HOME moved to the script's own and it now produces the script's exact number, and the
+normaliser narrowed from a pattern that accepted `2.1 GB` to one that hides a single character.
+`fetch-tags: true` alone was measured to **buy nothing** on a depth-1 checkout, because `--merged
+HEAD` has no history to walk.
+
+Its round 2 caught a regression a diff could not have shown, and only because the acceptance line
+said *both doors of the same run, side by side*: making `searched` honest turned `searched === 0`
+into an **ambiguous sentinel**, and `nothing()` branched on it — so a not-logged-in backend printed
+*"nothing in the index matches"* over a capability failure. **Third appearance of that frame this
+phase.** Then it swept 1,765 test bodies in three scripted passes: **five bare `return`s, three of
+them the defect**, 31 assertion-free `catch` blocks (all helpers, no findings), 14 honest skips.
+
+## the fusion is now the weak link, and the gate is what told us
+
+**FIX-I closed C-1 and C-2 as one implementation**, not two that agree: `byLabel` and `citableBlock`
+live in core, `orderByLabel` and its four helpers are **deleted** from the MCP door, and both doors
+read a published `RecallSession.citable`. The page is *selected* with `byLane` and *ordered* with
+`byLabel` after the cut, so membership is identical on all 40 queries and only the order moves.
+Measured before fixing: **12 of 40 queries carried an inversion; 26 of 40 carried a summary-only row
+marked `citable: true`.** Nineteen assertions are red on `7396c3e` and green after — the verifier's
+own version of this fix left **1,931 tests passing before and after**, because nothing pinned it.
+
+**And then every recall number moved:**
+
+| mode | before | after |
+|---|---|---|
+| bm25 only | 39/24 | **40/31** |
+| vectors only | 51/24 | **57/40** — 95% and 67% |
+| hybrid (auto) | 51/27 | **55/35** |
+| gate | PASS | **FAIL** |
+
+**Nothing regressed; every mode improved.** What fails is a *relative* clause — hybrid must beat
+both singles — and **vectors-only now beats it by 2 at recall@5 and 5 at recall@1**. The fusion's
+weights were derived when the page was ordered by the fused RRF score itself; with a calibrated
+ordering the semantic lane gains far more, and the current weighting **dilutes the better lane**.
+
+**The worker measured the way out and refused it**, and the reasoning is the rule: moving the sort
+downstream into the two doors restores the eval byte for byte, and makes `pnpm evals` measure an
+ordering **no surface prints**. A benchmark that cannot see the product is the shape this repository
+names in its own rules.
+
+So `main` is knowingly red on **exactly one test, 1,973 of 1,974**, and **is not pushed**. FIX-K is
+re-deriving the fusion, with the grid written down before it was run and the choice justified by
+recall rather than by the gate. `evals/gate.ts` and `evals/queries.jsonl` are off limits to it:
+changing the criterion or the query set to fit the result is the thing this project has refused five
+times.
