@@ -429,3 +429,221 @@ are unaffected; nothing asserts on it in `tests/`.
    fixture. T10.1 §d5's open question — whether block coverage is depressed further on 150-exchange
    sessions, which would make the verb's number *worse* on a real archive, not better — is still
    open, and §1's ceiling should be re-measured there before the design change in §2 is scoped.
+
+---
+
+# ROUND 2 — the fourth option: keep the floor for the LABEL, drop it for WITHHOLDING
+
+Measured, not shipped. No product file changed in this round; `git diff` against `ffcd4ac` is this
+section. Option 4 is `recall()` at `minConfidence: 'none'` with the labels left on — which is
+exactly the `ranking` column step 1 already prints, so the recall half needed no new instrument.
+
+## §R2.0 The premise, checked — and it is half true
+
+> *it is not the floor that makes nonsense return empty — FTS finds no term at all*
+
+**True on a cold index. False the moment there are vectors.** The vector lane always returns its
+nearest neighbours; nothing in it can decline. Verbatim, on the frozen demo corpus (the digest recorded in §3, rebuilt and
+re-verified byte-identical this round), at `--min-confidence none`:
+
+```
+$ potsherd find "flimberzork quaddlepan" --min-confidence none        [COLD: 0 of 439 embedded]
+potsherd find "flimberzork quaddlepan" · no match · bm25 · 12ms
+
+  nothing in the index matches "flimberzork quaddlepan".
+
+  text search only — no embeddings in the index, and nothing is embedding them
+  semantic search: not running (0 of 439 embedded) — the 46.1 MB runtime has not been fetched
+
+$ potsherd find "flimberzork quaddlepan" --min-confidence none        [FULL: 439 of 439 embedded]
+potsherd find "flimberzork quaddl… · 10 sessions · none · bm25 + vectors · 603ms
+
+  refactor the audit log so the retry logic lives in one place     claude · live
+  mobile-shell · 5 aug · 12 exchanges · develop                     none  0.1469
+    simplify the pagination helper; it has four levels of nesting
+    write a smoke test for the graphql resolver
+    no words in common — this one matched on meaning
+    run  claude --resume ‹elided›
+
+  Investigate rss parser regression                                claude · live
+  event-bus · 10 aug · 7 exchanges · develop                        none  0.1445
+    simplify the image resizer; it has four levels of nesting
+    no words in common — this one matched on meaning
+```
+
+The warming state (155 of 439 embedded, built by growing one HOME in place so the first six
+projects' vectors survive the second pass) behaves as the full state does: **10 sessions**. So on
+every index a user is on after `index --embed` — which F2 argues should be the default — option 4
+restores audit F1's headline symptom verbatim: *ten rows for a word that does not exist in any
+human language.* They now say `none` and carry `no words in common — this one matched on meaning`,
+which is a real improvement over 23 aug and is not nothing. The header still says `10 sessions`.
+
+## §R2.1 Recall on the 60-query set at the verb, with nothing withheld
+
+This is step 1's `ranking` column, which is option 4 by definition:
+
+```
+                     option 4 (label, don't withhold)     shipped (withhold at weak)
+  bm25 only          @5 40/60   @1 31/60                  @5  8/60   @1  8/60
+  vectors only       @5 57/60   @1 40/60                  @5  8/60   @1  8/60
+  hybrid (auto)      @5 57/60   @1 42/60                  @5  7/60   @1  7/60
+  hybrid (always)    @5 57/60   @1 42/60                  @5  7/60   @1  7/60
+```
+
+Option 4 clears the 51/60 ratchet and passes all five gate clauses. **The recall case for it is
+real and it is large.** Everything below is about what the reader is holding.
+
+## §R2.2 The deciding question — `none` or `weak`?
+
+Your test: *if absent topics can reach `weak` while paraphrase answers sit at `none`, this option is
+dead.* Measured on the eval fixture, floor off, both vector states, all six committed controls:
+
+```
+### vectors=on  floor=none
+  CONTROL strong    rows 20  top=strong  cal 0.850  rows>=weak 1   << pgbouncer transaction pooling
+  CONTROL no-match  rows 20  top=none    cal 0.212  rows>=weak 0   << kubernetes ingress payment service
+  CONTROL no-match  rows 20  top=none    cal 0.000  rows>=weak 0   << vondrelic pashtomeer
+  CONTROL no-match  rows 20  top=none    cal 0.462  rows>=weak 0   << dark mode for the invoice pdf
+  CONTROL no-match  rows 20  top=none    cal 0.425  rows>=weak 0   << rate limiting the sitemap generator
+  CONTROL no-match  rows 20  top=none    cal 0.617  rows>=weak 0   << bluetooth on the checkout page   [cap=none]
+  CORRECT ANSWERS n=60   strong 4   weak 3   none 53   not-found 0
+
+### vectors=off  floor=none
+  … five no-match controls, top=none, rows>=weak 0 on every one
+  CORRECT ANSWERS n=60   strong 2   weak 6   none 42   not-found 10
+```
+
+**The literal answer to your test is no: no absent-topic page has a single row at `weak` or above,
+at either vector state, at both doors.** By the letter of the test, option 4 survives.
+
+**But the label is not discriminating — it is constant.** 53 of 60 correct answers are `none` too.
+Both cases render `none`, so the label carries zero bits about which one the reader is in. And on the
+demo corpus the ordering is not merely uninformative, it is **inverted on a measured pair**:
+
+```
+### demo corpus, fully embedded, floor=none                        header  top    calibrated
+  TRUE    pgbouncer pool saturated                                 weak    weak     0.5667
+  TRUE    everything queued up and timed out under load            weak    weak     0.6291
+  TRUE    we exhausted our allowance of open channels              none    none     0.2099
+  TRUE    database handles ran out during heavy traffic            none    none     0.1417
+  ABSENT  pagination for the kerberos ticket list                  none    none     0.2093
+  ABSENT  thermostat firmware rolled out to the field units        none    none     0.1850
+  ABSENT  flimberzork quaddlepan                                   none    none     0.0000
+```
+
+A correct paraphrase answer sitting at rank 1 scores **0.2099**; a genuinely absent topic scores
+**0.2093** — a gap of **0.0006**. And `thermostat firmware rolled out to the field units`, which
+nothing in the archive is about, scores **0.1850**, *above* `database handles ran out during heavy
+traffic` at **0.1417**, whose correct answer is the row underneath it.
+
+Audit F1's complaint was arithmetic: *"a real hit and pure gibberish differ by 1.67x."* Under option
+4 the closest true/absent pair differs by **1.003x** in the calibrated score and by **0.00** in the
+label. **That is F1's own finding, reproduced, on the number F1 asked for.**
+
+## §R2.3 The two real-English controls, verbatim, and the `plans/05` reading
+
+```
+$ potsherd find "pagination for the kerberos ticket list" --min-confidence none   [FULL]
+potsherd find "pagination for the… · 10 sessions · none · bm25 + vectors · 542ms
+
+  Untangle token refresh error handling                            claude · live
+  auth-gateway · 17 aug · 12 exchanges · fix/flaky-e2e              none  0.1524
+    write the migration for the pagination helper
+    run  claude --resume ‹elided›
+
+  ↳ add metrics to the pagination helper so we can alert on…  claude · sidechain
+  billing-web · 29 jul · 1 exchange · chore/deps · flake-hunter     none  0.1557
+    add metrics to the pagination helper so we can alert on it
+
+$ potsherd find "thermostat firmware rolled out to the field units" --min-confidence none  [FULL]
+potsherd find "thermostat firmwar… · 10 sessions · none · bm25 + vectors · 540ms
+
+  ↳ write the rollback plan for the backup job                claude · sidechain
+  docs-site · 13 aug · 1 exchange · chore/deps · migration-planner  none  0.1560
+    The type error was real — the field is optional upstream.
+```
+
+**My reading, as a `plans/05` judgement.** The header says `none` and every row says `none`, so
+strictly the screen makes no claim it cannot support, and on that narrow reading F1 is held in
+substance. But `10 sessions` is the first thing on the line and `none` is the third, and the second
+screen's snippet — *"The type error was real — the field is optional upstream"* — is a real sentence
+from a real session offered under a query about thermostat firmware. A human glances at the titles
+and knows. An agent has been handed ten resume commands and a citation line for a question the
+archive has nothing to say about, and the only thing telling it so is one word it must weigh against
+seven signals pointing the other way. That is the state the audit scored 3/10.
+
+## §R2.4 Both doors, three vector states, and `belowFloor`
+
+```
+MODEL DOOR, minConfidence: "none"          threads   conf   noMatch   threads>=weak
+  cold  flimberzork quaddlepan                   0   none     true          0
+  cold  pagination for the kerberos ticket list 10   none     true          0
+  cold  thermostat firmware rolled out …        10   none     true          0
+  warm  flimberzork quaddlepan                  10   none     true          0
+  warm  (both real-English controls)            10   none     true          0
+  full  (all three)                             10   none     true          0
+```
+
+`noMatch` stays `true` and `confidence` stays `none` throughout, which is the one genuinely good
+property of option 4 at the model door: the envelope's verdict survives even when rows are attached,
+and step 3's note already says in words that such rows are not an answer.
+
+**`belowFloor` stops being meaningful.** It is `built - surviving`, so at floor `none` it is `0` by
+construction on every query — the counter that today distinguishes *nothing matched* from *eleven
+matched and none well enough* reads `0` in both cases. Under option 4 the two are told apart by
+`threads.length` instead, which works, but the field would need to be redefined or retired rather
+than left reading `0` next to ten rows.
+
+## §R2.5 What option 4 costs that is not a judgement call
+
+`evals/queries.jsonl` — which I may not edit and would not — says of `vondrelic pashtomeer`:
+*"Must return ZERO rows"*, and of the other four no-match controls the same. At floor `none` with
+vectors on, **four of the five return 20 rows each**, so `pnpm evals` fails on its controls, and it
+fails on the one the audit itself reported. Option 4 is not merely a judgement call about a screen:
+it contradicts a committed criterion that six verification rounds have left standing.
+
+## §R2.6 The vector states, and whether they change the arithmetic
+
+They change what the reader sees and they do **not** change the ceiling.
+
+* **Cold** (0 of 439): nonsense returns 0 rows from FTS, exactly as you said. Correct answers
+  reaching `weak`+ : **8 of 60** (2 strong, 6 weak) — but 10 answers are not found at all, because
+  bm25 alone cannot find them.
+* **Warming** (155 of 439) and **full** (439 of 439): nonsense returns 10 rows. Correct answers
+  reaching `weak`+ : **7 of 60** (4 strong, 3 weak), with 0 not found.
+
+So the F1-safe recall is 7–8 of 60 at the shipped floor in *every* vector state, against §1's
+exhaustively-searched ceiling of 16/60 for any threshold rule at all. **The cold state is the only
+one in which the coordinator's premise holds, and it is also the state in which the semantic lane —
+the thing that would answer the paraphrase — is switched off.** The two conditions are mutually
+exclusive: you get the honest empty for nonsense exactly when you have given up the recall that
+motivated the change.
+
+## §R2.7 My reading
+
+**Option 4 does not hold F1, and it is closer than anything else measured.** It passes your literal
+test and fails the thing the test was proxy for. Three findings, in the order I weigh them:
+
+1. **The label is constant, not discriminating.** `none` on 53 of 60 correct answers and on 5 of 5
+   absent topics. A cliff that fires on every page is a plain. The closest true/absent pair differs
+   by 0.0006 of calibrated score, and one absent topic outscores one true topic outright.
+2. **Nonsense returns ten rows on any embedded index.** F1's headline symptom, restored on the state
+   most users are in, mitigated only by the words `none` and *no words in common*.
+3. **It fails four committed controls** that say *Must return ZERO rows*.
+
+If the ruling is that (1) is acceptable because the reader is never *told* the archive answers — a
+defensible `plans/05` reading, and yours to make — then option 4 is the shape that ships and it is
+smaller than anything in §2: it is one word in `find.ts`'s `minConfidence()` and one in
+`AGENT_FLOOR`, plus a redefinition of `belowFloor` and an amendment to those four controls by
+whoever owns `queries.jsonl`. I would not make that ruling myself, on (2) alone: an agent told in
+capitals to trust a silence, and handed ten resume commands for `flimberzork quaddlepan`, is the
+audit's archaeologist again.
+
+**What I would rule instead, and it is a third path neither of us has costed:** option 4's real
+content is that *withholding and labelling are separable*. They can be separated the other way —
+keep the empty page for the **envelope**, and let the caller who has been told `belowFloor > 0` ask
+for the rows. That is step 3, already built and already shipping in this branch at the model door,
+and `--min-confidence none` is its CLI half. It gives an agent the recall of option 4 in one extra
+call, on purpose, with the note saying what the rows are — and it costs no control, no label and no
+committed criterion. It does not fix `find` for a human who types a sentence once, which is the gap
+§2's design change is for.
