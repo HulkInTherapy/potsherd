@@ -241,6 +241,39 @@ rounds found, and what changed because of it:
   all. An earlier release fixed the line beneath it and left the headline, which
   is the line a reader acts on.
 
+### upgrading from 1.1.0 — read this one
+
+- **`potsherd index` crashed on every database 1.1.0 had written.** 1.2.0 correctly stops needing
+  the optional native vector extension, but a database that already had it holds three of its
+  *virtual* tables, and every statement touching them threw `no such module: vec0`. A clean install
+  was never affected. Every other fix in this release is reached through indexing, so an upgrading
+  user would have got the old product with a changelog describing the new one. The migration now
+  removes those tables even when the extension is gone — and where it is still present, it copies
+  every vector across first, so nothing anybody has already paid for is lost.
+- **`ask --synthesis-out` now refuses without `--readers-in`.** Its help said it made no model call
+  and on its own it made one per shortlisted session. The composed form is the free one and is what
+  every document printed. A script calling the flag alone gets an error naming the two commands that
+  produce the same file for nothing.
+- Everything else is additive, and the index migrates itself.
+
+### the first row is the best row, at both doors
+
+- **`find` printed a weak result above three strong ones, under a header that said strong.** The
+  ordering fix from earlier in this release had been written for the tool an agent uses and never
+  for the one a person uses, so the row every documented `jq` example takes — the first — was the
+  weakest on the page. There is one ordering now, shared by both, and it is the confidence label
+  rather than the fused score, because a fused score is a fact about how lists were merged rather
+  than about how well anything matched.
+- **The two doors disagreed about whether a session title may be quoted as evidence.** One said yes
+  and one said no, for the same session, in the same search. Claude Code writes those titles with a
+  model, so the answer is no. Both doors read one field now, and a test fails if they ever diverge.
+- **`ls` said `1 session` where `doctor` and `stats` said `31`**, on three published screenshots.
+  The rollup was right — thirty of them are one thread — but the footer dropped them silently and
+  called the remainder sessions. It reads `1 of 31 sessions` now.
+- **Semantic search got substantially better as a result.** On the 60-query set, recall@5 went from
+  51 to 57 and recall@1 from 27 to 37, and the weight behind it was re-derived over the whole
+  parameter family with the grid written down before it was run.
+
 ### the guards that let those through
 
 - **Another project's git tags were sitting in this checkout, and one of them
