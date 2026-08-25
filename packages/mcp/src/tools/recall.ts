@@ -127,6 +127,13 @@ const SCOPE_WITH_CARDS = SCOPE.unwrap()
   .optional()
   .describe(SCOPE.description ?? '');
 
+/**
+ * How many rows the `nearest` key carries. Five, the same number the CLI's
+ * divider shows, because the two doors must not disagree about how much of the
+ * archive a `no match` reply admits to being near.
+ */
+export const NEAREST_THREADS = 5;
+
 export const recallInput = {
   query: z
     .string()
@@ -344,6 +351,43 @@ export async function runRecall(
     // FIX-D's fences asserted about the helper — asserted now about the reply.
     const threads = groupThreads(sessions);
 
+    /**
+     * ROUND 3 — the nearest rows, on a key of their own.
+     *
+     * `hits` and `threads` are the answer region and they stay **empty**.
+     * `noMatch` stays `true` and `confidence` stays `none`: the verdict is not
+     * revisited and `TRUST ITS SILENCE` stays true, because the silence is
+     * still the answer. This is the CLI's divider, expressed the way a JSON
+     * envelope expresses a region — a separate key, so that an agent that
+     * knows nothing about it cannot reach these rows by iterating the two
+     * arrays it already knows, and an agent that does know about it cannot
+     * mistake the key's name for a result.
+     *
+     * Deliberately thin. Each entry is a thread id, a title, a project, a date
+     * and the label `none`. **No citation, no snippet, no window and no
+     * excerpt** — those are the things an agent quotes from, and nothing under
+     * this key may be quoted. `citations[]` is built from `sessions`, which is
+     * empty, so a citation for one of these cannot be minted even by accident.
+     *
+     * Only when something was actually withheld, so the nonsense-on-a-text-
+     * only-index case still returns the bare empty it returned before.
+     */
+    const nearest =
+      withhold && (belowFloor ?? 0) > 0
+        ? (
+            await recall(db, query, filters, {
+              ...options,
+              [MIN_CONFIDENCE_FIELD]: 'none',
+            } as Parameters<typeof recall>[3])
+          ).sessions.slice(0, NEAREST_THREADS).map((s) => ({
+            thread: s.id,
+            title: s.displayTitle,
+            project: s.projectName,
+            startedAt: s.startedAt,
+            confidence: 'none' as const,
+          }))
+        : [];
+
     const envelope: Record<string, unknown> = {
       query: result.query,
       want,
@@ -462,6 +506,18 @@ export async function runRecall(
       weights: result.weights,
       ms: result.ms,
       threads,
+      // ROUND 3. Present only when rows were withheld, so its absence is not a
+      // fact a caller has to interpret. See its construction above.
+      ...(nearest.length > 0
+        ? {
+            nearest,
+            nearestNote:
+              'the archive\'s nearest text to your words, and NOT an answer to your question. ' +
+              'The verdict is still no match. Use these to decide what to ask next — a title ' +
+              'here may name the thread you want — not as a source: they carry no citation and ' +
+              'must not be quoted or reported as what was decided.',
+          }
+        : {}),
     };
 
     if (want === 'context') {

@@ -647,3 +647,198 @@ and `--min-confidence none` is its CLI half. It gives an agent the recall of opt
 call, on purpose, with the note saying what the rows are — and it costs no control, no label and no
 committed criterion. It does not fix `find` for a human who types a sentence once, which is the gap
 §2's design change is for.
+
+---
+
+# ROUND 3 — the divider
+
+**Reading: SHIP.** The verdict region is untouched and the evidence region cannot be mistaken for
+it. Built, measured, tested, and green on all ten published screens.
+
+## §R3.0 What changed
+
+Three files, and none of them touches `recall()`, `calibrate()` or a constant.
+
+* `packages/core/src/render/find.ts` — `FindRenderOptions.nearest`, `NEAREST_ROWS = 5`, and
+  `nearestNote()`, which draws a rule captioned `nearest by meaning · not an answer` and one line
+  per session under it. Absent or empty `nearest` renders the screen byte-for-byte as before.
+* `packages/cli/src/commands/find.ts` — one extra `recall()` at `minConfidence: 'none'`, **only**
+  when the page came back empty **and** `belowFloor > 0`, never for `--json`, at the same `limit`
+  the answering search used.
+* `packages/mcp/src/tools/recall.ts` — a `nearest` key and a `nearestNote`, on their own, present
+  only when rows were actually withheld.
+
+One bug caught by reading the first screens: the re-search used `NEAREST_ROWS` as its `limit`, and
+`recall()` builds `limit * 3` blocks before it sorts, so a smaller limit is a different candidate
+pool. At limit 5 the correct session for *we exhausted our allowance of open channels* fell off a
+page it is fourth on at limit 10. The renderer does the cutting now; the search does not.
+
+## §R3.1 The screens that decide it — 80 columns, no colour, fully embedded
+
+```
+$ potsherd find "flimberzork quaddlepan"
+potsherd find "flimberzork quaddlepan" · no match · bm25 + vectors · 844ms
+
+  nothing in the index answers "flimberzork quaddlepan".
+
+  27 sessions matched some of those words and none of them enough
+  --min-confidence none  shows them anyway
+
+  ── nearest by meaning · not an answer ────────────────────────────────────────
+    none  refactor the audit log so the retry logic…   mobile-shell · 5 aug 2026
+    none  Investigate rss parser regression              event-bus · 10 aug 2026
+    none  Make changelog generator idempotent            notes-api · 26 jul 2026
+    none  simplify the error reporter; it has four…   auth-gateway · 17 aug 2026
+    none  simplify the docker entrypoint; it has four…   notes-api · 22 jul 2026
+
+  run  potsherd find  with two or three distinctive words, or  potsherd ls
+
+$ potsherd find "we exhausted our allowance of open channels"
+potsherd find "we exhausted our allowance o… · no match · bm25 + vectors · 761ms
+
+  nothing in the index answers "we exhausted our allowance of open channels".
+
+  30 sessions matched some of those words and none of them enough
+  --min-confidence none  shows them anyway
+
+  ── nearest by meaning · not an answer ────────────────────────────────────────
+    none  the sms fallback regressed after the upgra…  search-index · 1 aug 2026
+    none  add a dry-run mode to the token refresh      billing-web · 27 jul 2026
+    none  Migrate thumbnail worker to the new loader     notes-api · 22 jul 2026
+    none  Pool the ingest workers through pgbouncer  data-pipeline · 21 aug 2026
+    none  Document dead-letter queue                infra-terraform · 7 aug 2026
+
+  run  potsherd find  with two or three distinctive words, or  potsherd ls
+```
+
+**`flimberzork quaddlepan` is the screen that decided it.** It is the one where option 4 printed ten
+blocks with snippets and `run claude --resume <id>`, and it read as an answer. Here the first thing
+on the page is `no match`, the first sentence is *nothing in the index answers*, and everything under
+the rule is inert: **no snippet, no resume command, no citation, nothing to act on**. The page
+recommends nothing. A caption-free screenshot reads *"I have nothing, and here is what was nearest"*
+— which is a true sentence about an archive that does contain those five threads.
+
+The `pagination for the kerberos ticket list` and `thermostat firmware rolled out to the field units`
+screens are the same shape and are in the commit's test fixtures.
+
+**Cold index, nonsense — unchanged, and this matters:** `belowFloor` is 0, so no rule is drawn.
+
+```
+potsherd find "flimberzork quaddlepan" · no match · bm25 · 8ms
+  nothing in the index matches "flimberzork quaddlepan".
+  text search only — no embeddings in the index, and nothing is embedding them
+```
+
+## §R3.2 The four demo queries — and the honest miss
+
+Two are answered above the rule as before (`weak`, unchanged). Of the two that are not:
+
+* `we exhausted our allowance of open channels` — the correct session, *Pool the ingest workers
+  through pgbouncer*, is **row 4 of 5** and is findable by eye: it is the only pooling title there.
+* `database handles ran out during heavy traffic` — the correct session is **not in the five**. The
+  top row is *Move the event-bus consumers behind the pool…*, a distractor that also mentions
+  pooling. At `--min-confidence none` the right answer is outside the top five for this query, so no
+  five-row region can carry it.
+
+**So the divider shows the archive's nearest text, and nearest is not always right.** On the 60-query
+benchmark the five rows would contain the answer on **57 of 60** and put it first on **42** — but
+that is a property of that corpus, not a promise, and the caption is written so that it is not read
+as one.
+
+## §R3.3 The model door
+
+```
+$ potsherd_recall {"query":"flimberzork quaddlepan"}
+  confidence=none  noMatch=true  belowFloor=27  threads=0  hits=0  citations=0
+  nearest = [ { "thread": "…", "title": "refactor the audit log so the retry logic lives in
+                one place", "project": "mobile-shell", "startedAt": "…", "confidence": "none" }, … ]
+  nearestNote: the archive's nearest text to your words, and NOT an answer to your question.
+  The verdict is still no match. Use these to decide what to ask next — a title here may name
+  the thread you want — not as a source: they carry no citation and must not be quoted or
+  reported as what was decided.
+```
+
+**I would call it `nearest`, and I would keep it thin.** Thread id, title, project, date, and the
+label `none`. **No citation, no snippet, no window, no text** — those are the fields an agent quotes
+*from*, and their absence is what makes the key safe to hand over. `citations[]` is built from
+`sessions`, which is `[]`, so a citation for one of these cannot be minted even by accident.
+
+`TRUST ITS SILENCE` stays true, and this is why: the silence is still the verdict — `noMatch: true`,
+`confidence: "none"`, both arrays empty. `nearest` is not a quieter result; it is the evidence that
+the silence was not laziness. It is also **absent rather than empty** when nothing was withheld, so
+its absence is never a fact a caller has to interpret, and it does not appear at all when the caller
+already passed `minConfidence: "none"` — the door would otherwise be handing back the same rows twice
+under two different descriptions.
+
+## §R3.4 `belowFloor`, and recall
+
+**`belowFloor` survives as a real number** — 27, 28, 29, 30 on the controls above — which is the one
+thing option 4 destroyed (it was 0 by construction there, because the floor it counts against was
+gone). Under the divider the floor is still on, so the count still means *this many were withheld*,
+and it is still what decides whether a rule is drawn at all.
+
+**You are right that recall does not move, and I want that stated plainly rather than softened.**
+`pnpm evals` measures `result.sessions`, the verdict region, which is still empty: hybrid stays at
+**7/60 @1 and 7/60 @5 at the verb**, and the run still **exits 1**. The divider is a change to what a
+human is shown on a `no match` screen. It is not a retrieval change, it does not close C-1, and §2's
+design change is still the thing that would.
+
+## §R3.5 Cost, bluntly
+
+| | |
+|---|---|
+| vertical space, 80x24 | **15 lines** — verdict 3, count 2, rule 1, rows 5, next verb 1, blanks 3 |
+| rows | 5, capped by `NEAREST_ROWS`; the region is never the majority of the page it disclaims |
+| latency, empty page | **963 ms** wall against **891 ms** for an answered page — about **70 ms**, because the model is already loaded in-process and the second call pays only for the search |
+| latency, answered page | unchanged: no second search runs |
+| latency, cold index | 219 ms, no second search (`belowFloor` is 0) |
+| `--ascii` | rule folds `─` → `-`; every line pure ASCII, asserted in `tests/find.test.ts` |
+| `--no-color` | every screen above is `--no-color` |
+| 60 columns | rule drawn to the edge, titles elided, every line exactly ≤ width, asserted at 60 / 80 / 120 |
+| `--json` | untouched: `sessions: []`, and the re-search never runs |
+
+## §R3.6 Verification
+
+```
+pnpm test                              2,019 passed / 55 files / 0 failed
+POTSHERD_SQLITE=node pnpm test         2,019 passed / 55 files / 0 failed
+pnpm typecheck                         4 of 4 Done
+python3 scripts/check-privacy.py       exit 0 (read from $?)
+pnpm build && pnpm vendor              git status plugins/ clean
+CI screens step, run locally           ten published screens match — 09-find.txt and
+                                       13-find-redacted.txt both ok (they return rows, so no
+                                       rule is drawn on either)
+```
+
+**Red first**, the eight new assertions against merged `main` (`6a157fa`):
+
+```
+ FAIL  ROUND 3 — the nearest rows live under a rule > draws the rule and its caption when it does
+ AssertionError: expected 84 to be less than -1                     [no caption on the screen]
+ FAIL  ROUND 3 — the nearest rows live under a rule > fits its width exactly, at 60 and 120
+ AssertionError: expected -1 to be greater than or equal to 0       [no rule to measure]
+ FAIL  ROUND 3 — nearest is not a result > keeps the verdict, and puts the rows somewhere …
+ AssertionError: expected false to be true                          [no `nearest` key]
+```
+
+## §R3.7 The reading
+
+**Ship it.** Three things decide it, in order.
+
+1. **The verdict is first and is unchanged.** A reader who stops at the top of the screen — which is
+   what a hurried reader does — has been told the true thing, in the same words as before.
+2. **Nothing under the rule can be acted on or quoted.** That is the property option 4 could not
+   have. Option 4 put these rows in the answer region with snippets and resume commands and left one
+   dimmed word to argue with seven signals pointing the other way. Here the region offers a title and
+   a project and stops. To do anything with one you must type another command, and by then you have
+   read the caption.
+3. **The boundary is a region, not a row.** `05` says the unit of a claim is the region; a row under
+   a caption that names the region is not making the region's claim on its own.
+
+**What I am not claiming.** A hurried human can still read the top row under the rule and go and look
+at it — on `database handles ran out during heavy traffic` that row is the wrong pooling session. The
+divider makes that cost one wasted `potsherd show`, where the old screen cost a second `find` and the
+option-4 screen would have cost a wrong answer with a citation on it. That is the trade, and I think
+it is the right one; if you disagree, the revert is deleting `nearestNote()` and three lines at each
+call site, and the release notes sentence you already have — *`find` is silent on paraphrase* —
+remains true either way, because **recall did not move**.

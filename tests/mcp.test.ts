@@ -8,7 +8,7 @@ import { db as store, indexAll, paths, writeCard } from '@potsherd/core';
 
 import { makeContext, resolveGraftCwd } from '../packages/mcp/src/context.js';
 import { TOOLS, WRITE_TOOLS } from '../packages/mcp/src/server.js';
-import { capabilityLine, runRecall } from '../packages/mcp/src/tools/recall.js';
+import { NEAREST_THREADS, capabilityLine, runRecall } from '../packages/mcp/src/tools/recall.js';
 // FIX-I C-1. `orderByLabel` was this door's own copy of FIX-D's rule and is
 // gone: the comparator lives in core, `recall()` applies it, and this door
 // takes the order it is given. `packages/core/src/index.ts` is another
@@ -1899,5 +1899,63 @@ describe('C-1 step 3 — the floor is visible, and it is overridable', () => {
     for (const t of strong['threads'] as { confidence: string }[]) {
       expect(t.confidence).toBe('strong');
     }
+  });
+});
+
+/**
+ * ROUND 3 — the divider at the model door, on a key of its own.
+ *
+ * `TRUST ITS SILENCE` survives this change and is the reason for its shape.
+ * The silence is the verdict: `noMatch` stays `true`, `confidence` stays
+ * `none`, `threads` and `hits` stay empty, and `citations` stays empty so a
+ * source line for one of these cannot be minted even by accident. What is
+ * added is the evidence that the silence was not laziness — the archive's
+ * nearest text, on a key an agent cannot reach by iterating the two arrays it
+ * already knows.
+ */
+describe('ROUND 3 — nearest is not a result', () => {
+  const PARAPHRASE = 'the pooling decision we wrote down in the readme afterwards';
+
+  it('keeps the verdict, and puts the rows somewhere they cannot be mistaken for it', async () => {
+    const r = await runRecall(ctx(), { query: PARAPHRASE });
+    expect(r['noMatch']).toBe(true);
+    expect(r['confidence']).toBe('none');
+    expect(r['threads']).toEqual([]);
+    expect(r['hits']).toEqual([]);
+    expect(r['citations'] ?? []).toEqual([]);
+    expect(Number(r['belowFloor'])).toBeGreaterThan(0);
+
+    const nearest = r['nearest'] as { thread: string; title: string; confidence: string }[];
+    expect(Array.isArray(nearest)).toBe(true);
+    expect(nearest.length).toBeGreaterThan(0);
+    expect(nearest.length).toBeLessThanOrEqual(NEAREST_THREADS);
+    for (const n of nearest) {
+      expect(n.confidence).toBe('none');
+      expect(typeof n.thread).toBe('string');
+      // Nothing quotable. These are the fields an agent quotes FROM, and their
+      // absence is what makes the key safe to hand over.
+      expect('citation' in n).toBe(false);
+      expect('snippet' in n).toBe(false);
+      expect('text' in n).toBe(false);
+    }
+    expect(String(r['nearestNote'])).toMatch(/NOT an answer/);
+    expect(String(r['nearestNote'])).toMatch(/must not be quoted/);
+  });
+
+  it('is absent, not empty, when nothing was withheld', async () => {
+    // So its absence is never a fact a caller has to interpret. On a text-only
+    // index nonsense matches no term at all and there is nothing to be near.
+    const r = await runRecall(ctx(), { query: 'zzzqqq flurblewomp aardvark protocol' });
+    expect(r['threads']).toEqual([]);
+    expect('nearest' in r).toBe(false);
+    expect('nearestNote' in r).toBe(false);
+  });
+
+  it('does not appear when the caller already asked to see below the floor', async () => {
+    // `minConfidence: "none"` returns the rows AS rows; a second copy of them
+    // under a "not an answer" key would be the door contradicting itself.
+    const r = await runRecall(ctx(), { query: PARAPHRASE, minConfidence: 'none' });
+    expect((r['threads'] as unknown[]).length).toBeGreaterThan(0);
+    expect('nearest' in r).toBe(false);
   });
 });
