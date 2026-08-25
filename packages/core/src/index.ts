@@ -132,7 +132,15 @@ export {
   type RecordTypeRow,
   type AdapterSpec,
 } from './ingest.js';
-export { vecStatus, vecAvailable, type VecStatus } from './vec.js';
+export {
+  vecStatus,
+  vecAvailable,
+  vectorCounts,
+  vectorDrift,
+  vectorInventory,
+  reconcileVectorStamps,
+  type VecStatus,
+} from './vec.js';
 
 // L6 — recall, browse and the counters behind `find`, `ls`, `show` and `stats`.
 export {

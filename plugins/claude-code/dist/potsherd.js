@@ -3665,6 +3665,7 @@ function wrap2(db) {
 }
 
 // ../core/dist/vec.js
+import { createHash } from "node:crypto";
 import { createRequire as createRequire2 } from "node:module";
 import process5 from "node:process";
 
@@ -4789,21 +4790,149 @@ function vecTablesExist(db) {
     return false;
   }
 }
+var STAMPED_LANES = [
+  { rows: "exchanges", blob: "vec_blob_exchanges", key: "id" },
+  { rows: "ghost_prompts", blob: "vec_blob_ghost_prompts", key: "id" }
+];
+var STORE_VERSION_KEY = "vectors:store-version";
+function storeVersion(db) {
+  try {
+    const row2 = db.prepare(`SELECT value FROM sync_state WHERE key = ?`).get(STORE_VERSION_KEY);
+    if (!row2)
+      return null;
+    const n2 = Number(row2.value);
+    return Number.isFinite(n2) ? n2 : null;
+  } catch {
+    return null;
+  }
+}
+function storeIsCurrent(db) {
+  const v = storeVersion(db);
+  return v === null || v === EMBEDDING_VERSION;
+}
 function vectorCounts(db) {
   let embedded = 0;
   let pending = 0;
-  for (const table2 of ["exchanges", "ghost_prompts"]) {
+  const current = storeIsCurrent(db);
+  for (const lane of STAMPED_LANES) {
+    let total = 0;
     try {
-      const row2 = db.prepare(`SELECT
-             SUM(CASE WHEN embedding_version = ? THEN 1 ELSE 0 END) AS ok,
-             SUM(CASE WHEN embedding_version IS NULL OR embedding_version != ? THEN 1 ELSE 0 END) AS todo
-           FROM ${table2}`).get(EMBEDDING_VERSION, EMBEDDING_VERSION);
-      embedded += row2.ok ?? 0;
-      pending += row2.todo ?? 0;
+      total = db.prepare(`SELECT COUNT(*) AS n FROM ${lane.rows}`).get().n;
     } catch {
+      continue;
     }
+    let have = 0;
+    if (current) {
+      try {
+        have = db.prepare(`SELECT COUNT(*) AS n FROM ${lane.blob} b
+                 JOIN ${lane.rows} r ON r.${lane.key} = b.${lane.key}`).get().n;
+      } catch {
+        have = 0;
+      }
+    }
+    embedded += have;
+    pending += Math.max(0, total - have);
   }
   return { embedded, pending };
+}
+function exchangeDigest(user, assistant) {
+  return createHash("sha1").update(user).update(" ").update(assistant).digest("hex");
+}
+function beginVectorCarry(db, sessionId) {
+  try {
+    const rows = db.prepare(`SELECT e.id AS id, e.user_text AS u, e.assistant_text AS a, e.embedding_version AS v
+           FROM exchanges e
+           JOIN vec_blob_exchanges b ON b.id = e.id
+          WHERE e.session_id = ?`).all(sessionId);
+    return {
+      sessionId,
+      rows: rows.map((r) => ({
+        id: r.id,
+        digest: exchangeDigest(r.u ?? "", r.a ?? ""),
+        version: r.v
+      }))
+    };
+  } catch {
+    return { sessionId, rows: [] };
+  }
+}
+function endVectorCarry(db, carry) {
+  let kept = 0;
+  let dropped = 0;
+  if (carry.rows.length === 0)
+    return { kept, dropped };
+  try {
+    const read = db.prepare(`SELECT user_text AS u, assistant_text AS a FROM exchanges WHERE id = ?`);
+    const drop = db.prepare(`DELETE FROM vec_blob_exchanges WHERE id = ?`);
+    const stamp = db.prepare(`UPDATE exchanges SET embedding_version = ? WHERE id = ?`);
+    for (const row2 of carry.rows) {
+      const now = read.get(row2.id);
+      if (!now || exchangeDigest(now.u ?? "", now.a ?? "") !== row2.digest) {
+        drop.run(row2.id);
+        dropped += 1;
+        continue;
+      }
+      if (row2.version !== null)
+        stamp.run(row2.version, row2.id);
+      kept += 1;
+    }
+  } catch {
+  }
+  return { kept, dropped };
+}
+function vectorInventory(db) {
+  const current = storeIsCurrent(db);
+  const count2 = (sql) => {
+    if (!current)
+      return 0;
+    try {
+      return db.prepare(sql).get().n;
+    } catch {
+      return 0;
+    }
+  };
+  const exchanges = count2(`SELECT COUNT(*) AS n FROM vec_blob_exchanges b JOIN exchanges r ON r.id = b.id`);
+  const ghostPrompts = count2(`SELECT COUNT(*) AS n FROM vec_blob_ghost_prompts b JOIN ghost_prompts r ON r.id = b.id`);
+  const cards = count2(`SELECT COUNT(*) AS n FROM vec_blob_cards`);
+  return { exchanges, ghostPrompts, cards, total: exchanges + ghostPrompts };
+}
+function reconcileVectorStamps(db) {
+  let adopted = 0;
+  let cleared = 0;
+  let orphans = 0;
+  const run3 = (sql, ...args) => {
+    try {
+      const info = db.prepare(sql).run(...args);
+      return Number(info.changes ?? 0);
+    } catch {
+      return 0;
+    }
+  };
+  const known = storeVersion(db);
+  if (known !== null && known !== EMBEDDING_VERSION) {
+    for (const lane of STAMPED_LANES) {
+      run3(`DELETE FROM ${lane.blob}`);
+      cleared += run3(`UPDATE ${lane.rows} SET embedding_version = NULL WHERE embedding_version IS NOT NULL`);
+    }
+    run3(`DELETE FROM vec_blob_cards`);
+  } else {
+    for (const lane of STAMPED_LANES) {
+      orphans += run3(`DELETE FROM ${lane.blob}
+          WHERE NOT EXISTS (SELECT 1 FROM ${lane.rows} r WHERE r.${lane.key} = ${lane.blob}.${lane.key})`);
+      adopted += run3(`UPDATE ${lane.rows} SET embedding_version = ?
+          WHERE (embedding_version IS NULL OR embedding_version != ?)
+            AND EXISTS (SELECT 1 FROM ${lane.blob} b WHERE b.${lane.key} = ${lane.rows}.${lane.key})`, EMBEDDING_VERSION, EMBEDDING_VERSION);
+      cleared += run3(`UPDATE ${lane.rows} SET embedding_version = NULL
+          WHERE embedding_version IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM ${lane.blob} b WHERE b.${lane.key} = ${lane.rows}.${lane.key})`);
+    }
+  }
+  try {
+    db.prepare(`INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(STORE_VERSION_KEY, String(EMBEDDING_VERSION), (/* @__PURE__ */ new Date()).toISOString());
+  } catch {
+  }
+  return { adopted, cleared, orphans };
 }
 async function embedPending(db, options = {}) {
   const started = Date.now();
@@ -5436,6 +5565,7 @@ function open(opts = {}) {
   if (!opts.readonly) {
     db = reopenForSchemaSurgery(db, file, opts);
     migrate(db);
+    reconcileVectorStamps(db);
   }
   return db;
 }
@@ -6988,7 +7118,7 @@ function rrfScore(rank, k = RRF_K) {
 }
 
 // ../core/dist/redact.js
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 
 // ../core/dist/redact-rules.js
 var SECRET_TYPES = [
@@ -7554,7 +7684,7 @@ var OPEN = "\u2039";
 var CLOSE = "\u203A";
 var MASK_RE = new RegExp(`${OPEN}redacted:[a-z-]+:[0-9a-f]{8}${CLOSE}`, "g");
 function secretDigest(secret) {
-  return createHash("sha256").update(secret, "utf8").digest("hex").slice(0, 8);
+  return createHash2("sha256").update(secret, "utf8").digest("hex").slice(0, 8);
 }
 function redact(text) {
   if (typeof text !== "string" || text.length === 0)
@@ -10223,12 +10353,12 @@ function vectorState(db, root) {
   if (!vecTablesExist(db)) {
     return { used: false, available: false, reason: "no vector index \u2014 never built" };
   }
-  let vectors = 0;
   try {
-    vectors = db.prepare("SELECT COUNT(*) AS n FROM vec_exchanges").get().n;
+    db.prepare("SELECT COUNT(*) AS n FROM vec_exchanges").get();
   } catch {
     return { used: false, available: false, reason: "no vector index \u2014 vec_exchanges unreadable" };
   }
+  const vectors = vectorInventory(db).total;
   if (vectors === 0) {
     return {
       used: false,
@@ -16476,9 +16606,11 @@ function ingestSession(db, parsed, options = {}) {
   const derivedTitle = session.title ? null : firstSubstantivePrompt(redacted.map((e) => e.userText));
   const run3 = db.transaction(() => {
     upsertSession(db, session, parsed, options);
+    const carry = beginVectorCarry(db, session.id);
     clearExchanges(db, session.id);
     for (const exchange of redacted)
       insertExchange(db, exchange);
+    endVectorCarry(db, carry);
     redateFromContent(db, session.id);
     if (derivedTitle) {
       db.prepare(`UPDATE sessions SET title = ?, title_source = 'prompt'
@@ -16561,11 +16693,6 @@ function clearExchanges(db, sessionId) {
      VALUES ('delete', ?, ?, ?)`);
   for (const row2 of rows)
     unindex.run(row2.rowid, row2.user_text, row2.assistant_text);
-  if (vecTableUsable(db, "vec_exchanges")) {
-    const dropVec = db.prepare("DELETE FROM vec_exchanges WHERE id = ?");
-    for (const row2 of rows)
-      dropVec.run(row2.id);
-  }
   db.prepare("DELETE FROM exchanges WHERE session_id = ?").run(sessionId);
 }
 function insertExchange(db, e) {
@@ -17526,17 +17653,21 @@ function nearestNote(result, opts, t) {
   if (rows.length === 0)
     return [];
   const out = [];
-  const caption = `nearest by meaning ${t.sep} not an answer`;
   const bar = t.g("\u2500", "-");
+  const plain = `nearest by meaning ${t.sep} not an answer`;
+  const headed = `${plain} ${t.sep} last active`;
+  const room = t.width - INDENT.length - 3;
+  const caption = Theme.len(headed) + 1 <= room ? headed : plain;
   const drawn = `${bar}${bar} ${caption} `;
   const fill = Math.max(0, t.width - INDENT.length - Theme.len(drawn));
   out.push(INDENT + t.dim(drawn + bar.repeat(fill)));
   for (const s of rows) {
-    const when2 = s.startedAt ? date(s.startedAt) : t.dash;
+    const at = sessionDate(s);
+    const when2 = at ? date(at) : t.dash;
     const where = `${s.projectName} ${t.sep} ${when2}`;
     const label4 = s.confidence.padEnd(5);
-    const room = t.width - INDENT.length - 2 - label4.length - 1 - Theme.len(where) - 2;
-    const title = elide(s.displayTitle, Math.max(12, room), t.ellip);
+    const room2 = t.width - INDENT.length - 2 - label4.length - 1 - Theme.len(where) - 2;
+    const title = elide(s.displayTitle, Math.max(12, room2), t.ellip);
     const line = `  ${label4} ${title}`;
     const pad4 = Math.max(1, t.width - INDENT.length - Theme.len(line) - Theme.len(where));
     out.push(INDENT + t.dim(line + " ".repeat(pad4) + where));

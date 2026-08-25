@@ -179,3 +179,58 @@
 {"query": "dark mode for the invoice pdf", "control": "no-match", "class": "control", "note": "[sentence] ABSENT TOPIC, added by T10.10. Dark and mode are in the design-tokens session; invoice and pdf are in a deleted api thread about a pdf job running out of heap. No session in the corpus is about theming an invoice, and no single session holds more than half the query. Must return ZERO rows."}
 {"query": "rate limiting the sitemap generator", "control": "no-match", "class": "control", "note": "[sentence] ABSENT TOPIC, added by T10.10. Rate and limited are in the outbound webhook session (limiting itself appears nowhere, which is the one place this control leans on a stem rather than a word); sitemap and generator are in a deleted seo thread. Nothing rate limits a sitemap anywhere in the corpus. Must return ZERO rows."}
 {"query": "bluetooth on the checkout page", "control": "no-match", "class": "control", "note": "[sentence] ABSENT TOPIC, added by T10.10. Bluetooth belongs to a devices ghost and checkout to four separate web and api sessions, which makes this the hardest of the three: the second half of the query has a large, genuinely relevant-looking neighbourhood and the first half has none. Must return ZERO rows."}
+//
+// ------------------------------------------- controls: an absent topic with ordinary words beside it
+//
+// VERIFICATION-7 C7-2 added these four, and the reason they exist is that the
+// six above **could not see the defect they were written to prevent**. Five of
+// the six absent-topic controls are four- and five-word sentences whose content
+// words split across two real topics, so no single row can cover more than half
+// of one and `coverage` is under the floor by construction; the sixth is two
+// invented words, which fts5 rejects before anything is scored. There was no
+// control in which an invented topic rides with ordinary words that one row
+// really does hold — and that is the shape that got through, four attempts out
+// of four, on the real archive:
+//
+//     quillfratch protocol failure    conf=weak   rows=3   withheld=28
+//
+// `coverage 2/3 = 0.667`, `x (0.60 + 0.25 x strength) = 0.5596 >= WEAK_FLOOR`,
+// and `KEY_TERMS_REQUIRED = 1` does not refuse it because `selectTerms` drops a
+// term no document contains — so the term the row was *required* to show was
+// one of the two ordinary words, never the word that was the question.
+//
+// Written at two, three and four words on purpose. Two is the width at which
+// `coverage` cannot reach the floor anyway (1/2 x 0.85 = 0.425). Three is the
+// shape that got through. Four is the same hole one word wider (3/4 x 0.85 =
+// 0.6375), which is where a rule aimed at exactly 2-of-3 would leave it open.
+//
+// ## WHAT THIS SET STILL CANNOT SEE, SAID PLAINLY
+//
+// **These three pass today, and the defect is not fixed.** All three happen to
+// land on neighbourhoods where `KEY_TERMS_REQUIRED` already refuses — the most
+// selective *present* term is one the top row cannot show. The one that does
+// not, and reproduces C7-2 on this fixture to the digit, is:
+//
+//     {"query": "pelvantic dark mode", "control": "no-match"}   ->  1 row weak
+//
+// `dark` and `mode` are both in the design-tokens session, `pelvantic` is in
+// nothing, one row covers 2 of 3 and comes back quotable. It is deliberately
+// **not** in the set above: `runControls` fails the whole run on a red control
+// and `tests/evals-gate.test.ts` fails with it, so committing it turns
+// `pnpm evals` and `pnpm test` red for everyone over a defect that is open by
+// ruling rather than by accident. The reproduction is one line to restore and
+// `phases/phase-11/V7FIX-REPORT.md` carries the measurement, the closing patch
+// and the reason it was not applied: the rule that refuses all four of these
+// on the real 4,774-row archive costs the verb 7/60 -> 5/60 on this 0.5 MB
+// fixture, where ordinary words (`sitting`, `discussion`) are absent from the
+// corpus exactly as an invented one is.
+//
+// The invented words are `thrumbolix`, `pelvantic` and `quorvex`, generated for
+// this file. The publication failure the note above records applies to them
+// too, which is why they are not the five words VERIFICATION-7 used: those are
+// in `phases/phase-10/VERIFICATION-7.md` and therefore in every archive that
+// indexes this repository. These are scored against `evals/fixture/`, which
+// nothing anybody types can get into.
+{"query": "thrumbolix checkout", "control": "no-match", "class": "control", "note": "[keyword] ABSENT TOPIC, two words, one invented. `checkout` is in four sessions and `thrumbolix` is in none, so bm25 returns rows and ranks them. Must return ZERO rows. This one already passed before C7-2 was fixed — at two words the best a row can cover is 1 of 2 and 0.5 x 0.85 = 0.425 is under the floor — and it is here so that a fix cannot be bought by moving the arithmetic underneath it."}
+{"query": "thrumbolix payment service", "control": "no-match", "class": "control", "note": "[keyword] ABSENT TOPIC, three words, one invented — VERIFICATION-7 C7-2's exact shape and the reason this block exists. Both ordinary words are common in the corpus and sit together in real sessions, so one row covers 2 of 3 = 0.667 and reaches `weak` with quotable snippets and a resume command on it. `thrumbolix` names the subject and nothing in the archive has ever contained it. Must return ZERO rows."}
+{"query": "quorvex payment service checkout", "control": "no-match", "class": "control", "note": "[sentence] ABSENT TOPIC, four words, one invented. The same hole one word wider: 3 of 4 = 0.75 covered, x 0.85 = 0.6375, comfortably over the floor and closer to `strong` than the three-word case is. It is here because a rule written to refuse exactly 2-of-3 would leave this open, and because it is the width at which the withheld count is largest. Must return ZERO rows."}

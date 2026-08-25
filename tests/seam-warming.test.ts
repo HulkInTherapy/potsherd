@@ -252,6 +252,17 @@ describe('the recording says what the index looked like', () => {
     db.prepare('UPDATE exchanges SET embedding_version = ? WHERE seq = 12').run(
       embeddings.EMBEDDING_VERSION,
     );
+    // The vector, not only the stamp — VERIFICATION-7 C7-1. The count this
+    // note is built from reads the store, so a stamp on its own moves nothing
+    // and the clause under test would never be emitted.
+    for (const r of db.prepare('SELECT id FROM exchanges WHERE seq = 12').all() as {
+      id: string;
+    }[]) {
+      db.prepare('INSERT OR REPLACE INTO vec_exchanges (id, embedding) VALUES (?, ?)').run(
+        r.id,
+        embeddings.embeddingToBlob([1, 0, 0]),
+      );
+    }
     const notes: string[] = [];
     await replayReaders(
       db,

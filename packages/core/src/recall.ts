@@ -23,7 +23,7 @@ import {
   keyphrase as extractKeyphrase,
   type Keyphrase,
 } from './keyphrase.js';
-import { vecStatus, vecTablesExist } from './vec.js';
+import { vecStatus, vecTablesExist, vectorInventory } from './vec.js';
 import { holder as lockHolder } from './lock.js';
 import {
   EMBEDDING_VERSION,
@@ -1844,12 +1844,25 @@ export function vectorState(db: Db, root?: string): VectorState {
   if (!vecTablesExist(db)) {
     return { used: false, available: false, reason: 'no vector index — never built' };
   }
-  let vectors = 0;
+  // The probe stays: on a database whose `vec_exchanges` is still a stranded
+  // vec0 table, `prepare` is where `no such module: vec0` surfaces, and that is
+  // a different answer from *no vectors*.
   try {
-    vectors = (db.prepare('SELECT COUNT(*) AS n FROM vec_exchanges').get() as { n: number }).n;
+    db.prepare('SELECT COUNT(*) AS n FROM vec_exchanges').get();
   } catch {
     return { used: false, available: false, reason: 'no vector index — vec_exchanges unreadable' };
   }
+  // VERIFICATION-7 C7-1 — **one source**. This used to be its own
+  // `SELECT COUNT(*) FROM vec_exchanges`, so `find --json` reported the
+  // exchange lane's 1,649 while `doctor`, `stats`, `find`'s own status line and
+  // `potsherd_recall`'s `capability` reported the stamp's 0, on one archive in
+  // one second. `vectorInventory` is the number `vectorCounts` reports as
+  // `embedded`, counted the same way over the same rows, so the header, the
+  // status line, the JSON and the model door cannot say different things about
+  // the same index. It covers both stamped lanes because both are fused: an
+  // index whose exchanges are unembedded and whose recovered prompts are not
+  // still has a semantic lane, and used to be told it had none.
+  const vectors = vectorInventory(db).total;
   if (vectors === 0) {
     return {
       used: false,

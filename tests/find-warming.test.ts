@@ -43,9 +43,19 @@ function warmingRoot(): string {
     for (let i = 0; i < 4; i += 1) {
       ex.run(`e${i}`, i, `2026-08-2${i}T00:00:00Z`, `pgbouncer pool size ${i}`, 'we raised it');
     }
+    // **VERIFICATION-7 C7-1 amended this fixture, not the rule.** A row is
+    // embedded when the *store* holds its vector; `embedding_version` is the
+    // queue's bookkeeping beside it. Stamping alone described a row the search
+    // lane cannot return, which is precisely the drift the real archive was in
+    // — 4,589 live vectors under `0 of 4,774` on every status surface. The
+    // fixture writes the vector the stamp is claiming.
     db.prepare('UPDATE exchanges SET embedding_version = ? WHERE id = ?').run(
       embeddings.EMBEDDING_VERSION,
       'e0',
+    );
+    db.prepare('INSERT OR REPLACE INTO vec_exchanges (id, embedding) VALUES (?, ?)').run(
+      'e0',
+      embeddings.embeddingToBlob([1, 0, 0]),
     );
   } finally {
     db.close();
@@ -58,7 +68,11 @@ function pendingRoot(): string {
   const root = warmingRoot();
   const db = store.open({ root });
   try {
+    // Both halves — VERIFICATION-7 C7-1. `pending` means the *store* is empty;
+    // clearing the stamp alone now leaves a warming index with a vector in it
+    // whose bookkeeping the next writable open simply puts back.
     db.prepare('UPDATE exchanges SET embedding_version = NULL').run();
+    db.prepare('DELETE FROM vec_blob_exchanges').run();
   } finally {
     db.close();
   }
@@ -220,7 +234,17 @@ describe('find says what semantic search is doing', () => {
     };
     expect(j.semantic?.working).toBe(false);
     expect(j.vectors?.working).toBe(false);
-    expect(String(j.vectors?.reason)).toMatch(/is not running|nothing is embedding/);
+    // **VERIFICATION-7 C7-1 amended which true sentence this is.** `warmingRoot`
+    // now writes the vector its stamp claims, so `vectorState` gets past its
+    // `vectors === 0` branch and reports the *next* obstacle instead: on this
+    // fixture the embedding model is not on disk. What the test is about is
+    // unchanged and is asserted directly — nothing here may be a promise. FIX-F
+    // round 2's finding is that `yet` is one, and it must not appear on an index
+    // nobody is embedding.
+    expect(String(j.vectors?.reason)).toMatch(
+      /is not running|nothing is embedding|not downloaded/,
+    );
+    expect(String(j.vectors?.reason)).not.toMatch(/yet/);
     // FIX-F round 2 — the C2 shape that survived inside the fix for C2. The
     // sentence and the fact beside it now agree; they did not in round 1,
     // where `line` said `warming` and `working` said `false` on one object.
@@ -232,6 +256,10 @@ describe('find says what semantic search is doing', () => {
     const root = warmingRoot();
     const db = store.open({ root });
     db.prepare('UPDATE exchanges SET embedding_version = ?').run(embeddings.EMBEDDING_VERSION);
+    // …and the vectors the stamp claims — see `warmingRoot`, VERIFICATION-7 C7-1.
+    const all = db.prepare('SELECT id FROM exchanges').all() as { id: string }[];
+    const put = db.prepare('INSERT OR REPLACE INTO vec_exchanges (id, embedding) VALUES (?, ?)');
+    for (const r of all) put.run(r.id, embeddings.embeddingToBlob([1, 0, 0]));
     db.close();
     const out = await capture({ query: 'pgbouncer', potsherdDir: root, color: false });
     expect(expected(root)).toBeNull();

@@ -1942,6 +1942,23 @@ describe('ROUND 3 — nearest is not a result', () => {
     expect(String(r['nearestNote'])).toMatch(/must not be quoted/);
   });
 
+  it('dates a nearest row at the same end every other surface does', async () => {
+    // **VERIFICATION-7 C7-5 at the model door.** The rows carried `startedAt`
+    // and nothing else, so an agent dated a session at the head of its interval
+    // while `ls`, `find` and this server's own thread rows date it at the tail.
+    // The key is named for the column it has to agree with.
+    const r = await runRecall(ctx(), { query: PARAPHRASE });
+    const nearest = r['nearest'] as { lastActive?: string | null; startedAt?: string | null }[];
+    expect(nearest.length).toBeGreaterThan(0);
+    for (const n of nearest) expect('lastActive' in n).toBe(true);
+    // And it is the end of the interval, not the head, wherever the two differ.
+    const withBoth = nearest.filter((n) => n.startedAt && n.lastActive);
+    expect(withBoth.length).toBeGreaterThan(0);
+    for (const n of withBoth) {
+      expect(String(n.lastActive) >= String(n.startedAt)).toBe(true);
+    }
+  });
+
   it('is absent, not empty, when nothing was withheld', async () => {
     // So its absence is never a fact a caller has to interpret. On a text-only
     // index nonsense matches no term at all and there is nothing to be near.
