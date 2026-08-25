@@ -241,6 +241,17 @@ rounds found, and what changed because of it:
   all. An earlier release fixed the line beneath it and left the headline, which
   is the line a reader acts on.
 
+### semantic search stopped agreeing with itself
+
+- **A result corroborated by itself outranked a better one found once.** The calibrator's threshold
+  is documented as a count of independent *sources*; the code counted *lists*, and the keyword and
+  semantic halves of the same body of evidence are two lists. So a session that matched the same
+  text twice — once by words, once by meaning — read as two witnesses agreeing. Eight lists are four
+  bodies of evidence now. On the 60-query set that moved recall@1 from 37 to **42**, above both the
+  keyword-only and semantic-only rankers for the first time, and it moved neither of those rankers
+  by a single query.
+- No constant was changed to get there. The weights, the floors and the arithmetic are untouched.
+
 ### upgrading from 1.1.0 — read this one
 
 - **`potsherd index` crashed on every database 1.1.0 had written.** 1.2.0 correctly stops needing

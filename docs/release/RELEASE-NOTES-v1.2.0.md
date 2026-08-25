@@ -135,11 +135,18 @@ Vincent (MIT). What was taken, what was adapted and what was refused is in
 ## verified at this tag
 
 ```
-1,932 tests, 53 files · macOS and Ubuntu × Node 22 and 24
-the same suite again on Node's own SQLite (POTSHERD_SQLITE=node) — 1,932, 0 skipped
-privacy guard: 586 files swept, 0 pinned violations, 25 probes, 19 unaccounted ids (ceiling 19)
-evals: 60 queries — recall@5 hybrid 51/60 vs bm25 40/60 (p = 2.4e-7), recall@1 hybrid 27/60,
-       strictly above both single rankers, and the set still fails at --vector-weight 0
+1,985 tests, 55 files · macOS and Ubuntu × Node 22 and 24
+the same suite again on Node's own SQLite (POTSHERD_SQLITE=node) — 1,985, 0 skipped
+privacy guard: 0 pinned violations, 25 probes, 19 unaccounted ids (ceiling 19)
+evals, 60 queries, blind — the set was built by someone told nothing about which way
+       any number needed to move:
+         bm25 only     recall@5 40/60   recall@1 31/60
+         vectors only  recall@5 57/60   recall@1 40/60
+         hybrid        recall@5 57/60   recall@1 42/60   ← strictly above both
+       and the set still fails, on two independent clauses, with the vector lists removed
+ten published screens diffed against what this build actually prints, in CI
+a database written by 1.1.0 upgraded and indexed, on both SQLite drivers, on a Node
+       where the schema pragma is silently ignored and on one where it is not
 published npm package built by GitHub Actions with a sigstore provenance attestation
 ```
 
