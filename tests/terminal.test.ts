@@ -708,3 +708,220 @@ describe('the version a user reads', () => {
     ).toBeGreaterThanOrEqual(0);
   });
 });
+
+// ---------------------------------------------------------------- C-2 / C-3
+
+/**
+ * `run`, in a named time zone — the thing this file could not do.
+ *
+ * VERIFICATION-6 C-2 existed **because nothing in the repository could see
+ * it**: `scripts/make-screens.sh` and the CI screens step both pin `TZ=UTC`,
+ * and UTC is the one zone in which both ends of a date filter render
+ * correctly. The pin is right — a published artefact must not encode which
+ * country its last regenerator was sitting in — so the answer is not to
+ * unpin it, it is to have one test that deliberately stands somewhere else.
+ */
+function runIn(zone: string, args: string[]): RunResult {
+  try {
+    const stdout = execFileSync('node', [bin, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, NO_COLOR: '1', TZ: zone },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { code: 0, stdout, stderr: '' };
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string; stderr?: string };
+    return { code: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+  }
+}
+
+/**
+ * Four zones, and the two that matter are on opposite sides of UTC.
+ *
+ * `Asia/Kolkata` is UTC+05:30 and moved the `--until` receipt forward a day;
+ * `America/Los_Angeles` is UTC-07/-08 and moved the `--since` receipt back
+ * one. `Pacific/Auckland` is the far east of the line and is here because a
+ * whole-day offset from UTC is the case a half-hour offset does not cover.
+ */
+const ZONES = ['UTC', 'Asia/Kolkata', 'America/Los_Angeles', 'Pacific/Auckland'] as const;
+
+describe('the receipt of a date filter is what the user typed', () => {
+  /** The four headlines, one per zone, from one command typed one way. */
+  function headlines(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const zone of ZONES) {
+      const r = runIn(zone, [
+        'ls',
+        '--since', '2026-08-01',
+        '--until', '2026-08-02',
+        '--limit', '1',
+        '--no-color',
+        '--width', '100',
+        '--claude-dir', claudeDir,
+        '--potsherd-dir', potsherdDir,
+      ]);
+      out.set(zone, r.stdout.split('\n')[0] ?? '');
+    }
+    return out;
+  }
+
+  /**
+   * THE ZONE TEST. This is the assertion the repository did not have.
+   *
+   * Same command, same index, same rows — the receipt of the user's own input
+   * moved by a day east of UTC on `--until` and west of it on `--since`,
+   * because the bound was stored as an instant and re-rendered with
+   * `getDate()`/`getMonth()`. Under `TZ=UTC`, the zone both the screens script
+   * and the CI screens step pin, it is the one setting where neither end
+   * moves, so nothing in the repository could see it.
+   */
+  it('does not move with the reader\'s zone', () => {
+    const seen = headlines();
+    expect(
+      new Set(seen.values()).size,
+      [...seen].map(([z, h]) => `TZ=${z}  ${h}`).join('\n'),
+    ).toBe(1);
+  });
+
+  it('quotes --since and --until back exactly as they were typed', () => {
+    for (const [zone, headline] of headlines()) {
+      // The bound the user typed, echoed. Not a re-rendering of the instant it
+      // was parsed into: that instant is `2026-08-02T23:59:59.999Z`, and read
+      // back with local-time getters east of UTC it is the third of August.
+      expect(headline, `TZ=${zone}`).toContain('since 2026-08-01');
+      expect(headline, `TZ=${zone}`).toContain('until 2026-08-02');
+    }
+  });
+
+  it('the rows the filter selects do not move with the zone either', () => {
+    const bodies = new Set<string>();
+    for (const zone of ZONES) {
+      const r = runIn(zone, [
+        'ls',
+        '--since', '2026-08-01',
+        '--until', '2026-08-02',
+        '--json',
+        '--claude-dir', claudeDir,
+        '--potsherd-dir', potsherdDir,
+      ]);
+      const j = JSON.parse(r.stdout) as { filters: Record<string, string>; total: number };
+      bodies.add(JSON.stringify([j.filters['since'], j.filters['until'], j.total]));
+    }
+    // `--json` was always right; it is the control that proves the defect was
+    // in the receipt and not in the filter.
+    expect([...bodies]).toHaveLength(1);
+  });
+});
+
+/**
+ * C-3 — the score column is the order the page is in, or it is not printed.
+ *
+ * The page is sorted by `byLabel` (`recall.ts`): lane, then the confidence
+ * word, then `calibration.score`. The number in the right-hand column was the
+ * fused RRF score, which is none of those, so the column ran backwards under a
+ * `strong` header — as a caption-free screenshot, a broken sort.
+ *
+ * The corpus is written here rather than borrowed, because the defect needs a
+ * shape the shared fixture does not have: a session whose **body** answers the
+ * query, and a subagent whose **title** answers it and whose body does not.
+ * RRF ranks the second above the first; calibration ranks it below. That is the
+ * disagreement, and it is the whole of C-3.
+ */
+describe('the score column is the order the page is in', () => {
+  const RANK: Record<string, number> = { strong: 0, weak: 1, none: 2 };
+  const PARENT = '11110000-0000-4000-8000-000000000001';
+  const OTHER = '11110000-0000-4000-8000-000000000002';
+  let c3Claude = '';
+  let c3Root = '';
+
+  function transcript(
+    file: string,
+    sid: string,
+    pairs: [string, string][],
+    extra: Record<string, unknown> = {},
+  ): void {
+    const base = {
+      sessionId: sid,
+      cwd: '/tmp/potsherd-c3',
+      version: '2.1.237',
+      gitBranch: 'main',
+      ...extra,
+    };
+    const rows: unknown[] = [];
+    pairs.forEach(([u, a], i) => {
+      const ts = `2026-08-${String(10 + i).padStart(2, '0')}T0${(i % 9) + 1}:00:00.000Z`;
+      rows.push({ ...base, type: 'user', promptId: `p${i}`, uuid: `${sid.slice(0, 8)}-u${i}`, timestamp: ts, message: { role: 'user', content: u } });
+      rows.push({ ...base, type: 'assistant', uuid: `${sid.slice(0, 8)}-a${i}`, timestamp: ts, message: { role: 'assistant', content: [{ type: 'text', text: a }] } });
+    });
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  }
+
+  beforeAll(() => {
+    const base = tempDir('potsherd-c3-');
+    created.push(base);
+    c3Claude = path.join(base, 'claude');
+    c3Root = path.join(base, 'potsherd');
+    const project = path.join(c3Claude, 'projects', '-tmp-potsherd-c3');
+
+    transcript(path.join(project, `${PARENT}.jsonl`), PARENT, [
+      ['the postgres connection pool saturates when the ingest workers spin up', 'Raising default_pool_size on the postgres connection pool.'],
+      ['does the postgres connection pool recycle in transaction mode', 'Yes — the postgres connection pool returns a connection at statement end.'],
+      ['what did the postgres connection pool do under load', 'The postgres connection pool queued and then timed out.'],
+    ]);
+    transcript(path.join(project, `${OTHER}.jsonl`), OTHER, [
+      ['the connection pool in postgres is leaking handles on retry', 'The connection pool leaks a postgres handle on every retry path.'],
+      ['show me the postgres connection pool metrics', 'postgres connection pool: 60 in use, 4 idle.'],
+    ]);
+    const titles = [
+      'write the migration for the postgres connection pool',
+      'review the postgres connection pool for race conditions',
+      'what is the blast radius of changing the postgres connection pool',
+    ];
+    titles.forEach((title, i) => {
+      transcript(
+        path.join(project, PARENT, 'subagents', `agent-${i}.jsonl`),
+        `2222000${i}-0000-4000-8000-00000000000${i}`,
+        [[title, 'Done. Nothing else to add here.']],
+        { isSidechain: true, agentName: 'code-reviewer' },
+      );
+    });
+    run(['index', '--full', '--no-embed', '--harness', 'claude', '--claude-dir', c3Claude, '--potsherd-dir', c3Root]);
+  });
+
+  function column(stdout: string): { word: string; n: number }[] {
+    const out: { word: string; n: number }[] = [];
+    for (const line of stdout.split('\n')) {
+      const m = /\s(strong|weak|none)\s\s(\d\.\d{4})\s*$/.exec(line);
+      if (m) out.push({ word: m[1] as string, n: Number(m[2]) });
+    }
+    return out;
+  }
+
+  it('never runs backwards, and never contradicts the word beside it', () => {
+    const r = run([
+      'find', 'postgres connection pool',
+      '--min-confidence', 'none',
+      '--no-color', '--width', '100',
+      '--claude-dir', c3Claude, '--potsherd-dir', c3Root,
+    ]);
+    const rows = column(r.stdout);
+    expect(rows.length, `no score column found in:\n${r.stdout}`).toBeGreaterThan(1);
+    for (let i = 1; i < rows.length; i += 1) {
+      const prev = rows[i - 1]!;
+      const here = rows[i]!;
+      expect(
+        here.n,
+        `row ${i} prints ${here.n} under row ${i - 1}'s ${prev.n}:\n${r.stdout}`,
+      ).toBeLessThanOrEqual(prev.n);
+      // And the word is a band cut from that same number, so a weaker row can
+      // never print a number a stronger row on the same page does not beat.
+      if (RANK[here.word]! > RANK[prev.word]!) {
+        expect(
+          here.n,
+          `${here.word} ${here.n} sits under ${prev.word} ${prev.n}:\n${r.stdout}`,
+        ).toBeLessThan(prev.n);
+      }
+    }
+  });
+});

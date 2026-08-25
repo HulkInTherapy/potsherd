@@ -115,7 +115,15 @@ export async function runLs(o: LsCommandOptions): Promise<number> {
     }
 
     const t = themeFrom(o);
-    print(o.resumeMenu ? renderResumeMenu(result, t) : renderLs(result, t));
+    print(
+      o.resumeMenu
+        ? renderResumeMenu(result, t)
+        : // The words the reader typed, handed to the heading so it can quote
+          // them rather than re-derive them from the instants `parseFilters`
+          // turned them into. VERIFICATION-6 C-2: the receipt of an input is
+          // the one thing that must never be a second computation.
+          renderLs(result, t, new Date(), { since: o.since, until: o.until }),
+    );
     return 0;
   } finally {
     db.close();

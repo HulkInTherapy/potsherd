@@ -24096,7 +24096,16 @@ function vectorReport(counts) {
     return { ...base, phase: "pending" };
   return { ...base, phase: "warming" };
 }
-function warmingLine(r, num2 = String) {
+function fetchClause(r, bytes2) {
+  return `fetching the ${bytes2(r.acquireBytes)} runtime`;
+}
+function warmingLine(r, num2 = String, bytes2 = (n) => `${Math.round(n / 1e6)} MB`) {
+  const head = warmingHead(r, num2);
+  if (r.embedded > 0 || r.runtimeReady)
+    return head;
+  return `${head} \u2014 ${fetchClause(r, bytes2)}`;
+}
+function warmingHead(r, num2 = String) {
   return `semantic search: warming (${num2(r.embedded)} of ${num2(r.total)} embedded)`;
 }
 function stoppedLine(r, num2 = String, bytes2 = (n) => `${Math.round(n / 1e6)} MB`) {
@@ -24150,7 +24159,7 @@ function vectorNote(r, opts = {}) {
           runtime
         ] : [
           `0 of ${num2(r.total)}`,
-          r.working === true ? `fetching the ${bytes2(r.acquireBytes)} runtime` : r.working === false ? `not running \u2014 ${bytes2(r.acquireBytes)} runtime not fetched` : `${bytes2(r.acquireBytes)} runtime not fetched yet`
+          r.working === true ? fetchClause(r, bytes2) : r.working === false ? `not running \u2014 ${bytes2(r.acquireBytes)} runtime not fetched` : `${bytes2(r.acquireBytes)} runtime not fetched yet`
         ],
         tone: "dim"
       };
@@ -24331,8 +24340,23 @@ function statementsCompile(db, name) {
   }
 }
 function strandedReason(db) {
-  return declines.get(db) ?? "run potsherd index \u2014 it converts a vec0 store written by 1.1.0";
+  const declined = declines.get(db);
+  if (declined)
+    return declined;
+  if (!portableVectorsStamped(db)) {
+    return "run potsherd index \u2014 it converts a vec0 store written by 1.1.0";
+  }
+  return "delete potsherd.db and run potsherd index \u2014 this vec0 store cannot be converted in place";
 }
+function portableVectorsStamped(db) {
+  try {
+    const row = db.prepare("SELECT COUNT(*) AS n FROM schema_migrations WHERE version = ?").get(PORTABLE_VECTORS);
+    return (row?.n ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+var PORTABLE_VECTORS = 10;
 function vecTableUsable(db, table2 = "vec_exchanges") {
   if (!loadVec(db).available)
     return false;
@@ -24375,7 +24399,7 @@ function statusLine(r) {
   }
   if (r.working === false)
     return stoppedLine(r, num, bytes);
-  return warmingLine(r, num);
+  return warmingLine(r, num, bytes);
 }
 var EXCHANGE_STORE = `
 CREATE TABLE IF NOT EXISTS vec_blob_exchanges (

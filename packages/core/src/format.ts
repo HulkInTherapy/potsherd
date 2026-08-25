@@ -42,7 +42,27 @@ export function shortDateTime(d: Date | string | number, now = new Date()): stri
   return `${dt.getDate()} ${MONTHS[dt.getMonth()]}${y} ${hh}:${mm}`;
 }
 
-/** `21 aug` / `21 aug 2025` — the `ls` and `find` column. */
+/**
+ * `21 aug` / `21 aug 2025` — the `ls` and `find` column.
+ *
+ * **Local time, and only ever for an instant that happened.** `getDate()` and
+ * `getMonth()` read the instant in the zone of whoever is looking at the
+ * screen, which is right for a session: it happened at a moment, and the
+ * reader wants it in their own calendar.
+ *
+ * It is wrong for a **filter bound**, and that was VERIFICATION-6 C-2.
+ * `--until 2026-08-15` is parsed in UTC (`search/when.ts`: *absolute forms are
+ * read in UTC, relative ones in local time*) into `2026-08-15T23:59:59.999Z`;
+ * read back here at UTC+05:30 that instant is the sixteenth, so `ls` quoted
+ * the user's own input back to them a day out everywhere east of UTC — and a
+ * day early on `--since` everywhere west of it. Nothing in the repository
+ * could see it, because `scripts/make-screens.sh` and the CI screens step both
+ * pin `TZ=UTC`, the one zone in which neither end moves.
+ *
+ * A bound carries its frame in the phrase the user typed and nowhere else, so
+ * the receipt quotes the phrase (`render/ls.ts`) and never comes back here.
+ * `tests/terminal.test.ts` stands in four zones to keep it that way.
+ */
 export function shortDate(d: Date | string | number, now = new Date()): string {
   const dt = toDate(d);
   if (!dt) return '?';

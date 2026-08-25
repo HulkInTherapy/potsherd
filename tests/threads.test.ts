@@ -1,5 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   db as store,
@@ -47,6 +50,11 @@ import { rmrf, tempDir } from './helpers.js';
  * here: the dedup is right, and nothing in this phase is allowed to "fix" F4
  * by moving records off the session that had them first.
  */
+
+const BIN = path.join(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
+  'packages', 'cli', 'bin', 'potsherd.js',
+);
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -887,5 +895,100 @@ describe('the chain reaches the model, not just the CLI', () => {
       ID.parent,
       ID.child,
     ]);
+  });
+});
+
+// --------------------------------------------------- one end, both verbs
+
+/**
+ * C-6 — `find` and `ls` dated the same session seven days apart.
+ *
+ * ```
+ * packages/core/src/render/ls.ts:139    const when = s.endedAt ?? s.startedAt;
+ * packages/core/src/render/find.ts:329  const when = s.startedAt ?? s.endedAt;
+ * ```
+ *
+ * Two spellings of one question, and they picked opposite ends of the interval
+ * F4 had just taught the index to record honestly. {@link sessionDate} is the
+ * promoted function — `graft` has read it since F4 — and the two renderers
+ * each kept a copy of the answer instead of the question.
+ *
+ * The second half of the finding is on the same page: the `--since`/`--until`
+ * filter is an *interval overlap* (`search/filters.ts`), so a session that
+ * started on the 12th and ended on the 19th is correctly returned by
+ * `--until 15 aug`, and its bare date column then read as a broken filter. The
+ * column is not bare any more: it is headed `last active`, and `find` says the
+ * same two words in the same place.
+ */
+describe('find and ls date a session the same way, and say which end', () => {
+  const SPAN = '99990000-1111-4111-8111-999900001111';
+
+  function writeSpan(claudeDir: string): void {
+    const base = { sessionId: SPAN, cwd: PROJECT, version: '2.1.238', gitBranch: 'main' };
+    const records: Rec[] = [];
+    const ex = (day: string, n: number, text: string, reply: string): void => {
+      records.push(
+        { ...base, type: 'user', promptId: `s-p${n}`, uuid: `s-u${n}`, timestamp: `${day}T09:00:0${n}.000Z`, message: { role: 'user', content: text } },
+        { ...base, type: 'assistant', uuid: `s-a${n}`, timestamp: `${day}T09:00:0${n}.000Z`, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } },
+      );
+    };
+    ex('2026-08-12', 1, 'the retry budget on the flaky uploader keeps tripping', 'Lowering the retry budget and adding jitter.');
+    ex('2026-08-19', 2, 'and the retry budget after the jitter change', 'The retry budget is steady at four attempts.');
+    writeSession(claudeDir, SPAN, records);
+  }
+
+  function cli(root: string, args: string[]): string {
+    return execFileSync(process.execPath, [BIN, ...args, '--no-color', '--width', '100', '--potsherd-dir', root], {
+      encoding: 'utf8',
+      env: { ...process.env, NO_COLOR: '1', TZ: 'UTC' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+
+  it('both verbs print the last-activity end, and both name it', async () => {
+    const { claudeDir, root } = scratch();
+    writeSpan(claudeDir);
+    const { db } = await index(claudeDir, root);
+    let stored: { startedAt: string | null; endedAt: string | null };
+    try {
+      const row = db
+        .prepare('SELECT started_at, ended_at FROM sessions WHERE id = ?')
+        .get(SPAN) as { started_at: string; ended_at: string };
+      stored = { startedAt: row.started_at, endedAt: row.ended_at };
+      // The premise: this session really does span a week, so the two ends are
+      // genuinely different days and either renderer could pick either.
+      expect(row.started_at.slice(0, 10)).toBe('2026-08-12');
+      expect(row.ended_at.slice(0, 10)).toBe('2026-08-19');
+    } finally {
+      db.close();
+    }
+
+    // The one answer, from the one function.
+    expect(sessionDate(stored)!.slice(0, 10)).toBe('2026-08-19');
+
+    const listed = cli(root, ['ls']);
+    const found = cli(root, ['find', 'retry budget']);
+    expect(listed).toContain('19 aug');
+    expect(listed).not.toContain('12 aug');
+    expect(found).toContain('19 aug');
+    expect(found).not.toContain('12 aug');
+
+    // …and neither page leaves the reader to guess which end that is.
+    expect(listed).toContain('last active');
+    expect(found).toContain('last active');
+  });
+
+  it('a row returned by --until says which end its date is', async () => {
+    const { claudeDir, root } = scratch();
+    writeSpan(claudeDir);
+    const { db } = await index(claudeDir, root);
+    db.close();
+    // `--since`/`--until` test the interval, not one end of it: a session alive
+    // on the 15th is a match even though it was still going on the 19th. That
+    // is right, and it is only legible because the column now says what it is.
+    const out = cli(root, ['ls', '--until', '2026-08-15']);
+    expect(out).toContain('19 aug');
+    expect(out).toContain('last active');
+    expect(out).toContain('until 2026-08-15');
   });
 });

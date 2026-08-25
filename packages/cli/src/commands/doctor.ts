@@ -26,6 +26,7 @@ import {
   Card,
   consent,
   redactionRow,
+  sessionStats,
   storedRecordTypes,
   storedRedactionCounts,
   Theme,
@@ -78,6 +79,17 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   let indexedTypes: RecordTypeRow[] = [];
   let vec: VecStatus = { available: false, reason: 'no database yet — run potsherd index' };
   let indexedAt: string | null = null;
+  // The index's own session counts, read from the function `stats` renders.
+  //
+  // VERIFICATION-6 C-4. `doctor` printed `sessions indexed` as
+  // `COUNT(*) FROM sessions`, which is sessions **plus** every subagent
+  // transcript; `stats` prints the top-level count and puts the subagents in
+  // the note beside it. Same index, same word, two numbers, and the phase had
+  // already had two of those. `all: true` because `doctor` is the screen that
+  // counts everything and names the ignore list separately further down;
+  // `freshness: false` because the per-file stat pass is `stats`'s job and
+  // `doctor` has its own freshness row.
+  let indexed: { sessions: number; sidechains: number } | null = null;
   if (dbExists) {
     // Read-only: `doctor` never migrates, never writes, and never takes the
     // lock, so it is safe to run while an index is in flight.
@@ -101,6 +113,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       }
       redaction = storedRedactionCounts(db);
       indexedTypes = storedRecordTypes(db);
+      indexed = sessionStats(db, { root, freshness: false, all: true }).totals;
       const row = db.prepare('SELECT MAX(indexed_at) AS at FROM sessions').get() as { at: string | null };
       indexedAt = row?.at ?? null;
     } catch {
@@ -472,7 +485,13 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
       },
       index: {
         indexedAt,
-        sessions: counts['sessions'] ?? 0,
+        // The same split the human view prints, and the same split `stats`
+        // publishes: `sessions` is top-level transcripts, `sidechains` is the
+        // subagents inside them. `rows` keeps the old meaning of this field —
+        // every row in the table — for a consumer that was reading it.
+        sessions: indexed?.sessions ?? counts['sessions'] ?? 0,
+        sidechains: indexed?.sidechains ?? 0,
+        rows: counts['sessions'] ?? 0,
         exchanges: counts['exchanges'] ?? 0,
         toolCalls: counts['tool_calls'] ?? 0,
         // The same numbers the human view prints, from the same call
@@ -522,7 +541,18 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   card.blank();
   card.rows([
     {
-      label: 'sessions on disk',
+      // `claude sessions on disk`, and the harness is not decoration.
+      //
+      // VERIFICATION-6 C-4, and it is audit F2's family: this number is
+      // `disk.sessions.length` from `audit.ts`, which walks `~/.claude` and
+      // nothing else. Under the bare word `sessions`, on a screen whose whole
+      // job is *what is on disk*, it read as a count of the machine — and on a
+      // machine with four harnesses it was `49` above an adapter block listing
+      // the other three and a `stats` card saying `56`. Nothing was
+      // miscounted; one of the two numbers was answering a question its label
+      // did not ask. The label asks it now, and the number is the same number
+      // the `claude` adapter line prints four rows below.
+      label: 'claude sessions on disk',
       value: fmt.num(report.onDiskFiles),
       // The live corpus's size belongs to this row, not to `files archived`.
       note:
@@ -536,7 +566,9 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
         `${fmt.num(report.titledSessions)} harness-titled ${t.mid} ${fmt.num(report.sdkSessions)} sdk ` +
         `${t.mid} ${fmt.bytes(report.bytes)}`,
     },
-    { label: 'sidechains on disk', value: fmt.num(report.sidechainFiles), note: 'subagent transcripts' },
+    // Same scope, same reason: `audit.ts` counts claude's subagent transcripts
+    // and no other harness's, and `stats` counts every harness's.
+    { label: 'claude sidechains on disk', value: fmt.num(report.sidechainFiles), note: 'subagent transcripts' },
     {
       label: 'ghosts stored',
       value: fmt.num(counts['ghosts'] ?? 0),
@@ -558,11 +590,23 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   card.blank();
   card.rows([
     {
+      // The number `stats` prints, from the call `stats` makes — not a second
+      // `COUNT(*)` that means something else by the same word.
+      //
+      // VERIFICATION-6 C-4. `COUNT(*) FROM sessions` counts subagent
+      // transcripts as sessions, so on the reference corpus this row said
+      // `228` where `stats` said `31 sessions · 197 subagents`. Both were
+      // arithmetically true and only one of them was answering the question
+      // the word asks. The subagents keep their place — in the note, exactly
+      // where `stats` puts them.
       label: 'sessions indexed',
-      value: fmt.num(counts['sessions'] ?? 0),
+      value: fmt.num(indexed?.sessions ?? counts['sessions'] ?? 0),
       note: indexedAt
-        ? `${fmt.num(counts['exchanges'] ?? 0)} ${fmt.plural(counts['exchanges'] ?? 0, 'exchange')} ${t.mid} ` +
-          `${fmt.num(counts['tool_calls'] ?? 0)} tool ${fmt.plural(counts['tool_calls'] ?? 0, 'call')}`
+        ? [
+            `${fmt.num(indexed?.sidechains ?? 0)} subagents`,
+            `${fmt.num(counts['exchanges'] ?? 0)} ${fmt.plural(counts['exchanges'] ?? 0, 'exchange')}`,
+            `${fmt.num(counts['tool_calls'] ?? 0)} tool ${fmt.plural(counts['tool_calls'] ?? 0, 'call')}`,
+          ].join(` ${t.mid} `)
         : 'nothing indexed yet — run potsherd index',
       tone: indexedAt ? 'none' : 'dim',
     },

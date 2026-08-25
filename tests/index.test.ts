@@ -932,3 +932,121 @@ describe('a live session the harness never named (8.2)', () => {
     }
   });
 });
+
+// ------------------------------------------------- one word, one number
+
+/**
+ * C-4 — `doctor` said `sessions on disk 49` where `stats` said `sessions 56`,
+ * on the same index in the same minute.
+ *
+ * Neither count was wrong. `doctor`'s came from `audit.ts`, which is scoped to
+ * `~/.claude` and therefore counts **claude alone**; `stats`'s is the index,
+ * across every harness. What was wrong is that one of them was printed under a
+ * label that names no harness, on a screen whose whole job is *what is on
+ * disk* — five rows above an adapter block that lists the other harnesses and
+ * adds up to the other number.
+ *
+ * This is audit F2's family — *"the two subsystems disagree in print"* — and
+ * it is the third count disagreement of the phase. The fixture is two
+ * harnesses on purpose: with claude alone the two numbers agree by accident,
+ * which is exactly how this survived every previous round.
+ */
+describe('doctor and stats do not print two numbers under one word', () => {
+  const PI_FIXTURE = path.join(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url))),
+    'fixtures',
+    'pi',
+  );
+
+  /** A HOME with a claude corpus and a pi corpus, and nothing of this machine's. */
+  function twoHarnesses(): { home: string; claudeDir: string; root: string } {
+    const base = tempDir('potsherd-count-');
+    dirs.push(base);
+    const home = path.join(base, 'home');
+    const claudeDir = path.join(home, '.claude');
+    fs.mkdirSync(claudeDir, { recursive: true });
+    writeTranscript(claudeDir);
+    // Two subagent transcripts, because a corpus with none lets a count of
+    // `sessions + sidechains` pass as a count of sessions.
+    writeSidechains(claudeDir, 2);
+    // The committed pi fixture, so the second harness is a real parse and not
+    // a row inserted by hand.
+    fs.cpSync(path.join(PI_FIXTURE, 'agent'), path.join(home, '.pi', 'agent'), { recursive: true });
+    return { home, claudeDir, root: path.join(base, 'potsherd') };
+  }
+
+  function homeCli(home: string, args: string[]): string {
+    const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, NO_COLOR: '1', COLUMNS: '100', TZ: 'UTC' };
+    delete env['NODE_PATH'];
+    delete env['CLAUDE_CONFIG_DIR'];
+    delete env['POTSHERD_DIR'];
+    delete env['XDG_CONFIG_HOME'];
+    delete env['CODEX_HOME'];
+    return execFileSync(process.execPath, [bin, ...args], {
+      encoding: 'utf8',
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+
+  /** `label   1,234` off a card row, as a number. */
+  function row(out: string, label: string): number | null {
+    const m = new RegExp(`^\\s+${label}\\s+([\\d,]+)\\s`, 'm').exec(out);
+    return m ? Number((m[1] as string).replace(/,/g, '')) : null;
+  }
+
+  /** `<project>/<session>/subagents/agent-N.jsonl` — the real claude layout. */
+  function writeSidechains(claudeDir: string, n: number): void {
+    const parent = 'aaaa1111-0000-4000-8000-000000000001';
+    for (let i = 0; i < n; i += 1) {
+      const sid = `bbbb111${i}-0000-4000-8000-00000000000${i}`;
+      const base = { sessionId: sid, cwd: '/tmp/potsherd-index', version: '2.1.237', gitBranch: 'main', isSidechain: true };
+      const file = path.join(claudeDir, 'projects', '-tmp-potsherd-index', parent, 'subagents', `agent-${i}.jsonl`);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(
+        file,
+        [
+          { ...base, type: 'user', promptId: `sp${i}`, uuid: `su${i}`, timestamp: '2026-08-19T10:00:00.000Z', message: { role: 'user', content: `review the pooler change ${i}` } },
+          { ...base, type: 'assistant', uuid: `sa${i}`, timestamp: '2026-08-19T10:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'Looks fine.' }] } },
+        ].map((r) => JSON.stringify(r)).join('\n') + '\n',
+      );
+    }
+  }
+
+  it('the number under a bare "sessions" is the same number on both screens', () => {
+    const { home, claudeDir, root } = twoHarnesses();
+    homeCli(home, ['index', '--no-embed', '--claude-dir', claudeDir, '--potsherd-dir', root]);
+    const doctor = homeCli(home, ['doctor', '--claude-dir', claudeDir, '--potsherd-dir', root]);
+    const stats = homeCli(home, ['stats', '--potsherd-dir', root]);
+
+    // The premise: two harnesses are in this index, so a claude-only count and
+    // an every-harness count are genuinely different numbers.
+    expect(stats, 'the pi fixture did not land in the index').toMatch(/^ {2}pi\s/m);
+
+    const statsSessions = row(stats, 'sessions');
+    expect(statsSessions).not.toBeNull();
+
+    // Every row on `doctor` whose label is the bare word `sessions` — with no
+    // harness in front of it — is claiming to count the machine. There must be
+    // no such row that disagrees with `stats`.
+    for (const [, label, value] of doctor.matchAll(/^ {2}(sessions[a-z ]*)\s{2,}([\d,]+)\s/gm)) {
+      const n = Number((value as string).replace(/,/g, ''));
+      expect(
+        n,
+        `doctor's "${String(label).trim()}" says ${n} where stats says ${statsSessions}:\n${doctor}`,
+      ).toBe(statsSessions);
+    }
+  });
+
+  it('the disk rows say which harness they walked', () => {
+    const { home, claudeDir, root } = twoHarnesses();
+    homeCli(home, ['index', '--no-embed', '--claude-dir', claudeDir, '--potsherd-dir', root]);
+    const doctor = homeCli(home, ['doctor', '--claude-dir', claudeDir, '--potsherd-dir', root]);
+    // `audit.ts` reads `~/.claude` and nothing else, so the two rows it feeds
+    // must say so rather than borrowing the machine's name for it.
+    expect(doctor).toMatch(/^ {2}claude sessions on disk\s/m);
+    expect(doctor).toMatch(/^ {2}claude sidechains on disk\s/m);
+    expect(doctor).not.toMatch(/^ {2}sessions on disk\s/m);
+    expect(doctor).not.toMatch(/^ {2}sidechains on disk\s/m);
+  });
+});

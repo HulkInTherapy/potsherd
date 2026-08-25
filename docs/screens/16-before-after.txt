@@ -12,12 +12,12 @@ what potsherd leaves you  —  potsherd ls
 
   potsherd ls · 5 of 300
   
-      when  harness  project        title                               status
-    21 aug  claude   data-pipeline  Pool the ingest workers through p…  live
-    21 jul  claude   asset-cdn      refactor the docker entrypoint so…  ghost
-    20 jul  claude   payments-api   explain what the invoice renderer…  ghost
-    19 jul  claude   payments-api   add a feature flag around the cac…  ghost
-    18 jul  claude   crm-ingest     turn the rss parser into a backgr…  ghost
+    last active  harness  project        title                          status
+         21 aug  claude   data-pipeline  Pool the ingest workers thro…  live
+         21 jul  claude   asset-cdn      refactor the docker entrypoi…  ghost
+         20 jul  claude   payments-api   explain what the invoice ren…  ghost
+         19 jul  claude   payments-api   add a feature flag around th…  ghost
+         18 jul  claude   crm-ingest     turn the rss parser into a b…  ghost
   
     1 of 31 sessions · 197 subagents inside them · 299 ghosts, prompts only
     run  potsherd show <id8>  to read one, or  potsherd find <words>
