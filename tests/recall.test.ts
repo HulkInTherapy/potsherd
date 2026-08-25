@@ -847,6 +847,53 @@ describe.skipIf(!hasModel)('recall: the vector half — T3.1', () => {
     expect(r.lists.some((l) => l.list === 'vec_ghost_prompts')).toBe(false);
     expect(r.sessions.every((x) => x.status !== 'ghost')).toBe(true);
   }, 120_000);
+
+  /**
+   * C-1 §1 — the finding, end to end, on a real index.
+   *
+   * `tests/calibration.test.ts` proves `score <= coverage` as arithmetic. This
+   * proves the consequence on a corpus with vectors in it: the query the
+   * subagent test two blocks above uses is one the **semantic lane answers
+   * correctly**, and `potsherd find` returns nothing for it, because the answer
+   * repeats none of the words that were typed.
+   *
+   * It is written as a measurement with both halves asserted rather than as
+   * "expect zero rows", so that it stays honest in both directions. If a later
+   * change makes the verb return this answer, the last two expectations go red
+   * and whoever made that change has to say which of F1 and F8 they bought it
+   * with. If a later change makes the *ranking* lose it, the first two go red.
+   * Either way the pair names what moved.
+   */
+  it('C-1 — withholds an answer the semantic lane ranked first, because the wording is absent', async () => {
+    const q = 'the thing quietly eating most of the cloud bill';
+    const ranked = await recall(vdb, q, {}, { vectors: true, root: vroot, limit: 20, minConfidence: 'none' });
+    const verb = await recall(vdb, q, {}, { vectors: true, root: vroot, limit: 20, minConfidence: 'weak' });
+
+    // The ranking finds it, and finds it first.
+    expect(ranked.vectors.used).toBe(true);
+    const at = ranked.sessions.findIndex(
+      (x) => x.id.startsWith('d4b1f0a7') && (x.isSidechain || x.hits.some((h) => h.isSidechain)),
+    );
+    expect(at).toBeGreaterThanOrEqual(0);
+
+    // And every block on that page is under the floor for one reason: not one
+    // of them repeats half of what was typed. `score <= coverage` is asserted
+    // here too, on real rows rather than on a grid, because this is the claim
+    // the empty page is a consequence of.
+    for (const s of ranked.sessions) {
+      expect(s.calibration.score).toBeLessThanOrEqual(s.calibration.coverage + 1e-12);
+      expect(s.calibration.coverage).toBeLessThan(0.5);
+    }
+
+    // So the verb returns nothing, and says how much it withheld.
+    expect(verb.sessions).toEqual([]);
+    expect(verb.confidence).toBe('none');
+    // `belowFloor` counts every block that was BUILT and refused, which is
+    // deeper than the page — the build takes `limit * 3` evidence blocks and
+    // the page is cut to `limit`. So it is at least the page, never less.
+    expect(verb.belowFloor).toBeGreaterThanOrEqual(ranked.sessions.length);
+    expect(verb.belowFloor).toBeGreaterThan(0);
+  }, 120_000);
 });
 
 /**

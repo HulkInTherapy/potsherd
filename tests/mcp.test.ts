@@ -241,8 +241,15 @@ describe('the tool list', () => {
       // signature and it is reported as such in T10.6-REPORT.md: `want:
       // "context"` is specified as "budgeted" and there was nowhere else to
       // put the ceiling.
+      // `minConfidence` is C-1 step 3, and it is the second addition to the
+      // pinned signature. The reason it is a schema field rather than a better
+      // note is in `recallInput`: the description tells the caller in capitals
+      // to trust an empty reply and `belowFloor` tells it thirty rows were
+      // withheld, and until this field existed there was no way to ask for
+      // them — an instruction to believe, with no way to check. The CLI has
+      // had `--min-confidence` since T10.1.
       expect(Object.keys(props('potsherd_recall')).sort()).toEqual(
-        ['budget', 'query', 'scope', 'want'].sort(),
+        ['budget', 'minConfidence', 'query', 'scope', 'want'].sort(),
       );
       expect(Object.keys(props('potsherd_read')).sort()).toEqual(['from', 'thread', 'to']);
       expect(Object.keys(props('potsherd_graft')).sort()).toEqual(['about', 'budget', 'thread']);
@@ -438,7 +445,13 @@ describe('the cliff (F1) — confidence, read and never re-derived', () => {
       path.join(repo, 'packages', 'mcp', 'src', 'tools', 'recall.ts'),
       'utf8',
     );
-    expect(src).toMatch(/\[MIN_CONFIDENCE_FIELD\]:\s*AGENT_FLOOR/);
+    // C-1 step 3 — the call site now passes the *requested* floor, which is
+    // `AGENT_FLOOR` when the caller named none. Both halves are asserted,
+    // because the constant being right is worth nothing if the resolution
+    // stops defaulting to it, and the default being right is worth nothing if
+    // the call site stops passing what it resolved.
+    expect(src).toMatch(/\[MIN_CONFIDENCE_FIELD\]:\s*requestedFloor/);
+    expect(src).toMatch(/const requestedFloor: Confidence = args\.minConfidence \?\? AGENT_FLOOR;/);
     expect(src).toMatch(/await recall\(db, query, filters, options\)/);
   });
 
@@ -475,7 +488,13 @@ describe('the cliff (F1) — confidence, read and never re-derived', () => {
       expect(r['noMatch']).toBe(true);
       expect(r['threads']).toEqual([]);
       expect(r['hits']).toEqual([]);
-      expect(String(r['note'])).toMatch(/^no match\./);
+      // C-1 step 3. Still `no match`, and now it says WHICH empty: nothing
+      // matched at all, or something matched and none of it cleared the floor.
+      // The old text asserted here — "no match. The archive does not contain
+      // this" — was a claim about the archive's contents that the floor is not
+      // able to make; C-1 §1 measures it false on 50 of 60 benchmark queries.
+      expect(String(r['note'])).toMatch(/^no match: /);
+      expect(String(r['note'])).not.toMatch(/The archive does not contain this/);
     }
   });
 
@@ -1762,6 +1781,123 @@ describe('FIX-F — the door stops claiming what it cannot know', () => {
         noMatch: true,
         belowFloor: 1,
       });
+    }
+  });
+});
+
+/**
+ * C-1 step 3 — the model door gets the control the CLI has had since T10.1.
+ *
+ * ## What was wrong
+ *
+ * `potsherd_recall`'s description says, in capitals, `TRUST ITS SILENCE`, and
+ * its reply reports `belowFloor: 30`. Its input schema was
+ * `query, scope, want, budget`. **The agent being instructed to trust the
+ * silence could neither check it nor override it**, while the human at the CLI
+ * was shown `--min-confidence none` on the same empty screen. That asymmetry is
+ * only survivable if the silence is trustworthy, and C-1 measured that it is
+ * not: on the product's own 60-query benchmark the floor withholds the correct
+ * answer on 50 of them, structurally, because `calibrate()`'s score can never
+ * exceed the fraction of the query's literal terms a thread repeats.
+ *
+ * ## What must not move, and is asserted here in both directions
+ *
+ * **F1 stays.** The default is `AGENT_FLOOR` and the default reply for an
+ * absent topic and for nonsense is still zero rows and `noMatch: true`. The
+ * override is opt-in, it comes back labelled `none`, and the note says in words
+ * that it is not an answer.
+ */
+describe('C-1 step 3 — the floor is visible, and it is overridable', () => {
+  it('declares minConfidence in the schema, with the three bands', async () => {
+    const { client, close } = await connect();
+    try {
+      const list = await listTools(client);
+      const recallTool = list.tools.find((t) => t.name === 'potsherd_recall')!;
+      const props = (recallTool.inputSchema as { properties: Record<string, unknown> }).properties;
+      expect(Object.keys(props)).toContain('minConfidence');
+      const field = props['minConfidence'] as { enum?: string[]; description?: string };
+      expect(field.enum).toEqual(['strong', 'weak', 'none']);
+      // The description has to name the thing the caller is being offered, or
+      // the field is a switch nobody knows is there.
+      expect(String(field.description)).toMatch(/belowFloor/);
+      expect(String(field.description)).toMatch(/not an answer|not be cited/);
+    } finally {
+      await close();
+    }
+  });
+
+  it('F1 — the default is unchanged: an absent topic is still zero rows', async () => {
+    const r = await runRecall(ctx(), { query: 'kubernetes ingress payment service' });
+    expect(r['minConfidence']).toBe(AGENT_FLOOR);
+    if (r['confidence'] === 'none') {
+      expect(r['noMatch']).toBe(true);
+      expect(r['threads']).toEqual([]);
+      expect(r['hits']).toEqual([]);
+    }
+    const nonsense = await runRecall(ctx(), { query: 'zzzqqq flurblewomp aardvark protocol' });
+    expect(nonsense['threads']).toEqual([]);
+    expect(nonsense['hits']).toEqual([]);
+  });
+
+  it('minConfidence: "none" hands back the rows the floor withheld, labelled none', async () => {
+    // A sentence about a conversation in words it does not use — the shape the
+    // floor deletes, and the reason a caller needs to be able to look.
+    const q = 'the pooling decision we wrote down in the readme afterwards';
+    const floored = await runRecall(ctx(), { query: q });
+    const opened = await runRecall(ctx(), { query: q, minConfidence: 'none' });
+
+    expect(floored['noMatch']).toBe(true);
+    expect(floored['threads']).toEqual([]);
+    expect(Number(floored['belowFloor'])).toBeGreaterThan(0);
+
+    expect(opened['minConfidence']).toBe('none');
+    expect((opened['threads'] as unknown[]).length).toBeGreaterThan(0);
+    for (const t of opened['threads'] as { confidence: string }[]) {
+      expect(t.confidence).toBe('none');
+    }
+    // And it says what they are, so an agent cannot read them as the answer
+    // the same envelope has just said it does not have.
+    expect(opened['noMatch']).toBe(true);
+    expect(String(opened['note'])).toMatch(/below the confidence floor/);
+    expect(String(opened['note'])).toMatch(/not an answer/);
+    expect(String(opened['note'])).toMatch(/do not cite them/);
+  });
+
+  it('the empty note tells the truth about what silence means, and names the way out', async () => {
+    const r = await runRecall(ctx(), {
+      query: 'the pooling decision we wrote down in the readme afterwards',
+    });
+    const note = String(r['note']);
+    // The sentence this replaced was "no match. The archive does not contain
+    // this" — false on 50 of the 60 queries the floor empties. It must not
+    // come back.
+    expect(note).not.toMatch(/The archive does not contain this/);
+    expect(note).toMatch(/how many of your literal words/);
+    expect(note).toMatch(/minConfidence: "none"/);
+    expect(note).toMatch(/two to four distinctive nouns/);
+    // The half that was always right, kept.
+    expect(note).toMatch(/do not answer from the repository in front of you/);
+  });
+
+  it('distinguishes the two empties that used to read the same', async () => {
+    // Nothing matched at all, versus something matched and none of it well
+    // enough. An agent that cannot tell those apart cannot decide whether to
+    // ask again, which is the whole of why `belowFloor` was added and then
+    // left unusable.
+    const nothing = String((await runRecall(ctx(), { query: 'zzzqqq flurblewomp aardvark protocol' }))['note']);
+    expect(nothing).toMatch(/nothing in the index matched these words at all/);
+    expect(nothing).toMatch(/a real answer/);
+    const withheld = String(
+      (await runRecall(ctx(), { query: 'the pooling decision we wrote down in the readme afterwards' }))['note'],
+    );
+    expect(withheld).toMatch(/nothing cleared the confidence floor/);
+  });
+
+  it('raising the floor is possible too, and is not a second way of lowering it', async () => {
+    const strong = await runRecall(ctx(), { query: 'pgbouncer', minConfidence: 'strong' });
+    expect(strong['minConfidence']).toBe('strong');
+    for (const t of strong['threads'] as { confidence: string }[]) {
+      expect(t.confidence).toBe('strong');
     }
   });
 });

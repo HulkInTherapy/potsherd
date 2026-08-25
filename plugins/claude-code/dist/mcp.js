@@ -43747,6 +43747,40 @@ var recallInput = {
   ),
   scope: SCOPE_WITH_CARDS,
   want: WANT,
+  /**
+   * C-1 step 3 — the control the CLI has had since T10.1 and this door did not.
+   *
+   * ## Why a schema field and not a better note
+   *
+   * The tool's description tells the caller, in capitals, to trust an empty
+   * reply. `belowFloor` then tells it that thirty rows were withheld. Until
+   * this field existed there was **no way to ask for them**: the agent was
+   * instructed to trust a silence it could neither check nor override, while
+   * the human at the CLI was shown `--min-confidence none` on the same screen.
+   * One door had the escape hatch and the other had the instruction to believe.
+   *
+   * That asymmetry is not survivable given what the floor actually does.
+   * Measured on the product's own 60-query benchmark (C-1 step 1): the floor
+   * withholds the correct answer on 50 of 60 queries, 44 of them ranked in the
+   * top five, and it is *structurally* unable to do otherwise for a question
+   * asked in words the transcript does not use — `calibrate()`'s score can
+   * never exceed the fraction of the query's literal terms the row contains,
+   * whatever the semantic lane says. So `none` does not mean *the archive does
+   * not contain this*. It means *nothing here repeats enough of your wording*.
+   * An agent has to be able to look.
+   *
+   * ## Why the default does not move
+   *
+   * `undefined` is {@link AGENT_FLOOR}, byte for byte the behaviour of every
+   * build since T10.1: an absent topic and a nonsense query still come back
+   * with zero rows and `noMatch: true`, at this door and at the CLI, and F1 is
+   * untouched. This field only lets a caller that has already been told
+   * something was withheld ask to see it — and the reply then says, in `note`,
+   * that what it is holding is below the floor and is not an answer.
+   */
+  minConfidence: external_exports.enum(["strong", "weak", "none"]).optional().describe(
+    `the confidence floor rows must clear to be returned. Default ${AGENT_FLOOR}. Pass "none" to see the rows a "no match" reply withheld \u2014 belowFloor says how many there are. They come back labelled "none": they are the closest text in the archive, not an answer to your question, and must not be cited as one. Worth doing when your query was a sentence rather than two to four distinctive nouns, because the floor is computed from how many of your literal words a thread repeats`
+  ),
   budget: external_exports.number().int().min(200).optional().describe(
     `want: "context" only \u2014 token ceiling on the windows returned. Default ${DEFAULT_CONTEXT_BUDGET}`
   )
@@ -43761,6 +43795,8 @@ async function runRecall(ctx, args) {
   }
   const want = args.want ?? "hits";
   const scope = args.scope ?? {};
+  const requestedFloor = args.minConfidence ?? AGENT_FLOOR;
+  const askedBelowFloor = args.minConfidence === "none";
   return withIndexAsync(ctx, async (db, root) => {
     const filters = parseFilters(db, toFlags(scope));
     const limit = parseLimit(scope.limit, 10);
@@ -43773,7 +43809,10 @@ async function runRecall(ctx, args) {
       // `cli/src/commands/find.ts`, so the two doors cannot mean different
       // things by the same word.
       cards: scope.cards !== false,
-      [MIN_CONFIDENCE_FIELD]: AGENT_FLOOR
+      // C-1 step 3. `undefined` is AGENT_FLOOR, so the default path is
+      // unchanged; a caller may raise the floor or ask to see below it. See
+      // `recallInput.minConfidence`.
+      [MIN_CONFIDENCE_FIELD]: requestedFloor
     };
     const result = await recall(db, query, filters, options);
     const vectorReport2 = vecStatus(db, root).report;
@@ -43782,8 +43821,9 @@ async function runRecall(ctx, args) {
     const minConfidence = minConfidenceOf(result);
     const belowFloor = belowFloorOf(result);
     const noMatch = confidence === "none";
-    const sessions = noMatch ? [] : result.sessions;
-    const hits = noMatch ? [] : result.hits;
+    const withhold = noMatch && !askedBelowFloor;
+    const sessions = withhold ? [] : result.sessions;
+    const hits = withhold ? [] : result.hits;
     const threads = groupThreads(sessions);
     const envelope = {
       query: result.query,
@@ -43818,10 +43858,34 @@ async function runRecall(ctx, args) {
        */
       capability: capabilityLine(result.vectors, vectorReport2),
       vectors: result.vectors,
-      note: noMatch ? "no match. The archive does not contain this" + // FIX-F C7 — `1 rows were withheld`, live at the model door. The
+      /**
+       * C-1 step 3 — what silence means, said truthfully.
+       *
+       * The sentence this note used to open with was *"no match. The archive
+       * does not contain this"*, and on the product's own 60-query benchmark
+       * that claim is false on 50 of the 60 queries the floor withholds an
+       * answer for. The floor is not a statement about the archive's contents.
+       * `calibrate()`'s score can never exceed the fraction of the query's
+       * **literal** terms a thread repeats, so a question asked in different
+       * words than the transcript used scores `none` over an index that has
+       * the answer at rank 1. C-1 §1 has the measurement.
+       *
+       * So the note now says the two things that are true and the one thing
+       * the caller can do about it, and it distinguishes the two empties that
+       * used to read identically:
+       *
+       *   * `belowFloor > 0` — something is under there. The archive may well
+       *     contain this. Look, or ask again with distinctive nouns.
+       *   * `belowFloor === 0` — nothing in the index matched at all. That is
+       *     the strong empty, and it is the one the old sentence described.
+       *
+       * The instruction that was always right is kept and kept first: do not
+       * fill an empty result from the repository in front of you.
+       */
+      note: withhold ? ((belowFloor ?? 0) > 0 ? "no match: nothing cleared the confidence floor" : "no match: nothing in the index matched these words at all") + // FIX-F C7 — `1 rows were withheld`, live at the model door. The
       // project singularises everywhere else through `f.plural`; this was
       // the one call site that built the clause by concatenation instead.
-      (belowFloor ? `, though ${String(belowFloor)} ${format_exports.plural(belowFloor, "row")} ${format_exports.plural(belowFloor, "was", "were")} withheld below the ${String(minConfidence ?? AGENT_FLOOR)} floor` : "") + // Which half of the search returned the empty. "The archive does not
+      (belowFloor ? `. ${String(belowFloor)} ${format_exports.plural(belowFloor, "row")} ${format_exports.plural(belowFloor, "was", "were")} withheld below the ${String(minConfidence ?? AGENT_FLOOR)} floor. The floor measures how many of your literal words a thread repeats, not whether the archive holds the answer, so a question phrased differently from the transcript scores none over an index that has it. Call again with minConfidence: "none" to see those rows \u2014 they are the closest text, not an answer, and may not be cited as one \u2014 or with two to four distinctive nouns instead of a sentence` : "") + // Which half of the search returned the empty. "The archive does not
       // contain this" is a much stronger claim when both halves ran than
       // when only bm25 did, and the gap is measured: the verifier's query
       // answers 1 session with vectors on and 0 with them off.
@@ -43831,7 +43895,16 @@ async function runRecall(ctx, args) {
       // on an index nothing is embedding, the retry returns the identical
       // empty. The clause that says so is the difference between a caller
       // that stops and a caller that loops.
-      (result.vectors.used ? "" : ". Only keyword search ran; the semantic half did not" + (vectorReport2?.working === false && vectorReport2.phase !== "ready" ? ", and nothing is embedding this index, so running the same search again will not change that" : "")) + ". Say so \u2014 do not widen into a guess, and do not answer from the repository in front of you." : calibrated ? null : 'this build of potsherd does not calibrate its scores yet, so "confidence" is null rather than a measurement. Treat a low-scoring row as unproven.',
+      (result.vectors.used ? "" : ". Only keyword search ran; the semantic half did not" + (vectorReport2?.working === false && vectorReport2.phase !== "ready" ? ", and nothing is embedding this index, so running the same search again will not change that" : "")) + // What was always right, kept and kept last, because it is the
+      // instruction the caller has to leave holding: an empty reply is
+      // never a licence to answer from the repo.
+      ". Do not widen into a guess, and do not answer from the repository in front of you" + (belowFloor ? "." : ". Saying the archive does not have this is a real answer.") : noMatch ? (
+        // C-1 step 3. Rows below the floor, because the caller asked for
+        // them. `noMatch` is still true and still means what it means, so
+        // the one thing this note must do is stop the caller reading the
+        // rows as the answer the envelope has just said it does not have.
+        `these ${String(sessions.length)} ${format_exports.plural(sessions.length, "row")} are below the confidence floor and are labelled none: they are the closest text in the archive to your words, not an answer to your question. Read them to judge for yourself, do not cite them as a source, and do not report them to the user as what was decided.`
+      ) : calibrated ? null : 'this build of potsherd does not calibrate its scores yet, so "confidence" is null rather than a measurement. Treat a low-scoring row as unproven.',
       ignored: result.ignored,
       lists: result.lists,
       relaxed: result.relaxed,
