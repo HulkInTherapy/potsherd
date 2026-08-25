@@ -470,3 +470,191 @@ public surface for a later fix, the line for `packages/core/src/index.ts:135` is
 ```ts
 export { vecStatus, vecAvailable, vecTableUsable, type VecStatus, type VecTable } from './vec.js';
 ```
+
+---
+
+# ROUND 2 — the migration declined on CI, and the reason was the Node version
+
+**Branch** `work/FIX-H2`, cut from `origin/main` `f3006e7`. Nothing pushed, nothing merged.
+`gh run view 32825931020` · jobs `test (ubuntu-latest, node 24)` and `test (macos-latest, node 24)`.
+
+## The step that returned short
+
+**`PRAGMA writable_schema = ON` — and it did not fail. It was accepted and silently ignored.**
+
+From **Node v24.19.0** `node:sqlite` opens every connection with `SQLITE_DBCONFIG_DEFENSIVE`
+**on**. This machine runs **v24.9.0**, which does not. Measured, same script, same file, same
+driver, one step per line:
+
+```
+                                    node v24.9.0        node v24.19.0
+  BEGIN                             OK                  OK
+  SELECT … FROM vec_exchanges       no such module      no such module    ← stranded, as intended
+  PRAGMA writable_schema = ON       OK                  OK                ← neither one throws
+  PRAGMA writable_schema (readback) 1                   0                 ← THE STEP
+  DELETE FROM sqlite_master (probe) changes: 0          table sqlite_master may not be modified
+  DELETE FROM sqlite_master (real)  changes: 1          table sqlite_master may not be modified
+  drop shadow tables                OK                  OK
+  final shape of vec_exchanges      view                table            ← unconverted
+```
+
+So the order of events on CI was: the extension probe correctly found the store unreadable, the
+schema-write acquisition **appeared** to succeed, the no-match delete probe caught the refusal, and
+`detachStranded` returned false — which is the migration declining, `schema v9 of v12`, and the
+three red tests.
+
+**The guard did its job.** The probe that matches nothing is why CI failed on an *assertion* rather
+than on a half-rewritten schema: not one byte of those databases was changed. That part of round 1
+holds up. What it could not do was succeed.
+
+## Why the local run was green
+
+Not `sqlite-vec`. It is installed here **and in CI** — `buildOneOneDatabase` throws a named error
+without it, and only 3 of 7 tests failed, so the fixture built fine on the runners. The premise the
+test had quietly inherited was **the Node version**: on v24.9.0 defensive mode is off and the exact
+same code performs the surgery happily. `POTSHERD_SQLITE=node pnpm test` passed here for a reason
+no assertion in the file named.
+
+I downloaded node **v24.19.0**, the build CI resolved, and reproduced it before writing a line:
+
+```
+$ POTSHERD_SQLITE=node node-v24.19.0/bin/node vitest run tests/upgrade-from-1.1.test.ts   # at f3006e7
+  ✓ the trap: the three names are vec0 virtual tables …
+  × hands back a connection whose schema is really writable, read back from sqlite
+  × migration 10 converts it instead of declining, and nothing is left of vec0
+  ✓ keeps every vector when the extension IS on the machine
+  × the whole verb: potsherd index completes on it, through the binary
+  ✓ index re-reads every transcript after the conversion …
+  ✓ nothing throws even on a database the migration did not repair
+  × doctor … names a command that runs, and running it is what fixes the database
+      Tests  4 failed | 4 passed (8)
+
+$ … same command, with this branch
+      Tests  8 passed (8)
+```
+
+## What changed
+
+**1. `sqlite-driver.ts` — `schemaWritable`, a construction option.** Defensive mode has no runtime
+switch on `node:sqlite`; `defensive: false` can only be set when the handle is built. The key is
+written **only when the caller asks**, so every other connection keeps Node's own default. On a Node
+that predates the option it is an unknown key and is ignored — correctly, because those builds are
+not defensive.
+
+**2. `db.ts` — `open()` reopens schema-writable only on a database that is actually stranded.** One
+extra `open()`, on a 1.1.0 database on a machine that has lost `sqlite-vec`, once — because the
+migration it enables is what stops it being stranded. This is not a global loosening: it is one
+connection, one database, one migration. `:memory:` is excluded, because reopening it would hand
+back a different, empty database.
+
+**3. `vec.ts` — read the pragma back.** `PRAGMA writable_schema = ON` is not a request that fails;
+under defensive mode it succeeds and does nothing. Trusting it is a **phantom flag** — a setting
+that looks applied, succeeds, and has no effect — which is the failure family this project has
+recorded most often, and I walked straight into it. The delete-that-matches-nothing stays as the
+second check, because it proves the *write* is permitted rather than merely the flag; the readback
+is what names the reason.
+
+**4. `vec.ts` — the decline message no longer hardcodes a driver.** It said
+`run POTSHERD_SQLITE=node potsherd index`. On v24.19.0 `node:sqlite` is the driver that *refuses*,
+so that sentence told the reader to re-run on the driver they were already on and had just watched
+fail — the ninth instance of "an instruction aimed at a reader who cannot follow it", introduced by
+me while fixing the eighth. It is now computed from `sqliteDriverName()`: whichever driver is not
+the one that refused.
+
+**Point 3 of the brief — `doctor`'s sentence — is true in the state we end at.** Both drivers now
+convert, so `doctor` says `run potsherd index` and that command converts the database. Verified
+below on both.
+
+## The test no longer inherits its premise
+
+Two premises, both now established by the test rather than by the machine:
+
+* **The fixture loads vec0 itself.** It used to go through `vecStatus()`, which is the *product's*
+  loader and obeys `POTSHERD_NO_VEC` — so a suite run with the extension switched off made the
+  fixture unbuildable and failed all 8 for a reason unrelated to what they assert. Building the trap
+  and exercising the product against it are different acts; only the second one should care about
+  the environment. (`createRequire` resolves from `packages/core`, because that is the only place
+  `sqlite-vec` is installed.)
+* **The one test that is about the extension being *present* says so**, with `withTheExtension`,
+  instead of inheriting the ambient value.
+
+And a new assertion that is about the **capability rather than the outcome**: on a stranded
+database, the connection `open()` hands back must be one where `writable_schema` really reads back
+as `1` and a `sqlite_master` write really is permitted. That is red on any machine where the schema
+is not writable — which is exactly what the outcome assertions could not be, since they were green
+on 24.9.0 and red on 24.19.0 with nothing naming the difference.
+
+The trap test, every combination that exists:
+
+```
+node 24.9.0   driver auto   NO_VEC=0 → 8 passed      node 24.19.0  driver auto   NO_VEC=0 → 8 passed
+node 24.9.0   driver auto   NO_VEC=1 → 8 passed      node 24.19.0  driver auto   NO_VEC=1 → 8 passed
+node 24.9.0   driver node   NO_VEC=0 → 8 passed      node 24.19.0  driver node   NO_VEC=0 → 8 passed
+node 24.9.0   driver node   NO_VEC=1 → 8 passed      node 24.19.0  driver node   NO_VEC=1 → 8 passed
+```
+
+## The whole verb, through the binary, on a stranded database
+
+`$HOME` relocated, `CLAUDE_CONFIG_DIR` / `POTSHERD_DIR` / `XDG_CONFIG_HOME` / `NODE_PATH` /
+`CODEX_HOME` cleared, writes to `$(mktemp -d)`, `POTSHERD_NO_VEC=1` — the extension genuinely
+unavailable — on **node v24.19.0**, the build CI runs.
+
+```
+########## POTSHERD_SQLITE=better-sqlite3 ##########
+  doctor BEFORE   database   schema v9 of v12  · run potsherd index — it converts a vec0 st…
+                  sqlite     better-sqlite3 (native addon)
+                  vectors 5  run potsherd index — it converts a vec0 store written by 1.1.0
+  potsherd index  exchanges indexed 5 · incremental index 35ms · 4 parsed        exit=0
+  doctor AFTER    database   schema v12 of v12
+
+########## POTSHERD_SQLITE=node          ##########   (CI's exact condition)
+  doctor BEFORE   database   schema v9 of v12  · run potsherd index — it converts a vec0 st…
+                  sqlite     node:sqlite — Node's own, no install needed
+                  vectors 5  run potsherd index — it converts a vec0 store written by 1.1.0
+  potsherd index  exchanges indexed 5 · incremental index 30ms · 4 parsed        exit=0
+  doctor AFTER    database   schema v12 of v12
+```
+
+## The numbers
+
+| run | result |
+|---|---|
+| `pnpm test` — node 24.9, better-sqlite3 | **1,985 passed · 55 files · 0 failed · 0 skipped** |
+| `POTSHERD_SQLITE=node pnpm test` — node 24.9 | **1,985 passed · 55 files · 0 failed · 0 skipped** |
+| `POTSHERD_NO_VEC=1 pnpm test` | **1,985 passed · 55 files · 0 failed · 0 skipped** |
+| `POTSHERD_NO_VEC=1 POTSHERD_SQLITE=node pnpm test` | **1,985 passed · 55 files · 0 failed · 0 skipped** |
+| **node 24.19.0** · `POTSHERD_SQLITE=node` | **1,984 passed · 1 skipped · 55 files · 0 failed** |
+| **node 24.19.0** · `POTSHERD_SQLITE=node` · `POTSHERD_NO_VEC=1` | **1,984 passed · 1 skipped · 55 files · 0 failed** |
+
+`pnpm typecheck` 4/4 · `pnpm evals` **exit 0 read from `$?`**, hybrid **57/42**, `PASS`, undisturbed ·
+`check-privacy.py` **exit 0 read from `$?`** · `pnpm build && pnpm vendor` → `git status plugins/`
+clean.
+
+**1,985, not the 1,984 asked for:** the capability assertion above is the extra one, and it is the
+test that would have caught this in the first place.
+
+**The 1 skipped on node 24.19.0 is pre-existing and not mine.** It is
+`sqlite-driver.test.ts`'s `POTSHERD_SQLITE_WARN` case, which skips itself with
+*"v24.19.0 does not warn about node:sqlite, so there is nothing to put back"* — the same line
+appears in CI's own log at `f3006e7`, in the step that **passed**. On node 24.9.0, where the
+0-skipped gate was written, nothing skips.
+
+## What I could not do, and what is still open
+
+1. **CI runs a Node version nothing in this repository pins, and that is the process defect under
+   the code defect.** `node-version: 24` resolves to whatever is current on the runner; it was
+   24.19.0 that morning and will be something else later. Both defects here — defensive mode, and
+   the `POTSHERD_SQLITE_WARN` skip — are Node-version behaviour that no local run would see. I did
+   not change `ci.yml`: pinning it, or adding a job on the oldest supported Node, is a call for you.
+   I would pin, and add a second job on `24` unpinned so drift shows up as a failure rather than as
+   a surprise.
+2. **I cannot test a Node newer than 24.19.0.** If a later release changes `defensive` again — or
+   renames the option — this breaks the same way. The readback in `vec.ts` means it would fail
+   *honestly* (decline, name the other driver, leave the file untouched) rather than corrupt
+   anything, which is the property worth having.
+3. **`enableDefensive` is not the option name.** The Node binary contains both strings; only
+   `defensive` takes effect (`{enableDefensive:false}` leaves `writable_schema` reading `0`). It is
+   an unknown-key-ignored API, so a typo here would be silent — the readback is the only thing that
+   would catch it, and it does.
+4. **The decline branch is still unreachable on both drivers**, now doubly so. Its message is
+   computed rather than hardcoded, which is the part that was actually wrong.
