@@ -80,6 +80,13 @@ two, which is exactly why silence is trustworthy here and exactly why paraphrase
 it needs term-level semantic matching — an index change, and the named target of the next release
 (`phases/phase-12/FIRST-JOB.md`).
 
+The same gap has a second face, and it is worth knowing before you trust a `weak`: **an invented
+word alongside two ordinary ones can clear the floor**, because the scorer discards terms the index
+has never seen — so the one distinctive word in the query is dropped before the bar is applied. A
+fix exists and is measured; it is held back because on the small evaluation corpus it cannot tell a
+made-up word from a real one that simply does not appear there. Same missing capability, same
+target.
+
 **What you get instead of a wrong answer:**
 
 - an empty verdict that shows its work — the closest sessions appear under a rule that says

@@ -68,6 +68,31 @@ no-op at 433 MB.
 
 **That is a phase, not a patch**, which is why it is here rather than in phase 11.
 
+## the second shape of the same gap, found by the seventh verifier
+
+**An invented word plus two ordinary ones defeats the floor.** Four attempts out of four on the real
+archive, at `weak`, with quotable snippets and a resume line — the audit's F1 alive on a shape
+nothing tested. `coverage 2/3 = 0.667` clears `WEAK_FLOOR`, and the six controls cannot see it
+because five are four-word queries, whose coverage is `≤ 0.5` by construction.
+
+**The cause is not a threshold.** `selectTerms` drops `df === 0` terms, so the term the floor
+*requires* becomes one of the ordinary words — the invented one, the only distinctive thing in the
+query, is discarded before the floor is applied.
+
+A two-line patch exists and was measured: **it refuses all four attempts on the real archive and
+keeps a true topic `strong`** — and costs the verb **7/60 → 5/60** on the 0.5 MB eval fixture, where
+legitimate words like `sitting` and `discussion` are absent from the corpus *exactly as an invented
+word is*. No alignment of `df` with `coveredTerms` recovers them.
+
+**So it is this file's own target seen from the other side**: with term-level semantic coverage, a
+rare term is evidence rather than noise, and both halves resolve. It was not taken alone because
+taking it means lowering the verb's ratchet to fit a result.
+
+Three controls of this shape ship green (two, three and four words). A fourth —
+the first reproduction of it on the committed fixture — is written into `evals/queries.jsonl`'s
+comment block rather than enforced, because a red control fails `pnpm evals` **and** `pnpm test`.
+**One line restores it** when the capability exists.
+
 ## what would make this a bad answer
 
 - A threshold moved until the number is met. The ceiling above says it cannot be, and any number
