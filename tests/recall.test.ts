@@ -1052,7 +1052,10 @@ describe('recall: calibrated confidence — T10.1', () => {
     const lines = out.split('\n');
     expect(lines[0]).toContain(r.confidence);
     for (const s of r.sessions) {
-      const meta = lines.find((l) => l.includes(s.score.toFixed(4)));
+      // C-3: the human meta line prints the calibration now, which is the
+      // sort key it is cut from. A locator, not the claim -- the assertion
+      // below is still that the two views carry the same word.
+      const meta = lines.find((l) => l.includes(s.calibration.score.toFixed(4)));
       expect(meta, `no meta line for ${s.id}`).toBeDefined();
       expect(meta!).toContain(s.confidence);
     }

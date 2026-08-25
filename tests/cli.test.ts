@@ -606,12 +606,17 @@ describe('potsherd cli', () => {
     expect(r.code).toBe(0);
     const d = JSON.parse(r.stdout) as {
       redaction: Record<string, number>;
-      index: { sessions: number; exchanges: number; vec: { available: boolean; reason?: string } };
+      index: { sessions: number; sidechains: number; rows: number; exchanges: number; vec: { available: boolean; reason?: string } };
       indexedRecordTypes: { harness: string; type: string; novel: boolean }[];
       adapters: { harness: string; supported: boolean }[];
     };
     expect(d.redaction).toHaveProperty('total');
-    expect(d.index.sessions).toBe(4);
+    // C-4: `doctor --json` used to publish one `sessions` that was really a
+    // row count -- the fixture is two top-level transcripts and two subagent
+    // ones, and `4` was rows. The three numbers are named separately now.
+    expect(d.index.sessions).toBe(2);
+    expect(d.index.sidechains).toBe(2);
+    expect(d.index.rows).toBe(4);
     expect(d.index.exchanges).toBeGreaterThan(0);
     // Either it loaded or it said why. Never neither.
     expect(d.index.vec.available || Boolean(d.index.vec.reason)).toBe(true);

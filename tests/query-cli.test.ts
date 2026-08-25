@@ -244,7 +244,10 @@ describe('find', () => {
     expect(j.minConfidence).toBe('weak');
     expect(human.split('\n')[0]).toContain(j.confidence);
     for (const s of j.sessions) {
-      const meta = human.split('\n').find((l) => l.includes(s.score.toFixed(4)));
+      // C-3: the human meta line prints the calibration now, which is the
+      // sort key. This is a locator, not the claim -- the assertion below is
+      // still about the word on the line it finds.
+      const meta = human.split('\n').find((l) => l.includes(s.calibrated.toFixed(4)));
       expect(meta, `no meta line for a session scored ${s.score}`).toBeDefined();
       expect(meta!).toContain(s.confidence);
       // 0..1, and a real number rather than a copy of the fused score, which
