@@ -2,6 +2,7 @@ import { INDENT } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
 import { idTag } from '../recall.js';
+import { sessionDate } from '../threads.js';
 import {
   clipToWords,
   isMostlyBoilerplate,
@@ -326,8 +327,16 @@ function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[]
 
   // line 2 — where and when, and the score.
   const meta: string[] = [s.projectName];
-  const when = s.startedAt ?? s.endedAt;
-  if (when) meta.push(f.shortDate(when, now));
+  // {@link sessionDate} — the one function, and it prefers the **end** of the
+  // interval. This line said `s.startedAt ?? s.endedAt` and `render/ls.ts`
+  // said `s.endedAt ?? s.startedAt`: two spellings of one question, opposite
+  // answers, and on a session that ran from the 12th to the 19th the two verbs
+  // dated it a week apart in the same terminal (VERIFICATION-6 C-6). The two
+  // words in front of the date are the other half of that finding: `ls` heads
+  // its column `last active` and this page has no column header at all, so it
+  // says the same two words in the same place.
+  const when = sessionDate(s);
+  if (when) meta.push(`last active ${f.shortDate(when, now)}`);
   meta.push(
     s.kind === 'ghost'
       ? `${f.num(s.prompts)} prompts recovered`
@@ -335,13 +344,26 @@ function block(s: RecallSession, r: RecallResult, t: Theme, now: Date): string[]
   );
   if (s.gitBranch) meta.push(s.gitBranch);
   if (s.agentName) meta.push(s.agentName);
-  // The confidence sits where the eye already goes for the score, and in front
-  // of it, because the score is the thing F1 found to be uninformative: a true
-  // topic and an absent one are 1.12x apart in this column. The word is not a
-  // restatement of the number beside it — it is computed from evidence the
-  // number no longer contains (`calibration.ts`), and `--json` carries the
-  // identical word on the identical row.
-  const score = `${s.confidence}  ${s.score.toFixed(4)}`;
+  // The confidence, and **the number the confidence is cut from** — not the
+  // fused RRF score.
+  //
+  // VERIFICATION-6 C-3. F1 found the RRF number uninformative (a true topic
+  // and an absent one 1.12x apart), and the comment that used to sit here said
+  // so — and then printed it anyway, in the column where the eye reads rank.
+  // FIX-I had since moved the sort key to `calibration.score` (`byLabel`:
+  // lane, then the confidence word, then this number), so the printed column
+  // was not merely uninformative, it ran **backwards**, under a `strong`
+  // header, on 19 of 20 queries. As a caption-free screenshot — which is what
+  // `plans/05` asks this page to survive as — that is a broken sort.
+  //
+  // So the column is the sort key. The word and the number are now one fact
+  // read twice rather than two facts side by side: the band is cut from the
+  // number (`calibration.ts` — `WEAK_FLOOR`, `STRONG_FLOOR`), so a `none` can
+  // no longer print a number a `strong` beside it does not beat, and
+  // `--min-confidence` names the very quantity the reader is looking at.
+  // `--json` and `--explain` still carry the fused score for anyone who wants
+  // the merge order; this column is the page's own order.
+  const score = `${s.confidence}  ${s.calibration.score.toFixed(4)}`;
   const metaLine = f.clip(meta.join(` ${t.sep} `), Math.max(10, width - score.length - 2), t);
   lines.push(
     INDENT +

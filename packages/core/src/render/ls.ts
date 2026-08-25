@@ -1,7 +1,28 @@
 import { INDENT, fitLine, table, type TableCellInput } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
+import { sessionDate } from '../threads.js';
 import type { BrowseSession, ListResult } from '../browse.js';
+
+/**
+ * The words the user actually typed for `--since` / `--until`.
+ *
+ * VERIFICATION-6 C-2: the heading is a **receipt of the reader's own input**,
+ * and the only thing that can be quoted back with no chance of drift is the
+ * input. The bound the CLI parsed out of it is an instant in a frame the
+ * instant does not carry — `2026-08-15` is read in UTC, `today` in local time
+ * (`search/when.ts`) — so re-rendering the instant was a second computation of
+ * a fact that was already in hand, and it disagreed with the first one
+ * everywhere except UTC.
+ *
+ * Empty for a caller with nothing to quote; then the heading says nothing
+ * about dates rather than guessing at them. `--json` still carries the
+ * resolved instants, and always did: it was never the surface that was wrong.
+ */
+export interface FilterEcho {
+  since?: string | undefined;
+  until?: string | undefined;
+}
 
 /**
  * `potsherd ls` — moment 3 of plans/05: "the archive, finally legible".
@@ -20,10 +41,15 @@ import type { BrowseSession, ListResult } from '../browse.js';
  *   - **it has to make sense with no caption.** Hence the column header, the
  *     one-line summary underneath, and the next verb as the last line.
  */
-export function renderLs(result: ListResult, t: Theme = new Theme(), now = new Date()): string {
+export function renderLs(
+  result: ListResult,
+  t: Theme = new Theme(),
+  now = new Date(),
+  echo: FilterEcho = {},
+): string {
   const lines: string[] = [];
 
-  lines.push(t.dim(headline(result, t, now)));
+  lines.push(t.dim(headline(result, t, echo)));
   lines.push('');
 
   if (result.sessions.length === 0) {
@@ -39,7 +65,14 @@ export function renderLs(result: ListResult, t: Theme = new Theme(), now = new D
     return lines.join('\n');
   }
 
-  const header = ['when', 'harness', 'project', 'title', 'status'].map((h) => t.dim(h));
+  // `last active`, not `when` — VERIFICATION-6 C-6. The column is
+  // {@link sessionDate}, the *end* of the session's interval, and `--since` /
+  // `--until` are an interval **overlap** (`search/filters.ts`), so
+  // `ls --until 15 aug` legitimately lists a row whose date is the 19th. Both
+  // halves are right and the bare word `when` made them read as a broken
+  // filter. Eleven characters, which is exactly the width the column already
+  // had for `21 aug 2025`, so nothing else on the line moves.
+  const header = ['last active', 'harness', 'project', 'title', 'status'].map((h) => t.dim(h));
   const rows: TableCellInput[][] = [header, ...result.sessions.map((s) => row(s, t, now))];
 
   lines.push(
@@ -77,15 +110,17 @@ export function renderLs(result: ListResult, t: Theme = new Theme(), now = new D
   return lines.join('\n');
 }
 
-function headline(r: ListResult, t: Theme, now: Date): string {
+function headline(r: ListResult, t: Theme, echo: FilterEcho): string {
   const parts = ['potsherd ls'];
   const fl = r.filters;
   if (fl.project) parts.push(shortProject(fl.project));
   if (fl.harness) parts.push(fl.harness);
-  // `--since 30d` arrives here as an ISO instant; nobody wants to read
-  // `2026-07-22T01:41:08.285Z` in a heading.
-  if (fl.since) parts.push(`since ${f.shortDate(fl.since, now)}`);
-  if (fl.until) parts.push(`until ${f.shortDate(fl.until, now)}`);
+  // The phrase, not the instant — see {@link FilterEcho}. `30d`, `last week`
+  // and `2026-08-15` are all quoted exactly as typed, so this line is the same
+  // line in every zone on earth, and nobody has to read
+  // `2026-07-22T01:41:08.285Z` in a heading either.
+  if (fl.since) parts.push(`since ${echo.since ?? fl.since}`);
+  if (fl.until) parts.push(`until ${echo.until ?? fl.until}`);
   if (fl.branch) parts.push(fl.branch);
   if (fl.tag) parts.push(`#${fl.tag}`);
   if (fl.pinned) parts.push('pinned');
@@ -136,7 +171,11 @@ function tagCell(s: BrowseSession): string {
 }
 
 function row(s: BrowseSession, t: Theme, now: Date): TableCellInput[] {
-  const when = s.endedAt ?? s.startedAt;
+  // {@link sessionDate}, not a copy of it. `threads.ts` calls itself "the
+  // promoted function" and `graft` has read it since F4; this file and
+  // `render/find.ts` each kept a spelling of the answer instead, and the two
+  // spellings were opposite ends of the interval (VERIFICATION-6 C-6).
+  const when = sessionDate(s);
   // `↳12` after the title, not a column: a session that spawned twelve
   // subagents is still one conversation, and the twelve are one flag away.
   const kids = s.subagents > 0 ? `  ${t.g('↳', '>')}${f.num(s.subagents)}` : '';

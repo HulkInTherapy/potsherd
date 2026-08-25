@@ -479,3 +479,83 @@ describe('doctor, on a database it can see is stranded and cannot repair itself'
     expect(after.stdout).not.toMatch(/converts a vec0 store/);
   });
 });
+
+/**
+ * C-8 — on a permanently stranded database, `potsherd index` prescribed
+ * `potsherd index`.
+ *
+ * The state is the one {@link buildOneOneDatabase} builds with
+ * `rewindSchema: false`: schema stamped 12, the three vec0 tables still there,
+ * the extension gone. `migrate()` skips any version already in
+ * `schema_migrations`, so **migration 10 can never run again on this
+ * database** — and every surface was telling the reader to run the verb that
+ * cannot help them. The requirement for this state was *must not throw*, and
+ * it does not; the sentence was not brought along.
+ *
+ * The test does not assert a form of words. It asserts the two things that
+ * make the sentence a lie: that the prescribed command changes nothing, and
+ * that the prescription is not the command that changes nothing.
+ */
+describe('a stranded database no migration will touch again', () => {
+  it('does not prescribe the command that cannot work', async () => {
+    const { root, claudeDir } = await buildOneOneDatabase({ rewindSchema: false });
+
+    await withoutTheExtension(() => {
+      const db = store.open({ root, readonly: true });
+      try {
+        const status = vecStatus(db);
+        expect(status.available).toBe(false);
+        expect(status.legacy).toContain('vec_exchanges');
+        // Migration 10 is stamped, so nothing will re-run it. That is the
+        // premise, read from the database rather than assumed.
+        const applied = db
+          .prepare('SELECT COUNT(*) AS n FROM schema_migrations WHERE version = 10')
+          .get() as { n: number };
+        expect(applied.n).toBe(1);
+        expect(
+          status.reason ?? '',
+          'the sentence still names potsherd index, which cannot convert this store',
+        ).not.toMatch(/^run potsherd index\b/);
+      } finally {
+        db.close();
+      }
+    });
+
+    // And the same sentence, through the binary, on the three verbs that print
+    // it. `index` prescribing itself is the sharpest form of the defect.
+    for (const argv of [
+      ['index', '--no-embed', '--harness', 'claude', '--claude-dir', claudeDir, '--potsherd-dir', root],
+      ['doctor', '--potsherd-dir', root],
+      ['stats', '--potsherd-dir', root],
+    ]) {
+      const r = cli(argv);
+      expect(r.code, `${argv[0]} exited ${r.code}`).toBe(0);
+      expect(r.stdout + r.stderr).not.toMatch(/no such module/);
+      expect(
+        r.stdout,
+        `${argv[0]} still prescribes potsherd index on a store it can never convert`,
+      ).not.toMatch(/run potsherd index — it converts a vec0 st/);
+    }
+  });
+
+  it('and the command it used to name really does change nothing', async () => {
+    const { root, claudeDir } = await buildOneOneDatabase({ rewindSchema: false });
+    const before = cli(['index', '--no-embed', '--harness', 'claude', '--claude-dir', claudeDir, '--potsherd-dir', root]);
+    expect(before.code).toBe(0);
+
+    await withoutTheExtension(() => {
+      const db = store.open({ root, readonly: true });
+      try {
+        // Ran the prescribed verb; the three vec0 tables are exactly where
+        // they were. This is why the sentence had to change.
+        for (const name of ['vec_exchanges', 'vec_cards', 'vec_ghost_prompts']) {
+          expect(objects(db, name)?.type, name).toBe('table');
+        }
+        expect(vecStatus(db).legacy).toContain('vec_exchanges');
+      } finally {
+        db.close();
+      }
+    });
+  });
+});
+

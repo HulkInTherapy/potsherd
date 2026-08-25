@@ -3,6 +3,8 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { db as store, embeddings, vecStatus } from '@potsherd/core';
 import { runFind } from '../packages/cli/src/commands/find.js';
+import { fitNote, vectorNote } from '../packages/core/src/doctor-line.js';
+import { bytes as fmtBytes, num as fmtNum } from '../packages/core/src/format.js';
 import { rmrf, tempDir } from './helpers.js';
 
 /**
@@ -45,6 +47,18 @@ function warmingRoot(): string {
       embeddings.EMBEDDING_VERSION,
       'e0',
     );
+  } finally {
+    db.close();
+  }
+  return root;
+}
+
+/** The same index with **nothing** embedded: `pending`, not `warming`. */
+function pendingRoot(): string {
+  const root = warmingRoot();
+  const db = store.open({ root });
+  try {
+    db.prepare('UPDATE exchanges SET embedding_version = NULL').run();
   } finally {
     db.close();
   }
@@ -222,5 +236,44 @@ describe('find says what semantic search is doing', () => {
     const out = await capture({ query: 'pgbouncer', potsherdDir: root, color: false });
     expect(expected(root)).toBeNull();
     expect(out).not.toContain('semantic search:');
+  });
+
+  /**
+   * C-6 of round 5 closed the `doctor` half of this and left the `find` half.
+   *
+   * On the first run of a fresh install there is a worker holding the embed
+   * lane and no runtime on disk: it is spending minutes fetching 46.1 MB
+   * before it can embed a single row. `doctor` says so —
+   * `vectors  —  0 of 4 · fetching the 46.1 MB runtime` — and `find` said
+   * `semantic search: warming (0 of 4 embedded)`, which tells the reader to
+   * wait for a pass that has not yet got its model. Two surfaces, one fact,
+   * and only one of them carried the clause.
+   */
+  it('names the fetch while the runtime is still coming down, as doctor does', async () => {
+    const root = pendingRoot();
+    const release = holdEmbedLane(root);
+    try {
+      const r = report(root) as { phase: string; runtimeReady: boolean; acquireBytes: number };
+      // The premise, established rather than assumed: a worker is alive, the
+      // runtime is not on disk, and nothing is embedded yet.
+      expect(r.phase).toBe('pending');
+      expect(r.runtimeReady).toBe(false);
+      expect(report(root).working).toBe(true);
+
+      // What `doctor` puts on the row, from the same report object.
+      // The same two formatters `vec.ts` hands it, so the clause compared
+      // below is the one a real `doctor` prints and not a default spelling.
+      const note = fitNote(vectorNote(r as never, { num: fmtNum, bytes: fmtBytes }).parts, 120);
+      expect(note).toMatch(/fetching the [\d.]+ MB runtime/);
+      const clause = /fetching the [\d.]+ MB runtime/.exec(note)![0];
+
+      const out = await capture({ query: 'pgbouncer', potsherdDir: root, color: false });
+      expect(out).toContain('semantic search: warming (0 of 4 embedded)');
+      // The clause `doctor` prints, on the line `find` prints, character for
+      // character — not a second sentence that means roughly the same thing.
+      expect(out).toContain(clause);
+    } finally {
+      release();
+    }
   });
 });

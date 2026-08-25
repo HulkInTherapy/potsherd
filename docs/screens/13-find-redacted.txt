@@ -1,7 +1,7 @@
 potsherd find "redacted" · 1 session · strong · bm25 · 8ms
 
   Put the importer behind the pooler                              claude · ghost
-  crm-ingest · 22 nov 2025 · 6 prompts recovered · feat/retry-b…  strong  0.0164
+  crm-ingest · last active 22 nov 2025 · 6 prompts recovered ·…   strong  0.8500
     …— postgres://ingest:‹redacted:basic-auth:201b2d22›@db.internal:6432/crm…
     assistant side not recoverable · potsherd show 840f40a5
 

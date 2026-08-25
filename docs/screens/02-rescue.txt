@@ -1,4 +1,4 @@
-potsherd rescue · ~/.potsherd/archive/claude · 24 aug 2026
+potsherd rescue · ~/.potsherd/archive/claude · 25 aug 2026
 
   files copied                 278   1.1 MB
   already archived               0   1.1 MB total on disk

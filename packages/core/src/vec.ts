@@ -19,6 +19,7 @@ import {
   stoppedLine,
   vectorNote,
   vectorReport,
+  warmingHead,
   warmingLine,
   type VectorReport,
 } from './doctor-line.js';
@@ -373,12 +374,63 @@ function statementsCompile(db: Db, name: string): boolean {
  * migration 10 has actually tried and been refused, and it names the driver
  * that is measured to succeed — `node:sqlite` writes `sqlite_master` under
  * `writable_schema`, and a `better-sqlite3` too old for `unsafeMode` cannot.
+ *
+ * ## the third case, and why it needs a sentence of its own
+ *
+ * VERIFICATION-6 C-8: on a database that is stranded **and already stamped**,
+ * `potsherd index` prescribed `potsherd index`, and it will never work.
+ * `migrate()` skips any version already in `schema_migrations`, so once 10 is
+ * recorded, migration 10 cannot run again on that file — whatever put it in
+ * that state. A decline records nothing and retries on the next open, which is
+ * what makes the first two sentences true; a *recorded* 10 is the one shape
+ * where they are not. `tests/upgrade-from-1.1.test.ts` builds it and calls it
+ * requirement 2, the requirement was *must not throw*, and it does not — the
+ * sentence was simply not brought along.
+ *
+ * So the state is asked rather than assumed, from the one table that decides
+ * it, and the sentence for it names something that actually works. There is no
+ * verb that repairs this file: the three vec0 names cannot be dropped without
+ * the extension, and no migration will be offered the chance to try. What is
+ * left is a rebuild, and the note says so with the command first, because
+ * `doctor`'s note column is 43 characters and elides from the right.
  */
 function strandedReason(db: Db): string {
-  return (
-    declines.get(db) ?? 'run potsherd index — it converts a vec0 store written by 1.1.0'
-  );
+  const declined = declines.get(db);
+  if (declined) return declined;
+  if (!portableVectorsStamped(db)) {
+    return 'run potsherd index — it converts a vec0 store written by 1.1.0';
+  }
+  return 'delete potsherd.db and run potsherd index — this vec0 store cannot be converted in place';
 }
+
+/**
+ * Is migration 10 already recorded on this database?
+ *
+ * Read straight from `schema_migrations`, because that table is the whole of
+ * what `migrate()` consults before it decides to skip a version, and a second
+ * idea about "has the conversion run" is how the sentence above came to be
+ * false in the first place. `false` on any error: an unreadable
+ * `schema_migrations` is a database nothing has migrated, and the ordinary
+ * sentence is the right one for it.
+ */
+function portableVectorsStamped(db: Db): boolean {
+  try {
+    const row = db
+      .prepare('SELECT COUNT(*) AS n FROM schema_migrations WHERE version = ?')
+      .get(PORTABLE_VECTORS) as { n: number } | undefined;
+    return (row?.n ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Migration 10's version number, named here because this file is where its
+ * body lives ({@link migrateToPortableVectors}) and `db.ts` is where its
+ * registration does. A bare `10` in a predicate about "has the conversion run"
+ * is the kind of constant that outlives the reason for it.
+ */
+const PORTABLE_VECTORS = 10;
 
 /**
  * Can this connection run a statement against `table` right now?
@@ -495,7 +547,11 @@ function statusLine(r: VectorReport): string | null {
   // are three assertions in `tests/index.test.ts` that go red if that is
   // undone.
   if (r.working === false) return stoppedLine(r, fmtNum, fmtBytes);
-  return warmingLine(r, fmtNum);
+  // `fmtBytes` as well as `fmtNum` — VERIFICATION-6 C-7. `warmingLine` now
+  // carries the same fetch clause `doctor`'s row does, and a clause with a
+  // byte figure in it has to be given the same formatter or the two surfaces
+  // print `46.1 MB` and `48 MB` for one number.
+  return warmingLine(r, fmtNum, fmtBytes);
 }
 
 export function vecAvailable(db: Db): boolean {
@@ -948,7 +1004,7 @@ export function vectorCounts(db: Db): { embedded: number; pending: number } {
   return { embedded, pending };
 }
 
-export { fitNote, stoppedLine, vectorNote, vectorReport, warmingLine };
+export { fitNote, stoppedLine, vectorNote, vectorReport, warmingHead, warmingLine };
 export type { VectorReport };
 
 // ------------------------------------------------------------------ embedding

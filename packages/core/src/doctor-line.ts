@@ -128,14 +128,73 @@ export function vectorReport(counts: {
 }
 
 /**
+ * The one clause that says the runtime itself is still coming down.
+ *
+ * VERIFICATION-6 C-7. `doctor` has carried it since round 5's C-6 — the
+ * `pending` branch of {@link vectorNote}, where a live worker and an absent
+ * runtime mean the multi-minute acquisition is in flight — and
+ * {@link warmingLine} did not, so on the first run of a fresh install `find`
+ * said *wait, this is warming* about a pass that had not yet got its model.
+ * The audit's item 9 asks for the degradation banner on **every** `find`.
+ *
+ * It is a function and not a second string for the same reason the phase is:
+ * two spellings of one clause is how the two surfaces came to disagree in the
+ * first place.
+ */
+function fetchClause(r: VectorReport, bytes: (n: number) => string): string {
+  return `fetching the ${bytes(r.acquireBytes)} runtime`;
+}
+
+/**
  * The status line every verb prints while vectors are warming.
  *
  * `05`'s honesty contract, and the audit's item 9: *tell me what you can't do,
  * at the top*. It is a **status, not an apology** — no "degraded", no
  * "unavailable", no command to run, because there is nothing for the user to
  * do. The work is already happening.
+ *
+ * What it now also says is **what** is happening, when the answer is not yet
+ * "embedding". A worker holding the lane with no runtime on disk is spending
+ * minutes on a 46 MB download before the first row is embedded, and
+ * {@link stoppedLine} already made the same distinction on the other side of
+ * the lock. Same clause as `doctor`'s row, from {@link fetchClause}.
+ *
+ * The clause order is {@link stoppedLine}'s, for {@link stoppedLine}'s reason:
+ * `embedded > 0` is tested first, because if anything in this index carries a
+ * vector then a pass has plainly used the runtime, and naming a download would
+ * be a strange thing to say about a machine that has already had one. That is
+ * also exactly where {@link vectorNote} draws the line — the fetch clause is
+ * on its `pending` branch and on no other — so the two surfaces are saying the
+ * same thing in the same states, which is the whole of the fix.
  */
-export function warmingLine(r: VectorReport, num: (n: number) => string = String): string {
+export function warmingLine(
+  r: VectorReport,
+  num: (n: number) => string = String,
+  bytes: (n: number) => string = (n) => `${Math.round(n / 1_000_000)} MB`,
+): string {
+  const head = warmingHead(r, num);
+  if (r.embedded > 0 || r.runtimeReady) return head;
+  return `${head} — ${fetchClause(r, bytes)}`;
+}
+
+/**
+ * {@link warmingLine} without the fetch clause, for the one caller that has a
+ * better clause of its own.
+ *
+ * `potsherd index` prints this sentence with an extra clause saying **who** is
+ * doing the work and that it happens once — the reassurance that a 46 MB
+ * download is not going to happen again and is not blocking anything. It built
+ * that by appending to `vecStatus().line`, so the moment C-7 put the fetch
+ * clause on that line the two collided: the composed sentence overran 80
+ * columns, `fitLine` dropped the whole of `index`'s half, and the screen lost
+ * *in the background, once* to gain a clause it was already carrying.
+ *
+ * A caller with something more specific to say should be given the head and
+ * say it, rather than be handed a finished sentence and told to grow it. The
+ * patch that makes `index` do that is one line and is in this branch's report;
+ * this is the half of it that lives in a file the branch owns.
+ */
+export function warmingHead(r: VectorReport, num: (n: number) => string = String): string {
   return `semantic search: warming (${num(r.embedded)} of ${num(r.total)} embedded)`;
 }
 
@@ -240,7 +299,7 @@ export function vectorNote(
           : [
               `0 of ${num(r.total)}`,
               r.working === true
-                ? `fetching the ${bytes(r.acquireBytes)} runtime`
+                ? fetchClause(r, bytes)
                 : r.working === false
                   ? `not running — ${bytes(r.acquireBytes)} runtime not fetched`
                   : `${bytes(r.acquireBytes)} runtime not fetched yet`,

@@ -1,4 +1,4 @@
-potsherd index · ~/.potsherd · 24 aug 2026
+potsherd index · ~/.potsherd · 25 aug 2026
 
   claude                       228   31 sessions · 197 sidechains · 439 exchang…
   codex                          0   not installed — ~/.codex/sessions
@@ -11,10 +11,10 @@ potsherd index · ~/.potsherd · 24 aug 2026
   exchanges indexed            439   242 tool calls · 2 redacted
   ghosts indexed               299   2,971 prompts, searchable
   masked this run                5   aws 1 · gcp 1 · github 1 · stripe 1 · …
-  vectors                        —   0 of 3,410
+  vectors                        —   0 of 3,410 · fetching the 46.1 MB runtime
 
-  full index                 374ms   228 parsed · 0 unchanged · 546 KB
+  full index                 384ms   228 parsed · 0 unchanged · 546 KB
 
-  semantic search: warming (0 of 3,410 embedded) — fetching 46.1 MB, once
+  semantic search: warming (0 of 3,410 embedded) — fetching the 46.1 MB runtime
 
   run  potsherd doctor  for parse coverage and every path read.

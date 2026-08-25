@@ -4160,7 +4160,16 @@ function vectorReport(counts2) {
     return { ...base2, phase: "pending" };
   return { ...base2, phase: "warming" };
 }
-function warmingLine(r, num3 = String) {
+function fetchClause(r, bytes3) {
+  return `fetching the ${bytes3(r.acquireBytes)} runtime`;
+}
+function warmingLine(r, num3 = String, bytes3 = (n2) => `${Math.round(n2 / 1e6)} MB`) {
+  const head = warmingHead(r, num3);
+  if (r.embedded > 0 || r.runtimeReady)
+    return head;
+  return `${head} \u2014 ${fetchClause(r, bytes3)}`;
+}
+function warmingHead(r, num3 = String) {
   return `semantic search: warming (${num3(r.embedded)} of ${num3(r.total)} embedded)`;
 }
 function stoppedLine(r, num3 = String, bytes3 = (n2) => `${Math.round(n2 / 1e6)} MB`) {
@@ -4214,7 +4223,7 @@ function vectorNote(r, opts = {}) {
           runtime
         ] : [
           `0 of ${num3(r.total)}`,
-          r.working === true ? `fetching the ${bytes3(r.acquireBytes)} runtime` : r.working === false ? `not running \u2014 ${bytes3(r.acquireBytes)} runtime not fetched` : `${bytes3(r.acquireBytes)} runtime not fetched yet`
+          r.working === true ? fetchClause(r, bytes3) : r.working === false ? `not running \u2014 ${bytes3(r.acquireBytes)} runtime not fetched` : `${bytes3(r.acquireBytes)} runtime not fetched yet`
         ],
         tone: "dim"
       };
@@ -4492,8 +4501,23 @@ function statementsCompile(db, name) {
   }
 }
 function strandedReason(db) {
-  return declines.get(db) ?? "run potsherd index \u2014 it converts a vec0 store written by 1.1.0";
+  const declined = declines.get(db);
+  if (declined)
+    return declined;
+  if (!portableVectorsStamped(db)) {
+    return "run potsherd index \u2014 it converts a vec0 store written by 1.1.0";
+  }
+  return "delete potsherd.db and run potsherd index \u2014 this vec0 store cannot be converted in place";
 }
+function portableVectorsStamped(db) {
+  try {
+    const row2 = db.prepare("SELECT COUNT(*) AS n FROM schema_migrations WHERE version = ?").get(PORTABLE_VECTORS);
+    return (row2?.n ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+var PORTABLE_VECTORS = 10;
 function vecTableUsable(db, table2 = "vec_exchanges") {
   if (!loadVec(db).available)
     return false;
@@ -4536,7 +4560,7 @@ function statusLine(r) {
   }
   if (r.working === false)
     return stoppedLine(r, num, bytes);
-  return warmingLine(r, num);
+  return warmingLine(r, num, bytes);
 }
 function vecAvailable(db) {
   return vecStatus(db).available;
@@ -17552,15 +17576,15 @@ function block(s, r, t, now) {
   const title = markerFor(s, t) + elide(s.displayTitle, titleRoom - markerLen(s), t);
   lines.push(INDENT + title + " ".repeat(Math.max(1, width - Theme.len(title) - right.length)) + tone(right, s, t));
   const meta = [s.projectName];
-  const when2 = s.startedAt ?? s.endedAt;
+  const when2 = sessionDate(s);
   if (when2)
-    meta.push(shortDate(when2, now));
+    meta.push(`last active ${shortDate(when2, now)}`);
   meta.push(s.kind === "ghost" ? `${num(s.prompts)} prompts recovered` : `${num(s.exchanges)} ${plural(s.exchanges, "exchange")}`);
   if (s.gitBranch)
     meta.push(s.gitBranch);
   if (s.agentName)
     meta.push(s.agentName);
-  const score = `${s.confidence}  ${s.score.toFixed(4)}`;
+  const score = `${s.confidence}  ${s.calibration.score.toFixed(4)}`;
   const metaLine = clip(meta.join(` ${t.sep} `), Math.max(10, width - score.length - 2), t);
   lines.push(INDENT + t.dim(metaLine) + " ".repeat(Math.max(1, width - metaLine.length - score.length)) + t.dim(score));
   const quotable = s.hits.filter((h) => h.kind !== "title" && h.snippet.text.trim().length > 0);
@@ -17826,9 +17850,9 @@ function tail(e, t, width) {
 }
 
 // ../core/dist/render/ls.js
-function renderLs(result, t = new Theme(), now = /* @__PURE__ */ new Date()) {
+function renderLs(result, t = new Theme(), now = /* @__PURE__ */ new Date(), echo = {}) {
   const lines = [];
-  lines.push(t.dim(headline2(result, t, now)));
+  lines.push(t.dim(headline2(result, t, echo)));
   lines.push("");
   if (result.sessions.length === 0) {
     lines.push(INDENT + "nothing matches those filters.");
@@ -17836,7 +17860,7 @@ function renderLs(result, t = new Theme(), now = /* @__PURE__ */ new Date()) {
     lines.push(fitLine(t, `${t.dim("run")}  potsherd ls  ${t.dim("for everything potsherd has indexed.")}`, `${t.dim("run")}  potsherd ls`));
     return lines.join("\n");
   }
-  const header = ["when", "harness", "project", "title", "status"].map((h) => t.dim(h));
+  const header = ["last active", "harness", "project", "title", "status"].map((h) => t.dim(h));
   const rows = [header, ...result.sessions.map((s) => row(s, t, now))];
   lines.push(...table(t, rows, {
     gap: 2,
@@ -17858,7 +17882,7 @@ function renderLs(result, t = new Theme(), now = /* @__PURE__ */ new Date()) {
   lines.push(fitLine(t, `${t.dim("run")}  potsherd show <id8>  ${t.dim("to read one, or  potsherd find <words>")}`, `${t.dim("run")}  potsherd show <id8>  ${t.dim("to read one")}`, `${t.dim("run")}  potsherd show <id8>`));
   return lines.join("\n");
 }
-function headline2(r, t, now) {
+function headline2(r, t, echo) {
   const parts = ["potsherd ls"];
   const fl = r.filters;
   if (fl.project)
@@ -17866,9 +17890,9 @@ function headline2(r, t, now) {
   if (fl.harness)
     parts.push(fl.harness);
   if (fl.since)
-    parts.push(`since ${shortDate(fl.since, now)}`);
+    parts.push(`since ${echo.since ?? fl.since}`);
   if (fl.until)
-    parts.push(`until ${shortDate(fl.until, now)}`);
+    parts.push(`until ${echo.until ?? fl.until}`);
   if (fl.branch)
     parts.push(fl.branch);
   if (fl.tag)
@@ -17899,7 +17923,7 @@ function tagCell(s) {
   return s.tags.length > 0 ? "  " + s.tags.map((tag) => `#${tag}`).join(" ") : "";
 }
 function row(s, t, now) {
-  const when2 = s.endedAt ?? s.startedAt;
+  const when2 = sessionDate(s);
   const kids = s.subagents > 0 ? `  ${t.g("\u21B3", ">")}${num(s.subagents)}` : "";
   return [
     when2 ? shortDate(when2, now) : "\u2014",
@@ -25845,6 +25869,7 @@ async function runDoctor(o) {
   let indexedTypes = [];
   let vec = { available: false, reason: "no database yet \u2014 run potsherd index" };
   let indexedAt = null;
+  let indexed = null;
   if (dbExists) {
     const db = db_exports.open({ root, readonly: true });
     try {
@@ -25855,6 +25880,7 @@ async function runDoctor(o) {
       }
       redaction = storedRedactionCounts(db);
       indexedTypes = storedRecordTypes(db);
+      indexed = stats(db, { root, freshness: false, all: true }).totals;
       const row2 = db.prepare("SELECT MAX(indexed_at) AS at FROM sessions").get();
       indexedAt = row2?.at ?? null;
     } catch {
@@ -26085,7 +26111,13 @@ async function runDoctor(o) {
       },
       index: {
         indexedAt,
-        sessions: counts2["sessions"] ?? 0,
+        // The same split the human view prints, and the same split `stats`
+        // publishes: `sessions` is top-level transcripts, `sidechains` is the
+        // subagents inside them. `rows` keeps the old meaning of this field —
+        // every row in the table — for a consumer that was reading it.
+        sessions: indexed?.sessions ?? counts2["sessions"] ?? 0,
+        sidechains: indexed?.sidechains ?? 0,
+        rows: counts2["sessions"] ?? 0,
         exchanges: counts2["exchanges"] ?? 0,
         toolCalls: counts2["tool_calls"] ?? 0,
         // The same numbers the human view prints, from the same call
@@ -26132,7 +26164,18 @@ async function runDoctor(o) {
   card.blank();
   card.rows([
     {
-      label: "sessions on disk",
+      // `claude sessions on disk`, and the harness is not decoration.
+      //
+      // VERIFICATION-6 C-4, and it is audit F2's family: this number is
+      // `disk.sessions.length` from `audit.ts`, which walks `~/.claude` and
+      // nothing else. Under the bare word `sessions`, on a screen whose whole
+      // job is *what is on disk*, it read as a count of the machine — and on a
+      // machine with four harnesses it was `49` above an adapter block listing
+      // the other three and a `stats` card saying `56`. Nothing was
+      // miscounted; one of the two numbers was answering a question its label
+      // did not ask. The label asks it now, and the number is the same number
+      // the `claude` adapter line prints four rows below.
+      label: "claude sessions on disk",
       value: format_exports.num(report.onDiskFiles),
       // The live corpus's size belongs to this row, not to `files archived`.
       note: (
@@ -26146,7 +26189,9 @@ async function runDoctor(o) {
         `${format_exports.num(report.titledSessions)} harness-titled ${t.mid} ${format_exports.num(report.sdkSessions)} sdk ${t.mid} ${format_exports.bytes(report.bytes)}`
       )
     },
-    { label: "sidechains on disk", value: format_exports.num(report.sidechainFiles), note: "subagent transcripts" },
+    // Same scope, same reason: `audit.ts` counts claude's subagent transcripts
+    // and no other harness's, and `stats` counts every harness's.
+    { label: "claude sidechains on disk", value: format_exports.num(report.sidechainFiles), note: "subagent transcripts" },
     {
       label: "ghosts stored",
       value: format_exports.num(counts2["ghosts"] ?? 0),
@@ -26165,9 +26210,22 @@ async function runDoctor(o) {
   card.blank();
   card.rows([
     {
+      // The number `stats` prints, from the call `stats` makes — not a second
+      // `COUNT(*)` that means something else by the same word.
+      //
+      // VERIFICATION-6 C-4. `COUNT(*) FROM sessions` counts subagent
+      // transcripts as sessions, so on the reference corpus this row said
+      // `228` where `stats` said `31 sessions · 197 subagents`. Both were
+      // arithmetically true and only one of them was answering the question
+      // the word asks. The subagents keep their place — in the note, exactly
+      // where `stats` puts them.
       label: "sessions indexed",
-      value: format_exports.num(counts2["sessions"] ?? 0),
-      note: indexedAt ? `${format_exports.num(counts2["exchanges"] ?? 0)} ${format_exports.plural(counts2["exchanges"] ?? 0, "exchange")} ${t.mid} ${format_exports.num(counts2["tool_calls"] ?? 0)} tool ${format_exports.plural(counts2["tool_calls"] ?? 0, "call")}` : "nothing indexed yet \u2014 run potsherd index",
+      value: format_exports.num(indexed?.sessions ?? counts2["sessions"] ?? 0),
+      note: indexedAt ? [
+        `${format_exports.num(indexed?.sidechains ?? 0)} subagents`,
+        `${format_exports.num(counts2["exchanges"] ?? 0)} ${format_exports.plural(counts2["exchanges"] ?? 0, "exchange")}`,
+        `${format_exports.num(counts2["tool_calls"] ?? 0)} tool ${format_exports.plural(counts2["tool_calls"] ?? 0, "call")}`
+      ].join(` ${t.mid} `) : "nothing indexed yet \u2014 run potsherd index",
       tone: indexedAt ? "none" : "dim"
     },
     {
@@ -27244,7 +27302,15 @@ async function runLs(o) {
       return 0;
     }
     const t = themeFrom(o);
-    print(o.resumeMenu ? renderResumeMenu(result, t) : renderLs(result, t));
+    print(
+      o.resumeMenu ? renderResumeMenu(result, t) : (
+        // The words the reader typed, handed to the heading so it can quote
+        // them rather than re-derive them from the instants `parseFilters`
+        // turned them into. VERIFICATION-6 C-2: the receipt of an input is
+        // the one thing that must never be a second computation.
+        renderLs(result, t, /* @__PURE__ */ new Date(), { since: o.since, until: o.until })
+      )
+    );
     return 0;
   } finally {
     db.close();
