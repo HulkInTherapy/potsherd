@@ -25,7 +25,15 @@ import {
   type RecallResult,
 } from '../packages/core/src/index.js';
 import type { Db } from '../packages/core/src/db.js';
-import { PHASE_1_GATE, PHASE_3_GATE, judge, ruleLine, type Gate } from './gate.js';
+import {
+  PHASE_1_GATE,
+  PHASE_3_GATE,
+  VERB_RATCHET,
+  judge,
+  ruleLine,
+  verbBars,
+  type Gate,
+} from './gate.js';
 
 /**
  * T1.6 / T1.7b / T3.4 — the recall eval. `pnpm evals`.
@@ -870,20 +878,24 @@ function overlaps(root: string, queries: EvalQuery[], threshold: number): Overla
 // ------------------------------------------------------------- the phase gate
 
 /**
- * The **amended** gate of `plans/phases/phase-8-hardening.md` §8.5: *hybrid
- * must be ≥ both singles at recall@k, and strictly above both at recall@1.*
+ * The gate, re-scoped 25 aug 2026 (P11-GATE) to judge **both surfaces**, each
+ * on what it can honestly say. The rule and the whole of its rationale are in
+ * `evals/gate.ts`; this function's only job is to hand it the right two
+ * measurements, which is the exact thing that was wrong for eight phases.
+ *
+ *   * **the ranker**, scored by `rankingScoreAt` at {@link RANKING_FLOOR} —
+ *     the comparative clauses. Hybrid ≥ both singles at recall@k, strictly >
+ *     both at recall@1, and ≥ the ratchet. These are meaningful there and were
+ *     always measured there.
+ *   * **the verb**, scored by `scoreAt` at {@link VERB_FLOOR} — the ratchet,
+ *     with no comparison in it. `gate.ts`'s {@link VERB_RATCHET} says why.
  *
  * Every condition is computed here rather than left for a human to do with two
  * screenshots — the fusion has now been measured losing three separate times,
- * and every one of those took somebody comparing numbers by hand. The rule
- * itself is in `evals/gate.ts`, which is where its rationale and its test are.
+ * and every one of those took somebody comparing numbers by hand.
  *
- * **C-1 step 1: it is judged on the verb.** `scoreAt` reads `Outcome.rank`,
- * which since this change is the answer's position on the page `recall()`
- * returns at {@link VERB_FLOOR}. No clause of the rule moved and no line of
- * `evals/gate.ts` moved; what moved is which of two measurements is fed to it.
- * The rule's own sentence — *"strictly > both at recall@1 (the row the user
- * actually sees)"* — names the verb, and it was being handed the ranking.
+ * The two reported-never-judged numbers travel with the verdict so that the
+ * JSON blob and the terminal cannot disagree about the size of the gap.
  */
 function gateFor(
   runs: { mode: Mode; outcomes: Outcome[] }[],
@@ -895,15 +907,36 @@ function gateFor(
   const bm25 = runs.find((r) => r.mode.key === 'bm25');
   const vec = runs.find((r) => r.mode.key === 'vectors');
   if (!hybrid || !bm25 || !vec) return null;
-  const score = (o: Outcome[]): { at1: number; atK: number } => ({
+  /** The verb: the page `potsherd find` prints. */
+  const verb = (o: Outcome[]): { at1: number; atK: number } => ({
     at1: scoreAt(o, 1),
     atK: scoreAt(o, k),
   });
+  /** The ranker: every row the fusion found, before the floor decided. */
+  const rank = (o: Outcome[]): { at1: number; atK: number } => ({
+    at1: rankingScoreAt(o, 1),
+    atK: rankingScoreAt(o, k),
+  });
   return judge(
     key,
-    { bm25: score(bm25.outcomes), vectors: score(vec.outcomes), hybrid: score(hybrid.outcomes) },
+    {
+      ranking: {
+        bm25: rank(bm25.outcomes),
+        vectors: rank(vec.outcomes),
+        hybrid: rank(hybrid.outcomes),
+      },
+      verb: {
+        bm25: verb(bm25.outcomes),
+        vectors: verb(vec.outcomes),
+        hybrid: verb(hybrid.outcomes),
+      },
+    },
     total,
     k,
+    {
+      emptyPages: emptyPages(hybrid.outcomes),
+      withheld: withheldAt(hybrid.outcomes, k),
+    },
   );
 }
 
@@ -1009,15 +1042,25 @@ async function main(): Promise<void> {
             pass: c.pass,
           })),
           coverage: coverage(queries),
-          // Both halves of the amended gate, separately, per judged mode —
-          // `wide` (recall@k, `>=`) and `tight` (recall@1, `>`) — so a pass is
-          // machine-checkable condition by condition and not a rendered
-          // string somebody has to read. `rule` is the same sentence the
-          // terminal prints.
+          // Every clause of the re-scoped gate, separately, per judged mode,
+          // so a pass is machine-checkable condition by condition and not a
+          // rendered string somebody has to read. `rule` is the same sentence
+          // the terminal prints.
+          //
+          //   `wide`  — RANKER, recall@k, `>=` against both singles
+          //   `tight` — RANKER, recall@1, `>`  against both singles
+          //   `clearsBar` — RANKER, recall@k against the 51/60 ratchet
+          //   `verb`  — VERB, a ratchet on the judged mode and nothing else,
+          //             carrying `emptyPages` and `withheld` as reported-only
+          //
+          // `phase3Bar` keeps its name because its value never moved; what
+          // moved is that it is read off the ranking view, which is the view
+          // it was measured on in every run from phase 10 onward.
           gates: {
             rule: ruleLine(o.k, total),
             phase1Bar: PHASE_1_GATE,
             phase3Bar: PHASE_3_GATE,
+            verbRatchet: { ...VERB_RATCHET, ...verbBars(total) },
             phase1Met: phase1,
             phase3: gates,
           },
@@ -1177,39 +1220,42 @@ async function main(): Promise<void> {
   // the library default — every row the fusion found. The gap between the two
   // lines is exactly what the cliff costs, per mode, in the same run that
   // scored it, which is the property a reader of one number could never have.
+  //
+  // `product` is the verb's line and it is printed bright, because it is what
+  // ships. `ranker` is dim because it is the upstream number, and it carries
+  // the ✓/✗ against the 51/60 ratchet because that ratchet is the *ranker's*
+  // — it was measured with no floor applied in every run from phase 10 on.
   const scoreLine = (
     label: string,
     wide: number,
     tight: number,
     tail: string,
-    judged: boolean,
+    product: boolean,
+    scoreAgainstRankerBar: boolean,
   ): string => {
     const pct = `${total ? Math.round((wide / total) * 100) : 0}%`.padEnd(5);
     const ok3 = total > 0 && wide / total >= PHASE_3_GATE;
     const body =
       `  ${label.padEnd(23)}` +
       `recall@${o.k} ${String(wide).padStart(3)}/${total}  ` +
-      // Only the judged line is scored green or amber against the ratchet. The
-      // ranking line is a reference number and colouring it would say the bar
-      // applies to it, which is the confusion this whole change is undoing.
-      (judged ? (ok3 ? t.ok(pct) : t.warn(pct)) : pct) +
+      (scoreAgainstRankerBar ? (ok3 ? t.ok(pct) : t.warn(pct)) : pct) +
       `   recall@1 ${String(tight).padStart(3)}/${total}  ` +
       `${total ? Math.round((tight / total) * 100) : 0}%`.padEnd(5) +
       tail;
-    return judged ? body : t.dim(body);
+    return product ? body : t.dim(body);
   };
   out.push(
     INDENT +
       t.dim(
-        `find ${t.sep} recall() at --min-confidence ${VERB_FLOOR}, what the verb returns ` +
-          `${t.sep} the gate is judged on this line`,
+        `find ${t.sep} recall() at --min-confidence ${VERB_FLOOR} ${t.sep} ` +
+          'THE PAGE A USER IS HANDED. this is the product, and it is ratcheted below',
       ),
   );
   out.push(
     INDENT +
       t.dim(
         `ranking ${t.sep} the same call at ${RANKING_FLOOR} ${t.sep} what the fusion found, ` +
-          'before the floor decided who sees it',
+          'before the floor decided who sees it. the comparative clauses are judged here',
       ),
   );
   out.push('');
@@ -1221,6 +1267,7 @@ async function main(): Promise<void> {
         scoreAt(outcomes, 1),
         t.dim(`  p50 ${percentile(sorted(outcomes), 50)}ms  p95 ${percentile(sorted(outcomes), 95)}ms`),
         true,
+        false,
       ),
     );
     const withheld = withheldAt(outcomes, o.k);
@@ -1232,10 +1279,35 @@ async function main(): Promise<void> {
         `  ${emptyPages(outcomes)}/${total} empty pages` +
           (withheld > 0 ? `, ${withheld} answers ranked and withheld` : ''),
         false,
+        true,
       ),
     );
   }
   out.push('');
+  // One sentence, in the run's own numbers, so that the gap between the two
+  // lines above cannot be read past. `plans/09 §17.16`: shipping the ranker's
+  // numbers as the product's numbers is what happened for eight phases.
+  {
+    const h = runs.find((r) => r.mode.key === 'hybrid') ?? runs[runs.length - 1];
+    if (h) {
+      const v1 = scoreAt(h.outcomes, 1);
+      const r1 = rankingScoreAt(h.outcomes, 1);
+      out.push(
+        INDENT +
+          t.warn('the gap') +
+          t.dim(
+            ` ${t.sep} ${h.mode.label}: the ranker puts the answer first for ${r1}/${total} queries; ` +
+              `potsherd find prints it for ${v1}. ` +
+              `${emptyPages(h.outcomes)}/${total} pages come back empty. ` +
+              'the second number is the product',
+          ),
+      );
+      out.push(
+        INDENT + t.dim(`${' '.repeat(8)}closing it is phase 12's named target ${t.sep} phases/phase-12/FIRST-JOB.md`),
+      );
+      out.push('');
+    }
+  }
 
   // ------------------------------------------------------------- the overlap
   const flagged = overlap.filter((r) => r.flagged);
@@ -1279,7 +1351,13 @@ async function main(): Promise<void> {
   // because this block is the thing that ends up in a screenshot and the
   // original one-line version — "above bm25-only and vec-only" — was ambiguous
   // enough about `>` versus `>=` to cost this project five phases of argument.
-  out.push(INDENT + t.dim(`phase-3 gate ${t.sep} amended 22 aug 2026 (phase 8.5), by the author of the original`));
+  out.push(
+    INDENT +
+      t.dim(
+        `retrieval gate ${t.sep} ranker clauses amended 22 aug 2026 (phase 8.5); ` +
+          'verb ratchet added 25 aug 2026 (phase 11) — both by the author of the original',
+      ),
+  );
   for (const line of fmt.wrap(ruleLine(o.k, total), t.width - 4)) {
     out.push(INDENT + t.dim(line));
   }
@@ -1301,12 +1379,14 @@ async function main(): Promise<void> {
   } else {
     for (const g of gates) {
       const label = MODES[g.mode as ModeKey].label;
-      // Two lines per mode, one per half of the rule, each condition its own
-      // ✓/✗ with the number it was compared against in brackets. One line
-      // would fit; it would also hide which of the four conditions went red.
+      // Three lines per mode: two for the ranker's halves and one for the
+      // verb's ratchet, each condition its own ✓/✗ with the number it was
+      // compared against in brackets. One line would fit; it would also hide
+      // which of the six conditions went red, and which SURFACE went red —
+      // which is the distinction the whole re-scope exists to make.
       out.push(
         INDENT +
-          `${label.padEnd(18)}recall@${g.k} ${String(g.wide.hybrid).padStart(3)}/${total}   ` +
+          `${(label + ' · ranker').padEnd(26)}recall@${g.k} ${String(g.wide.hybrid).padStart(3)}/${total}   ` +
           mark(t, g.wide.beatsBm25, `≥ bm25 (${g.wide.bm25})`.padEnd(15)) +
           '  ' +
           mark(t, g.wide.beatsVectors, `≥ vectors (${g.wide.vectors})`.padEnd(17)) +
@@ -1315,19 +1395,43 @@ async function main(): Promise<void> {
       );
       out.push(
         INDENT +
-          `${' '.repeat(18)}recall@1 ${String(g.tight.hybrid).padStart(3)}/${total}   ` +
+          `${' '.repeat(26)}recall@1 ${String(g.tight.hybrid).padStart(3)}/${total}   ` +
           mark(t, g.tight.beatsBm25, `> bm25 (${g.tight.bm25})`.padEnd(15)) +
           '  ' +
-          mark(t, g.tight.beatsVectors, `> vectors (${g.tight.vectors})`.padEnd(17)) +
+          mark(t, g.tight.beatsVectors, `> vectors (${g.tight.vectors})`.padEnd(17)),
+      );
+      // No `bm25` or `vectors` column here, on purpose, and a reader who
+      // wonders where they went is asked the question in `gate.ts`: at the
+      // verb the floor is computed from wording, so a comparison against a
+      // single lane measures nothing a lane can change. See VERB_RATCHET.
+      out.push(
+        INDENT +
+          `${'  · verb (ratchet)'.padEnd(26)}recall@${g.k} ${String(g.verb.atK).padStart(3)}/${total}   ` +
+          mark(t, g.verb.holdsAtK, `≥ ${g.verb.barK}/${total}`.padEnd(15)) +
+          '  ' +
+          `recall@1 ${String(g.verb.at1).padStart(3)}/${total}  ` +
+          mark(t, g.verb.holdsAt1, `≥ ${g.verb.bar1}/${total}`.padEnd(8)) +
           '  ' +
           (g.pass ? t.ok('PASS') : t.warn('FAIL')),
       );
+      if (g.verb.emptyPages !== null) {
+        out.push(
+          INDENT +
+            t.dim(
+              `${' '.repeat(26)}${g.verb.emptyPages}/${total} empty pages` +
+                (g.verb.withheld !== null
+                  ? `, ${g.verb.withheld} answers ranked in the top ${g.k} and withheld`
+                  : '') +
+                ' — reported, never judged',
+            ),
+        );
+      }
     }
     out.push(
       INDENT +
         (verdict?.pass
-          ? t.ok('PASS') + t.dim(' — the amended phase-3 gate would merge this fusion')
-          : t.warn('FAIL') + t.dim(' — the amended phase-3 gate would not merge this fusion')),
+          ? t.ok('PASS') + t.dim(' — the re-scoped gate would merge this fusion')
+          : t.warn('FAIL') + t.dim(' — the re-scoped gate would not merge this fusion')),
     );
   }
   if (controlOutcomes.length > 0) {
