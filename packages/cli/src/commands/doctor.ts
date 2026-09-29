@@ -1,0 +1,1118 @@
+import fs from 'node:fs';
+import nodePath from 'node:path';
+import process from 'node:process';
+import {
+  type FormatProvenance,
+  VERSION,
+  audit,
+  claude as claudeAdapter,
+  codex as codexAdapter,
+  countsJson,
+  cursor as cursorAdapter,
+  detectBackend,
+  embeddings,
+  MODEL_CALL_VERBS,
+  NoBackendError,
+  LOCAL_SOCKET_VERBS,
+  OFFLINE_VERBS,
+  RUNTIME_FETCH_VERBS,
+  db as store,
+  paths,
+  pi as piAdapter,
+  gemini as geminiAdapter,
+  opencode as opencodeAdapter,
+  copilot as copilotAdapter,
+  format as fmt,
+  Card,
+  runtimeHealth, inspectAssets,
+  consent,
+  redactionRow,
+  sessionStats,
+  storedRecordTypes,
+  storedRedactionCounts,
+  Theme,
+  vecStatus,
+  emptyCounts,
+  setup,
+  type AuditReport,
+  type RecordTypeRow,
+  type RedactionCounts,
+  type VecStatus,
+} from '@potsherd/core';
+import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
+import {
+  BRIDGE_READ_PATHS,
+  CLAUDE_SPAWN_WRITE_NOTE,
+  CLAUDE_SPAWN_WRITE_PATH,
+  EXPORT_WRITE_PATHS,
+} from '../privacy-paths.js';
+import { search as searchNs } from '@potsherd/core';
+
+// The ignore list. It reaches `doctor` through the `search` namespace because
+// that is where the filter vocabulary lives (`SearchFilters.excludeProjects`),
+// and because `packages/core/src/index.ts` is reserved on the branch this
+// landed on.
+const { readIgnoreConfig, ignoredProjectsInIndex, countIgnoredSessions } = searchNs;
+
+export interface DoctorOptions extends GlobalOptions {
+  privacy?: boolean;
+}
+
+/**
+ * `potsherd doctor` — what potsherd can see, what it has stored, and what it
+ * could not parse. Unknown record types are counted and listed, never hidden:
+ * a parser that silently drops a record type is how an archive tool quietly
+ * loses the thing you were looking for.
+ *
+ * `--privacy` prints every path read and every path written. It is the section
+ * of the readme that lets someone decide to trust this, and it is generated
+ * rather than written by hand so it can never drift from the code.
+ */
+export async function runDoctor(o: DoctorOptions): Promise<number> {
+  const report = await audit(o.claudeDir, new Date(), o.potsherdDir ? { potsherdDir: o.potsherdDir } : {});
+  const root = paths.potsherdDir(o.potsherdDir);
+  const dbFile = paths.dbPath(root);
+  const dbExists = fs.existsSync(dbFile);
+
+  const counts: Record<string, number> = {};
+  let schema = 0;
+  let redaction: RedactionCounts = emptyCounts();
+  let indexedTypes: RecordTypeRow[] = [];
+  let vec: VecStatus = { available: false, reason: 'no database yet — run potsherd index' };
+  let maintenance:ReturnType<typeof runtimeHealth>|null=null;
+  const semanticAssets=inspectAssets(paths.modelsDir(root));
+  let indexedAt: string | null = null;
+  // The index's own session counts, read from the function `stats` renders.
+  //
+  // VERIFICATION-6 C-4. `doctor` printed `sessions indexed` as
+  // `COUNT(*) FROM sessions`, which is sessions **plus** every subagent
+  // transcript; `stats` prints the top-level count and puts the subagents in
+  // the note beside it. Same index, same word, two numbers, and the phase had
+  // already had two of those. `all: true` because `doctor` is the screen that
+  // counts everything and names the ignore list separately further down;
+  // `freshness: false` because the per-file stat pass is `stats`'s job and
+  // `doctor` has its own freshness row.
+  let indexed: { sessions: number; sidechains: number } | null = null;
+  if (dbExists) {
+    // Read-only: `doctor` never migrates, never writes, and never takes the
+    // lock, so it is safe to run while an index is in flight.
+    const db = store.open({ root, readonly: true });
+    try {
+      schema = store.schemaVersion(db);
+      if(schema>=17)maintenance=runtimeHealth(db);
+      // Before the counts, and **with the root**, because that is the call
+      // that carries the numbers. `vecStatus(db, root)` is the one source of
+      // truth for the vectors line: `index` makes the same call and renders
+      // the same `row`, so the two can no longer disagree in print the way
+      // the agent audit (§2 F2) caught them doing — `doctor` saying
+      // `vectors —` in the same session `index` said `vectors 1,561`.
+      //
+      // They disagreed because this line used to be a `COUNT(*)` gated on
+      // whether a native extension had loaded into this particular
+      // connection, while `index` reported what its own pass had just done.
+      // Neither was the state of the index.
+      vec = vecStatus(db, root);
+      for (const table of ['sessions', 'exchanges', 'tool_calls', 'ghosts', 'ghost_prompts', 'cards', 'tags', 'pins', 'links', 'archive_files', 'rescue_log', 'vec_exchanges']) {
+        counts[table] = store.count(db, table);
+      }
+      redaction = storedRedactionCounts(db);
+      indexedTypes = storedRecordTypes(db);
+      indexed = sessionStats(db, { root, freshness: false, all: true }).totals;
+      const row = db.prepare('SELECT MAX(indexed_at) AS at FROM sessions').get() as { at: string | null };
+      indexedAt = row?.at ?? null;
+    } catch {
+      // A database written by a newer potsherd, or one being migrated right
+      // now. Say what is readable rather than failing the whole verb.
+    } finally {
+      db.close();
+    }
+  }
+
+  // The ignore list, read whether or not it is empty. `doctor` is the one
+  // screen that prints it in full and by name: `ls`, `find` and `stats` print
+  // only a count, because they are screenshot surfaces and these are
+  // directories off the user's own machine.
+  const ignoreConfig = readIgnoreConfig(root);
+  const ignoreProjects = ignoreList(root, dbExists, ignoreConfig.list);
+
+  const unknownTypes = collectRecordTypes(report);
+  const adapters = await adapterStatus(o);
+  // `audit` only ever reads claude's tree. `index` reads all seven harnesses,
+  // so `--privacy` must list all seven — from `paths.harnessSourceDirs()`, the
+  // one module every adapter now resolves its directory through (finding F9),
+  // so this list cannot drift from what the code actually opens.
+  const harnessReads = paths
+    .harnessSourceDirs(o.claudeDir ? { claudeDir: o.claudeDir } : {})
+    .map((h) => h.dir);
+  const reads = dedupe([...report.pathsRead, ...harnessReads]);
+  const written = [
+    root,
+    paths.archiveDir(root),
+    dbFile,
+    paths.modelsDir(root),
+    // `03` §11 promises "~/.potsherd and the four things inside it" and then
+    // lists three. This is the fourth, and until `potsherd ignore` there was
+    // nothing that wrote it — the path had been resolvable since phase 0 and
+    // unused. It is an unprompted write inside potsherd's own directory, so it
+    // is named here rather than left to the reader to infer from the directory
+    // above it.
+    paths.configPath(root),
+    // `graft` is the one verb that writes outside ~/.potsherd: the brief lands
+    // in the project you run it in, which is the entire point of the verb.
+    // `03` §11 says this receipt lists *every* path written — and it has
+    // under-reported once already, when it still said "no network" after the
+    // product had started calling a model. So it lists this one.
+    nodePath.join(process.cwd(), '.potsherd', 'graft-<id8>.md'),
+    // `graft` writes a second file beside the brief, and the receipt named
+    // only the first. The ignore file is why `git status` stays clean after a
+    // graft, which is a kindness — but a path this receipt does not list is a
+    // path it under-reports, and under-reporting is the failure this surface
+    // has now committed six times.
+    nodePath.join(process.cwd(), '.potsherd', '.gitignore'),
+    // And the seam files are next, at paths the user names. They hold the same
+    // redacted excerpts a model would have been sent, and no model was called
+    // to write them.
+    //
+    // BOTH halves, not just the first. `--synthesis-out` was added this phase
+    // and writes verbatim quotes and session ids exactly as `--readers-out`
+    // does; the receipt named only `--readers-out`, so the newer file was
+    // invisible on the screen whose whole job is to list what gets written.
+    '<the path you give to  ask --readers-out>',
+    '<the path you give to  ask --synthesis-out>',
+    // T6.6 D13 — and `export` is the third. `EXPORT_WRITE_PATHS` was declared
+    // in `commands/export.ts` labelled "Exported for the registration file's
+    // `doctor --privacy` line" and had zero consumers, so the one verb that
+    // writes a directory of files wherever you point it appeared nowhere in
+    // the list of what potsherd writes.
+    ...EXPORT_WRITE_PATHS,
+    // FIX-B D6. Not a path potsherd's own code opens — Claude Code creates it
+    // for whatever cwd it is spawned in — but a directory that exists in the
+    // user's archive because they ran potsherd, in the tree this receipt was
+    // simultaneously listing as *never modified*. See `CLAUDE_SPAWN_WRITE_PATH`.
+    CLAUDE_SPAWN_WRITE_PATH,
+  ];
+  const settingsFile = paths.claudePaths(report.claudeDir).settings;
+  // `setup` writes one MCP stanza into each agent's own config file. That is
+  // the only place potsherd writes into another tool's directory, it is gated
+  // on an explicit y at a diff, and every other server in those files is
+  // preserved — but it is a write, so it is listed.
+  const mcpConfigs = setup.setupWritePaths();
+  const consented = [settingsFile, ...mcpConfigs];
+  // AND, BESIDE EACH OF THEM, A BACKUP. Every consented write copies the file
+  // it is about to change to `<file>.potsherd-bak-<UTC>` first. That is a file
+  // potsherd creates in somebody else's directory, and until T5.9 this receipt
+  // named the eight configs and said nothing about the eight copies — while
+  // claiming, two lines below, that "every other server in those files is
+  // preserved", which reads as an exhaustive account of what setup does to
+  // them. `03` §11 says this receipt lists every path written; these are paths
+  // written.
+  const backups = consented.map((p) => `${p}.potsherd-bak-<UTC>`);
+
+  if (o.privacy) {
+    const network = networkDisclosure();
+    if (o.json) {
+      printJson({
+      maintenance,semanticAssets,
+        reads,
+        // The same list the human view prints, so a script and a person are
+        // reading one receipt.
+        bridgeReads: BRIDGE_READ_PATHS.map((b) => b.path),
+        writes: written,
+        writesWithConsent: [...consented, ...backups],
+        network,
+        ignore: ignoreConfig.list,
+      });
+      return 0;
+    }
+    const t = themeFrom(o);
+    const card = new Card(t);
+    card.heading('doctor --privacy', fmt.date(new Date())).blank();
+    // Paths are the one thing here that can outrun any terminal, so they elide
+    // in the middle: the last segment is what identifies a file.
+    const pathW = Math.max(24, t.width - 16);
+    const show = (p: string) => fmt.elideMiddle(paths.tildify(p), pathW, t);
+
+    /**
+     * A note under a path, wrapped to whatever width this terminal is.
+     *
+     * These used to be hand-split string literals, broken at roughly 72
+     * characters — which is a screen designed for exactly one width. `05` asks
+     * for 80 degrading to 60, and at 60 this receipt overflowed on **fourteen
+     * lines**, found by widening the width check from the two verbs that had
+     * once been caught to all twenty-three.
+     *
+     * Written as whole sentences and wrapped here, so the receipt is right at
+     * any width and there is no second copy of the prose to keep in step.
+     */
+    const note = (text: string, indent = 6): void => {
+      const pad = ' '.repeat(indent);
+      // Verbatim when it fits. `fmt.wrap` collapses runs of spaces, and the
+      // double space in `with  --with / --to` is the design system's, not an
+      // accident — so a line that never needed wrapping does not get it.
+      if (Theme.len(pad + text) <= t.width) {
+        card.raw(`${pad}${t.dim(text)}`);
+        return;
+      }
+      for (const line of fmt.wrap(text, Math.max(20, t.width - indent - 1))) {
+        card.raw(`${pad}${t.dim(line)}`);
+      }
+    };
+
+    card.text('reads (never modified):');
+    for (const p of reads) {
+      card.raw(`    ${show(p)}${fs.existsSync(p) ? '' : t.dim('  (absent)')}`);
+    }
+    // FIX-B D6. The heading is a claim about potsherd, and potsherd does only
+    // read these. Something still appears in one of them because potsherd ran,
+    // and a reader of a privacy receipt is owed that before they find it — so
+    // the heading points at the entry under `writes:` rather than quietly
+    // remaining true on a technicality.
+    note('potsherd only ever reads these. one directory appears under claude\'s own projects/ anyway — claude code creates it for the cwd potsherd spawns it in, and it is named under writes.', 4);
+    // T6.6 D13 — the other tools' stores. `03` §11 says this receipt lists
+    // every path read, and until now it listed none of these: `find --with`
+    // and `export --to` read a claude-mem database, an agentmemory store and
+    // the CLAUDE.md files the notes bridge walks up from the working
+    // directory. Written out rather than computed, because resolving them
+    // would put `@potsherd/bridges` — and its localhost socket — into an
+    // offline verb's import graph; `tests/bridges.test.ts` asserts each one
+    // against the bridge's own path helper so they cannot drift.
+    note('…and these, only when you name them with  --with / --to:', 4);
+    for (const b of BRIDGE_READ_PATHS) {
+      card.raw(`    ${show(b.path)}`);
+      note(b.note);
+    }
+    card.blank().text('writes:');
+    for (const p of written) {
+      card.raw(`    ${show(p)}`);
+      // A note per path, not one line after the loop: two of these are
+      // conditional now, and a single trailing sentence could only describe one
+      // of them truthfully.
+      if (p.endsWith('config.json')) {
+        note('your settings: the ignore list, written by potsherd ignore / unignore');
+      } else if (p.endsWith('graft-<id8>.md')) {
+        note('only when you run graft, in the directory you run it in');
+      } else if (p.endsWith(nodePath.join('.potsherd', '.gitignore'))) {
+        // C5b. This was the only entry under `writes:` with no sub-line, sat
+        // between two that have one — so the one path here a reader did not
+        // ask for was also the one path with no explanation. It is a
+        // three-line file that ignores the directory it sits in, written once,
+        // beside the first brief.
+        note(
+          'written once, the first time you run graft here, and never ' +
+            'overwritten: it is what keeps the briefs out of your commits',
+        );
+      } else if (p.startsWith('<the path you give')) {
+        note(
+          'only when you pass the flag. it holds the same redacted excerpts a model ' +
+            'would have been sent, and no model was called to write it',
+        );
+      } else if (p.startsWith('<the dir you give')) {
+        note('one markdown file per card, only when you run export');
+      } else if (p === CLAUDE_SPAWN_WRITE_PATH) {
+        note(CLAUDE_SPAWN_WRITE_NOTE);
+      } else if (p.startsWith('<your agentmemory')) {
+        note(
+          "rows into another tool's store. never without --yes, and never at all " +
+            'unless you asked for that target',
+        );
+      }
+    }
+    card.blank().text('writes only after an explicit y at a diff:');
+    card.raw(`    ${show(settingsFile)}`);
+    note('cleanupPeriodDays, and one SessionStart hook entry');
+    for (const p of mcpConfigs) card.raw(`    ${show(p)}`);
+    note(
+      'one "potsherd" MCP server entry each, from potsherd setup. every other ' +
+        'server in those files is preserved.',
+    );
+    note(
+      `…and beside each of those ${String(consented.length)}:  <that file>.potsherd-bak-<UTC>`,
+      4,
+    );
+    note(
+      'a copy of the file as it was, taken before potsherd changes it. one per ' +
+        'write. potsherd never reads them back and never removes them; delete them ' +
+        'yourself once you are happy with the change.',
+    );
+    // The largest privacy-relevant thing potsherd does is no longer "reads
+    // your files": from phase 2 on it *sends* some of them. A receipt that
+    // still said "no network" would be the worst class of bug this project
+    // has, so what leaves the machine is stated before what does not.
+    card.blank().text('leaves this machine:');
+    {
+      // The accent belongs on the first phrase, so the wrap is computed over
+      // the plain sentence and the phrase is coloured back in afterwards. It
+      // is the one accent on this screen (`05`: one per card).
+      const lead = 'redacted slices of your transcripts';
+      const body =
+        `${lead}, sent to a model as the text of one prompt. redaction runs ` +
+        'first, in one place, on every outgoing string — there is no --no-redact ' +
+        'flag. nothing else is ever sent: no file is uploaded, no path, no index, ' +
+        'no counts, no identifiers.';
+      const lines = fmt.wrap(body, Math.max(20, t.width - 5));
+      lines.forEach((line, i) => {
+        card.raw(`    ${i === 0 && line.startsWith(lead) ? t.accent(lead) + line.slice(lead.length) : line}`);
+      });
+    }
+
+    card.blank().text('only these verbs call a model:');
+    const verbNote: Record<string, string> = {
+      card: 'writes the cards; one call per slice',
+      ask: 'one call, over the shortlist it retrieved',
+      graft: 'one call, to compress one session into a brief',
+    };
+    const socketNote: Record<string, string> = {
+      find: '--with <tool>, to read another tool\'s store',
+      export: '--to <tool>, to write rows into one',
+    };
+    const verbRow = (verb: string, gloss?: string): void => {
+      const head = `    potsherd ${verb.padEnd(8)}`;
+      // The verb is the thing a reader is looking for, so the gloss elides.
+      const room = t.width - head.length - 2;
+      card.raw(
+        (gloss && room >= 12 ? `${head}  ${fmt.elide(gloss, room, t)}` : head).trimEnd(),
+      );
+    };
+    for (const verb of MODEL_CALL_VERBS) verbRow(verb, verbNote[verb]);
+    card.blank().text('these never do, and open no socket at all:');
+    // Wrapped, not elided: the whole value of this line is that a reader can
+    // find their verb in it, and `ls…w, stats` is a list with the answer cut
+    // out of the middle.
+    for (const line of fmt.wrap(OFFLINE_VERBS.join(', '), pathW)) card.raw(`    ${line}`);
+
+    // T6.6 D2/D12. `find` and `export` were in the list above, under the words
+    // "open no socket at all", while both were probing 127.0.0.1 and spawning
+    // another program to talk to. The fix was not to move the word `export`
+    // into a screenshot — it was to stop the receipt saying something false,
+    // and only then regenerate the screen. `LOCAL_SOCKET_VERBS` carries the
+    // whole reasoning.
+    // Phase 10, and the same defect as T6.6 D2/D12 one release later: `index`
+    // sat in the list above, under "open no socket at all", while A2 made it
+    // fetch 46.1 MB from huggingface.co on first use without being asked. The
+    // download was already described further down this screen, which meant the
+    // receipt contradicted itself nine lines apart -- and the CI guard could
+    // not see it, because the guard proves screen == live output and never
+    // live output == truth.
+    card.blank().text('this one calls no model and does reach the network,');
+    note('because it acquires what it needs instead of asking you to:', 2);
+    for (const verb of RUNTIME_FETCH_VERBS) verbRow(verb, 'the embedding runtime, once per machine');
+
+    card.blank().text('these call no model either, but do open a socket on');
+    note('this machine — and only when you ask them to:', 2);
+    for (const verb of LOCAL_SOCKET_VERBS) verbRow(verb, socketNote[verb]);
+    note(
+      'claude-mem is read over http://127.0.0.1; agentmemory by launching its mcp ' +
+        'server, itself a shim over an http backend on localhost. nothing leaves ' +
+        'this machine, and without the flag neither opens anything at all.',
+    );
+
+    card.blank().text('who receives them:');
+    for (const line of fmt.wrap(network.to, pathW)) card.raw(`    ${line}`);
+    for (const line of network.detail) note(line, 4);
+
+    card
+      .blank()
+      // This paragraph asserted, until 2026-08-22, that `index` "announces
+      // before it starts" — full stop. Phase 5 built a path where it does
+      // not: the plugin's SessionEnd hook runs `index --quiet`, and `--quiet`
+      // returns from `onModelDownload` before printing. One SessionEnd firing
+      // fetched 33 MB with nothing shown. A receipt that describes an
+      // announcement it does not always make is the same failure as the
+      // "no network" line this project shipped once already (`08` rule 1), so
+      // the suppressing flags are named and the hook's own warning is stated.
+      // 8.6 flipped the default, so the sentence that used to end '`--no-embed`
+      // skips the download entirely' now describes an escape hatch from a thing
+      // that no longer happens by default. It says what does happen instead.
+      //
+      // And phase 9's verifier caught the half of that rewrite which was still
+      // false: it ended '...so its SessionStart hook warns you first', which
+      // phase 8 had DELETED from both hooks in the same release, describing a
+      // download session-end.sh cannot cause because it never passes --embed.
+      // Two false halves in one sentence, in the receipt this project nominates
+      // as its trust anchor, four lines under a comment warning against exactly
+      // that. tests/cli.test.ts pins it against the hooks themselves now.
+      .text('one other download, once per machine: the embedding runtime,')
+      .text('fetched by potsherd index without being asked.');
+    for (const line of fmt.wrap(
+      `The first ${'`'}potsherd index${'`'} on a machine fetches from ${embeddings.runtimeHosts()} ` +
+        `— ${fmt.bytes(embeddings.ACQUIRE_BYTES)} of WebAssembly runtime and quantized model weights, ` +
+        `into ${paths.tildify(paths.modelsDir(root))}. Every file is pinned to a size and a ` +
+        'sha256 that ships in the source and is checked before it is kept. They are GET ' +
+        'requests for public files: no transcript, no path, no identifier and no count ' +
+        'leaves this machine, and nothing is installed into node_modules. It runs in a ' +
+        `background process so the verb returns as soon as text search is live, which ` +
+        `means ${'`'}--quiet${'`'} and ${'`'}--json${'`'} — and the plugin's SessionEnd hook, which ` +
+        `runs ${'`'}index --quiet${'`'} — do it silently. ${'`'}potsherd index --no-embed${'`'} does not ` +
+        `do it at all, and neither does any run on a machine with ${'`'}POTSHERD_OFFLINE${'`'} set; ` +
+        'text search is unaffected either way.',
+      Math.max(20, t.width - 3),
+    )) {
+      card.raw(`  ${line}`);
+    }
+    for (const line of fmt.wrap(
+      'no telemetry. no account. potsherd stores no credential of its own.',
+      Math.max(20, t.width - 3),
+    )) {
+      card.raw(`  ${line}`);
+    }
+    print(card.toString());
+    return 0;
+  }
+
+  if (o.json) {
+    printJson({
+      maintenance,semanticAssets,
+      version: VERSION_STRING,
+      node: process.version,
+      platform: process.platform,
+      claudeDir: report.claudeDir,
+      claudeDirExists: report.claudeDirExists,
+      potsherdDir: root,
+      db: {
+        path: dbFile,
+        exists: dbExists,
+        schemaVersion: schema,
+        latest: store.latestSchemaVersion(),
+        // Which SQLite is answering. Two can, and which one changes what the
+        // product can do — a machine-readable consumer needs it as much as the
+        // human view does.
+        driver: store.sqliteDriverName(),
+        counts,
+      },
+      corpus: {
+        sessions: report.onDiskFiles,
+        sidechains: report.sidechainFiles,
+        ghosts: counts['ghosts'] ?? 0,
+        bytes: report.bytes,
+        titled: report.titledSessions,
+        sdkSessions: report.sdkSessions,
+        sessionsIndexFiles: report.sessionsIndexFiles,
+        memoryFiles: report.memoryFiles,
+      },
+      index: {
+        indexedAt,
+        // The same split the human view prints, and the same split `stats`
+        // publishes: `sessions` is top-level transcripts, `sidechains` is the
+        // subagents inside them. `rows` keeps the old meaning of this field —
+        // every row in the table — for a consumer that was reading it.
+        sessions: indexed?.sessions ?? counts['sessions'] ?? 0,
+        sidechains: indexed?.sidechains ?? 0,
+        rows: counts['sessions'] ?? 0,
+        exchanges: counts['exchanges'] ?? 0,
+        toolCalls: counts['tool_calls'] ?? 0,
+        // The same numbers the human view prints, from the same call
+        // (audit F9: `--json` parity). `vectors` stays a bare count so no
+        // existing consumer breaks; `vectorState` is the whole report.
+        vectors: vec.report?.embedded ?? counts['vec_exchanges'] ?? 0,
+        vectorState: vec.report ?? null,
+        vec,
+      },
+      ignore: {
+        config: ignoreConfig.file,
+        entries: ignoreConfig.list,
+        ...(ignoreConfig.error ? { error: ignoreConfig.error } : {}),
+        projects: ignoreProjects.projects,
+        sessions: ignoreProjects.sessions,
+      },
+      redaction: countsJson(redaction),
+      recordTypes: unknownTypes,
+      // Exact per-(harness, version, type) counts over every session in the
+      // index, summed from `session_record_types`. `recordTypes` above is the
+      // audit's head/tail estimate and stays for machines that never indexed.
+      indexedRecordTypes: indexedTypes,
+      adapters,
+      guard: { installed: consent.guardInstalled(o.claudeDir) },
+      cleanupPeriodDays: report.cleanupPeriodEffective,
+      fatalErrors: report.warnings.filter((w) => w.startsWith('unreadable transcript')).length,
+      warnings: report.warnings,
+    });
+    return 0;
+  }
+
+  const t = themeFrom(o);
+  const card = new Card(t);
+  card.heading('doctor', `potsherd ${VERSION_STRING}`, `node ${process.version}`).blank();
+  card.rows([
+    { label: 'claude dir', value: '', note: paths.tildify(report.claudeDir) + (report.claudeDirExists ? '' : '  (not found)') },
+    { label: 'potsherd dir', value: '', note: paths.tildify(root) },
+    {
+      label: 'database',
+      value: '',
+      note: dbExists
+        ? `schema v${schema} of v${store.latestSchemaVersion()}${schemaNote(schema, vec, card.noteWidth())}`
+        : 'not created yet — run potsherd rescue',
+    },
+    { label: 'sqlite', value: '', note: sqliteNote() },
+  ]);
+  card.blank();
+  card.rows([
+    {
+      // `claude sessions on disk`, and the harness is not decoration.
+      //
+      // VERIFICATION-6 C-4, and it is audit F2's family: this number is
+      // `disk.sessions.length` from `audit.ts`, which walks `~/.claude` and
+      // nothing else. Under the bare word `sessions`, on a screen whose whole
+      // job is *what is on disk*, it read as a count of the machine — and on a
+      // machine with four harnesses it was `49` above an adapter block listing
+      // the other three and a `stats` card saying `56`. Nothing was
+      // miscounted; one of the two numbers was answering a question its label
+      // did not ask. The label asks it now, and the number is the same number
+      // the `claude` adapter line prints four rows below.
+      label: 'claude sessions on disk',
+      value: fmt.num(report.onDiskFiles),
+      // The live corpus's size belongs to this row, not to `files archived`.
+      note:
+        // `harness-titled`, not `titled`. `stats` prints `31 titled` for this
+        // same corpus and means something else by it — every session that has
+        // a NAME, including the 8.2 titles potsherd derives from the first
+        // substantive prompt. This line counts only the ones the harness
+        // itself named, which is what `doctor` is for: what is on disk and
+        // what came with it. Two screens, one word, two numbers, and neither
+        // said which question it answered — `09 §13.12`.
+        `${fmt.num(report.titledSessions)} harness-titled ${t.mid} ${fmt.num(report.sdkSessions)} sdk ` +
+        `${t.mid} ${fmt.bytes(report.bytes)}`,
+    },
+    // Same scope, same reason: `audit.ts` counts claude's subagent transcripts
+    // and no other harness's, and `stats` counts every harness's.
+    { label: 'claude sidechains on disk', value: fmt.num(report.sidechainFiles), note: 'subagent transcripts' },
+    {
+      label: 'ghosts stored',
+      value: fmt.num(counts['ghosts'] ?? 0),
+      note: `${fmt.num(counts['ghost_prompts'] ?? 0)} ${fmt.plural(counts['ghost_prompts'] ?? 0, 'prompt')}`,
+    },
+    {
+      // The count is of archived files, so the size beside it must be the
+      // archive's, not the live corpus's — printing report.bytes here made the
+      // row contradict the rescue receipt that had just run.
+      label: 'files archived',
+      value: fmt.num(counts['archive_files'] ?? 0),
+      note: report.archive && report.archive.archivedFiles > 0
+        ? fmt.bytes(report.archive.archivedBytes) + ' of source, byte-exact'
+        : 'nothing archived yet — run potsherd rescue',
+    },
+    { label: 'rescue runs', value: fmt.num(counts['rescue_log'] ?? 0) },
+  ]);
+
+  card.blank();
+  card.rows([
+    {
+      // The number `stats` prints, from the call `stats` makes — not a second
+      // `COUNT(*)` that means something else by the same word.
+      //
+      // VERIFICATION-6 C-4. `COUNT(*) FROM sessions` counts subagent
+      // transcripts as sessions, so on the reference corpus this row said
+      // `228` where `stats` said `31 sessions · 197 subagents`. Both were
+      // arithmetically true and only one of them was answering the question
+      // the word asks. The subagents keep their place — in the note, exactly
+      // where `stats` puts them.
+      label: 'sessions indexed',
+      value: fmt.num(indexed?.sessions ?? counts['sessions'] ?? 0),
+      note: indexedAt
+        ? [
+            `${fmt.num(indexed?.sidechains ?? 0)} subagents`,
+            `${fmt.num(counts['exchanges'] ?? 0)} ${fmt.plural(counts['exchanges'] ?? 0, 'exchange')}`,
+            `${fmt.num(counts['tool_calls'] ?? 0)} tool ${fmt.plural(counts['tool_calls'] ?? 0, 'call')}`,
+          ].join(` ${t.mid} `)
+        : 'nothing indexed yet — run potsherd index',
+      tone: indexedAt ? 'none' : 'dim',
+    },
+    {
+      label: 'ghost prompts indexed',
+      value: fmt.num(counts['ghost_prompts'] ?? 0),
+      note: 'searchable in ghost_prompts_fts',
+    },
+    // `03` §5: doctor reports redaction counts by type. The numbers are read
+    // back out of the index rather than remembered, so they cannot drift.
+    redactionRow(redaction, t, card.noteWidth()),
+    // One row, one source (`vecStatus(db, root)`), and a note that drops whole
+    // clauses to fit rather than being clipped mid-word — the truncated
+    // `doctor` vectors line logged in `plans/04`. The first clause always says
+    // what is true on its own, so a 60-column terminal loses the elaboration
+    // and never the fact.
+    vectorsRow(vec, t, card.noteWidth()),
+  ]);
+
+  // Every record type, always. A parser that silently drops a type is how an
+  // archive tool loses the thing you were looking for, so nothing is hidden
+  // behind a "N more" here. Once `index` has run these are exact counts per
+  // (harness, version, type); before that they are the audit's head/tail
+  // estimate over claude alone.
+  if (indexedTypes.length > 0) {
+    // Summed across harness versions — the full (harness, version, type) table
+    // is in `--json`, and on this corpus it is a hundred rows. What a person
+    // needs on screen is which types exist, how many, in how many builds, and
+    // whether any of them is one no format note has described yet.
+    //
+    // These are the counts over everything the index currently holds, not over
+    // whatever the last `index` pass happened to open: they are stored per
+    // session (`session_record_types`, migration 5) and summed here.
+    card.blank().text('record types the parsers did not consume, over the whole index:');
+    for (const line of recordTypeLines(foldRecordTypes(indexedTypes), t)) card.raw(line);
+    card.text(t.dim('"new" means no note in research/formats.md describes it yet.'));
+  } else {
+    card.blank().text('record types seen (head/tail scan — run potsherd index for exact counts):');
+    for (const [type, n] of Object.entries(unknownTypes).sort((a, b) => b[1] - a[1])) {
+      card.raw(`    ${fmt.elide(type, Math.max(12, t.width - 13), t).padEnd(24)}${fmt.num(n).padStart(7)}`);
+    }
+  }
+
+  card.blank().text('adapters:');
+  for (const a of adapters) {
+    // Clipped, never wrapped: `render.ts`'s one rule.
+    const line = fmt.clip(a.line, Math.max(20, t.width - 4), t);
+    card.raw(`    ${a.supported ? line : t.dim(line)}`);
+  }
+  card.text(t.dim(fmt.clip(cursorAdapter.CURSOR_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+  card.text(t.dim(fmt.clip(geminiAdapter.GEMINI_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+  card.text(t.dim(fmt.clip(opencodeAdapter.OPENCODE_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+  card.text(t.dim(fmt.clip(copilotAdapter.COPILOT_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
+
+  // `03` §8.4: "doctor prints the ignore list". Printed only when there is one
+  // — a fresh install ignores nothing, and a line saying so on every doctor run
+  // would be a permanent answer to a question nobody asked. A *broken*
+  // config.json is always printed, because an unreadable settings file and an
+  // empty list look identical from the outside and only one of them is a
+  // problem the user can fix.
+  if (ignoreConfig.error) {
+    card.blank().text(t.warn(`ignore list: ${ignoreConfig.error}`));
+    card.text(t.dim(fmt.elideMiddle(paths.tildify(ignoreConfig.file), Math.max(20, t.width - 4), t)));
+  } else if (ignoreConfig.list.length > 0) {
+    card.blank().text('ignored — hidden from ls, find, ask and stats (--all shows them):');
+    for (const entry of ignoreConfig.list) {
+      card.raw(`    ${fmt.elideMiddle(paths.tildify(entry), Math.max(20, t.width - 4), t)}`);
+    }
+    const p = ignoreProjects.projects.length;
+    const n = ignoreProjects.sessions;
+    card.text(
+      t.dim(
+        `${fmt.num(p)} ${fmt.plural(p, 'project')} in the index ${t.mid} ${fmt.num(n)} ${fmt.plural(n, 'session')} hidden ${t.mid} potsherd unignore <project>`,
+      ),
+    );
+  }
+
+  const fatal = report.warnings.filter((w) => w.startsWith('unreadable transcript'));
+  card.blank();
+  card.rows([{
+    label: 'fatal parse errors',
+    value: fmt.num(fatal.length),
+    note: fatal.length ? 'see --json' : 'none',
+    tone: fatal.length ? 'warn' : 'ok',
+  }]);
+  for (const w of report.warnings.slice(0, 4)) card.text(t.dim(`note: ${w}`));
+
+  card.blank().fix(
+    'potsherd doctor --privacy',
+    'to see every path potsherd reads and writes.',
+    'for every path it touches.',
+  );
+  print(card.toString());
+  return fatal.length ? 1 : 0;
+}
+
+/**
+ * The projects an ignore list actually names in this index, and their session
+ * count. Zero of both when there is no database yet — `doctor` runs before
+ * `index` does, and an ignore list is legal before anything is indexed.
+ */
+function ignoreList(
+  root: string,
+  dbExists: boolean,
+  entries: readonly string[],
+): { projects: string[]; sessions: number } {
+  if (!dbExists || entries.length === 0) return { projects: [], sessions: 0 };
+  const db = store.open({ root, readonly: true });
+  try {
+    const projects = ignoredProjectsInIndex(db, entries);
+    return { projects, sessions: countIgnoredSessions(db, projects) };
+  } catch {
+    return { projects: [], sessions: 0 };
+  } finally {
+    db.close();
+  }
+}
+
+function collectRecordTypes(report: AuditReport): Record<string, number> {
+  // The audit scan counted every `type` it saw in the head/tail windows. Phase
+  // 1's full parser replaces this with exact per-file, per-version counts.
+  return report.recordTypes;
+}
+
+interface AdapterStatus {
+  harness: string;
+  supported: boolean;
+  /** The phase that will support it. 1 for the four that now do. */
+  phase: number;
+  path: string;
+  /** The adapter's own one-liner — every adapter owns the words about itself. */
+  line: string;
+  /**
+   * T6.6 D6 — was this parser ever run against a real store?
+   *
+   * `false` for the four adapters written against real transcripts; `true` for
+   * the three written from documentation alone (`<NAME>_FORMAT_UNVERIFIED`).
+   *
+   * It is a field and not a word inside {@link line} because `line` is clipped
+   * to the terminal width and, when the tool is **absent**, does not carry the
+   * word at all — and absent is the state on every machine that does not have
+   * the tool. `doctor --json` is documented as the API, and the API said
+   * `supported: true` with nothing to distinguish a parser that has read a
+   * thousand real sessions from one that has read none.
+   */
+  unverified: boolean;
+  /**
+   * The measured split, when there is one. A bare `unverified: true` cannot
+   * distinguish *never looked* from *looked and it is wrong*, and phase 10
+   * measured both: gemini refused at auth, so its parse is genuinely unmeasured;
+   * opencode and copilot were run against real sessions and their formats are
+   * wrong. A caller deciding whether to trust a count needs to know which.
+   */
+  provenance?: FormatProvenance;
+}
+
+/**
+ * The adapter block.
+ *
+ * Each supported adapter exports its own `doctorLine()`, because the facts
+ * worth printing differ per harness — codex has a cli version, cursor has
+ * fields it can never recover, claude has sidechains — and the adapter is the
+ * only place that knows them. `doctor` supplies the block, not the sentences.
+ */
+async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
+  const out: AdapterStatus[] = [];
+  const claudeOptions = {
+    ...(o.claudeDir ? { claudeDir: o.claudeDir } : {}),
+    ...(o.potsherdDir ? { potsherdDir: o.potsherdDir } : {}),
+  };
+  out.push({
+    harness: 'claude',
+    supported: true,
+    phase: 1,
+    unverified: false,
+    path: claudeAdapter.sourceDir(o.claudeDir),
+    line: claudeAdapter.doctorLine(claudeOptions),
+  });
+
+  const codexReport = await codexAdapter.codexDoctor(o.codexDir?{codexHome:o.codexDir}:undefined);
+  out.push({
+    harness: 'codex',
+    supported: true,
+    phase: 1,
+    unverified: false,
+    path: codexReport.sourceDir,
+    line: codexAdapter.doctorLine(codexReport),
+  });
+
+  out.push({
+    harness: 'cursor',
+    supported: true,
+    phase: 1,
+    unverified: false,
+    path: cursorAdapter.cursorProjectsDir(),
+    line: cursorAdapter.doctorLine(),
+  });
+
+  out.push({
+    harness: 'pi',
+    supported: true,
+    phase: 1,
+    unverified: false,
+    path: piAdapter.sourceDir(),
+    line: piAdapter.doctorLine(),
+  });
+
+  // Phase 6, T6.1 wrote all three from documentation, because none was present
+  // with sessions on the machine they were written on. **Phase 10 installed all
+  // three and ran real sessions**, and the labels are no longer one word:
+  // gemini stays `unverified` (it refused at auth, so the parse is still
+  // unmeasured), while opencode and copilot are `verified and WRONG` — a
+  // stronger and more useful claim than never having looked, and the reason
+  // each carries a `provenance` object rather than one boolean. The `formats.md`
+  // history below is kept because it is how they came to be
+  // built against `plans/research/formats.md` (which marks all three sections
+  // **unmeasured**) and synthetic fixtures. Each adapter's own `doctorLine()`
+  // says so, and distinguishes **not installed** from **installed with no
+  // sessions** from **parsed** — "0 sessions" alone cannot tell those apart.
+  out.push({
+    harness: 'gemini',
+    supported: true,
+    phase: 6,
+    unverified: geminiAdapter.GEMINI_FORMAT_UNVERIFIED,
+    // gemini has no provenance object and should not: it refused at auth in
+    // phase 10, so `unverified: true` is the whole and accurate truth about
+    // it. Inventing a split here would claim a measurement nobody made.
+    path: geminiAdapter.sourceDir(),
+    line: geminiAdapter.doctorLine(),
+  });
+
+  out.push({
+    harness: 'opencode',
+    supported: true,
+    phase: 6,
+    unverified: opencodeAdapter.OPENCODE_FORMAT_UNVERIFIED,
+    provenance: opencodeAdapter.OPENCODE_FORMAT_PROVENANCE,
+    path: opencodeAdapter.sourceDir(),
+    line: opencodeAdapter.doctorLine(),
+  });
+
+  out.push({
+    harness: 'copilot',
+    supported: true,
+    phase: 6,
+    unverified: copilotAdapter.COPILOT_FORMAT_UNVERIFIED,
+    provenance: copilotAdapter.COPILOT_FORMAT_PROVENANCE,
+    path: copilotAdapter.sourceDir(),
+    line: copilotAdapter.doctorLine(),
+  });
+
+  return out;
+}
+
+/**
+ * One line per record type, laid out so that **the name is never the thing
+ * that gets elided**.
+ *
+ * The name is the only part a reader can act on — `queue-operation` sends you
+ * to a format note, `user:injected-continua…` sends you nowhere — so it takes
+ * every column the fixed fields do not need, and when even that is not enough
+ * the row wraps onto a second line rather than losing its identity. The
+ * version column is what gives ground at 60 columns (`2 versions` → `2v`), and
+ * the whole line is exactly `t.width` at 80 and at 60: the two-space gap after
+ * the count is deliberate, and a third space is what pushed every `known` row
+ * one character past `--width 60`.
+ */
+function recordTypeLines(rows: readonly FoldedRecordType[], t: Theme): string[] {
+  const wide = t.width >= 74;
+  const countW = 7;
+  const versionW = wide ? 11 : 3;
+  const markW = 5;
+  const nameW = Math.max(12, t.width - 4 - countW - 2 - versionW - 1 - markW);
+  const out: string[] = [];
+  for (const row of rows) {
+    const name = `${row.harness} ${row.type}`;
+    const mark = row.novel ? t.warn('new') : t.dim('known');
+    const versions = wide
+      ? row.versions === 1 ? '1 version' : `${row.versions} versions`
+      : `${row.versions}v`;
+    const tail = `${fmt.num(row.count).padStart(countW)}  ${t.dim(versions.padEnd(versionW))} ${mark}`;
+    if (name.length <= nameW) {
+      out.push(`    ${name.padEnd(nameW)}${tail}`);
+    } else {
+      // Wrapped, not truncated. A name too long for any terminal still elides
+      // in the middle, where the least identifying characters are.
+      out.push(`    ${fmt.elideMiddle(name, Math.max(12, t.width - 4), t)}`);
+      out.push(`    ${' '.repeat(nameW)}${tail}`);
+    }
+  }
+  return out;
+}
+
+interface FoldedRecordType {
+  harness: string;
+  type: string;
+  count: number;
+  versions: number;
+  novel: boolean;
+}
+
+/** `(harness, version, type)` rows summed to `(harness, type)`, novel first. */
+function foldRecordTypes(rows: readonly RecordTypeRow[]): FoldedRecordType[] {
+  const out = new Map<string, FoldedRecordType>();
+  for (const row of rows) {
+    const key = `${row.harness} ${row.type}`;
+    const at = out.get(key);
+    if (at) {
+      at.count += row.count;
+      at.versions += 1;
+      at.novel = at.novel || row.novel;
+    } else {
+      out.set(key, {
+        harness: row.harness,
+        type: row.type,
+        count: row.count,
+        versions: 1,
+        novel: row.novel,
+      });
+    }
+  }
+  return [...out.values()].sort(
+    (a, b) => Number(b.novel) - Number(a.novel) || b.count - a.count || (a.type < b.type ? -1 : 1),
+  );
+}
+
+function dedupe(xs: string[]): string[] {
+  return [...new Set(xs)];
+}
+
+/** Re-exported under the old name so existing callers keep working. */
+export const VERSION_STRING = VERSION;
+
+/**
+ * Where this machine's model calls would actually go, detected rather than
+ * assumed.
+ *
+ * `04` Q4's backend choice *is* the answer to "who receives my transcripts",
+ * so the receipt runs the same detection `card` runs. It reads a binary's
+ * presence and one environment variable; it makes no call and needs no
+ * credential to answer, which is what lets `--privacy` stay the one section
+ * that is safe to run before you trust anything.
+ */
+export function networkDisclosure(): { backend: string | null; to: string; detail: string[] } {
+  try {
+    const choice = detectBackend();
+    if (choice.backend === 'api') {
+      return {
+        backend: 'api',
+        to: 'api.anthropic.com, on your own ANTHROPIC_API_KEY.',
+        detail: [
+          'metered against that key. potsherd never stores or logs it.',
+          'this is the fallback path: install Claude Code and it is not used.',
+        ],
+      };
+    }
+    // The path, shortened the way every other path in this receipt is: what
+    // identifies a binary is its last segment, and a shim path can be 100
+    // characters of temp directory.
+    const bin = choice.bin
+      ? fmt.elideMiddle(paths.tildify(choice.bin), 46, '...')
+      : choice.backend;
+    return {
+      backend: choice.backend,
+      to: `your own ${choice.backend === 'codex' ? 'codex' : 'Claude'} subscription, via ${bin}`,
+      detail: [
+        'the same binary and the same account you already use by hand.',
+        'potsherd holds no key, no token and no account of its own.',
+        'the call runs with no tools, in an empty scratch directory, and',
+        'its session is never written to ~/.claude/projects.',
+      ],
+    };
+  } catch (err) {
+    if (!(err instanceof NoBackendError)) throw err;
+    // `NoBackendError` no longer means "no model". Rung 1 is the host agent
+    // itself, and on a machine with no binary and no key that rung is still
+    // reachable — `ask` completes through the seam and potsherd filters the
+    // citations in code. Printing "there is no model backend" there would be
+    // the privacy screen making a claim the product had stopped honouring,
+    // which is the one thing this screen exists not to do.
+    const seam = err.rung === 'host-seam';
+    return {
+      backend: null,
+      to: seam
+        ? 'the coding agent you are already talking to — potsherd emits the prompts, it answers them.'
+        : 'nobody — there is no model backend on this machine.',
+      detail: seam
+        ? [
+            'no binary, no key, and none needed: `ask` runs through the seam and',
+            'potsherd filters the citations in code. nothing leaves this machine',
+            'that the agent in front of you is not already holding.',
+          ]
+        : [
+            'no `claude` binary and no ANTHROPIC_API_KEY, so `potsherd card`',
+            'refuses rather than calling anything. every other verb still works.',
+          ],
+    };
+  }
+}
+
+
+/**
+ * Which SQLite is answering.
+ *
+ * Two can, and which one is running changes what the product can do, so it is
+ * on the screen rather than inferable. `better-sqlite3` is the native addon and
+ * the only one that has ever had vector search; `node:sqlite` is Node's own,
+ * needs no install at all, and is what a plugin installed from the marketplace
+ * runs on — the whole reason a marketplace install works now.
+ */
+function sqliteNote(): string {
+  const kind = store.sqliteDriverName();
+  if (kind === 'better-sqlite3') return 'better-sqlite3 (native addon)';
+  if (kind === 'node:sqlite') return "node:sqlite — Node's own, no install needed";
+  return 'none — nothing that reads the index can run';
+}
+
+/**
+ * Why the schema number can legitimately be lower than the latest.
+ *
+ * It used to be one reason: migrations 4 and 8 built the `vec0` virtual tables
+ * and declined on a machine without `sqlite-vec`, and since `schemaVersion()`
+ * reports the highest *contiguous* migration, one declining migration held the
+ * number down even though everything after it had applied. `schema v3 of v9`
+ * on a perfectly working install alarmed for no reason.
+ *
+ * Migration 10 removed that reason: the vectors live in ordinary tables now
+ * and nothing in the schema needs an extension, so 4 and 8 no longer decline
+ * and the only way to be behind is not to have opened the database for writing
+ * since upgrading. `doctor` never migrates — it opens read-only, deliberately,
+ * so it is safe to run while an index is in flight — so the fix is the verb
+ * that does open for writing.
+ *
+ * The one case that still stops it is a database built when vec0 was real, on a
+ * machine that has since lost the extension. `doctor` is the only verb that can
+ * see that state and not fix it — it opens read-only on purpose, so it never
+ * runs the migration — and it is the state this sentence exists for.
+ *
+ * **The sentence is part of the fix, not decoration.** It read `schema v9 of
+ * v12 · run potsherd index` on exactly the database where `potsherd index` was
+ * the one command that could not run (audit §N1): an instruction aimed at a
+ * reader who cannot follow it, which this project has now recorded nine times.
+ * `potsherd index` *is* the answer again — it is the verb that opens for
+ * writing and therefore the verb that converts — and when this driver has
+ * already refused, `vec.reason` names the driver that does not, so the command
+ * is taken from there verbatim rather than reworded here.
+ *
+ * **And it is measured against the room it has.** `schema v9 of v12  · ` costs
+ * 20 of a note column that is 43 characters wide at width 80, and a row elides
+ * from the right — so a command that does not fit is printed as *half* a
+ * command, which is worse than not printing one. `room` is the real width, and
+ * when the command will not survive it, this row says only what is true and the
+ * `vectors` row below carries the command in full. Nothing here is ever a
+ * clause the reader cannot act on.
+ */
+function schemaNote(schema: number, vec: VecStatus, room: number): string {
+  if (schema >= store.latestSchemaVersion()) return '';
+  const head = `schema v${schema} of v${store.latestSchemaVersion()}  · `;
+  if (vec.legacy && vec.legacy.length > 0) {
+    // `vec.reason` leads with its command; the em-dash clause is the expendable
+    // half, and the row's own elision drops it for us.
+    const command = (vec.reason ?? 'run potsherd index').split(' — ')[0] ?? 'run potsherd index';
+    if (head.length + command.length <= room) return `  · ${vec.reason ?? command}`;
+    return '  · a vec0 index from potsherd 1.1.0';
+  }
+  if (vec.reason && /vec0|extension/i.test(vec.reason)) {
+    return '  · a vec0 index this machine can no longer read';
+  }
+  return '  · run potsherd index';
+}
+
+/**
+ * The `vectors` row.
+ *
+ * Every word of it comes from {@link vecStatus} with a root — the same call
+ * `index` makes and the same call `find` will make for its warming line — so
+ * the three verbs cannot describe the same index differently. The note is
+ * joined to the card's own width by dropping whole clauses, which is what fixes
+ * the truncation `plans/04` logged: the reason a reader most needs is the first
+ * clause, and the first clause is the one that always survives.
+ */
+function vectorsRow(vec: VecStatus, t: Theme, noteWidth: number): {
+  label: string;
+  value: string;
+  note: string;
+  tone: 'ok' | 'warn' | 'dim';
+} {
+  const row = vec.row;
+  if (!row) {
+    return {
+      label: 'vectors',
+      value: t.dash,
+      note: fmt.clip(vec.reason ?? 'no index yet — run potsherd index', noteWidth, t),
+      tone: 'dim',
+    };
+  }
+  return {
+    label: 'vectors',
+    value: row.value === '\u2014' ? t.dash : row.value,
+    note: row.note(noteWidth, ` ${t.mid} `),
+    tone: row.tone,
+  };
+}

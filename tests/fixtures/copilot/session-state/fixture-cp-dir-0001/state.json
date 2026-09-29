@@ -1,0 +1,81 @@
+{
+  "sessionId": "fixture-cp-dir-0001",
+  "startTime": "2026-01-02T03:04:05.000Z",
+  "lastUpdated": "2026-01-02T03:34:05.000Z",
+  "cwd": "/tmp/potsherd-fx/epsilon",
+  "model": "fixture-model-c",
+  "gitBranch": "fixture-branch",
+  "title": "fixture directory-layout session",
+  "messages": [
+    {
+      "role": "user",
+      "timestamp": "2026-01-02T03:04:05.000Z",
+      "content": "fixture prompt one"
+    },
+    {
+      "role": "assistant",
+      "timestamp": "2026-01-02T03:04:15.000Z",
+      "content": [
+        { "type": "text", "text": "fixture reply one." },
+        {
+          "type": "tool_call",
+          "id": "call-1",
+          "name": "str_replace_editor",
+          "arguments": "{\"path\":\"/tmp/potsherd-fx/epsilon/src/mod.ts\",\"command\":\"view\"}"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "timestamp": "2026-01-02T03:04:25.000Z",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_call_id": "call-1",
+          "content": "fixture tool output"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "timestamp": "2026-01-02T03:04:35.000Z",
+      "content": [
+        { "type": "text", "text": "fixture reply two." },
+        { "type": "fixture_unknown_block", "note": "counted, not fatal" }
+      ]
+    },
+    {
+      "role": "user",
+      "timestamp": "2026-01-02T03:05:05.000Z",
+      "content": "fixture prompt two"
+    },
+    {
+      "role": "assistant",
+      "timestamp": "2026-01-02T03:05:15.000Z",
+      "content": [],
+      "tool_calls": [
+        {
+          "id": "call-2",
+          "function": { "name": "bash", "arguments": "{\"command\":\"fixture-command\"}" }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "timestamp": "2026-01-02T03:05:25.000Z",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_call_id": "call-2",
+          "is_error": true,
+          "content": "fixture command failed"
+        }
+      ]
+    },
+    {
+      "role": "fixture-unknown-role",
+      "timestamp": "2026-01-02T03:05:35.000Z",
+      "content": "fixture odd role text"
+    }
+  ]
+}

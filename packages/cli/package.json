@@ -1,0 +1,75 @@
+{
+  "name": "potsherd",
+  "version": "2.0.0-rc.1",
+  "description": "Rescue, index, search, interrogate and re-enter every coding-agent session on your machine. Local-first.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://github.com/HulkInTherapy/potsherd",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HulkInTherapy/potsherd.git"
+  },
+  "bugs": "https://github.com/HulkInTherapy/potsherd/issues",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "cursor",
+    "session",
+    "history",
+    "transcript",
+    "memory",
+    "search",
+    "archive",
+    "cli",
+    "mcp"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "potsherd": "bin/potsherd.js"
+  },
+  "files": [
+    "bin",
+    "dist/potsherd.js",
+    "dist/potsherd.js.map",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "licenses"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "node ../../scripts/package-readme.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1"
+  },
+  "devDependencies": {
+    "@potsherd/bridges": "workspace:*",
+    "@potsherd/core": "workspace:*",
+    "@types/better-sqlite3": "^7.6.13",
+    "commander": "^12.1.0"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.238",
+    "@anthropic-ai/sdk": "^0.120.0",
+    "@huggingface/transformers": "^4.2.0",
+    "sqlite-vec": "^0.1.9"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/claude-agent-sdk": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@huggingface/transformers": {
+      "optional": true
+    },
+    "sqlite-vec": {
+      "optional": true
+    }
+  }
+}

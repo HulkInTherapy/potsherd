@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "potsherd": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/potsherd-mcp"]
+    }
+  }
+}

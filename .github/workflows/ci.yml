@@ -1,0 +1,33 @@
+name: Candidate validation
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sqlite: [node, better-sqlite3]
+    env:
+      POTSHERD_SQLITE: ${{ matrix.sqlite }}
+      POTSHERD_TEST_MODELS_DIR: ${{ runner.temp }}/potsherd-ci-assets/models
+      POTSHERD_TEST_TOKENIZER_DIR: ${{ runner.temp }}/potsherd-ci-assets/models
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: acquire verified public test assets
+        run: node packages/cli/bin/potsherd.js maintain --acquire-assets --potsherd-dir "${{ runner.temp }}/potsherd-ci-assets" --json
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm privacy
+      - run: pnpm vendor
+      - run: sh plugins/codex/bin/potsherd-mcp --selftest
+      - run: sh plugins/claude-code/bin/potsherd-mcp --selftest

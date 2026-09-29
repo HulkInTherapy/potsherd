@@ -1,0 +1,82 @@
+[
+  {
+    "role": "user",
+    "parts": [{ "text": "fixture prompt one: rename the widget helper" }]
+  },
+  {
+    "role": "model",
+    "parts": [
+      { "text": "fixture reply one." },
+      {
+        "functionCall": {
+          "name": "read_file",
+          "args": { "absolute_path": "/tmp/potsherd-fx/alpha/src/widget.ts" }
+        }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "parts": [
+      {
+        "functionResponse": {
+          "name": "read_file",
+          "response": { "output": "fixture file body" }
+        }
+      }
+    ]
+  },
+  {
+    "role": "model",
+    "parts": [
+      { "thought": true },
+      { "text": "fixture reply two." },
+      {
+        "functionCall": {
+          "name": "write_file",
+          "args": {
+            "file_path": "/tmp/potsherd-fx/alpha/src/widget.ts",
+            "content": "fixture new body"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "parts": [
+      {
+        "functionResponse": {
+          "name": "write_file",
+          "response": { "error": "fixture write refused" }
+        }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "parts": [{ "text": "fixture prompt two: try again" }]
+  },
+  {
+    "role": "model",
+    "parts": [
+      { "text": "fixture reply three." },
+      { "inlineData": { "mimeType": "image/png", "data": "AAAA" } }
+    ]
+  },
+  {
+    "role": "fixture-unknown-role",
+    "parts": [{ "text": "fixture record of a type this parser does not know" }]
+  },
+  {
+    "role": "model",
+    "parts": [
+      {
+        "functionResponse": {
+          "name": "orphan_tool",
+          "response": { "output": "fixture orphan result" }
+        }
+      }
+    ]
+  }
+]

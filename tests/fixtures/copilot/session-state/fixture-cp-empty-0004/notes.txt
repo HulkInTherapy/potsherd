@@ -1,0 +1,3 @@
+fixture placeholder: a session directory holding no file this adapter
+recognises. discover() must report it as unreadable rather than skip it
+silently, and doctor must count it.

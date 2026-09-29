@@ -1,0 +1,702 @@
+export * as paths from './paths.js';
+export * as format from './format.js';
+export * as db from './db.js';
+// Named as well as namespaced: a caller that needs to know whether this build
+// can open a database at all should not have to reach through the `db`
+// namespace to ask.
+export { NoSqliteError, sqliteAvailable } from './db.js';
+export * as lock from './lock.js';
+export * as consent from './consent.js';
+export { onPath, resolveHookCommand, type BinResolution } from './resolve-bin.js';
+
+export { Theme, stripAnsi, toAscii, type ThemeOptions } from './theme.js';
+export { Card, table, fitLine, noteWidth, INDENT, type Row, type TableCell, type TableCellInput } from './render.js';
+
+export { readArchiveState, type ArchiveState } from './archive-state.js';
+export { audit, computeAudit, collectAudit, type AuditOptions, type AuditReport, type AuditInput, type DoomedSession, type WipedProject } from './audit.js';
+export { renderAuditCard, renderSweepList } from './render/audit-card.js';
+export {
+  renderVerify,
+  verifyInfo,
+  VERIFY_SNIPPET,
+  snippetFor,
+  VERIFY_SCRIPT_PATH,
+  VERIFY_SCRIPT_URL,
+  VERIFY_DEFINITIONS,
+  type VerifyInfo,
+} from './render/verify.js';
+
+export { rescue, sha256File, type RescueOptions, type RescueResult, type RescueProgress } from './rescue.js';
+export { renderRescueReceipt, type ReceiptExtras } from './render/rescue-receipt.js';
+
+export { scanClaudeDisk, scanFile, slugToPathGuess, SIDECHAIN_DIR, type DiskScan, type ScanOptions, type ScannedFile, type ProjectDir } from './claude/scan.js';
+export { readHistory, type HistoryScan, type HistorySession, type HistoryPrompt } from './claude/history.js';
+export { readSessionsIndexes, type SessionIndexScan, type SessionIndexEntry } from './claude/sessions-index.js';
+export {
+  readCleanupStatus,
+  readSettingsFile,
+  looksLikeJsonc,
+  unifiedDiff,
+  backupPath,
+  CLAUDE_DEFAULT_CLEANUP_DAYS,
+  POTSHERD_CLEANUP_DAYS,
+  type CleanupStatus,
+  type SettingsFile,
+} from './claude/settings.js';
+
+// ---------------------------------------------------------------- phase 1
+// Ported from obra/episodic-memory v1.4.2 (MIT, (c) 2025 Jesse Vincent).
+// See NOTICE for the upstream revision and docs/upstream/PORT-LOG.md for what
+// was taken, what was adapted and what was refused.
+
+export type {
+  Harness,
+  SessionStatus,
+  SessionRecord,
+  Exchange,
+  ExchangeToolCall,
+  SessionSource,
+  ParseOptions,
+  ParseResult,
+  Adapter,
+  AdapterStub,
+  FormatProvenance,
+} from './adapters/types.js';
+export { HARNESSES, isAdapter } from './adapters/types.js';
+
+// The five adapters (L0). Each was deliberately left out of this barrel during
+// the parallel wave so five workers could not collide on one line (F8/F13);
+// integration adds them. Namespaced rather than flattened because every
+// adapter exports `discover`, `parse` and `sourceDir`.
+export * as claude from './adapters/claude.js';
+export * as codex from './adapters/codex.js';
+export * as cursor from './adapters/cursor.js';
+export * as pi from './adapters/pi.js';
+export * as gemini from './adapters/gemini.js';
+export * as opencode from './adapters/opencode.js';
+export * as copilot from './adapters/copilot.js';
+export { claudeAdapter } from './adapters/claude.js';
+export { codexAdapter } from './adapters/codex.js';
+export { cursorAdapter } from './adapters/cursor.js';
+export { piAdapter } from './adapters/pi.js';
+export { geminiAdapter } from './adapters/gemini.js';
+export { opencodeAdapter } from './adapters/opencode.js';
+export { copilotAdapter } from './adapters/copilot.js';
+
+// L2 — redaction. Runs before anything is written to the index (`03` §5).
+export * as redaction from './redact.js';
+export {
+  redact,
+  redactText,
+  redactExchange,
+  maskFor,
+  secretDigest,
+  containsMask,
+  emptyCounts,
+  tally,
+  addCounts,
+  countsJson,
+  redactionRow,
+  redactionLine,
+  elideBinary,
+  elideExchange,
+  emptyElisions,
+  addElisions,
+  type Elisions,
+  MASK_RE,
+  SECRET_TYPES,
+  type SecretType,
+  type RedactionHit,
+  type RedactionResult,
+  type RedactionCounts,
+} from './redact.js';
+
+// L1/L4 — adapter output into the store, and the store's own vector table.
+export {
+  ingestSession,
+  ingestGhosts,
+  indexAll,
+  adapterSpecs,
+  storedRedactionCounts,
+  storedRecordTypes,
+  readIndexState,
+  writeIndexState,
+  type IngestOptions,
+  type IngestSessionResult,
+  type IndexOptions,
+  type IndexReport,
+  type IndexProgress,
+  type HarnessReport,
+  type EmbeddingReport,
+  type GhostSyncResult,
+  type RecordTypeRow,
+  type AdapterSpec,
+} from './ingest.js';
+export {
+  vecStatus,
+  vecAvailable,
+  vectorCounts,
+  vectorDrift,
+  vectorInventory,
+  reconcileVectorStamps,
+  type VecStatus,
+} from './vec.js';
+
+// L6 — recall, browse and the counters behind `find`, `ls`, `show` and `stats`.
+export {
+  recall,
+  ftsQuery,
+  resumeCommand,
+  projectName,
+  fallbackTitle,
+  displayTitleOf,
+  idTag,
+  keywordCandidates,
+  sessionMeta,
+  fromSessionRow,
+  fromGhostRow,
+  vectorState,
+  LISTS,
+  PER_SESSION,
+  CORROBORATION,
+  WEIGHTS,
+  type ListName,
+  type RecallHit,
+  type RecallSession,
+  type RecallResult,
+  type RecallOptions,
+  type VectorState,
+  type SessionRow,
+  type GhostRow,
+  CARDS_SCORE_EVIDENCE_BLOCKS,
+  LANES,
+  ROUTING_KINDS,
+  // FIX-F round 2 §4.2. `SUMMARY_KINDS` — the kinds whose text is a statement
+  // *about* a conversation rather than a line *from* one — was spelled twice:
+  // once here as the authority, and once inside
+  // `packages/mcp/src/tools/recall.ts`, because that package reaches core
+  // through this barrel and the constant was not on it. A four-word set
+  // duplicated across a package boundary is a set that drifts, and the two
+  // halves of C3 (a summary is not citable; a summary never outranks a
+  // transcript) are decided on opposite sides of that boundary.
+  SUMMARY_KINDS,
+  hasTranscriptEvidence,
+  isSummaryHit,
+  summaryRank,
+  ROUTING_PER_SESSION,
+  byLane,
+  laneOfHit,
+  laneOfSession,
+  type Lane,
+} from './recall.js';
+export {
+  listSessions,
+  resolveSession,
+  showSession,
+  type BrowseSession,
+  type ListOptions,
+  type ListResult,
+  type ResolvedSession,
+  type ShowOptions,
+  type ShowResult,
+  type ShownExchange,
+} from './browse.js';
+// L1½ — the fork/resume chain (audit F4, `threads.ts`). Exported here because
+// the MCP package is a consumer of core's public surface and `potsherd_read`
+// addresses the **thread**: it had been probing this barrel for `resolveThread`
+// by name since T10.6 and finding nothing, which is how F4 survived the release
+// that fixed it. A capability a caller asks for by name belongs in the barrel.
+export {
+  resolveThread,
+  threadOf,
+  threadTotals,
+  storedThreads,
+  inThread,
+  sessionDate,
+  sessionDay,
+  LINEAGE_HARNESSES,
+  OVERLAP_THRESHOLD,
+  MIN_SHARED_RECORDS,
+  type Thread,
+  type ThreadResolution,
+  type ThreadTotals,
+  type ThreadReport,
+  type ThreadEdge,
+} from './threads.js';
+export {
+  stats as sessionStats,
+  type StatsReport,
+  type StatsOptions,
+  type HarnessStats,
+  type FreshnessStats,
+} from './stats.js';
+// L6 — the user's own annotations: tags, pins and links (`03 §8`, phase-2 T2.4).
+export {
+  allTags,
+  applyTags,
+  isPinned,
+  linkSessions,
+  linkedSessionIds,
+  normalizeTag,
+  parseTagArgs,
+  pinSession,
+  pinnedSessionIds,
+  sessionLinks,
+  sessionTags,
+  tagsForSessions,
+  unlinkSessions,
+  unpinSession,
+  LINKED_TO_SQL,
+  MAX_TAG_LENGTH,
+  type LinkChange,
+  type PinChange,
+  type SessionLink,
+  type TagChange,
+} from './tags.js';
+export { NEAREST_ROWS, renderFind, snippetLine, type FindRenderOptions } from './render/find.js';
+export { renderLs, renderResumeMenu, marker } from './render/ls.js';
+export { renderShow, renderShowMarkdown } from './render/show.js';
+export { renderShowHtml, esc as escapeHtml } from './render/show-html.js';
+export { renderStats } from './render/stats.js';
+
+export * as parser from './parser/index.js';
+export * as embeddings from './embeddings.js';
+export * as search from './search/index.js';
+export * as markers from './markers.js';
+export * as codexVersion from './codex/version.js';
+
+// ---------------------------------------------------------------- phase 2
+// L5 — the single entry point for every model call (`03` §0, `04` Q4).
+// Nothing above L4 may reach a backend except through `llm.ts`: redaction,
+// the cost estimate, the caps and the re-entrancy guard all live there.
+export {
+  Llm,
+  Budget,
+  BudgetError,
+  LlmError,
+  NoBackendError,
+  ReentrancyError,
+  detectBackend,
+  availability,
+  estimate,
+  emptySpend,
+  insidePotsherdCall,
+  isAlias,
+  lastAgentMessage,
+  modelClass,
+  parseJsonish,
+  redactOutgoing,
+  resolveModel,
+  tokensForChars,
+  tokensForText,
+  API_MODEL_IDS,
+  ASK_MODEL,
+  CARD_MODEL,
+  callProfile,
+  effectiveConcurrency,
+  CALL_PROFILES,
+  MODEL_CALL_VERBS,
+  LOCAL_SOCKET_VERBS,
+  OFFLINE_VERBS,
+  RUNTIME_FETCH_VERBS,
+  DEFAULT_TIMEOUT_MS,
+  TIMEOUT_RETRIES,
+  CHARS_PER_TOKEN,
+  CHUNK_CHARS,
+  HARNESS_OVERHEAD_USD,
+  IMPLAUSIBLE_TOKEN_FACTOR,
+  MODEL_ALIASES,
+  OUTPUT_CHARS_PER_CALL,
+  PRICES,
+  PROMPT_OVERHEAD_CHARS,
+  REENTRANCY_ENV,
+  type Availability,
+  type Backend,
+  type BackendChoice,
+  type BudgetOptions,
+  type Calibration,
+  type CallProfile,
+  type DetectOptions,
+  type Estimate,
+  type EstimateInput,
+  type EstimatePerSession,
+  type EstimateSession,
+  type JsonRequest,
+  type JsonResult,
+  type LlmOptions,
+  type LlmRequest,
+  type LlmResult,
+  type ModelAlias,
+  type ModelClass,
+  type Price,
+  type SendRequest,
+  type SendResult,
+  type Spend,
+  type Transport,
+} from './llm.js';
+export {
+  planCards,
+  isStale,
+  MIN_EXCHANGES,
+  MIN_GHOST_PROMPTS,
+  SEQ_HEADER_CHARS,
+  type CardKind,
+  type CardPlan,
+  type CardTarget,
+  type PlanOptions,
+  type SkipReasonCounts,
+} from './cards/plan.js';
+export {
+  renderEstimate,
+  approxDuration,
+  compact as compactNumber,
+  TARGET_SECONDS,
+  TARGET_USD,
+  type EstimateCardOptions,
+} from './render/estimate.js';
+// The estimator's self-check: what a run was quoted, what it cost, and the
+// correction the next quote inherits from it (`calibration.ts`).
+export {
+  accuracyNote,
+  accuracyShort,
+  cardRuns,
+  compareToEstimate,
+  readCalibration,
+  recordCardRun,
+  CALIBRATION_WINDOW,
+  MAX_RATIO as MAX_CALIBRATION_RATIO,
+  MIN_CALLS as MIN_CALIBRATION_CALLS,
+  type CardRunRecord,
+  type CardRunRow,
+  // The other half of the file, added in phase 10: the estimator says what a
+  // card run will cost, and this says how much of the query a row actually
+  // answered. Same module because both are the honest number behind a screen.
+  atLeastConfident,
+  calibrate,
+  coveredTerms,
+  label as confidenceLabel,
+  maxConfidence,
+  relativeStrength,
+  AGREEMENT_LISTS,
+  STRONG_FLOOR,
+  WEAK_FLOOR,
+  WEIGHT_AGREEMENT,
+  WEIGHT_BASE,
+  WEIGHT_STRENGTH,
+  type Calibrated,
+  type Confidence,
+  type RowEvidence,
+  ROUTING_CEILING,
+  capConfidence,
+} from './calibration.js';
+export * as cardSentinel from './cards/sentinel.js';
+
+// L5 — the ProMem-lite pipeline itself (`03` §6, T2.2). Five steps, in order,
+// and two of them cost nothing: `verify` and `dedupe` are arithmetic against
+// the transcript, which is what lets a card claim to be checkable.
+export {
+  cardTranscript,
+  type CardPipelineOptions,
+  type CardResult,
+  type CardStep,
+} from './cards/pipeline.js';
+export {
+  runCards,
+  type CardProgress,
+  type CardRunOptions,
+  type CardRunReport,
+  type CardSummary,
+} from './cards/run.js';
+export {
+  loadSessionTranscript,
+  loadGhostTranscript,
+  ghostProjectSlug,
+  unitHeader,
+  unitText,
+  renderUnit,
+  elideMiddle,
+  loadVectors,
+  type Transcript,
+  type TranscriptUnit,
+} from './cards/transcript.js';
+export {
+  extractCalls,
+  sliceUnits,
+  MAX_UNIT_CHARS,
+  SLICE_CHUNK_CHARS,
+  SLICE_THRESHOLD_CHARS,
+  type SliceOptions,
+} from './cards/slice.js';
+export {
+  extractCard,
+  supplementCard,
+  fallbackCard,
+  transcriptBlock,
+  type ExtractOptions,
+  type ExtractResult,
+  type ExtractSpend,
+} from './cards/extract.js';
+export {
+  cardItems,
+  measureCoverage,
+  mergeSupplement,
+  COVERAGE_COSINE,
+  UNCOVERED_FRACTION,
+  type CoverageReport,
+} from './cards/coverage.js';
+export {
+  verifyCard,
+  unresolvedEvidence,
+  EVIDENCE_COSINE,
+  EVIDENCE_WINDOWS,
+  EVIDENCE_WINDOW_CHARS,
+  type DropReason,
+  type DroppedClaim,
+  type ClaimGate,
+  type VerifyResult,
+  type VerifyTotals,
+} from './cards/verify.js';
+export {
+  ghostClaimGate,
+  statesDecision,
+  decisionEvidence,
+  GHOST_SYSTEM,
+  PROMPTS_ONLY,
+} from './cards/ghost.js';
+export { dedupeCard, DEDUPE_COSINE, type DedupeReport, type DedupeResult } from './cards/dedupe.js';
+export { makeGate, openGate, type Gate } from './cards/gate.js';
+export {
+  cachedEmbedder,
+  cosine,
+  bestMatch,
+  rankedWindows,
+  windows,
+  type CachedEmbedder,
+  type Embedder,
+} from './cards/vectors.js';
+export {
+  cardEmbeddingText,
+  cardMarkdown,
+  cardPath,
+  exportCards,
+  readPriorCard,
+  readCard,
+  safeSlug,
+  writeCard,
+  type CardRecord,
+  type StoredCard,
+  type ExportResult,
+} from './cards/write.js';
+export {
+  CARD_OUTCOMES,
+  CARD_SCHEMA,
+  MAX_CLAIMS,
+  MAX_CLAIM_CHARS,
+  MAX_FILES,
+  MAX_SUMMARY_WORDS,
+  MAX_TAGS,
+  MAX_TITLE_WORDS,
+  MAX_TOPICS,
+  asSeqList,
+  clampWords,
+  emptyCard,
+  minimalCard,
+  normaliseCard,
+  tagify,
+  validateCard,
+  type CardClaim,
+  type CardOutcome,
+  type ExtractedCard,
+} from './cards/schema.js';
+export { renderCardRun, type CardRunOptions as CardRunCardOptions } from './render/card-run.js';
+
+// ---------------------------------------------------------------- phase 4
+// L7 — `ask`: shortlist → readers → synthesizer → the code-level citation
+// filter (`03` §8, phase-4 T4.1). `filterAnswer` is the whole claim and is
+// exported so it can be tested, and audited, without a backend.
+export {
+  ask,
+  filterAnswer,
+  excerptUnits,
+  excerptText,
+  normaliseQuote,
+  quoteOccursIn,
+  matchSpan,
+  quotableText,
+  unlabelQuote,
+  MIN_UNIT_CHARS,
+  ANSWER_MAX_WORDS,
+  ASK_CARD_CHARS,
+  ASK_CHEAP_K,
+  ASK_CHEAP_MODEL,
+  ASK_CHEAP_SESSION_CHARS,
+  ASK_CHEAP_TOP_EXCHANGES,
+  ASK_CONCURRENCY,
+  ASK_K,
+  ASK_MAX_USD,
+  ASK_SCAN,
+  ASK_SESSION_CHARS,
+  ASK_TOP_EXCHANGES,
+  ASK_WINDOWS,
+  MIN_QUOTE_CHARS,
+  READER_CARD_NOTE,
+  READER_GHOST_NOTE,
+  READER_SYSTEM,
+  STRICT_MIN_EVIDENCE,
+  SYNTH_SYSTEM,
+  type AskDrop,
+  type AskDropReason,
+  type AskEvidence,
+  type AskOptions,
+  type AskProgress,
+  type AskReaderFn,
+  type AskReaderInput,
+  type AskReaderOutput,
+  type AskReaderQuote,
+  type AskReaderReport,
+  type AskRefusal,
+  type AskResult,
+  type AskSentence,
+  type AskStep,
+  type EvidenceSource,
+  type FilterOutput,
+  type ProposedEvidence,
+  type ProposedSentence,
+} from './ask.js';
+export {
+  renderAsk,
+  readerLine,
+  cheapNote,
+  clipQuote,
+  maskSafeCut,
+  QUOTE_CHARS,
+  type AskRenderOptions,
+} from './render/ask.js';
+
+// ------------------------------------------------------------------ phase 4
+export {
+  OPEN_THREAD_LABEL,
+  openThreadCandidates,
+  type OpenThreadCandidate,
+  type OpenThread,
+  type CandidateOptions as OpenThreadCandidateOptions,
+} from './open-threads.js';
+// T6.6 D0b — the model pass moved to its own module so that `open-threads.ts`
+// is provably offline and `link --suggest`, which reads it, is provably out of
+// reach of a model. The names exported here are unchanged.
+export {
+  confirmOpenThreads,
+  type ConfirmOptions as OpenThreadConfirmOptions,
+} from './open-threads-confirm.js';
+
+// ---------------------------------------------------------------- phase 4
+// L7 — `graft`: the token-budgeted re-entry brief (`03` §8, T4.3).
+export {
+  ABOUT_K,
+  CITATION_RE,
+  DEFAULT_BUDGET,
+  GRAFT_SYSTEM,
+  GRAFT_WRITE_PATH_NOTE,
+  GraftError,
+  MIN_BUDGET,
+  SLICE_CHARS,
+  buildPrompt,
+  cardOnlyBody,
+  clipSafe,
+  collectSource,
+  copyToClipboard,
+  counterFor,
+  countTokens,
+  enforceBudget,
+  ensureGraftDir,
+  graft,
+  graftDir,
+  graftPath,
+  resolveCitations,
+  resolveTarget,
+  safeCut,
+  sourceLine,
+  type BudgetPass,
+  type CitationPass,
+  type ClipOutcome,
+  type Counter,
+  type GraftCitation,
+  type GraftOptions,
+  type GraftPath,
+  type GraftReport,
+  type GraftResult,
+  type GraftSource,
+  type TokenCount,
+} from './graft.js';
+export { graftJson, renderGraft } from './render/graft.js';
+
+// ---------------------------------------------------------------- phase 5
+// L8 — `setup`: the second, and last, place potsherd writes outside
+// `~/.potsherd`, and the only one that writes into another tool's directory
+// (`03` §9, phase-5 T5.5). A namespace, like `consent`, because the whole
+// module is one verb's worth of proposal-and-apply.
+export * as setup from './setup.js';
+
+// ---------------------------------------------------------------- phase 6
+// T6.4 — `stack`: the verb that says which tool owns which of `01 §1`'s four
+// failures, and which two potsherd loses.
+export * as stack from './stack.js';
+// `renderSuggestions` lives beside `MEASURED_PRECISION` on purpose, so there is
+// no wiring that leaves the measured-precision disclosure out.
+export {
+  suggestLinks,
+  renderSuggestions,
+  MEASURED_PRECISION,
+  DEFAULT_LIMIT as SUGGEST_DEFAULT_LIMIT,
+  type LinkSuggestion,
+  type SuggestResult,
+  type SuggestOptions,
+  type Precision,
+} from './link-suggest.js';
+
+export { VERSION } from './version.js';
+
+export type * from './memory/contracts.js';
+export { sourceId, readEpochs, readSpan, inspectCoverage, publishSource, compatibilityRecords, NORMALIZATION_VERSION } from './memory/source.js';
+export type { PublicationInput } from './memory/source.js';
+export { scopeSql, validateScope } from './memory/scope.js';
+export { spanWindows, reassembleUnit, buildSpanManifest, deriveCoveragePartitions, spanManifestHash, currentSpanPolicy, hasCurrentSpanManifest, compatibleSpanPolicies, SPAN_MANIFEST_VERSION } from './memory/spans.js';
+export type { SpanTokenizer, SpanWindow, SpanManifest, CoveragePartition, SourceBoundary } from './memory/spans.js';
+export { getSourceRevision, listSourceSpans } from './memory/source.js';
+export type { SourceRevisionView } from './memory/source.js';
+export { backfillLegacy } from './memory/backfill.js';
+export { readEnrolledSources } from './ingest.js';
+export type { SourceEnrollment } from './ingest.js';
+export { discoverEnrolledSources } from './ingest.js';
+export { LocalMemoryService } from './memory/service.js';
+export type { PlannedMemoryService } from './memory/service.js';
+export type { DenseLane, MemoryServiceOptions } from './memory/service.js';
+export { TOKENIZER_ID, TOKENIZER_ASSET_HASH, defaultBudget, countTokens as countTransportTokens, planResponse, serializeResponse, planWriteReceipt, finalizeEmission, emittedMcpResult } from './memory/budget.js';
+export type { PlannedResponse, FinalizedEmission, McpTextResult, Transport as MemoryTransport } from './memory/budget.js';
+export { encodeCompactMemoryPacket, decodeCompactMemoryPacket, canonicalPacketRef, MemoryPacketError } from './memory/packet.js';
+export type { CompactMemoryPacketV1, PackedEvidence } from './memory/packet.js';
+export { applyIgnore } from './ignore.js';
+export { inspectNotes, queryCurrentNotes, writeMemoryNotes, backfillLegacyNotes } from './memory/notes-store.js';
+export type { NoteQueryOptions } from './memory/notes-store.js';
+export { previewForget, applyForget, recoverForget } from './memory/delete.js';
+export { backfillLegacyGhosts } from './memory/backfill.js';
+export { spanEmbeddingText } from './memory/spans.js';
+export { rebuildEvidenceSpans } from './memory/backfill.js';
+export { SpanDenseLane } from './memory/dense.js';
+export { DEFAULT_SPACE_ID, CLS_SPACE_ID, inspectAssets, acquireAssets, LocalEncoder } from './memory/assets.js';
+export { enqueueJob, spoolRequest, drainSpool, runtimeHealth } from './memory/jobs.js';
+export { MaintenanceWorker, prepareMigration, withPublicationLease, ensureSpanSpace, commitSpanVector } from './memory/maintenance.js';
+
+export { loadSpanTokenizer } from './memory/tokenization.js';
+export { MEMORY_SCHEMA_VERSION, MemorySchemaError, assertMemorySchema, schemaResponse } from './memory/readiness.js';
+export { MemoryInputError, validateMemoryInput, validateMemoryResponseFormat, validateRecallNavigation } from './memory/input.js';
+export type { PublicMemoryKind } from './memory/input.js';
+
+export {MemoryPrivacyError} from './memory/privacy.js';
+
+export {legacyNativeOwners,legacyNativeOwnershipAmbiguous,AMBIGUOUS_LEGACY_NATIVE_IDS_SQL} from './memory/legacy-ownership.js';
+
+export {completeDeliveredSpan,complementaryReadRefs,planComplementaryRead} from './memory/delivery.js';
+export type {ComplementaryReadPlan} from './memory/delivery.js';
+export {READER_CONTRACT,buildReaderTask,readerPrompt,validateReaderAnswer} from './memory/reader.js';
+export type {ReaderStatus,ReaderClaimKind,ReaderCitation,ReaderTask,ReaderClaim,ReaderAnswer,ReaderValidation} from './memory/reader.js';

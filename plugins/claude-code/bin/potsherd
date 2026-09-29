@@ -1,0 +1,93 @@
+#!/bin/sh
+# The potsherd this plugin runs.
+#
+# `skills/potsherd/SKILL.md` pre-approves exactly this path
+# (`allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/potsherd *)`) and routes all
+# fifteen verbs through it, so every `/potsherd <verb>` arrives here. Since
+# T5.9 `hooks/session-start.sh` and `hooks/session-end.sh` arrive here too:
+# before that each hook re-implemented the resolution below inline in
+# `hooks.json`, in the opposite order, and so let the stale 0.1.0 on PATH
+# answer for a 0.4.0 checkout -- exactly the case this header warns about.
+#
+# Resolution order, and why it is not phase 0's order:
+#
+#   `resolve-bin.ts` prefers `potsherd` on PATH, because it is installing a
+#   command into the *user's* settings.json, where a portable spelling survives
+#   upgrades and reads better in a diff. This file is the opposite situation.
+#   It belongs to a plugin that carries its own version number, and the archive
+#   format it speaks is pinned to that version. Reaching for PATH first would
+#   let a stale global install answer for a newer plugin -- on the machine this
+#   was written on, PATH held 0.1.0 while the checkout beside it was 0.4.0.
+#   So: this plugin's own potsherd first, PATH only as a last resort.
+#
+#   1. vendored inside the plugin        (committed; see below)
+#   2. the working copy this plugin was checked out inside, once built
+#   3. a global install on PATH
+#   4. nothing -- and then it says so, loudly, and exits non-zero
+#
+#
+# WHAT STEPS 1 AND 2 NEED, and what changed in phase 7.
+#
+# `dist/potsherd.js` is a single esbuild bundle. It used to need a `node_modules`
+# beside it: `commander` was external, so the bundle could not even *start*
+# without it, and `better-sqlite3` was a hoisted static import, so every verb
+# failed with a module-not-found stack trace on a machine that had not built the
+# addon -- including the four verbs that never open a database. A git clone of
+# this repository has neither `dist/` nor `node_modules`, which is why a
+# marketplace install used to fall through to step 3; and step 3 was empty too,
+# because potsherd is not published to npm.
+#
+# Both halves are fixed:
+#
+#   - `plugins/*/dist/*.js` are **vendored** -- built by `pnpm build`, copied by
+#     `scripts/vendor-plugin.mjs`, committed. Step 1 now succeeds for a plain
+#     git clone. See that script for why a generated file is in the repository.
+#   - `commander` and the MCP SDK are bundled in, and `better-sqlite3`,
+#     `sqlite-vec`, the embedding runtime and the agent SDK are all loaded
+#     lazily. So the bundle runs with an empty `node_modules`: `audit`,
+#     `rescue`, `guard` and `doctor` work -- the whole rescue path, which is
+#     what the product is named for -- and anything that reads the index says
+#     so in one sentence and names the one command that fixes it.
+#
+# Step 4 is still the whole point. Phase 0's ruling was that a hook which looks
+# installed and silently does nothing is worse than no hook; a shim that exits 0
+# having run nothing is the same failure wearing the skill's clothes. There is
+# no silent branch below.
+set -u
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# 1. vendored: plugins/claude-code/dist/potsherd.js
+if [ -f "$ROOT/dist/potsherd.js" ]; then
+  exec node "$ROOT/dist/potsherd.js" "$@"
+fi
+
+# 2. the surrounding checkout: <repo>/packages/cli/dist/potsherd.js
+if [ -f "$ROOT/../../packages/cli/dist/potsherd.js" ]; then
+  exec node "$ROOT/../../packages/cli/dist/potsherd.js" "$@"
+fi
+
+# 3. a global install
+if command -v potsherd >/dev/null 2>&1; then
+  exec potsherd "$@"
+fi
+
+# 4. no potsherd anywhere. Say which three places were tried.
+cat >&2 <<EOF
+potsherd: this plugin has no potsherd to run, so nothing was done.
+
+Looked in three places:
+  1. $ROOT/dist/potsherd.js                      (vendored in the plugin)
+  2. $ROOT/../../packages/cli/dist/potsherd.js   (the surrounding checkout)
+  3. potsherd on PATH                            (a global install)
+
+Place 1 is committed to this repository, so a normal install has it. If it is
+missing, this plugin directory was copied without it. Reinstall the plugin, or
+build from a checkout:
+
+  git clone https://github.com/HulkInTherapy/potsherd
+  cd potsherd && pnpm install && pnpm build && pnpm vendor
+
+potsherd is not published to npm, so there is no  npm i -g  to suggest.
+EOF
+exit 127

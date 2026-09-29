@@ -1,0 +1,62 @@
+#!/bin/sh
+# The MCP server this plugin runs.
+#
+# `.mcp.json` used to name `${CLAUDE_PLUGIN_ROOT}/../../packages/mcp/dist/index.js`
+# directly. In a marketplace install that file does not exist — `dist/` is
+# gitignored — so `node` died with a module-not-found stack trace before the
+# server ever spoke MCP, every tool vanished from the client, and the only
+# symptom was a tool list that was simply shorter. `session-archaeologist`,
+# whose `tools:` line is two `mcp__plugin_potsherd_potsherd__*` entries and
+# nothing else since T10.6, was left with no tools at all and answered
+# "not found" to everything.
+#
+# An MCP server that fails to start is invisible by design, so the least this
+# can do is put a sentence a human can act on into the server log instead of a
+# stack trace. Same three places as `bin/potsherd`, same order, same reasons --
+# see that file's header, which also explains what phase 7 changed.
+#
+# Since phase 7 place 1 is committed: `dist/mcp.js` is vendored (`scripts/
+# vendor-plugin.mjs`), and the MCP SDK and `zod` are bundled into it rather than
+# left external, so the server starts with an empty `node_modules`. Its four
+# tools all read the index, so on a machine with no `better-sqlite3` each one
+# answers with a sentence naming the fix -- which is a working server reporting
+# a missing dependency, not a client silently missing every tool.
+set -u
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# 1. vendored inside the plugin
+if [ -f "$ROOT/dist/mcp.js" ]; then
+  exec node "$ROOT/dist/mcp.js" "$@"
+fi
+
+# 2. the surrounding checkout
+if [ -f "$ROOT/../../packages/mcp/dist/index.js" ]; then
+  exec node "$ROOT/../../packages/mcp/dist/index.js" "$@"
+fi
+
+# 3. a global install
+if command -v potsherd-mcp >/dev/null 2>&1; then
+  exec potsherd-mcp "$@"
+fi
+
+# 4. nothing. Say which three places were tried, and what it costs.
+cat >&2 <<EOF
+potsherd: no MCP server to run, so this client has NO potsherd tools.
+
+Looked in three places:
+  1. $ROOT/dist/mcp.js                            (vendored in the plugin)
+  2. $ROOT/../../packages/mcp/dist/index.js       (the surrounding checkout)
+  3. potsherd-mcp on PATH                         (a global install)
+
+All four tools -- potsherd_recall, potsherd_read, potsherd_graft, potsherd_write -- are therefore absent, and the
+session-archaeologist agent is left with no tools at all.
+
+Place 1 is committed to this repository, so a normal install has it. If it is
+missing, this plugin directory was copied without it. Reinstall the plugin, or
+build from a checkout:
+
+  git clone https://github.com/HulkInTherapy/potsherd
+  cd potsherd && pnpm install && pnpm build && pnpm vendor
+EOF
+exit 127

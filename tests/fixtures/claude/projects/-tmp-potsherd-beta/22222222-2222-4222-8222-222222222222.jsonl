@@ -1,0 +1,2 @@
+{"sessionId":"22222222-2222-4222-8222-222222222222","cwd":"/tmp/potsherd-beta","version":"2.1.237","entrypoint":"sdk-ts","isSidechain":false,"type":"user","uuid":"k1","promptId":"kp1","timestamp":"2026-08-02T11:00:00.000Z","message":{"role":"user","content":"summarise the changelog"}}
+{"sessionId":"22222222-2222-4222-8222-222222222222","cwd":"/tmp/potsherd-beta","entrypoint":"sdk-ts","type":"assistant","uuid":"k2","parentUuid":"k1","timestamp":"2026-08-02T11:00:09.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Three fixes, one feature."}]}}

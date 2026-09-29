@@ -1,0 +1,4 @@
+[
+  { "role": "user", "content": "fixture flat prompt" },
+  { "role": "assistant", "content": "fixture flat reply." }
+]

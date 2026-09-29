@@ -1,0 +1,41 @@
+#!/bin/sh
+# Self-contained potsherd runtime for this installed plugin.
+# Own bundle first; development checkout and PATH are explicit fallbacks.
+set -u
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# 1. vendored: plugins/codex/dist/potsherd.js
+if [ -f "$ROOT/dist/potsherd.js" ]; then
+  exec node "$ROOT/dist/potsherd.js" "$@"
+fi
+
+# 2. the surrounding checkout: <repo>/packages/cli/dist/potsherd.js
+if [ -f "$ROOT/../../packages/cli/dist/potsherd.js" ]; then
+  exec node "$ROOT/../../packages/cli/dist/potsherd.js" "$@"
+fi
+
+# 3. a global install
+if command -v potsherd >/dev/null 2>&1; then
+  exec potsherd "$@"
+fi
+
+# 4. no potsherd anywhere. Say which three places were tried.
+cat >&2 <<EOF
+potsherd: this plugin has no potsherd to run, so nothing was done.
+
+Looked in three places:
+  1. $ROOT/dist/potsherd.js                      (vendored in the plugin)
+  2. $ROOT/../../packages/cli/dist/potsherd.js   (the surrounding checkout)
+  3. potsherd on PATH                            (a global install)
+
+potsherd is not published to npm yet, so there is no install command.
+Build it from a checkout:
+
+  git clone https://github.com/HulkInTherapy/potsherd
+  cd potsherd && pnpm install && pnpm build
+
+then install this plugin from that checkout, so that step 2 finds the
+bundle beside it.
+EOF
+exit 127

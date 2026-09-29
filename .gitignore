@@ -1,8 +1,28 @@
 node_modules/
 dist/
+# ...except the bundles a plugin install has no way to build for itself.
+# See scripts/vendor-plugin.mjs for why a generated file is committed here.
+!plugins/*/dist/
+!plugins/*/dist/*.js
+!plugins/*/dist/README.md
+!plugins/*/dist/artifact-manifest.json
 *.tsbuildinfo
 .DS_Store
 *.tgz
 coverage/
 .tmp/
 .potsherd/
+
+# copied into packages/cli at build time from the repo root
+packages/cli/LICENSE
+packages/cli/NOTICE
+packages/cli/README.md
+
+# agent worktrees
+.claude/
+
+# python bytecode from scripts/
+__pycache__/
+
+# Third-party notices copied by the CLI build for npm packaging.
+packages/cli/licenses/

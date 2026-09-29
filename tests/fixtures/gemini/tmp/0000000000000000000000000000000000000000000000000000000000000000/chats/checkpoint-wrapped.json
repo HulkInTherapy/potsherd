@@ -1,0 +1,13 @@
+{
+  "sessionId": "fixture-gemini-session-0001",
+  "startTime": "2026-01-02T03:04:05.000Z",
+  "lastUpdated": "2026-01-02T03:44:05.000Z",
+  "cwd": "/tmp/potsherd-fx/beta",
+  "model": "fixture-model-pro",
+  "gitBranch": "fixture-branch",
+  "title": "fixture wrapped checkpoint",
+  "history": [
+    { "role": "user", "parts": "fixture bare string prompt" },
+    { "role": "model", "parts": [{ "text": "fixture wrapped reply." }] }
+  ]
+}

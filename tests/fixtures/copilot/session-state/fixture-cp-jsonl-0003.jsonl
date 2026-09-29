@@ -1,0 +1,5 @@
+{"sessionId":"fixture-cp-jsonl-0003","cwd":"/tmp/potsherd-fx/zeta","model":"fixture-model-d"}
+{"role":"user","timestamp":"2026-01-03T01:00:00.000Z","content":"fixture jsonl prompt"}
+{"role":"assistant","timestamp":"2026-01-03T01:00:10.000Z","content":[{"type":"text","text":"fixture jsonl reply."}]}
+this line is not json at all
+{"role":"assistant","timestamp":"2026-01-03T01:00:20.000Z","content":[{"type":"tool_result","name":"orphan_tool","content":"fixture orphan output"}]}
