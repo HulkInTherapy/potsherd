@@ -1,5 +1,11 @@
 # 2.0.0-rc.1 release candidate
 
+The candidate defines **2,437 tests** across 104 test files. This inventory count
+does not imply that every check passed. Qualification results, skipped private-
+corpus checks, and reader/model limitations are reported separately. The Node
+qualification combines completed files from its interrupted initial run with
+the remaining-file continuation; original receipts are preserved.
+
 The candidate keeps source evidence, authored memory and reader judgments separate. The installed `reader next-read` helper exposes the same public bounded source selection used in qualification. Default recall, read and graft do not make paid model calls. Strict reader validation checks citation membership and authority, while semantic support remains unassessed by the engine.
 
 The frozen 144-case warm comparison completed all72operations on each interface, with zero integrity failures. Required delivery passed48/48 on CLI and48/48 on MCP; literal exact cases passed6/6 on each. These are evidence delivery results, not a promise that every model answer is correct. Mixed-role composite answers can fail the strict reader contract; an abbreviated citation is not silently repaired.
