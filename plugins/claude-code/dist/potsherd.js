@@ -34657,7 +34657,12 @@ function checkedPublicInput(o, kind) {
     let responseFormat = "expanded-v2";
     try {
       const raw = JSON.parse(o.inputJson);
-      if (raw.budget && Number.isInteger(raw.budget.maxTokens) && raw.budget.maxTokens >= 64 && raw.budget.maxTokens <= 65536 && (raw.budget.tokenizerId === void 0 || raw.budget.tokenizerId === requested.tokenizerId)) requested = { ...requested, maxTokens: raw.budget.maxTokens, ...Number.isInteger(raw.budget.maxBytes) && raw.budget.maxBytes >= 256 && raw.budget.maxBytes <= 1048576 ? { maxBytes: raw.budget.maxBytes } : {} };
+      if (raw.budget) {
+        for (const key2 of ["maxTokens", "remainingJourneyTokens", "maxBytes"]) {
+          const min2 = key2 === "maxBytes" ? 256 : 64, max2 = key2 === "maxBytes" ? 1048576 : 65536;
+          if (Number.isInteger(raw.budget[key2]) && raw.budget[key2] >= min2 && raw.budget[key2] <= max2) requested[key2] = raw.budget[key2];
+        }
+      }
       if (kind !== "write") responseFormat = validateMemoryResponseFormat(raw.responseFormat);
     } catch {
     }
