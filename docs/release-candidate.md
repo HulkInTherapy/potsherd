@@ -2,7 +2,9 @@
 
 rc.2 fixes CLI JSON budgets that omit the pinned accounting tokenizer and adds field-specific input errors. The qualification results below were measured against rc.1; rc.2 receives focused input, version/layout and bundled MCP checks, without a repeated full qualification or new real-consumer run. Semantic readiness and consumer limitations remain.
 
-The rc.1 qualification inventory defined **2,437 tests** across 104 test files. That inventory count
+The current rc.2 `vitest list` inventory contains **2,391 tests** across 103 files with offline Node-driver defaults and no supplied semantic test assets. The listing excludes skipped cases and files; it runs no tests and establishes no pass result.
+
+The rc.1 baseline qualification inventory defined **2,437 tests** across 104 test files. That historical inventory count
 does not imply that every check passed. Qualification results, skipped private-
 corpus checks, and reader/model limitations are reported separately. The Node
 qualification combines completed files from its interrupted initial run with
