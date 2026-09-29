@@ -27029,7 +27029,7 @@ function clip2(s, max2) {
 }
 
 // packages/core/dist/version.js
-var VERSION = "2.0.0-rc.1";
+var VERSION = "2.0.0-rc.2";
 
 // packages/core/dist/memory/budget.js
 import { createHash as createHash7 } from "node:crypto";
@@ -28251,8 +28251,8 @@ import { randomUUID as randomUUID5 } from "node:crypto";
 // packages/core/dist/memory/input.js
 var MemoryInputError = class extends Error {
   code;
-  constructor(code) {
-    super(code);
+  constructor(code, message2 = code) {
+    super(message2);
     this.code = code;
   }
 };
@@ -28323,13 +28323,22 @@ function scope(value) {
     fail2("invalid_event_range");
 }
 function budget(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new MemoryInputError("invalid_budget_object", "budget must be a JSON object.");
   const b = keys2(value, ["maxTokens", "tokenizerId", "remainingJourneyTokens", "maxBytes"], "unknown_budget_field");
-  integer2(b.maxTokens, 64, 65536);
-  text(b.tokenizerId, 256);
-  if (b.remainingJourneyTokens !== void 0)
-    integer2(b.remainingJourneyTokens, 64, 65536);
-  if (b.maxBytes !== void 0)
-    integer2(b.maxBytes, 256, 1048576);
+  for (const key2 of ["maxTokens", "remainingJourneyTokens", "maxBytes"]) {
+    if (key2 !== "maxTokens" && b[key2] === void 0)
+      continue;
+    const min2 = key2 === "maxBytes" ? 256 : 64, max2 = key2 === "maxBytes" ? 1048576 : 65536;
+    if (!Number.isInteger(b[key2]) || Number(b[key2]) < min2 || Number(b[key2]) > max2)
+      throw new MemoryInputError("invalid_budget_" + key2, `budget.${key2} must be an integer from ${min2} to ${max2}.`);
+  }
+  if (b.tokenizerId === void 0)
+    b.tokenizerId = TOKENIZER_ID;
+  if (typeof b.tokenizerId !== "string" || b.tokenizerId.length > 256)
+    throw new MemoryInputError("invalid_budget_tokenizerId", "budget.tokenizerId must be text; omit it to use the bundled accounting tokenizer.");
+  if (b.tokenizerId !== TOKENIZER_ID)
+    throw new MemoryInputError("unsupported_budget_tokenizerId", "budget.tokenizerId is unsupported; omit it to use the bundled accounting tokenizer.");
 }
 function refs(value) {
   if (!Array.isArray(value) || value.length > 16)
@@ -28387,8 +28396,11 @@ function validateMemoryInput(kind, value, mcp = false) {
   if (v.requirements !== void 0)
     requirements(v.requirements);
   for (const key2 of ["query", "cursor", "thread", "about", "originSourceId", "lineageAnchorSourceId", "authorClaim"])
-    if (v[key2] !== void 0)
-      text(v[key2], key2 === "cursor" ? 16384 : 8e3);
+    if (v[key2] !== void 0) {
+      const max2 = key2 === "cursor" ? 16384 : 8e3;
+      if (typeof v[key2] !== "string" || String(v[key2]).length > max2)
+        throw new MemoryInputError("invalid_" + key2, `${key2} must be text of at most ${max2} characters.`);
+    }
   if (kind === "recall") {
     if (!v.query)
       fail2("missing_query");
@@ -34546,7 +34558,7 @@ function operationalMemory(o) {
   } catch (error) {
     if (!(error instanceof MemorySchemaError)) throw error;
     const input = o.inputJson ? parseMemoryInput(o.inputJson) : {};
-    const planned = planResponse(schemaResponse(error, input.scope ?? {}), input.budget ?? defaultBudget(), { transport: o.inputJson || o.json ? "cli_json" : "human", responseFormat: input.responseFormat });
+    const planned = planResponse(schemaResponse(error, input.scope ?? {}), { ...defaultBudget(), ...input.budget }, { transport: o.inputJson || o.json ? "cli_json" : "human", responseFormat: input.responseFormat });
     return { opened: null, state: emitMemory(planned) };
   }
 }
@@ -34645,13 +34657,13 @@ function checkedPublicInput(o, kind) {
     let responseFormat = "expanded-v2";
     try {
       const raw = JSON.parse(o.inputJson);
-      if (raw.budget && Number.isInteger(raw.budget.maxTokens) && raw.budget.maxTokens >= 64 && raw.budget.tokenizerId === requested.tokenizerId) requested = { ...requested, ...raw.budget };
+      if (raw.budget && Number.isInteger(raw.budget.maxTokens) && raw.budget.maxTokens >= 64 && raw.budget.maxTokens <= 65536 && (raw.budget.tokenizerId === void 0 || raw.budget.tokenizerId === requested.tokenizerId)) requested = { ...requested, maxTokens: raw.budget.maxTokens, ...Number.isInteger(raw.budget.maxBytes) && raw.budget.maxBytes >= 256 && raw.budget.maxBytes <= 1048576 ? { maxBytes: raw.budget.maxBytes } : {} };
       if (kind !== "write") responseFormat = validateMemoryResponseFormat(raw.responseFormat);
     } catch {
     }
     const response2 = schemaResponse(new MemorySchemaError(0), {});
     response2.coverage.state = "unavailable";
-    response2.support.unresolved = ["The request boundary is invalid; no memory operation ran."];
+    response2.support.unresolved = ["The request boundary is invalid; no memory operation ran.", ...error instanceof MemoryInputError ? [error.message] : []];
     response2.warnings = ["invalid_memory_input", error instanceof MemoryInputError ? error.code : "invalid_input_json"];
     return { failure: emitMemory(planResponse(response2, requested, { transport: "cli_json", responseFormat })) };
   }
@@ -38715,12 +38727,15 @@ example:
   ).addHelpText("after", `
 example:
   potsherd find "pgbouncer"
+  potsherd find "latest project decisions" --project /example/project --json
+  potsherd find --input-json '{"query":"latest project decisions","scope":{"project":"/example/project"},"budget":{"maxTokens":2048,"maxBytes":65536}}'
   potsherd find "rate limiter" --json | jq -r '.evidence[0].citation'
   potsherd index --no-embed                          # text only, fetch nothing
   potsherd find "the pooler decision" --vectors on   # force it, once vectors exist
   potsherd find "pgbouncer" --explain                # why this order
 
 V2 find --since/--until constrain evidence event time; ls/stats retain session-date filters. Unknown event times are disclosed, not dated or treated as proof of temporal absence.
+JSON budget.tokenizerId may be omitted: the bundled accounting tokenizer is used and named in the response receipt. An explicit unsupported tokenizer is rejected.
 
 filters, one example each \u2014 they compose, and all of them are AND:
   --project event-bus          only that project (a directory name is enough)

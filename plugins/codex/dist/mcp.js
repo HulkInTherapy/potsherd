@@ -34426,7 +34426,7 @@ function episodicIndexPath(env = process9.env) {
 }
 
 // packages/core/dist/version.js
-var VERSION = "2.0.0-rc.1";
+var VERSION = "2.0.0-rc.2";
 
 // packages/core/dist/memory/budget.js
 import { createHash as createHash7 } from "node:crypto";
@@ -35653,8 +35653,8 @@ import { randomUUID as randomUUID2 } from "node:crypto";
 // packages/core/dist/memory/input.js
 var MemoryInputError = class extends Error {
   code;
-  constructor(code) {
-    super(code);
+  constructor(code, message = code) {
+    super(message);
     this.code = code;
   }
 };
@@ -35725,13 +35725,22 @@ function scope(value) {
     fail2("invalid_event_range");
 }
 function budget(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new MemoryInputError("invalid_budget_object", "budget must be a JSON object.");
   const b = keys2(value, ["maxTokens", "tokenizerId", "remainingJourneyTokens", "maxBytes"], "unknown_budget_field");
-  integer3(b.maxTokens, 64, 65536);
-  text(b.tokenizerId, 256);
-  if (b.remainingJourneyTokens !== void 0)
-    integer3(b.remainingJourneyTokens, 64, 65536);
-  if (b.maxBytes !== void 0)
-    integer3(b.maxBytes, 256, 1048576);
+  for (const key2 of ["maxTokens", "remainingJourneyTokens", "maxBytes"]) {
+    if (key2 !== "maxTokens" && b[key2] === void 0)
+      continue;
+    const min = key2 === "maxBytes" ? 256 : 64, max = key2 === "maxBytes" ? 1048576 : 65536;
+    if (!Number.isInteger(b[key2]) || Number(b[key2]) < min || Number(b[key2]) > max)
+      throw new MemoryInputError("invalid_budget_" + key2, `budget.${key2} must be an integer from ${min} to ${max}.`);
+  }
+  if (b.tokenizerId === void 0)
+    b.tokenizerId = TOKENIZER_ID;
+  if (typeof b.tokenizerId !== "string" || b.tokenizerId.length > 256)
+    throw new MemoryInputError("invalid_budget_tokenizerId", "budget.tokenizerId must be text; omit it to use the bundled accounting tokenizer.");
+  if (b.tokenizerId !== TOKENIZER_ID)
+    throw new MemoryInputError("unsupported_budget_tokenizerId", "budget.tokenizerId is unsupported; omit it to use the bundled accounting tokenizer.");
 }
 function refs(value) {
   if (!Array.isArray(value) || value.length > 16)
@@ -35789,8 +35798,11 @@ function validateMemoryInput(kind, value, mcp = false) {
   if (v.requirements !== void 0)
     requirements(v.requirements);
   for (const key2 of ["query", "cursor", "thread", "about", "originSourceId", "lineageAnchorSourceId", "authorClaim"])
-    if (v[key2] !== void 0)
-      text(v[key2], key2 === "cursor" ? 16384 : 8e3);
+    if (v[key2] !== void 0) {
+      const max = key2 === "cursor" ? 16384 : 8e3;
+      if (typeof v[key2] !== "string" || String(v[key2]).length > max)
+        throw new MemoryInputError("invalid_" + key2, `${key2} must be text of at most ${max} characters.`);
+    }
   if (kind === "recall") {
     if (!v.query)
       fail2("missing_query");
@@ -45218,9 +45230,9 @@ async function call(ctx, requestedBudget, scopeValue, fn, validate, formatValue)
     if (error51 instanceof MemoryInputError) {
       const response3 = schemaResponse(new MemorySchemaError(0), {});
       response3.coverage.state = "unavailable";
-      response3.support.unresolved = ["The request boundary is invalid; no memory operation ran."];
+      response3.support.unresolved = ["The request boundary is invalid; no memory operation ran.", error51.message];
       response3.warnings = ["invalid_memory_input", error51.code];
-      return plannedResult(planResponse(response3, requestedBudget, { transport: "mcp", responseFormat: responseFormat2 }));
+      return plannedResult(planResponse(response3, { ...requestedBudget, tokenizerId: TOKENIZER_ID }, { transport: "mcp", responseFormat: responseFormat2 }));
     }
     if (error51 instanceof MemorySchemaError) return plannedResult(planResponse(schemaResponse(error51, scopeValue), requestedBudget, { transport: "mcp", responseFormat: responseFormat2 }));
     const response2 = { contractVersion: 2, requestId: "unavailable", coverage: { state: "unavailable", snapshotEpochs: { evidence: 0, notes: 0, lineage: 0, deletion: 0, vector: 0 }, scope: scopeValue, capturedThrough: null, pendingSources: 0, failedSources: 0, omittedKinds: ["evidence_index"], semantic: "failed" }, support: { state: "insufficient", method: "none", requirements: [], unresolved: ["Memory operation unavailable; this does not establish absence."] }, evidence: [], assertions: [], candidates: [], budget: { tokenizerId: TOKENIZER_ID, usedTokens: 0, remainingTokens: 0, truncated: false, omittedItems: 0 }, warnings: [error51 instanceof MemoryPrivacyError ? "privacy_refresh_required" : "memory_operation_failed"] };
