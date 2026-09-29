@@ -4,6 +4,19 @@ This directory carries its own ESM CLI and MCP bundles, transport tokenizer asse
 
 The MCP surface has four tools: recall, exact source/note read, deterministic graft, and explicit durable write. Only write changes authored memory. Source evidence carries role, scope, event/observation time and immutable refs; notes carry author authority and explicit supersession. Relevance and source links do not certify entailment or human attestation.
 
+Register the candidate checkout with Codex CLI, then install its native plugin:
+
+```sh
+codex plugin marketplace add /path/to/potsherd
+codex plugin add potsherd@potsherd
+```
+
+The repository's `.agents/plugins/marketplace.json` selects `plugins/codex`;
+`.claude-plugin/marketplace.json` continues to select `plugins/claude-code` for
+Claude Code. If an existing `potsherd` marketplace points to another source,
+remove that marketplace registration before adding this checkout. Start a fresh
+Codex session to load the installed version and tools.
+
 Hooks enqueue durable capture requests and retain failure state. Active discovery uses the index's enrolled source roots; isolated roots do not silently become the user's real archive. Read tools do not migrate/repair a store or acquire models. Missing semantic assets leave labelled lexical/source access, not semantic parity.
 
 ```sh

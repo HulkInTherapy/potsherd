@@ -1,0 +1,20 @@
+{
+  "name": "potsherd",
+  "interface": {
+    "displayName": "potsherd"
+  },
+  "plugins": [
+    {
+      "name": "potsherd",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
