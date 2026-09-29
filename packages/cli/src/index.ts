@@ -316,12 +316,15 @@ example:
   ).addHelpText('after', `
 example:
   potsherd find "pgbouncer"
+  potsherd find "latest project decisions" --project /example/project --json
+  potsherd find --input-json '{"query":"latest project decisions","scope":{"project":"/example/project"},"budget":{"maxTokens":2048,"maxBytes":65536}}'
   potsherd find "rate limiter" --json | jq -r '.evidence[0].citation'
   potsherd index --no-embed                          # text only, fetch nothing
   potsherd find "the pooler decision" --vectors on   # force it, once vectors exist
   potsherd find "pgbouncer" --explain                # why this order
 
 V2 find --since/--until constrain evidence event time; ls/stats retain session-date filters. Unknown event times are disclosed, not dated or treated as proof of temporal absence.
+JSON budget.tokenizerId may be omitted: the bundled accounting tokenizer is used and named in the response receipt. An explicit unsupported tokenizer is rejected.
 
 filters, one example each — they compose, and all of them are AND:
   --project event-bus          only that project (a directory name is enough)

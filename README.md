@@ -2,7 +2,7 @@
 
 Local memory for coding-agent sessions: capture supported history, retrieve exact source evidence, and write scoped handoffs with explicit provenance.
 
-**2.0.0-rc.1 is a release candidate.** The four host integrations have separate evidence levels; full native model qualification is limited to available subscriptions. It is not certified as unattended primary memory. The current public npm release is 1.2.1.
+**2.0.0-rc.2 is a release candidate.** The four host integrations have separate evidence levels; full native model qualification is limited to available subscriptions. It is not certified as unattended primary memory. The current public npm release is 1.2.1.
 
 Requires Node.js 22 or newer. The CLI and each standalone plugin carry their own built bundles. Semantic assets are acquired explicitly; source reads do not download models.
 
@@ -16,6 +16,18 @@ node packages/cli/bin/potsherd.js --help
 node packages/cli/bin/potsherd.js maintain --migrate --potsherd-dir /path/to/test-store
 node packages/cli/bin/potsherd.js index --enroll codex,claude --codex-dir /path/to/codex --claude-dir /path/to/claude --potsherd-dir /path/to/test-store
 ```
+
+A first scoped search can use ordinary flags or a complete JSON input:
+
+```sh
+potsherd find "latest project decisions" --project /example/project --json
+potsherd find --input-json '{"query":"latest project decisions","scope":{"project":"/example/project"},"budget":{"maxTokens":2048,"maxBytes":65536}}'
+```
+
+Omitting `budget.tokenizerId` uses the pinned bundled accounting tokenizer;
+its full identity appears in the response receipt. An explicit unsupported
+identity is rejected with a field-specific error. This accounting is separate
+from the host model's tokenizer.
 
 Use an owned test store and explicit source roots when rehearsing an upgrade. `index --harness` alone is a one-time scan filter; `--enroll` persists automatic capture authority. Model assets can be acquired with `maintain --acquire-assets`, then rebuilt with `maintain --rebuild`. Missing assets produce labelled degraded coverage.
 

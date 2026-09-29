@@ -1,6 +1,8 @@
-# 2.0.0-rc.1 release candidate
+# 2.0.0-rc.2 release candidate
 
-The candidate defines **2,437 tests** across 104 test files. This inventory count
+rc.2 fixes CLI JSON budgets that omit the pinned accounting tokenizer and adds field-specific input errors. The qualification results below were measured against rc.1; rc.2 receives focused input, version/layout and bundled MCP checks, without a repeated full qualification or new real-consumer run. Semantic readiness and consumer limitations remain.
+
+The rc.1 qualification inventory defined **2,437 tests** across 104 test files. That inventory count
 does not imply that every check passed. Qualification results, skipped private-
 corpus checks, and reader/model limitations are reported separately. The Node
 qualification combines completed files from its interrupted initial run with

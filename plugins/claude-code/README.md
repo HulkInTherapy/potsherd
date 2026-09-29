@@ -1,4 +1,4 @@
-# potsherd — claude-code plugin, 2.0.0-rc.1 local candidate
+# potsherd — claude-code plugin, 2.0.0-rc.2 local candidate
 
 This directory carries its own ESM CLI and MCP bundles, transport tokenizer assets, licenses and hash manifest. A standalone copy runs without a neighboring plugin or developer checkout. Native marketplace registration and real host journeys are separate checks; this candidate is not a completed primary-memory acceptance claim. The installed/published1.2.1 release is unchanged.
 
