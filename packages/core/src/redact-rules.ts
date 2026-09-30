@@ -481,6 +481,14 @@ const genericAssignmentRule: Rule = {
   },
 };
 
+/** Explicit socket-auth command arguments are credential context, not hashes. */
+const socketAuthRule:Rule={
+ id:'socket-auth-argument',type:'generic',source:'03 §5 credential context',
+ scan(text:string):RuleMatch[]{const out:RuleMatch[]=[];const anchor=/(?:^|[\s"'`])--socket-auth["']?(?:[ \t]*=[ \t]*|[ \t]+)/gi;let match:RegExpExecArray|null;
+  while((match=anchor.exec(text))!==null){GENERIC_VALUE.lastIndex=anchor.lastIndex;const found=GENERIC_VALUE.exec(text);if(!found)continue;const value=found[1]??found[2]??found[3]??found[4];if(value===undefined||!valueLooksLikeSecret(value))continue;const start=found.index+found[0].lastIndexOf(value);out.push({start,end:start+value.length,value});anchor.lastIndex=start+value.length;}
+  return out;}
+};
+
 /**
  * `Authorization: Bearer <token>` — a credential *context* rather than a
  * credential *shape*.
@@ -520,7 +528,7 @@ const bearerRule: Rule = regexRule(
  * was never specified and the naive reading was doing the damage:
  *
  *   1. `=` is base64 *padding*, so it is only a token character at the end.
- *      Before, `ANTHROPIC_VERTEX_PROJECT_ID=gpu-reservation-sarvam` was one
+ *      Before, `ANTHROPIC_VERTEX_PROJECT_ID=example-project` was one
  *      "token" — a variable glued to its value — and scored 4.7.
  *   2. `/` and `.` remain separators, so a long path or a dotted hostname is
  *      not one token. (Unchanged from T1.4; the reasoning is that a real
@@ -740,6 +748,7 @@ export const RULES: Rule[] = [
   // ---- credential context (03 §5) ----------------------------------------
   bearerRule,
   genericAssignmentRule,
+  socketAuthRule,
 
   // ---- entropy (03 §5) ---------------------------------------------------
   // Last, so that anything a named rule understands is reported under its real

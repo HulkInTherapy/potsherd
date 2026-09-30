@@ -9,6 +9,7 @@ import {
   type SessionStatus,
 } from '@potsherd/core';
 import type { db as dbNs, search } from '@potsherd/core';
+import { mustResolve } from './session-ref.js';
 import { UserError, type GlobalOptions } from './output.js';
 
 const { whenEdge, WHEN_FORMS } = searchNs;
@@ -105,21 +106,7 @@ function resolveTag(value: string): string {
  * of quietly matching nothing, which reads as "these two are not linked".
  */
 function resolveSessionRef(db: Db, ref: string, flag: string): string {
-  const found = resolveSession(db, ref.trim());
-  if (!found) {
-    throw new UserError(
-      `${flag}: no session id starts with "${ref}"`,
-      'potsherd ls    # the ids are in  potsherd ls --json',
-    );
-  }
-  if (found.ambiguous) {
-    const shown = found.ambiguous.slice(0, 3).map((c) => c.id).join('\n        ');
-    throw new UserError(
-      `${flag}: "${ref}" matches ${found.ambiguous.length} sessions:\n        ${shown}`,
-      `potsherd ls ${flag} ${found.ambiguous[0]!.id}`,
-    );
-  }
-  return found.id;
+  return mustResolve(db,ref,flag).id;
 }
 
 function tri(flag: string, value: string | undefined): TriState {
@@ -188,12 +175,14 @@ export function parseWhen(value: string, flag: string, now = new Date()): string
  * silently choosing one.
  */
 export function resolveProject(db: Db, needle: string): string {
+  const hasMemory=Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_sources'").get());
   const projects = db
     .prepare(
       `SELECT project, COUNT(*) AS n FROM (
           SELECT project FROM sessions WHERE project IS NOT NULL
           UNION ALL
           SELECT project FROM ghosts WHERE project IS NOT NULL
+          ${hasMemory?"UNION ALL SELECT u.project FROM memory_sources s JOIN revision_units ru ON ru.revision_id=s.active_revision_id JOIN evidence_units u ON u.unit_revision_id=ru.unit_revision_id WHERE s.active_revision_id IS NOT NULL AND s.availability<>'forgotten' AND u.project IS NOT NULL AND NOT EXISTS(SELECT 1 FROM forget_tombstones t WHERE t.source_id=s.source_id AND t.state<>'reversed') UNION ALL SELECT project FROM memory_sources WHERE active_revision_id IS NOT NULL AND availability<>'forgotten' AND project IS NOT NULL AND NOT EXISTS(SELECT 1 FROM forget_tombstones t WHERE t.source_id=memory_sources.source_id AND t.state<>'reversed')":''}
        ) GROUP BY project ORDER BY n DESC`,
     )
     .all() as { project: string; n: number }[];

@@ -37,7 +37,7 @@ emit() {
 # 1. Whatever the last SessionEnd could not do.
 if [ -s "$LOG" ]; then
   say "potsherd: the last SessionEnd hook did not finish. $(tr '\n' ' ' < "$LOG" | cut -c1-500)"
-  : > "$LOG" 2>/dev/null || true
+  # Retain failure evidence until durable maintenance has actually retried it.
 fi
 
 # 2. Is there a potsherd to run at all, and does it have the verbs?
@@ -73,6 +73,16 @@ fi
 #    the upgrade is where it becomes relevant -- `potsherd index` ends with
 #    `run potsherd index --embed for semantic search`, and `find`'s footer
 #    says the same on a text-only index. The plugin README carries it too.
+# Upgrade/bootstrap is a deliberate startup writer operation, separate from read tools.
+(
+  trap '' HUP
+  ERR=$(sh "$SHIM" maintain --migrate --quiet --potsherd-dir "$PD" 2>&1); RC=$?
+  if [ "$RC" -ne 0 ]; then
+    mkdir -p "$PD" 2>/dev/null
+    printf '%s  startup maintenance needs retry (exit %s): %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RC" "$(printf '%s' "$ERR" | tr '\n' ' ' | tr -d '\000-\037' | cut -c1-400)" >> "$LOG" 2>/dev/null || true
+    exit 0
+  fi
+) </dev/null >/dev/null 2>&1 &
 
 emit
 exit 0

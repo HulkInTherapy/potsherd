@@ -1,3 +1,4 @@
+import { testModelCache } from './model-cache.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,7 +14,7 @@ import { rmrf, tempDir } from './helpers.js';
  *
  * The cache is a temp directory, never `~/.potsherd/models`.
  */
-const MODEL_CACHE = path.join(os.tmpdir(), 'potsherd-test-models');
+const MODEL_CACHE = testModelCache(path.join(os.tmpdir(), 'potsherd-test-models'));
 const wantsModel = process.env['POTSHERD_TEST_EMBED'] === '1';
 const hasModel = wantsModel || embeddings.isEmbeddingReady(MODEL_CACHE);
 

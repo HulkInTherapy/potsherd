@@ -1,3 +1,4 @@
+import { memoryNote } from '../memory.js';
 import { fitLine, format as fmt, idTag, Theme } from '@potsherd/core';
 // `notes.ts` is not in core's barrel (`packages/core/src/index.ts` belongs to
 // the orchestrator this phase), so it is imported by path. The subgraph that
@@ -45,6 +46,8 @@ import { mustResolve } from '../session-ref.js';
  * safe no-argument form is a write verb people are willing to type.
  */
 export interface NoteCommandOptions extends GlobalOptions {
+  inputJson?:string;
+  requestKey?:string;
   /** Any ref the other verbs take: an 8-character prefix, or a whole id. */
   session: string;
   decided?: string[];
@@ -59,6 +62,7 @@ export interface NoteCommandOptions extends GlobalOptions {
 const LABEL_W = 9;
 
 export async function runNote(o: NoteCommandOptions): Promise<number> {
+  const memory=memoryNote(o);if(memory!==null)return memory;
   const { db } = openIndex(o);
   try {
     if (!notesTableExists(db)) {

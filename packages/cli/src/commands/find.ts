@@ -1,3 +1,4 @@
+import { memoryFind } from '../memory.js';
 import {
   projectName,
   recall,
@@ -32,6 +33,8 @@ import { openIndex, parseFilters, parseLimit, type FilterFlags } from '../filter
 type Confidence = NonNullable<RecallOptions['minConfidence']>;
 
 export interface FindCommandOptions extends GlobalOptions, FilterFlags {
+  inputJson?: string;
+  exact?: boolean;
   query: string;
   limit?: unknown;
   /** `--no-vec`. */
@@ -111,6 +114,9 @@ export interface FindCommandOptions extends GlobalOptions, FilterFlags {
  * on an aeroplane, and text search alone is genuinely good.
  */
 export async function runFind(o: FindCommandOptions): Promise<number> {
+  const memory = (o.with || o.explain) && !o.inputJson ? null : await memoryFind(o);
+  if (memory !== null) return memory;
+
   const query = o.query?.trim();
   if (!query) {
     throw new UserError('find needs something to look for', 'potsherd find "pgbouncer"');
@@ -135,6 +141,7 @@ export async function runFind(o: FindCommandOptions): Promise<number> {
       limit,
       root,
       vectors: vectorMode(o),
+      exact: Boolean(o.exact),
       // `--all` searches the projects the ignore list hides. Same flag, same
       // meaning as `ls --all` and `stats --all`; `find --project X` also
       // overrides the list, because naming a project is asking for it.

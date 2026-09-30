@@ -1,3 +1,4 @@
+import { testModelCache } from './model-cache.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -61,7 +62,7 @@ function embed(db: Db, table: 'vec_exchanges' | 'vec_ghost_prompts', id: string)
  * write to `~/.potsherd`.
  */
 
-const MODEL_CACHE = path.join(os.tmpdir(), 'potsherd-test-models');
+const MODEL_CACHE = testModelCache(path.join(os.tmpdir(), 'potsherd-test-models'));
 const ready = embeddings.isEmbeddingReady(MODEL_CACHE);
 
 /** A plain 80-column theme, so the assertions are about wording not colour. */

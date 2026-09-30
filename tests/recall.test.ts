@@ -1,3 +1,4 @@
+import { testModelCache } from './model-cache.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -192,8 +193,7 @@ describe('recall: the fusion — T3.1', () => {
     // block it is in the flat list too, or the two disagree about the page.
     const total = r.sessions.reduce((n, s) => n + s.hits.length, 0);
     expect(r.hits.length).toBe(total);
-    const inBlocks = new Set(r.sessions.flatMap((s) => s.hits));
-    expect(r.hits.every((h) => inBlocks.has(h))).toBe(true);
+    expect(r.hits).toEqual(expect.arrayContaining(r.sessions.flatMap((s)=>s.hits)));
   });
 
   it('honours a smaller perSession budget', async () => {
@@ -239,7 +239,7 @@ describe('recall: the fusion — T3.1', () => {
     expect(fromOtherMembers.some((h) => h.isSidechain)).toBe(true);
     // Present, and attributable: the id says which session actually matched.
     for (const h of fromOtherMembers) {
-      expect(r.hits).toContain(h);
+      expect(r.hits).toContainEqual(h);
       expect(h.sessionId).toBeTruthy();
     }
     expect(r.hits.length).toBe(r.sessions.reduce((n, s) => n + s.hits.length, 0));
@@ -595,7 +595,7 @@ describe('resume commands', () => {
 
   it('names a subagent by the half of its id that is its own', () => {
     expect(idTag('9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43')).toBe('9c4d2f18');
-    expect(idTag('9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43:agent-a02db260b621e9897')).toBe('a02db260');
+    expect(idTag('9c4d2f18-7a3b-4e05-b6d1-0f2a58e17c43:agent-eeee4444b621e9897')).toBe('eeee4444');
   });
 });
 
@@ -752,7 +752,7 @@ describe('stats', () => {
  * is already on disk — CI must never silently fetch it — and given its own
  * index because embedding is the only thing here that costs anything.
  */
-const MODEL_CACHE = path.join(os.tmpdir(), 'potsherd-test-models');
+const MODEL_CACHE = testModelCache(path.join(os.tmpdir(), 'potsherd-test-models'));
 const hasModel =
   process.env['POTSHERD_TEST_EMBED'] === '1' || embeddings.isModelCached(MODEL_CACHE);
 
@@ -982,7 +982,7 @@ describe.skipIf(!hasModel)('recall: ghost vectors survive a second index — T3.
  * renderer had a failure mode the window cutter does not: **the highlight can
  * land inside the mask.** `find "redacted aws"` matches the literal word
  * `redacted` — eight characters in the middle of
- * `‹redacted:basic-auth:201b2d22›` — so the window was centred on a fragment
+ * `‹redacted:basic-auth:dddd3333›` — so the window was centred on a fragment
  * and `wordEdges` then pulled its end back to exactly the end of that
  * fragment, which is the middle of the marker. That is how
  * `docs/screens/13-find-redacted.txt` came to publish
@@ -990,7 +990,7 @@ describe.skipIf(!hasModel)('recall: ghost vectors survive a second index — T3.
  * assertion.
  */
 describe('the find renderer never prints half a mask', () => {
-  const MASK = '‹redacted:basic-auth:201b2d22›';
+  const MASK = '‹redacted:basic-auth:dddd3333›';
   const TEXT = `the importer cannot reach the pooler — postgres://ingest:${MASK}@db.internal:6432/crm times out but the direct port is fine`;
 
   const balanced = (s: string): boolean => {

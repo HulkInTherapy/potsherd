@@ -1,6 +1,6 @@
 {
   "name": "potsherd",
-  "version": "1.2.1",
+  "version": "2.0.0-rc.2",
   "description": "Rescue, index, search, interrogate and re-enter every coding-agent session on your machine. Local-first.",
   "type": "module",
   "license": "MIT",
@@ -35,12 +35,13 @@
     "dist/potsherd.js.map",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "licenses"
   ],
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepack": "node -e \"require('node:fs').copyFileSync('../../README.md','README.md')\""
+    "prepack": "node ../../scripts/package-readme.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1"

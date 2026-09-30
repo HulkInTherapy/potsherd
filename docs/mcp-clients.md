@@ -1,27 +1,19 @@
-# potsherd as an MCP server
+# potsherd as an MCP server — contract 2
 
-potsherd ships a stdio MCP server with three tools, so any MCP client can
-search, read and re-enter your coding-agent sessions without leaving the agent
-you are already in.
+The local 2.0.0-rc.1 candidate exposes four stdio tools:
 
-```
-potsherd_recall  search every prompt, every subagent, every deleted session,
-                 with a confidence label and an honest empty
-potsherd_read    read one thread, paginated, by seq and timestamp
-potsherd_graft   a token-budgeted brief that re-enters an old thread
-```
+| Tool | Purpose |
+|---|---|
+| `potsherd_recall` | Scoped lexical/semantic candidates and sourced evidence with explicit coverage |
+| `potsherd_read` | Exact immutable spans, historical refs, authored notes and bounded pagination |
+| `potsherd_graft` | Deterministic bounded context; no default model call or file write |
+| `potsherd_write` | Explicit durable sourced author assertions with idempotent request keys |
 
-Three, not fifty-four — and three rather than the six this server carried until
-v1.2.0. The reason for the cut is the reason the count matters at all: six tools
-with overlapping descriptions cost a model a decision on every call, and it will
-sometimes make the wrong one. Three with disjoint jobs cost it none. `find`,
-`ls` and `ask` all became modes of `potsherd_recall`, which is one question —
-*what is in the archive about this* — asked once.
+Only `potsherd_write` is a write tool. Source roles, unknown times, branch scope, note authority and explicit supersession travel with the result. Similarity and link existence do not certify claim support. Missing semantic assets leave labelled lexical access; unavailable or incomplete capture never becomes global absence.
 
-Only `potsherd_graft` writes, saving its brief as `./.potsherd/graft-<id8>.md`
-in the directory you ran the client from — the only potsherd write outside
-`~/.potsherd`. It is annotated `readOnlyHint: false`, so a client that asks
-before running a write tool will ask before running it.
+Budget counts the complete controlled payload using bundled cl100k-base transport accounting, not the host model's exact tokenizer. See [the versioned agent contract](AGENT-CONTRACT.md) for full inputs, currentness, privacy and migration limits.
+
+Both plugins carry their own ESM CLI/MCP bundles and transport assets. A copied plugin directory can launch independently; native marketplace registration and actual host journeys are separate checks. Semantic model assets are acquired only with explicit `maintain --acquire-assets`; reads do not download them.
 
 ## the one command
 
@@ -59,7 +51,7 @@ should not look like one that has.
 | Gemini CLI | `~/.gemini/settings.json` | JSON | *documentation only — unverified* |
 | opencode | `~/.config/opencode/opencode.json` | JSON | *documentation only — unverified* |
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | JSON | *documentation only — unverified* |
-| pi | `~/.pi/agent/settings.json` | JSON | *documentation only — unverified, and the weakest of the seven* |
+| pi | `~/.pi/agent/extensions/potsherd.ts` | Native extension | installed pi 0.74.0 API; model journey pending |
 
 "Unverified" means exactly what it says: the client was not installed on the
 machine these snippets were written on, and no config file it had written was
@@ -77,7 +69,7 @@ Two forms work, and `setup` picks between them the way `guard` does:
 | `potsherd-mcp` | it is on your `PATH` | survives an upgrade, reads best in a diff |
 | `/abs/path/to/node /abs/path/to/packages/mcp/dist/index.js` | it is not | pinned to this install |
 
-(Inside the two plugins the same server is launched through `bin/potsherd-mcp`, which resolves the bundle and, when there is none, writes the three paths it tried to the server log rather than dying with a module-not-found trace and taking all three tools with it silently.)
+(Inside the two plugins the same server is launched through `bin/potsherd-mcp`, which resolves the bundle and, when there is none, writes the three paths it tried to the server log rather than dying with a module-not-found trace and taking all four tools with it silently.)
 
 The absolute `node` in the second form is deliberate. Several of these clients
 are GUI applications launched from Finder or a desktop entry, and those inherit
@@ -228,23 +220,23 @@ when it has to create the file, and leaves it alone when it does not.
 
 ## pi
 
-> Unverified, and the least certain of the seven: written from documentation
-> only, with no `pi` installed and no MCP key in the real
-> `~/.pi/agent/settings.json` on the machine this was written on. Check it
-> against your own before trusting it.
+`potsherd setup --pi` installs a native pi extension at
+`~/.pi/agent/extensions/potsherd.ts`. It uses the installed pi 0.74.0
+`registerTool`, `session_start`, and `session_shutdown` APIs to bridge the four
+MCP tools. The former `mcpServers` settings stanza was unverified and is no
+longer generated. Existing user settings are not rewritten.
 
-`~/.pi/agent/settings.json`:
+Setup enrolls selected capture hosts. `index --enroll pi,opencode` adds durable
+capture authority; `index --unenroll pi` removes it. `--harness` alone is a
+one-shot scan filter. Explicit `--pi-dir`/`--opencode-dir` roots are preserved
+with existing enrolled roots. The MCP worker polls enrolled sources while the
+host is alive and catches up when restarted. This is eventual capture, not an
+acknowledgment that every final shutdown turn has already been indexed.
 
-```json
-{
-  "mcpServers": {
-    "potsherd": {
-      "command": "potsherd-mcp",
-      "args": []
-    }
-  }
-}
-```
+Native pi and OpenCode content currently has exchange-level evidence fidelity;
+native IDs are retained in OpenCode snapshot artifacts, but public evidence
+handles are projected exchanges. Native model-backed write/restart/resume
+qualification remains separate from parser and extension tests.
 
 ---
 

@@ -1,3 +1,4 @@
+import { testModelCache } from './model-cache.js';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -454,17 +455,14 @@ const repo = path.resolve(here, '..');
 /**
  * Where a cached embedding model already is, if it is anywhere.
  *
- * `tests/setup.ts` repoints `POTSHERD_DIR` at a throwaway sandbox, so the real
- * `~/.potsherd/models` has to be named explicitly rather than found through
- * `paths`. Nothing is written here and nothing is downloaded: this is a read
+ * `tests/setup.ts` repoints `POTSHERD_DIR` at a throwaway sandbox, so the verified fixture cache must be supplied explicitly through a test/model root. Nothing is written here and nothing is downloaded: this is a read
  * of a cache the machine already has, or nothing.
  */
 function cachedModel(): string | null {
-  const candidates = [
-    process.env['POTSHERD_MODELS_DIR'],
-    path.join(os.homedir(), '.potsherd', 'models'),
-    path.join(os.tmpdir(), 'potsherd-test-models'),
-  ].filter((d): d is string => Boolean(d));
+  const override = testModelCache();
+  const candidates = (override === undefined
+    ? [process.env['POTSHERD_MODELS_DIR']]
+    : [override]).filter((d): d is string => Boolean(d));
   for (const dir of candidates) {
     try {
       if (fs.existsSync(dir) && embeddings.isModelCached(dir)) return dir;

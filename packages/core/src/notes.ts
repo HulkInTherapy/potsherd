@@ -1,3 +1,4 @@
+import {redactLegacyProjection} from './redact.js';
 import type { Db } from './db.js';
 import { threadOf, type Thread } from './threads.js';
 import { idTag } from './recall.js';
@@ -312,19 +313,19 @@ function toNote(r: NoteDbRow): NoteRow {
  * `id` is the order the rows were actually accepted in, which is the only
  * ordering the store can vouch for.
  */
-export function threadNotes(db: Db, threadId: string): NoteRow[] {
+function threadNotesLegacyRaw(db: Db, threadId: string): NoteRow[] {
   return (
     db.prepare(`${SELECT_NOTE} WHERE thread_id = ? ORDER BY id DESC`).all(threadId) as NoteDbRow[]
   ).map(toNote);
 }
 
 /** The notes on the thread this session belongs to, newest first. */
-export function notesForSession(db: Db, sessionId: string): NoteRow[] {
+function notesForSessionLegacyRaw(db: Db, sessionId: string): NoteRow[] {
   return threadNotes(db, threadOf(db, sessionId).id);
 }
 
 /** The current verdict on a thread: the newest note, or null. */
-export function currentNote(db: Db, threadId: string): NoteRow | null {
+function currentNoteLegacyRaw(db: Db, threadId: string): NoteRow | null {
   const row = db.prepare(`${SELECT_NOTE} WHERE thread_id = ? ORDER BY id DESC LIMIT 1`).get(
     threadId,
   ) as NoteDbRow | undefined;
@@ -404,7 +405,7 @@ export function noteCountsForSessions(
  * accidentally file these rows under `exchange`. It is the label the human
  * view and `--json` both read.
  */
-export function searchNotes(db: Db, match: string, limit = 20): NoteHit[] {
+function searchNotesLegacyRaw(db: Db, match: string, limit = 20): NoteHit[] {
   if (!match.trim()) return [];
   const rows = db
     .prepare(
@@ -452,3 +453,11 @@ export function notesTableExists(db: Db): boolean {
 export function noteHeadline(n: Pick<NoteRow, 'decided' | 'open' | 'next'>): string {
   return (n.decided || n.next || n.open || '').replace(/\s+/g, ' ').trim();
 }
+
+export function threadNotes(...args:Parameters<typeof threadNotesLegacyRaw>):ReturnType<typeof threadNotesLegacyRaw>{return redactLegacyProjection(threadNotesLegacyRaw(...args));}
+
+export function notesForSession(...args:Parameters<typeof notesForSessionLegacyRaw>):ReturnType<typeof notesForSessionLegacyRaw>{return redactLegacyProjection(notesForSessionLegacyRaw(...args));}
+
+export function currentNote(...args:Parameters<typeof currentNoteLegacyRaw>):ReturnType<typeof currentNoteLegacyRaw>{return redactLegacyProjection(currentNoteLegacyRaw(...args));}
+
+export function searchNotes(...args:Parameters<typeof searchNotesLegacyRaw>):ReturnType<typeof searchNotesLegacyRaw>{return redactLegacyProjection(searchNotesLegacyRaw(...args));}

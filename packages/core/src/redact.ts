@@ -50,7 +50,7 @@ export {
  *
  * ## The mask
  *
- *     ‹redacted:<type>:<sha8>›        e.g. ‹redacted:aws:9f2b1c04›
+ *     ‹redacted:<type>:<sha8>›        e.g. ‹redacted:aws:cccc2222›
  *
  * `sha8` is the first 8 hex characters of sha256(secret), so the *same* secret
  * always produces the *same* mask: the index stays searchable by shape ("that
@@ -62,11 +62,11 @@ export {
  * for content and can never be pasted back into a command by accident.
  *
  * fts5 tokenisation, measured against the bundled sqlite (default `unicode61`
- * tokenizer): `‹redacted:aws:9f2b1c04›` indexes as the three tokens
- * `redacted`, `aws`, `9f2b1c04` — both guillemets and both colons are
- * separators. So `find "9f2b1c04"` locates every exchange that leaked that one
+ * tokenizer): `‹redacted:aws:cccc2222›` indexes as the three tokens
+ * `redacted`, `aws`, `cccc2222` — both guillemets and both colons are
+ * separators. So `find "cccc2222"` locates every exchange that leaked that one
  * secret, `find "redacted AND aws"` locates every exchange that leaked an aws
- * key, and the phrase query `"redacted:aws:9f2b1c04"` also works. The mask
+ * key, and the phrase query `"redacted:aws:cccc2222"` also works. The mask
  * costs three tokens per hit in the index and nothing else.
  *
  * ## What redaction does NOT touch
@@ -111,7 +111,7 @@ export function secretDigest(secret: string): string {
   return createHash('sha256').update(secret, 'utf8').digest('hex').slice(0, 8);
 }
 
-/** `‹redacted:aws:9f2b1c04›` */
+/** `‹redacted:aws:cccc2222›` */
 export function maskFor(type: SecretType, secret: string): string {
   return `${OPEN}redacted:${type}:${secretDigest(secret)}${CLOSE}`;
 }
@@ -298,4 +298,16 @@ function isClaimed(claimed: Uint8Array, s: Span): boolean {
 function claim(claimed: Uint8Array, s: Span): void {
   const end = Math.min(s.end, claimed.length);
   for (let i = Math.max(0, s.start); i < end; i++) claimed[i] = 1;
+}
+
+/** Legacy projections have no immutable text-hash contract; mask on public read.
+ * Canonical evidence/notes must instead refuse an unsafe old immutable value.
+ */
+export function redactLegacyProjection<T>(value:T):T{
+ const visit=(input:unknown):{value:unknown;changed:boolean}=>{
+  if(typeof input==='string'){const clean=redact(input).text;return {value:clean,changed:clean!==input};}
+  if(Array.isArray(input)){const items=input.map(visit);return {value:items.map(item=>item.value),changed:items.some(item=>item.changed)};}
+  if(input&&typeof input==='object'&&Object.getPrototypeOf(input)===Object.prototype){const output:Record<string,unknown>={};let changed=false;for(const [key,child] of Object.entries(input)){const result=visit(child);output[key]=result.value;changed ||= result.changed;}if(changed){if('redacted' in output)output.redacted=true;if('text' in output&&'match' in output)output.match=null;output.redactionRefreshed=true;}return {value:output,changed};}
+  return {value:input,changed:false};
+ };return visit(value).value as T;
 }

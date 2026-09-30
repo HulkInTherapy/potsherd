@@ -293,7 +293,7 @@ describe('opencode adapter — doctor', () => {
     // Was `unverified format`. T10.12 ran a real 1.18.21 store through this
     // path; what it found was a measured defect, which is a stronger claim
     // than never having looked. See the D8 block at the foot of this file.
-    expect(line).toContain('content unread at 1.18.21');
+    expect(line).toContain('1.18.21 parts fixture verified');
   });
 });
 
@@ -388,15 +388,13 @@ describe('opencode adapter — a real opencode-ai 1.18.21 store (T10.12)', () =>
     expect(cols['content']).toBe('data');
   });
 
-  it('FINDING — so a real session indexes with zero prompts and no turn text', async () => {
+  it('regression — native JSON role and child parts now deliver both turns', async () => {
     const r = await parse(discover(realDir)[0]!);
-    expect(r.session.counts.userPrompts, 'see T10.12-LABELS.md — opencode F1').toBe(0);
-    const whole = JSON.stringify(r.exchanges);
-    expect(whole).not.toContain('say hello');
-    expect(whole).not.toContain('Hello!');
-    // what landed instead: the metadata blob, verbatim.
-    expect(whole).toContain('finish');
-    expect(Object.keys(r.unknownTypes).some((t) => /no role/i.test(t))).toBe(true);
+    expect(r.session.counts.userPrompts).toBe(1);
+    expect(r.exchanges[0]?.userText).toBe('say hello');
+    expect(r.exchanges[0]?.assistantText).toBe('Hello!');
+    expect(r.artifactSnapshot?.toString()).toContain('parentID');
+    expect(Object.keys(r.unknownTypes).some((t) => /no role/i.test(t))).toBe(false);
   });
 });
 

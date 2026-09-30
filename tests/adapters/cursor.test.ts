@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -470,13 +471,16 @@ describe('cursor fixtures', () => {
     };
     walk(FIXTURE);
     expect(files.length).toBeGreaterThan(0);
+    const bannedHashes: [number, string][] = [[12, "74a02c219972db956dce8dcd3a1708e88454f012a45db62de6f4843500057f02"], [31, "6463420d9436463806f96fcb24680562e9e67571865ac968faefbdd74a9ae45b"], [14, "f14cfdac921c595e9da576e4cd233b96d2c428f63bdc2f0bea526be022d6bf00"]];
     const banned = [
-      /\/Users\/zebra/, /Infant-State-Recognition-System/, /maths_practice/,
       /sk-[A-Za-z0-9]{16,}/, /ghp_[A-Za-z0-9]{16,}/, /AKIA[0-9A-Z]{12,}/,
       /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
     ];
     for (const file of files) {
       const text = fs.readFileSync(file, 'utf8');
+      for (const [width, hash] of bannedHashes) {
+        for (let start=0; start+width<=text.length; start++) expect(createHash('sha256').update(text.slice(start,start+width)).digest('hex')).not.toBe(hash);
+      }
       for (const re of banned) expect(text, `${file} matched ${re}`).not.toMatch(re);
     }
   });

@@ -1,42 +1,6 @@
 #!/bin/sh
-# The potsherd this plugin runs.
-#
-# This is the Codex twin of `plugins/claude-code/bin/potsherd`, and it is
-# deliberately byte-for-byte the same logic. Both plugins' hooks call their own
-# copy of this file and nothing else: before T5.9 each hook re-implemented
-# resolution inline in `hooks.json`, in the opposite order, and got it wrong.
-#
-# Resolution order, and why it is not `resolve-bin.ts`'s order:
-#
-#   `resolve-bin.ts` prefers `potsherd` on PATH, because it is installing a
-#   command into the *user's* settings.json, where a portable spelling survives
-#   upgrades and reads better in a diff. This file is the opposite situation.
-#   It belongs to a plugin that carries its own version number, and the archive
-#   format it speaks is pinned to that version. Reaching for PATH first would
-#   let a stale global install answer for a newer plugin -- on the machine this
-#   was written on, PATH held 0.1.0 while the checkout beside it was 0.4.0.
-#   So: this plugin's own potsherd first, PATH only as a last resort.
-#
-#   1. vendored inside the plugin        (packaging, if it ever lands)
-#   2. the working copy this plugin was checked out inside, once built
-#   3. a global install on PATH
-#   4. nothing -- and then it says so, loudly, and exits non-zero
-#
-# Step 4 is the whole point. Phase 0's ruling was that a hook which looks
-# installed and silently does nothing is worse than no hook; a shim that exits
-# 0 having run nothing is the same failure wearing the skill's clothes. There
-# is no silent branch below.
-#
-# NOTE ON WHAT STEPS 1 AND 2 NEED. `dist/potsherd.js` is a single esbuild
-# bundle, but it is not self-contained: it still resolves `better-sqlite3` and
-# `sqlite-vec` at runtime through `createRequire`, so it needs a `node_modules`
-# beside it with those two built for the host platform. A git clone of this
-# repository has neither `dist/` (gitignored) nor `node_modules/`, which is why
-# a marketplace install falls through to step 3, and why the README tells you
-# to build from the checkout. And step 3 is empty too: potsherd is NOT
-# published to npm, so a global install is something only somebody who already
-# built a checkout can have, and there is no install command for this file to
-# print.
+# Self-contained potsherd runtime for this installed plugin.
+# Own bundle first; development checkout and PATH are explicit fallbacks.
 set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -44,18 +8,6 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # 1. vendored: plugins/codex/dist/potsherd.js
 if [ -f "$ROOT/dist/potsherd.js" ]; then
   exec node "$ROOT/dist/potsherd.js" "$@"
-fi
-
-# 1b. the Claude Code plugin's vendored copy, next door.
-#
-# Only `plugins/claude-code/dist/` carries the built bundles: they are 2.4 MB
-# of identical bytes, and this plugin is INFERRED FROM DOCUMENTATION and has
-# never been loaded by codex (codex is not installed on the machine it was
-# written on). Doubling what every clone downloads for a surface nobody has
-# confirmed works is not a trade worth making. The two plugins ship in one
-# repository and land in one clone, so next door is a real place.
-if [ -f "$ROOT/../claude-code/dist/potsherd.js" ]; then
-  exec node "$ROOT/../claude-code/dist/potsherd.js" "$@"
 fi
 
 # 2. the surrounding checkout: <repo>/packages/cli/dist/potsherd.js

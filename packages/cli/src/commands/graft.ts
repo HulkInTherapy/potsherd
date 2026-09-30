@@ -1,3 +1,4 @@
+import { memoryGraft } from '../memory.js';
 import process from 'node:process';
 
 import {
@@ -43,6 +44,7 @@ import { mustResolve } from '../session-ref.js';
  * already there — and `doctor --privacy` names the path.
  */
 export interface GraftCommandOptions extends GlobalOptions {
+  inputJson?: string;
   target: string;
   about?: string;
   budget?: number;
@@ -54,6 +56,9 @@ export interface GraftCommandOptions extends GlobalOptions {
 }
 
 export async function runGraft(o: GraftCommandOptions): Promise<number> {
+  const memory = typeof o.model === 'string' || o.backend ? null : await memoryGraft(o);
+  if (memory !== null) return memory;
+
   const target = o.target?.trim();
   if (!target) {
     throw new UserError('graft needs a session id or a query', 'potsherd graft 9c4d2f18');

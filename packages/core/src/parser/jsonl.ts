@@ -35,6 +35,8 @@ export interface ReadJsonlOptions {
   start?: number;
   /** Line number of the line before `start`, so numbering stays continuous. */
   startLine?: number;
+  /** Frozen bytes shared by all parser passes. */
+  snapshot?: Buffer;
 }
 
 export async function* readJsonlLines(
@@ -46,7 +48,7 @@ export async function* readJsonlLines(
   let lineNumber = options.startLine ?? 0;
   let held: Buffer = Buffer.alloc(0);
 
-  const stream = fs.createReadStream(filePath, { start });
+  const stream = options.snapshot ? [options.snapshot.subarray(start)] : fs.createReadStream(filePath, { start });
   for await (const chunk of stream) {
     held = held.length === 0 ? (chunk as Buffer) : Buffer.concat([held, chunk as Buffer]);
     let idx = held.indexOf(LF);

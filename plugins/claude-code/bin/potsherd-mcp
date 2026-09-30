@@ -17,7 +17,7 @@
 #
 # Since phase 7 place 1 is committed: `dist/mcp.js` is vendored (`scripts/
 # vendor-plugin.mjs`), and the MCP SDK and `zod` are bundled into it rather than
-# left external, so the server starts with an empty `node_modules`. Its three
+# left external, so the server starts with an empty `node_modules`. Its four
 # tools all read the index, so on a machine with no `better-sqlite3` each one
 # answers with a sentence naming the fix -- which is a working server reporting
 # a missing dependency, not a client silently missing every tool.
@@ -49,7 +49,7 @@ Looked in three places:
   2. $ROOT/../../packages/mcp/dist/index.js       (the surrounding checkout)
   3. potsherd-mcp on PATH                         (a global install)
 
-All three tools -- potsherd_recall, potsherd_read, potsherd_graft -- are therefore absent, and the
+All four tools -- potsherd_recall, potsherd_read, potsherd_graft, potsherd_write -- are therefore absent, and the
 session-archaeologist agent is left with no tools at all.
 
 Place 1 is committed to this repository, so a normal install has it. If it is

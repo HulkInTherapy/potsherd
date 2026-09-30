@@ -19,6 +19,9 @@ export interface GlobalOptions {
   width?: number;
   debug?: boolean;
   claudeDir?: string;
+  codexDir?: string;
+  piDir?: string;
+  opencodeDir?: string;
   potsherdDir?: string;
   quiet?: boolean;
   yes?: boolean;

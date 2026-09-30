@@ -920,7 +920,7 @@ describe('the chain reaches the model, not just the CLI', () => {
  * column is not bare any more: it is headed `last active`, and `find` says the
  * same two words in the same place.
  */
-describe('find and ls date a session the same way, and say which end', () => {
+describe('legacy find diagnostics and ls date a session by last activity', () => {
   const SPAN = '99990000-1111-4111-8111-999900001111';
 
   function writeSpan(claudeDir: string): void {
@@ -967,7 +967,7 @@ describe('find and ls date a session the same way, and say which end', () => {
     expect(sessionDate(stored)!.slice(0, 10)).toBe('2026-08-19');
 
     const listed = cli(root, ['ls']);
-    const found = cli(root, ['find', 'retry budget']);
+    const found = cli(root, ['find', 'retry budget', '--with', 'notes']);
     expect(listed).toContain('19 aug');
     expect(listed).not.toContain('12 aug');
     expect(found).toContain('19 aug');

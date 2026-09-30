@@ -253,14 +253,14 @@ describe('the archaeologist cannot read the filesystem', () => {
     // A PROMPT constraint, and named as one in T10.6-REPORT.md. F3 is the
     // proof that prompts do not hold; what holds here is the tool list above.
     const text = fs.readFileSync(AGENT, 'utf8');
-    expect(text).toContain('**No conclusions.**');
-    expect(text).toContain('Delegate\ncontext, never judgement');
+    expect(text).toContain('Do not give a verdict');
+    expect(text).toContain('The main agent holds the current question and judges');
   });
 
   it('is told to copy a citation rather than compose one', () => {
     const text = fs.readFileSync(AGENT, 'utf8');
-    expect(text).toMatch(/minted by potsherd from its own index/);
-    expect(text).toMatch(/refused by potsherd's code/);
+    expect(text).toMatch(/actual immutable refs/);
+    expect(text).toMatch(/retain exact delivered text.*citation/);
   });
 });
 
@@ -284,17 +284,16 @@ describe('one model-invocable skill', () => {
     // §B7: "the human CLI keeps its 20 verbs untouched". Untouched is the
     // assertion; the count is reported rather than pinned, because the plan's
     // own number is stale and correcting it in the repo is not this task.
-    const routing = fs.readFileSync(human, 'utf8').match(/^\| `[a-z]/gm) ?? [];
-    expect(routing.length).toBeGreaterThan(10);
+    const text = fs.readFileSync(human, 'utf8');
+    for (const verb of ['audit', 'rescue', 'index', 'ls', 'find', 'show', 'ask', 'graft', 'tag', 'pin', 'link', 'card', 'stats', 'doctor', 'maintain', 'note'])
+      expect(text, verb).toMatch(new RegExp('`[^`]*\\b' + verb + '\\b'));
   });
 
   it('exactly one description is uncommented in the frontmatter', () => {
     const file = path.join(SKILLS, 'remembering-sessions', 'SKILL.md');
     const fm = /^---\n([\s\S]*?)\n---/.exec(fs.readFileSync(file, 'utf8'))![1]!;
     const live = fm.split('\n').filter((l) => /^description:/.test(l));
-    const parked = fm.split('\n').filter((l) => /^#\s*description:/.test(l));
     expect(live).toHaveLength(1);
-    expect(parked).toHaveLength(2);
   });
 
   it('the self-defeating "once is enough" instruction is gone', () => {
@@ -302,18 +301,15 @@ describe('one model-invocable skill', () => {
     // dispatch was the only dispatch, and the skill forbade the retry that
     // would have worked with better keywords.
     const text = fs.readFileSync(path.join(SKILLS, 'remembering-sessions', 'SKILL.md'), 'utf8');
-    // It survives in the file exactly once, inside the sentence that records
-    // its deletion. Keeping the history is the point; keeping the instruction
-    // is what is forbidden, so the assertion is on the instruction form.
-    expect(text.match(/Once is enough/g) ?? []).toHaveLength(1);
-    expect(text).toMatch(/This skill used to say \*"You already dispatched the\n   archaeologist/);
-    expect(text).not.toMatch(/^- You already dispatched the archaeologist/m);
-    expect(text).toMatch(/Search up to three times, with different nouns each time/);
+    expect(text).not.toMatch(/Once is enough|You already dispatched/);
+    expect(text).toContain('when refining a search');
+    expect(text).toContain('do not discard inconvenient qualifiers');
   });
 
   it('sends the main-loop agent to potsherd_recall directly', () => {
     const text = fs.readFileSync(path.join(SKILLS, 'remembering-sessions', 'SKILL.md'), 'utf8');
-    expect(text).toMatch(/\*\*Search it yourself\. `potsherd_recall`\.\*\*/);
+    expect(text).toMatch(/Call `potsherd_recall` with the question/);
+    expect(text).toMatch(/Read.*immutable.*potsherd_read/);
     // And the fork-into-the-subagent dispatch is removed, not merely parked.
     expect(text).not.toMatch(/^context: fork/m);
     expect(text).not.toMatch(/^agent: session-archaeologist/m);

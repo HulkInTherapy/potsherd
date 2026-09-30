@@ -474,7 +474,7 @@ const bin = path.join(repoRoot, 'packages', 'cli', 'bin', 'potsherd.js');
 function cli(args: string[]): { code: number; stdout: string; stderr: string } {
   const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: '1', COLUMNS: '80' };
   delete env['NODE_PATH'];
-  delete env['CLAUDE_CONFIG_DIR'];
+  // Keep the disposable supported source root from tests/setup.ts.
   delete env['POTSHERD_DIR'];
   delete env['XDG_CONFIG_HOME'];
   try {
@@ -985,12 +985,12 @@ describe('doctor and stats do not print two numbers under one word', () => {
   }
 
   function homeCli(home: string, args: string[]): string {
-    const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, NO_COLOR: '1', COLUMNS: '100', TZ: 'UTC' };
+    const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR:path.join(home,'.claude'), POTSHERD_PI_DIR:path.join(home,'.pi'), POTSHERD_CODEX_DIR:path.join(home,'.codex'), NO_COLOR: '1', COLUMNS: '100', TZ: 'UTC' };
     delete env['NODE_PATH'];
-    delete env['CLAUDE_CONFIG_DIR'];
+    // Keep the disposable supported source root from tests/setup.ts.
     delete env['POTSHERD_DIR'];
     delete env['XDG_CONFIG_HOME'];
-    delete env['CODEX_HOME'];
+    // Explicit source roots keep diagnostic reads inside this fixture.
     return execFileSync(process.execPath, [bin, ...args], {
       encoding: 'utf8',
       env,
@@ -1024,7 +1024,7 @@ describe('doctor and stats do not print two numbers under one word', () => {
 
   it('the number under a bare "sessions" is the same number on both screens', () => {
     const { home, claudeDir, root } = twoHarnesses();
-    homeCli(home, ['index', '--no-embed', '--claude-dir', claudeDir, '--potsherd-dir', root]);
+    homeCli(home, ['index', '--no-embed', '--harness', 'claude,pi', '--claude-dir', claudeDir, '--potsherd-dir', root]);
     const doctor = homeCli(home, ['doctor', '--claude-dir', claudeDir, '--potsherd-dir', root]);
     const stats = homeCli(home, ['stats', '--potsherd-dir', root]);
 
@@ -1049,7 +1049,7 @@ describe('doctor and stats do not print two numbers under one word', () => {
 
   it('the disk rows say which harness they walked', () => {
     const { home, claudeDir, root } = twoHarnesses();
-    homeCli(home, ['index', '--no-embed', '--claude-dir', claudeDir, '--potsherd-dir', root]);
+    homeCli(home, ['index', '--no-embed', '--harness', 'claude,pi', '--claude-dir', claudeDir, '--potsherd-dir', root]);
     const doctor = homeCli(home, ['doctor', '--claude-dir', claudeDir, '--potsherd-dir', root]);
     // `audit.ts` reads `~/.claude` and nothing else, so the two rows it feeds
     // must say so rather than borrowing the machine's name for it.

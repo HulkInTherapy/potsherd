@@ -4,13 +4,13 @@
     "name": "HulkInTherapy",
     "url": "https://github.com/HulkInTherapy"
   },
-  "description": "potsherd — a local-first rescue, search, recall and interrogation layer over every coding-agent session on your machine.",
+  "description": "potsherd \u2014 a local-first rescue, search, recall and interrogation layer over every coding-agent session on your machine.",
   "plugins": [
     {
       "name": "potsherd",
       "source": "./plugins/claude-code",
       "description": "Takes a copy of every Claude Code session before the 30-day sweep can delete it, then makes the whole archive searchable from inside Claude Code.",
-      "version": "1.2.1",
+      "version": "2.0.0-rc.2",
       "author": {
         "name": "HulkInTherapy",
         "url": "https://github.com/HulkInTherapy"

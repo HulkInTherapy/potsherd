@@ -24,7 +24,9 @@ const external = [
 ];
 
 await build({
-  entryPoints: [path.join(here, 'src/index.ts')],
+  // Stable source labels and wrapper keys regardless of the caller's cwd.
+    absWorkingDir: path.resolve(here, '..', '..'),
+    entryPoints: [path.join(here, 'src/index.ts')],
   outfile: path.join(here, 'dist/index.js'),
   bundle: true,
   platform: 'node',

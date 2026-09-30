@@ -1,3 +1,11 @@
+import {inspectCaptureCapability,persistCaptureCapability} from './memory/capabilities.js';
+import { CLAUDE_EVIDENCE_VERSION,CODEX_EVIDENCE_VERSION,LEGACY_EXCHANGE_MAPPING_VERSION } from './parser/evidence.js';
+import {captureHistoryEvidence} from './memory/history.js';
+import { backfillLegacyGhosts } from './memory/backfill.js';
+import * as sourcePaths from './paths.js';
+import { loadSpanTokenizer } from './memory/tokenization.js';
+import { publishSource, sourceId,NORMALIZATION_VERSION } from './memory/source.js';
+import { hasCurrentSpanManifest, hash } from './memory/spans.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -89,6 +97,8 @@ import { LINEAGE_HARNESSES, deriveThreads, redateFromContent, type ThreadReport 
 export interface AdapterSpec {
   harness: Harness;
   displayName: string;
+  evidenceVersion?:string;
+  captureCapability?:{state:string;fidelity:string;codes:string[]};
   sourceDir: string;
   discover(): SessionSource[];
   parse(source: SessionSource): Promise<ParseResult>;
@@ -118,6 +128,7 @@ export function adapterSpecs(o: AdapterOptions = {}): AdapterSpec[] {
   return [
     {
       harness: 'claude',
+      evidenceVersion:CLAUDE_EVIDENCE_VERSION,
       displayName: 'Claude Code',
       sourceDir: claudeAdapterModule.sourceDir(o.claudeDir),
       discover: () =>
@@ -131,6 +142,7 @@ export function adapterSpecs(o: AdapterOptions = {}): AdapterSpec[] {
     },
     {
       harness: 'codex',
+      evidenceVersion:CODEX_EVIDENCE_VERSION,
       displayName: 'Codex CLI',
       sourceDir: codexAdapterModule.codexPaths(codexAdapterModule.codexDir(o.codexHome)).sessions,
       discover: () => codexAdapterModule.discover(o.codexHome ? { codexHome: o.codexHome } : {}),
@@ -175,6 +187,7 @@ export function adapterSpecs(o: AdapterOptions = {}): AdapterSpec[] {
       // at runtime (`03 §10`), never hard-coded, and it degrades to
       // "unsupported version" rather than half-parsing. See the adapter header.
       harness: 'opencode',
+      evidenceVersion:opencodeAdapterModule.EVIDENCE_VERSION,
       displayName: opencodeAdapterModule.DISPLAY_NAME,
       sourceDir: opencodeAdapterModule.sourceDir(o.opencodeDir),
       discover: () => opencodeAdapterModule.discover(o.opencodeDir),
@@ -701,6 +714,8 @@ export interface RecordTypeRow {
 export interface HarnessReport {
   harness: Harness;
   displayName: string;
+  evidenceVersion?:string;
+  captureCapability?:{state:string;fidelity:string;codes:string[]};
   sourceDir: string;
   present: boolean;
   discovered: number;
@@ -790,6 +805,9 @@ export interface IndexOptions extends AdapterOptions {
   full?: boolean;
   /** Restrict to these harnesses. */
   harnesses?: readonly Harness[];
+  /** Durable source authority changes, separate from a one-shot harness filter. */
+  enrollHarnesses?: readonly Harness[];
+  removeHarnesses?: readonly Harness[];
   /** Restrict to one session id (its transcript is still discovered normally). */
   sessionId?: string;
   /** Default true. `false` is `--no-embed`: fts-only, no model, no network. */
@@ -797,6 +815,8 @@ export interface IndexOptions extends AdapterOptions {
   onProgress?: (p: IndexProgress) => void;
   /** Called once, before a ~34 MB first-run download starts. */
   onModelDownload?: (bytes: number) => void;
+  /** Runtime ownership fence checked inside authoritative publication. */
+  beforeCommit?:()=>void;
 }
 
 /**
@@ -815,14 +835,15 @@ export async function indexAll(options: IndexOptions = {}): Promise<IndexReport>
   // the *same* directory this run is writing to. Defaulting one from the other
   // is not a nicety: a run given only `root` would otherwise discover the real
   // `~/.potsherd/archive` and index someone else's corpus into a scratch db.
-  const adapterOptions: AdapterOptions = { ...options, potsherdDir: options.potsherdDir ?? root };
+  const enrolled=db.transaction(()=>{options.beforeCommit?.();return resolveEnrolledSources(db,options);}).immediate();
+  const adapterOptions: AdapterOptions = { ...enrolled.options, potsherdDir: options.potsherdDir ?? root };
 
   try {
     // Migration 4 may have declined at open() if `sqlite-vec` was missing; ask
     // once here so the report can say which of the two indexes this run built.
     const vec = loadVec(db);
 
-    const wanted = options.harnesses ? new Set(options.harnesses) : null;
+    const wanted = new Set(options.harnesses ?? enrolled.harnesses);
     const specs = adapterSpecs(adapterOptions).filter((s) => !wanted || wanted.has(s.harness));
 
     const harnesses: HarnessReport[] = [];
@@ -834,6 +855,9 @@ export async function indexAll(options: IndexOptions = {}): Promise<IndexReport>
       const report = await indexHarness(db, spec, { ...options, ...adapterOptions }, recordTypes);
       redaction = addCounts(redaction, report.redaction);
       harnesses.push(report.harness_);
+      const rootKeys:Record<string,keyof AdapterOptions>={claude:'claudeDir',codex:'codexHome',cursor:'cursorDir',pi:'piDir',gemini:'geminiDir',opencode:'opencodeDir',copilot:'copilotDir'};
+      const enrolledRoot=enrolled.options[rootKeys[spec.harness]!];
+      if(typeof enrolledRoot==='string'){const capability=inspectCaptureCapability(spec.harness,enrolledRoot,report.harness_.discovered,report.harness_.errors.length);persistCaptureCapability(db,capability,options.beforeCommit);report.harness_.captureCapability={state:capability.state,fidelity:capability.fidelity,codes:capability.codes};}
     }
 
     // After every harness and before the ghosts: the chain is a relation
@@ -843,6 +867,12 @@ export async function indexAll(options: IndexOptions = {}): Promise<IndexReport>
     options.onProgress?.({ phase: 'ghosts' });
     const ghosts = ingestGhosts(db, { full: Boolean(options.full) });
     redaction = addCounts(redaction, ghosts.counts);
+    if(!ghosts.unchanged)backfillLegacyGhosts(db,Number.MAX_SAFE_INTEGER);
+    let historyFailures=0;
+    const historyTokenizer=await loadSpanTokenizer(modelsDir(root));
+    for(const {harness,historyPath} of discoverEnrolledHistoryInputs(db,root)){
+      const capturedHistory=captureHistoryEvidence(db,{root,harness,historyPath,sessionId:options.sessionId,tokenizer:historyTokenizer??undefined,beforeCommit:options.beforeCommit});historyFailures+=capturedHistory.malformed||capturedHistory.pendingBytes?1:0;
+    }
 
     const embeddings = await embedExchanges(db, { ...options, embed }, vec);
 
@@ -853,7 +883,7 @@ export async function indexAll(options: IndexOptions = {}): Promise<IndexReport>
       redactedExchanges: sum(harnesses, (h) => h.redactedExchanges),
       parsed: sum(harnesses, (h) => h.parsed),
       skipped: sum(harnesses, (h) => h.skipped),
-      failed: sum(harnesses, (h) => h.failed),
+      failed: sum(harnesses, (h) => h.failed)+historyFailures,
       bytes: sum(harnesses, (h) => h.bytes),
     };
 
@@ -934,13 +964,6 @@ async function indexHarness(
 
   const stateKey = `index:${spec.harness}`;
   const fingerprint = sourceFingerprint(sources);
-  if (!options.full && !options.sessionId && readIndexState(db, stateKey) === fingerprint) {
-    report.unchanged = true;
-    report.skipped = sources.length;
-    fillStoredCounts(db, report);
-    report.ms = Date.now() - started;
-    return { harness_: report, redaction };
-  }
 
   const known = new Map<string, { mtime: number | null; offset: number }>();
   for (const row of db
@@ -949,6 +972,7 @@ async function indexHarness(
     known.set(row.id, { mtime: row.source_mtime, offset: row.source_offset });
   }
 
+  const tokenizer = await loadSpanTokenizer(modelsDir(options.root ?? potsherdDir(options.potsherdDir)));
   let done = 0;
   for (const source of sources) {
     done += 1;
@@ -960,60 +984,64 @@ async function indexHarness(
       note: path.basename(source.path),
     });
 
-    // The incremental test, and it is a stat comparison exactly as
-    // `archive_files` does it for rescue: same mtime and same byte count means
-    // the file cannot have changed, so it is never opened.
-    const seen = known.get(source.sessionId);
-    if (
-      !options.full &&
-      seen &&
-      seen.mtime !== null &&
-      seen.mtime === Math.floor(source.mtimeMs) &&
-      seen.offset === source.bytes
-    ) {
-      report.skipped += 1;
-      continue;
+    if(db.prepare("SELECT 1 FROM forget_tombstones WHERE source_id=? AND state<>'reversed'").get(sourceId(source.harness,source.sessionId))){report.skipped+=1;continue;}
+    let raw: Buffer;
+    let databaseParsed: ParseResult | undefined;
+    try { if(source.harness==='opencode'){databaseParsed=await spec.parse(source);if(!databaseParsed.artifactSnapshot)throw new Error('native snapshot unavailable');raw=databaseParsed.artifactSnapshot;}else raw = fs.readFileSync(source.path); } catch (err) {
+      report.failed += 1; report.errors.push(`${source.path}: ${(err as Error).message}`);
+      try {recordCaptureFailure(db,source,'source_read_failed',options.beforeCommit);} catch { /* Lost ownership leaves recovery to the current worker. */ } continue;
     }
+    const checkpoint = db.prepare(`SELECT acknowledged_fingerprint,discovered_fingerprint,error_code,json_extract(continuation_json,'$.legacyMappingVersion') legacy_mapping_version,(SELECT adapter_version FROM source_revisions WHERE revision_id=c.acknowledged_revision_id) adapter_version,(SELECT normalization_version FROM source_revisions WHERE revision_id=c.acknowledged_revision_id) normalization_version,(SELECT coverage_gaps_json FROM source_revisions WHERE revision_id=c.acknowledged_revision_id) coverage_gaps_json FROM capture_checkpoints c WHERE source_id=? OR (? <> 'opencode' AND source_id IN (SELECT source_id FROM source_aliases WHERE path=?))`).get(sourceId(source.harness,source.sessionId),source.harness,source.path) as { acknowledged_fingerprint:string|null;discovered_fingerprint:string|null; error_code:string|null;adapter_version:string|null;normalization_version:string|null;coverage_gaps_json:string|null;legacy_mapping_version:string|null } | undefined;
+    const rawFingerprint = hash(raw);
+    if (!options.full && (checkpoint?.acknowledged_fingerprint===rawFingerprint||(source.status==='archived'&&checkpoint?.discovered_fingerprint===rawFingerprint)) && !checkpoint.error_code&&(!spec.evidenceVersion||checkpoint.adapter_version===spec.evidenceVersion)&&checkpoint.normalization_version===NORMALIZATION_VERSION&&hasCurrentSpanManifest(checkpoint.coverage_gaps_json,tokenizer??undefined)&&(!['claude','codex'].includes(source.harness)||checkpoint.legacy_mapping_version===LEGACY_EXCHANGE_MAPPING_VERSION)) { report.skipped+=1;continue; }
 
+    const expectedActiveRevisionId=(db.prepare("SELECT active_revision_id FROM memory_sources WHERE source_id=? OR (? <> 'opencode' AND source_id IN (SELECT source_id FROM source_aliases WHERE path=?))").get(sourceId(source.harness,source.sessionId),source.harness,source.path) as {active_revision_id:string|null}|undefined)?.active_revision_id??null;
     let parsed: ParseResult;
+    let capturedSource=source;
+    let scratch:string|undefined;
     try {
-      parsed = await spec.parse(source);
-    } catch (err) {
-      // A live transcript can vanish between readdir and read; that is the
-      // sweep doing its job, not a parse failure. Everything else is named.
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        report.failed += 1;
-        report.errors.push(`${source.path}: ${(err as Error).message}`);
+      if(source.harness==='claude'||source.harness==='codex'){
+       const scratchRoot=path.join(options.root??potsherdDir(options.potsherdDir),'capture-scratch');fs.mkdirSync(scratchRoot,{recursive:true,mode:0o700});scratch=fs.mkdtempSync(path.join(scratchRoot,'capture-'));const file=path.join(scratch,path.basename(source.path));fs.writeFileSync(file,raw,{mode:0o600});capturedSource={...source,path:file,bytes:raw.length};
       }
+      parsed = databaseParsed ?? await spec.parse(capturedSource);
+      parsed.session.sourcePath=source.path;
+    } catch (err) {
+      report.failed += 1;
+      report.errors.push(`${source.path}: ${(err as Error).message}`);
+      try {recordCaptureFailure(db,source,'parse_failed',options.beforeCommit);} catch { /* Lost ownership leaves recovery to the current worker. */ }
+      if(scratch)fs.rmSync(scratch,{recursive:true,force:true});
       continue;
     }
 
-    const result = ingestSession(db, parsed, {
-      sourceMtimeMs: source.mtimeMs,
-      ...(source.status === 'archived' ? { archivedPath: source.path } : {}),
-      ...((source as { originalPath?: string }).originalPath
-        ? { originalPath: (source as { originalPath?: string }).originalPath }
-        : {}),
-    });
+    if(db.prepare("SELECT 1 FROM forget_tombstones WHERE source_id=? AND state<>'reversed'").get(sourceId(source.harness,parsed.session.id))){if(scratch)fs.rmSync(scratch,{recursive:true,force:true});report.skipped+=1;continue;}
+    let result: IngestSessionResult;
+    const version = spec.version(parsed);
+    try {
+      const lineage = await prepareLineage(db,spec.harness,capturedSource,parsed.session.id);
+      const consumed = parsed.artifactSnapshot ?? raw.subarray(0, parsed.endOffset);
+      if (parsed.artifactHash && parsed.artifactHash !== hash(consumed)) throw new Error('source changed during parse');
+      if (!scratch && !parsed.artifactSnapshot && !consumed.equals(fs.readFileSync(source.path).subarray(0,parsed.endOffset))) throw new Error('source changed before publication');
+      const artifactHash=hash(consumed);
+      const proof=sourcePrefixProof(db,options.root??potsherdDir(options.potsherdDir),sourceId(source.harness,parsed.session.id),consumed);
+      const archiveRelativePath=preserveEvidenceArtifact(options.root ?? potsherdDir(options.potsherdDir),artifactHash,consumed);
+      const publication=publishSource(db,{parsed,artifactHash,artifactBytes:consumed.length,archiveRelativePath,fingerprint:rawFingerprint,expectedActiveRevisionId,beforeCommit:options.beforeCommit,prefixCompatibleArtifactHashes:proof.compatibleHashes,olderArchivedPrefix:source.status==='archived'&&proof.olderThanActive,retainedArchivePath:source.status==='archived'&&proof.olderThanActive?proof.retainedArchivePath:undefined,...(tokenizer?{tokenizer}:{}),
+        publishCompatibility:()=> { result=ingestSession(db,parsed,{sourceMtimeMs:source.mtimeMs,...(source.status==='archived'?{archivedPath:source.path}:{})}); },
+        publishAuxiliary:()=>{lineage();writeSessionRecordTypes(db,parsed.session.id,spec,version,parsed.unknownTypes);if(parsed.session.id!==source.sessionId)db.prepare('DELETE FROM capture_checkpoints WHERE source_id=? AND acknowledged_revision_id IS NULL').run(sourceId(source.harness,source.sessionId));} });
+      if(publication.conflict){report.failed+=1;report.errors.push(`${source.path}: conflicting source aliases`);continue;}
+      if(!publication.activated){report.parsed+=1;report.malformedLines+=parsed.malformedLines;continue;}
+    } catch(err) {
+      report.failed+=1;report.errors.push(`${source.path}: ${(err as Error).message}`);
+      try { options.beforeCommit?.();recordCaptureFailure(db,{...source,sessionId:parsed.session.id},'publication_failed',options.beforeCommit); } catch { /* A superseded owner must not change the new owner's checkpoint. */ }
+      continue;
+    } finally { if(scratch)fs.rmSync(scratch,{recursive:true,force:true}); }
 
     report.parsed += 1;
     report.malformedLines += parsed.malformedLines;
-    redaction = addCounts(redaction, result.counts);
+    redaction = addCounts(redaction, result!.counts);
 
-    try {
-      await indexLineage(db, spec.harness, source, parsed.session.id);
-    } catch (err) {
-      // The chain is a convenience; the transcript is the product. A lineage
-      // pass that cannot read a file it has already parsed once is named and
-      // stepped over, exactly like an unknown record type.
-      report.errors.push(`lineage ${path.basename(source.path)}: ${(err as Error).message}`);
-    }
-
-    const version = spec.version(parsed);
     // Two ledgers, deliberately: the map is what *this run* saw and goes on the
     // receipt; the table is what the *index* holds and is what `doctor` reads
     // back, months later, after an incremental pass that opened one file.
-    writeSessionRecordTypes(db, parsed.session.id, spec, version, parsed.unknownTypes);
     for (const [type, count] of Object.entries(parsed.unknownTypes)) {
       const key = `${spec.harness}\0${version}\0${type}`;
       const row = recordTypes.get(key);
@@ -1033,7 +1061,8 @@ async function indexHarness(
     }
   }
 
-  if (!options.sessionId) writeIndexState(db, stateKey, fingerprint);
+  if (!options.sessionId && report.failed===0 && report.errors.length===0) writeIndexState(db, stateKey, fingerprint);
+  report.unchanged = report.parsed===0 && report.failed===0 && report.errors.length===0;
   fillStoredCounts(db, report);
   report.ms = Date.now() - started;
   return { harness_: report, redaction };
@@ -1080,15 +1109,15 @@ const LINEAGE_FIELDS: Record<string, { id: string; declaredParent: string }> = {
  * Sidechains are skipped: a subagent transcript is spawned, never resumed, and
  * scanning 280 of them for a relation they cannot have is work thrown away.
  */
-async function indexLineage(
+async function prepareLineage(
   db: Db,
   harness: Harness,
   source: SessionSource,
   sessionId: string,
-): Promise<void> {
-  if (!LINEAGE_HARNESSES.includes(harness)) return;
+): Promise<() => void> {
+  if (!LINEAGE_HARNESSES.includes(harness)) return () => {};
   const fields = LINEAGE_FIELDS[harness];
-  if (!fields || source.isSidechain) return;
+  if (!fields || source.isSidechain) return () => {};
 
   const ids: string[] = [];
   const declared = new Map<string, number>();
@@ -1116,7 +1145,7 @@ async function indexLineage(
     );
     for (const [parent, n] of declared) insParent.run(sessionId, parent, n);
   });
-  write();
+  return write;
 }
 
 /**
@@ -1471,4 +1500,87 @@ function firstLine(s: string): string {
 
 function sum<T>(xs: readonly T[], f: (x: T) => number): number {
   return xs.reduce((a, x) => a + f(x), 0);
+}
+
+/** Failed work never shares the successful source acknowledgment. */
+function recordCaptureFailure(db:Db,source:SessionSource,errorCode:string,fence?:()=>void):void {
+ const sid=sourceId(source.harness,source.sessionId),at=new Date().toISOString();
+ db.transaction(()=>{
+  fence?.();
+  db.prepare("INSERT OR IGNORE INTO memory_sources VALUES(?,?,?,NULL,NULL,'live',?)").run(sid,source.harness,source.sessionId,at);
+  db.prepare('INSERT INTO capture_checkpoints(source_id,last_error_at,error_code) VALUES(?,?,?) ON CONFLICT(source_id) DO UPDATE SET last_error_at=excluded.last_error_at,error_code=excluded.error_code').run(sid,at,errorCode);
+ })();
+}
+/** Content-addressed owner-only raw artifacts preserve history when live paths disappear. */
+function preserveEvidenceArtifact(root:string,artifactHash:string,bytes:Buffer):string {
+ const relative=path.join('archive','evidence',`${artifactHash}.jsonl`),file=path.join(root,relative);
+ fs.mkdirSync(path.dirname(file),{recursive:true,mode:0o700});
+ if(fs.existsSync(file)){if(hash(fs.readFileSync(file))!==artifactHash)throw new Error('immutable archive hash mismatch');return relative;}
+ const temp=`${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+ try {const fd=fs.openSync(temp,'wx',0o600);try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}fs.renameSync(temp,file);const dir=fs.openSync(path.dirname(file),'r');try{fs.fsyncSync(dir);}finally{fs.closeSync(dir);}}finally{try{fs.unlinkSync(temp);}catch{}}
+ return relative;
+}
+
+export type SourceEnrollment={version:1;harnesses:Harness[];options:AdapterOptions};
+export function readEnrolledSources(db:Db):SourceEnrollment|null {
+ const value=readIndexState(db,'memory:source-enrollment');if(!value)return null;
+ const parsed=JSON.parse(value) as SourceEnrollment;if(parsed.version!==1||!Array.isArray(parsed.harnesses)||!parsed.options)throw new Error('invalid source enrollment');return parsed;
+}
+/** Explicit index roots are persisted; unqualified follow-ups use exactly the enrolled roots. */
+function resolveEnrolledSources(db:Db,input:IndexOptions):SourceEnrollment {
+ const prior=readEnrolledSources(db);const names={claude:'claudeDir',codex:'codexHome',cursor:'cursorDir',pi:'piDir',gemini:'geminiDir',opencode:'opencodeDir',copilot:'copilotDir'} as const;
+ const defaults={claude:sourcePaths.claudeDir,codex:sourcePaths.codexDir,cursor:sourcePaths.cursorDir,pi:sourcePaths.piDir,gemini:sourcePaths.geminiDir,opencode:sourcePaths.opencodeDir,copilot:sourcePaths.copilotDir};
+ const explicit=(Object.keys(names) as Harness[]).filter(h=>input[names[h]]!==undefined);
+ const harnesses=input.harnesses?[...input.harnesses]:explicit.length?explicit:prior?.harnesses??Object.keys(names) as Harness[];
+ const options:AdapterOptions={...(prior?.options??{})};
+ for(const h of harnesses){const key=names[h];options[key]=path.resolve(input[key]??options[key]??defaults[h]());}
+ const removed=new Set(input.removeHarnesses??[]);
+ const savedHarnesses=[...new Set([...(prior?.harnesses??harnesses),...explicit,...(input.enrollHarnesses??[])])].filter(h=>!removed.has(h));
+ for(const h of savedHarnesses){const key=names[h];options[key]=path.resolve(input[key]??options[key]??defaults[h]());}
+ const enrollment:SourceEnrollment={version:1,harnesses:savedHarnesses,options};
+ if(!prior||explicit.length||input.enrollHarnesses||input.removeHarnesses){
+  const semantic=(value:SourceEnrollment)=>JSON.stringify({harnesses:[...value.harnesses].sort(),roots:Object.fromEntries([...value.harnesses].sort().map(h=>[h,value.options[names[h]]]))});
+  const changed=!prior||semantic(prior)!==semantic(enrollment);
+  writeIndexState(db,'memory:source-enrollment',JSON.stringify(enrollment));
+  if(changed)db.prepare('UPDATE memory_epochs SET evidence_epoch=evidence_epoch+1,lineage_epoch=lineage_epoch+1 WHERE singleton=1').run();
+ }
+ return enrollment;
+}
+/** Cheap discovery hints for workers. Only capture verifies content and advances acknowledgment. */
+export function discoverEnrolledSources(db:Db,root:string,beforeCommit?:()=>void):SessionSource[] {
+ const enrollment=readEnrolledSources(db);if(!enrollment)return [];
+ const wanted=new Set(enrollment.harnesses),sources:SessionSource[]=[];
+ const rootKeys:Record<string,keyof AdapterOptions>={claude:'claudeDir',codex:'codexHome',cursor:'cursorDir',pi:'piDir',gemini:'geminiDir',opencode:'opencodeDir',copilot:'copilotDir'};
+ for(const spec of adapterSpecs({...enrollment.options,potsherdDir:root}).filter(s=>wanted.has(s.harness))){
+  let discovered:SessionSource[]=[];let failure:unknown;
+  try{discovered=spec.discover();}catch(error){failure=error;}
+  const enrolledRoot=enrollment.options[rootKeys[spec.harness]!];
+  if(typeof enrolledRoot==='string')persistCaptureCapability(db,inspectCaptureCapability(spec.harness,enrolledRoot,discovered.length,failure?1:0),beforeCommit);
+  if(failure)throw failure;sources.push(...discovered);
+ }
+ return sources;
+}
+
+/** Prefix authority uses immutable complete-record artifacts, never filesystem mtimes. */
+function sourcePrefixProof(db:Db,root:string,sid:string,incoming:Buffer):{compatibleHashes:string[];olderThanActive:boolean;retainedArchivePath?:string}{
+ const rows=db.prepare('SELECT r.artifact_hash,r.artifact_bytes,r.archive_relative_path,(s.active_revision_id=r.revision_id) active FROM source_revisions r JOIN memory_sources s ON s.source_id=r.source_id WHERE r.source_id=? AND r.archive_relative_path IS NOT NULL').all(sid) as {artifact_hash:string;artifact_bytes:number;archive_relative_path:string;active:number}[];
+ const compatibleHashes:string[]=[];let olderThanActive=false;let retainedArchivePath:string|undefined;
+ for(const r of rows){
+  const file=path.resolve(root,r.archive_relative_path);if(!file.startsWith(path.resolve(root)+path.sep)||!r.archive_relative_path.startsWith('archive/'))continue;
+  let fd:number|undefined;
+  try{
+   fd=fs.openSync(file,'r');const digest=crypto.createHash('sha256');const chunk=Buffer.alloc(65536);let offset=0;let equal=true;
+   while(true){const count=fs.readSync(fd,chunk,0,chunk.length,null);if(count===0)break;digest.update(chunk.subarray(0,count));const end=Math.min(offset+count,incoming.length);if(offset<incoming.length&&!chunk.subarray(0,end-offset).equals(incoming.subarray(offset,end)))equal=false;offset+=count;}
+   if(offset!==r.artifact_bytes||digest.digest('hex')!==r.artifact_hash||!equal)continue;
+   compatibleHashes.push(r.artifact_hash);if(r.active&&incoming.length<offset){olderThanActive=true;const liveAliases=db.prepare("SELECT path FROM source_aliases WHERE source_id=? AND kind='live' AND missing_at IS NULL").all(sid) as {path:string}[];if(!liveAliases.some(a=>fs.existsSync(a.path)))retainedArchivePath=file;}
+  }catch{/* Missing/unverified copies cannot confer prefix authority. */}finally{if(fd!==undefined)fs.closeSync(fd);}
+ }
+ return {compatibleHashes:[...new Set(compatibleHashes)],olderThanActive,retainedArchivePath};
+}
+
+/** Enrolled history paths only; discovery may stat these hints before verified capture. */
+export function discoverEnrolledHistoryInputs(db:Db,root:string):{harness:'claude'|'codex';historyPath:string}[]{
+ const enrolled=readEnrolledSources(db);if(!enrolled)return[];const inputs:{harness:'claude'|'codex';historyPath:string}[]=[];
+ for(const harness of ['claude','codex'] as const){if(!enrolled.harnesses.includes(harness))continue;const dir=harness==='claude'?enrolled.options.claudeDir:enrolled.options.codexHome;if(!dir)continue;const live=path.join(dir,'history.jsonl'),fallback=path.join(root,'archive','history.jsonl');const historyPath=fs.existsSync(live)?live:harness==='claude'?fallback:live;if(fs.existsSync(historyPath))inputs.push({harness,historyPath});}
+ return inputs;
 }

@@ -45,6 +45,8 @@ const targets = [
 
 for (const t of targets) {
   await build({
+    // Stable source labels and wrapper keys regardless of the caller's cwd.
+    absWorkingDir: path.resolve(here, '..', '..'),
     entryPoints: [path.join(here, t.in)],
     outfile: path.join(here, t.out),
     bundle: true,
@@ -69,3 +71,6 @@ for (const file of ['LICENSE', 'NOTICE', 'README.md']) {
   const from = path.join(repo, file);
   if (existsSync(from)) copyFileSync(from, path.join(here, file));
 }
+
+mkdirSync(path.join(here,'licenses'),{recursive:true});
+copyFileSync(path.join(repo,'licenses','js-tiktoken-MIT.txt'),path.join(here,'licenses','js-tiktoken-MIT.txt'));

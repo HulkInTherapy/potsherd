@@ -188,6 +188,7 @@ async function findJson(query: string): Promise<Record<string, unknown>> {
       query,
       json: true,
       potsherdDir: root,
+      explain: true,
       minConfidence: 'none',
       vectors: 'off',
     } as Parameters<typeof runFind>[0]);
@@ -341,7 +342,7 @@ describe('C-1 — the page is ordered by the label, once, in core', () => {
 
 // ============================================================= C-1 at the door
 
-describe('C-1 — find --json is ordered the same way', () => {
+describe('C-1 — explicit find diagnostics preserve the legacy ranking', () => {
   it('sessions[0] is the best-calibrated row on the page, not the best-fused one', async () => {
     const out = await findJson(ORDER_QUERY);
     const ss = rows(out);
@@ -400,7 +401,7 @@ describe('C-2 — citable is decided once, and both doors read it', () => {
  * true of whatever either door does next: if one of them ever grows a second
  * opinion again, this is the case that says so.
  */
-describe('both doors, one index, one query', () => {
+describe('legacy diagnostic implementations agree on ranking and citability', () => {
   const at = () => makeContext({ potsherdDir: root, env: {}, cwd: root });
 
   it('agree on the order of the page and on which rows may be quoted', async () => {
@@ -624,15 +625,18 @@ describe('ROUND 3 — the nearest rows live under a rule, not in the answer', ()
     }
   });
 
-  it('the verdict the machine reads is untouched', async () => {
-    // `--json` is the contract an agent parses. It gets no rows, whatever the
-    // human screen chose to draw under a rule.
-    const out = await runFind({
-      query: PARAPHRASE,
-      json: true,
-      potsherdDir: root,
-      vectors: 'off',
-    } as Parameters<typeof runFind>[0]).then(() => null).catch(() => null);
-    void out;
+  it('the default evidence surface leaves a natural-language claim unassessed', async () => {
+    const chunks: string[] = [];
+    const write = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((value: string | Uint8Array) => { chunks.push(String(value)); return true; }) as typeof process.stdout.write;
+    try { await runFind({ query: PARAPHRASE, json: true, potsherdDir: root, vectors: 'off' }); }
+    finally { process.stdout.write = write; }
+    const result = JSON.parse(chunks.join(''));
+    expect(result.contractVersion).toBe(2);
+    expect(result.support.state).not.toBe('sufficient');
+    expect(result.support.unresolved.join(' ')).toMatch(/host reader|incomplete/i);
+    expect(result.coverage.semantic).toBe('disabled');
+    expect(result).not.toHaveProperty('confidence');
+    for (const evidence of result.evidence) expect(evidence.quoteBasis).toBe('redacted_unit');
   });
 });

@@ -33,7 +33,7 @@
  * ## What T4.8 added, and why
  *
  * A word edge is not a safe edge. Redaction runs at index time, so the text a
- * window is cut out of can contain `‹redacted:basic-auth:201b2d22›` — which is
+ * window is cut out of can contain `‹redacted:basic-auth:dddd3333›` — which is
  * four words to {@link wordSpans}, so three of its internal boundaries are
  * legal word edges that cut the marker in half. `docs/screens/13-find-redacted.txt`
  * had been failing `scripts/make-screens.sh`'s own "a mask is visible on this
@@ -73,7 +73,7 @@ export interface MaskSpan {
  * Every redaction mask and elision marker in `text`, in order.
  *
  * Redaction runs at index time, so every string a snippet is cut out of can
- * contain `‹redacted:aws:9f2b1c04›` (`redact.ts`) or
+ * contain `‹redacted:aws:cccc2222›` (`redact.ts`) or
  * `‹elided:image/png:109362 bytes›` (`redact-elide.ts`). Both are **one atom**,
  * and a window edge that lands inside one is the defect this exists to
  * prevent: `‹redacted:aws:9f2b…` is not a shorter version of the fact that a
@@ -189,6 +189,26 @@ export function wordMatchesToken(word: string, token: string): boolean {
   return false;
 }
 
+/** Scan until every requested term is found, without materializing all words. */
+export function matchingTerms(text: string, tokens: readonly string[]): Set<string> {
+  const remaining = new Set(tokens);
+  const found = new Set<string>();
+  if (!text || remaining.size === 0) return found;
+  const re = new RegExp(WORD_RE.source, WORD_RE.flags);
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const word = match[0].toLowerCase();
+    for (const token of remaining) {
+      if (wordMatchesToken(word, token)) {
+        found.add(token);
+        remaining.delete(token);
+      }
+    }
+    if (remaining.size === 0) break;
+  }
+  return found;
+}
+
 // -------------------------------------------------------------- boilerplate
 
 /**
@@ -238,20 +258,20 @@ export function isMostlyBoilerplate(text: string): boolean {
  * Snap `at` back to a word edge so no snippet ever starts in mid-word — and
  * never into the middle of a mask.
  *
- * A word edge is not enough on its own: `‹redacted:basic-auth:201b2d22›` is
- * four words to {@link wordSpans} (`redacted`, `basic`, `auth`, `201b2d22`),
+ * A word edge is not enough on its own: `‹redacted:basic-auth:dddd3333›` is
+ * four words to {@link wordSpans} (`redacted`, `basic`, `auth`, `dddd3333`),
  * so every boundary inside it is a legal word edge and three of them cut the
  * atom in half.
  */
 function snapStart(spans: WordSpan[], at: number, masks: readonly MaskSpan[] = []): number {
   if (at <= 0) return 0;
-  let out = at;
-  for (const s of spans) {
-    if (s.end <= at) continue;
-    // `at` fell inside this word (or just before it): begin at the word.
-    out = s.start;
-    break;
+  let lo = 0, hi = spans.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (spans[mid]!.end <= at) lo = mid + 1;
+    else hi = mid;
   }
+  const out = spans[lo]?.start ?? at;
   return offMask(masks, out, 'forward');
 }
 
@@ -263,10 +283,14 @@ function snapEnd(
 ): number {
   if (at >= text.length) return text.length;
   let end = at;
-  for (const s of spans) {
-    if (s.start >= at) break;
-    end = s.end <= at ? s.end : s.start;
+  let lo = 0, hi = spans.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (spans[mid]!.start < at) lo = mid + 1;
+    else hi = mid;
   }
+  const s = spans[lo - 1];
+  if (s) end = s.end <= at ? s.end : s.start;
   if (end <= 0) return offMask(masks, at, 'back');
   // Keep the punctuation the sentence ended on; a snippet stopping at "so" is
   // worse than one stopping at "so." by exactly one character.
@@ -382,10 +406,11 @@ export function denseSnippet(
   text: string,
   tokens: readonly string[],
   max = SNIPPET_CHARS,
+  preparedSpans?: WordSpan[],
 ): MatchSnippet {
   if (!text) return { text: '' };
   const wanted = [...new Set(tokens.map((t) => t.toLowerCase()).filter(Boolean))];
-  const spans = wordSpans(text);
+  const spans = preparedSpans ?? wordSpans(text);
   const masks = maskSpans(text);
   if (wanted.length === 0 || spans.length === 0) return cleanLead(text, spans, max, masks);
 
@@ -431,7 +456,7 @@ export function denseSnippet(
     if (end <= first.span.end) end = Math.min(text.length, first.span.end);
     // The three lines above all override a mask-safe edge with a *word* edge —
     // `first.span` is a word, and when the matched word is one of the four
-    // inside `‹redacted:basic-auth:201b2d22›` every one of them lands in the
+    // inside `‹redacted:basic-auth:dddd3333›` every one of them lands in the
     // middle of the marker. Re-applied here rather than folded into each
     // branch, so a fourth branch cannot forget it. `keep` is the match, so an
     // edge that has to move moves the way that keeps the match in the window,

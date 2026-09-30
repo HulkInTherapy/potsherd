@@ -656,7 +656,7 @@ export function snippetLine(hit: RecallHit, t: Theme, width: number): string {
   const masks = maskSpans(text);
   // A mask is one atom, and the highlight can land *inside* one: `find
   // "redacted aws"` matches the word `redacted` in the middle of
-  // `‹redacted:basic-auth:201b2d22›`, and every window this function builds is
+  // `‹redacted:basic-auth:dddd3333›`, and every window this function builds is
   // then centred on eight characters of a thirty-character marker. Widening
   // the match to the whole marker is what makes the rest of the arithmetic
   // come out right — the window is sized around an atom instead of around a
@@ -707,7 +707,7 @@ export function snippetLine(hit: RecallHit, t: Theme, width: number): string {
  *
  * `find "redacted aws"` highlights the literal word `redacted` — which, in a
  * redacted exchange, is eight characters in the middle of
- * `‹redacted:basic-auth:201b2d22›`. Every window below is then built around a
+ * `‹redacted:basic-auth:dddd3333›`. Every window below is then built around a
  * fragment, and {@link wordEdges} duly pulls the window's end back to exactly
  * `m.end`, which is the middle of the marker. That is how
  * `docs/screens/13-find-redacted.txt` came to publish
@@ -731,7 +731,7 @@ function widenToMask(
  *
  * The mask pass runs *after* the word pass rather than instead of it, because
  * a word edge inside a marker is a legal word edge:
- * `‹redacted:basic-auth:201b2d22›` is four words to `wordSpans`, and the
+ * `‹redacted:basic-auth:dddd3333›` is four words to `wordSpans`, and the
  * search below will happily stop at any of their boundaries.
  */
 function wordEdges(

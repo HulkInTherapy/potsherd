@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { archiveDir, claudeDir, claudePaths, potsherdDir } from './paths.js';
 import { scanClaudeDisk, SIDECHAIN_DIR } from './claude/scan.js';
 import { readHistory } from './claude/history.js';
+import { sourceId } from './memory/source.js';
 import { readSessionsIndexes } from './claude/sessions-index.js';
 import { open as openDb, type Db } from './db.js';
 import { fallbackTitle } from './recall.js';
@@ -201,7 +202,9 @@ function copyPass(
   );
 
   let done = 0;
+  const forgotten=new Set((db.prepare("SELECT s.native_session_id FROM memory_sources s JOIN forget_tombstones t ON t.source_id=s.source_id WHERE s.harness='claude' AND t.state<>'reversed'").all() as {native_session_id:string}[]).map(r=>r.native_session_id));
   for (const f of files) {
+    if(forgotten.has(path.basename(f.abs,'.jsonl')))continue;
     result.filesConsidered++;
     done++;
     opts.onProgress?.({ phase: 'copy', done, total: files.length, label: path.basename(f.rel) });
@@ -216,21 +219,7 @@ function copyPass(
     }
     result.bytesArchived += stat.size;
 
-    // Fast path: same size and mtime as the last copy we recorded, and the
-    // archive copy is still there. Hashing 345 MB on every SessionStart hook
-    // would blow the one-second budget; this makes the no-change path a stat.
-    const prev = known.get(f.abs);
-    if (
-      prev &&
-      prev.bytes === stat.size &&
-      prev.source_mtime === Math.floor(stat.mtimeMs) &&
-      fs.existsSync(target)
-    ) {
-      result.filesSkipped++;
-      countKind(result, f.kind, false);
-      continue;
-    }
-
+    // Stat data are discovery hints. Only matching source/archive hashes acknowledge a skip.
     let sha: string;
     try {
       sha = sha256File(f.abs);
@@ -239,7 +228,9 @@ function copyPass(
       continue;
     }
 
-    if (fs.existsSync(target) && safeSize(target) === stat.size && sha256File(target) === sha) {
+    let unchanged=false;
+    try{unchanged=fs.existsSync(target)&&safeSize(target)===stat.size&&sha256File(target)===sha;}catch(err){result.filesFailed.push({path:target,error:(err as Error).message});continue;}
+    if (unchanged) {
       result.filesSkipped++;
       countKind(result, f.kind, false);
       if (!opts.dryRun) {
@@ -263,9 +254,12 @@ function copyPass(
         // half-written archive file that a later run would trust.
         const tmp = `${target}.potsherd-tmp`;
         fs.copyFileSync(f.abs, tmp);
+        if(safeSize(tmp)!==stat.size||sha256File(tmp)!==sha)throw new Error('source changed during archive capture');
         fs.chmodSync(tmp, 0o600);
         fs.utimesSync(tmp, stat.atime, stat.mtime);
+        const fd=fs.openSync(tmp,'r');try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
         fs.renameSync(tmp, target);
+        const parent=fs.openSync(path.dirname(target),'r');try{fs.fsyncSync(parent);}finally{fs.closeSync(parent);}
         upsert.run({
           source_path: f.abs,
           archive_path: target,
@@ -651,6 +645,7 @@ async function ghostPass(
       if (done % 25 === 0) {
         opts.onProgress?.({ phase: 'ghosts', done, total: ghosts.length });
       }
+      if(db.prepare("SELECT 1 FROM forget_tombstones WHERE source_id=? AND state<>'reversed'").get(sourceId(HARNESS,g.sessionId)))continue;
       const idx = index.entries.get(g.sessionId);
       const source = idx ? 'both' : 'history';
       const summary = collapse(idx?.summary) || null;

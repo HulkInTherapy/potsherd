@@ -1,0 +1,46 @@
+import {openDatabase} from '../packages/core/src/sqlite-driver.js';
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';
+import {afterEach,describe,expect,it} from 'vitest';
+import {open} from '../packages/core/src/db.js';import {publishSource} from '../packages/core/src/memory/source.js';import {hash} from '../packages/core/src/memory/spans.js';import {countTokens,defaultBudget} from '../packages/core/src/memory/budget.js';
+import type {ParseResult} from '../packages/core/src/adapters/types.js';
+const roots:string[]=[];afterEach(()=>roots.splice(0).forEach((root)=>fs.rmSync(root,{recursive:true,force:true})));
+function fixture(){const root=fs.mkdtempSync(path.join(os.tmpdir(),'p12-cli-'));roots.push(root);const db=open({root});const parsed:ParseResult={session:{id:'native-memory',harness:'claude',sourcePath:'/synthetic/native',project:'/p',projectSlug:'p',startedAt:'',endedAt:'',isSidechain:false,counts:{userPrompts:0,assistantTurns:1,toolCalls:0,bytes:22},status:'live'},exchanges:[],unknownTypes:{},endOffset:22,malformedLines:0,evidenceVersion:'test-v1',records:[{unitKey:'record',role:'assistant',text:'Exact cache.X_9 recovered',eventAt:null,timeBasis:'unknown',project:'/p',locator:{recordKey:'record',mapping:'unavailable'},locatorFidelity:'record_id',recordType:'assistant'}]};publishSource(db,{parsed,artifactHash:hash('raw'),artifactBytes:3});db.close();return root;}
+const bin=path.resolve('packages/cli/bin/potsherd.js');
+function run(root:string,args:string[]){return execFileSync(process.execPath,[bin,'--potsherd-dir',root,...args],{encoding:'utf8',env:{...process.env,POTSHERD_SQLITE:'node'}});}
+describe('installed CLI memory defaults and public full inputs',()=>{
+ it('routes normal find/show/graft through evidence service with measured complete stdout',()=>{
+  const root=fixture();const before=fs.readFileSync(path.join(root,'potsherd.db'));
+  const output=run(root,['find','cache.X_9','--exact','--json']);const result=JSON.parse(output);
+  expect(result.contractVersion).toBe(2);expect(result.evidence[0].text).toBe('Exact cache.X_9 recovered');expect(result.budget.usedTokens).toBe(countTokens(output));
+  const shown=JSON.parse(run(root,['show','native','--json']));expect(shown.evidence[0].ref).toEqual(result.evidence[0].ref);
+  const grafted=JSON.parse(run(root,['graft','native','--json']));expect(grafted.evidence[0].text).toEqual(shown.evidence[0].text);
+  expect(fs.readFileSync(path.join(root,'potsherd.db'))).toEqual(before);
+ });
+ it('maps ordinary note flags and full WriteInput to durable visible assertions',()=>{
+  const root=fixture();const receipt=JSON.parse(run(root,['note','native','--decided','retry cache requires review','--request-key','cli-same','--by','user','--json']));
+  expect(receipt.authority).toBe('agent_assertion');
+  const retried=JSON.parse(run(root,['note','native','--decided','retry cache requires review','--request-key','cli-same','--by','user','--json']));expect(retried.noteIds).toEqual(receipt.noteIds);
+  const found=JSON.parse(run(root,['find','retry cache','--json']));expect(found.assertions[0].text).toBe('retry cache requires review');
+  const full=JSON.parse(run(root,['note','--input-json',JSON.stringify({requestKey:'full-note',scope:{project:'/p'},entries:[{kind:'next',text:'inspect recorded tool outcome'}],origin:'cli'})]));expect(full.noteIds).toHaveLength(1);
+ });
+ it('accepts a public v2 input without a positional query and enforces its actual output budget',()=>{
+  const root=fixture();const output=run(root,['find','--input-json',JSON.stringify({query:'cache.X_9',mode:'literal',scope:{project:'/p'},budget:defaultBudget(1200)})]);const result=JSON.parse(output);
+  expect(result.evidence).toHaveLength(1);expect(result.budget.usedTokens).toBe(countTokens(output));expect(result.budget.usedTokens).toBeLessThanOrEqual(1200);
+  const shown=JSON.parse(run(root,['show','--input-json',JSON.stringify({refs:[result.evidence[0].ref],scope:{project:'/p'},budget:defaultBudget(1200)})]));expect(shown.evidence[0].ref).toEqual(result.evidence[0].ref);expect(shown.evidence[0].provenance.spanStartUtf16).toBe(0);
+ });
+});
+it('the actual CLI accepts omitted accounting tokenizer and emits safe measured field errors',()=>{
+ const root=fixture();const {spawnSync}=require('node:child_process') as typeof import('node:child_process');
+ const invoke=(input:unknown)=>spawnSync(process.execPath,[bin,'--potsherd-dir',root,'find','--input-json',JSON.stringify(input)],{encoding:'utf8',env:{...process.env,POTSHERD_SQLITE:'node'}});
+ const input={query:'cache.X_9',mode:'literal',scope:{project:'/p'},budget:{maxTokens:2048}};
+ const good=invoke(input),response=JSON.parse(good.stdout);expect(good.status,good.stderr).toBe(0);expect(response.evidence[0].text).toBe('Exact cache.X_9 recovered');expect(response.budget.tokenizerId).toBe(defaultBudget().tokenizerId);expect(response.budget.usedTokens).toBe(countTokens(good.stdout));expect(response.budget.usedTokens).toBeLessThanOrEqual(2048);
+ for(const [budget,code] of [[{maxTokens:2048,tokenizerId:'private-wrong-secret'},'unsupported_budget_tokenizerId'],[{maxTokens:2048,tokenizerId:null},'invalid_budget_tokenizerId'],[{maxTokens:'private-invalid-secret'},'invalid_budget_maxTokens']] as const){
+  const bad=invoke({...input,budget}),body=JSON.parse(bad.stdout);expect(bad.status).toBe(1);expect(body.warnings).toContain(code);expect(body.evidence).toEqual([]);expect(body.budget.usedTokens).toBe(countTokens(bad.stdout));expect(bad.stdout+bad.stderr).not.toContain('private-');
+ }
+ for(const malformed of [{...input,query:{secret:'private-query-secret'},budget:{maxTokens:2048,remainingJourneyTokens:64}},{...input,budget:{maxTokens:64,tokenizerId:'private-tokenizer-secret'}}]){
+  const bad=invoke(malformed);expect(bad.status).toBe(1);expect(countTokens(bad.stdout)).toBeLessThanOrEqual(64);expect(bad.stdout+bad.stderr).not.toContain('private-');
+ }
+ const malformed=spawnSync(process.execPath,[bin,'--potsherd-dir',root,'find','--input-json','{'],{encoding:'utf8',env:{...process.env,POTSHERD_SQLITE:'node'}});expect(malformed.status).toBe(1);expect(JSON.parse(malformed.stdout).warnings).toContain('invalid_input_json');
+});
+it('ordinary and full-input CLI reads report unsupported schema without migrating or falling into writable legacy access',()=>{const root=fixture();const db=open({root});db.prepare('DELETE FROM schema_migrations WHERE version=17').run();db.pragma('wal_checkpoint(TRUNCATE)');db.close();const before=fs.readFileSync(path.join(root,'potsherd.db'));const {spawnSync}=require('node:child_process') as typeof import('node:child_process');for(const args of [['find','cache.X_9','--exact','--json'],['show','--input-json',JSON.stringify({legacyRef:{sessionId:'native-memory'},scope:{},budget:defaultBudget()})],['find','--input-json',JSON.stringify({query:'cache.X_9',scope:{project:'/p'},budget:{maxTokens:2048}})]]){const result=spawnSync(process.execPath,[bin,'--potsherd-dir',root,...args],{encoding:'utf8',env:{...process.env,POTSHERD_SQLITE:'node'}});expect(result.status).toBe(1);const response=JSON.parse(result.stdout);expect(response.coverage.state).toBe('upgrade_required');expect(response.support.state).toBe('insufficient');expect(response.evidence).toEqual([]);expect(response.budget.usedTokens).toBe(countTokens(result.stdout));expect(fs.readFileSync(path.join(root,'potsherd.db'))).toEqual(before);}const future=openDatabase(path.join(root,'potsherd.db'));future.prepare("INSERT INTO schema_migrations VALUES(20,'future','now')").run();future.close();const result=spawnSync(process.execPath,[bin,'--potsherd-dir',root,'find','cache','--json'],{encoding:'utf8',env:{...process.env,POTSHERD_SQLITE:'node'}});expect(JSON.parse(result.stdout).warnings).toContain('unsupported_future_schema');});
+it('rejects undeclared top-level and nested JSON boundaries instead of returning either project',()=>{const root=fixture();const db=open({root});const p:ParseResult={session:{id:'B',harness:'claude',sourcePath:'/synthetic/B',project:'/b',projectSlug:'b',startedAt:'',endedAt:'',isSidechain:false,counts:{userPrompts:1,assistantTurns:0,toolCalls:0,bytes:1},status:'live'},records:[{unitKey:'b',role:'user',text:'cache.X_9 from B',project:'/b',eventAt:null,timeBasis:'unknown',locator:{recordKey:'b',mapping:'unavailable'},locatorFidelity:'record_id',recordType:'user'}],exchanges:[],unknownTypes:{},endOffset:1,malformedLines:0,evidenceVersion:'test'};publishSource(db,{parsed:p,artifactHash:hash('B'),artifactBytes:1});db.close();const {spawnSync}=require('node:child_process') as typeof import('node:child_process');for(const malformed of [{project:'/p',scope:{}},{scope:{projcet:'/p'}},{scope:{project:'/p',repository:'/b'}},{project:'/b',scope:{project:'/p'}}]){const output=spawnSync(process.execPath,[bin,'--potsherd-dir',root,'find','--input-json',JSON.stringify({query:'cache.X_9',mode:'literal',budget:defaultBudget(),...malformed})],{encoding:'utf8',env:{...process.env,POTSHERD_SQLITE:'node'}});expect(output.status).toBe(1);const result=JSON.parse(output.stdout);expect(result.warnings).toContain('invalid_memory_input');expect(result.evidence).toEqual([]);expect(result.budget.usedTokens).toBe(countTokens(output.stdout));}});

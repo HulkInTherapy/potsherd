@@ -205,8 +205,8 @@ describe('snippet selection', () => {
  * **T4.8.** A mask is one atom, and a word edge is not a safe edge.
  *
  * Redaction runs at index time, so every string a snippet is cut out of can
- * carry `‹redacted:basic-auth:201b2d22›` — which is four *words* to
- * `wordSpans` (`redacted`, `basic`, `auth`, `201b2d22`), so three of its
+ * carry `‹redacted:basic-auth:dddd3333›` — which is four *words* to
+ * `wordSpans` (`redacted`, `basic`, `auth`, `dddd3333`), so three of its
  * internal boundaries are legal word edges. Every cutter in the snippet path
  * happily stopped at one, and `docs/screens/13-find-redacted.txt` had been
  * failing `scripts/make-screens.sh`'s own "a mask is visible on this screen"
@@ -225,7 +225,7 @@ describe('snippet selection', () => {
  */
 describe('a snippet never cuts a redaction mask in half', () => {
   /** The shape `index` leaves behind when a dsn is pasted into a prompt. */
-  const MASK = '‹redacted:basic-auth:201b2d22›';
+  const MASK = '‹redacted:basic-auth:dddd3333›';
   const DSN = `the importer cannot reach the pooler — postgres://ingest:${MASK}@db.internal:6432/crm times out but the direct port is fine`;
 
   /** True when every `‹` in `s` is closed and no `›` opens one. */

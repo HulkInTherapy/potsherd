@@ -141,7 +141,7 @@ describe('one line per reader, as it returns', () => {
   it('lines the four columns up, whatever the verdict or the id', () => {
     const t = new Theme({ color: false, width: 80 });
     const lines = [
-      readerLine(report({ id8: 'b2181bfe', found: false, ms: 9_500 }), 1, 6, t),
+      readerLine(report({ id8: 'bbbb1111', found: false, ms: 9_500 }), 1, 6, t),
       readerLine(report({ id8: '9c4d2f18', ms: 15_000 }), 5, 6, t),
       // `idTag` returns two characters for a harness whose ids carry a `:`
       // suffix. Unpadded, that line reads as corrupt output.

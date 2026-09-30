@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as store from '../packages/core/src/db.js';
 import type { Db } from '../packages/core/src/db.js';
@@ -73,26 +73,20 @@ function memDb(): Db {
 // --------------------------------------------------------------- fake $HOME
 
 let home = '';
-let realHome: string | undefined;
-let realUserProfile: string | undefined;
-
-beforeEach(() => {
-  home = tempDir('potsherd-stack-');
-  realHome = process.env['HOME'];
-  realUserProfile = process.env['USERPROFILE'];
-  process.env['HOME'] = home;
-  process.env['USERPROFILE'] = home;
+let homeResolver:ReturnType<typeof vi.spyOn>;
+let childResolver='';
+const savedRoots:Record<string,string|undefined>={};
+const rootKeys=['CLAUDE_CONFIG_DIR','XDG_CONFIG_HOME','XDG_DATA_HOME',...['CODEX','CURSOR','PI','GEMINI','OPENCODE','COPILOT'].map(harness=>`POTSHERD_${harness}_DIR`)];
+beforeEach(()=>{
+ home=tempDir('potsherd-stack-');homeResolver=vi.spyOn(os,'homedir').mockReturnValue(home);
+ childResolver=path.join(home,'scoped-os-home.mjs');fs.writeFileSync(childResolver,`import os from 'node:os'; os.homedir=()=>${JSON.stringify(home)};`);
+ for(const key of rootKeys){savedRoots[key]=process.env[key];process.env[key]=path.join(home,key==='CLAUDE_CONFIG_DIR'?'.claude':key==='XDG_CONFIG_HOME'?'.config':key==='XDG_DATA_HOME'?'.local/share':`.${key.slice(9,-4).toLowerCase()}`);}
+});
+afterEach(()=>{
+ homeResolver.mockRestore();for(const key of rootKeys){if(savedRoots[key]===undefined)delete process.env[key];else process.env[key]=savedRoots[key];}
+ rmrf(home);
 });
 
-afterEach(() => {
-  if (realHome === undefined) delete process.env['HOME'];
-  else process.env['HOME'] = realHome;
-  if (realUserProfile === undefined) delete process.env['USERPROFILE'];
-  else process.env['USERPROFILE'] = realUserProfile;
-  rmrf(home);
-});
-
-/** Create a marker directory for `id`, as the tool itself would. */
 function install(id: ToolId, env: NodeJS.ProcessEnv = process.env): string {
   const marker = toolSpec(id).markers(env)[0]!;
   fs.mkdirSync(path.dirname(marker), { recursive: true });
@@ -704,7 +698,7 @@ describe('stack and find are self-consistent, and fit the width they are given',
 
   const runCli = (args: string[]): string => {
     try {
-      return execFileSync(process.execPath, [bin, ...args], {
+      return execFileSync(process.execPath, ['--import',childResolver,bin, ...args], {
         encoding: 'utf8',
         env: { ...process.env, NO_COLOR: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],

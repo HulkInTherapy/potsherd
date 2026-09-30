@@ -36,13 +36,21 @@ fi
 CFG="$PD/config.json"
 if grep -q '"cardOnEnd"[[:space:]]*:[[:space:]]*true' "$CFG" 2>/dev/null; then CARD=1; else CARD=; fi
 
+# Persist the request before detaching. SQLite/startup failures leave the spool intact.
+ERR=$(sh "$SHIM" maintain --enqueue-session "$ID" --enqueue-only --quiet --potsherd-dir "$PD" 2>&1); RC=$?
+if [ "$RC" -ne 0 ]; then
+  note "session $ID was NOT indexed — capture ingress failed: $(flatten "$ERR")"
+  exit 0
+fi
+
 (
   trap '' HUP
-  ERR=$(sh "$SHIM" index --session "$ID" --quiet 2>&1); RC=$?
+  ERR=$(sh "$SHIM" index --session "$ID" --quiet --potsherd-dir "$PD" 2>&1); RC=$?
   if [ "$RC" -ne 0 ]; then
     note "session $ID was NOT indexed — index exited $RC: $(flatten "$ERR")"
     exit 0
   fi
+  sh "$SHIM" maintain --quiet --potsherd-dir "$PD" >/dev/null 2>&1 || true
   [ -n "$CARD" ] || exit 0
   ERR=$(sh "$SHIM" card "$ID" --quiet --yes 2>&1); RC=$?
   [ "$RC" -eq 0 ] || note "session $ID was indexed but cardOnEnd made no card — card exited $RC: $(flatten "$ERR")"

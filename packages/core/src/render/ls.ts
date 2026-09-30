@@ -1,3 +1,4 @@
+import { idTag } from '../recall.js';
 import { INDENT, fitLine, table, type TableCellInput } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
@@ -126,7 +127,7 @@ function headline(r: ListResult, t: Theme, echo: FilterEcho): string {
   if (fl.pinned) parts.push('pinned');
   // The eight characters the rest of the tool prints for a session, not the
   // uuid: the heading is read, not copied.
-  if (fl.linkedTo) parts.push(`linked to ${fl.linkedTo.slice(0, 8)}`);
+  if (fl.linkedTo) parts.push(`linked to ${idTag(fl.linkedTo)}`);
   if (fl.untitled) parts.push('untitled');
   if (fl.status) parts.push(fl.status);
   parts.push(

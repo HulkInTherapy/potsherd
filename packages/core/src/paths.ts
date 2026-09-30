@@ -75,10 +75,10 @@ export function claudePaths(dir = claudeDir()) {
 // ------------------------------------------------- the other harnesses (F9)
 
 /** `~/.codex`, honouring `CODEX_HOME` and an explicit override. */
-export function codexDir(override?: string): string {
+export function codexDir(override?: string, env:NodeJS.ProcessEnv=process.env): string {
   if (override) return path.resolve(expandTilde(override));
-  const env = process.env['CODEX_HOME'];
-  if (env && env.trim()) return path.resolve(expandTilde(env.trim()));
+  const root = env['POTSHERD_CODEX_DIR'] ?? env['CODEX_HOME'];
+  if (root && root.trim()) return path.resolve(expandTilde(root.trim()));
   return path.join(home(), '.codex');
 }
 

@@ -292,7 +292,7 @@ export async function readCodexHeader(filePath: string): Promise<CodexHeader | u
       typeof payload[key] === 'string' ? (payload[key] as string) : undefined;
     const timestamp = typeof parsed['timestamp'] === 'string' ? parsed['timestamp'] : undefined;
     const header: CodexHeader = {
-      ...(str('session_id') ?? str('id') ? { sessionId: str('session_id') ?? str('id') } : {}),
+      ...(str('id') ?? str('session_id') ? { sessionId: str('id') ?? str('session_id') } : {}),
       ...(str('cwd') ? { cwd: str('cwd') } : {}),
       ...(str('originator') ? { originator: str('originator') } : {}),
       ...(str('source') ? { source: str('source') } : {}),

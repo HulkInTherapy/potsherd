@@ -335,7 +335,7 @@ export function counterFor(llm: Llm | null | undefined, env?: NodeJS.ProcessEnv)
 /**
  * Where a cut may fall, so a redaction mask is never sliced in half.
  *
- * `‹redacted:aws:9f2b1c04›` and `‹elided:image/png:109362 bytes›` are the two
+ * `‹redacted:aws:cccc2222›` and `‹elided:image/png:109362 bytes›` are the two
  * spans potsherd writes into text it will later cut. Half of one of those is
  * not a shorter mask — it is `‹redacted:aws:9f2b` followed by nothing, which
  * reads as content, survives a copy-paste into an issue, and looks exactly

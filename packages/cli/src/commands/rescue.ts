@@ -88,18 +88,19 @@ export async function runRescue(o: RescueOptions): Promise<number> {
     extras.settingsSkippedReason = 'not asked (--dry-run)';
   }
 
+  const exitCode = result.filesFailed.length > 0 ? 1 : 0;
   if (o.json) {
     printJson({ ...result, settings: extras });
-    return 0;
+    return exitCode;
   }
-  if (o.quiet) return 0;
+  if (o.quiet) return exitCode;
 
   print(renderRescueReceipt(result, t, extras));
   if (extras.settingsBackup) {
     const shown = fmt.elideMiddle(paths.tildify(extras.settingsBackup), Math.max(24, t.width - 11), t.ellip);
     print(`  ${t.dim('backup:')} ${shown}`);
   }
-  return 0;
+  return exitCode;
 }
 
 async function askForSettings(

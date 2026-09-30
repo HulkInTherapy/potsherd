@@ -209,20 +209,24 @@ describe('a note attaches to the thread, not to the id that was typed', () => {
       }),
     );
     const second = await capture(() =>
-      runNote({ potsherdDir: root, json: true, session: ID.parent, next: ['whole-id form works'] }),
+      runNote({ potsherdDir: root, json: true, session: ID.child, next: ['whole-id form works'] }),
     );
-    const a = JSON.parse(first.out) as { wrote: { threadId: string } };
-    const b = JSON.parse(second.out) as { wrote: { threadId: string }; earlier: number };
-    expect(a.wrote.threadId).toBe(b.wrote.threadId);
-    expect(b.earlier).toBe(1);
+    const a = JSON.parse(first.out) as { noteIds: string[]; authority: string };
+    const b = JSON.parse(second.out) as { noteIds: string[]; authority: string };
+    expect(a.noteIds).toHaveLength(1);
+    expect(b.noteIds).toHaveLength(1);
+    expect(a.noteIds).not.toEqual(b.noteIds);
+    const read = JSON.parse((await capture(() => runNote({ potsherdDir: root, json: true, session: ID.child }))).out);
+    expect(read.assertions.map((n: { noteId: string }) => n.noteId).sort()).toEqual([...a.noteIds, ...b.noteIds].sort());
+    expect(read.assertions.every((n: { authority: string }) => n.authority === 'agent_assertion')).toBe(true);
   });
 
   it('refuses a ref that resolves to nothing, and names the fix', async () => {
     const { db, root } = await indexed();
     db.close();
     await expect(
-      runNote({ potsherdDir: root, session: 'ffffffff', decided: ['nope'] }),
-    ).rejects.toThrow(/no session in the index/);
+      runNote({ potsherdDir: root, json: true, session: 'ffffffff', decided: ['nope'] }),
+    ).rejects.toThrow(/source ref unavailable.*|potsherd ls/);
   });
 });
 
@@ -430,117 +434,76 @@ describe('a note records what it was told and nothing else', () => {
 
 // ------------------------------------------------------------------- the verb
 
-describe('the verb, judged against plans/05', () => {
-  it('writes a receipt inside 80 columns whose last line names the next verb', async () => {
-    const { db, root } = await indexed();
-    db.close();
-    const { code, out } = await capture(() =>
-      runNote({
-        potsherdDir: root,
-        width: 80,
-        color: false,
-        session: ID.child.slice(0, 8),
-        decided: ['the notes lane is append-only; the transcript is never rewritten'],
-        open: ['whether ls should mark a thread that already carries a note'],
-        next: ['wire notes_fts into recall as its own lane'],
-        by: 'agent',
-      }),
-    );
-    expect(code).toBe(0);
-    const lines = stripAnsi(out).trimEnd().split('\n');
-    for (const line of lines) expect(line.length, `too wide: ${line}`).toBeLessThanOrEqual(80);
-    expect(lines[lines.length - 1]).toMatch(/potsherd graft/);
-    const text = lines.join('\n');
-    expect(text).toMatch(/decided/);
-    expect(text).toMatch(/the transcript was not touched/);
-    expect(text).toMatch(/by agent/);
+describe('the durable v2 note verb', () => {
+  it('returns a durable receipt and keeps typed fields as separate author assertions', async () => {
+    const { db, root, claudeDir } = await indexed(); db.close();
+    const before = digests(claudeDir);
+    const input = { potsherdDir: root, json: true, session: ID.child.slice(0, 8), requestKey: 'stable-cli-note', decided: ['We pin PgBouncer to 16 — review pending.'], open: ['whether the setting survives restart'], next: ['measure p99 next week'], by: 'user' };
+    const first = await capture(() => runNote(input));
+    const retry = await capture(() => runNote(input));
+    expect(first.code).toBe(0);
+    const receipt = JSON.parse(first.out), repeated = JSON.parse(retry.out);
+    expect(receipt.contractVersion).toBe(2);
+    expect(receipt.noteIds).toHaveLength(3);
+    expect(repeated.noteIds).toEqual(receipt.noteIds);
+    expect(receipt.authority).toBe('agent_assertion');
+    expect(receipt.supportStatus).toBe('unverified');
+    const read = JSON.parse((await capture(() => runNote({ potsherdDir: root, json: true, session: ID.child }))).out);
+    expect(read.evidence).toEqual([]);
+    expect(read.assertions.map((n: { text: string }) => n.text).sort()).toEqual([...input.decided, ...input.open, ...input.next].sort());
+    expect(read.assertions.map((n: { kind: string }) => n.kind).sort()).toEqual(['decision', 'next', 'open']);
+    for (const note of read.assertions) expect(note).toMatchObject({ project: PROJECT, branch: 'main', authorClaim: 'user', authority: 'agent_assertion', origin: 'cli', current: true });
+    expect(digests(claudeDir)).toEqual(before);
   });
 
-  it('says how many earlier notes survived a second write', async () => {
-    const { db, root } = await indexed();
-    db.close();
-    await capture(() =>
-      runNote({ potsherdDir: root, width: 80, session: ID.parent, decided: ['first'] }),
-    );
-    const { out } = await capture(() =>
-      runNote({ potsherdDir: root, width: 80, color: false, session: ID.parent, decided: ['second'] }),
-    );
-    expect(stripAnsi(out)).toMatch(/1 earlier note on this thread is still there/);
-  });
-
-  it('with no field flags it reads the lane back', async () => {
-    const { db, root } = await indexed();
-    db.close();
-    const empty = await capture(() =>
-      runNote({ potsherdDir: root, width: 80, color: false, session: ID.lone }),
-    );
-    expect(stripAnsi(empty.out)).toMatch(/no notes on this thread yet/);
-
-    await capture(() =>
-      runNote({ potsherdDir: root, session: ID.lone, decided: ['read me back'], by: 'agent' }),
-    );
-    const listed = await capture(() =>
-      runNote({ potsherdDir: root, width: 80, color: false, session: ID.lone }),
-    );
-    const text = stripAnsi(listed.out);
-    expect(text).toMatch(/read me back/);
-    // The label that keeps the lane honest on a human screen.
-    expect(text).toMatch(/assertions/);
-    expect(text.trimEnd().split('\n').pop()).toMatch(/potsherd graft/);
-  });
-
-  it('--json carries the same data, on both the write and the read', async () => {
-    const { db, root } = await indexed();
-    db.close();
-    const wrote = JSON.parse(
-      (
-        await capture(() =>
-          runNote({
-            potsherdDir: root,
-            json: true,
-            session: ID.parent,
-            decided: ['json write'],
-            next: ['json next'],
-            by: 'agent',
-          }),
-        )
-      ).out,
-    ) as {
-      lane: string;
-      appended: boolean;
-      superseded: null;
-      transcriptTouched: boolean;
-      thread: { id: string; sessions: string[] };
-      wrote: Record<string, unknown>;
-      notes: Record<string, unknown>[];
-    };
-
-    expect(wrote.lane).toBe('notes');
-    expect(wrote.appended).toBe(true);
-    expect(wrote.superseded).toBeNull();
-    expect(wrote.transcriptTouched).toBe(false);
-    expect(wrote.thread.sessions).toEqual([ID.parent, ID.child]);
-    expect(wrote.wrote).toMatchObject({
-      kind: 'note',
-      citable: false,
-      decided: 'json write',
-      next: 'json next',
-      author: 'agent',
-      via: 'cli',
-    });
-
-    const read = JSON.parse(
-      (await capture(() => runNote({ potsherdDir: root, json: true, session: ID.child }))).out,
-    ) as { lane: string; current: Record<string, unknown>; notes: Record<string, unknown>[] };
-    expect(read.lane).toBe('notes');
-    expect(read.notes).toHaveLength(1);
-    // Same object shape from both directions — `05`'s "--json on everything,
-    // identical data to the human view" also means identical between verbs.
-    expect(read.current).toEqual(wrote.wrote);
-    // Every note object says what it is, on its own, without the envelope.
-    for (const n of read.notes) {
-      expect(n['kind']).toBe('note');
-      expect(n['citable']).toBe(false);
+  it('keeps ordinary write receipts within 60/80 columns and honors ASCII output', async () => {
+    const { db, root } = await indexed(); db.close();
+    for (const width of [60, 80]) {
+      const human = await capture(() => runNote({ potsherdDir: root, session: ID.lone, width, ascii: true, color: false, requestKey: `human-receipt-${width}`, decided: ['Unicode policy — review before shipping'] }));
+      expect(human.code).toBe(0);
+      expect(human.out).toContain('agent_assertion');
+      expect(human.out).toContain('potsherd');
+      expect(stripAnsi(human.out)).toMatch(/^[\x00-\x7f]*$/);
+      for (const line of human.out.split('\n')) expect([...stripAnsi(line)].length, line).toBeLessThanOrEqual(width);
     }
+  });
+
+  it('appends without automatic supersession and immediately reads both writes', async () => {
+    const { db, root } = await indexed(); db.close();
+    const one = JSON.parse((await capture(() => runNote({ potsherdDir: root, json: true, session: ID.parent, decided: ['first decision'] }))).out);
+    const two = JSON.parse((await capture(() => runNote({ potsherdDir: root, json: true, session: ID.parent, decided: ['second decision'] }))).out);
+    const read = JSON.parse((await capture(() => runNote({ potsherdDir: root, json: true, session: ID.parent }))).out);
+    expect(read.assertions.map((n: { noteId: string }) => n.noteId).sort()).toEqual([...one.noteIds, ...two.noteIds].sort());
+    expect(read.assertions.every((n: { current: boolean; supersedes: string[] }) => n.current && n.supersedes.length === 0)).toBe(true);
+    expect(read.assertions.map((n: { text: string }) => n.text).sort()).toEqual(['first decision', 'second decision']);
+  });
+
+  it('reads an empty assertion lane without claiming missing source history', async () => {
+    const { db, root } = await indexed(); db.close();
+    const empty = JSON.parse((await capture(() => runNote({ potsherdDir: root, json: true, session: ID.lone }))).out);
+    expect(empty.assertions).toEqual([]);
+    expect(empty.evidence).toEqual([]);
+    expect(empty.contractVersion).toBe(2);
+    const wrote = await capture(() => runNote({ potsherdDir: root, json: true, session: ID.lone, decided: ['read me back'] }));
+    expect(wrote.code).toBe(0);
+    const human = await capture(() => runNote({ potsherdDir: root, session: ID.lone, width: 80, color: false }));
+    expect(human.out).toContain('read me back');
+    expect(human.out).toContain('agent_assertion');
+    expect(human.out).toContain('current');
+    for (const line of human.out.split('\n')) expect([...stripAnsi(line)].length).toBeLessThanOrEqual(80);
+  });
+
+  it('uses explicit same-scope supersession, preserves prior prose and rejects cross-scope writes', async () => {
+    const { db, root } = await indexed(); db.close();
+    const scope = { project: PROJECT, branch: 'main' };
+    const one = JSON.parse((await capture(() => runNote({ potsherdDir: root, json: true, session: '', inputJson: JSON.stringify({ requestKey: 'supersede-first', scope, entries: [{ kind: 'decision', text: 'old policy' }] }) }))).out);
+    const two = JSON.parse((await capture(() => runNote({ potsherdDir: root, json: true, session: '', inputJson: JSON.stringify({ requestKey: 'supersede-second', scope, entries: [{ kind: 'decision', text: 'new policy', supersedes: one.noteIds }] }) }))).out);
+    expect(two.noteIds).not.toEqual(one.noteIds);
+    const { runShow } = await import('../packages/cli/src/commands/show.js');
+    const { defaultBudget } = await import('../packages/core/src/memory/budget.js');
+    const read = JSON.parse((await capture(() => runShow({ potsherdDir: root, json: true, session: '', inputJson: JSON.stringify({ noteIds: [...one.noteIds, ...two.noteIds], scope, budget: defaultBudget() }) }))).out);
+    expect(read.assertions.find((n: { text: string }) => n.text === 'old policy').current).toBe(false);
+    expect(read.assertions.find((n: { text: string }) => n.text === 'new policy').current).toBe(true);
+    await expect(capture(() => runNote({ potsherdDir: root, json: true, session: '', inputJson: JSON.stringify({ requestKey: 'cross-scope', scope: { project: '/tmp/other-project' }, entries: [{ kind: 'decision', text: 'wrong scope', supersedes: two.noteIds }] }) }))).rejects.toThrow(/scope/);
   });
 });

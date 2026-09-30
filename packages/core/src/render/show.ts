@@ -64,10 +64,10 @@ export function renderShow(r: ShowResult, t: Theme = new Theme(), now = new Date
         t,
         t.dim('thread') +
           `  ${f.num(s.thread.exchanges)} exchanges across ${f.num(s.thread.sessions.length)} sessions` +
-          t.dim(`  ${t.sep} potsherd graft ${s.id.slice(0, 8)}`),
+          t.dim(`  ${t.sep} potsherd graft ${idTag(s.id)}`),
         t.dim('thread') +
           `  ${f.num(s.thread.exchanges)} exchanges` +
-          t.dim(`  ${t.sep} potsherd graft ${s.id.slice(0, 8)}`),
+          t.dim(`  ${t.sep} potsherd graft ${idTag(s.id)}`),
         t.dim('thread') + `  ${f.num(s.thread.exchanges)} exchanges in the chain`,
       ),
     );

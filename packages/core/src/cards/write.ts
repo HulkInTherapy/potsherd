@@ -1,3 +1,5 @@
+import {redactLegacyProjection} from '../redact.js';
+import { idTag } from '../recall.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -63,7 +65,10 @@ export function cardEmbeddingText(card: ExtractedCard): string {
 
 /** `~/.potsherd/cards/<harness>/<slug>/<id>.md`. */
 export function cardPath(root: string, harness: string, slug: string | null, id: string): string {
-  return path.join(cardsDir(root), harness, safeSlug(slug), `${id}.md`);
+  // Session ids come from transcript headers. Encode path separators and the
+  // escape character so a hostile id cannot leave the archive or collide.
+  const filename = id.replace(/[%/\\\0]/g, (c) => encodeURIComponent(c));
+  return path.join(cardsDir(root), harness, safeSlug(slug), `${filename}.md`);
 }
 
 /**
@@ -145,7 +150,7 @@ export function cardMarkdown(record: CardRecord): string {
     '---',
   ].join('\n');
 
-  const body: string[] = ['', `# ${c.title || record.sessionId.slice(0, 8)}`, ''];
+  const body: string[] = ['', `# ${c.title || idTag(record.sessionId)}`, ''];
   // Above the summary, not below it: a reader who takes one line off this file
   // must take the line that says half the conversation is missing.
   if (record.source === PROMPTS_ONLY) {
@@ -182,7 +187,7 @@ export function cardMarkdown(record: CardRecord): string {
       `${record.source === PROMPTS_ONLY ? 'prompts' : 'transcript'}.` +
       (record.degraded ? '  The model never returned valid JSON; this card is title and summary only.' : ''),
     '',
-    `\`potsherd show ${record.sessionId.slice(0, 8)}\``,
+    `\`potsherd show ${idTag(record.sessionId)}\``,
     '',
   );
 
@@ -417,7 +422,7 @@ export interface StoredCard {
   costUsd: number;
 }
 
-export function readCard(db: Db, sessionId: string): StoredCard | null {
+function readCardLegacyRaw(db: Db, sessionId: string): StoredCard | null {
   const row = db
     .prepare(
       `SELECT title, summary, topics, decisions, files, outcome, open_threads,
@@ -474,7 +479,7 @@ export function readCard(db: Db, sessionId: string): StoredCard | null {
 }
 
 /** The card already written for a session, as the prior for a re-card. */
-export function readPriorCard(db: Db, sessionId: string): ExtractedCard | null {
+function readPriorCardLegacyRaw(db: Db, sessionId: string): ExtractedCard | null {
   const row = db
     .prepare(
       `SELECT title, summary, topics, decisions, files, outcome, open_threads, suggested_tags
@@ -511,3 +516,7 @@ export function readPriorCard(db: Db, sessionId: string): ExtractedCard | null {
     tags: parse<string[]>(row.suggested_tags, []),
   };
 }
+
+export function readCard(...args:Parameters<typeof readCardLegacyRaw>):ReturnType<typeof readCardLegacyRaw>{return redactLegacyProjection(readCardLegacyRaw(...args));}
+
+export function readPriorCard(...args:Parameters<typeof readPriorCardLegacyRaw>):ReturnType<typeof readPriorCardLegacyRaw>{return redactLegacyProjection(readPriorCardLegacyRaw(...args));}

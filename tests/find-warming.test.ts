@@ -87,7 +87,7 @@ async function capture(o: Record<string, unknown>): Promise<string> {
     return true;
   }) as typeof process.stdout.write;
   try {
-    await runFind({ minConfidence: 'none', vectors: 'off', ...o } as Parameters<typeof runFind>[0]);
+    await runFind({ explain: true, minConfidence: 'none', vectors: 'off', ...o } as Parameters<typeof runFind>[0]);
   } finally {
     process.stdout.write = write;
   }
@@ -135,7 +135,7 @@ function holdEmbedLane(root: string): () => void {
   return () => rmrf(dir);
 }
 
-describe('find says what semantic search is doing', () => {
+describe('explicit find diagnostics report embedding progress', () => {
   it('prints the warming line, in the wording every other verb uses', async () => {
     // FIX-F C2 — with a worker actually holding the embed lane, which is the
     // state the word `warming` has always claimed and which this fixture did

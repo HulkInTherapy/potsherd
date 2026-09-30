@@ -27,7 +27,7 @@ the private working tree that transcript ran in. Three families:
   3. THE PRIVATE TREE .. a home-directory path or project slug naming a
      directory that is NOT this repository, plus the file names and file
      contents inside it. A project directory name is a fact about somebody's
-     private life -- `maths_practice` and `Infant-State-Recognition-System`
+     private life -- `synthetic-project` and `synthetic-project-System`
      say what a person was studying and building -- and the slug is also the
      join key back to the transcript it came from.
 
@@ -73,7 +73,7 @@ Rule by rule, what it catches and what it does not:
                    Windows paths (`C:` + backslashes) are not matched either.
 
   project-name ... an exact-substring list. Exact is the whole weakness: the
-                   list held `Meghavi` and `format.ts` shipped `Second-Brain`
+                   list held `synthetic-project` and `format.ts` shipped `Second-Brain`
                    for a year, because a different substring of the same
                    private name is a different string. Adding a name catches
                    that name and teaches nothing about the next one.
@@ -217,7 +217,7 @@ OWN_TREE_ROOTS = ('randomness', '.potsherd')
 def is_private_home(token: str) -> bool:
     """True when a `/Users/...` or `-Users-...` token names somebody's private tree."""
     parts = re.split(r'[-/]', token.lstrip('-/'))
-    # `..` escapes the own-tree exemption. `/Users/zebra/randomness/../Client`
+    # `..` escapes the own-tree exemption. `/Users/syntheticuser/randomness/../Client`
     # matched OWN_TREE_ROOTS on segment 3 and was waved through, while naming a
     # sibling of the repo -- which is exactly the private tree this rule exists
     # for. Resolve the traversal first, then decide.
@@ -237,12 +237,12 @@ def is_private_home(token: str) -> bool:
     account = parts[1]
     if account.lower() in PLACEHOLDER_USERS:
         return False
-    # `/Users/zebra` with nothing after it names a home directory and no project.
+    # `/Users/syntheticuser` with nothing after it names a home directory and no project.
     if len(parts) == 2:
         return False
     if parts[2] in OWN_TREE_ROOTS:
         return False
-    # Terminal output elides long paths mid-word (`-Users-zebra-rando...`). A
+    # Terminal output elides long paths mid-word (`-Users-syntheticuser-rando...`). A
     # truncated final segment that is a prefix of an own-tree root is that root.
     if len(parts) == 3 and any(r.startswith(parts[2]) for r in OWN_TREE_ROOTS):
         return False
@@ -252,25 +252,13 @@ def is_private_home(token: str) -> bool:
 # Directory names taken off a real machine. The first six are the list
 # `scripts/make-screens.sh` has enforced over the published screens since phase
 # 0; the rest are the ones phase-4's HANDOFF recorded as still outstanding
-# ("`Fulcrum` / `meghbrain` -- the user's own project names -- remain as
+# ("`synthetic-project` / `synthetic-project` -- the user's own project names -- remain as
 # examples in `--help` and fixtures").
-REAL_PROJECT_NAMES = [
-    'Meghavi', 'lexaiLMS', 'Veyu', 'anilearn', 'Crimes-cog', 'Ops-Outreach-Engine',
-    'Fulcrum', 'meghbrain', 'maths_practice', 'maths-practice',
-    'Infant-State-Recognition', 'Protfolio',
-    # Added phase 10: the agent audit published this one to a public repo
-    # twelve times before the rule that was supposed to catch it was asked
-    # whether it knew the name. The list is exact-substring and therefore
-    # only knows what it has been told; every name learned goes in here.
-    'Proteus', 'proteus',
-]
+REAL_PROJECT_NAMES = [(7, 5072231, '4875c5c4395cc16a4668085bd12ec6900d68cd1849af1904545a8cb377f5cad4'), (8, 7103864, 'a72f2d8221a89333554a68781ea11114be7e49731a2f22b30eb78bb4a34edc96'), (4, 5662073, '03069fcbcc0af3882889fda0f9cdd8096420d8be3f62d4038a9e4afbb1f4465d'), (8, 6385257, '47e5a44d612e43d1c926978cb48fea84f1583b2f9567c5f42abd7e342e39be73'), (10, 4420201, '2d1bcbf20e6d72a3651eb4209b962de613829044f604c2d6ba07004d83d385d2'), (19, 5206131, '40376d3f7c6ce03cfab14306b8c869a1572c705c838849697a362800e3ea71cb'), (7, 4617580, '047bdb93ac5552e5ac5b7c01cc4e5086424c5059bd043cef858fd5a858341644'), (9, 7169383, '33c6c62896402050e5823c63323b8c3c91594d2cd08d42754a12193121853ace'), (14, 7168372, 'f14cfdac921c595e9da576e4cd233b96d2c428f63bdc2f0bea526be022d6bf00'), (14, 7168372, 'dc82e262a0dfdcb693d04447eef0f34ad4a59ce288990ac2f037e7676d371f8d'), (24, 4812390, '113430315f9c719b38fa48972893d4f3026bcda59ebd9d2db7e441438c5b4cb7'), (9, 5272175, '37a04e316a36805a19b47d3b4dc7ebd5133ae6edc894ad88e1173d6cd428ba37'), (7, 5272175, '76709fdf234f65143b3b57f2bfb1f06e407ddf91e5b8d1bc62b13523a243a2dd'), (7, 7369327, 'b93d1d4b19afbe7d80d0d8fc433d9ca907413336978eac4c3032fcb45c0e019e')]
 
 # Subject matter that is in this repo only because it was in somebody's real
 # sessions. A topic is transcript prose with the words taken out.
-CORPUS_TOPICS = [
-    'astrolog', 'horoscop', 'kundli', 'nakshatra', 'jyotish',
-    'DM_master_assignment', 'class_worksheets', 'infant cry',
-]
+CORPUS_TOPICS = [(8, 6386548, '0e61513463a86553fbb1c70a507112d14259190b82637a536402bb4c2f25da49'), (8, 6844274, 'ab6df2c6aa9277289f09067f8205a75dbf71c0174b9ca1f4b959bafc04cf0b56'), (6, 7042414, '0f81348cf8adc83ae2d2c6b5304ecdcdf9d4f7a6f3ac2878ff2729bc7e81ef65'), (9, 7233899, '0ae40b41fe2caa8e9ac785de44c85036c95691972d6ff2b36712a68b532cac7b'), (7, 6977903, '416473a94eb5de5b35b7feae66379d4a75f3ce01ae6538798a269ae1565bc2e9'), (20, 6581599, '22a81a3d15b7c6e868e7e7857742056afcdc942f2ba4ce1b725b28eb6ad34b86'), (16, 6515809, 'c0f39d53c95eac7603d4150ef16bb4eb0016c550b1f8ffdd1f4f0b7f01945932'), (10, 6909542, '210de3eddce33bf178d50b1635106a91ceb89efff003d3bdcaa08a62d162c690')]
 
 # ------------------------------------------------- family (2): corpus identity
 #
@@ -549,6 +537,23 @@ def classify_id(tok: str) -> str | None:
     return None
 
 
+def dependency_bitmask(path: str, line: str, tok: str) -> bool:
+    """Only the exact generated expression from the hash-verified npm input."""
+    bundles = {f'plugins/{platform}/dist/{name}.js'
+               for platform in ('claude-code', 'codex') for name in ('mcp', 'potsherd')}
+    if path not in bundles or tok != str(int('FF0000', 16)):
+        return False
+    if not re.fullmatch(r'\s*tmp = \(uint8\[i2\] << 16 & 16711680\) \+ \(uint8\[i2 \+ 1\] << 8 & 65280\) \+ \(uint8\[i2 \+ 2\] & 255\);', line):
+        return False
+    dependency = REPO / 'node_modules/.pnpm/base64-js@1.5.1/node_modules/base64-js/index.js'
+    if not dependency.is_file():
+        return False
+    raw = dependency.read_bytes()
+    return (hashlib.sha256(raw).hexdigest() ==
+            '829eadd8a1a441d25be0cb93b00e16a0d0c20fd294db95d8f2ed87e6954b7182'
+            and b'((uint8[i] << 16) & 0xFF0000)' in raw)
+
+
 def find_unaccounted_ids(path: str, lines: list[str]) -> list[tuple[int, str]]:
     """A whole-file rule: it needs the path, to skip the sources themselves.
 
@@ -559,7 +564,7 @@ def find_unaccounted_ids(path: str, lines: list[str]) -> list[tuple[int, str]]:
     hits: list[tuple[int, str]] = []
     for i, line in enumerate(lines, 1):
         for tok in id_tokens(line):
-            if classify_id(tok) is None:
+            if classify_id(tok) is None and not dependency_bitmask(path, line, tok):
                 hits.append((i, f'{tok[:4]}… (an id-shaped token that no source '
                                 f'in this repository accounts for)'))
     return hits
@@ -701,6 +706,18 @@ def find_transcript_records(path: str, lines: list[str]) -> list[tuple[int, str]
     return hits
 
 
+def fingerprint_hits(line, fingerprints):
+    prefixes = {}
+    for width, prefix, digest in fingerprints:
+        prefixes.setdefault(prefix.to_bytes(3, 'big').decode(), []).append((width,digest))
+    hits = []
+    pattern = '(?=(' + '|'.join(re.escape(p) for p in prefixes) + '))'
+    for match in re.finditer(pattern, line):
+        for width, digest in prefixes[match.group(1)]:
+            if hashlib.sha256(line[match.start():match.start()+width].encode()).hexdigest() == digest:
+                hits.append('private-fingerprint:' + digest[:12])
+    return list(dict.fromkeys(hits))
+
 RULES: dict[str, dict] = {
     'home-path': {
         'why': 'an absolute home path or project slug naming a directory that is not this repo',
@@ -709,7 +726,7 @@ RULES: dict[str, dict] = {
     },
     'project-name': {
         'why': 'a project directory name off a real machine',
-        'find': lambda line: [n for n in REAL_PROJECT_NAMES if n in line],
+        'find': lambda line: fingerprint_hits(line, REAL_PROJECT_NAMES),
     },
     'corpus-id': {
         'why': 'a session/thread id that indexes a live transcript',
@@ -728,7 +745,7 @@ RULES: dict[str, dict] = {
     },
     'corpus-topic': {
         'why': 'subject matter that is here only because it was in a live corpus',
-        'find': lambda line: [t for t in CORPUS_TOPICS if t.lower() in line.lower()],
+        'find': lambda line: fingerprint_hits(line.lower(), CORPUS_TOPICS),
     },
     'transcript-record': {
         'why': 'a transcript record sample in docs/** carrying a long prose payload that '
@@ -888,68 +905,9 @@ DEBT: list[tuple[str, str, int, str]] = [
 # ratchet, like the pins below and like DEBT: lower it when it falls, never
 # raise it. It exists because the per-file pins are counts, and a count cannot
 # tell one unaccounted id from another -- see `unaccounted_total`.
-ID_INVENTORY_CEILING = 19
+ID_INVENTORY_CEILING = 0
 
-ID_INVENTORY_PINS: list[tuple[str, int, str]] = [
-    ('docs/upstream/PHASE-1-SCOUT.md', 14,
-     '(s) codex/cursor/pi uuid stand-ins hand-written by the 8.1 rewrite. Their'
-     ' first eight characters hold FOUR distinct hex digits (`0c000012`,'
-     ' `7a000003`), one over the entropy test. Raising the test to four would'
-     ' clear all 14 and would also blind it to 43 of the 3,013 real ids in the'
-     ' reference archive, which is the wrong trade. Rewrite them instead.'),
-    ('evals/ASK-EVALS.md', 1,
-     '(b) the agent session uuid inside a kept --potsherd-dir citation. evals/ is'
-     ' RESERVED; the same token is pinned in four other files for the same reason.'),
-
-    # ---- (r) THE BIG ONE, and the reason this rule exists. ONE real
-    # reference-corpus session id is the canonical eight-hex example for every
-    # verb: `potsherd tag <id>`, `pin`, `unpin`, `link`, `ls --linked-to`,
-    # `graft`, `card`, and the "needs a session id" error message. A SECOND real
-    # id is the other end of the `link` example. Both are on a paying
-    # developer's machine and both are in a public repository. Nineteen of the
-    # files below are RESERVED by phase 8's worker map to workers other than the
-    # one that wrote this rule, which is why they are pinned rather than fixed;
-    # `phases/phase-8/registration-W7.txt` names the exact substitution each one
-    # needs. The demo corpus's own `9c4d2f18` is the substitute, and this file's
-    # header has said so since T5.9.
-    ('packages/core/src/graft.ts', 1, '(r) the REAL reference-corpus session id used as the canonical --help / docstring example.' + ' The citation-parsing docstrings.'),
-    ('tests/redact.test.ts', 7,
-     '(r) the same real id, plus two more real ids, in the redaction fixtures.'
-     ' This test and tests/fixtures/secrets/agent-transcript.txt are the pair'
-     ' that made the whole leak invisible -- see ID_SOURCE_EXCLUDE above.'),
-    ('tests/recall.test.ts', 1,
-     '(r) the same real id, and a real subagent id derived from it.'),
-
-    ('packages/core/src/ask.ts', 1,
-     '(r) a real session cited in a docstring as the case a bug was measured on.'),
-
-
-    ('packages/core/src/redact.ts', 6, '(n) the `‹redacted:aws:<sha8>›` placeholder sha8.'),
-    ('packages/core/src/render/ask.ts', 1, '(n) the same redaction placeholder sha8.'),
-    ('packages/core/src/search/snippet.ts', 1, '(n) the same redaction placeholder sha8.'),
-    ('tests/ask.test.ts', 1, '(n) the redaction placeholder sha8.'),
-    ('tests/cards.test.ts', 1,
-     '(n) 16777619, the FNV-1a prime, in a hash function. Eight digits.'),
-    ('phases/phase-2/VERIFICATION.md', 1,
-     '(n) a truncated content sha over a 721-file listing, cited to show two'
-     ' listings matched. Not a session id; the full sha is written nowhere, so'
-     ' S3b cannot reach it.'),
-
-    ('phases/phase-3/evidence-verify/evals-reference-set.txt', 1,
-     '(b) the agent session uuid inside a kept --potsherd-dir citation.'),
-    ('phases/phase-4/evidence-T4.3/README.txt', 1,
-     '(b) the agent session uuid inside the kept index path this evidence folder'
-     ' is required to cite.'),
-    ('phases/phase-5/evidence-orchestrator/model-invoked-recall.md', 1,
-     '(b) the agent session uuid inside a kept scratchpad citation.'),
-    ('phases/phase-5/registration-T5.3.txt', 1,
-     '(b) the agent session uuid inside a kept config-dir citation. The SAME'
-     ' uuid printed as an `ls` row identity, twenty lines further down, was NOT'
-     ' left standing -- exemption (b) covers a path, not a session identity.'),
-    ('phases/phase-5/registration-T5.4.txt', 1,
-     '(b) the agent session uuid inside a kept scratchpad citation. Same split'
-     ' as T5.3: the `harness/id:` line that named a real codex rollout is gone.'),
-]
+ID_INVENTORY_PINS = []
 
 
 # --------------------------------------------------------------------- engine
@@ -1009,9 +967,9 @@ SELFTEST: list[tuple] = [
     ('a Linux project slug',
      'projects/-home-hjolt-Some-Private-Client', ('home-path',)),
     ('a traversal out of the own-tree exemption',
-     '/Users/zebra/randomness/../Some-Private-Client/notes.md', ('home-path',)),
+     '/Users/syntheticuser/randomness/../Some-Private-Client/notes.md', ('home-path',)),
     ('CONTROL this repository\'s own checkout path',
-     '/Users/zebra/randomness/potsherd/packages/core', ()),
+     '/Users/syntheticuser/randomness/potsherd/packages/core', ()),
     # ---- corpus-id-inventory. The rule that does NOT need to have been told.
     #
     # The positive case is the whole difference between this rule and the
@@ -1110,6 +1068,15 @@ try:
                          f'see commit {_head[:8]} for the rewrite', ()))
 except (subprocess.CalledProcessError, OSError):
     pass
+
+SELFTEST.extend([
+    ('dependency numeral injected into first-party code still fails',
+     'const privateId = "16711680";', ('corpus-id-inventory',), 'packages/core/probe.ts'),
+    ('dependency numeral injected into first-party data still fails',
+     '{"session": "16711680"}', ('corpus-id-inventory',), 'docs/probe.json'),
+    ('dependency numeral prose inside generated bundle still fails',
+     'const privateId = "16711680";', ('corpus-id-inventory',), 'plugins/codex/dist/mcp.js'),
+])
 
 
 # (label, argv after the script name, expected exit code). These probe the
@@ -1288,8 +1255,13 @@ def main(argv: list[str]) -> int:
         # content: they exist to be flagged, and counting them would put the
         # guard's test data into the number the guard reports about the repo.
         if path != 'scripts/check-privacy.py':
-            for tok in id_tokens(text):
-                inventory.setdefault(tok[:8], classify_id(tok))
+            for line in text.splitlines():
+                for tok in id_tokens(line):
+                    label = classify_id(tok)
+                    if dependency_bitmask(path, line, tok):
+                        label = 'an exact verified dependency bitmask expression'
+                    if tok[:8] not in inventory or label is None:
+                        inventory[tok[:8]] = label
         for rule, spec in RULES.items():
             if allowed(path, rule):
                 continue
@@ -1387,7 +1359,7 @@ working tree that transcript ran in:
   2. corpus identity -- a session/thread/composer uuid, or a session title;
   3. the private tree -- a home path or project slug naming a directory that is
      not this repository, and the file names inside it. The directory name IS
-     the private fact: `maths_practice` says what somebody was studying.
+     the private fact: `synthetic-project` says what somebody was studying.
 
 These are NOT violations, and you should not "fix" them:
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { VERSION } from '@potsherd/core';
 
-import { makeContext } from './context.js';
+import { makeContext, closeMemoryService, startMemoryMaintenance } from './context.js';
 import { createServer, TOOLS } from './server.js';
 import { selftest } from './selftest.js';
 
@@ -115,6 +115,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   };
 
   await server.connect(transport);
+  startMemoryMaintenance(ctx);
   process.stderr.write(
     `potsherd-mcp ${VERSION} ready · ${String(TOOLS.length)} tools · index ${potsherdDir ?? '~/.potsherd'}\n`,
   );
@@ -132,13 +133,19 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
    * rather than merely resolving a promise and hoping the event loop drains.
    */
   await new Promise<void>((resolve) => {
-    server.server.onclose = () => resolve();
-    for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-      process.on(sig, () => {
-        void server.close().finally(() => process.exit(0));
-      });
-    }
+    let closing:Promise<void>|null=null;
+    const shutdown=():Promise<void>=>{
+      if(closing)return closing;
+      // A referenced deadline also prevents EOF from letting Node exit before lease cleanup.
+      const deadline=setTimeout(()=>process.exit(1),4500);
+      closing=(async()=>{try{await closeMemoryService(ctx);await server.close().catch(()=>{});}finally{clearTimeout(deadline);resolve();}})();
+      return closing;
+    };
+    server.server.onclose=()=>{void shutdown();};
+    process.stdin.once('end',()=>{void shutdown();});
+    for(const sig of ['SIGINT','SIGTERM'] as const)process.on(sig,()=>{void shutdown().finally(()=>process.exit(0));});
   });
+  await closeMemoryService(ctx);
   await server.close().catch(() => {});
   return 0;
 }
