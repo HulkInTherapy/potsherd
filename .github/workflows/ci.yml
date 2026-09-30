@@ -10,10 +10,12 @@ jobs:
         sqlite: [node, better-sqlite3]
     env:
       POTSHERD_SQLITE: ${{ matrix.sqlite }}
-      POTSHERD_TEST_MODELS_DIR: ${{ runner.temp }}/potsherd-ci-assets/models
-      POTSHERD_TEST_TOKENIZER_DIR: ${{ runner.temp }}/potsherd-ci-assets/models
     steps:
       - uses: actions/checkout@v4
+      - name: configure public test asset paths
+        run: |
+          echo "POTSHERD_TEST_MODELS_DIR=$RUNNER_TEMP/potsherd-ci-assets/models" >> "$GITHUB_ENV"
+          echo "POTSHERD_TEST_TOKENIZER_DIR=$RUNNER_TEMP/potsherd-ci-assets/models" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
         with:
           version: 10.18.0

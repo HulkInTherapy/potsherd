@@ -63,14 +63,15 @@ jobs:
       contents: read
       id-token: write        # ← the whole point: without this there is no provenance
 
-    env:
-      POTSHERD_TEST_MODELS_DIR: ${{ runner.temp }}/potsherd-ci-assets/models
-      POTSHERD_TEST_TOKENIZER_DIR: ${{ runner.temp }}/potsherd-ci-assets/models
-
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0     # tags, for the version test
+
+      - name: configure public test asset paths
+        run: |
+          echo "POTSHERD_TEST_MODELS_DIR=$RUNNER_TEMP/potsherd-ci-assets/models" >> "$GITHUB_ENV"
+          echo "POTSHERD_TEST_TOKENIZER_DIR=$RUNNER_TEMP/potsherd-ci-assets/models" >> "$GITHUB_ENV"
 
       # Everything below the publish step is a reason NOT to publish. A release
       # pipeline whose only job is to publish will publish anything.
