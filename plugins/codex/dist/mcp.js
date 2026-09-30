@@ -34426,7 +34426,7 @@ function episodicIndexPath(env = process9.env) {
 }
 
 // packages/core/dist/version.js
-var VERSION = "2.0.0-rc.2";
+var VERSION = "2.0.0-rc.3";
 
 // packages/core/dist/memory/budget.js
 import { createHash as createHash7 } from "node:crypto";
