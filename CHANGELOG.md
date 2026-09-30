@@ -1,9 +1,12 @@
 # Changelog
 
+Public releases use package versions. Internal development phase numbers are planning milestones, not product versions. This public candidate consolidates a development snapshot; the original private development branches are preserved separately.
+
 ## 2.0.0-rc.2
 
 - Default an omitted JSON budget tokenizer to the pinned bundled accountant. Reject explicit unsupported identities and malformed budget fields with safe field-specific errors.
 - Add complete scoped CLI JSON and ordinary-flag examples. Existing rc.1 consumer and qualification results remain bound to rc.1.
+- Fix native Codex marketplace registration to select `plugins/codex`; Claude Code retains its own marketplace entry.
 
 ## 2.0.0-rc.1 — unpublished candidate
 
