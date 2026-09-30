@@ -1554,7 +1554,7 @@ describe('claude -p backend plumbing', () => {
  * The trap is built the way `tests/plugin-install.test.ts` builds its own —
  * a real spawn against a decoy, not a clean room — because the failure being
  * guarded against is potsherd handing a child the *user's* directories. So:
- * a fake `HOME` with a populated `.claude` and `.codex` inside it, a stub
+ * explicit disposable provider roots with populated `.claude` and `.codex` directories, a stub
  * binary that tries to write into both, and afterwards an assertion that the
  * real ones are untouched and byte-identical.
  *
@@ -1610,17 +1610,17 @@ describe('a subprocess model call writes nothing into the user’s agent directo
         backend === 'codex' ? 'codex' : 'claude',
         `cat > /dev/null
 ` +
-          `mkdir -p "$HOME/.claude/projects/-junk-from-a-model-call"
+          `mkdir -p "$CLAUDE_CONFIG_DIR/projects/-junk-from-a-model-call"
 ` +
-          `echo '{"type":"user"}' > "$HOME/.claude/projects/-junk-from-a-model-call/s.jsonl"
+          `echo '{"type":"user"}' > "$CLAUDE_CONFIG_DIR/projects/-junk-from-a-model-call/s.jsonl"
 ` +
-          `mkdir -p "$HOME/.codex/sessions/junk"
+          `mkdir -p "$POTSHERD_CODEX_DIR/sessions/junk"
 ` +
           `printf '{"subtype":"success","result":"ok"}\\n'`,
       );
       const llm = Llm.open({
         backend,
-        env: { ...process.env, PATH: bin, HOME: home },
+        env: { ...process.env, PATH: bin, CLAUDE_CONFIG_DIR:path.join(home,'.claude'),...Object.fromEntries(['CODEX','CURSOR','PI','GEMINI','OPENCODE','COPILOT'].map(harness=>[`POTSHERD_${harness}_DIR`,path.join(home,`.${harness.toLowerCase()}`)])) },
         tmpRoot,
       });
       try {
@@ -1629,7 +1629,7 @@ describe('a subprocess model call writes nothing into the user’s agent directo
         await llm.close();
       }
 
-      // The stub really did write — into the fake home it was handed, which is
+      // The stub really did write — into the explicit fixture roots it was handed, which is
       // the point: the trap is armed, so a pass is evidence and not an absence.
       expect(census()).not.toBe(before);
       expect(census()).toContain('-junk-from-a-model-call');
@@ -1705,6 +1705,36 @@ echo "from stdout"`,
     } finally {
       await llm.close();
     }
+  });
+
+  it('uses Codex defaults rather than sending Claude model aliases', async () => {
+    const dir = fakeBin('codex', 'cat > /dev/null; echo "$*"');
+    const llm = Llm.open({ backend: 'codex', model: 'haiku', env: { ...process.env, PATH: dir, POTSHERD_CODEX_MODEL: '' }, tmpRoot: scratch() });
+    try {
+      expect((await llm.text({ prompt: 'q' })).text).not.toContain('--model');
+    } finally { await llm.close(); }
+  });
+
+  it('gives concurrent Codex calls different output files', async () => {
+    const dir = fakeBin('codex', 'cat > /dev/null; echo "$*"');
+    const llm = Llm.open({ backend: 'codex', env: { ...process.env, PATH: dir }, tmpRoot: scratch() });
+    try {
+      const answers = await Promise.all([llm.text({ prompt: 'first' }), llm.text({ prompt: 'second' })]);
+      const files = answers.map((a) => a.text.match(/--output-last-message (\S+)/)?.[1]);
+      expect(files.every(Boolean)).toBe(true);
+      expect(new Set(files).size).toBe(2);
+    } finally { await llm.close(); }
+  });
+
+  it('does not reuse the previous answer when a later call writes only stdout', async () => {
+    const dir = fakeBin('codex', `input=$(cat)
+while [ $# -gt 0 ]; do if [ "$1" = "--output-last-message" ]; then output="$2"; fi; shift; done
+case "$input" in *first*) echo "first answer" > "$output";; *) echo "second answer";; esac`);
+    const llm = Llm.open({ backend: 'codex', env: { ...process.env, PATH: dir }, tmpRoot: scratch() });
+    try {
+      expect((await llm.text({ prompt: 'first' })).text).toBe('first answer');
+      expect((await llm.text({ prompt: 'second' })).text).toBe('second answer');
+    } finally { await llm.close(); }
   });
 });
 

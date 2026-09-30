@@ -352,13 +352,13 @@ describe('pi adapter — nothing is fatal', () => {
 });
 
 describe('pi adapter — the real corpus', () => {
-  const realPi = path.join(os.homedir(), '.pi');
-  const present = fs.existsSync(path.join(realPi, 'agent', 'sessions'));
+  const realPi = process.env['POTSHERD_TEST_PI_CORPUS'];
+  const present = Boolean(realPi && fs.existsSync(path.join(realPi, 'agent', 'sessions')));
 
   // Read-only, and skipped where pi is not installed (CI). The count is not
   // asserted — it is whatever this machine has — but the shape is.
   it.skipIf(!present)('discovers and parses every real session under ~/.pi', async () => {
-    const found = discover(realPi);
+    const found = discover(realPi!);
     expect(found.length).toBeGreaterThan(0);
     for (const src of found) {
       expect(src.harness).toBe('pi');

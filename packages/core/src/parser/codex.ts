@@ -1,3 +1,4 @@
+import { collectEvidence, CODEX_EVIDENCE_VERSION } from './evidence.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type {
@@ -88,7 +89,11 @@ export async function parseCodexTranscript(
 ): Promise<ParseResult> {
   const absolute = path.resolve(filePath);
   const fromOffset = options.fromOffset ?? 0;
-  const humanPrompts = await collectHumanPrompts(absolute, fromOffset);
+  const snapshot = fs.readFileSync(absolute);
+  // Link each record to the exchange assigned by this exact parse, never by
+  // counting evidence units (tool and injected records are not human turns).
+  const seqByOffset = new Map<number, number>();
+  const humanPrompts = await collectHumanPrompts(absolute, fromOffset, snapshot);
 
   const unknownTypes: Record<string, number> = {};
   let malformedLines = 0;
@@ -102,6 +107,8 @@ export async function parseCodexTranscript(
   let cwd: string | undefined;
   let model: string | undefined;
   let entrypoint: string | undefined;
+  let parentSessionId: string | undefined;
+  let agentName: string | undefined;
   let firstTs: string | undefined;
   let lastTs: string | undefined;
   let userPrompts = 0;
@@ -124,12 +131,12 @@ export async function parseCodexTranscript(
       assistantText: b.assistantTexts.join('\n\n'),
       toolCalls: b.toolCalls,
       filesTouched: uniq(b.files),
-      isSidechain: false,
+      isSidechain: parentSessionId !== undefined,
       redacted: false,
     });
   };
 
-  for await (const line of readJsonlLines(absolute, { start: fromOffset })) {
+  for await (const line of readJsonlLines(absolute, { start: fromOffset, snapshot })) {
     if (!line.terminated) break;
     endOffset = line.end;
 
@@ -158,12 +165,18 @@ export async function parseCodexTranscript(
 
     if (envelope === 'session_meta') {
       if (!options.sessionId) {
-        const id = payload.session_id ?? payload.id;
+        const id = payload.id ?? payload.session_id;
         if (typeof id === 'string') sessionId = id;
       }
       if (typeof payload.cwd === 'string') cwd = payload.cwd;
       if (typeof payload.originator === 'string') entrypoint = payload.originator;
       else if (typeof payload.source === 'string') entrypoint = payload.source;
+      if (isRecord(payload.source) && isRecord(payload.source.subagent) &&
+          isRecord(payload.source.subagent.thread_spawn)) {
+        const spawned = payload.source.subagent.thread_spawn;
+        if (typeof spawned.parent_thread_id === 'string') parentSessionId = spawned.parent_thread_id;
+        if (typeof spawned.agent_nickname === 'string') agentName = spawned.agent_nickname;
+      }
       continue;
     }
 
@@ -196,7 +209,9 @@ export async function parseCodexTranscript(
           byCallId: new Map(),
           files: [],
         };
+        seqByOffset.set(line.start, seq);
       } else if (payload.role === 'assistant' && current) {
+        seqByOffset.set(line.start, current.seq);
         current.assistantTexts.push(text);
         current.ts = ts;
         assistantTurns += 1;
@@ -205,6 +220,7 @@ export async function parseCodexTranscript(
     }
 
     if (TOOL_CALL_TYPES.has(kind) && current) {
+      seqByOffset.set(line.start, current.seq);
       let input: unknown = payload.arguments;
       if (typeof input === 'string') input = safeParseJson(input);
       else if (payload.input !== undefined) input = payload.input;
@@ -225,6 +241,7 @@ export async function parseCodexTranscript(
     }
 
     if (TOOL_OUTPUT_TYPES.has(kind) && current) {
+      seqByOffset.set(line.start, current.seq);
       const callId = typeof payload.call_id === 'string' ? payload.call_id : undefined;
       if (!callId) continue;
       const at = current.byCallId.get(callId);
@@ -254,24 +271,39 @@ export async function parseCodexTranscript(
     ...(options.gitBranch ? { gitBranch: options.gitBranch } : {}),
     ...(entrypoint ? { entrypoint } : {}),
     ...(model ? { model } : {}),
-    isSidechain: false,
+    isSidechain: parentSessionId !== undefined,
+    ...(parentSessionId ? { parentSessionId } : {}),
+    ...(agentName ? { agentName } : {}),
     counts: { userPrompts, assistantTurns, toolCalls: toolCallCount, bytes },
     status: options.status ?? 'live',
   };
 
-  return { session, exchanges, unknownTypes, endOffset, malformedLines };
+  const bySeq = new Map(exchanges.map(exchange => [exchange.seq, exchange]));
+  const legacyByOffset = new Map([...seqByOffset].flatMap(([offset, seq]) => {
+    const exchange = bySeq.get(seq);
+    return exchange ? [[offset, { seq, exchangeId: exchange.id }] as const] : [];
+  }));
+  const evidence = await collectEvidence(absolute, 'codex', fromOffset, { snapshot, legacyByOffset });
+  for(const [kind,count] of Object.entries(evidence.unknownTypes)) unknownTypes[kind]=(unknownTypes[kind]??0)+count;
+  return { session, exchanges, unknownTypes, endOffset, malformedLines, records: evidence.records, continuation: evidence.continuation, evidenceVersion: CODEX_EVIDENCE_VERSION, artifactHash: evidence.artifactHash };
 }
 
 /** First pass: every text the human actually typed, per `event_msg/user_message`. */
-async function collectHumanPrompts(absolute: string, start: number): Promise<Set<string>> {
+async function collectHumanPrompts(absolute: string, start: number, snapshot: Buffer): Promise<Set<string>> {
   const out = new Set<string>();
-  for await (const line of readJsonlLines(absolute, { start })) {
+  for await (const line of readJsonlLines(absolute, { start, snapshot })) {
     if (!line.terminated) break;
     const parsed = parseJsonLine(line.text);
     if (!isRecord(parsed) || parsed.type !== 'event_msg') continue;
     const payload = parsed.payload;
-    if (!isRecord(payload) || payload.type !== 'user_message') continue;
-    if (typeof payload.message === 'string') out.add(normalise(payload.message));
+    if (!isRecord(payload)) continue;
+    if (payload.type === 'user_message' && typeof payload.message === 'string') {
+      out.add(normalise(payload.message));
+    } else if (payload.type === 'item_completed' && isRecord(payload.item) &&
+               payload.item.type === 'UserMessage') {
+      const text = extractTextFromContent(payload.item.content);
+      if (text.trim()) out.add(normalise(text));
+    }
   }
   return out;
 }

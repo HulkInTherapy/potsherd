@@ -35,7 +35,7 @@ function hookCommand(plugin: string, event: 'SessionStart' | 'SessionEnd'): stri
 }
 
 interface Machine {
-  /** Where the hook thinks $HOME is. */
+  /** Disposable parent of all explicit hook provider and store roots. */
   home: string;
   /** The plugin root to hand the hook. */
   root: (plugin: string) => string;
@@ -108,12 +108,14 @@ function runHook(
     input: stdin,
     encoding: 'utf8',
     env: {
-      HOME: m.home,
+      ...process.env,
       PATH: m.path,
       CLAUDE_PLUGIN_ROOT: m.root(plugin),
       PLUGIN_ROOT: m.root(plugin),
       POTSHERD_DIR: m.potsherdDir,
-      CLAUDE_CONFIG_DIR: path.join(m.home, '.claude'),
+      CLAUDE_CONFIG_DIR: path.join(m.home,'.claude'),
+      ...Object.fromEntries(['CODEX','CURSOR','PI','GEMINI','OPENCODE','COPILOT'].map(harness=>[`POTSHERD_${harness}_DIR`,path.join(m.home,`.${harness.toLowerCase()}`)])),
+      POTSHERD_MODELS_DIR:path.join(m.home,'empty-models'),POTSHERD_OFFLINE:'1',
       // The one-off embedding download is not this suite's business, and CI
       // has no network. index degrades to bm25-only and still exits 0.
       HF_HUB_OFFLINE: '1',
@@ -212,8 +214,8 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
       const msg = JSON.parse(start.stdout.trim()) as { systemMessage: string };
       expect(msg.systemMessage).toMatch(/0\.1\.0/);
       expect(msg.systemMessage).toMatch(/no 'index' verb/);
-      // Read once, then cleared: the same failure is not reported forever.
-      expect(fs.readFileSync(log, 'utf8')).toBe('');
+      // Displaying an error does not acknowledge or erase durable retry debt (L7).
+      expect(fs.readFileSync(log, 'utf8')).toBe(recorded);
     },
   );
 
@@ -355,7 +357,7 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
         env: bare(),
       });
       expect(r.status, r.stderr).toBe(0);
-      expect(r.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(r.stdout.trim()).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?$/);
 
       // And it does the thing the product is named for, with no database
       // driver installed anywhere on the machine.
@@ -377,7 +379,7 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
       expect((JSON.parse(audit.stdout) as { deleted: number }).deleted).toBe(3);
     });
 
-    it('carries an MCP server that starts and lists its three tools', () => {
+    it('carries an MCP server that starts and lists its four tools', () => {
       const dir = cloned();
       // One `tools/list` over stdio. A server that fails to start is invisible
       // by design, so the only honest check is to speak the protocol to it.
@@ -410,6 +412,7 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
         'potsherd_graft',
         'potsherd_read',
         'potsherd_recall',
+        'potsherd_write',
       ]);
     });
   });

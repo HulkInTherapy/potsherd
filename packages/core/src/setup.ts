@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {piExtension} from './pi-extension.js';
 import path from 'node:path';
 import process from 'node:process';
 import { backupPath, looksLikeJsonc, stringifySettings, unifiedDiff } from './claude/settings.js';
@@ -119,6 +120,12 @@ export function findMcpEntry(entry: string | undefined): { file: string | null; 
   let dir = start;
   let workspace: string | null = null;
 
+  // A marketplace plugin carries its server beside the bundled CLI.
+  const bundled = path.join(start, 'mcp.js');
+  if (path.basename(start) === 'dist' && fs.existsSync(bundled)) {
+    return { file: bundled, exists: true };
+  }
+
   for (let i = 0; i < 8; i++) {
     for (const rel of [MCP_ENTRY_RELATIVE, MCP_PACKAGE_RELATIVE]) {
       const candidate = path.join(dir, rel);
@@ -173,7 +180,7 @@ export type Verification = 'tool' | 'config' | 'docs';
 export interface ClientSpec {
   id: ClientId;
   label: string;
-  format: 'json' | 'toml';
+  format: 'json' | 'toml' | 'extension';
   /** Executables whose presence proves the client is installed. */
   bins: string[];
   verified: Verification;
@@ -311,14 +318,12 @@ export const CLIENTS: ClientSpec[] = [
   {
     id: 'pi',
     label: 'pi',
-    format: 'json',
+    format: 'extension',
     bins: ['pi'],
-    verified: 'docs',
-    evidenceNote:
-      'documentation only, and the weakest of the seven: no pi on this machine, and the real ~/.pi/agent/settings.json here carries no MCP key to read',
-    configPath: () => path.join(paths.piDir(), 'agent', 'settings.json'),
+    verified: 'tool',
+    evidenceNote: 'native pi 0.74.0 loader/tool/lifecycle probe verified with synthetic MCP; model journey not qualified',
+    configPath: () => path.join(paths.piDir(), 'agent', 'extensions', 'potsherd.ts'),
     homeDir: () => paths.piDir(),
-    jsonPath: ['mcpServers'],
     entry: (res) => stdio(res),
   },
 ];
@@ -456,6 +461,12 @@ function readServers(spec: ClientSpec, p: string): ServerRead {
   } catch (err) {
     return { servers: {}, text: null, blocked: `${p} is unreadable (${(err as Error).message})` };
   }
+  if (spec.format === 'extension') {
+    const marker=text.split('\n')[0];
+    if(text==='export default function() {}\n')return {servers:{},text};
+    if(!marker?.startsWith('// potsherd-pi-entry: '))return {servers:{},text,blocked:'existing extension is not managed by potsherd'};
+    try{return {servers:{[SERVER_NAME]:JSON.parse(marker.slice(22))},text};}catch{return {servers:{},text,blocked:'invalid potsherd extension marker'};}
+  }
   if (spec.format === 'toml') return { servers: tomlServers(text), text };
 
   if (looksLikeJsonc(text)) {
@@ -588,7 +599,7 @@ export function tomlWithout(text: string, name: string): string {
 export interface SetupPlan extends SettingsProposal {
   client: ClientId;
   label: string;
-  format: 'json' | 'toml';
+  format: 'json' | 'toml' | 'extension';
   action: 'add' | 'update' | 'remove' | 'none';
   /** Every other MCP server in that file. The merge keeps all of them. */
   keeps: string[];
@@ -677,6 +688,7 @@ function addStanza(
   before: string,
   entry: Record<string, unknown>,
 ): string {
+  if (spec.format === 'extension') return piExtension(entry);
   if (spec.format === 'toml') {
     if (!before.trim()) return tomlTable(SERVER_NAME, entry);
     // Strictly additive. Replacing our own table means removing it first, which
@@ -693,6 +705,7 @@ function addStanza(
 }
 
 function removeStanza(spec: ClientSpec, read: ServerRead, before: string): string {
+  if (spec.format === 'extension') return 'export default function() {}\n';
   if (spec.format === 'toml') return tomlWithout(before, SERVER_NAME);
   if (!read.json) return before;
   const json = structuredClone(read.json);
@@ -707,6 +720,7 @@ function removeStanza(spec: ClientSpec, read: ServerRead, before: string): strin
 
 /** The stanza on its own, in that client's syntax — what the docs show. */
 export function snippetFor(spec: ClientSpec, entry: Record<string, unknown>): string {
+  if (spec.format === 'extension') return piExtension(entry);
   if (spec.format === 'toml') return tomlTable(SERVER_NAME, entry);
   const doc: Record<string, unknown> = {};
   setIn(doc, [...(spec.jsonPath ?? []), SERVER_NAME], entry);

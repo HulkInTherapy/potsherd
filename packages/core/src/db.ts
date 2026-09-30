@@ -555,16 +555,91 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
   },
 ];
 
+// Cover the stamp reconciliation queries without reading large transcript bodies.
+MIGRATIONS.push({
+  version: 13,
+  name: 'cover-vector-stamps',
+  up: `
+CREATE INDEX IF NOT EXISTS exchanges_embedding_stamp ON exchanges(embedding_version, id);
+CREATE INDEX IF NOT EXISTS ghost_prompts_embedding_stamp ON ghost_prompts(embedding_version, id);
+DELETE FROM sync_state WHERE key = 'index:codex';
+UPDATE sessions SET source_mtime = NULL WHERE harness = 'codex';
+`,
+});
+
+
+// Phase 12 authoritative evidence is independent of legacy compatibility rows.
+MIGRATIONS.push({ version: 14, name: 'immutable-evidence-ledger', up: `
+CREATE TABLE memory_epochs (singleton INTEGER PRIMARY KEY CHECK(singleton=1), evidence_epoch INTEGER NOT NULL DEFAULT 0 CHECK(evidence_epoch>=0), notes_epoch INTEGER NOT NULL DEFAULT 0 CHECK(notes_epoch>=0), lineage_epoch INTEGER NOT NULL DEFAULT 0 CHECK(lineage_epoch>=0), deletion_epoch INTEGER NOT NULL DEFAULT 0 CHECK(deletion_epoch>=0), vector_epoch INTEGER NOT NULL DEFAULT 0 CHECK(vector_epoch>=0));
+INSERT INTO memory_epochs(singleton) VALUES(1);
+CREATE TABLE memory_sources (source_id TEXT PRIMARY KEY, harness TEXT NOT NULL CHECK(harness IN ('claude','codex','cursor','pi','gemini','opencode','copilot')), native_session_id TEXT NOT NULL, active_revision_id TEXT REFERENCES source_revisions(revision_id) DEFERRABLE INITIALLY DEFERRED, project TEXT, availability TEXT NOT NULL CHECK(availability IN ('live','archived','lost','forgotten','conflict')), created_at TEXT NOT NULL, UNIQUE(harness,native_session_id));
+CREATE TABLE source_aliases (source_id TEXT NOT NULL REFERENCES memory_sources(source_id), path TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('live','archive')), last_seen_at TEXT NOT NULL, last_stat_json TEXT NOT NULL CHECK(json_valid(last_stat_json)), artifact_hash TEXT, missing_at TEXT, PRIMARY KEY(source_id,path));
+CREATE TABLE source_revisions (revision_id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES memory_sources(source_id), artifact_hash TEXT NOT NULL, artifact_bytes INTEGER NOT NULL CHECK(artifact_bytes>=0), archive_relative_path TEXT, adapter_version TEXT NOT NULL, normalization_version TEXT NOT NULL, manifest_hash TEXT NOT NULL, event_min TEXT, event_max TEXT, observed_at TEXT NOT NULL, project TEXT, branch TEXT, completeness TEXT NOT NULL CHECK(completeness IN ('complete','partial','legacy')), coverage_gaps_json TEXT NOT NULL CHECK(json_valid(coverage_gaps_json)), UNIQUE(source_id,artifact_hash,adapter_version,normalization_version,manifest_hash));
+CREATE TABLE evidence_units (unit_revision_id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES memory_sources(source_id), unit_key TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('user','assistant','tool_input','tool_result','ghost_prompt')), text TEXT NOT NULL, text_hash TEXT NOT NULL, normalization_version TEXT NOT NULL, tool_name TEXT, tool_call_id TEXT, outcome TEXT CHECK(outcome IS NULL OR outcome IN ('success','error','unknown')), event_at TEXT, time_basis TEXT NOT NULL CHECK(time_basis IN ('record','exchange','unknown')), project TEXT, branch TEXT, locator_json TEXT NOT NULL CHECK(json_valid(locator_json)), locator_fidelity TEXT NOT NULL CHECK(locator_fidelity IN ('record_id','record_ordinal','exchange_ordinal')), legacy_exchange_id TEXT, legacy_seq INTEGER CHECK(legacy_seq IS NULL OR legacy_seq>=0));
+CREATE TABLE revision_units (revision_id TEXT NOT NULL REFERENCES source_revisions(revision_id), unit_revision_id TEXT NOT NULL REFERENCES evidence_units(unit_revision_id), ordinal INTEGER NOT NULL CHECK(ordinal>=0), PRIMARY KEY(revision_id,unit_revision_id), UNIQUE(revision_id,ordinal));
+CREATE TABLE evidence_spans (span_rowid INTEGER PRIMARY KEY, span_id TEXT NOT NULL UNIQUE, unit_revision_id TEXT NOT NULL REFERENCES evidence_units(unit_revision_id), start_utf16 INTEGER NOT NULL CHECK(start_utf16>=0), end_utf16 INTEGER NOT NULL CHECK(end_utf16>start_utf16), text TEXT NOT NULL, text_hash TEXT NOT NULL, chunk_policy TEXT NOT NULL, embedding_input_hash TEXT NOT NULL, embedding_context_json TEXT NOT NULL CHECK(json_valid(embedding_context_json)), UNIQUE(unit_revision_id,start_utf16,end_utf16,chunk_policy));
+CREATE TABLE revision_spans (revision_id TEXT NOT NULL REFERENCES source_revisions(revision_id), span_id TEXT NOT NULL REFERENCES evidence_spans(span_id), ordinal INTEGER NOT NULL CHECK(ordinal>=0), PRIMARY KEY(revision_id,span_id), UNIQUE(revision_id,ordinal));
+CREATE TABLE source_relations (relation_id TEXT PRIMARY KEY, from_source_id TEXT NOT NULL REFERENCES memory_sources(source_id), to_source_id TEXT NOT NULL REFERENCES memory_sources(source_id), kind TEXT NOT NULL CHECK(kind IN ('spawn','resume','fork','record_overlap')), evidence_revision_id TEXT REFERENCES source_revisions(revision_id), basis_json TEXT NOT NULL CHECK(json_valid(basis_json)), observed_at TEXT NOT NULL, lineage_version TEXT NOT NULL);
+CREATE VIRTUAL TABLE spans_fts USING fts5(text,content='evidence_spans',content_rowid='span_rowid');
+CREATE INDEX evidence_units_source_key ON evidence_units(source_id,unit_key);
+CREATE INDEX memory_sources_scope ON memory_sources(project,availability);
+CREATE INDEX source_relations_from ON source_relations(from_source_id);
+CREATE INDEX source_relations_to ON source_relations(to_source_id);
+CREATE INDEX source_revisions_events ON source_revisions(source_id,event_min,event_max);
+CREATE TRIGGER revision_unit_source BEFORE INSERT ON revision_units WHEN (SELECT source_id FROM source_revisions WHERE revision_id=NEW.revision_id)<>(SELECT source_id FROM evidence_units WHERE unit_revision_id=NEW.unit_revision_id) BEGIN SELECT RAISE(ABORT,'unit source mismatch'); END;
+CREATE TRIGGER revision_span_unit BEFORE INSERT ON revision_spans WHEN NOT EXISTS(SELECT 1 FROM revision_units ru JOIN evidence_spans s ON s.unit_revision_id=ru.unit_revision_id WHERE ru.revision_id=NEW.revision_id AND s.span_id=NEW.span_id) BEGIN SELECT RAISE(ABORT,'span unit outside revision'); END;
+CREATE TRIGGER source_active_revision BEFORE UPDATE OF active_revision_id ON memory_sources WHEN NEW.active_revision_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM source_revisions WHERE revision_id=NEW.active_revision_id AND source_id=NEW.source_id) BEGIN SELECT RAISE(ABORT,'active revision source mismatch'); END;
+` });
+MIGRATIONS.push({ version: 15, name: 'durable-work-fences', up: `
+CREATE TABLE maintenance_jobs (job_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('discover','capture','parse','lineage','embed','rebuild','forget')), target_id TEXT NOT NULL, target_revision_id TEXT REFERENCES source_revisions(revision_id), input_hash TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','running','retry','done','blocked','cancelled')), attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts>=0), next_attempt_at TEXT NOT NULL, owner_token TEXT, lease_generation INTEGER CHECK(lease_generation IS NULL OR lease_generation>=0), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, error_code TEXT, error_detail_redacted TEXT, UNIQUE(kind,target_id,input_hash));
+CREATE INDEX maintenance_jobs_due ON maintenance_jobs(state,next_attempt_at);
+CREATE TABLE maintenance_leases (lane TEXT PRIMARY KEY, owner_token TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation>=0), pid INTEGER NOT NULL CHECK(pid>0), process_started_at TEXT NOT NULL, host_id TEXT NOT NULL, heartbeat_at TEXT NOT NULL, expires_at TEXT NOT NULL);
+CREATE TABLE capture_checkpoints (source_id TEXT PRIMARY KEY REFERENCES memory_sources(source_id), discovered_fingerprint TEXT, acknowledged_fingerprint TEXT, acknowledged_revision_id TEXT REFERENCES source_revisions(revision_id), consumed_offset INTEGER NOT NULL DEFAULT 0 CHECK(consumed_offset>=0), reopen_offset INTEGER NOT NULL DEFAULT 0 CHECK(reopen_offset>=0 AND reopen_offset<=consumed_offset), prefix_hash TEXT, continuation_json TEXT CHECK(continuation_json IS NULL OR json_valid(continuation_json)), last_success_at TEXT, last_error_at TEXT, error_code TEXT);
+CREATE TABLE maintenance_events (event_id INTEGER PRIMARY KEY, job_id TEXT REFERENCES maintenance_jobs(job_id), kind TEXT NOT NULL, at TEXT NOT NULL, detail_json TEXT NOT NULL CHECK(json_valid(detail_json)));
+CREATE INDEX maintenance_events_job ON maintenance_events(job_id,event_id);
+` });
+MIGRATIONS.push({ version: 16, name: 'named-span-vector-spaces', up: `
+CREATE TABLE embedding_spaces (space_id TEXT PRIMARY KEY, model_id TEXT NOT NULL, model_revision TEXT NOT NULL, model_asset_hash TEXT NOT NULL, tokenizer_hash TEXT NOT NULL, runtime_version TEXT NOT NULL, dtype TEXT NOT NULL, pooling TEXT NOT NULL CHECK(pooling IN ('mean','cls')), query_prefix TEXT NOT NULL, normalization TEXT NOT NULL, dimensions INTEGER NOT NULL CHECK(dimensions>0), chunk_policy TEXT NOT NULL, created_at TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('building','active','retired')));
+CREATE UNIQUE INDEX embedding_one_active ON embedding_spaces(state) WHERE state='active';
+CREATE TABLE span_embeddings (span_id TEXT NOT NULL REFERENCES evidence_spans(span_id), space_id TEXT NOT NULL REFERENCES embedding_spaces(space_id), input_hash TEXT NOT NULL, vector_blob BLOB NOT NULL, created_at TEXT NOT NULL, job_id TEXT REFERENCES maintenance_jobs(job_id), PRIMARY KEY(span_id,space_id));
+CREATE TRIGGER span_vector_bytes_insert BEFORE INSERT ON span_embeddings WHEN length(NEW.vector_blob)<>(SELECT dimensions*4 FROM embedding_spaces WHERE space_id=NEW.space_id) BEGIN SELECT RAISE(ABORT,'vector dimensions mismatch'); END;
+CREATE TRIGGER span_vector_bytes_update BEFORE UPDATE ON span_embeddings WHEN length(NEW.vector_blob)<>(SELECT dimensions*4 FROM embedding_spaces WHERE space_id=NEW.space_id) BEGIN SELECT RAISE(ABORT,'vector dimensions mismatch'); END;
+` });
+MIGRATIONS.push({ version: 17, name: 'sourced-note-events', up: `
+CREATE TABLE memory_note_events (note_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, origin_source_id TEXT REFERENCES memory_sources(source_id), legacy_note_id INTEGER REFERENCES notes(id), kind TEXT NOT NULL CHECK(kind IN ('decision','open','next','observation','retraction')), text TEXT NOT NULL, text_hash TEXT NOT NULL, project TEXT NOT NULL, branch TEXT, lineage_anchor_source_id TEXT REFERENCES memory_sources(source_id), event_at TEXT, valid_from TEXT, valid_until TEXT, observed_at TEXT NOT NULL, author_claim TEXT NOT NULL, origin TEXT NOT NULL CHECK(origin IN ('cli','mcp','api','migration')), authority TEXT NOT NULL CHECK(authority IN ('user_attested','agent_assertion','unknown')), support_status TEXT NOT NULL CHECK(support_status IN ('linked','unverified','orphaned')), normalization_version TEXT NOT NULL, CHECK(valid_from IS NULL OR valid_until IS NULL OR valid_from<=valid_until));
+CREATE INDEX memory_notes_scope ON memory_note_events(project,branch,observed_at);
+CREATE TABLE note_supports (note_id TEXT NOT NULL REFERENCES memory_note_events(note_id), revision_id TEXT NOT NULL REFERENCES source_revisions(revision_id), span_id TEXT NOT NULL REFERENCES evidence_spans(span_id), relation TEXT NOT NULL CHECK(relation IN ('supports','contradicts','context')), PRIMARY KEY(note_id,revision_id,span_id,relation), FOREIGN KEY(revision_id,span_id) REFERENCES revision_spans(revision_id,span_id));
+CREATE TABLE note_supersessions (new_note_id TEXT NOT NULL REFERENCES memory_note_events(note_id), old_note_id TEXT NOT NULL REFERENCES memory_note_events(note_id), scope_json TEXT NOT NULL CHECK(json_valid(scope_json)), reason TEXT NOT NULL, PRIMARY KEY(new_note_id,old_note_id), CHECK(new_note_id<>old_note_id));
+CREATE TRIGGER note_supersession_scope BEFORE INSERT ON note_supersessions WHEN NOT EXISTS(SELECT 1 FROM memory_note_events n JOIN memory_note_events o WHERE n.note_id=NEW.new_note_id AND o.note_id=NEW.old_note_id AND n.project=o.project AND n.branch IS o.branch) BEGIN SELECT RAISE(ABORT,'supersession scope mismatch'); END;
+CREATE TRIGGER note_supersession_cycle BEFORE INSERT ON note_supersessions WHEN EXISTS(WITH RECURSIVE chain(id) AS (SELECT old_note_id FROM note_supersessions WHERE new_note_id=NEW.old_note_id UNION SELECT s.old_note_id FROM note_supersessions s JOIN chain c ON s.new_note_id=c.id) SELECT 1 FROM chain WHERE id=NEW.new_note_id) BEGIN SELECT RAISE(ABORT,'supersession cycle'); END;
+CREATE TABLE memory_write_receipts (request_key TEXT PRIMARY KEY, input_hash TEXT NOT NULL, batch_id TEXT NOT NULL, receipt_json TEXT NOT NULL CHECK(json_valid(receipt_json)), committed_at TEXT NOT NULL);
+CREATE TABLE forget_tombstones (tombstone_id TEXT PRIMARY KEY, source_id TEXT, note_id TEXT, scope_hash TEXT NOT NULL, created_at TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','complete','reversed')), receipt_json TEXT NOT NULL CHECK(json_valid(receipt_json)), CHECK((source_id IS NOT NULL)+(note_id IS NOT NULL)=1));
+CREATE INDEX forget_tombstones_source ON forget_tombstones(source_id,state);
+CREATE INDEX forget_tombstones_note ON forget_tombstones(note_id,state);
+CREATE VIRTUAL TABLE memory_notes_fts USING fts5(text,content='memory_note_events');
+` });
+
+// Distinguish observed immutable snapshots from actual active-pointer transitions.
+MIGRATIONS.push({version:18,name:'source-activation-history',up:`
+CREATE UNIQUE INDEX source_revisions_source_revision ON source_revisions(source_id,revision_id);
+CREATE TABLE source_activation_baselines(source_id TEXT PRIMARY KEY REFERENCES memory_sources(source_id) ON DELETE CASCADE,known_from TEXT NOT NULL,history_complete INTEGER NOT NULL CHECK(history_complete IN(0,1)));
+CREATE TABLE source_activations(activation_id INTEGER PRIMARY KEY AUTOINCREMENT,source_id TEXT NOT NULL REFERENCES memory_sources(source_id) ON DELETE CASCADE,revision_id TEXT NOT NULL REFERENCES source_revisions(revision_id) ON DELETE CASCADE,activated_at TEXT NOT NULL,evidence_epoch INTEGER NOT NULL CHECK(evidence_epoch>=0),basis TEXT NOT NULL CHECK(basis IN('published','migration_current')),FOREIGN KEY(source_id,revision_id) REFERENCES source_revisions(source_id,revision_id) ON DELETE CASCADE);
+CREATE INDEX source_activations_order ON source_activations(source_id,activation_id DESC);
+CREATE INDEX source_activations_cutoff ON source_activations(source_id,activated_at,activation_id);
+INSERT INTO source_activation_baselines SELECT source_id,strftime('%Y-%m-%dT%H:%M:%fZ','now'),0 FROM memory_sources WHERE active_revision_id IS NOT NULL AND availability<>'forgotten';
+INSERT INTO source_activations(source_id,revision_id,activated_at,evidence_epoch,basis) SELECT s.source_id,s.active_revision_id,b.known_from,e.evidence_epoch,'migration_current' FROM memory_sources s JOIN source_activation_baselines b ON b.source_id=s.source_id CROSS JOIN memory_epochs e WHERE e.singleton=1;
+`});
+
 export function open(opts: OpenOptions = {}): Db {
   const root = opts.root ?? potsherdDir();
   const file = opts.file ?? dbPath(root);
-  if (file !== ':memory:') {
+  if (file !== ':memory:' && !opts.readonly) {
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   }
   let db = openDatabase(file, { readonly: opts.readonly ?? false });
   if (!opts.readonly) {
     db.pragma('journal_mode = WAL');
-    db.pragma('synchronous = NORMAL');
+    db.pragma('synchronous = FULL');
     // The database holds prompt text, so it is owner-only like the archive.
     // WAL creates two sidecar files; all three get the same treatment.
     if (file !== ':memory:') {
@@ -643,7 +718,7 @@ function reopenForSchemaSurgery(db: Db, file: string, opts: OpenOptions): Db {
     /* already gone; the new handle is the one that matters */
   }
   next.pragma('journal_mode = WAL');
-  next.pragma('synchronous = NORMAL');
+  next.pragma('synchronous = FULL');
   next.pragma('foreign_keys = ON');
   next.pragma('busy_timeout = 5000');
   loadVec(next);

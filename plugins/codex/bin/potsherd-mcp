@@ -1,19 +1,6 @@
 #!/bin/sh
-# The MCP server this plugin runs.
-#
-# `.mcp.json` used to name a path relative to the plugin root
-# directly. In a marketplace install that file does not exist — `dist/` is
-# gitignored — so `node` died with a module-not-found stack trace before the
-# server ever spoke MCP, every tool vanished from the client, and the only
-# symptom was a tool list that was simply shorter. `session-archaeologist`,
-# whose `tools:` line is two `mcp__plugin_potsherd_potsherd__*` entries and
-# nothing else since T10.6, was left with no tools at all and answered
-# "not found" to everything.
-#
-# An MCP server that fails to start is invisible by design, so the least this
-# can do is put a sentence a human can act on into the server log instead of a
-# stack trace. Same three places as `bin/potsherd`, same order, same reasons —
-# see that file's header.
+# Self-contained potsherd-mcp runtime for this installed plugin.
+# Own bundle first; development checkout and PATH are explicit fallbacks.
 set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -21,18 +8,6 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # 1. vendored inside the plugin
 if [ -f "$ROOT/dist/mcp.js" ]; then
   exec node "$ROOT/dist/mcp.js" "$@"
-fi
-
-# 1b. the Claude Code plugin's vendored copy, next door.
-#
-# Only `plugins/claude-code/dist/` carries the built bundles: they are 2.4 MB
-# of identical bytes, and this plugin is INFERRED FROM DOCUMENTATION and has
-# never been loaded by codex (codex is not installed on the machine it was
-# written on). Doubling what every clone downloads for a surface nobody has
-# confirmed works is not a trade worth making. The two plugins ship in one
-# repository and land in one clone, so next door is a real place.
-if [ -f "$ROOT/../claude-code/dist/mcp.js" ]; then
-  exec node "$ROOT/../claude-code/dist/mcp.js" "$@"
 fi
 
 # 2. the surrounding checkout
@@ -54,7 +29,7 @@ Looked in three places:
   2. $ROOT/../../packages/mcp/dist/index.js       (the surrounding checkout)
   3. potsherd-mcp on PATH                         (a global install)
 
-All three tools — potsherd_recall, potsherd_read, potsherd_graft — are therefore absent.
+All four tools — potsherd_recall, potsherd_read, potsherd_graft, potsherd_write — are therefore absent.
 
 potsherd is not published to npm yet, so there is no install command.
 Build it from a checkout:

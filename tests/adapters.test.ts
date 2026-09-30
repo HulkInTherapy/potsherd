@@ -16,14 +16,18 @@ const TYPES = path.join(repo, 'packages', 'core', 'src', 'adapters', 'types.ts')
  * field list is asserted literally against `plans/03-ARCHITECTURE.md` §2.
  */
 describe('adapter contract', () => {
-  it('compiles standalone, under the strictest settings, importing nothing', () => {
+  it('compiles the portable adapter/evidence contracts under the strictest settings with no runtime imports', () => {
     // It must be liftable into any other project (and into a worker's editor)
     // without dragging the rest of core behind it.
-    expect(fs.readFileSync(TYPES, 'utf8')).not.toMatch(/^\s*import\s/m);
+    const imports=fs.readFileSync(TYPES,'utf8').split('\n').filter(line=>/^\s*import\s/.test(line));
+    expect(imports.every(line=>/^\s*import type /.test(line))).toBe(true);
 
     const dir = tempDir();
-    const copy = path.join(dir, 'types.ts');
+    const copy = path.join(dir, 'adapters','types.ts');
+    fs.mkdirSync(path.dirname(copy),{recursive:true});
+    fs.mkdirSync(path.join(dir,'memory'));
     fs.copyFileSync(TYPES, copy);
+    fs.copyFileSync(path.join(repo,'packages/core/src/memory/contracts.ts'),path.join(dir,'memory/contracts.ts'));
     const tsc = path.join(repo, 'node_modules', 'typescript', 'bin', 'tsc');
     expect(() =>
       execFileSync(process.execPath, [

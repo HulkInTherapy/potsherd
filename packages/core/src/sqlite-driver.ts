@@ -330,27 +330,15 @@ function wrap(db: NodeDatabase): Db {
       }
     },
     transaction<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
-      return (...args: A): R => {
-        const name = `potsherd_sp_${depth}`;
-        db.exec(depth === 0 ? 'BEGIN' : `SAVEPOINT ${name}`);
-        depth += 1;
-        try {
-          const out = fn(...args);
-          depth -= 1;
-          db.exec(depth === 0 ? 'COMMIT' : `RELEASE ${name}`);
-          return out;
-        } catch (err) {
-          depth -= 1;
-          try {
-            db.exec(depth === 0 ? 'ROLLBACK' : `ROLLBACK TO ${name}`);
-            if (depth > 0) db.exec(`RELEASE ${name}`);
-          } catch {
-            // The statement that threw may already have rolled the
-            // transaction back; a second rollback is not the error to report.
-          }
-          throw err;
-        }
+      const make=(begin:string)=>(...args:A):R=>{
+        const parentDepth=depth;const name=`potsherd_sp_${parentDepth}`;
+        db.exec(parentDepth===0?begin:`SAVEPOINT ${name}`);depth=parentDepth+1;
+        try {const out=fn(...args);db.exec(parentDepth===0?'COMMIT':`RELEASE ${name}`);depth=parentDepth;return out;}
+        catch(error){try{db.exec(parentDepth===0?'ROLLBACK':`ROLLBACK TO ${name}`);if(parentDepth>0)db.exec(`RELEASE ${name}`);}catch{/* Preserve original failure. */}finally{depth=parentDepth;}throw error;}
       };
+      const variants={default:make('BEGIN'),deferred:make('BEGIN'),immediate:make('BEGIN IMMEDIATE'),exclusive:make('BEGIN EXCLUSIVE')};
+      for(const variant of Object.values(variants))Object.assign(variant,variants);
+      return variants.default;
     },
     loadExtension(path: string): void {
       db.enableLoadExtension?.(true);

@@ -1455,8 +1455,8 @@ describe('the ask block is built to fit 80x24', () => {
     const openThreads = Array.from({ length: nThreads }, (_, i) => ({
       what: 'Route delivery consumers through connection pooler on port 6432 instead of direct postgres on port 5432',
       why: 'connection limits',
-      sessionId: `b2181bfe-0000-4000-8000-00000000000${i}`,
-      id8: 'b2181bfe',
+      sessionId: `bbbb1111-0000-4000-8000-00000000000${i}`,
+      id8: 'bbbb1111',
       project: '/home/dev/event-bus',
       ts: '2026-08-11T11:38:00.000Z',
       evidenceSeqs: [1, 2] as readonly number[],
@@ -1890,7 +1890,7 @@ describe('a refusal says why', () => {
 // ------------------------------------------------------- mask-safe clipping
 
 describe('clipQuote', () => {
-  const MASK = '‹redacted:aws:9f2b1c04›';
+  const MASK = '‹redacted:aws:cccc2222›';
 
   it('truncates at ~90 characters with an ellipsis', () => {
     const long = 'x'.repeat(400);

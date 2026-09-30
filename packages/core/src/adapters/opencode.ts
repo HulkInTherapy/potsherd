@@ -1,70 +1,9 @@
-/**
- * L0 adapter — opencode's sqlite session store.
- *
- *   ~/.local/share/opencode/**\/*.{db,sqlite,sqlite3}
- *
- * ## PROVENANCE — `unverified — documentation only`
- *
- * **Nothing here was measured against a real opencode store.**
- * `~/.local/share/opencode` does not exist on the reference machine — not
- * empty, absent — and `plans/research/formats.md` marks its opencode section
- * **unmeasured**: "none here, nothing has been parsed." This adapter is
- * therefore the same call phase 5 made for four unverified MCP clients:
- * written from documentation, exercised against synthetic fixtures, and
- * labelled as such in the file header, the doctor line and the doctor note.
- *
- * ## the schema is discovered, never hard-coded
- *
- * `03 §10`'s rule for bridges — *do not hard-code a schema you did not
- * write; discover it at runtime with `pragma table_info` and degrade on
- * mismatch* — is the load-bearing decision in this file, and it applies with
- * more force here than to a bridge, because opencode's store is one this
- * project has never seen. So:
- *
- *   - tables come from `sqlite_master`, columns from `pragma table_info`;
- *   - a column is found by matching the candidate names in {@link SESSION_COLUMNS}
- *     and {@link MESSAGE_COLUMNS} case-insensitively, so `sessionID`,
- *     `session_id` and `session` all resolve;
- *   - **every query is built from column names the database itself reported**,
- *     quoted, never from a string the caller supplied;
- *   - when the required columns are not all present, {@link describeStore}
- *     returns a `reason` and the adapter degrades to **unsupported version**.
- *     It does not throw, does not half-parse, and `doctor` prints the reason.
- *
- * Adding a candidate name to those lists can only make a store that was
- * unreadable readable. It can never change what an already-readable store
- * parses to, which is the property that makes widening the lists safe.
- *
- * ## the store is opened read-only
- *
- * `~/.local/share/opencode` is a **read-only input** (`00-README.md` ground
- * rules). The connection is opened `readonly: true`, and additionally with
- * `fileMustExist: true` so a typo in a path can never cause better-sqlite3 to
- * create a database inside another tool's directory. potsherd never writes a
- * byte under it.
- *
- * ## one database, many sessions
- *
- * Unlike every other harness potsherd reads, an opencode transcript is not a
- * file — one database holds every session. So `SessionSource.path` is the
- * database and `SessionSource.sessionId` is what distinguishes one source from
- * the next; `bytes` is the session's own content size rather than the file's,
- * because the file's size is a fact about all the sessions at once and would
- * make `counts.bytes` meaningless. There is no byte offset to resume from
- * inside a database, so `fromOffset` is accepted and deliberately ignored, as
- * it is for pi, and `endOffset` reports the session's content size. Exchange
- * ids are a pure function of `(sessionId, seq)`, so a re-parse is an upsert.
- *
- * ## a known other layout, deliberately not built
- *
- * Recent opencode versions are documented as keeping sessions as JSON under
- * `storage/session/`. That is a second layout, not a correction to this one,
- * and building it against no real files would be a second guess stacked on
- * the first. {@link describeStore} names it in the degrade reason when no
- * database is found but a `storage/` directory is, so the user learns that
- * potsherd saw their install and knows what it would take to read it.
- *
- * No model calls, no network (`03 §1`). This file is potsherd's own.
+/** OpenCode SQLite adapter. Historical 1.18.21 discovery was measured in T10.12.
+ * Native message.data roles and ordered part.data are now covered by the
+ * committed native-shaped fixture. Reads use a consistent read-only transaction
+ * and retain a per-session snapshot including message/part IDs. Public evidence
+ * remains an exchange projection; a new model-backed host journey is pending.
+ * Alternate JSON-directory layouts remain visibly unsupported.
  */
 
 import fs from 'node:fs';
@@ -97,6 +36,7 @@ import { exchangeId } from '../parser/claude.js';
 export { opencodeDir } from '../paths.js';
 
 export const DISPLAY_NAME = 'opencode';
+export const EVIDENCE_VERSION = 'opencode-session-snapshot-projection-v1';
 
 /** File extensions treated as a candidate sqlite store. */
 const DB_EXTENSIONS = ['.db', '.sqlite', '.sqlite3'];
@@ -125,16 +65,10 @@ const MAX_DEPTH = 3;
 export const OPENCODE_FORMAT_UNVERIFIED = true;
 
 export const OPENCODE_DOCTOR_NOTE =
-  'opencode: measured against opencode-ai 1.18.21 (T10.12, 24 aug 2026) — a real session was run ' +
-  'and indexed, and the label splits in two. DISCOVERY AND SESSION METADATA ARE CORRECT: the ' +
-  'store is at ~/.local/share/opencode/opencode.db exactly where this adapter looks, ' +
-  'describeStore accepts it, and the session row parses with title, directory and both ' +
-  'timestamps right. MESSAGE CONTENT IS NOT READ: at 1.18.21 the `message` table carries neither ' +
-  'a role column nor a text column — the role is inside a `data` JSON blob, and the turn text is ' +
-  'in the child `part` table, which this adapter does not join — so a real session indexes with ' +
-  '0 prompts and its answer does not reach the index. Schema is still discovered at runtime ' +
-  '(pragma table_info) rather than assumed, and an unrecognised store degrades to "unsupported ' +
-  'version" rather than half-parsing. The database is opened read-only.';
+  'opencode: discovery and session metadata measured at 1.18.21 (T10.12); ' +
+  'historical missing role/text defect repaired with native message.data + part.data fixture tests. ' +
+  'Read-only transactional snapshots include committed WAL data and native IDs. ' +
+  'Public evidence remains an exchange projection; fresh native model journey pending.';
 
 /**
  * The split label as fields. See {@link FormatProvenance} for why a boolean
@@ -147,7 +81,7 @@ export const OPENCODE_DOCTOR_NOTE =
 export const OPENCODE_FORMAT_PROVENANCE: FormatProvenance = {
   measured: 'opencode-ai 1.18.21, 24 aug 2026',
   verified: ['store discovery', 'session metadata (title, directory, timestamps)'],
-  wrong: ['message role — it is inside message.data, not a column', 'turn text — it is in part.data, which is not joined'],
+  wrong: ['historical T10.12: role/text missing; repaired by native-shaped fixture, fresh native journey pending'],
   unverified: OPENCODE_FORMAT_UNVERIFIED,
   note: OPENCODE_DOCTOR_NOTE,
 };
@@ -196,6 +130,7 @@ export interface StoreSchema {
   dbPath: string;
   sessions: ResolvedTable;
   messages: ResolvedTable;
+  parts?: ResolvedTable;
 }
 
 export type StoreDescription =
@@ -291,7 +226,17 @@ export function describeStore(dbPath: string): StoreDescription {
     if (!messages.columns['content']) {
       return { ok: false, reason: `unsupported version — ${messageTable} has no content column (saw: ${mCols.join(', ')})` };
     }
-    return { ok: true, schema: { dbPath, sessions, messages } };
+    const partTable = bestTable(tables.filter(t => t !== messageTable), [/^parts?$/i]);
+    let parts: ResolvedTable | undefined;
+    if (!messages.columns['role'] && messages.columns['content']?.toLowerCase() === 'data') {
+      const cols = partTable ? columnsOf(db, partTable) : [];
+      const message = pick(cols, ['message_id', 'messageID']);
+      const content = pick(cols, ['data']);
+      const id = pick(cols, ['id']);
+      if (!partTable || !message || !content || !id) return {ok:false,reason:'unsupported version — native message.data requires part.id/message_id/data'};
+      parts = {table:partTable,columns:{message,content,id,created:pick(cols,['time_created','created_at'])}};
+    }
+    return { ok: true, schema: { dbPath, sessions, messages, ...(parts ? {parts} : {}) } };
   } finally {
     db.close();
   }
@@ -483,6 +428,7 @@ export async function parse(
   }
 
   try {
+    db.exec('BEGIN');
     const sc = schema.sessions.columns;
     const sSelect = [
       `${quoteIdent(sc['id']!)} as id`,
@@ -522,7 +468,8 @@ export async function parse(
             `where ${quoteIdent(mc['session']!)} = ? ${orderBy}`,
         )
         .all(sessionId) as Record<string, unknown>[];
-    } catch {
+    } catch (error) {
+      if (schema.parts) throw error; // Native order is required; never silently reorder.
       // A view without a rowid, most likely. Retry unordered rather than
       // losing the session entirely; the doctor note already warns that this
       // store's shape is unverified.
@@ -538,6 +485,26 @@ export async function parse(
       }
     }
 
+    const nativeRows = messageRows.map(row => ({...row}));
+    const nativeParts: Record<string, unknown>[] = [];
+    if (schema.parts) {
+      const pc = schema.parts.columns;
+      const query = db.prepare(`select * from ${quoteIdent(schema.parts.table)} where ${quoteIdent(pc.message!)} = ? order by ${pc.created ? quoteIdent(pc.created) + ', ' : ''}${quoteIdent(pc.id!)}`);
+      messageRows = messageRows.map(row => {
+        const metadata = safeParseJson(String(row.content ?? ''));
+        if (!isRecord(metadata) || !['user','assistant'].includes(String(metadata.role))) throw new Error('unsupported native message role');
+        const parts = query.all(row.id) as Record<string, unknown>[];
+        nativeParts.push(...parts);
+        return {...row, role:metadata.role, content:JSON.stringify({model:metadata.modelID,parts:parts.map(part => {
+          const data = safeParseJson(String(part[pc.content!] ?? ''));
+          if (!isRecord(data)) throw new Error('invalid native part data');
+          return data;
+        })})};
+      });
+    }
+    // A read transaction keeps metadata, messages and parts from one SQLite snapshot,
+    // including committed WAL pages. Preserve native IDs/JSON in the artifact.
+    const artifactSnapshot = Buffer.from(JSON.stringify({format:'opencode-session-snapshot-v1',session:sessionRow,messages:nativeRows,parts:nativeParts}) + '\n');
     const counts = { userPrompts: 0, assistantTurns: 0, toolCalls: 0 };
     let malformedLines = 0;
     const { exchanges, contentBytes, firstTs, lastTs, model: turnModel } = buildExchanges(
@@ -579,7 +546,7 @@ export async function parse(
       status: options.status ?? src?.status ?? 'live',
     };
 
-    return { session, exchanges, unknownTypes, endOffset: contentBytes, malformedLines };
+    return { session, exchanges, unknownTypes, endOffset: contentBytes, malformedLines, artifactSnapshot, evidenceVersion:EVIDENCE_VERSION };
   } finally {
     db.close();
   }
@@ -774,7 +741,7 @@ export function parseContent(
       const state = isRecord(p['state']) ? p['state'] : {};
       const name = String(p['tool'] ?? p['name'] ?? state['tool'] ?? 'unknown');
       const input = state['input'] ?? p['input'] ?? p['args'] ?? p['arguments'];
-      const output = state['output'] ?? p['output'] ?? p['result'];
+      const output = state['output'] ?? state['error'] ?? p['output'] ?? p['result'];
       const status = String(state['status'] ?? p['status'] ?? '').toLowerCase();
       const result = stringifyToolOutput(output);
       const call: ExchangeToolCall = {
@@ -891,7 +858,7 @@ export function doctorLine(override?: string): string {
   if (failures.length) note.push(`${failures.length} store${failures.length === 1 ? '' : 's'} unsupported`);
   // The measurement, not a state of ignorance: T10.12 ran a real 1.18.21
   // session through this path and the prompts came out empty.
-  note.push('content unread at 1.18.21 — text is in part.data');
+  note.push('1.18.21 parts fixture verified; projection fidelity');
   return formatDoctorLine({
     harness: 'opencode',
     status: 'ready',

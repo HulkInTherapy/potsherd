@@ -24,6 +24,7 @@ import {
   copilot as copilotAdapter,
   format as fmt,
   Card,
+  runtimeHealth, inspectAssets,
   consent,
   redactionRow,
   sessionStats,
@@ -78,6 +79,8 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
   let redaction: RedactionCounts = emptyCounts();
   let indexedTypes: RecordTypeRow[] = [];
   let vec: VecStatus = { available: false, reason: 'no database yet — run potsherd index' };
+  let maintenance:ReturnType<typeof runtimeHealth>|null=null;
+  const semanticAssets=inspectAssets(paths.modelsDir(root));
   let indexedAt: string | null = null;
   // The index's own session counts, read from the function `stats` renders.
   //
@@ -96,6 +99,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     const db = store.open({ root, readonly: true });
     try {
       schema = store.schemaVersion(db);
+      if(schema>=17)maintenance=runtimeHealth(db);
       // Before the counts, and **with the root**, because that is the call
       // that carries the numbers. `vecStatus(db, root)` is the one source of
       // truth for the vectors line: `index` makes the same call and renders
@@ -208,6 +212,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
     const network = networkDisclosure();
     if (o.json) {
       printJson({
+      maintenance,semanticAssets,
         reads,
         // The same list the human view prints, so a script and a person are
         // reading one receipt.
@@ -456,6 +461,7 @@ export async function runDoctor(o: DoctorOptions): Promise<number> {
 
   if (o.json) {
     printJson({
+      maintenance,semanticAssets,
       version: VERSION_STRING,
       node: process.version,
       platform: process.platform,
@@ -786,7 +792,7 @@ async function adapterStatus(o: DoctorOptions): Promise<AdapterStatus[]> {
     line: claudeAdapter.doctorLine(claudeOptions),
   });
 
-  const codexReport = await codexAdapter.codexDoctor();
+  const codexReport = await codexAdapter.codexDoctor(o.codexDir?{codexHome:o.codexDir}:undefined);
   out.push({
     harness: 'codex',
     supported: true,

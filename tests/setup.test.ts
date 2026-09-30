@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applySetupPlan,
   claudeJsonPath,
@@ -37,48 +37,31 @@ import { rmrf, readJson, tempDir } from './helpers.js';
  * clobbers, it refuses what it cannot rewrite losslessly, it writes nothing on
  * a dry run, and it never writes without a `y`.
  *
- * Every test runs against a throwaway HOME under the OS temp directory. The
+ * Every test uses explicit provider/config roots and a scoped mocked OS home resolver under the OS temp directory. The
  * real `~/.claude`, `~/.codex`, `~/.cursor` and `~/.pi` are read-only inputs
- * (`00-README.md`) and nothing here goes near them: `home()` resolves through
- * `$HOME`, and each fixture home is removed in `afterEach`.
+ * (`00-README.md`) and nothing here goes near them: `home()` resolves through the scoped OS dependency, and each fixture home is removed in `afterEach`.
  */
 
 const created: string[] = [];
 let home = '';
 const saved: Record<string, string | undefined> = {};
 
-const ENV_KEYS = [
-  'HOME',
-  'USERPROFILE',
-  'CLAUDE_CONFIG_DIR',
-  'CODEX_HOME',
-  'POTSHERD_CURSOR_DIR',
-  'POTSHERD_PI_DIR',
-  'XDG_CONFIG_HOME',
-  'PATH',
-] as const;
-
-beforeEach(() => {
-  for (const k of ENV_KEYS) saved[k] = process.env[k];
-  home = path.join(tempDir('potsherd-setup-'), 'home');
-  created.push(path.dirname(home));
-  fs.mkdirSync(home, { recursive: true });
-  process.env['HOME'] = home;
-  process.env['USERPROFILE'] = home;
-  for (const k of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'POTSHERD_CURSOR_DIR', 'POTSHERD_PI_DIR', 'XDG_CONFIG_HOME'] as const) {
-    delete process.env[k];
-  }
-  // Nothing named `potsherd-mcp` may be found by accident: the resolution the
-  // tests assert on is the one a fresh machine gets.
-  process.env['PATH'] = path.join(home, 'bin');
+const ENV_KEYS=['CLAUDE_CONFIG_DIR','POTSHERD_CODEX_DIR','POTSHERD_CURSOR_DIR','POTSHERD_PI_DIR','POTSHERD_GEMINI_DIR','POTSHERD_OPENCODE_DIR','POTSHERD_COPILOT_DIR','XDG_CONFIG_HOME','PATH'] as const;
+let homeResolver:ReturnType<typeof vi.spyOn>;
+beforeEach(()=>{
+ for(const key of ENV_KEYS)saved[key]=process.env[key];
+ home=path.join(tempDir('potsherd-setup-'),'home');created.push(path.dirname(home));fs.mkdirSync(home,{recursive:true});
+ homeResolver=vi.spyOn(os,'homedir').mockReturnValue(home);
+ process.env.CLAUDE_CONFIG_DIR=path.join(home,'.claude');
+ for(const harness of ['CODEX','CURSOR','PI','GEMINI','COPILOT'])process.env[`POTSHERD_${harness}_DIR`]=path.join(home,`.${harness.toLowerCase()}`);
+ process.env.POTSHERD_OPENCODE_DIR=path.join(home,'.config','opencode');
+ process.env.XDG_CONFIG_HOME=path.join(home,'.config');
+ process.env.PATH=path.join(home,'bin');
 });
-
-afterEach(() => {
-  for (const k of ENV_KEYS) {
-    if (saved[k] === undefined) delete process.env[k];
-    else process.env[k] = saved[k] as string;
-  }
-  while (created.length) rmrf(created.pop()!);
+afterEach(()=>{
+ homeResolver.mockRestore();
+ for(const key of ENV_KEYS){if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];}
+ while(created.length)rmrf(created.pop()!);
 });
 
 /** A resolution that pretends the server is built, for the write tests. */
@@ -259,7 +242,7 @@ describe('detecting a client', () => {
       gemini: 'docs',
       opencode: 'docs',
       copilot: 'docs',
-      pi: 'docs',
+      pi: 'tool',
     });
     for (const c of CLIENTS) expect(c.evidenceNote.length).toBeGreaterThan(20);
   });
@@ -451,7 +434,7 @@ describe('one snippet per client, in that client’s own schema', () => {
   const res: McpResolution = { command: 'potsherd-mcp', args: [], via: 'path', exists: true };
 
   it('uses mcpServers for six clients and mcp for opencode', () => {
-    for (const id of ['claude', 'cursor', 'gemini', 'copilot', 'pi'] as ClientId[]) {
+    for (const id of ['claude', 'cursor', 'gemini', 'copilot'] as ClientId[]) {
       const spec = clientSpec(id);
       expect(spec.jsonPath).toEqual(['mcpServers']);
       expect(snippetFor(spec, spec.entry(res))).toContain('"mcpServers"');
@@ -493,7 +476,8 @@ describe('one snippet per client, in that client’s own schema', () => {
    * write a file Claude Code never reads.
    */
   it('puts the claude stanza beside ~/.claude, not inside it', () => {
-    expect(claudeJsonPath()).toBe(path.join(home, '.claude.json'));
+    expect(claudeJsonPath(undefined,{})).toBe(path.join(home,'.claude.json'));
+    expect(claudeJsonPath()).toBe(path.join(home,'.claude','.claude.json'));
     const relocated = path.join(home, 'elsewhere');
     expect(claudeJsonPath(relocated)).toBe(path.join(relocated, '.claude.json'));
   });
@@ -663,7 +647,7 @@ describe('the verb', () => {
     };
     expect(parsed.dryRun).toBe(true);
     expect(parsed.server.name).toBe(SERVER_NAME);
-    expect(parsed.server.tools).toHaveLength(6);
+    expect(parsed.server.tools).toEqual(['potsherd_recall', 'potsherd_read', 'potsherd_graft']);
     expect(parsed.results).toHaveLength(1);
     expect(parsed.results[0]!.keeps).toEqual(['linear', 'playwright', 'sentry']);
     expect(parsed.results[0]!.written).toBe(false);
@@ -780,6 +764,7 @@ describe('docs/mcp-clients.md', () => {
   it('shows a snippet that matches what setup would write, for every client', () => {
     for (const spec of CLIENTS) {
       const snippet = snippetFor(spec, spec.entry(onPathRes));
+      if (spec.format === 'extension') { expect(doc).toContain('native pi extension'); continue; }
       if (spec.format === 'toml') {
         expect(doc).toContain(snippet.trimEnd());
         continue;
@@ -790,7 +775,7 @@ describe('docs/mcp-clients.md', () => {
 
   it('names every config path it claims to configure', () => {
     for (const spec of CLIENTS) {
-      const shown = detectClient(spec).path.replace(home, '~');
+      const shown=spec.id==='claude'?'~/.claude.json':detectClient(spec).path.replace(home,'~');
       expect(doc, `${spec.id} path missing`).toContain(shown);
     }
   });
@@ -820,13 +805,13 @@ describe('the privacy receipt', () => {
     const written = setupWritePaths();
     expect(written).toHaveLength(CLIENT_IDS.length);
     expect(written).toEqual([
-      path.join(home, '.claude.json'),
+      path.join(home, '.claude', '.claude.json'),
       path.join(home, '.codex', 'config.toml'),
       path.join(home, '.cursor', 'mcp.json'),
       path.join(home, '.gemini', 'settings.json'),
       path.join(home, '.config', 'opencode', 'opencode.json'),
       path.join(home, '.copilot', 'mcp-config.json'),
-      path.join(home, '.pi', 'agent', 'settings.json'),
+      path.join(home, '.pi', 'agent', 'extensions', 'potsherd.ts'),
     ]);
     // Every path setup can plan for is a path the receipt names.
     const planned = planClients([...CLIENT_IDS]).map((p) => p.path);
@@ -836,7 +821,21 @@ describe('the privacy receipt', () => {
   it('writes nowhere near the real home directory', () => {
     for (const p of setupWritePaths()) {
       expect(p.startsWith(home)).toBe(true);
-      expect(p.startsWith(os.homedir())).toBe(true);
+      expect(fs.realpathSync(home).startsWith(fs.realpathSync(os.tmpdir()))).toBe(true);
     }
   });
+});
+
+
+describe('native pi extension installation',()=>{
+ it('writes only its owned extension, detects it, and removes without touching settings',()=>{
+  const settings=path.join(home,'.pi','agent','settings.json');write(settings,'{"theme":"owned-test"}\n');
+  const spec=clientSpec('pi'),resolution=built();const plan=planClient(spec,{resolution});
+  expect(plan.path).toBe(path.join(home,'.pi','agent','extensions','potsherd.ts'));
+  expect(plan.after).toContain('pi.registerTool');expect(plan.after).not.toContain('mcpServers');
+  applySetupPlan(plan);expect(detectClient(spec).registered).toBe(true);
+  expect(planClient(spec,{resolution}).noop).toBe(true);
+  applySetupPlan(planClient(spec,{resolution,remove:true}));expect(detectClient(spec).registered).toBe(false);
+  expect(fs.readFileSync(settings,'utf8')).toBe('{"theme":"owned-test"}\n');
+ });
 });

@@ -1,4 +1,5 @@
 import process from 'node:process';
+import {runReaderCommand} from './reader-command.js';
 import { Command, Option } from 'commander';
 import { ASK_K, ASK_CHEAP_K, ASK_MAX_USD, ASK_CONCURRENCY, ASK_WINDOWS } from '@potsherd/core';
 import { closeAgentMemoryClients } from '@potsherd/bridges';
@@ -7,6 +8,7 @@ import { runAudit } from './commands/audit.js';
 import { runRescue } from './commands/rescue.js';
 import { runGuard } from './commands/guard.js';
 import { runDoctor } from './commands/doctor.js';
+import { runMaintain } from './commands/maintain.js';
 import { runIndex } from './commands/index.js';
 import { runFind } from './commands/find.js';
 import { runLs } from './commands/ls.js';
@@ -43,7 +45,7 @@ export { VERSION };
  * an empty screen.
  */
 const GLOBAL_ONLY =
-  /^(--json|--no-color|--ascii|--width|--claude-dir|--potsherd-dir|--debug|\d+|\/.*|~.*)$/;
+  /^(--json|--no-color|--ascii|--width|--claude-dir|--codex-dir|--potsherd-dir|--debug|\d+|\/.*|~.*)$/;
 
 /** Registered on the program *and* on every verb, so position never matters. */
 /**
@@ -76,6 +78,9 @@ function addGlobals(cmd: Command): Command {
     .option('--ascii', 'ASCII-only glyphs, for terminals without a unicode font')
     .addOption(new Option('--width <n>', 'render for this terminal width').argParser(Number))
     .option('--claude-dir <path>', 'read Claude Code data from here (CLAUDE_CONFIG_DIR is honoured)')
+    .option('--codex-dir <path>', 'read Codex data from this enrolled root')
+    .option('--pi-dir <path>', 'read pi data from this enrolled root')
+    .option('--opencode-dir <path>', 'read OpenCode data from this enrolled root')
     .option('--potsherd-dir <path>', "potsherd's own directory (default ~/.potsherd)")
     .option('--debug', 'print full errors');
 }
@@ -139,6 +144,9 @@ function main(rawArgv: string[]): void {
   // constructed; see `splitTagOperands` for the rule, which is one sentence.
   const { argv, ops: tagOperands } = splitTagOperands(rawArgv);
   const program = new Command();
+  const reader=addGlobals(program.command('reader <operation>').description('prepare, validate or select a bounded read tuple for one task; no model or archive access').requiredOption('--input-file <path>', 'JSON taskId, query, scope, packets; validate adds raw, next-read adds budget'));
+  reader.addHelpText('after', '\nexamples:\n  potsherd reader prepare --input-file public-task.json --json\n  potsherd reader validate --input-file public-task-with-raw-answer.json --json\n  potsherd reader next-read --input-file public-task-with-budget.json --json');
+  reader.action((operation:string,opts:Record<string,unknown>)=>{process.exitCode=runReaderCommand(operation,String(opts['inputFile']));});
 
   addGlobals(
     program
@@ -222,20 +230,31 @@ example:
     );
   });
 
+  const maintain=addGlobals(program.command('maintain').description('initialize, recover and maintain the durable memory index')
+   .option('--migrate','explicitly initialize or upgrade the evidence store')
+   .option('--acquire-assets','explicitly fetch and verify the pinned semantic assets')
+   .option('--rebuild','rebuild source spans using saved enrolled roots')
+   .option('--enqueue-session <id>','durably queue one session capture')
+   .option('--enqueue-only','persist ingress without opening the database')
+   .option('-q, --quiet','print nothing on success'));
+  maintain.action(async(opts:Record<string,unknown>)=>{const o=globals(program,maintain,opts);await run(()=>runMaintain({...o,enqueueOnly:Boolean(opts['enqueueOnly']),migrate:Boolean(opts['migrate']),acquireAssets:Boolean(opts['acquireAssets']),rebuild:Boolean(opts['rebuild']),...(opts['enqueueSession']?{enqueueSession:String(opts['enqueueSession'])}: {})}),o);});
+
   const index = addGlobals(
     program
       .command('index')
       .description('parse, redact and index every transcript on this machine')
       .option('--full', 're-read every transcript, ignoring what has not changed')
       .option('--incremental', 'only what changed since the last run (the default)')
-      .option('--harness <list>', 'only these harnesses: claude,codex,cursor,pi')
+      .option('--harness <list>', 'temporary scan filter: claude,codex,cursor,pi,opencode')
+      .option('--enroll <list>', 'persistently add these harnesses to automatic capture')
+      .option('--unenroll <list>', 'persistently remove these harnesses from automatic capture')
       // Semantic search is ON and needs no flag: the runtime is fetched in the
       // background on the first index and `find` upgrades to hybrid when the
       // vectors are ready. `--embed` now means *wait for it* rather than
       // *enable it*, and `--no-embed` is the escape hatch for a machine that
       // must never fetch anything. Until phase 10 these two said the opposite,
       // and the help contradicted what the verb actually did.
-      .option('--embed', 'embed in the foreground rather than in the background')
+      .option('--embed', 'embed cached assets in the foreground; acquire with maintain --acquire-assets')
       .option('--no-embed', 'text only — fetch nothing, embed nothing')
       .option('--session <id>', 'index one session id and nothing else')
       .option('-q, --quiet', 'print nothing on success (for hooks)'),
@@ -261,6 +280,8 @@ example:
           ...(opts['embed'] === undefined ? {} : { embed: Boolean(opts['embed']) }),
           ...(opts['harness'] ? { harness: String(opts['harness']) } : {}),
           ...(opts['session'] ? { session: String(opts['session']) } : {}),
+          ...(opts['enroll'] ? { enroll: String(opts['enroll']) } : {}),
+          ...(opts['unenroll'] ? { unenroll: String(opts['unenroll']) } : {}),
         }),
       o,
     );
@@ -272,7 +293,8 @@ example:
       program
         .command('find')
         .description('search every prompt, every subagent and every deleted session')
-        .argument('<query>', 'the words to look for'),
+        .argument('[query]', 'the words to look for')
+        .option('--input-json <json>', 'complete public RecallInput JSON; responseFormat compact-v1 permits navigation inspect-v1'),
     )
       .option('--file <path>', 'only sessions that touched a path containing this')
       .addOption(
@@ -281,22 +303,28 @@ example:
           .default('auto'),
       )
       .addOption(
-        new Option('--min-confidence <level>', 'withhold rows the archive does not answer')
+        new Option('--min-confidence <level>', 'legacy candidate relevance floor; v2 reports claim support separately')
           .choices(['strong', 'weak', 'none'])
           .default('weak'),
       )
       .option('--no-vec', 'text search only — the same as --vectors off')
-      .option('--no-cards', 'transcripts only — do not search session cards')
+      .option('--no-cards', 'legacy --explain/--with diagnostics only; rejected by default v2 evidence output')
+      .option('--exact', 'case-sensitive literal substring in transcripts; preserve punctuation, no fallback')
       .option('--explain', 'show the per-list ranks and scores behind the order')
       .option('--with <tools>', 'also search other memory tools: claude-mem, agentmemory, notes')
       .option('--all', 'include the projects  potsherd ignore  hides'),
   ).addHelpText('after', `
 example:
   potsherd find "pgbouncer"
-  potsherd find "rate limiter" --json | jq -r '.sessions[0].resume'
+  potsherd find "latest project decisions" --project /example/project --json
+  potsherd find --input-json '{"query":"latest project decisions","scope":{"project":"/example/project"},"budget":{"maxTokens":2048,"maxBytes":65536}}'
+  potsherd find "rate limiter" --json | jq -r '.evidence[0].citation'
   potsherd index --no-embed                          # text only, fetch nothing
   potsherd find "the pooler decision" --vectors on   # force it, once vectors exist
   potsherd find "pgbouncer" --explain                # why this order
+
+V2 find --since/--until constrain evidence event time; ls/stats retain session-date filters. Unknown event times are disclosed, not dated or treated as proof of temporal absence.
+JSON budget.tokenizerId may be omitted: the bundled accounting tokenizer is used and named in the response receipt. An explicit unsupported tokenizer is rejected.
 
 filters, one example each — they compose, and all of them are AND:
   --project event-bus          only that project (a directory name is enough)
@@ -319,12 +347,15 @@ filters, one example each — they compose, and all of them are AND:
         runFind({
           ...o,
           ...filterFlags(opts),
-          query,
+          query: query ?? '',
+          ...(opts['inputJson'] ? {inputJson:String(opts['inputJson'])}: {}),
           vec: opts['vec'] !== false,
           explain: Boolean(opts['explain']),
           all: Boolean(opts['all']),
           cards: opts['cards'] !== false,
-          minConfidence: String(opts['minConfidence'] ?? 'weak'),
+          exact: Boolean(opts['exact']),
+          ...(find.getOptionValueSource('minConfidence')==='cli'?{minConfidence:String(opts['minConfidence'])}:{}),
+          ...(find.getOptionValueSource('limit')==='cli'?{limit:opts['limit']}:{}),
           ...(opts['vectors'] ? { vectors: String(opts['vectors']) } : {}),
           ...(opts['with'] ? { with: String(opts['with']) } : {}),
         }),
@@ -507,8 +538,10 @@ example:
   const note = addGlobals(
     program
       .command('note')
-      .description('leave the two-line verdict on a thread — the one verb that writes')
-      .argument('<thread>', 'session or thread id, or the first 8 characters of one')
+      .description('write or read explicit durable authored memory; assertions retain source and authority labels')
+      .argument('[thread]', 'session or thread id, or the first 8 characters of one')
+      .option('--input-json <json>', 'complete public WriteInput JSON; durable idempotent write')
+      .option('--request-key <key>', 'stable retry key for the same note write')
       .option('--decided <text>', 'what this thread settled (repeatable)', collect)
       .option('--open <text>', 'what it left open (repeatable)', collect)
       .option('--next <text>', 'the next step (repeatable)', collect)
@@ -531,7 +564,9 @@ never touched, and nothing potsherd writes here can be cited as evidence.`);
       () =>
         runNote({
           ...o,
-          session,
+          session:session??'',
+          ...(opts['inputJson'] ? {inputJson:String(opts['inputJson'])}: {}),
+          ...(opts['requestKey'] ? {requestKey:String(opts['requestKey'])}: {}),
           decided: (opts['decided'] as string[]) ?? [],
           open: (opts['open'] as string[]) ?? [],
           next: (opts['next'] as string[]) ?? [],
@@ -626,10 +661,10 @@ example:
       .option('--suggest', 'propose cross-project links to accept by hand; writes nothing'),
   ).addHelpText('after', `
 example:
-  potsherd link 9c4d2f18 b2181bfe --note "same pgbouncer fix"
+  potsherd link 9c4d2f18 bbbb1111 --note "same pgbouncer fix"
   potsherd ls --linked-to 9c4d2f18                   # finds it from either end
-  potsherd ls --linked-to b2181bfe
-  potsherd link 9c4d2f18 b2181bfe --remove
+  potsherd ls --linked-to bbbb1111
+  potsherd link 9c4d2f18 bbbb1111 --remove
   potsherd link --suggest                            # proposals, nothing written`);
   link.action(async (a: string | undefined, b: string | undefined, opts: Record<string, unknown>) => {
     const o = globals(program, link, opts);
@@ -650,8 +685,9 @@ example:
   const show = addGlobals(
     program
       .command('show')
-      .description('read one session end to end, by id or by any unambiguous prefix')
-      .argument('<session>', 'session id, or the first 8 characters of one')
+      .description('read bounded source evidence by id or prefix; --md/--html export a legacy session view')
+      .argument('[session]', 'session id, or the first 8 characters of one')
+      .option('--input-json <json>', 'complete public ReadInput JSON; optional responseFormat compact-v1')
       .addOption(new Option('--from <n>', 'first exchange to print (1-based)').argParser(Number))
       .addOption(new Option('--to <n>', 'last exchange to print').argParser(Number))
       .option('--md', 'markdown, for pasting into an issue or a note')
@@ -669,7 +705,8 @@ example:
       () =>
         runShow({
           ...o,
-          session,
+          session: session ?? '',
+          ...(opts['inputJson'] ? {inputJson:String(opts['inputJson'])}: {}),
           ...(opts['from'] !== undefined ? { from: opts['from'] } : {}),
           ...(opts['to'] !== undefined ? { to: opts['to'] } : {}),
           md: Boolean(opts['md']),
@@ -684,12 +721,13 @@ example:
     program
       .command('graft')
       .description('a token-budgeted brief from one past session, ready to paste into an agent')
-      .argument('<session>', 'a session id, the first 8 characters of one, or a query')
+      .argument('[session]', 'a session id, the first 8 characters of one, or a query')
+      .option('--input-json <json>', 'complete public GraftInput JSON; optional responseFormat compact-v1')
       .option('--about <topic>', 'only the exchanges about this topic')
       .addOption(
         new Option('--budget <n>', 'hard ceiling on the brief, in tokens')
           .argParser(Number)
-          .default(1200),
+          .default(4096),
       )
       .option('--clip', 'copy the brief to the system clipboard')
       .option('--no-model', 'no model call — the card verbatim, labelled unsummarised')
@@ -716,7 +754,8 @@ the stored card verbatim, labelled unsummarised. --no-model asks for that path.`
       () =>
         runGraft({
           ...o,
-          target: session,
+          target: session ?? '',
+          ...(opts['inputJson'] ? {inputJson:String(opts['inputJson'])}: {}),
           ...(opts['about'] !== undefined ? { about: String(opts['about']) } : {}),
           ...(opts['budget'] !== undefined ? { budget: Number(opts['budget']) } : {}),
           clip: Boolean(opts['clip']),
@@ -953,6 +992,9 @@ function globals(program: Command, cmd: Command, local: Record<string, unknown>)
 
   const width = pick<number>('width');
   const claudeDir = pick<string>('claudeDir');
+  const codexDir = pick<string>('codexDir');
+  const piDir = pick<string>('piDir');
+  const opencodeDir = pick<string>('opencodeDir');
   const potsherdDir = pick<string>('potsherdDir');
   void cmd;
   return {
@@ -962,6 +1004,9 @@ function globals(program: Command, cmd: Command, local: Record<string, unknown>)
     ...(width ? { width: Number(width) } : {}),
     debug: Boolean(pick<boolean>('debug')),
     ...(claudeDir ? { claudeDir: String(claudeDir) } : {}),
+    ...(codexDir ? { codexDir: String(codexDir) } : {}),
+    ...(piDir ? { piDir: String(piDir) } : {}),
+    ...(opencodeDir ? { opencodeDir: String(opencodeDir) } : {}),
     ...(potsherdDir ? { potsherdDir: String(potsherdDir) } : {}),
     quiet: Boolean(local['quiet']),
     yes: Boolean(local['yes']),
@@ -1025,10 +1070,10 @@ const PATH6: [string, string, string][] = [
  * five, each with one gloss, is still one glance.
  */
 const REST: [string[], string][] = [
-  [['index', 'show', 'stats', 'doctor'], 'the archive, and what is in it'],
+  [['index', 'maintain', 'show', 'stats', 'doctor'], 'the archive, and what is in it'],
   [['note', 'card', 'tag', 'pin', 'unpin', 'link', 'guard'], 'what you add to it'],
   [['ignore', 'unignore'], 'projects you would rather not see'],
-  [['setup', 'export', 'stack'], 'reaching your other tools'],
+  [['setup', 'export', 'stack', 'reader'], 'reaching your other tools'],
 ];
 
 function tour(o: { width?: number; ascii?: boolean; color?: boolean; json?: boolean } = {}): void {
@@ -1053,7 +1098,7 @@ function tour(o: { width?: number; ascii?: boolean; color?: boolean; json?: bool
     `  ${t.bold('potsherd')} ${t.dim(VERSION)}  ${t.dim(
       wide
         ? `${t.g('—', '-')} your coding-agent sessions, rescued and searchable`
-        : `${t.g('—', '-')} your sessions, rescued and searchable`,
+        : `${t.g('—', '-')} sessions, rescued and searchable`,
     )}`,
   );
   print('');

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { indexAll, rescue, stripAnsi } from '@potsherd/core';
+import { indexAll, rescue, stripAnsi, defaultBudget, type MemoryResponse } from '@potsherd/core';
 import { rmrf, tempDir } from './helpers.js';
 
 /**
@@ -140,275 +140,138 @@ describe('ls', () => {
   });
 });
 
-describe('find', () => {
-  it('prints the resume command for the harness', () => {
-    const r = run(['find', 'pgbouncer transaction pooling', '--width', '80']);
-    expect(r.stdout).toMatch(/claude --resume [0-9a-f-]{36}/);
+const memory = (args: string[]): MemoryResponse => JSON.parse(run([...args, '--json']).stdout) as MemoryResponse;
+const projectScope = { project: '/tmp/potsherd-eval-api' };
+
+describe('find: bounded source evidence', () => {
+  it('preserves native source identity, exact matching text, roles and citations', () => {
+    const j = memory(['find', 'pgbouncer', '--exact']);
+    expect(j.contractVersion).toBe(2);
+    expect(j.evidence.length, JSON.stringify(j)).toBeGreaterThan(0);
+    for (const e of j.evidence) {
+      expect(e.text).toContain('pgbouncer');
+      expect(e.provenance!.nativeSessionId).toBeTruthy();
+      expect(e.citation).toBeTruthy();
+      expect(['user', 'assistant', 'tool_input', 'tool_result', 'ghost_prompt']).toContain(e.role);
+      expect(e.quoteBasis).toBe('redacted_unit');
+    }
+    const human = run(['find', 'pgbouncer', '--exact', '--width', '80']).stdout;
+    expect(human).toContain('pgbouncer');
+    expect(human).toContain('semantic:');
+    expect(human).toContain('support:');
+    expect(j.coverage.semantic).toBe('disabled');
   });
 
-  it('states the limitation on a ghost hit rather than offering a dead command', () => {
-    const r = run(['find', 'brother laser printer', '--width', '80']);
-    expect(r.stdout).toContain('assistant side not recoverable');
-    expect(r.stdout).toContain('ghost');
-  });
-
-  it('finds a subagent transcript by default', () => {
-    const j = JSON.parse(run(['find', 'tree shaking icon set', '--json']).stdout) as {
-      sessions: { isSidechain: boolean }[];
-    };
-    expect(j.sessions.some((s) => s.isSidechain)).toBe(true);
-  });
-
-  it('--sidechains exclude turns that off again', () => {
-    const j = JSON.parse(
-      run(['find', 'tree shaking icon set', '--sidechains', 'exclude', '--json']).stdout,
-    ) as { sessions: { isSidechain: boolean }[] };
-    expect(j.sessions.every((s) => !s.isSidechain)).toBe(true);
-  });
-
-  it('exits non-zero and suggests a verb when nothing matches', () => {
-    const r = run(['find', 'zzzznothinghere', '--width', '80']);
-    expect(r.code).toBe(1);
-    expect(r.stdout).toContain('potsherd ls');
-  });
-
-  /**
-   * Audit F9, first bullet. `--json` returned the absolute path as `project`
-   * while the human view printed the short directory name, and omitted `title`
-   * on many rows — so a caller parsing JSON got a strictly WORSE object than a
-   * reader of the terminal. For a tool whose stated target is the agent, that
-   * is backwards, and it is the kind of gap nobody notices because the pretty
-   * view looks right.
-   *
-   * The path is kept, because a caller that wants to open the directory needs
-   * it. What the test pins is that the name the human sees is there too.
-   */
-  it('--json shows the short project name the terminal shows, not only the path', () => {
-    const r = run(['find', 'pgbouncer transaction pooling', '--width', '80']);
-    const j = JSON.parse(run(['find', 'pgbouncer transaction pooling', '--json']).stdout) as {
-      sessions: { project: string; projectName: string; title: string | null }[];
-    };
-    expect(j.sessions.length).toBeGreaterThan(0);
-    for (const s of j.sessions) {
-      // Whatever the human was shown for this row is present in the JSON.
-      expect(r.stdout).toContain(s.projectName);
-      expect(s.projectName).not.toContain('/');
-      // And the path is still there for anyone who needs to open it.
-      expect(s.project.endsWith(s.projectName)).toBe(true);
+  it('reports lexical degradation and honors explicit vector-off flags', () => {
+    const hybrid = memory(['find', 'pgbouncer']);
+    expect(hybrid.evidence.length).toBeGreaterThan(0);
+    expect(hybrid.coverage.semantic).toBe('missing_assets');
+    for (const flags of [['--no-vec'], ['--vectors', 'off']]) {
+      const lexical = memory(['find', 'pgbouncer', ...flags]);
+      expect(lexical.evidence.length).toBeGreaterThan(0);
+      expect(lexical.coverage.semantic).toBe('disabled');
     }
   });
 
-  it('--json carries the score, the lists and the snippet the human view showed', () => {
-    const j = JSON.parse(run(['find', 'pgbouncer transaction pooling', '--json']).stdout) as {
-      vectors: { used: boolean; reason?: string };
-      lists: { list: string }[];
-      sessions: { score: number; resume: string | null; hits: { snippet: string }[] }[];
-    };
-    expect(j.lists.map((l) => l.list)).toContain('exchanges_fts');
-    expect(j.sessions[0]!.score).toBeGreaterThan(0);
-    expect(j.sessions[0]!.resume).toMatch(/^claude --resume /);
-    expect(j.sessions[0]!.hits[0]!.snippet.length).toBeGreaterThan(0);
-    // No embeddings in this index, so the verb must say why it is text-only.
-    expect(j.vectors.used).toBe(false);
-    expect(j.vectors.reason).toBeTruthy();
-  });
-
-  /**
-   * T10.1 — the same three words on the screen and in the pipe.
-   *
-   * `05`'s contract is `--json` on everything, *identical data to the human
-   * view*. For confidence that is not a nicety: an agent reads the JSON, a
-   * person reads the terminal, and the entire value of the label is that the
-   * two of them are looking at one fact. This runs the shipped binary twice
-   * on one query and compares what each printed.
-   */
-  it('--json and the human view carry identical confidence, row for row', () => {
-    const q = 'pgbouncer transaction pooling';
-    const j = JSON.parse(run(['find', q, '--json']).stdout) as {
-      confidence: string;
-      minConfidence: string;
-      withheld: number;
-      sessions: {
-        score: number;
-        confidence: string;
-        calibrated: number;
-        coverage: number;
-        hits: { confidence: string; calibrated: number }[];
-      }[];
-    };
-    const human = run(['find', q, '--width', '80']).stdout;
-    expect(j.sessions.length).toBeGreaterThan(0);
-    expect(j.confidence).toBe('strong');
-    // The floor `find` runs at, on the record, so a consumer knows whether it
-    // is looking at a filtered page or an unfiltered one.
-    expect(j.minConfidence).toBe('weak');
-    expect(human.split('\n')[0]).toContain(j.confidence);
-    for (const s of j.sessions) {
-      // C-3: the human meta line prints the calibration now, which is the
-      // sort key. This is a locator, not the claim -- the assertion below is
-      // still about the word on the line it finds.
-      const meta = human.split('\n').find((l) => l.includes(s.calibrated.toFixed(4)));
-      expect(meta, `no meta line for a session scored ${s.score}`).toBeDefined();
-      expect(meta!).toContain(s.confidence);
-      // 0..1, and a real number rather than a copy of the fused score, which
-      // on this row is ~0.018.
-      expect(s.calibrated).toBeGreaterThan(0);
-      expect(s.calibrated).toBeLessThanOrEqual(1);
-      expect(s.calibrated).not.toBeCloseTo(s.score, 3);
-      expect(s.coverage).toBeGreaterThan(0);
-      for (const h of s.hits) expect(['strong', 'weak', 'none']).toContain(h.confidence);
+  it('honors project, source, branch and event-time boundaries in complete public JSON inputs', () => {
+    const input = { query: 'pgbouncer', mode: 'literal', scope: projectScope, budget: defaultBudget() };
+    const all = memory(['find', '--input-json', JSON.stringify(input)]);
+    expect(all.evidence.length).toBeGreaterThan(0);
+    expect(all.evidence.every(e => e.project === projectScope.project)).toBe(true);
+    const sourceId = all.evidence[0]!.ref.sourceId;
+    const scoped = memory(['find', '--input-json', JSON.stringify({ ...input, scope: { ...projectScope, sourceIds: [sourceId], branch: 'main', asOf: '2026-06-02T10:00:00.000Z' } })]);
+    expect(scoped.evidence.length).toBeGreaterThan(0);
+    for (const e of scoped.evidence) {
+      expect(e.ref.sourceId).toBe(sourceId);
+      expect(e.branch).toBe('main');
+      expect(Date.parse(e.sourceEventAt!)).toBeLessThanOrEqual(Date.parse('2026-06-02T10:00:00.000Z'));
     }
+    const wrong = memory(['find', '--input-json', JSON.stringify({ ...input, scope: { project: '/tmp/not-enrolled' } })]);
+    expect(wrong.evidence).toEqual([]);
   });
 
-  it('an absent topic is an honest empty in both views, and exits 1', () => {
-    // Every word of this is somewhere in the corpus; no conversation in it is
-    // about the topic. Before T10.1 this returned confident-looking rows whose
-    // top score was inside 12% of a true phrase hit on the reference archive.
-    const q = 'kubernetes ingress payment service';
-    const r = run(['find', q, '--width', '80']);
-    expect(r.code).toBe(1);
-    expect(r.stdout).toContain('no match');
-    expect(r.stdout).toContain('nothing in the index answers');
-    expect(r.stdout).toContain('--min-confidence none');
-    // The last line names the next verb, and after an honest empty the next
-    // verb is a narrower search.
-    expect(r.stdout.trimEnd().split('\n').at(-1)).toContain('potsherd find');
-
-    const j = JSON.parse(run(['find', q, '--json']).stdout) as {
-      confidence: string;
-      withheld: number;
-      sessions: unknown[];
-    };
-    expect(j.sessions).toEqual([]);
-    expect(j.confidence).toBe('none');
-    // The count is the difference between "nothing matched" and "things
-    // matched and none of them well enough", which are different facts.
-    expect(j.withheld).toBeGreaterThan(0);
+  it('finds subagent-owned evidence by default and excludes it when explicitly requested', () => {
+    const all = memory(['find', 'tree shaking icon set']);
+    expect(all.evidence.length).toBeGreaterThan(0);
+    expect(all.evidence.some(e => e.provenance!.parentNativeSessionId !== null)).toBe(true);
+    const excluded = memory(['find', 'tree shaking icon set', '--sidechains', 'exclude']);
+    expect(excluded.evidence.every(e => e.provenance!.parentNativeSessionId === null)).toBe(true);
   });
 
-  /**
-   * **T3.6.** A block is a conversation, so a hit under it can belong to the
-   * session in the heading *or* to a subagent it spawned. The human view marks
-   * the difference; without `sessionId` on the hit `--json` could not, and a
-   * consumer had no way to tell which session actually matched.
-   */
-  it('--json says which session each hit belongs to', () => {
-    const j = JSON.parse(run(['find', 'the', '--json', '--limit', '20']).stdout) as {
-      sessions: { id: string; hits: { sessionId: string; isSidechain: boolean }[] }[];
-    };
-    for (const s of j.sessions) {
-      for (const h of s.hits) expect(typeof h.sessionId).toBe('string');
+  it('delivers ghost prompts without certifying assistant answers or tool outcomes', () => {
+    const j = memory(['find', 'brother laser printer', '--ghosts', 'only']);
+    expect(j.evidence.length, JSON.stringify(j)).toBeGreaterThan(0);
+    expect(j.coverage.unavailableKinds).toContain('original_transcript');
+    for (const e of j.evidence) {
+      expect(e.role).toBe('ghost_prompt');
+      expect(e.text).toContain('printer');
+      expect(e.toolOutcome).not.toBe('success');
     }
-    // …and it is a real distinction, not a field that always echoes the block.
-    const clustered = j.sessions.filter((s) => s.hits.some((h) => h.sessionId !== s.id));
-    expect(clustered.length).toBeGreaterThan(0);
-    expect(
-      clustered.some((s) => s.hits.some((h) => h.sessionId !== s.id && h.isSidechain)),
-    ).toBe(true);
+    expect(j.support.state).not.toBe('sufficient');
+    const human = run(['find', 'brother laser printer', '--ghosts', 'only']).stdout;
+    expect(human).toMatch(/Original transcript unavailable/);
+    expect(human).not.toContain('claude --resume');
   });
 
-  it('shows the matched word rather than a pasted-screenshot placeholder', () => {
-    // The T1.7 review's sharpest complaint: a top-three result whose only
-    // snippet was `[Image: source: /var/folders/…/clipboard-…]`, so nothing on
-    // the screen said why that result was there.
-    //
-    // Held over the WHOLE of stdout, which is where it started and where it
-    // belongs. W8 narrowed it to the snippet lines for one release-candidate
-    // hour, and said so: 8.2 made a session heading a *prompt*, and
-    // `rescue.ts`'s stopping rule — not a slash command, at least eight
-    // characters, not a stopword — admitted
-    // `[Image: source: …/clipboard-….png]`, so the one eval-corpus session
-    // whose prompts are all paste placeholders became headed by one. Narrowing
-    // was the honest holding action; it was not the fix.
-    //
-    // The fix was to compose `isMostlyBoilerplate` — which this same file's
-    // complaint produced, and which `find` already uses to refuse a
-    // placeholder as a SNIPPET — into the title CANDIDATE filter. A string too
-    // empty to quote as evidence is too empty to use as a name. So the
-    // assertion is broad again: no placeholder anywhere on the screen, in a
-    // snippet or in a heading.
-    const r = run(['find', 'pay button spinner', '--width', '80']);
-    const snippets = stripAnsi(r.stdout)
-      .split('\n')
-      .filter((l) => /^ {4}(?!run )\S/.test(l));
-    expect(snippets.length).toBeGreaterThan(0);
-    expect(r.stdout).not.toContain('[Image:');
-    expect(r.stdout).toContain('spinner');
+  it('returns a scoped empty with exit 1 and no fabricated answer', () => {
+    const q = 'zzzznothinghere';
+    const human = run(['find', q]);
+    const json = run(['find', q, '--json']);
+    expect(human.code).toBe(1);
+    expect(json.code).toBe(1);
+    const j = JSON.parse(json.stdout) as MemoryResponse;
+    expect(j.evidence).toEqual([]);
+    expect(j.assertions).toEqual([]);
+    expect(j.support.state).not.toBe('sufficient');
+    expect(human.stdout).not.toMatch(/nothing in the index answers|TRUST ITS SILENCE/);
+    expect(human.stdout).toContain('Memory:');
   });
 
-  it('every snippet line begins on a word, at 80 columns and at 60', () => {
-    for (const width of ['80', '60']) {
-      const r = run(['find', 'idempotency key on a replayed request', '--width', width]);
-      const lines = stripAnsi(r.stdout).split('\n');
-      for (const line of lines) {
-        // Snippet lines are the four-space-indented ones that are not the
-        // `run …` action line.
-        const m = /^ {4}(?!run )(.*)$/.exec(line);
-        if (!m) continue;
-        const body = m[1]!;
-        if (!body || body.startsWith('the session title matched')) continue;
-        // Either it starts at a sentence, or it starts with the ellipsis that
-        // says an excerpt begins here. What it may never do is start with the
-        // tail of a word, which is what `…wn) that book consultations` was.
-        expect(body[0] === '…' || /^[\w"'(\[]/.test(body), `snippet: ${body}`).toBe(true);
-      }
+  it('rejects obsolete flat inputs and explicitly unsupported default flags', () => {
+    for (const flags of [['--no-cards'], ['--min-confidence', 'none'], ['--limit', '20']]) {
+      const r = run(['find', 'pgbouncer', ...flags]);
+      expect(r.code).not.toBe(0);
+      expect(r.stderr).toMatch(/not supported by v2/);
     }
+    for (const scope of [{ projcet: projectScope.project }, { project: projectScope.project, repository: '/tmp/other' }]) {
+      const r = memory(['find', '--input-json', JSON.stringify({ query: 'pgbouncer', scope, budget: defaultBudget() })]);
+      expect(r.warnings).toContain('invalid_memory_input');
+      expect(r.evidence).toEqual([]);
+    }
+    const diagnostic = JSON.parse(run(['find', 'pgbouncer', '--explain', '--no-cards', '--min-confidence', 'none', '--limit', '20', '--json']).stdout);
+    expect(diagnostic.cards).toBe(false);
+    expect(diagnostic.sessions.length).toBeGreaterThan(0);
+    expect(diagnostic.sessions.length).toBeLessThanOrEqual(20);
   });
 
-  it('--ascii keeps the block inside 7-bit and inside the column', () => {
+  it('makes exact source expansion available through immutable refs', () => {
+    const j = memory(['find', 'spinner', '--exact']);
+    expect(j.evidence.length).toBeGreaterThan(0);
+    const hit = j.evidence[0]!;
+    const read = memory(['show', '--input-json', JSON.stringify({ refs: [hit.ref], scope: { sourceIds: [hit.ref.sourceId] }, budget: defaultBudget() })]);
+    expect(read.evidence[0]!.ref).toEqual(hit.ref);
+    expect(read.evidence[0]!.text).toContain(hit.text);
+    expect(read.evidence[0]!.role).toBe(hit.role);
+    expect(read.evidence[0]!.provenance!.nativeSessionId).toBe(hit.provenance!.nativeSessionId);
+  });
+
+  it('keeps default human source text inside width and ASCII limits', () => {
     for (const width of ['80', '60']) {
       const r = run(['find', 'idempotency key on a replayed request', '--width', width, '--ascii']);
-      // eslint-disable-next-line no-control-regex
+      expect(r.code).toBe(0);
       expect(stripAnsi(r.stdout)).toMatch(/^[\x00-\x7f]*$/);
-      // The snippet window reserves room for two ellipses; under --ascii each
-      // is three characters, not one, and reserving two overflowed by four.
-      const { width: got, line } = widest(r.stdout);
-      expect(got, `widest --ascii line (${got}): ${line}`).toBeLessThanOrEqual(Number(width));
+      expect(widest(r.stdout).width).toBeLessThanOrEqual(Number(width));
+      expect(r.stdout.toLowerCase()).toContain('idempotency');
     }
-    expect(run(['find', 'idempotency key', '--width', '80', '--ascii']).stdout).toContain(
-      'Idempotency keys',
-    );
   });
 
-  it('says rescue, not silence, when the index has no ghosts to search', async () => {
-    // `index` does not build ghosts — `rescue` does. An empty
-    // `find --ghosts only` on an indexed-but-never-rescued directory otherwise
-    // reads as "you have no deleted sessions", which is the belief potsherd
-    // exists to correct.
-    const bare = tempDir('potsherd-no-ghosts-');
-    dirs.push(bare);
-    await indexAll({ root: bare, claudeDir: FIXTURE, harnesses: ['claude'], embed: false, full: true });
-    // `find` exits 1 on no match, which is the point of this case.
-    let out = '';
-    try {
-      out = execFileSync(
-        'node',
-        [bin, 'find', 'printer', '--ghosts', 'only', '--potsherd-dir', bare, '--width', '60'],
-        { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] },
-      ).toString();
-    } catch (err) {
-      out = (err as { stdout?: string }).stdout ?? '';
-    }
-    expect(out).toContain('potsherd rescue');
-    expect(widest(out).width).toBeLessThanOrEqual(60);
-  }, 60_000);
-
-  it('says why a result is there when no snippet can show it', () => {
-    // `timezone drift` rather than `pay button spinner`: this is the query
-    // `plans/09 §13.5` measured for exactly this behaviour — one session
-    // returned on the strength of its title alone, because its body contains
-    // neither word — and the session it returns carries a HARNESS title, so
-    // the case survives changes to how potsherd derives titles of its own.
-    // The old query reached this branch only incidentally, and stopped when
-    // 8.2 gave the session it depended on a real name.
-    const r = run(['find', 'timezone drift', '--width', '80']);
-    expect(r.stdout).toContain('the session title matched');
-  });
-
-  it('says text-only in the human view too, rather than pretending', () => {
-    const r = run(['find', 'pgbouncer transaction pooling', '--width', '80']);
-    expect(r.stdout).toContain('bm25');
-    expect(r.stdout).not.toContain('bm25 + vectors');
+  it('does not cite card/title-only routing as transcript evidence', () => {
+    const j = memory(['find', 'timezone drift', '--exact']);
+    expect(j.evidence.every(e => e.text.includes('timezone drift'))).toBe(true);
+    expect(j.evidence.some(e => ['title', 'card'].includes(e.role))).toBe(false);
+    expect(j.support.state).not.toBe('sufficient');
+    // The retained diagnostic makes the metadata-only route inspectable.
+    expect(run(['find', 'timezone drift', '--explain']).stdout).toContain('titles');
   });
 });
 
@@ -416,25 +279,46 @@ describe('show', () => {
   it('reads one session by an 8-character prefix', () => {
     const r = run(['show', '0a2fbf9b', '--width', '80']);
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain('Pin the pgbouncer');
-    expect(r.stdout).toContain('claude --resume');
+    expect(r.stdout).toContain('pgbouncer');
+    expect(r.stdout).toContain('span:');
+    const j = memory(['show', '0a2fbf9b']);
+    expect(j.evidence[0]!.provenance!.nativeSessionId).toMatch(/^0a2fbf9b/);
+    expect(r.stdout).toContain('user');
   });
 
   it('windows with --from and --to', () => {
-    const j = JSON.parse(run(['show', '0a2fbf9b', '--from', '2', '--to', '2', '--json']).stdout) as {
-      from: number;
-      to: number;
-      total: number;
-      exchanges: unknown[];
-    };
-    expect(j.from).toBe(2);
-    expect(j.exchanges.length).toBe(1);
-    expect(j.total).toBe(3);
+    const j = memory(['show', '0a2fbf9b', '--from', '2', '--to', '2']);
+    expect(j.evidence.length, JSON.stringify(j)).toBeGreaterThan(0);
+    expect(j.evidence.every(e => e.provenance!.nativeSessionId.startsWith('0a2fbf9b'))).toBe(true);
+    const exact = memory(['show', '--input-json', JSON.stringify({ legacyRef: { sessionId: j.evidence[0]!.provenance!.nativeSessionId, seq: 2 }, scope: {}, budget: defaultBudget() })]);
+    expect(exact.evidence.map(e => ({ ref: e.ref, text: e.text, role: e.role }))).toEqual(j.evidence.map(e => ({ ref: e.ref, text: e.text, role: e.role })));
+    expect(j.evidence[0]!.text).not.toContain('the connection pool falls over under load');
+  });
+
+  it('rejects JSON read inputs combined with silently conflicting legacy range flags', () => {
+    const first = memory(['show', '0a2fbf9b']);
+    const native = first.evidence[0]!.provenance!.nativeSessionId;
+    const scope = { project: first.evidence[0]!.project! };
+    for (const [target, flags] of [
+      [{ legacyRef: { sessionId: native, seq: 1 } }, ['--from', '2']],
+      [{ legacyRef: { sessionId: native, seq: 2 } }, ['--to', '1']],
+      [{ refs: [first.evidence[0]!.ref] }, ['--from', '2']],
+    ] as const) {
+      const result = run(['show', '--input-json', JSON.stringify({ ...target, scope, budget: defaultBudget() }), ...flags]);
+      expect(result.code, result.stdout).toBe(1);
+      const rejected = JSON.parse(result.stdout) as MemoryResponse;
+      expect(rejected.warnings).toContain('invalid_memory_input');
+      expect(rejected.evidence).toEqual([]);
+      expect(rejected.coverage.state).toBe('unavailable');
+    }
+    const control = memory(['show', '--input-json', JSON.stringify({ legacyRef: { sessionId: native, fromSeq: 2, toSeq: 2 }, scope, budget: defaultBudget() })]);
+    expect(control.evidence.length).toBeGreaterThan(0);
+    expect(control.evidence[0]!.provenance!.nativeSessionId).toBe(native);
   });
 
   it('renders a ghost as prompts, and says the rest is gone', () => {
     const r = run(['show', 'e6aa5ba7', '--width', '80']);
-    expect(r.stdout).toContain('not recoverable');
+    expect(r.stdout).toMatch(/Original transcript unavailable/);
     expect(r.stdout).toContain('brother laser printer');
     expect(r.stdout).not.toContain('claude --resume');
   });
@@ -448,9 +332,10 @@ describe('show', () => {
   it('names the candidates rather than guessing on an ambiguous prefix', () => {
     const r = run(['show', 'a', '--width', '80']);
     expect(r.code).toBe(1);
-    expect(r.stdout).toContain('matches');
+    expect(r.stderr).toContain('matches');
     // The whole id, because the point is that the prefixes collided.
-    expect(r.stdout).toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-/);
+    expect(r.stderr).toMatch(/complete native session id/);
+    expect(r.stderr).toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-/);
   });
 
   it('says so plainly when the id is not there', () => {

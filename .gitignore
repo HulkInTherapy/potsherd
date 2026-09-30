@@ -5,6 +5,7 @@ dist/
 !plugins/*/dist/
 !plugins/*/dist/*.js
 !plugins/*/dist/README.md
+!plugins/*/dist/artifact-manifest.json
 *.tsbuildinfo
 .DS_Store
 *.tgz
@@ -22,3 +23,6 @@ packages/cli/README.md
 
 # python bytecode from scripts/
 __pycache__/
+
+# Third-party notices copied by the CLI build for npm packaging.
+packages/cli/licenses/

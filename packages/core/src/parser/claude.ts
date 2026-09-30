@@ -1,3 +1,4 @@
+import { collectEvidence, CLAUDE_EVIDENCE_VERSION } from './evidence.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -98,6 +99,10 @@ export async function parseClaudeTranscript(
 ): Promise<ParseResult> {
   const absolute = path.resolve(filePath);
   const fromOffset = options.fromOffset ?? 0;
+  const snapshot = fs.readFileSync(absolute);
+  // Link each record to the exchange assigned by this exact parse, never by
+  // counting evidence units (tool and injected records are not human turns).
+  const seqByOffset = new Map<number, number>();
 
   const unknownTypes: Record<string, number> = {};
   let malformedLines = 0;
@@ -148,7 +153,7 @@ export async function parseClaudeTranscript(
   const sessionIdSoFar = (): string =>
     resolveSessionId(absolute, options, recordSessionId, sidechainFlag);
 
-  for await (const line of readJsonlLines(absolute, { start: fromOffset })) {
+  for await (const line of readJsonlLines(absolute, { start: fromOffset, snapshot })) {
     if (!line.terminated) break; // half-written tail: leave it for next run
     endOffset = line.end;
 
@@ -229,12 +234,14 @@ export async function parseClaudeTranscript(
           files: [],
           ...(typeof parsed.parentUuid === 'string' ? { parentUuid: parsed.parentUuid } : {}),
         };
+        seqByOffset.set(line.start, seq);
         continue;
       }
 
       // Not a prompt: a tool_result carrier, or a synthetic user record. Fold
       // its results into the exchange that issued the calls.
       if (current) {
+        seqByOffset.set(line.start, current.seq);
         for (const block of results) {
           const id = typeof block.tool_use_id === 'string' ? block.tool_use_id : undefined;
           if (!id) continue;
@@ -256,6 +263,7 @@ export async function parseClaudeTranscript(
     }
 
     if (role !== 'assistant' || !current) continue;
+    seqByOffset.set(line.start, current.seq);
 
     if (typeof message.model === 'string') model = message.model;
     const text = extractTypedText(content);
@@ -301,7 +309,14 @@ export async function parseClaudeTranscript(
     status: options.status ?? 'live',
   };
 
-  return { session, exchanges, unknownTypes, endOffset, malformedLines };
+  const bySeq = new Map(exchanges.map(exchange => [exchange.seq, exchange]));
+  const legacyByOffset = new Map([...seqByOffset].flatMap(([offset, seq]) => {
+    const exchange = bySeq.get(seq);
+    return exchange ? [[offset, { seq, exchangeId: exchange.id }] as const] : [];
+  }));
+  const evidence = await collectEvidence(absolute, 'claude', fromOffset, { snapshot, legacyByOffset });
+  for(const [kind,count] of Object.entries(evidence.unknownTypes)) unknownTypes[kind]=(unknownTypes[kind]??0)+count;
+  return { session, exchanges, unknownTypes, endOffset, malformedLines, records: evidence.records, continuation: evidence.continuation, evidenceVersion: CLAUDE_EVIDENCE_VERSION, artifactHash: evidence.artifactHash };
 }
 
 /**

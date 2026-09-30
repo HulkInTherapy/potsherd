@@ -359,7 +359,7 @@ describe('audit --verify, piped the way the docs pipe it', () => {
     // A shell with CLAUDE_CONFIG_DIR deliberately *cleared*: the point is that
     // the snippet carries what it needs.
     const env: Record<string, string | undefined> = { ...process.env };
-    delete env['CLAUDE_CONFIG_DIR'];
+    // Keep the disposable supported source root from tests/setup.ts.
     const out = execFileSync('sh', ['-c', snippet], {
       encoding: 'utf8',
       env: env as NodeJS.ProcessEnv,

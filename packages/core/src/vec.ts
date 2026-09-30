@@ -1348,8 +1348,11 @@ export function reconcileVectorStamps(db: Db): {
       );
       adopted += run(
         `UPDATE ${lane.rows} SET embedding_version = ?
-          WHERE (embedding_version IS NULL OR embedding_version != ?)
-            AND EXISTS (SELECT 1 FROM ${lane.blob} b WHERE b.${lane.key} = ${lane.rows}.${lane.key})`,
+          WHERE ${lane.key} IN (
+            SELECT r.${lane.key} FROM ${lane.rows} r
+             WHERE (r.embedding_version IS NULL OR r.embedding_version != ?)
+               AND EXISTS (SELECT 1 FROM ${lane.blob} b WHERE b.${lane.key} = r.${lane.key})
+          )`,
         EMBEDDING_VERSION,
         EMBEDDING_VERSION,
       );
@@ -1364,7 +1367,8 @@ export function reconcileVectorStamps(db: Db): {
   try {
     db.prepare(
       `INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+           WHERE sync_state.value != excluded.value`,
     ).run(STORE_VERSION_KEY, String(EMBEDDING_VERSION), new Date().toISOString());
   } catch {
     /* no `sync_state` yet — migration 3 has not run. Nothing to record. */
@@ -1491,9 +1495,13 @@ export async function embedPending(
     }
     const w = row.kind === 'ghost' ? writers.ghost : writers.exchange;
     try {
-      w.insert.run(row.id, embeddingToBlob(vector));
-      w.stamp.run(EMBEDDING_VERSION, row.id);
-      embedded += 1;
+      db.transaction(()=>{
+       const now=row.kind==='ghost'
+        ? db.prepare('SELECT text a FROM ghost_prompts WHERE id=?').get(row.id) as {a:string}|undefined
+        : db.prepare('SELECT user_text a,assistant_text b FROM exchanges WHERE id=?').get(row.id) as {a:string;b:string|null}|undefined;
+       if(!now||now.a!==row.userText||('b' in now?(now.b??''):'')!==row.assistantText)return;
+       w.insert.run(row.id,embeddingToBlob(vector));w.stamp.run(EMBEDDING_VERSION,row.id);embedded++;
+      })();
     } catch (err) {
       reason = firstLine((err as Error)?.message ?? String(err));
       break;

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { VERSION } from '@potsherd/core';
 import { rmrf, tempDir } from './helpers.js';
 
 /**
@@ -109,7 +110,7 @@ describe('the shipped bundle, with no node_modules anywhere', () => {
   it('starts, and knows its own version', () => {
     const r = run(['--version']);
     expect(r.code, r.stderr).toBe(0);
-    expect(r.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(r.stdout.trim()).toBe(VERSION);
   });
 
   it('audits — the first command anyone runs, and it needs no database', () => {
@@ -132,18 +133,22 @@ describe('the shipped bundle, with no node_modules anywhere', () => {
 
   it('indexes and searches, and finds a prompt from a deleted session', () => {
     const root = path.join(sandbox, 'pd-find');
-    expect(run(['rescue', '--yes', '--no-settings', '--quiet', '--claude-dir', FIXTURE, '--potsherd-dir', root]).code).toBe(0);
-    expect(
-      run(['index', '--full', '--no-embed', '--harness', 'claude', '--claude-dir', FIXTURE, '--potsherd-dir', root]).code,
-    ).toBe(0);
+    const completeFixture=path.join(sandbox,'complete-claude');fs.cpSync(FIXTURE,completeFixture,{recursive:true});
+    const history=path.join(completeFixture,'history.jsonl');fs.writeFileSync(history,fs.readFileSync(history,'utf8').split('\n').filter(line=>{if(!line.trim())return false;try{const row=JSON.parse(line);return typeof row.sessionId==='string';}catch{return false;}}).join('\n')+'\n');
+    expect(run(['rescue', '--yes', '--no-settings', '--quiet', '--claude-dir', completeFixture, '--potsherd-dir', root]).code).toBe(0);
+    const indexed=run(['index', '--full', '--no-embed', '--harness', 'claude', '--claude-dir', completeFixture, '--potsherd-dir', root]);
+    expect(indexed.code,indexed.stderr+'\n'+indexed.stdout).toBe(0);
     const r = run(['find', 'pgbouncer', '--json', '--potsherd-dir', root]);
     expect(r.code, r.stderr).toBe(0);
-    const j = JSON.parse(r.stdout) as { sessions: unknown[] };
-    expect(j.sessions.length).toBeGreaterThan(0);
+    const j = JSON.parse(r.stdout) as {contractVersion:number;evidence:{role:string;text:string}[]};
+    expect(j.contractVersion).toBe(2);expect(j.evidence.length).toBeGreaterThan(0);
+    expect(j.evidence.some(item=>item.text.toLowerCase().includes('pgbouncer'))).toBe(true);
   });
 
   it('reports which sqlite it used, in the human view and in --json', () => {
     const root = path.join(sandbox, 'pd-find');
+    const completeFixture=path.join(sandbox,'complete-claude');fs.cpSync(FIXTURE,completeFixture,{recursive:true});
+    const history=path.join(completeFixture,'history.jsonl');fs.writeFileSync(history,fs.readFileSync(history,'utf8').split('\n').filter(line=>{if(!line.trim())return false;try{const row=JSON.parse(line);return typeof row.sessionId==='string';}catch{return false;}}).join('\n')+'\n');
     const human = run(['doctor', '--claude-dir', FIXTURE, '--potsherd-dir', root, '--width', '80']);
     expect(human.stdout).toContain('node:sqlite');
     const j = JSON.parse(
@@ -157,6 +162,8 @@ describe('the shipped bundle, with no node_modules anywhere', () => {
     // every screen and in front of every `--json` consumer's stderr, for a
     // decision the user did not make and cannot act on.
     const root = path.join(sandbox, 'pd-find');
+    const completeFixture=path.join(sandbox,'complete-claude');fs.cpSync(FIXTURE,completeFixture,{recursive:true});
+    const history=path.join(completeFixture,'history.jsonl');fs.writeFileSync(history,fs.readFileSync(history,'utf8').split('\n').filter(line=>{if(!line.trim())return false;try{const row=JSON.parse(line);return typeof row.sessionId==='string';}catch{return false;}}).join('\n')+'\n');
     const r = run(['ls', '--potsherd-dir', root]);
     expect(r.stderr).toBe('');
   });
@@ -192,6 +199,8 @@ describe('the shipped bundle, with no node_modules anywhere', () => {
       return;
     }
     const root = path.join(sandbox, 'pd-find');
+    const completeFixture=path.join(sandbox,'complete-claude');fs.cpSync(FIXTURE,completeFixture,{recursive:true});
+    const history=path.join(completeFixture,'history.jsonl');fs.writeFileSync(history,fs.readFileSync(history,'utf8').split('\n').filter(line=>{if(!line.trim())return false;try{const row=JSON.parse(line);return typeof row.sessionId==='string';}catch{return false;}}).join('\n')+'\n');
     const loud = run(['ls', '--potsherd-dir', root], { POTSHERD_SQLITE_WARN: '1' });
     expect(loud.stderr).toContain('ExperimentalWarning');
   });

@@ -1,7 +1,12 @@
+import {randomUUID} from 'node:crypto';
+import {spoolRequest,captureStatus,type CaptureStatus} from '../../../core/src/memory/jobs.js';
 import { spawn } from 'node:child_process';
 import process from 'node:process';
+import path from 'node:path';
 import {
   Card,
+  MaintenanceWorker,
+  withPublicationLease,
   countsJson,
   db as store,
   embeddings,
@@ -34,6 +39,8 @@ export interface IndexCommandOptions extends GlobalOptions {
   full?: boolean;
   incremental?: boolean;
   harness?: string;
+  enroll?: string;
+  unenroll?: string;
   /**
    * Tri-state, and the middle state is the one that changed (phase 10 §A2).
    *
@@ -59,8 +66,8 @@ export interface IndexCommandOptions extends GlobalOptions {
 }
 
 /** The harnesses an adapter exists for. `03` §2 names three more; phase 6. */
-const INDEXABLE: readonly string[] = ['claude', 'codex', 'cursor', 'pi'];
-const NOT_YET: readonly string[] = ['gemini', 'opencode', 'copilot'];
+const INDEXABLE: readonly string[] = ['claude', 'codex', 'cursor', 'pi', 'opencode'];
+const NOT_YET: readonly string[] = ['gemini', 'copilot'];
 
 /**
  * `potsherd index` — every transcript on this machine, parsed, redacted,
@@ -100,15 +107,37 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
   }
   const harnesses = parseHarnesses(o.harness);
 
+  const enrollment={...(o.enroll?{enrollHarnesses:parseHarnesses(o.enroll)}:{}),...(o.unenroll?{removeHarnesses:parseHarnesses(o.unenroll)}:{})};
+  const hostRoots={...(o.piDir?{piDir:path.resolve(paths.expandTilde(o.piDir))}:{}),...(o.opencodeDir?{opencodeDir:path.resolve(paths.expandTilde(o.opencodeDir))}:{})};
   const bar = new Progress('indexing', showProgress);
 
-  const report = await lock.withLockAsync(
+  let report:IndexReport;
+  const queued=async():Promise<IndexReport|null>=>{
+   const requestId=randomUUID(),capture={...enrollment,...hostRoots,...(o.claudeDir?{claudeDir:path.resolve(paths.expandTilde(o.claudeDir))}:{}),...(o.codexDir?{codexHome:path.resolve(paths.expandTilde(o.codexDir))}:{}),...(harnesses?{harnesses}:{}),...(o.session?{sessionId:o.session}:{}),full:Boolean(o.full)};
+   const request={kind:'capture' as const,targetId:o.session??'*',inputHash:requestId,requestId,capture};spoolRequest(root,request);
+   // The durable ID uses exactly the queue's identity recipe; no writer is opened here.
+   const {identity}=await import('../../../core/src/memory/spans.js');const jobId=identity('job/v1',request.kind,request.targetId,request.inputHash);
+   startBackgroundEmbedding(root,o);const deadline=Date.now()+Math.max(0,4000-process.uptime()*1000);let status:CaptureStatus|null=null;
+   while(Date.now()<deadline){try{const reader=store.openSqliteReadOnly(paths.dbPath(root));try{status=captureStatus(reader,jobId);}finally{reader.close();}}catch{}
+    if(status?.captured&&status.report)return status.report;
+    await new Promise<void>(resolve=>setTimeout(resolve,50));
+   }
+   if(o.json)printJson({contractVersion:2,requestId,jobId,durable:true,captured:false,state:status?.state??'spooled',db:paths.dbPath(root)});
+   else if(!o.quiet)print(`Index work durably queued (${jobId}). Source publication is pending; the active maintenance worker will retry it.`);
+   return null;
+  };
+  let owned=false;
+  try{const reader=store.openSqliteReadOnly(paths.dbPath(root));try{owned=Boolean(reader.prepare("SELECT 1 FROM maintenance_leases WHERE lane='maintenance' AND process_started_at<>'released'").get());}finally{reader.close();}}catch{}
+  if(owned){const result=await queued();bar.done();if(!result)return 0;report=result;}
+  else try{
+    report = await lock.withLockAsync(
     'index',
-    () =>
-      indexAll({
+    () => withPublicationLease(root,(db,beforeCommit)=>
+      indexAll({db,beforeCommit,...enrollment,...hostRoots,
         root,
         potsherdDir: root,
         ...(o.claudeDir ? { claudeDir: o.claudeDir } : {}),
+        ...(o.codexDir ? { codexHome: o.codexDir } : {}),
         ...(harnesses ? { harnesses } : {}),
         ...(o.session ? { sessionId: o.session } : {}),
         full: Boolean(o.full),
@@ -118,9 +147,10 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
         onProgress: (p) => {
           if (p.phase === 'parse') bar.update(p.done, p.total, `${p.harness}  ${p.note}`);
         },
-      }),
+      })),
     { root, wait: 2000 },
   );
+  }catch(error){if(!(error instanceof Error)||error.message!=='maintenance_busy')throw error;const result=await queued();bar.done();if(!result)return 0;report=result;}
   bar.done();
 
   // The vectors half of the receipt, and the only place it is computed.
@@ -130,7 +160,7 @@ export async function runIndex(o: IndexCommandOptions): Promise<number> {
   if (o.embed === true) {
     // The foreground path: the same work, watched.
     vec = await embedInForeground(root, showProgress);
-  } else if (o.embed !== false && (vec.report?.pending ?? 0) > 0) {
+  } else if (o.embed !== false) {
     spawned = startBackgroundEmbedding(root, o);
     // FIX-F round 2, and the half of C2 that could not land in round 1.
     //
@@ -216,10 +246,11 @@ async function embedInForeground(root: string, showProgress: boolean): Promise<V
   try {
     db = store.open({ root });
     const before = vecStatus(db, root);
+    const worker=new MaintenanceWorker(root,{db});try{await worker.drainOnce();}finally{await worker.close();}
     await lock.withLockAsync(
       'embed',
       async () => {
-        await before.embed?.({
+        await before.embed?.({noAcquire:true,cacheDir:paths.modelsDir(root),
           onProgress: (p) => {
             if (p.phase === 'acquire') fetchBar.update(p.done, p.total, p.file);
             else embedBar.update(p.done, p.total);
@@ -279,6 +310,7 @@ function startBackgroundEmbedding(root: string, o: IndexCommandOptions): boolean
         env: { ...process.env, [WORKER_ENV]: '1' },
       },
     );
+    child.on('error',()=>{});
     child.unref();
     return true;
   } catch {
@@ -302,28 +334,9 @@ function startBackgroundEmbedding(root: string, o: IndexCommandOptions): boolean
  * unwatched process is a lie waiting to be found in a log.
  */
 async function runEmbedWorker(o: IndexCommandOptions): Promise<number> {
-  const root = paths.potsherdDir(o.potsherdDir);
-  const cacheDir = paths.modelsDir(root);
-  let db: Db | null = null;
-  try {
-    db = store.open({ root });
-    const status = vecStatus(db, root);
-    await lock.withLockAsync('embed', async () => void (await status.embed?.({ cacheDir })), {
-      root,
-      wait: 0,
-      lane: 'embed',
-    });
-  } catch {
-    // Locked by another worker, offline, or a database that moved. All three
-    // are answered the same way: leave it for the next run.
-  } finally {
-    try {
-      db?.close();
-    } catch {
-      /* already gone */
-    }
-  }
-  return 0;
+ const root=paths.potsherdDir(o.potsherdDir),worker=new MaintenanceWorker(root);
+ const stop=()=>{void worker.close();};process.once('SIGTERM',stop);process.once('SIGINT',stop);
+ try {await worker.drainOnce();return 0;}catch{return 1;}finally{process.off('SIGTERM',stop);process.off('SIGINT',stop);await worker.close();}
 }
 
 function parseHarnesses(raw?: string): Harness[] | undefined {

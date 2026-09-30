@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
-import { paths, type db as dbNs } from '@potsherd/core';
+import { paths, assertMemorySchema, MaintenanceWorker, SpanDenseLane, LocalMemoryService, db as dbNsRuntime, writeMemoryNotes, type WriteInput, type WriteReceipt, type db as dbNs } from '@potsherd/core';
 import { openIndex } from '../../cli/src/filters.js';
 import { describeError } from './errors.js';
 
@@ -184,3 +184,44 @@ function positiveMs(raw: string | undefined, fallback: number): number {
 }
 
 export { describeError };
+
+// Read-only service connection survives requests and reopens on atomic DB replacement.
+const memories = new WeakMap<ServerContext, {service: LocalMemoryService; db: Db; identity: string; dense:SpanDenseLane}>();
+export function memoryService(ctx: ServerContext): LocalMemoryService {
+  const file = paths.dbPath(rootOf(ctx));
+  const stat = fs.statSync(file);
+  const identity = `${stat.dev}:${stat.ino}`;
+  const existing = memories.get(ctx);
+  if (existing?.identity === identity) {assertMemorySchema(existing.db);return existing.service;}
+  if (existing) { existing.service.close(); void existing.dense.close(); existing.db.close(); memories.delete(ctx); }
+  const db = dbNsRuntime.openSqliteReadOnly(file);
+  try {assertMemorySchema(db);}catch(error){db.close();throw error;}
+  const dense=new SpanDenseLane(db,{root:rootOf(ctx),cacheDir:paths.modelsDir(rootOf(ctx))});
+  const service = new LocalMemoryService(db, {dense, transport: 'mcp', root: rootOf(ctx), write: (input) => writeNotes(ctx,input) });
+  memories.set(ctx, {service, db, identity,dense});
+  return service;
+}
+const workers=new WeakMap<ServerContext,MaintenanceWorker>();
+/** Startup policy is explicit: existing schema17 only, saved enrollment/job debt only. */
+export function startMemoryMaintenance(ctx:ServerContext):void {
+ if(workers.has(ctx))return;const file=paths.dbPath(rootOf(ctx));if(!fs.existsSync(file))return;
+ const inspection=dbNsRuntime.openSqliteReadOnly(file);let eligible=false;
+ try {assertMemorySchema(inspection);eligible=Boolean(inspection.prepare("SELECT 1 FROM sync_state WHERE key='memory:source-enrollment' UNION SELECT 1 FROM maintenance_jobs WHERE state IN('pending','running','retry','blocked') LIMIT 1").get());}catch{}finally{inspection.close();}
+ if(!eligible)return;const worker=new MaintenanceWorker(rootOf(ctx));workers.set(ctx,worker);worker.start();
+}
+export async function closeMemoryService(ctx: ServerContext):Promise<void> {
+ const existing=memories.get(ctx);memories.delete(ctx);
+ if(existing){existing.service.close();existing.db.close();}
+ const worker=workers.get(ctx);workers.delete(ctx);
+ await Promise.all([existing?.dense.close(),worker?.close()]);
+}
+
+export function writeNotes(ctx: ServerContext,input:WriteInput):WriteReceipt {
+  // Explicit writes use their own FULL-synchronous connection; reads never upgrade it.
+  const root=rootOf(ctx);
+  if(!fs.existsSync(paths.dbPath(root)))throw new Error('memory_writer_unavailable');
+  const inspection=dbNsRuntime.openSqliteReadOnly(paths.dbPath(root));
+  try {assertMemorySchema(inspection);}finally{inspection.close();}
+  const writer=dbNsRuntime.open({root});
+  try {return writeMemoryNotes(writer,{...input,origin:'mcp',authority:input.authority??'agent_assertion'},'mcp');}finally{writer.close();}
+}

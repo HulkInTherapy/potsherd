@@ -514,9 +514,8 @@ describe('image payloads that are not prompts', () => {
  *
  * Both are opened **read-only**. Nothing in this file writes to either.
  */
-const FROZEN = process.env['POTSHERD_TEST_CORPUS'] ??
-  path.join(os.homedir(), '.potsherd', 'archive-manual-2026-08-21');
-const LIVE = path.join(os.homedir(), '.claude');
+const FROZEN = process.env['POTSHERD_TEST_CORPUS'];
+const LIVE = process.env['POTSHERD_TEST_CLAUDE_CORPUS'];
 
 interface CorpusReading {
   sources: ClaudeSessionSource[];
@@ -573,11 +572,11 @@ async function readCorpus(dir: string): Promise<CorpusReading> {
   return out;
 }
 
-const hasFrozen = fs.existsSync(path.join(FROZEN, 'projects'));
+const hasFrozen = Boolean(FROZEN && fs.existsSync(path.join(FROZEN, 'projects')));
 
 describe.skipIf(!hasFrozen)('reference corpus (frozen, read-only)', () => {
   it('parses every transcript with no fatal error and the expected counts', async () => {
-    const corpus = await readCorpus(FROZEN);
+    const corpus = await readCorpus(FROZEN!);
     const sessions = corpus.sources.filter((s) => !s.isSidechain);
     const sidechains = corpus.sources.filter((s) => s.isSidechain);
 
@@ -615,11 +614,11 @@ describe.skipIf(!hasFrozen)('reference corpus (frozen, read-only)', () => {
   }, 300_000);
 });
 
-const hasLive = fs.existsSync(path.join(LIVE, 'projects'));
+const hasLive = Boolean(LIVE && fs.existsSync(path.join(LIVE, 'projects')));
 
 describe.skipIf(!hasLive)('live ~/.claude (read-only, floors only)', () => {
   it('discovers at least the reference counts and parses them all', async () => {
-    const corpus = await readCorpus(LIVE);
+    const corpus = await readCorpus(LIVE!);
     const sessions = corpus.sources.filter((s) => !s.isSidechain);
     const sidechains = corpus.sources.filter((s) => s.isSidechain);
 

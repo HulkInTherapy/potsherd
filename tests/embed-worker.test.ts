@@ -30,24 +30,10 @@ import { rmrf, tempDir } from './helpers.js';
  * before it spawns one — which is the third test here, and the one the defect
  * is actually about.
  *
- * ## and then the guarantee went too far — VERIFICATION-5 C-4
- *
- * `isStale` answered `!pidAlive(holder.pid)` and stopped: *"a live owner is
- * never stale."* A live pid became sufficient rather than merely necessary, and
- * two states follow from that which nothing in the product could leave:
- * `kill -9` leaves the lock behind (there is no verb that clears it), and the
- * moment the operating system recycles that pid number to any unrelated
- * process, `index` refuses to spawn a replacement and every surface says
- * *warming* with nothing embedding — **for ever**. That is FIX-F's C2 lie
- * coming back through a door C2 did not close.
- *
- * The answer is not to delete the mtime test again; it is to give it something
- * true to read. A holder now stamps its own lock while it works, so the tests
- * below say `touch()` where a real pass has a heartbeat, and D3's guarantee is
- * restated exactly as it was: **a pass that is still working is never taken
- * over, however long it runs.** What is no longer true, and must not be, is
- * that a lock nobody has touched for ten minutes is honoured because some
- * process somewhere happens to hold its number.
+ * Phase 12 corrects C-4's timeout: an old heartbeat does not prove PID reuse.
+ * Identified live work is excluded even while its event loop is blocked. New
+ * leases record process birth identity where available; legacy live-pid leases
+ * remain protected until their owner exits or they are explicitly removed.
  */
 
 const roots: string[] = [];
@@ -137,41 +123,30 @@ describe('index does not spawn an embedder on top of a running one', () => {
   });
 });
 
-describe('a lock nobody is refreshing does not outlive its owner — C-4', () => {
-  it('a live pid is necessary and not sufficient: an unstamped lock ages out', () => {
+describe('live process exclusion and legacy PID ambiguity — phase 12', () => {
+  it('does not expire identified live work because its event loop missed heartbeats', () => {
     const r = root();
     const held = lock.acquire('embed', { root: r, lane: 'embed' });
     try {
-      // The poisoned lock, exactly: `owner.json` names a pid that is alive —
-      // this process's own, the strongest possible version of the case — and
-      // nothing has stamped the lock for eleven minutes. Before C-4 this was
-      // honoured for the life of the machine.
       age(held.path, 11);
-      expect(lock.holder({ root: r, lane: 'embed' })).toBeNull();
-      const taken = lock.acquire('embed', { root: r, lane: 'embed' });
-      expect(taken.path).toBe(held.path);
-      taken.release();
+      expect(lock.holder({ root: r, lane: 'embed' })?.pid).toBe(process.pid);
+      expect(() => lock.acquire('embed', { root: r, lane: 'embed' })).toThrow(/another potsherd/);
     } finally {
       held.release();
     }
   });
 
-  it('a recycled pid is a stale lock, not a working embedder', () => {
+  it('conservatively honors a legacy live pid whose birth identity is unknown', () => {
     const r = root();
     const lockPath = path.join(r, '.lock.embed');
     fs.mkdirSync(lockPath, { recursive: true });
-    // The verifier's measurement, without needing the operating system to
-    // actually recycle a number: a lock whose recorded pid is alive and is not
-    // the process that wrote it. `nohup sleep 400 &` in their run; this process
-    // here, which is alive by construction and has never held this lane.
     fs.writeFileSync(
       path.join(lockPath, 'owner.json'),
       JSON.stringify({ pid: process.pid, op: 'embed', at: '2026-08-24T18:41:23.642Z', host: process.env.HOSTNAME ?? '' }),
     );
     age(lockPath, 30);
-    expect(lock.holder({ root: r, lane: 'embed' })).toBeNull();
-    const taken = lock.acquire('embed', { root: r, lane: 'embed' });
-    taken.release();
+    expect(lock.holder({ root: r, lane: 'embed' })?.pid).toBe(process.pid);
+    expect(() => lock.acquire('embed', { root: r, lane: 'embed' })).toThrow(/another potsherd/);
   });
 
   it('the heartbeat is the holder\'s own, and stops when it releases', () => {

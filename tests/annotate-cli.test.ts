@@ -114,11 +114,16 @@ const ids = (j: LsJson): string[] => j.sessions.map((s) => s.id);
  * regex it was written against. This reads the session.
  */
 function firstUserPrompt(id: string): string | null {
-  const j = json<{ exchanges?: { userText?: string | null }[] }>(['show', id.slice(0, 8)]);
-  for (const e of j.exchanges ?? []) {
-    const t = (e.userText ?? '').trim();
-    if (t) return t;
-  }
+  const first=json<{evidence:{role:string;text:string}[]}>(['show',id]);
+  if(first.evidence[0]?.role==='ghost_prompt')return null;
+  const texts:string[]=[];let cursor:string|undefined;let pages=0;
+  do{
+    if(++pages>100)throw new Error('first exchange pagination did not finish');
+    const page=json<{evidence:{role:string;text:string}[];continuation?:string}>(['show','--input-json',JSON.stringify({...(cursor?{cursor}:{legacyRef:{sessionId:id,seq:1}}),scope:{}})]);
+    for(const item of page.evidence??[])if(item.role==='user')texts.push(item.text);
+    cursor=page.continuation;
+  }while(cursor);
+  const text=texts.join('\n').trim();if(text)return text;
   return null;
 }
 

@@ -1,0 +1,68 @@
+{
+  "producerVersion": "1.2.1",
+  "producerBundleSha256": "ff458036a7e5af7fa56446c5292804abac0d02c0fdb7dc049a54f7743b60953d",
+  "fixtureSha256": "aade9e64a2af7b066ac6a403f83ed7ff7a630b4bcc3a68a8cbcbc63c39c6aca6",
+  "seedSha256": "482c9864948dcab3d8c05082b5b2867cebcd0ab469d32fbd4eb1b72144de4c8c",
+  "producedAt": "2026-09-29T10:00:23.161Z",
+  "node": "v24.9.0",
+  "driver": "node:sqlite",
+  "models": false,
+  "network": false,
+  "fixtureOnly": true,
+  "commands": [
+    {
+      "args": [
+        "--version"
+      ],
+      "status": 0,
+      "stdout": "1.2.1\n"
+    },
+    {
+      "args": [
+        "index",
+        "--harness",
+        "claude",
+        "--no-embed",
+        "--json"
+      ],
+      "status": 0,
+      "stdout": "{\n  \"ranAt\": \"2026-09-29T10:00:22.803Z\",\n  \"full\": false,\n  \"harnesses\": [\n    {\n      \"harness\": \"claude\",\n      \"displayName\": \"Claude Code\",\n      \"sourceDir\": \"/var/folders/x7/878s1bxj4c950snx6h2200k00000gn/T/potsherd-121-producer-DNIn9q/claude/projects\",\n      \"present\": true,\n      \"discovered\": 1,\n      \"parsed\": 1,\n      \"skipped\": 0,\n      \"failed\": 0,\n      \"sessions\": 1,\n      \"sidechains\": 0,\n      \"exchanges\": 1,\n      \"toolCalls\": 1,\n      \"redactedExchanges\": 0,\n      \"malformedLines\": 0,\n      \"bytes\": 1024,\n      \"errors\": [],\n      \"unchanged\": false,\n      \"ms\": 11\n    }\n  ],\n  \"totals\": {\n    \"sessions\": 1,\n    \"exchanges\": 1,\n    \"toolCalls\": 1,\n    \"redactedExchanges\": 0,\n    \"parsed\": 1,\n    \"skipped\": 0,\n    \"failed\": 0,\n    \"bytes\": 1024\n  },\n  \"recordTypes\": [],\n  \"redaction\": {\n    \"total\": 0\n  },\n  \"threads\": {\n    \"threads\": [],\n    \"edges\": [],\n    \"refused\": [],\n    \"withoutLineage\": [],\n    \"candidates\": 1\n  },\n  \"ghosts\": {\n    \"ghosts\": 0,\n    \"prompts\": 0,\n    \"redactedPrompts\": 0,\n    \"counts\": {\n      \"total\": 0,\n      \"byType\": {\n        \"aws\": 0,\n        \"gcp\": 0,\n        \"github\": 0,\n        \"slack\": 0,\n        \"stripe\": 0,\n        \"openai\": 0,\n        \"anthropic\": 0,\n        \"npm\": 0,\n        \"jwt\": 0,\n        \"private-key\": 0,\n        \"basic-auth\": 0,\n        \"generic\": 0,\n        \"entropy\": 0\n      }\n    },\n    \"unchanged\": false\n  },\n  \"embeddings\": {\n    \"enabled\": false,\n    \"available\": true,\n    \"model\": \"Xenova/bge-small-en-v1.5\",\n    \"embedded\": 0,\n    \"upToDate\": 0,\n    \"ghostPrompts\": 0,\n    \"downloaded\": false,\n    \"ms\": 0,\n    \"reason\": \"text search only — potsherd index --embed adds vectors\"\n  },\n  \"vec\": {\n    \"available\": true,\n    \"backend\": \"scan\"\n  },\n  \"ms\": 25,\n  \"redactionScope\": \"run\",\n  \"vectors\": {\n    \"embedded\": 0,\n    \"pending\": 1,\n    \"total\": 1,\n    \"runtimeReady\": false,\n    \"acquireBytes\": 48385798,\n    \"working\": false,\n    \"phase\": \"pending\"\n  },\n  \"vectorBackend\": \"scan\",\n  \"embeddingInBackground\": false,\n  \"db\": \"/var/folders/x7/878s1bxj4c950snx6h2200k00000gn/T/potsherd-121-producer-DNIn9q/store/potsherd.db\"\n}\n"
+    },
+    {
+      "args": [
+        "note",
+        "33333333-3333-4333-8333-333333333333",
+        "--decided",
+        "Synthetic pool remains in transaction mode",
+        "--open",
+        "Synthetic latency still unmeasured",
+        "--next",
+        "Run the synthetic check",
+        "--by",
+        "fixture-author",
+        "--json"
+      ],
+      "status": 0,
+      "stdout": "{\n  \"lane\": \"notes\",\n  \"appended\": true,\n  \"superseded\": null,\n  \"transcriptTouched\": false,\n  \"thread\": {\n    \"id\": \"33333333-3333-4333-8333-333333333333\",\n    \"sessions\": [\n      \"33333333-3333-4333-8333-333333333333\"\n    ],\n    \"head\": \"33333333-3333-4333-8333-333333333333\"\n  },\n  \"earlier\": 0,\n  \"wrote\": {\n    \"kind\": \"note\",\n    \"citable\": false,\n    \"id\": 1,\n    \"threadId\": \"33333333-3333-4333-8333-333333333333\",\n    \"sessionId\": \"33333333-3333-4333-8333-333333333333\",\n    \"decided\": \"Synthetic pool remains in transaction mode\",\n    \"open\": \"Synthetic latency still unmeasured\",\n    \"next\": \"Run the synthetic check\",\n    \"headline\": \"Synthetic pool remains in transaction mode\",\n    \"author\": \"fixture-author\",\n    \"via\": \"cli\",\n    \"writtenAt\": \"2026-09-29T10:00:22.969Z\"\n  },\n  \"notes\": [\n    {\n      \"kind\": \"note\",\n      \"citable\": false,\n      \"id\": 1,\n      \"threadId\": \"33333333-3333-4333-8333-333333333333\",\n      \"sessionId\": \"33333333-3333-4333-8333-333333333333\",\n      \"decided\": \"Synthetic pool remains in transaction mode\",\n      \"open\": \"Synthetic latency still unmeasured\",\n      \"next\": \"Run the synthetic check\",\n      \"headline\": \"Synthetic pool remains in transaction mode\",\n      \"author\": \"fixture-author\",\n      \"via\": \"cli\",\n      \"writtenAt\": \"2026-09-29T10:00:22.969Z\"\n    }\n  ]\n}\n"
+    },
+    {
+      "args": [
+        "pin",
+        "33333333-3333-4333-8333-333333333333",
+        "--json"
+      ],
+      "status": 0,
+      "stdout": "{\n  \"session\": {\n    \"id\": \"33333333-3333-4333-8333-333333333333\",\n    \"kind\": \"session\",\n    \"title\": \"Keep the synthetic pool in transaction mode.\"\n  },\n  \"pinned\": true,\n  \"pinnedAt\": \"2026-09-29T10:00:23.061Z\",\n  \"changed\": true,\n  \"tags\": []\n}\n"
+    },
+    {
+      "args": [
+        "tag",
+        "33333333-3333-4333-8333-333333333333",
+        "synthetic-upgrade",
+        "--json"
+      ],
+      "status": 0,
+      "stdout": "{\n  \"session\": {\n    \"id\": \"33333333-3333-4333-8333-333333333333\",\n    \"kind\": \"session\",\n    \"title\": \"Keep the synthetic pool in transaction mode.\"\n  },\n  \"tags\": [\n    \"synthetic-upgrade\"\n  ],\n  \"added\": [\n    \"synthetic-upgrade\"\n  ],\n  \"removed\": [],\n  \"unchanged\": [],\n  \"rejected\": []\n}\n"
+    }
+  ]
+}

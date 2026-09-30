@@ -756,7 +756,7 @@ function footer(
  * Truncate a quote to `max` columns **without ever cutting a mask in half**.
  *
  * Redaction happens at index time, so the text a quote is drawn from can
- * contain `‹redacted:aws:9f2b1c04›` (redact.ts) or `‹elided:image/png:109362
+ * contain `‹redacted:aws:cccc2222›` (redact.ts) or `‹elided:image/png:109362
  * bytes›` (redact-elide.ts). Both are one atom: the first is the *only* thing
  * a reader has telling them a secret was there, and `‹redacted:aws:9f2b…` is
  * not a shorter version of that fact — it is a fragment that reads like

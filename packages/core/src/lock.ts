@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import os from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { potsherdDir } from './paths.js';
 
 /**
@@ -17,8 +20,8 @@ import { potsherdDir } from './paths.js';
  *
  * It is a **last resort**, not the rule. A lock with a readable owner is
  * decided by whether that owner is still running (see {@link isStale}); this
- * number only decides the case where `owner.json` is unreadable or was written
- * on another host, where there is nothing else to go on.
+ * number only decides the case where owner metadata is unreadable. A named
+ * foreign host cannot be probed locally and is conservatively protected.
  *
  * It used to decide every case, and that is FIX-B D3: a full embedding pass
  * runs for hours, so from minute five onward every `potsherd index` removed the
@@ -27,35 +30,6 @@ import { potsherdDir } from './paths.js';
  * guarantee.
  */
 const STALE_MS = 5 * 60_000;
-
-/**
- * How long a lock whose owner **is alive** is honoured without a heartbeat.
- *
- * VERIFICATION-5 C-4. `isStale` used to answer `!pidAlive(holder.pid)` and stop
- * there — *"a live owner is never stale"* — which made a live pid not merely
- * necessary but sufficient. Two things follow, and both were measured:
- *
- *   1. `kill -9` leaves `.lock.embed` behind and nothing in the product removes
- *      it. There is no `unlock` verb; all 22 were checked.
- *   2. **A recycled pid poisons the lane for ever.** Once the operating system
- *      hands that pid number to any unrelated process, `pidAlive` is true,
- *      `isStale` is false, `index` refuses to spawn a replacement, and every
- *      surface says *warming* with nothing embedding — which is FIX-F's C2 lie
- *      coming back in through a door C2 did not close.
- *
- * So a live pid is necessary and not sufficient: an owner that is alive **and**
- * has not touched its lock inside this window is stale. That is what the mtime
- * test was always for, and the reason it could not be used before is that
- * nothing refreshed the lock — a five-minute expiry on a pass that runs for
- * hours is FIX-B's D3, where every `index` past minute five removed a working
- * embedder's lock and started another beside it.
- *
- * The half that makes the timeout safe is therefore {@link HEARTBEAT_MS}: the
- * holder stamps its own lock while it works, so a *working* owner is never more
- * than one beat old and thirty consecutive misses is the threshold here. A
- * timeout on a lock nobody refreshes would only move the failure.
- */
-const LIVE_STALE_MS = 10 * 60_000;
 
 /**
  * How often a holder stamps its own lock.
@@ -95,7 +69,7 @@ export interface LockHandle {
    *
    * Called on a timer for the whole life of the lock, and exposed so a caller
    * in a long **synchronous** stretch — where no timer can fire — can say so
-   * itself. See {@link LIVE_STALE_MS} for why anybody has to.
+   * itself. A missed heartbeat never expires an identified live process.
    */
   touch(): void;
 }
@@ -117,6 +91,10 @@ export interface LockInfo {
   op: string;
   at: string;
   host: string;
+  /** Local process birth identity, when the OS exposes one. */
+  processStart?: string;
+  /** Unique lease identity. Legacy owner.json records have neither field. */
+  token?: string;
 }
 
 export function acquire(
@@ -129,54 +107,80 @@ export function acquire(
 
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 
-  for (;;) {
-    try {
-      fs.mkdirSync(lockPath);
-      const info: LockInfo = {
-        pid: process.pid,
-        op,
-        at: new Date().toISOString(),
-        host: process.env.HOSTNAME ?? '',
-      };
-      fs.writeFileSync(path.join(lockPath, 'owner.json'), JSON.stringify(info), { mode: 0o600 });
-      let released = false;
-      const touch = () => {
-        if (released) return;
-        try {
-          const now = new Date();
-          fs.utimesSync(lockPath, now, now);
-        } catch {
-          /* the lock was removed under us; `release` is about to find that out */
+  // Publish metadata with the directory, avoiding a mkdir/owner-write gap.
+  // Every owner record has a unique filename. No operation recursively deletes
+  // the shared path: unlinking A's record cannot affect B, and rmdir cannot
+  // remove B's already-populated directory even if publication interleaves.
+  const token = randomUUID();
+  const ownerFile = `owner.${token}.json`;
+  const claim = `${lockPath}.claim-${token}`;
+  const start = processStart(process.pid);
+  const info: LockInfo = {
+    pid: process.pid,
+    op,
+    at: new Date().toISOString(),
+    host: os.hostname(),
+    token,
+    ...(start ? { processStart: start } : {}),
+  };
+  fs.mkdirSync(claim, { mode: 0o700 });
+  try {
+    fs.writeFileSync(path.join(claim, ownerFile), JSON.stringify(info), { mode: 0o600 });
+    for (;;) {
+      let observed = fs.existsSync(lockPath) ? readOwner(lockPath) : null;
+      if (fs.existsSync(lockPath)) {
+        if (isStale(lockPath, observed?.info ?? null)) {
+          retire(lockPath, observed?.file);
+          // Unknown extra files cannot be safely removed; fail closed.
+          if (!fs.existsSync(lockPath)) continue;
+          observed = readOwner(lockPath);
         }
-      };
-      const beat = setInterval(touch, HEARTBEAT_MS);
-      // Never hold the event loop open for a heartbeat. The embedding worker is
-      // detached and nothing waits on it, so a timer that kept it alive would
-      // outlive the pass and hold the lane it is meant to be reporting on.
-      beat.unref?.();
-      return {
-        path: lockPath,
-        touch,
-        release() {
-          if (released) return;
-          released = true;
-          clearInterval(beat);
-          try {
-            fs.rmSync(lockPath, { recursive: true, force: true });
-          } catch { /* the process is exiting anyway */ }
-        },
-      };
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      const holder = readOwner(lockPath);
-      if (isStale(lockPath, holder)) {
-        try { fs.rmSync(lockPath, { recursive: true, force: true }); } catch { /* raced */ }
+        if (Date.now() >= deadline) throw new LockBusyError(observed?.info ?? null, lockPath);
+        sleepSync(100);
         continue;
       }
-      if (Date.now() >= deadline) throw new LockBusyError(holder, lockPath);
-      sleepSync(100);
+      try {
+        fs.renameSync(claim, lockPath);
+        break;
+      } catch (err) {
+        if (!['EEXIST', 'ENOTEMPTY'].includes((err as NodeJS.ErrnoException).code ?? '')) throw err;
+        // A concurrent fully-published owner won; inspect it on the next pass.
+      }
     }
+  } finally {
+    // This private staging path is never the published lease.
+    fs.rmSync(claim, { recursive: true, force: true });
   }
+
+  let directory: number;
+  try {
+    directory = fs.openSync(lockPath, 'r');
+  } catch (err) {
+    retire(lockPath, ownerFile);
+    throw err;
+  }
+  let released = false;
+  const touch = () => {
+    if (released) return;
+    try {
+      const now = new Date();
+      // The descriptor names this owner's inode, even after path replacement.
+      fs.futimesSync(directory, now, now);
+    } catch { /* no authority over a replacement path */ }
+  };
+  const beat = setInterval(touch, HEARTBEAT_MS);
+  beat.unref?.();
+  return {
+    path: lockPath,
+    touch,
+    release() {
+      if (released) return;
+      released = true;
+      clearInterval(beat);
+      try { fs.closeSync(directory); } catch { /* already closed */ }
+      retire(lockPath, ownerFile);
+    },
+  };
 }
 
 /** Run `fn` under the lock, always releasing it. */
@@ -206,44 +210,67 @@ export async function withLockAsync<T>(
   }
 }
 
-function readOwner(lockPath: string): LockInfo | null {
+/** Read only immutable owner records; never infer an owner from a pid alone. */
+function readOwner(lockPath: string): { info: LockInfo | null; file: string } | null {
   try {
-    return JSON.parse(fs.readFileSync(path.join(lockPath, 'owner.json'), 'utf8')) as LockInfo;
+    const files = fs.readdirSync(lockPath);
+    const file = files.find((name) => /^owner\.[0-9a-f-]+\.json$/.test(name))
+      ?? (files.includes('owner.json') ? 'owner.json' : undefined);
+    if (!file) return null;
+    try {
+      const info = JSON.parse(fs.readFileSync(path.join(lockPath, file), 'utf8')) as LockInfo;
+      if (!Number.isInteger(info.pid) || info.pid <= 0 || typeof info.host !== 'string') return { info: null, file };
+      return { info, file };
+    } catch {
+      return { info: null, file };
+    }
   } catch {
     return null;
   }
 }
 
+/** Remove only the observed record, then only an empty directory. */
+function retire(lockPath: string, file?: string): void {
+  try {
+    if (file) fs.unlinkSync(path.join(lockPath, file));
+    fs.rmdirSync(lockPath);
+  } catch { /* replaced, already retired, or unknown nonempty metadata */ }
+}
+
 /**
- * Whether this lock may be taken over.
- *
- * **A live owner is never stale.** That is the whole of the change, and the
- * reason is arithmetic: the embedding pass measured on the reference archive
- * takes hours, {@link STALE_MS} is five minutes, and the old body fell through
- * to the mtime test even after confirming the owner was alive. So every run
- * past minute five removed a working process's lock and started another one
- * beside it — the pile-up D3 measured, with the previous embedders still
- * running and still burning CPU.
- *
- * **And a live owner is not thereby a working one** (VERIFICATION-5 C-4). A pid
- * the operating system has since handed to something else is alive and is not
- * this lock's owner, and `kill -9` leaves a lock behind that nothing in the
- * product removes — so the answer used to be *warming, for ever*. A live owner
- * is honoured for {@link LIVE_STALE_MS} **since it last stamped its lock**,
- * which is thirty heartbeats, and a holder that is working stamps it every
- * {@link HEARTBEAT_MS}. D3's guarantee is untouched by that: a pass that runs
- * for hours is refreshing the whole time, so its lock never ages at all.
- *
- * The plain mtime test survives for the one case it is the only answer to: a
- * lock whose `owner.json` is unreadable, or which was written on another host
- * and whose pid means nothing here.
+ * Dead local processes and proven PID reuse can be recovered immediately.
+ * Without process birth evidence a live local pid is conservatively honoured,
+ * including legacy leases. Heartbeat age cannot distinguish a paused/busy
+ * event loop from a recycled pid. Foreign owners cannot be checked locally
+ * and are protected until explicitly removed. Unidentified leases retain the
+ * historical grace period; unknown extra files fail closed.
  */
 function isStale(lockPath: string, holder: LockInfo | null): boolean {
-  if (holder && holder.pid && (!holder.host || holder.host === (process.env.HOSTNAME ?? ''))) {
+  if (holder && (!holder.host || holder.host === os.hostname() || holder.host === (process.env.HOSTNAME ?? ''))) {
     if (!pidAlive(holder.pid)) return true;
-    return ageMs(lockPath) > LIVE_STALE_MS;
+    const currentStart = holder.processStart ? processStart(holder.pid) : null;
+    return Boolean(currentStart && currentStart !== holder.processStart);
   }
-  return ageMs(lockPath) > STALE_MS;
+  return !holder && ageMs(lockPath) > STALE_MS;
+}
+
+/** Linux exposes kernel start ticks; macOS/BSD expose a process birth date. */
+function processStart(pid: number): string | null {
+  try {
+    if (process.platform === 'linux') {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      return fields[19] ? `linux:${fields[19]}` : null;
+    }
+    if (process.platform === 'darwin' || process.platform === 'freebsd') {
+      const start = execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 1000,
+        env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+      }).trim();
+      return start ? `${process.platform}:${start}` : null;
+    }
+  } catch { /* birth identity unavailable: keep a live owner, never guess */ }
+  return null;
 }
 
 /** How long since this lock was last stamped. `Infinity` when it is not there. */
@@ -273,7 +300,7 @@ export function holder(opts: { root?: string; lane?: Lane } = {}): LockInfo | nu
   } catch {
     return null;
   }
-  const info = readOwner(lockPath);
+  const info = readOwner(lockPath)?.info ?? null;
   return isStale(lockPath, info) ? null : info;
 }
 

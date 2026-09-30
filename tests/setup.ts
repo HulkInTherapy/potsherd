@@ -16,6 +16,7 @@ const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'potsherd-vitest-'));
 process.env['POTSHERD_DIR'] = path.join(sandbox, 'potsherd');
 process.env['CLAUDE_CONFIG_DIR'] = path.join(sandbox, 'claude-empty');
 process.env['NO_COLOR'] = '1';
+for(const harness of ['CODEX','CURSOR','PI','GEMINI','OPENCODE','COPILOT'])process.env[`POTSHERD_${harness}_DIR`]=path.join(sandbox,`.${harness.toLowerCase()}`);
 
 /**
  * And no test may pull the 48 MB embedding runtime over the wire.

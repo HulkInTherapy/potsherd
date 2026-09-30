@@ -252,7 +252,7 @@ describe('the test count the documents quote', () => {
     // The rule this encodes: a number in a phase handoff is a measurement with
     // a date on it; a number in the README is a claim about the current build.
     // Only the second kind has to agree with the first kind of anything else.
-    const files = ['README.md', 'FINAL-REPORT.md', 'CHANGELOG.md', 'docs/08-STATE-OF-PLAY.md'];
+    const files = ['README.md', 'CHANGELOG.md', 'docs/release-candidate.md'];
     const found = new Map<string, Set<string>>();
     for (const f of files) {
       // A line that says `baseline` is quoting history — the handoff records
@@ -265,7 +265,7 @@ describe('the test count the documents quote', () => {
         .join('\n');
       // `1,433 tests`, `1,433 green`, `1,433-test`, `pnpm test  # 1,433`
       const ns = new Set(
-        [...text.matchAll(/\b(1,\d{3})(?=[\s-]?(?:tests?\b|green\b|$))/gm)].map(
+        [...text.matchAll(/\b(\d{1,3}(?:,\d{3})+)(?=[\s-]?(?:tests?\b|green\b|$))/gm)].map(
           (m) => m[1] as string,
         ),
       );
@@ -315,6 +315,10 @@ describe('every verb ends with the next verb', () => {
     setup: 'ends by naming the flag it needs; there is no next verb until it has one',
     'doctor --privacy': 'ends with the privacy receipt, which is the point of it',
     'find --explain': 'ends with the ledger it was asked for; the numbers are the output',
+    find: 'bounded v2 source response ends with measured budget/coverage',
+    'find --ghosts only': 'bounded retained-prompt response ends with measured budget/coverage',
+    'find (no match)': 'v2 scoped empty ends with measured budget/coverage',
+    show: 'bounded exact source response ends with measured budget/coverage',
     'find --explain (no match)': 'falls through to the empty-result screen',
   };
 
@@ -324,6 +328,11 @@ describe('every verb ends with the next verb', () => {
       const lines = r.stdout.split('\n').filter((l) => l.trim() !== '');
       const last = lines.at(-1) ?? '';
       if (EXEMPT[v.name]) {
+        if (['find', 'find --ghosts only', 'find (no match)', 'show'].includes(v.name)) {
+          expect(r.stdout).toContain('Memory:');
+          expect(r.stdout).toContain('Tokens:');
+          expect(r.stdout).toContain('support:');
+        }
         // An exempt screen still has to say *something*; `setup` with no client
         // says it on stderr, because it is an error.
         expect(
@@ -407,13 +416,16 @@ describe('find --json', () => {
    * which a bare array of sessions cannot. `plans/phases/phase-1-foundation.md`
    * documents `jq '.[0].session'` and is the thing that needs correcting.
    */
-  it('is an object with .sessions, not a bare array', () => {
+  it('is a scoped evidence envelope with coverage, support and measured budget', () => {
     const r = invoke(['find', 'pgbouncer'], ['--json']);
     const j = JSON.parse(r.stdout) as Record<string, unknown>;
     expect(Array.isArray(j)).toBe(false);
-    expect(Array.isArray(j['sessions'])).toBe(true);
-    expect(j).toHaveProperty('vectors');
-    expect(j).toHaveProperty('ms');
+    expect(j['contractVersion']).toBe(2);
+    expect(Array.isArray(j['evidence'])).toBe(true);
+    expect((j['evidence'] as unknown[]).length).toBeGreaterThan(0);
+    expect(j).toHaveProperty('coverage');
+    expect(j).toHaveProperty('support');
+    expect(j).toHaveProperty('budget');
   });
 });
 
@@ -532,12 +544,12 @@ describe('the version a user reads', () => {
     expect(doc.stdout).toContain(`potsherd ${cli}`);
   });
 
-  it('is a plain semver triple, so it can be compared with a git tag', () => {
+  it('is valid semver, including local prerelease candidates', () => {
     // `0.2.0` was still being printed at tag `v0.4.0`. Nothing in the suite can
     // reach the tag list of the repository a user cloned, but it can insist the
     // string is the shape a tag is made from, so that comparing the two is a
     // one-line check rather than a parse.
-    expect(manifest('packages/cli/package.json').version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(manifest('packages/cli/package.json').version).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/);
   });
 
   /**
@@ -565,6 +577,7 @@ describe('the version a user reads', () => {
       ['plugins/claude-code/.claude-plugin/plugin.json', (o) => o['version']],
       ['plugins/claude-code/package.json', (o) => o['version']],
       ['plugins/codex/.codex-plugin/plugin.json', (o) => o['version']],
+      ['plugins/codex/package.json', (o) => o['version']],
       [
         '.claude-plugin/marketplace.json',
         (o) => (o['plugins'] as { version: string }[])[0]?.version,
@@ -693,19 +706,16 @@ describe('the version a user reads', () => {
       return;
     }
 
-    const parse = (s: string): [number, number, number] => {
-      const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(s);
-      return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0];
+    type Semver={core:[number,number,number];pre:string[]};
+    const parse=(text:string):Semver=>{const m=/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text);if(!m)throw new Error(`invalid version ${text}`);return {core:[Number(m[1]),Number(m[2]),Number(m[3])],pre:m[4]?.split('.')??[]};};
+    const cmp=(a:Semver,b:Semver):number=>{
+     const core=a.core[0]-b.core[0]||a.core[1]-b.core[1]||a.core[2]-b.core[2];if(core)return core;
+     if(!a.pre.length||!b.pre.length)return a.pre.length===b.pre.length?0:a.pre.length?-1:1;
+     for(let i=0;i<Math.max(a.pre.length,b.pre.length);i++){const x=a.pre[i],y=b.pre[i];if(x===y)continue;if(x===undefined)return -1;if(y===undefined)return 1;const xn=/^\d+$/.test(x),yn=/^\d+$/.test(y);if(xn&&yn)return Number(x)-Number(y);if(xn!==yn)return xn?-1:1;return x<y?-1:1;}return 0;
     };
-    const cmp = (a: [number, number, number], b: [number, number, number]): number =>
-      a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+    const newest=tags.map(parse).sort(cmp).at(-1)!;
+    expect(cmp(parse(VERSION),newest),`VERSION is ${VERSION} but this repository has a newer released tag`).toBeGreaterThanOrEqual(0);
 
-    const newest = tags.map(parse).sort(cmp).at(-1) as [number, number, number];
-    const here = parse(VERSION);
-    expect(
-      cmp(here, newest),
-      `VERSION is ${VERSION} but this repository already released v${newest.join('.')}`,
-    ).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -827,7 +837,7 @@ describe('the receipt of a date filter is what the user typed', () => {
  * RRF ranks the second above the first; calibration ranks it below. That is the
  * disagreement, and it is the whole of C-3.
  */
-describe('the score column is the order the page is in', () => {
+describe('explicit legacy diagnostic score columns follow their rank', () => {
   const RANK: Record<string, number> = { strong: 0, weak: 1, none: 2 };
   const PARENT = '11110000-0000-4000-8000-000000000001';
   const OTHER = '11110000-0000-4000-8000-000000000002';
@@ -901,7 +911,7 @@ describe('the score column is the order the page is in', () => {
   it('never runs backwards, and never contradicts the word beside it', () => {
     const r = run([
       'find', 'postgres connection pool',
-      '--min-confidence', 'none',
+      '--with', 'notes', '--min-confidence', 'none',
       '--no-color', '--width', '100',
       '--claude-dir', c3Claude, '--potsherd-dir', c3Root,
     ]);

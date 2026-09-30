@@ -116,7 +116,7 @@ describe('planted fixture', () => {
       'Zt7Qw3nR9pLxV2mKd6Hs4YbG1eUa0JfC',
       '9pV2kR8mZ4tL6wY0bN3cX5hJ1qA7sD-fG_eK2uT',
       // the T1.4b adversarial group
-      '3f9a1c2e-7b4d-4e19-9a55-2c8d0f6b17ae',
+      'cccccccc-7b4d-4e19-9a55-2c8d0f6b17ae',
       'Kq7nR2vX9bL4mT6yH1gF5dS8wJ3pQ7nR',
       'mAg88Rlsa9ceIZPJeEYvRLCakxSMohvLscv9OuJU',
       'toolu_9xQ2mR7bV4nK1pL8sT6yH3gF5dZ0aW',
@@ -149,7 +149,7 @@ describe('clean fixture', () => {
     const out = redactText(CLEAN);
     for (const shape of [
       '9fceb02d0ae598e95dc970b74767f19372d61af8', // git sha1
-      '550e8400-e29b-41d4-a716-446655440000', // uuid
+      'aaaaaaaa-e29b-41d4-a716-446655440000', // uuid
       'data:image/png;base64,iVBORw0KGgo', // inlined png
       'sha512-Rt2wIrKPHKgf', // lockfile integrity
       'focus-visible:outline-offset-2', // tailwind
@@ -196,7 +196,7 @@ describe('agent-transcript fixture (T1.4b)', () => {
       '5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03', // sha256
       'blake3-af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262',
       'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=', // SRI
-      'ANTHROPIC_VERTEX_PROJECT_ID=gpu-reservation-sarvam', // the `=` glue class
+      'ANTHROPIC_VERTEX_PROJECT_ID=demo-reservation-tests', // the `=` glue class
       'reducto-has-just-raised-a-75m-series-b-activity-7383909473913880576-ba7M',
       '0123456789ABCDEFGHJKMNPQRSTVWXYZ',     // crockford base32 table
       'layout-4f8b2c1e9d6a0537.js',           // bundler hash
@@ -292,9 +292,9 @@ describe('adversarial planted cases (T1.4b)', () => {
   const cases: Array<[name: string, line: string, type: SecretType, secret: string]> = [
     [
       'a signing secret shaped exactly like a uuid',
-      'WEBHOOK_SIGNING_SECRET=3f9a1c2e-7b4d-4e19-9a55-2c8d0f6b17ae',
+      'WEBHOOK_SIGNING_SECRET=cccccccc-7b4d-4e19-9a55-2c8d0f6b17ae',
       'generic',
-      '3f9a1c2e-7b4d-4e19-9a55-2c8d0f6b17ae',
+      'cccccccc-7b4d-4e19-9a55-2c8d0f6b17ae',
     ],
     [
       'a credential bound to a variable called id',
@@ -337,7 +337,7 @@ describe('adversarial planted cases (T1.4b)', () => {
     // saved them. (The `id =` case is the exception: it has no context, which
     // is exactly why the entropy fallback must survive.)
     for (const bare of [
-      '3f9a1c2e-7b4d-4e19-9a55-2c8d0f6b17ae',
+      'cccccccc-7b4d-4e19-9a55-2c8d0f6b17ae',
       'toolu_9xQ2mR7bV4nK1pL8sT6yH3gF5dZ0aW',
       'paperclip-tuesday-harmonica-sandstone-9Fq2',
     ]) {
@@ -517,7 +517,7 @@ describe('rules', () => {
     'Authorization: Bearer ${token}',
     'the monkey: donkey-whiskey-turkey-jockey',
     'commit 9fceb02d0ae598e95dc970b74767f19372d61af8',
-    'session 550e8400-e29b-41d4-a716-446655440000 resumed',
+    'session aaaaaaaa-e29b-41d4-a716-446655440000 resumed',
     'psql "postgresql://app:${DB_PASSWORD}@db.internal:5432/app"',
     'curl -u user:pass https://proxy.internal:3128/status',
     '"integrity": "sha512-Rt2wIrKPHKgfQOWTKBrAQCP0oGnMhOOKOZBnKpGkbn/GRnEXAqTIrCXtIWKKe0Ai"',
@@ -536,7 +536,7 @@ describe('rules', () => {
     'https://www.linkedin.com/posts/y-combinator_reducto-has-just-raised-a-75m-series-b-activity-7383909473913880576-ba7M', // E6
     'https://r.jina.ai/https%3A%2F%2Fexample.com%2Fposts%2Freducto-ai_weve-raised-a-245m-series-a-led-by-benchmark-activity-7321593705629376512-69ej', // E6
     'const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";',             // E7
-    'ANTHROPIC_VERTEX_PROJECT_ID=gpu-reservation-sarvam',                // `=` glue
+    'ANTHROPIC_VERTEX_PROJECT_ID=demo-reservation-tests',                // `=` glue
     'Authorization: Bearer <YOUR_TOKEN_HERE>',
     'Authorization: Bearer $ACCESS_TOKEN',
   ];
@@ -571,7 +571,7 @@ describe('entropy', () => {
 
   it('is under threshold for hex digests and uuids at any length', () => {
     expect(shannonEntropy('9fceb02d0ae598e95dc970b74767f19372d61af8')).toBeLessThan(4.5);
-    expect(shannonEntropy('550e8400-e29b-41d4-a716-446655440000')).toBeLessThan(4.5);
+    expect(shannonEntropy('aaaaaaaa-e29b-41d4-a716-446655440000')).toBeLessThan(4.5);
   });
 
   it('cannot tell random from merely varied, which is why shape rules exist', () => {

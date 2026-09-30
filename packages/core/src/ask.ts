@@ -1159,7 +1159,7 @@ export function excerptText(units: readonly TranscriptUnit[]): string {
  * for a bad quote — *"a quote that does not appear is discarded by code and
  * the claim goes with it"*. Measured on the reference corpus, that reads as an
  * instruction to be silent: six readers over a question whose answer sat in
- * exchange 16 of session 819606f3 returned `found: false` six times, one of
+ * exchange 16 of a prior session returned `found: false` six times, one of
  * them after 3,596 output tokens of deliberation. A reader that refuses is
  * indistinguishable, on the screen, from a corpus that has nothing — which is
  * the one confusion `05`'s honesty contract cannot afford, because it turns a

@@ -1,3 +1,4 @@
+import {redactLegacyProjection} from './redact.js';
 import type { Db } from './db.js';
 import type { Harness, SessionStatus } from './adapters/types.js';
 import {
@@ -809,6 +810,8 @@ export interface RecallResult {
 }
 
 export interface RecallOptions {
+  /** Case-sensitive literal substring in transcripts, without semantic or summary fallback. */
+  exact?: boolean;
   /** Sessions to return. Default 10. */
   limit?: number;
   /** RRF's k. `03` §7 fixes it at 60; the knob exists for the evals. */
@@ -1184,7 +1187,7 @@ export function resumeCommand(
   // one, so its own resume command would fail. Printing it anyway would be the
   // worst kind of wrong: a command that looks like the fix and is not.
   if (status !== 'live') return null;
-  // A subagent transcript is not resumable — `9c4d2f18-…:agent-a02db260…` is
+  // A subagent transcript is not resumable — `9c4d2f18-…:agent-eeee4444…` is
   // potsherd's id for a file, not a session claude will reopen. What the user
   // actually wants is the conversation that spawned it, so that is what is
   // offered. This is the difference between a command that works and a
@@ -1279,29 +1282,32 @@ export function bestSnippet(
   const exact = query.trim().toLowerCase();
   const scored = sides.map((text) => {
     const lower = text.toLowerCase();
+    const spans = wordSpans(text);
     const distinct = new Set(
-      wordSpans(text)
+      spans
         .map((s) => tokens.find((t) => wordMatchesToken(s.word, t)))
         .filter((t): t is string => Boolean(t)),
     ).size;
     return {
       text,
+      spans,
       // The whole phrase, verbatim, beats any count of scattered words.
       phrase: exact.length > 0 && lower.includes(exact) ? 1 : 0,
       distinct,
-      boilerplate: isMostlyBoilerplate(text) ? 1 : 0,
+      boilerplate: undefined as number | undefined,
     };
   });
   scored.sort(
     (a, b) =>
       b.phrase - a.phrase ||
       b.distinct - a.distinct ||
-      a.boilerplate - b.boilerplate ||
+      (a.boilerplate ??= isMostlyBoilerplate(a.text) ? 1 : 0) -
+        (b.boilerplate ??= isMostlyBoilerplate(b.text) ? 1 : 0) ||
       sides.indexOf(a.text) - sides.indexOf(b.text),
   );
   const chosen = scored[0]!;
   if (chosen.phrase === 1 && chosen.distinct <= 1) return matchSnippet(chosen.text, query);
-  return denseSnippet(chosen.text, tokens);
+  return denseSnippet(chosen.text, tokens, undefined, chosen.spans);
 }
 
 // -------------------------------------------------------------------- lists
@@ -1377,7 +1383,7 @@ function titleMatches(
   const meaningful = allTokens.filter((t) => !STOPWORDS.has(t));
   const tokens = meaningful.length > 0 ? meaningful : allTokens;
   if (tokens.length === 0) return { hits: [], coverage: 0 };
-  const likes = tokens.map(() => 'LOWER(s.title) LIKE ?').join(' OR ');
+  const likes = tokens.map(() => "LOWER(s.title) LIKE ? ESCAPE '\\'").join(' OR ');
   const params = tokens.map((t) => `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
   const f = buildSessionFilters(filters);
   const rows = db
@@ -1428,7 +1434,7 @@ function titleMatches(
   };
 }
 
-function bm25Exchanges(db: Db, match: string, filters: SearchFilters, depth: number): RawHit[] {
+function bm25Exchanges(db: Db, match: string, filters: SearchFilters, depth: number, exact?: string): RawHit[] {
   const f = buildExchangeFilters(filters);
   const rows = db
     .prepare(
@@ -1440,11 +1446,12 @@ function bm25Exchanges(db: Db, match: string, filters: SearchFilters, depth: num
          JOIN exchanges e ON e.rowid = exchanges_fts.rowid
          JOIN sessions  s ON s.id = e.session_id
         WHERE exchanges_fts MATCH ?
+          ${exact === undefined ? '' : 'AND (instr(e.user_text, ?) > 0 OR instr(e.assistant_text, ?) > 0)'}
           ${f.sql}
         ORDER BY rank
         LIMIT ?`,
     )
-    .all(match, ...f.params, depth) as {
+    .all(match, ...(exact === undefined ? [] : [exact, exact]), ...f.params, depth) as {
     id: string;
     session_id: string;
     seq: number;
@@ -1686,7 +1693,7 @@ function bm25Ghosts(db: Db, match: string, filters: SearchFilters, depth: number
   }));
 }
 
-function bm25GhostPrompts(db: Db, match: string, filters: SearchFilters, depth: number): RawHit[] {
+function bm25GhostPrompts(db: Db, match: string, filters: SearchFilters, depth: number, exact?: string): RawHit[] {
   const f = buildGhostFilters(filters);
   const rows = db
     .prepare(
@@ -1696,11 +1703,12 @@ function bm25GhostPrompts(db: Db, match: string, filters: SearchFilters, depth: 
          JOIN ghost_prompts p ON p.rowid = ghost_prompts_fts.rowid
          JOIN ghosts g ON g.session_id = p.session_id
         WHERE ghost_prompts_fts MATCH ?
+          ${exact === undefined ? '' : 'AND instr(p.text, ?) > 0'}
           ${f.sql}
         ORDER BY rank
         LIMIT ?`,
     )
-    .all(match, ...f.params, depth) as {
+    .all(match, ...(exact === undefined ? [] : [exact]), ...f.params, depth) as {
     id: string;
     session_id: string;
     seq: number;
@@ -1927,7 +1935,7 @@ export function vectorState(db: Db, root?: string): VectorState {
  * The whole of `find`'s ranking. Runs each list, fuses by RRF, diversifies by
  * session, and groups into the blocks the renderer prints.
  */
-export async function recall(
+async function recallLegacyRaw(
   db: Db,
   query: string,
   requested: SearchFilters = {},
@@ -2015,7 +2023,8 @@ export async function recall(
     ms: Date.now() - started,
   });
 
-  const vecMode: boolean | 'auto' = options.vectors ?? 'auto';
+  const exact = options.exact ? query.trim() : undefined;
+  const vecMode: boolean | 'auto' = exact === undefined ? options.vectors ?? 'auto' : false;
   const vectors: VectorState =
     vecMode === false
       ? {
@@ -2038,6 +2047,11 @@ export async function recall(
   // `--ghosts only` is not "search everything then drop the non-ghosts", it is
   // "do not run the exchange lists at all", which is also why it is fast.
   const wanted = new Set<ListName>(options.lists ?? LISTS);
+  if (exact !== undefined) {
+    for (const name of [...wanted]) {
+      if (name !== 'exchanges_fts' && name !== 'ghost_prompts_fts') wanted.delete(name);
+    }
+  }
   if (ghosts === 'only') {
     wanted.delete('titles');
     wanted.delete('exchanges_fts');
@@ -2142,12 +2156,12 @@ export async function recall(
     const anyWord = (): RawHit[] =>
       fts.or && fts.or !== fts.and ? fn(fts.or) : [];
     try {
-      hits = fn(fts.and);
+      hits = fn(exact === undefined ? fts.and : quoteTerm(exact));
       // F8 — the second rung, and the first responder. It runs only when the
       // words *as typed* found nothing, which is the exact case the audit
       // measured: a long question whose AND pass is empty and whose OR pass
       // then drifts to whatever session holds the most common words.
-      if (hits.length === 0 && keyOr && keyOr !== fts.and && keyOr !== fts.or) {
+      if (exact === undefined && hits.length === 0 && keyOr && keyOr !== fts.and && keyOr !== fts.or) {
         usedOr = true;
         usedKeyphrase = true;
         hits = fn(keyOr);
@@ -2155,7 +2169,7 @@ export async function recall(
       // The third rung, unchanged, and the reason nothing is thrown away: when
       // the distinctive words find nothing, every token the user typed is
       // tried again, prefix-matched, exactly as before this rung existed.
-      if (hits.length === 0) {
+      if (exact === undefined && hits.length === 0) {
         const rest = anyWord();
         if (fts.or && fts.or !== fts.and) usedOr = true;
         usedKeyphrase = false;
@@ -2180,11 +2194,11 @@ export async function recall(
     : { hits: [], coverage: 0 };
   const lists: Record<string, RawHit[]> = {
     titles: titles.hits,
-    exchanges_fts: textList('exchanges_fts', (m) => bm25Exchanges(db, m, filters, depth)),
+    exchanges_fts: textList('exchanges_fts', (m) => bm25Exchanges(db, m, filters, depth, exact)),
     cards_fts: textList('cards_fts', (m) => bm25Cards(db, m, filters, depth)),
     ghosts_fts: textList('ghosts_fts', (m) => bm25Ghosts(db, m, filters, depth)),
     ghost_prompts_fts: textList('ghost_prompts_fts', (m) =>
-      bm25GhostPrompts(db, m, filters, depth),
+      bm25GhostPrompts(db, m, filters, depth, exact),
     ),
   };
 
@@ -2394,16 +2408,16 @@ export async function recall(
     // words on the screen are two readings of one measurement.
     const hitText = `${hit.userText} ${hit.assistantText ?? ''}`;
     const calibration = calibrate({
-      covered: coveredTerms(quotableTokens, hitText),
+      covered: exact === undefined ? coveredTerms(quotableTokens, hitText) : quotableTokens.length,
       terms: quotableTokens.length,
-      strength: strengthOf(hit.from),
+      strength: exact === undefined ? strengthOf(hit.from) : 1,
       // Independent bodies of evidence, not indexes. See {@link SOURCE_OF_LIST}.
       lists: evidenceSources(hit.from.map((f) => f.list)),
       // F8's second half. Coverage above is a uniform partition over every
       // word the user typed; this says which of those words the question was
       // actually *about*. A row that shows none of them is not an answer to
       // it, whatever the other four numbers say. See `calibration.ts`.
-      keyCovered: coveredTerms(requiredTerms, hitText),
+      keyCovered: exact === undefined ? coveredTerms(requiredTerms, hitText) : requiredTerms.length,
       keyTerms: requiredTerms.length,
       // A card's text is a model's paragraph about the session, so full
       // coverage of the query inside it means the *summary* used those words
@@ -2427,7 +2441,9 @@ export async function recall(
       ts: hit.ts ?? null,
       userText: hit.userText,
       ...(hit.assistantText !== undefined ? { assistantText: hit.assistantText } : {}),
-      snippet: bestSnippet(hit.userText, hit.assistantText, query, quotableTokens),
+      snippet: exact === undefined
+        ? bestSnippet(hit.userText, hit.assistantText, query, quotableTokens)
+        : matchSnippet(hit.userText.includes(exact) ? hit.userText : hit.assistantText ?? '', exact),
       isSidechain: hit.isSidechain,
       score: hit.score,
       from: hit.from,
@@ -2531,9 +2547,9 @@ export async function recall(
     // only lift a block that has transcript evidence of its own to show for it.
     const transcript = hasTranscriptEvidence(hits);
     const calibration = calibrate({
-      covered: coveredTerms(quotableTokens, blockText),
+      covered: exact === undefined ? coveredTerms(quotableTokens, blockText) : quotableTokens.length,
       terms: quotableTokens.length,
-      keyCovered: coveredTerms(requiredTerms, blockText),
+      keyCovered: exact === undefined ? coveredTerms(requiredTerms, blockText) : requiredTerms.length,
       keyTerms: requiredTerms.length,
       strength: Math.max(0, ...counted.map((h) => h.calibration.strength)),
       lists: evidenceSources(counted.flatMap((h) => h.from.map((f) => f.list))),
@@ -2936,3 +2952,5 @@ function firstLine(s: string): string {
 
 /** Kept honest against `embeddings.EMBEDDING_VERSION` by the index. */
 export const RECALL_EMBEDDING_VERSION = EMBEDDING_VERSION;
+
+export async function recall(...args:Parameters<typeof recallLegacyRaw>):Promise<Awaited<ReturnType<typeof recallLegacyRaw>>>{return redactLegacyProjection(await recallLegacyRaw(...args));}

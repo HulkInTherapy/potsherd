@@ -1,3 +1,4 @@
+import { memoryShow } from '../memory.js';
 import {
   displayTitleOf,
   format as fmt,
@@ -14,6 +15,7 @@ import { print, printJson, themeFrom, UserError, type GlobalOptions } from '../o
 import { openIndex } from '../filters.js';
 
 export interface ShowCommandOptions extends GlobalOptions {
+  inputJson?: string;
   session: string;
   from?: unknown;
   to?: unknown;
@@ -31,6 +33,9 @@ export interface ShowCommandOptions extends GlobalOptions {
  * memory tool cannot recover from — so this is a hard rule, not a nicety.
  */
 export async function runShow(o: ShowCommandOptions): Promise<number> {
+  const memory = (o.md || o.html) && !o.inputJson ? null : memoryShow(o);
+  if (memory !== null) return memory;
+
   const ref = o.session?.trim();
   if (!ref) throw new UserError('show needs a session id', 'potsherd show 9c4d2f18');
 

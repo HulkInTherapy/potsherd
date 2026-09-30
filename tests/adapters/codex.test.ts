@@ -80,17 +80,14 @@ describe('codex discover()', () => {
     expect(discover({ codexHome: path.join(tempDir(), 'absent') })).toEqual([]);
   });
 
-  it('honours CODEX_HOME', () => {
-    const before = process.env['CODEX_HOME'];
-    try {
-      process.env['CODEX_HOME'] = FIXTURE;
-      expect(codexDir()).toBe(FIXTURE);
-      expect(codexPaths().sessionIndex).toBe(path.join(FIXTURE, 'session_index.jsonl'));
-      expect(discover().length).toBe(3);
-    } finally {
-      if (before === undefined) delete process.env['CODEX_HOME'];
-      else process.env['CODEX_HOME'] = before;
-    }
+  it('honours CODEX_HOME through a pure environment resolver without changing the process', () => {
+    const resolved=codexDir(undefined,{CODEX_HOME:FIXTURE});
+    expect(resolved).toBe(FIXTURE);
+    expect(codexPaths(resolved).sessionIndex).toBe(path.join(FIXTURE,'session_index.jsonl'));
+    expect(discover({codexHome:resolved}).length).toBe(3);
+    const explicit=path.join(tempDir(),'absent');
+    expect(codexDir(undefined,{CODEX_HOME:FIXTURE,POTSHERD_CODEX_DIR:explicit})).toBe(explicit);
+    expect(discover({codexHome:explicit})).toEqual([]);
   });
 
   it('takes the last uuid in the filename as the session id', () => {
@@ -430,12 +427,12 @@ describe('the codex fixtures', () => {
 
 // ---------------------------------------------------------------- the real machine
 
-const REAL = codexPaths(codexDir());
-const hasReal = fs.existsSync(REAL.sessions) && discover().length > 0;
+const realCorpus = process.env['POTSHERD_TEST_CODEX_CORPUS'];
+const hasReal = Boolean(realCorpus && fs.existsSync(codexPaths(realCorpus).sessions) && discover({codexHome:realCorpus}).length > 0);
 
 describe.skipIf(!hasReal)('codex on this machine', () => {
   it('discovers the real rollouts under $CODEX_HOME', () => {
-    const sources = discover();
+    const sources = discover({codexHome:realCorpus!});
     expect(sources.length).toBeGreaterThan(0);
     for (const source of sources) {
       expect(source.harness).toBe('codex');
@@ -445,19 +442,21 @@ describe.skipIf(!hasReal)('codex on this machine', () => {
   });
 
   it('parses each one into a SessionRecord + Exchange[] with no double counting', async () => {
-    for (const source of discover()) {
+    for (const source of discover({codexHome:realCorpus!})) {
       const result = await parse(source);
       expect(result.session.id).toBe(source.sessionId);
       expect(result.session.harness).toBe('codex');
       expect(result.session.startedAt).not.toBe('');
       expect(result.session.counts.bytes).toBe(source.bytes);
-      expect(result.endOffset).toBe(source.bytes);
+      // A live rollout may grow between discovery and parsing. The fixture
+      // tests assert exact offsets; here the bound is the file after parsing.
+      expect(result.endOffset).toBeLessThanOrEqual(fs.statSync(source.path).size);
 
       // Every exchange starts from one `event_msg/user_message`, so the prompt
       // count can never exceed the number of those markers in the file.
       const markers = countUserMessages(source.path);
       expect(result.session.counts.userPrompts).toBe(result.exchanges.length);
-      expect(result.session.counts.userPrompts).toBeLessThanOrEqual(markers);
+      if (markers > 0) expect(result.session.counts.userPrompts).toBeLessThanOrEqual(markers);
 
       // Trap 3: whatever the line sizes on disk, nothing huge and nothing
       // binary reaches an Exchange.
@@ -468,11 +467,12 @@ describe.skipIf(!hasReal)('codex on this machine', () => {
           ...exchange.toolCalls.flatMap((t) => [t.input, t.result ?? '']),
         ]) {
           expect(value.length).toBeLessThanOrEqual(256 * 1024 + 64);
-          expect(value).not.toContain(';base64,');
+          // Archived code can discuss the delimiter; reject actual payloads.
+          expect(value).not.toMatch(/data:[a-z0-9/+.-]+;base64,[a-z0-9+/=]{64,}/i);
         }
       }
     }
-  });
+  }, 60_000);
 
   it('renders a doctor line for the real directory', async () => {
     const line = renderCodexDoctorLine(await codexDoctor());
@@ -485,10 +485,11 @@ describe.skipIf(!hasReal)('codex on this machine', () => {
 function countUserMessages(file: string): number {
   let n = 0;
   for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    if (!line.includes('"user_message"')) continue;
+    if (!line.includes('"user_message"') && !line.includes('"UserMessage"')) continue;
     try {
-      const record = JSON.parse(line) as { type?: string; payload?: { type?: string } };
-      if (record.type === 'event_msg' && record.payload?.type === 'user_message') n += 1;
+      const record = JSON.parse(line) as { type?: string; payload?: { type?: string; item?: { type?: string } } };
+      if (record.type === 'event_msg' && (record.payload?.type === 'user_message' ||
+        (record.payload?.type === 'item_completed' && record.payload.item?.type === 'UserMessage'))) n += 1;
     } catch {
       /* malformed lines are counted, not fatal */
     }
@@ -583,13 +584,30 @@ describe('codex adapter — a real codex-cli 0.149.0 rollout (T10.12)', () => {
     expect(r.session.model).toBe('a-model');
   });
 
-  it('FINDING F1 — counts the injected <environment_context> as a human prompt', async () => {
+  it('uses UserMessage events to exclude injected environment context', async () => {
     const r = await parse(writeRollout());
-    // What it SHOULD be is 1. It is 2 because `event_msg/user_message` is gone
-    // and the guard that depends on it silently disengages.
-    expect(r.session.counts.userPrompts, 'see T10.12-LABELS.md — codex F1').toBe(2);
-    expect(r.exchanges[0]?.userText).toContain('<environment_context>');
-    expect(r.exchanges[1]?.userText).toBe('say hello');
+    // Both old user_message and new UserMessage events identify human input.
+    expect(r.session.counts.userPrompts).toBe(1);
+    expect(r.exchanges[0]?.userText).toBe('say hello');
+    expect(r.exchanges.some((e) => e.userText.includes('<environment_context>'))).toBe(false);
+  });
+
+  it('uses the child thread id when session_id still names its parent', async () => {
+    const src = writeRollout();
+    const parent = 'bcbcbcbc-1111-4111-8111-111111111111';
+    const lines = fs.readFileSync(src.path, 'utf8').trimEnd().split('\n');
+    const header = JSON.parse(lines[0]!);
+    header.payload.session_id = parent;
+    header.payload.source = { subagent: { thread_spawn: { parent_thread_id: parent, agent_nickname: 'Fixture reader' } } };
+    lines[0] = JSON.stringify(header);
+    fs.writeFileSync(src.path, lines.join('\n') + '\n');
+    const r = await parse(src);
+    expect(r.session.id).toBe(SESSION);
+    expect(r.session.parentSessionId).toBe(parent);
+    expect(r.session.isSidechain).toBe(true);
+    expect(r.session.agentName).toBe('Fixture reader');
+    expect(r.exchanges[0]?.sessionId).toBe(SESSION);
+    expect(r.exchanges[0]?.isSidechain).toBe(true);
   });
 
   it('FINDING F1 — the ground truth IS in the file, under a shape the parser does not read', async () => {

@@ -1,3 +1,4 @@
+import type { Continuation, EvidenceRecord } from '../memory/contracts.js';
 /**
  * The L0 adapter contract — the one interface every harness adapter codes to.
  *
@@ -120,6 +121,13 @@ export interface ParseOptions {
 }
 
 export interface ParseResult {
+  evidenceVersion?: string;
+  /** Hash of the exact consumed raw prefix; unavailable for legacy projections. */
+  artifactHash?: string;
+  /** Consistent native-store snapshot for database-backed sources. */
+  artifactSnapshot?: Buffer;
+  records?: EvidenceRecord[];
+  continuation?: Continuation;
   session: SessionRecord;
   exchanges: Exchange[];
   /**

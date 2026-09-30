@@ -166,7 +166,15 @@ DROP TABLE IF EXISTS vec_blob_ghost_prompts;
   // migration is going to touch again, whatever put it there — a driver that
   // refused the schema rewrite, or a decline a later version recorded. Every
   // verb must degrade to text search rather than throw.
-  if (opts.rewindSchema !== false) db.exec('DELETE FROM schema_migrations WHERE version >= 10');
+  if (opts.rewindSchema !== false) {
+    // Remove additive phase-12 objects as well as their ledger stamps. Leaving
+    // current tables under a v9 ledger is not a database written by 1.1.0.
+    db.pragma('foreign_keys = OFF');
+    for(const table of ['memory_notes_fts','spans_fts','note_supports','note_supersessions','memory_write_receipts','forget_tombstones','memory_note_events','source_activations','source_activation_baselines','span_embeddings','embedding_spaces','maintenance_events','maintenance_jobs','maintenance_leases','capture_checkpoints','source_relations','revision_spans','evidence_spans','revision_units','evidence_units','source_revisions','source_aliases','memory_sources','memory_epochs'])db.exec(`DROP TABLE IF EXISTS ${table}`);
+    db.prepare("DELETE FROM sync_state WHERE key LIKE 'memory:%'").run();
+    db.exec('DELETE FROM schema_migrations WHERE version >= 10');
+    db.pragma('foreign_keys = ON');
+  }
   db.close();
   return { root, claudeDir, ids };
 }
@@ -248,7 +256,7 @@ function cli(
   const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: '1', COLUMNS: '100', POTSHERD_NO_VEC: '1' };
   if (opts.vec) delete env['POTSHERD_NO_VEC'];
   delete env['NODE_PATH'];
-  delete env['CLAUDE_CONFIG_DIR'];
+  // Keep the disposable supported source root from tests/setup.ts.
   delete env['POTSHERD_DIR'];
   delete env['XDG_CONFIG_HOME'];
   try {
@@ -579,7 +587,7 @@ describe('doctor, on a database it can see is stranded and cannot repair itself'
     // further down the same screen. A regex that can match another line is not
     // an assertion about this one.
     const before = cli(['doctor', '--potsherd-dir', root]);
-    expect(before.stdout).toMatch(/schema v9 of v12 {2}· run potsherd index/);
+    expect(before.stdout).toMatch(new RegExp(`schema v9 of v${store.latestSchemaVersion()} {2}· run potsherd index`));
     // **VERIFICATION-7 C7-1 moved the value column, and this is the amendment.**
     // It used to be `\d+` — the count of `embedding_version` stamps, which on
     // this database is 2 — beside a note saying the store cannot be read at all.
@@ -603,7 +611,7 @@ describe('doctor, on a database it can see is stranded and cannot repair itself'
     expect(fix.code).toBe(0);
 
     const after = cli(['doctor', '--potsherd-dir', root]);
-    expect(after.stdout).toMatch(/schema v12 of v12/);
+    expect(after.stdout).toMatch(new RegExp(`schema v${store.latestSchemaVersion()} of v${store.latestSchemaVersion()}`));
     expect(after.stdout).not.toMatch(/converts a vec0 store/);
   });
 });

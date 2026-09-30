@@ -1,6 +1,6 @@
 {
   "name": "@potsherd/core",
-  "version": "1.2.1",
+  "version": "2.0.0-rc.3",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -20,7 +20,8 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "js-tiktoken": "1.0.21"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13"

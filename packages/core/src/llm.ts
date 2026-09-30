@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -138,7 +139,7 @@ export const MODEL_CALL_VERBS: readonly string[] = ['card', 'ask', 'graft'];
  * described further down the screen, pinned to a size and a sha256; this list
  * is what stops the two paragraphs contradicting each other.
  */
-export const RUNTIME_FETCH_VERBS: readonly string[] = ['index'];
+export const RUNTIME_FETCH_VERBS: readonly string[] = ['index', 'maintain'];
 
 export const OFFLINE_VERBS: readonly string[] = [
   'audit',
@@ -2099,7 +2100,11 @@ class CodexTransport implements Transport {
   async send(req: SendRequest): Promise<SendResult> {
     this.scratch ??= makeScratch(this.opts.tmpRoot);
     const extra = (this.opts.env['POTSHERD_CODEX_ARGS'] ?? '').split(' ').filter(Boolean);
-    const lastMessage = path.join(this.scratch, 'last-message.txt');
+    const lastMessage = path.join(this.scratch, `last-message-${randomUUID()}.txt`);
+    // Claude's aliases are not Codex model ids. Let Codex choose its default
+    // unless this caller supplied a concrete id or an explicit Codex override.
+    const codexModel = this.opts.env['POTSHERD_CODEX_MODEL']?.trim() ||
+      (MODEL_ALIASES.includes(req.model as ModelAlias) ? undefined : req.model);
     const args = [
       'exec',
       '--skip-git-repo-check',
@@ -2110,8 +2115,7 @@ class CodexTransport implements Transport {
       '--ignore-user-config',
       '--cd',
       this.scratch,
-      '--model',
-      req.model,
+      ...(codexModel ? ['--model', codexModel] : []),
       '--output-last-message',
       lastMessage,
       ...extra,
@@ -2130,13 +2134,14 @@ class CodexTransport implements Transport {
     // over; `lastAgentMessage` is an inference from stdout's shape, and an
     // inference should never win over a statement.
     const text = readIfPresent(lastMessage) || lastAgentMessage(out.stdout);
+    try { fs.unlinkSync(lastMessage); } catch { /* stdout-only or no output */ }
     if (!text) {
       throw new LlmError(
         `codex exec produced no answer${out.stderr ? `: ${out.stderr.trim().split('\n').slice(-1)[0]}` : ''}`,
         'codex exec "hello"   # check codex runs at all',
       );
     }
-    return { text, model: req.model };
+    return { text, model: codexModel ?? 'codex-default' };
   }
 
   async close(): Promise<void> {

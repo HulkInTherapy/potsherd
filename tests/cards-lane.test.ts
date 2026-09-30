@@ -417,7 +417,7 @@ describe('the label', () => {
  * `recall()` acts on it, so when the two lines land the flag works rather than
  * type-checks.
  */
-describe('runFind forwards --no-cards', () => {
+describe('explicit runFind diagnostics forward --no-cards', () => {
   const capture = async (over: Record<string, unknown>): Promise<Record<string, unknown>> => {
     const chunks: string[] = [];
     const write = process.stdout.write.bind(process.stdout);
@@ -429,6 +429,7 @@ describe('runFind forwards --no-cards', () => {
       await runFind({
         query: CARD_ONLY_QUERY,
         json: true,
+        explain: true,
         potsherdDir: root,
         minConfidence: 'none',
         vectors: 'off',

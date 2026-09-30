@@ -655,3 +655,48 @@ export {
 } from './link-suggest.js';
 
 export { VERSION } from './version.js';
+
+export type * from './memory/contracts.js';
+export { sourceId, readEpochs, readSpan, inspectCoverage, publishSource, compatibilityRecords, NORMALIZATION_VERSION } from './memory/source.js';
+export type { PublicationInput } from './memory/source.js';
+export { scopeSql, validateScope } from './memory/scope.js';
+export { spanWindows, reassembleUnit, buildSpanManifest, deriveCoveragePartitions, spanManifestHash, currentSpanPolicy, hasCurrentSpanManifest, compatibleSpanPolicies, SPAN_MANIFEST_VERSION } from './memory/spans.js';
+export type { SpanTokenizer, SpanWindow, SpanManifest, CoveragePartition, SourceBoundary } from './memory/spans.js';
+export { getSourceRevision, listSourceSpans } from './memory/source.js';
+export type { SourceRevisionView } from './memory/source.js';
+export { backfillLegacy } from './memory/backfill.js';
+export { readEnrolledSources } from './ingest.js';
+export type { SourceEnrollment } from './ingest.js';
+export { discoverEnrolledSources } from './ingest.js';
+export { LocalMemoryService } from './memory/service.js';
+export type { PlannedMemoryService } from './memory/service.js';
+export type { DenseLane, MemoryServiceOptions } from './memory/service.js';
+export { TOKENIZER_ID, TOKENIZER_ASSET_HASH, defaultBudget, countTokens as countTransportTokens, planResponse, serializeResponse, planWriteReceipt, finalizeEmission, emittedMcpResult } from './memory/budget.js';
+export type { PlannedResponse, FinalizedEmission, McpTextResult, Transport as MemoryTransport } from './memory/budget.js';
+export { encodeCompactMemoryPacket, decodeCompactMemoryPacket, canonicalPacketRef, MemoryPacketError } from './memory/packet.js';
+export type { CompactMemoryPacketV1, PackedEvidence } from './memory/packet.js';
+export { applyIgnore } from './ignore.js';
+export { inspectNotes, queryCurrentNotes, writeMemoryNotes, backfillLegacyNotes } from './memory/notes-store.js';
+export type { NoteQueryOptions } from './memory/notes-store.js';
+export { previewForget, applyForget, recoverForget } from './memory/delete.js';
+export { backfillLegacyGhosts } from './memory/backfill.js';
+export { spanEmbeddingText } from './memory/spans.js';
+export { rebuildEvidenceSpans } from './memory/backfill.js';
+export { SpanDenseLane } from './memory/dense.js';
+export { DEFAULT_SPACE_ID, CLS_SPACE_ID, inspectAssets, acquireAssets, LocalEncoder } from './memory/assets.js';
+export { enqueueJob, spoolRequest, drainSpool, runtimeHealth } from './memory/jobs.js';
+export { MaintenanceWorker, prepareMigration, withPublicationLease, ensureSpanSpace, commitSpanVector } from './memory/maintenance.js';
+
+export { loadSpanTokenizer } from './memory/tokenization.js';
+export { MEMORY_SCHEMA_VERSION, MemorySchemaError, assertMemorySchema, schemaResponse } from './memory/readiness.js';
+export { MemoryInputError, validateMemoryInput, validateMemoryResponseFormat, validateRecallNavigation } from './memory/input.js';
+export type { PublicMemoryKind } from './memory/input.js';
+
+export {MemoryPrivacyError} from './memory/privacy.js';
+
+export {legacyNativeOwners,legacyNativeOwnershipAmbiguous,AMBIGUOUS_LEGACY_NATIVE_IDS_SQL} from './memory/legacy-ownership.js';
+
+export {completeDeliveredSpan,complementaryReadRefs,planComplementaryRead} from './memory/delivery.js';
+export type {ComplementaryReadPlan} from './memory/delivery.js';
+export {READER_CONTRACT,buildReaderTask,readerPrompt,validateReaderAnswer} from './memory/reader.js';
+export type {ReaderStatus,ReaderClaimKind,ReaderCitation,ReaderTask,ReaderClaim,ReaderAnswer,ReaderValidation} from './memory/reader.js';

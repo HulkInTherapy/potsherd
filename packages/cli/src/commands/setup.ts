@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { format as fmt, paths, setup } from '@potsherd/core';
+import { format as fmt, paths, setup, indexAll, withPublicationLease, lock } from '@potsherd/core';
 // `packages/core/src/index.ts` is reserved for the integrator this phase, so
 // the barrel line — `export * as setup from './setup.js';` — is written out in
 // `phases/phase-5/registration-T5.5.txt` rather than added here. Until it
@@ -168,6 +168,12 @@ export async function runSetup(o: SetupOptions): Promise<number> {
     }
   }
 
+  if(!o.dryRun&&!refused&&(changed>0||done.length>0)){
+    const root=paths.potsherdDir(o.potsherdDir);
+    // Setup deliberately initializes and enrolls the successfully selected capture hosts.
+    const indexed=await lock.withLockAsync('setup-memory',()=>withPublicationLease(root,(db,beforeCommit)=>indexAll({db,beforeCommit,root,potsherdDir:root,harnesses:o.remove?[]:live.filter(p=>p.safe).map(p=>p.client),...(o.remove?{removeHarnesses:live.filter(p=>p.safe).map(p=>p.client)}:{enrollHarnesses:live.filter(p=>p.safe).map(p=>p.client)}),...(o.claudeDir?{claudeDir:o.claudeDir}:{}),...(o.codexDir?{codexHome:o.codexDir}:{}),...(o.piDir?{piDir:o.piDir}:{}),...(o.opencodeDir?{opencodeDir:o.opencodeDir}:{}),embed:false})),{root,wait:2000});
+    if(indexed.totals.failed)throw new UserError('memory capture did not finish','Run potsherd maintain to retry the durable work');
+  }
   if (!o.quiet) nextStep(o, t, { changed, refused, todo: todo.length, plans });
   return refused ? 1 : 0;
 }
@@ -365,8 +371,8 @@ function short(p: string, t: ReturnType<typeof themeFrom>, indent: number): stri
   return fmt.elideMiddle(paths.tildify(p), Math.max(24, t.width - indent), t);
 }
 
-/** The six tools of the pinned MCP contract (`phases/phase-5/WAVE.md`). */
-const TOOLS = ['find', 'read', 'ask', 'graft', 'ls', 'tag'].map((v) => `potsherd_${v}`);
+/** The current agent-facing MCP contract. */
+const TOOLS = ['recall', 'read', 'graft'].map((v) => `potsherd_${v}`);
 
 function commandLine(res: setup.McpResolution): string {
   return [res.command, ...res.args].map(paths.tildify).join(' ');

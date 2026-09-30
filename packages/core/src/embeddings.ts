@@ -256,7 +256,9 @@ export const MODEL_DOWNLOAD_BYTES = 34_014_426;
 /** True when a file is present at exactly its pinned size. */
 function haveFile(cacheDir: string, f: RuntimeFile): boolean {
   try {
-    return fs.statSync(path.join(cacheDir, ...f.name.split('/'))).size === f.bytes;
+    const file=path.join(cacheDir,...f.name.split('/'));
+    if(fs.statSync(file).size!==f.bytes)return false;
+    return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')===f.sha256;
   } catch {
     return false;
   }
@@ -461,7 +463,7 @@ async function getPipeline(options: EmbeddingsOptions = {}): Promise<Pipeline> {
   if (pipelinePromise) return pipelinePromise;
   pipelinePromise = (async () => {
     const cacheDir = options.cacheDir ?? modelsDir();
-    fs.mkdirSync(cacheDir, { recursive: true });
+
 
     const forced = (process.env['POTSHERD_EMBED_BACKEND'] ?? '').trim().toLowerCase();
     if (forced === 'native') {
@@ -470,9 +472,9 @@ async function getPipeline(options: EmbeddingsOptions = {}): Promise<Pipeline> {
     }
 
     if (!acquisitionPlan(cacheDir).complete) {
-      if (options.noAcquire) {
+      if (options.noAcquire !== false) {
         throw new EmbeddingUnavailableError(
-          'the embedding runtime is not on this machine yet — potsherd index fetches it',
+          'semantic assets are missing — run potsherd maintain --acquire-assets',
         );
       }
       const onProgress = options.onProgress;
@@ -663,6 +665,7 @@ async function nativePipeline(cacheDir: string, options: EmbeddingsOptions): Pro
   }
   const env = transformers.env as Record<string, unknown>;
   env['allowLocalModels'] = true;
+  env['allowRemoteModels'] = options.noAcquire === false;
   env['useBrowserCache'] = false;
   env['cacheDir'] = cacheDir;
   const onProgress = options.onProgress;

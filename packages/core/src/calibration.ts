@@ -1,7 +1,7 @@
 import type { Db } from './db.js';
 import { ESTIMATOR_FIT } from './llm.js';
 import type { Backend, Calibration, Estimate } from './llm.js';
-import { wordMatchesToken, wordSpans } from './search/snippet.js';
+import { matchingTerms } from './search/snippet.js';
 
 /**
  * The estimator's self-check: what a run was quoted at, what it cost, and how
@@ -679,15 +679,6 @@ function clamp01(x: number): number {
  */
 export function coveredTerms(terms: readonly string[], text: string): number {
   if (terms.length === 0 || !text) return 0;
-  const words = new Set(wordSpans(text).map((w) => w.word));
-  let n = 0;
-  for (const t of terms) {
-    for (const w of words) {
-      if (wordMatchesToken(w, t)) {
-        n++;
-        break;
-      }
-    }
-  }
-  return n;
+  const found = matchingTerms(text, terms);
+  return terms.filter((term) => found.has(term)).length;
 }

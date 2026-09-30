@@ -1,3 +1,4 @@
+import {redactLegacyProjection} from './redact.js';
 import type { Db } from './db.js';
 import type { Harness, SessionStatus } from './adapters/types.js';
 import {
@@ -316,7 +317,7 @@ function sessionsInScope(filters: SearchFilters): boolean {
 }
 
 /** `potsherd ls` — newest first, titles not uuids, ghosts in line with the rest. */
-export function listSessions(
+function listSessionsLegacyRaw(
   db: Db,
   requested: SearchFilters = {},
   options: ListOptions = {},
@@ -653,7 +654,7 @@ export interface ShowOptions {
   to?: number;
 }
 
-export function showSession(db: Db, id: string, options: ShowOptions = {}): ShowResult | null {
+function showSessionLegacyRaw(db: Db, id: string, options: ShowOptions = {}): ShowResult | null {
   const sessionRow = db
     .prepare(`SELECT ${SESSION_COLUMNS} FROM sessions s WHERE s.id = ?`)
     .get(id) as SessionRowPlus | undefined;
@@ -785,3 +786,7 @@ function parseFiles(json: string): string[] {
 
 /** Re-exported so a caller can type a row without reaching into `recall`. */
 export type { Harness, SessionStatus };
+
+export function listSessions(...args:Parameters<typeof listSessionsLegacyRaw>):ReturnType<typeof listSessionsLegacyRaw>{return redactLegacyProjection(listSessionsLegacyRaw(...args));}
+
+export function showSession(...args:Parameters<typeof showSessionLegacyRaw>):ReturnType<typeof showSessionLegacyRaw>{return redactLegacyProjection(showSessionLegacyRaw(...args));}

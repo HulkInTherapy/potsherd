@@ -143,6 +143,7 @@ const SCOPE_WITH_CARDS = SCOPE.unwrap()
 export const NEAREST_THREADS = 5;
 
 export const recallInput = {
+  exact: z.boolean().optional().describe('true: case-sensitive literal substring in transcripts. Preserves punctuation in identifiers and phrases; no semantic or summary fallback'),
   query: z
     .string()
     .min(1)
@@ -290,6 +291,7 @@ export async function runRecall(
       // `cli/src/commands/find.ts`, so the two doors cannot mean different
       // things by the same word.
       cards: (scope as { cards?: boolean }).cards !== false,
+      exact: Boolean(args.exact),
       // C-1 step 3. `undefined` is AGENT_FLOOR, so the default path is
       // unchanged; a caller may raise the floor or ask to see below it. See
       // `recallInput.minConfidence`.
@@ -556,7 +558,7 @@ export async function runRecall(
 
     if (want === 'context') {
       const budget = Math.max(200, Math.floor(args.budget ?? DEFAULT_CONTEXT_BUDGET));
-      const { windows, truncated, tokens, clipped } = windowsFrom(sessions, budget);
+      const { windows, truncated, tokens, clipped } = windowsFrom(sessions, budget, query);
       envelope['windows'] = windows;
       envelope['windowBudget'] = budget;
       envelope['windowTokens'] = tokens;
@@ -821,7 +823,7 @@ function hitJson(h: Hit, sessions: readonly Session[]): Record<string, unknown> 
   return {
     thread: (owner ? threadIdOf(owner) : null) ?? h.sessionId,
     sessionId: h.sessionId,
-    id8: h.sessionId.slice(0, 8),
+    id8: idTag(h.sessionId),
     kind: h.kind,
     isSidechain: h.isSidechain,
     seq: h.seq ?? null,
@@ -848,6 +850,7 @@ function hitJson(h: Hit, sessions: readonly Session[]): Record<string, unknown> 
 function windowsFrom(
   sessions: readonly Session[],
   budgetTokens: number,
+  query: string,
 ): { windows: RecallWindow[]; truncated: boolean; tokens: number; clipped: number } {
   const queues = sessions.map((s) => ({ s, hits: [...s.hits] }));
   const windows: RecallWindow[] = [];
@@ -855,24 +858,8 @@ function windowsFrom(
   const ceiling = budgetTokens * CHARS_PER_TOKEN;
   let truncated = false;
   let clipped = 0;
-  /**
-   * The one hit that would have been returned if anything fitted.
-   *
-   * FIX-F C6 — `want: "context"` could return `threads: 1`, `windows: 0`,
-   * `windowTokens: 0` and no `hits` key, because the single matching exchange
-   * was longer than the whole ceiling and the loop below `continue`d past it.
-   * The agent asked for context, was told it matched, and got no text at all.
-   *
-   * The fix is a clip, and it is deliberately taken **only when the page would
-   * otherwise be empty**. Clipping the first oversized window mid-round would
-   * let one 139,000-token exchange — the reference archive has one — eat a
-   * budget that F5 exists to spread across five threads. So the round-robin is
-   * unchanged, and this is the floor underneath it: if nothing fitted, return
-   * the best hit's opening rather than nothing, marked `clipped` so the agent
-   * knows it is holding a fragment.
-   */
-  let firstSkipped: { q: (typeof queues)[number]; h: Session['hits'][number]; text: string } | null =
-    null;
+  // Reserve a share for each thread before spending the budget on later hits.
+  const share = Math.max(1, Math.floor(ceiling / Math.max(1, queues.length)));
 
   for (let round = 0; ; round++) {
     let any = false;
@@ -882,18 +869,28 @@ function windowsFrom(
       any = true;
       // A summary hit has no exchange behind it, so it has no window to return.
       if (evidenceOf(h.kind) === 'not-a-transcript') continue;
-      const text = [h.userText, h.assistantText].filter(Boolean).join('\n\n').trim();
-      if (!text) continue;
-      if (chars + text.length > ceiling) {
+      const fullText = [h.userText, h.assistantText].filter(Boolean).join('\n\n').trim();
+      if (!fullText) continue;
+      const room = Math.min(share, ceiling - chars);
+      if (room <= 0) { truncated = true; continue; }
+      const isClipped = fullText.length > room;
+      let start = 0;
+      if (isClipped) {
+        const highlight = h.snippet.match
+          ? h.snippet.text.slice(h.snippet.match.start, h.snippet.match.end) : '';
+        const lower = fullText.toLowerCase();
+        let at = lower.indexOf(query.toLowerCase());
+        if (at < 0 && highlight) at = lower.indexOf(highlight.toLowerCase());
+        start = Math.max(0, Math.min(fullText.length - room, at - Math.floor(room / 3)));
         truncated = true;
-        if (!firstSkipped) firstSkipped = { q, h, text };
-        continue;
+        clipped++;
       }
+      const text = fullText.slice(start, start + room);
       chars += text.length;
       windows.push({
         thread: threadIdOf(q.s) ?? q.s.id,
         sessionId: h.sessionId,
-        id8: h.sessionId.slice(0, 8),
+        id8: idTag(h.sessionId),
         seq: h.seq ?? null,
         ts: h.ts ?? null,
         kind: h.kind,
@@ -910,41 +907,10 @@ function windowsFrom(
           date: (q.s.endedAt ?? q.s.startedAt)?.slice(0, 10) ?? null,
         }),
         text,
+        ...(isClipped ? { clipped: true } : {}),
       });
     }
     if (!any) break;
-  }
-
-  // The floor. Nothing fitted, and something matched: return the head of the
-  // best hit rather than an empty page. `budgetTokens` is a ceiling on what
-  // the caller wants to read, not a rule that it would rather read nothing.
-  if (windows.length === 0 && firstSkipped) {
-    const { q, h, text } = firstSkipped;
-    clipped = 1;
-    const cut = text.slice(0, ceiling);
-    chars += cut.length;
-    windows.push({
-      thread: threadIdOf(q.s) ?? q.s.id,
-      sessionId: h.sessionId,
-      id8: h.sessionId.slice(0, 8),
-      seq: h.seq ?? null,
-      ts: h.ts ?? null,
-      kind: h.kind,
-      isSidechain: h.isSidechain,
-      confidence: confidenceOf(h),
-      calibration: calibrationOf(h),
-      citation: mintCitation({
-        sessionId: h.sessionId,
-        kind: q.s.kind,
-        harness: q.s.harness,
-        project: q.s.projectName,
-        exchanges: q.s.exchanges,
-        prompts: q.s.prompts,
-        date: (q.s.endedAt ?? q.s.startedAt)?.slice(0, 10) ?? null,
-      }),
-      text: cut,
-      clipped: true,
-    });
   }
 
   return {

@@ -127,7 +127,7 @@ function toyVector(text: string): number[] {
   for (const token of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
     let h = 2166136261;
     for (let i = 0; i < token.length; i++) {
-      h = Math.imul(h ^ token.charCodeAt(i), 16777619) >>> 0;
+      h = Math.imul(h ^ token.charCodeAt(i), 16_777_619) >>> 0;
     }
     v[h % DIMS] = (v[h % DIMS] ?? 0) + 1;
   }
@@ -1392,7 +1392,7 @@ describe('card --limit (T2.7 D6)', () => {
  * wall of prompts is not that. So: the card leads, it carries its citations,
  * and it fits the two widths the design system names.
  */
-describe('potsherd show renders the card (T2.7 D3)', () => {
+describe('explicit legacy card views preserve derived metadata (T2.7 D3)', () => {
   function cardedGhost(): string {
     const root = scratch();
     const db = seededDb(root);
@@ -1428,9 +1428,18 @@ describe('potsherd show renders the card (T2.7 D3)', () => {
     return root;
   }
 
+  function legacyView(root: string, width = 80, ascii = false): string {
+    const db = store.open({ root });
+    try {
+      const theme = new Theme({ width, ascii, color: false });
+      return theme.asciiLine(renderShow(showSession(db, 'g1')!, theme));
+    }
+    finally { db.close(); }
+  }
+
   it('puts the card above the transcript, with its citations and its counts', () => {
     const root = cardedGhost();
-    const out = cli(['show', 'g1', '--potsherd-dir', root, '--width', '80']).stdout;
+    const out = legacyView(root);
 
     expect(out).toContain('summary');
     expect(out).toContain('Asked for an events table');
@@ -1457,15 +1466,7 @@ describe('potsherd show renders the card (T2.7 D3)', () => {
     const root = cardedGhost();
     for (const width of [80, 60]) {
       for (const extra of [[], ['--ascii']]) {
-        const out = cli([
-          'show',
-          'g1',
-          '--potsherd-dir',
-          root,
-          '--width',
-          String(width),
-          ...extra,
-        ]).stdout;
+        const out = legacyView(root, width, extra.length > 0);
         for (const line of out.split('\n')) {
           // Counted by character, not by byte: `·` and `—` are three bytes.
           expect([...line].length, `"${line}" at ${width}`).toBeLessThanOrEqual(width);
@@ -1478,11 +1479,13 @@ describe('potsherd show renders the card (T2.7 D3)', () => {
     }
   });
 
-  it('carries the whole card in --json, not just its title', () => {
+  it('carries the whole derived card in the explicit legacy data view', () => {
     const root = cardedGhost();
-    const j = JSON.parse(cli(['show', 'g1', '--json', '--potsherd-dir', root]).stdout) as {
+    const db = store.open({ root });
+    const j = showSession(db, 'g1') as unknown as {
       card: { card: { summary: string; decisions: { what: string; evidence_seq: number[] }[] }; verified: { kept: number; dropped: number }; source: string } | null;
     };
+    db.close();
     expect(j.card).toBeTruthy();
     expect(j.card!.card.summary).toContain('Asked for');
     expect(j.card!.card.decisions[0]!.evidence_seq).toEqual([2]);
@@ -1495,10 +1498,32 @@ describe('potsherd show renders the card (T2.7 D3)', () => {
     const db = seededDb(root);
     seedGhost(db, 'g2', GHOST_PROMPTS);
     db.close();
-    const out = cli(['show', 'g2', '--potsherd-dir', root, '--width', '80']).stdout;
+    const read = store.open({ root });
+    const out = renderShow(showSession(read, 'g2')!, new Theme({ width: 80, color: false }));
+    read.close();
     expect(out).not.toContain('open threads');
     expect(out).not.toContain('verified');
     expect(out).toContain('set up the events table');
+  });
+  it('default show after public migration quotes retained prompts and keeps card prose out of evidence', () => {
+    const root = cardedGhost();
+    cli(['maintain', '--migrate', '--potsherd-dir', root]);
+    const result = cli(['show', 'g1', '--json', '--potsherd-dir', root]);
+    expect(result.code).toBe(0);
+    const j = JSON.parse(result.stdout);
+    expect(j.contractVersion).toBe(2);
+    expect(j.evidence.length, result.stdout).toBeGreaterThan(0);
+    for (const e of j.evidence) {
+      expect(e.role).toBe('ghost_prompt');
+      expect(e.text).not.toContain('Asked for an events table');
+      expect(e.toolOutcome).not.toBe('success');
+      expect(e.provenance.artifactBasis).toBe('legacy_projection');
+    }
+    expect(j.support.state).not.toBe('sufficient');
+    expect(j).not.toHaveProperty('card');
+    const md = cli(['show', 'g1', '--md', '--potsherd-dir', root]).stdout;
+    expect(md).toContain('Asked for an events table');
+    expect(md).toContain('2 kept, 3 dropped');
   });
 });
 
