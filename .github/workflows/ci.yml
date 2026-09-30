@@ -25,6 +25,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: initialize isolated public test asset store
+        run: node packages/cli/bin/potsherd.js maintain --migrate --potsherd-dir "${{ runner.temp }}/potsherd-ci-assets" --json
       - name: acquire verified public test assets
         run: node packages/cli/bin/potsherd.js maintain --acquire-assets --potsherd-dir "${{ runner.temp }}/potsherd-ci-assets" --json
       - run: pnpm typecheck
