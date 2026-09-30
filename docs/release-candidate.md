@@ -1,8 +1,10 @@
-# 2.0.0-rc.2 release candidate
+# 2.0.0-rc.3 release candidate
+
+rc.3 restores complete CI tag history and explicitly names the v2 agent contract in the README. It changes release metadata and documentation only; the rc.2 memory engine and the historical qualification and consumer results below remain applicable with their recorded limits. rc.2 was not published because release validation failed before the publishing step.
 
 rc.2 defaults omitted CLI JSON budget tokenizers to the pinned bundled accountant, adds field-specific input errors, and fixes native Codex marketplace registration. The broad qualification below was measured against rc.1; rc.2 received focused input, version/layout, bundled MCP and installed CLI checks. These changes do not establish semantic readiness or resolve the recorded consumer limitations.
 
-The current rc.2 `vitest list` inventory contains **2,391 tests** across 103 files with offline Node-driver defaults and no supplied semantic test assets. The listing excludes skipped cases and files; it runs no tests and establishes no pass result.
+The recorded rc.2 `vitest list` inventory contains **2,391 tests** across 103 files with offline Node-driver defaults and no supplied semantic test assets. The listing excludes skipped cases and files; it runs no tests and establishes no pass result.
 
 The rc.1 baseline qualification inventory defined **2,437 tests** across 104 test files. That historical inventory count
 does not imply that every check passed. Qualification results, skipped private-

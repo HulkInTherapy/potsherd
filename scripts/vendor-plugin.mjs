@@ -14,6 +14,26 @@ const ARTIFACTS = [
 ];
 const PLUGINS = ['plugins/claude-code','plugins/codex'];
 
+// Generated artifacts and docs do not change build provenance. Freeze bundles
+// after committing these inputs so a later artifact commit reproduces the manifest.
+const BUILD_INPUTS = [
+  ':(glob)packages/*/src/**',
+  ':(glob)packages/*/bin/**',
+  ':(glob)packages/*/package.json',
+  ':(glob)packages/*/build.mjs',
+  ':(glob)packages/*/tsconfig*.json',
+  'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml',
+  ':(glob)tsconfig*.json', 'scripts/vendor-plugin.mjs',
+  ':(glob)plugins/*/package.json',
+  ':(glob)plugins/*/.*-plugin/*.json',
+  '.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json',
+  'LICENSE', 'NOTICE', 'licenses/js-tiktoken-MIT.txt',
+];
+const sourceRevision = execFileSync('git', ['log', '-1', '--format=%H', '--', ...BUILD_INPUTS], {
+  cwd: repo, encoding: 'utf8',
+}).trim();
+if (!sourceRevision) throw new Error('No committed build inputs found');
+
 const missing = ARTIFACTS.map(([from]) => from).filter((f) => !existsSync(path.join(repo, f)));
 if (missing.length > 0) {
   console.error(`not built: ${missing.join(', ')}\nrun:  pnpm build`);
@@ -35,7 +55,7 @@ for (const plugin of PLUGINS) {
   copyFileSync(path.join(repo,'licenses','js-tiktoken-MIT.txt'),path.join(repo,plugin,'licenses','js-tiktoken-MIT.txt'));
   const files=Object.fromEntries(ARTIFACTS.map(([,name])=>{const body=readFileSync(path.join(repo,plugin,name));return [name,{bytes:body.length,sha256:createHash('sha256').update(body).digest('hex')}];}));
   const version=JSON.parse(readFileSync(path.join(repo,'packages','cli','package.json'),'utf8')).version;
-  writeFileSync(path.join(repo,plugin,'dist','artifact-manifest.json'),JSON.stringify({contractVersion:2,version,sourceRevision:execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim(),files,budgetTokenizer:'cl100k-base/js-tiktoken@1.0.21',semanticAssets:'explicit maintain acquisition; not bundled or downloaded on read'},null,2)+'\n');
+  writeFileSync(path.join(repo,plugin,'dist','artifact-manifest.json'),JSON.stringify({contractVersion:2,version,sourceRevision,files,budgetTokenizer:'cl100k-base/js-tiktoken@1.0.21',semanticAssets:'explicit maintain acquisition; not bundled or downloaded on read'},null,2)+'\n');
   writeFileSync(path.join(repo,plugin,'dist','README.md'),`# Generated local candidate artifacts
 
 Both this plugin's CLI and MCP bundles run independently of a sibling plugin or repository checkout. Bundled transport tokenizer assets require no download. Semantic model assets are acquired only by explicit maintain policy; missing assets leave labelled lexical/source access.

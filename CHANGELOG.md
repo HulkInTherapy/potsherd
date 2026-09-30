@@ -2,6 +2,11 @@
 
 Public releases use package versions. Internal development phase numbers are planning milestones, not product versions. This public candidate consolidates a development snapshot; the original private development branches are preserved separately.
 
+## 2.0.0-rc.3
+
+- Restore complete tag history in candidate CI so release-version checks run against reachable release tags.
+- Name the v2 agent contract and its four tools explicitly in the README. This candidate carries release metadata and documentation fixes; the rc.2 memory engine and recorded consumer limitations remain unchanged.
+
 ## 2.0.0-rc.2
 
 - Default an omitted JSON budget tokenizer to the pinned bundled accountant. Reject explicit unsupported identities and malformed budget fields with safe field-specific errors.
