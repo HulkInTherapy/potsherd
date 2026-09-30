@@ -713,8 +713,16 @@ describe('the version a user reads', () => {
      if(!a.pre.length||!b.pre.length)return a.pre.length===b.pre.length?0:a.pre.length?-1:1;
      for(let i=0;i<Math.max(a.pre.length,b.pre.length);i++){const x=a.pre[i],y=b.pre[i];if(x===y)continue;if(x===undefined)return -1;if(y===undefined)return 1;const xn=/^\d+$/.test(x),yn=/^\d+$/.test(y);if(xn&&yn)return Number(x)-Number(y);if(xn!==yn)return xn?-1:1;return x<y?-1:1;}return 0;
     };
-    const newest=tags.map(parse).sort(cmp).at(-1)!;
-    expect(cmp(parse(VERSION),newest),`VERSION is ${VERSION} but this repository has a newer released tag`).toBeGreaterThanOrEqual(0);
+    // Stable package numbering can differ from a higher experimental release
+    // line. Stable releases must not regress behind a stable tag; candidates
+    // retain the stricter comparison against every reachable release tag.
+    const newestFor=(current:Semver,available:Semver[]):Semver=>available
+      .filter(tag=>current.pre.length>0||tag.pre.length===0).sort(cmp).at(-1)!;
+    expect(cmp(parse('1.5.0'),newestFor(parse('1.5.0'),['v1.2.1','v2.0.0-rc.3'].map(parse)))).toBeGreaterThanOrEqual(0);
+    expect(cmp(parse('1.5.0'),newestFor(parse('1.5.0'),['v1.2.1','v2.0.0'].map(parse)))).toBeLessThan(0);
+    expect(cmp(parse('2.0.0-rc.2'),newestFor(parse('2.0.0-rc.2'),['v1.2.1','v2.0.0-rc.3'].map(parse)))).toBeLessThan(0);
+    const current=parse(VERSION),newest=newestFor(current,tags.map(parse));
+    expect(cmp(current,newest),`VERSION is ${VERSION} but this repository has a newer released tag in its release channel`).toBeGreaterThanOrEqual(0);
 
   });
 });

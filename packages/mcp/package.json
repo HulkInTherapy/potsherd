@@ -1,6 +1,6 @@
 {
   "name": "@potsherd/mcp",
-  "version": "2.0.0-rc.3",
+  "version": "1.5.0",
   "private": true,
   "description": "potsherd as an MCP stdio server: four tools over your own coding-agent history.",
   "type": "module",

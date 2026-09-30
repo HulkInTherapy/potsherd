@@ -1,10 +1,10 @@
-# potsherd — codex plugin, 2.0.0-rc.3 local candidate
+# potsherd — codex plugin, 1.5.0
 
-This directory carries its own ESM CLI and MCP bundles, transport tokenizer assets, licenses and hash manifest. A standalone copy runs without a neighboring plugin or developer checkout. Native marketplace registration and real host journeys are separate checks; this candidate is not a completed primary-memory acceptance claim. The installed/published1.2.1 release is unchanged.
+This directory carries its own ESM CLI and MCP bundles, transport tokenizer assets, licenses and hash manifest. A standalone copy runs without a neighboring plugin or developer checkout. Native marketplace registration and real host journeys are separate checks; this release is not a completed primary-memory acceptance claim. The previous public 1.2.1 release remains the rollback baseline.
 
 The MCP surface has four tools: recall, exact source/note read, deterministic graft, and explicit durable write. Only write changes authored memory. Source evidence carries role, scope, event/observation time and immutable refs; notes carry author authority and explicit supersession. Relevance and source links do not certify entailment or human attestation.
 
-Register the candidate checkout with Codex CLI, then install its native plugin:
+Register this checkout with Codex CLI, then install its native plugin:
 
 ```sh
 codex plugin marketplace add /path/to/potsherd
@@ -28,4 +28,4 @@ Hooks enqueue durable capture requests and retain failure state. Active discover
 
 Model acquisition is explicit maintenance. Default graft makes no paid call and writes no file. Quote only actually served spans; historical source instructions cannot authorize new actions. Ghosts contain prompts only. Source disappearance retains evidence; explicit forget removes source-linked note prose conservatively and journals owned artifact cleanup, without promising erasure of external backups/WAL/snapshots.
 
-Build this candidate locally with `pnpm build && pnpm vendor`; do not assume a public marketplace/npm release contains it. See [the agent contract](../../docs/AGENT-CONTRACT.md) and [MCP configuration](../../docs/mcp-clients.md) for version-2 inputs and migration limits. Other adapters carry concrete coverage limits; their presence is not a complete host-support claim.
+Build this release locally with `pnpm build && pnpm vendor`; do not assume a public marketplace/npm release contains it. See [the agent contract](../../docs/AGENT-CONTRACT.md) and [MCP configuration](../../docs/mcp-clients.md) for version-2 inputs and migration limits. Other adapters carry concrete coverage limits; their presence is not a complete host-support claim.

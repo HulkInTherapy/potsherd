@@ -2,11 +2,11 @@
 
 Local memory for coding-agent sessions. Capture supported history, find exact source evidence, and save scoped handoffs with provenance.
 
-**2.0.0-rc.3 is a release candidate.** Requires Node.js 22 or newer.
+**1.5.0 is designated stable.** Requires Node.js 22 or newer.
 
 ## Install and use
 
-Build the candidate checkout:
+Install or upgrade the published release with `npm install -g potsherd@latest`. Build this checkout from source:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -29,7 +29,7 @@ node packages/cli/bin/potsherd.js find "latest project decisions" --project /exa
 
 The v2 agent contract exposes four tools: `potsherd_recall` for scoped recall, `potsherd_read` for exact source evidence, `potsherd_graft` for deterministic handoffs, and `potsherd_write` for explicit authored memory. The [Codex plugin](plugins/codex/README.md), [Claude Code plugin](plugins/claude-code/README.md), native pi extension, and OpenCode MCP configuration use this contract. See [installation and MCP configuration](docs/mcp-clients.md), the [agent contract](docs/AGENT-CONTRACT.md), and the [reader contract](docs/reader-contract.md).
 
-Host verification differs by integration. [Candidate notes](docs/release-candidate.md) describe measured results and remaining limits; [release history](CHANGELOG.md) tracks product versions. This candidate is not certified as unattended primary memory.
+Host verification differs by integration. [Release notes](docs/release-candidate.md) describe measured results and remaining limits; [release history](CHANGELOG.md) tracks product versions. This release is not certified as unattended primary memory.
 
 ## Evidence and upgrades
 

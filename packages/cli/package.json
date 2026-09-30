@@ -1,6 +1,6 @@
 {
   "name": "potsherd",
-  "version": "2.0.0-rc.3",
+  "version": "1.5.0",
   "description": "Rescue, index, search, interrogate and re-enter every coding-agent session on your machine. Local-first.",
   "type": "module",
   "license": "MIT",

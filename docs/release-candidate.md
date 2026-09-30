@@ -1,4 +1,8 @@
-# 2.0.0-rc.3 release candidate
+# 1.5.0 release notes
+
+1.5.0 promotes the existing candidate implementation to the stable package version and npm `latest` channel. The v2 agent contract remains unchanged. This is a release designation, not a new qualification or retrieval-quality result; the recorded rc.2 consumer score of 4/10 and cold-retrieval limits remain unresolved. The publishing workflow retries temporary registry lookup failures while checking provenance, within its existing six-attempt limit.
+
+## Historical candidate qualification
 
 rc.3 restores complete CI tag history and explicitly names the v2 agent contract in the README. It changes release metadata and documentation only; the rc.2 memory engine and the historical qualification and consumer results below remain applicable with their recorded limits. rc.2 was not published because release validation failed before the publishing step.
 
@@ -35,7 +39,7 @@ A real consumer trial used a cold snapshot of 97 Claude and five Codex sessions,
 
 Use Node.js 22 or newer and explicit owned source/store roots. For a rehearsed update, preserve the old package and use `maintain --migrate` on a copied store; this creates a pre-upgrade backup. The authentic 1.2.1 fixture verifies source/tool/note/tag/pin preservation and restart behavior. To roll back, stop owned processes, preserve the upgraded store for diagnosis, restore a copy of the pre-upgrade backup, and run the old package against that restored copy.
 
-The prerelease publishing workflow uses npm dist-tag `next` and preserves `latest`. It checks version/tag agreement, privacy, builds, tests, canonical bundles, install behavior and provenance. Local CLI and native Codex plugin installations have been exercised; npm publication is a separate release event.
+The publishing workflow uses npm dist-tag `latest` for stable versions and `next` for prerelease versions. It checks version/tag agreement, privacy, builds, tests, canonical bundles, install behavior and provenance. Local CLI and native Codex plugin installations have been exercised; npm publication is a separate release event.
 
 ## Independent rc.2 consumer retest (2026-09-30)
 

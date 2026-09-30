@@ -1,6 +1,12 @@
 # Changelog
 
-Public releases use package versions. Internal development phase numbers are planning milestones, not product versions. This public candidate consolidates a development snapshot; the original private development branches are preserved separately.
+Public releases use package versions. Internal development phase numbers are planning milestones, not product versions. This public release consolidates a development snapshot; the original private development branches are preserved separately.
+
+## 1.5.0
+
+- Promote the existing candidate implementation to stable package version 1.5.0 and the npm `latest` channel. The v2 tool contract is independent of the package version.
+- Retry temporary registry lookup failures within the bounded provenance check after publishing.
+- Retain the recorded rc.2 cold-retrieval limitations and 4/10 consumer result. The stable designation does not establish improved retrieval quality or unattended primary-memory acceptance.
 
 ## 2.0.0-rc.3
 

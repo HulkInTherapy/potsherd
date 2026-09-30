@@ -206,8 +206,12 @@ jobs:
           PKG="$(node -p "require('./packages/cli/package.json').version")"
           for i in 1 2 3 4 5 6; do
             sleep 10
-            ATT="$(npm view "potsherd@$PKG" --json 2>/dev/null \
-              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.stringify(JSON.parse(s).dist.attestations??null))}catch{console.log("null")}})')"
+            # The registry may still be processing the new version. A failed
+            # lookup must consume an attempt rather than exit under pipefail.
+            if ! ATT="$(npm view "potsherd@$PKG" --json 2>/dev/null \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.stringify(JSON.parse(s).dist.attestations??null))}catch{console.log("null")}})')"; then
+              ATT="null"
+            fi
             echo "attempt $i: $ATT"
             if [ "$ATT" != "null" ]; then
               echo "provenance recorded for potsherd@$PKG"
