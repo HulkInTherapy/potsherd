@@ -122,4 +122,7 @@ describe('bounded local audit session',()=>{
   const f=fixture();claude(f,[user('a','one',{timestamp:'2026-10-01T00:00:00Z'}),user('b','two',{timestamp:undefined})]);const snap=await session({...f.options,harnesses:['claude']}).run();expect(snap.insights).toEqual([]);expect(snap.phrases).toEqual([]);
   fs.rmSync(path.join(f.options.claudeDir!,'projects'),{recursive:true});claude(f,[user('x','same',{entrypoint:'sdk-ts'}),user('y','same',{entrypoint:'sdk-ts'})]);const automatic=await session({...f.options,harnesses:['claude']}).run();expect(automatic.insights).toEqual([]);expect(automatic.phrases).toEqual([]);
  });
+ it('memoizes repeated validated timestamps across progress snapshots without changing timezone counts',async()=>{
+  const f=fixture();for(let source=0;source<3;source++)claude(f,Array.from({length:10},(_,i)=>user(`source-${source}-${i}`,'input '+i,{sessionId:'source-'+source})),String(source));const parts=vi.spyOn(Intl.DateTimeFormat.prototype,'formatToParts');const snap=await session({...f.options,harnesses:['claude'],timezone:'Asia/Kolkata'}).run();expect(snap.metrics.humanPrompts.value).toBe(30);expect(snap.activity).toEqual([{date:'2026-10-02',count:30}]);expect(parts).toHaveBeenCalledTimes(1);
+ });
 });

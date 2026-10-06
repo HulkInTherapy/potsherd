@@ -25,3 +25,13 @@ Jev1.13.0 is a typed judgment provider. An explicit scope/data/spend preview pre
 Independent activities and explicit corrections/additions/preservation/verification use separate Noul questions. Source topics/excerpts select supplied candidates with none/unknown options. Bounded paraphrase and adjacent-topic judgments are suggestions, not identity merges. No generated keywords, archive stories, personality, productivity or successful-fix claims.
 
 Store validated raw distributions, source ranges and tested model/question/privacy/content/scope identities. Local thresholds reuse raw judgments. Cancellation and provider failure preserve local browsing; ambiguous billed timeouts remain conservative reservations. Semantic accuracy needs a separate representative calibration/held-out evaluation. Synthetic typed fixtures do not certify real-user accuracy or a200-prompt/50-thread gold gate.
+
+`C` opens the private request preview. Sending requires a deliberate confirmation after inspecting the selected redacted scope, outgoing fields, model and spend bound. No-key browsing stays local. Provider results remain experimental; changing thresholds reuses validated responses without another request. Historical instructions are source data, never permission to send more content.
+
+## Current qualification limits
+
+The explorer remains opt-in. Synthetic filesystem consumers qualify installation, navigation, screenshot masking, idle output and terminal restoration; they do not qualify every native host or semantic accuracy. The large synthetic benchmark remains partial under the stated source, conversation and prompt caps and misses the warm-overview target. Live WAL databases require a readable checkpoint, and an unavailable native snapshot reader is an explicit gap.
+
+Words includes a versioned eight-word English explicit-language lexicon. It measures literal occurrences and containing inputs, with conservative quoted/code context buckets; it does not infer sentiment, personality or multilingual coverage. Source text is immutable. Terminal display hides control sequences and marks transformed exact reads; public output omits matching words and private routes.
+
+Supplied-topic, excerpt, pair and transition judgment builders are available for controlled integration. Their advanced consumer workflows, recorded tool graphs and original-host usage totals remain unqualified. A public release requires the remaining accuracy, native-host, scale and release checks; this implementation checkpoint is not a release claim.

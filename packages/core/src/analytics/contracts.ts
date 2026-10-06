@@ -24,11 +24,13 @@ export interface AuditPromptPage { snapshotId: string; conversationId: string; p
 export interface AuditEvidence { state: 'available'|'stale'|'unavailable'; text: string|null; role: string|null; eventAt: string|null; route: AuditEvidenceRoute; gapCodes: readonly string[]; }
 export interface AuditInsight { id: string; basis: 'deterministic'|'semantic'; caption: string; publicCaption: string; value: AuditMetric; conversationIds: readonly string[]; promptIds: readonly string[]; definition: string; }
 export interface AuditPhrase { id: string; text: string; prompts: number; occurrences: number; denominator: number; measurementBasis: string; conversationIds: readonly string[]; promptIds?: readonly string[]; evidenceRoutes?: readonly AuditEvidenceRoute[]; }
+export type AuditProseKind='direct_prose'|'quoted'|'code'|'unknown';
+export interface AuditProfanity { lexiconVersion:string; language:'en-explicit-lexicon'; measurementBasis:string; eligiblePrompts:number; occurrences:AuditMetric; containingPrompts:AuditMetric; buckets:readonly {kind:AuditProseKind;occurrences:number;containingPrompts:number}[]; coverageGaps:readonly string[]; matches?:readonly {term:string;kind:AuditProseKind;promptId:string;conversationId:string;startUtf16:number;endUtf16:number;route:AuditEvidenceRoute}[]; }
 export type AuditRawAnswer = { type:'choice'; choice: string; probabilities: Readonly<Record<string,number>>; confidence:number }|{ type:'noul'; noul:number }|{ type:'score'; score:number; legend: Readonly<Record<string,string>>; probabilities:Readonly<Record<string,number>>; confidence:number };
-export interface AuditPromptJudgment { promptId: string; conversationId: string; sourceRoute: AuditEvidenceRoute; contentHash:string; scopeHash:string; normalizationVersion:string; questionVersion:string; model:string; answers:Readonly<Record<string,AuditRawAnswer>>; windowCoverage:'complete'|'truncated'|'partial'; primaryIntent:AuditIntent|null; abstained:boolean; }
+export interface AuditPromptJudgment { promptId: string; conversationId: string; sourceRoute: AuditEvidenceRoute; contentHash:string; scopeHash:string; normalizationVersion:string; questionVersion:string; questionDefinitions?:Readonly<Record<string,unknown>>; model:string; answers:Readonly<Record<string,AuditRawAnswer>>; windowCoverage:'complete'|'truncated'|'partial'; primaryIntent:AuditIntent|null; abstained:boolean; }
 export interface AuditUsage { state: Availability; inputTokens: number|null; outputTokens: number|null; cacheTokens: number|null; reasoningTokens: number|null; costUsd: number|null; measurementBasis: string|null; inclusion: string|null; priceVersion: string|null; }
 export interface AuditWorkBar { label: string; count: number; denominator: number; state: Availability; }
-export interface AuditSemantics { state: 'not_run'|'no_key'|'running'|'partial'|'complete'|'cancelled'|'error'; qualified: boolean; model: string|null; classifiedPrompts: number; eligiblePrompts: number; uncertainPrompts: number; work: readonly AuditWorkBar[]; requestCount: number; cacheHits: number; estimatedCostUsd: number|null; reportedCostUsd: number|null; unresolvedCostUsd: number|null; errorCode: string|null; }
+export interface AuditSemantics { state: 'not_run'|'no_key'|'running'|'partial'|'complete'|'cancelled'|'error'; qualified: boolean; model: string|null; classifiedPrompts: number; eligiblePrompts: number; uncertainPrompts: number; unclassifiedPrompts?:number; work: readonly AuditWorkBar[]; requestCount: number; cacheHits: number; estimatedCostUsd: number|null; reportedCostUsd: number|null; unresolvedCostUsd: number|null; errorCode: string|null; }
 export interface AuditSnapshot {
   schemaVersion: 'audit-v1'; snapshotId: string; sequence: number; measuredAt: string; commitment?:string;
   scope: AuditScope; status: AuditState; coverage: AuditCoverage; progress: AuditProgress;
@@ -38,6 +40,7 @@ export interface AuditSnapshot {
   activity: readonly AuditActivityBucket[]; conversations: readonly AuditConversation[];
   insights: readonly AuditInsight[]; usage: AuditUsage; semantics: AuditSemantics;
   phrases?: readonly AuditPhrase[]; judgments?: readonly AuditPromptJudgment[];
+  profanity?:AuditProfanity;
   warnings: readonly string[];
 }
 export type AuditEvent = { type: 'snapshot'; snapshot: AuditSnapshot }|{ type:'progress'; snapshotId: string; sequence: number; progress: AuditProgress; sources: readonly AuditSourceCapability[] }|{ type:'error'; snapshotId:string; code: string; message: string };
@@ -46,13 +49,15 @@ export interface AuditOverviewOptions {
   harnesses?: readonly AuditHarness[]; project?: string; since?: string; until?: string; timezone?: string;
   signal?: AbortSignal; maxSourceBytes?: number; maxCandidates?: number; maxTotalBytes?:number; maxPrompts?:number; maxRecordsPerSource?:number;
 }
-export interface AuditSemanticSelection { conversationIds: readonly string[]; maxPrompts: number; maxRequests: number; budgetUsd: number; consent: true; signal?: AbortSignal; }
+export interface AuditSemanticSelection { conversationIds: readonly string[]; maxPrompts: number; maxRequests: number; budgetUsd: number; consent: true; confidenceThreshold?:number; signal?: AbortSignal; }
+export interface AuditSemanticPreview { snapshotId:string; model:string; selectedConversations:number; eligiblePrompts:number; selectedPrompts:number; maxRequests:number; budgetUsd:number; estimatedReservationUsd:number; keyAvailable:boolean; outgoingFields:readonly string[]; windowCoverage:'partial'|'truncated'; samples:readonly {promptId:string;excerpt:string}[]; gapCodes:readonly string[]; }
 export interface AuditSession {
   run(onEvent?: (event: AuditEvent)=>void): Promise<AuditSnapshot>;
   snapshot(): AuditSnapshot;
   cancel(): void;
   prompts(conversationId: string, offset?: number, limit?: number): Promise<AuditPromptPage>;
   evidence(route: AuditEvidenceRoute): Promise<AuditEvidence>;
+  preview?(selection: Omit<AuditSemanticSelection,'consent'>):Promise<AuditSemanticPreview>;
   classify(selection: AuditSemanticSelection, onEvent?: (event: AuditEvent)=>void): Promise<AuditSnapshot>;
   dispose(): void;
 }
