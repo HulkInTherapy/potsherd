@@ -43,7 +43,7 @@ export async function nativeFacts(file:string,harness:Exclude<AuditHarness,'open
  const events:NativeEvent[]=[];const gaps=new Set<string>();let project:string|null=null,parent:string|null=null,title:string|null=null;
  let nativeId=path.basename(file,'.jsonl'),consumed=0,records=0,turn:string|null=null,programmatic=false;
  const identity=new Map<string,string>();
- const responses:{text:string;turn:string|null;start:number;end:number;key:string;time:string|null;project:string|null}[]=[];
+ const responses:{text:string;cleanText:string;turn:string|null;start:number;end:number;key:string;time:string|null;project:string|null}[]=[];
  const markers:{event:NativeEvent;turn:string|null}[]=[];
  const put=(event:NativeEvent)=>{const previous=identity.get(event.identity);if(previous!==undefined){if(previous!==event.text)gaps.add('native_event_identity_conflict');return;}identity.set(event.identity,event.text);events.push(event);};
  for await(const line of readJsonlLines(file,{snapshot:bytes})){
@@ -81,7 +81,7 @@ export async function nativeFacts(file:string,harness:Exclude<AuditHarness,'open
    }
    if(typeof p.turn_id==='string')turn=p.turn_id;
    if(r.type==='response_item'&&p.type==='message'&&p.role==='user'){
-    const text=extractTextFromContent(p.content);if(text.trim())responses.push({text,turn,start:line.start,end:line.end,key,time:at,project});
+    const text=extractTextFromContent(p.content);if(text.trim())responses.push({text,cleanText:clean(text),turn,start:line.start,end:line.end,key,time:at,project});
    }
    if(r.type!=='response_item'&&r.type!=='event_msg'&&p.role==='user'){
     const text=extractTextFromContent(p.content);if(text.trim()){gaps.add('unsupported_user_container');put({...base,text:clean(text),origin:'unknown',eligible:false,excluded:'unsupported_user_container',identity:`record:${key}`});}
@@ -106,11 +106,11 @@ export async function nativeFacts(file:string,harness:Exclude<AuditHarness,'open
   // explicit turn or nearest marker window; a same-text injection remains ambiguous.
   const used=new Set<number>();
   for(let i=0;i<markers.length;i++){const marker=markers[i]!,prev=markers[i-1]?.event.rawStart??0,next=markers[i+1]?.event.rawStart??consumed;
-   const matches=responses.filter(r=>!used.has(r.start)&&clean(r.text).trim()===marker.event.text.trim()&&(marker.turn!==null?r.turn===marker.turn:r.start>=prev&&r.start<=next));
+   const matches=responses.filter(r=>!used.has(r.start)&&r.cleanText.trim()===marker.event.text.trim()&&(marker.turn!==null?r.turn===marker.turn:r.start>=prev&&r.start<=next));
    if(matches.length===1){const response=matches[0]!;used.add(response.start);marker.event.evidenceStart=response.start;}else if(matches.length>1)gaps.add('codex_response_pair_ambiguous');
   }
-  for(const response of responses){if(used.has(response.start))continue;const matches=markers.some(m=>m.event.text.trim()===clean(response.text).trim());
-   events.push({key:response.key,rawStart:response.start,rawEnd:response.end,role:'user',text:clean(response.text),eventAt:response.time,project:response.project,origin:'unknown',eligible:false,excluded:matches?'unpaired_user_response':'human_marker_missing',identity:`response:${response.start}`});
+  for(const response of responses){if(used.has(response.start))continue;const matches=markers.some(m=>m.event.text.trim()===response.cleanText.trim());
+   events.push({key:response.key,rawStart:response.start,rawEnd:response.end,role:'user',text:response.cleanText,eventAt:response.time,project:response.project,origin:'unknown',eligible:false,excluded:matches?'unpaired_user_response':'human_marker_missing',identity:`response:${response.start}`});
    if(!markers.length)gaps.add('codex_human_marker_missing');
   }
  }
