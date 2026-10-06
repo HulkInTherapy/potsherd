@@ -19,6 +19,17 @@ function session(options:AuditOverviewOptions){const s=createAuditSession(option
 function inventory(root:string):Record<string,string>{const result:Record<string,string>={};if(!fs.existsSync(root))return result;for(const item of fs.readdirSync(root,{withFileTypes:true})){const file=path.join(root,item.name);if(item.isDirectory()){for(const [key,value] of Object.entries(inventory(file)))result[path.join(item.name,key)]=value;}else if(item.isFile())result[item.name]=digest(fs.readFileSync(file));}return result;}
 
 describe('bounded local audit session',()=>{
+ it('validates a per-session checkpoint cap while preserving default reads, no writes and privacy fences',async()=>{
+  const f=fixture();claude(f,[user('cap','private input')]);const db=open({file:path.join(f.options.potsherdDir!,'potsherd.db')});db.close();
+  const before=inventory(f.root);const defaultRead=await session({...f.options,harnesses:['claude']}).run();expect(defaultRead.metrics.humanPrompts.value).toBe(1);expect(inventory(f.root)).toEqual(before);
+  const held=await session({...f.options,harnesses:['claude'],maxStoreBytes:100}).run();expect(held.coverage.gapCodes).toContain('audit_sqlite_snapshot_byte_limit');expect(held.coverage.gapCodes).toContain('raw_lane_policy_hold');expect(held.metrics.humanPrompts.value).toBeNull();
+  fs.writeFileSync(path.join(f.options.potsherdDir!,'config.json'),JSON.stringify({ignore:['/private/customer/project']}));const ignoredBefore=inventory(f.root);const highRead=await session({...f.options,harnesses:['claude'],maxStoreBytes:256*1024*1024}).run();expect(highRead.metrics.humanPrompts.value).toBe(0);expect(inventory(f.root)).toEqual(ignoredBefore);
+  fs.writeFileSync(path.join(f.options.potsherdDir!,'config.json'),'invalid');const invalidPolicy=await session({...f.options,harnesses:['claude'],maxStoreBytes:256*1024*1024}).run();expect(invalidPolicy.coverage.gapCodes).toContain('raw_lane_policy_hold');expect(invalidPolicy.metrics.humanPrompts.value).toBeNull();
+  for(const maxStoreBytes of [99,256*1024*1024+1,1.5,NaN])expect(()=>createAuditSession({...f.options,maxStoreBytes})).toThrow('invalid audit SQLite byte limit');
+ });
+ it('keeps live WAL unavailable even with the maximum per-session checkpoint cap',async()=>{
+  const f=fixture();claude(f,[user('wal-cap','private input')]);const db=open({file:path.join(f.options.potsherdDir!,'potsherd.db')});try{db.pragma('wal_checkpoint(TRUNCATE)');db.exec("INSERT INTO sync_state(key,value,updated_at) VALUES('cap-test','live','2026-10-01T00:00:00Z')");const before=inventory(f.root);const held=await session({...f.options,harnesses:['claude'],maxStoreBytes:256*1024*1024}).run();expect(held.coverage.gapCodes).toContain('audit_sqlite_live_journal_unavailable');expect(held.coverage.gapCodes).toContain('raw_lane_policy_hold');expect(held.metrics.humanPrompts.value).toBeNull();expect(inventory(f.root)).toEqual(before);}finally{db.close();}
+ });
  it('is synchronous initially, scans fresh noDB roots without writes or network, and emits immutable bound progress',async()=>{
   const f=fixture();claude(f,[user('one','build a small tool'),user('two','run its checks')]);const before=inventory(f.root);const network=vi.spyOn(globalThis,'fetch').mockRejectedValue(new Error('network forbidden'));
   const s=session({...f.options,harnesses:['claude'],timezone:'Asia/Kolkata'});expect(s.snapshot().status).toBe('discovering');expect(Object.isFrozen(s.snapshot())).toBe(true);

@@ -48,6 +48,8 @@ export interface AuditOverviewOptions {
   claudeDir?: string; codexDir?: string; piDir?: string; opencodeDir?: string; potsherdDir?: string;
   harnesses?: readonly AuditHarness[]; project?: string; since?: string; until?: string; timezone?: string;
   signal?: AbortSignal; maxSourceBytes?: number; maxCandidates?: number; maxTotalBytes?:number; maxPrompts?:number; maxRecordsPerSource?:number;
+  /** Frozen checkpoint allocation bound for this session only; default64MiB,100bytes..256MiB. */
+  maxStoreBytes?: number;
 }
 export interface AuditSemanticSelection { conversationIds: readonly string[]; maxPrompts: number; maxRequests: number; budgetUsd: number; consent: true; confidenceThreshold?:number; signal?: AbortSignal; }
 export interface AuditSemanticPreview { snapshotId:string; model:string; selectedConversations:number; eligiblePrompts:number; selectedPrompts:number; maxRequests:number; budgetUsd:number; estimatedReservationUsd:number; keyAvailable:boolean; outgoingFields:readonly string[]; windowCoverage:'partial'|'truncated'; samples:readonly {promptId:string;excerpt:string}[]; gapCodes:readonly string[]; }
