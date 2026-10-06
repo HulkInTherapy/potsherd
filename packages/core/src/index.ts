@@ -14,6 +14,8 @@ export { Card, table, fitLine, noteWidth, INDENT, type Row, type TableCell, type
 
 export { readArchiveState, type ArchiveState } from './archive-state.js';
 export { audit, computeAudit, collectAudit, type AuditOptions, type AuditReport, type AuditInput, type DoomedSession, type WipedProject } from './audit.js';
+export * from './analytics/contracts.js';
+export { createAuditSession, publicAuditSnapshot } from './analytics/index.js';
 export { renderAuditCard, renderSweepList } from './render/audit-card.js';
 export {
   renderVerify,

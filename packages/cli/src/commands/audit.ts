@@ -1,9 +1,20 @@
 import { audit, paths, renderAuditCard, renderSweepList, renderVerify, verifyInfo } from '@potsherd/core';
-import { print, printJson, themeFrom, type GlobalOptions } from '../output.js';
+import { print, printJson, themeFrom, UserError, type GlobalOptions } from '../output.js';
 
 export interface AuditOptions extends GlobalOptions {
   sweep?: boolean;
   verify?: boolean;
+  overview?: boolean;
+  legacy?: boolean;
+  plain?: boolean;
+  motion?: boolean;
+  private?: boolean;
+  harness?: string;
+  project?: string;
+  since?: string;
+  until?: string;
+  timezone?: string;
+  export?: string;
 }
 
 /**
@@ -12,6 +23,14 @@ export interface AuditOptions extends GlobalOptions {
  * `npx` runs on a stranger's machine.
  */
 export async function runAudit(o: AuditOptions): Promise<number> {
+  if (o.overview) {
+    if (o.legacy || o.sweep || o.verify) throw new UserError('--overview cannot be combined with --legacy, --sweep or --verify.');
+    const { runAuditOverview } = await import('./audit-overview.js');
+    return runAuditOverview(o);
+  }
+  if (o.plain || o.private || o.harness || o.project || o.since || o.until || o.timezone || o.export || o.motion === false) {
+    throw new UserError('The new audit options require --overview.');
+  }
   // `--verify` reads nothing at all: it hands over the python that recomputes
   // the four numbers from the user's own files, and gets out of the way. It is
   // the honesty contract in plans/05 §honesty, and it must keep working on a

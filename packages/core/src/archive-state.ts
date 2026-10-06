@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import { dbPath, potsherdDir } from './paths.js';
-import { open as openDb, count } from './db.js';
+import { count } from './db.js';
+import { openAuditSqliteSnapshot } from './audit-sqlite.js';
+
+export const ARCHIVE_UNAVAILABLE_WARNING = 'archive snapshot unavailable; local retention counts remain available';
 
 /**
  * A read-only peek at what potsherd has already rescued.
@@ -25,20 +28,21 @@ export interface ArchiveState {
 export function readArchiveState(root = potsherdDir()): ArchiveState | null {
   const file = dbPath(root);
   if (!fs.existsSync(file)) return null;
-  let db;
+  let snapshot: ReturnType<typeof openAuditSqliteSnapshot>;
   try {
-    db = openDb({ root, file, readonly: true });
+    snapshot = openAuditSqliteSnapshot(file);
   } catch {
     // A database from a newer potsherd, or a half-written one. Not worth
     // failing an otherwise read-only command over.
     return null;
   }
+  const db=snapshot.db;
   try {
     const last = db
       .prepare('SELECT ran_at, bytes FROM rescue_log ORDER BY id DESC LIMIT 1')
       .get() as { ran_at: string; bytes: number } | undefined;
     const bytes = db.prepare('SELECT COALESCE(SUM(bytes), 0) AS n FROM archive_files').get() as { n: number };
-    return {
+    const state = {
       dbPath: file,
       ghosts: count(db, 'ghosts'),
       ghostPrompts: count(db, 'ghost_prompts'),
@@ -47,6 +51,8 @@ export function readArchiveState(root = potsherdDir()): ArchiveState | null {
       rescues: count(db, 'rescue_log'),
       lastRescueAt: last?.ran_at ?? null,
     };
+    snapshot.assertCurrent();
+    return state;
   } catch {
     return null;
   } finally {

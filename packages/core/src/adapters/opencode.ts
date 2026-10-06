@@ -178,10 +178,10 @@ function pick(present: readonly string[], candidates: readonly string[]): string
  * clears it parses; a store that does not is reported as an unsupported
  * version with the reason, which is strictly more useful than a stack trace.
  */
-export function describeStore(dbPath: string): StoreDescription {
+export function describeStore(dbPath: string, providedDb?: Db): StoreDescription {
   let db: Db;
   try {
-    db = openSqliteReadOnly(dbPath);
+    db = providedDb ?? openSqliteReadOnly(dbPath);
   } catch (e) {
     return { ok: false, reason: `cannot open store read-only (${errText(e)})` };
   }
@@ -238,7 +238,7 @@ export function describeStore(dbPath: string): StoreDescription {
     }
     return { ok: true, schema: { dbPath, sessions, messages, ...(parts ? {parts} : {}) } };
   } finally {
-    db.close();
+    if (!providedDb) db.close();
   }
 }
 

@@ -1,4 +1,5 @@
 import type { AuditReport } from '../audit.js';
+import { ARCHIVE_UNAVAILABLE_WARNING } from '../archive-state.js';
 import { Card, noteWidth, type Row } from '../render.js';
 import { Theme } from '../theme.js';
 import * as f from '../format.js';
@@ -137,6 +138,10 @@ export function renderAuditCard(r: AuditReport, t: Theme = new Theme()): string 
  * `Card.fix` drops the explanation before it drops a character of the verb.
  */
 function closing(card: Card, r: AuditReport, t: Theme): void {
+  if(r.warnings.includes(ARCHIVE_UNAVAILABLE_WARNING)) {
+    card.text('archive stats are unavailable in this read-only snapshot.');
+    return;
+  }
   if (r.onDisk === 0 && r.deleted === 0) {
     card.text('no sessions found yet. run Claude Code once, then audit again.');
     return;
