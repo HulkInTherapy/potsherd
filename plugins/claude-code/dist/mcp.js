@@ -30821,12 +30821,14 @@ function assertResponseFormat(transport, format) {
   if (format === "compact-v1" && (transport === "human" || typeof transport === "object"))
     throw new RangeError("Compact response format requires JSON transport");
 }
-function finalizeEmission(value, transport = "json", format = "expanded-v2") {
+function finalizeEmission(value, transport = "json", format = "expanded-v2", prefix = "") {
   assertResponseFormat(transport, format);
+  if (prefix.length > 32 || /[^ \t\r\n]/u.test(prefix))
+    throw new RangeError("Invalid emission whitespace");
   if (transport === "human" || typeof transport === "object")
-    return Object.freeze({ kind: "human", format: "expanded-v2", serialized: serializeResponse(value, transport) });
+    return Object.freeze({ kind: "human", format: "expanded-v2", serialized: prefix + serializeResponse(value, transport) });
   const body = format === "compact-v1" && value && typeof value === "object" && "evidence" in value ? encodeCompactMemoryPacket(value) : value;
-  const text2 = JSON.stringify(body);
+  const text2 = prefix + JSON.stringify(body);
   if (transport === "mcp") {
     const block = Object.freeze({ type: "text", text: text2 });
     const result = { content: [block] };
@@ -30835,6 +30837,36 @@ function finalizeEmission(value, transport = "json", format = "expanded-v2") {
     return Object.freeze({ kind: "mcp", format, result, serialized: JSON.stringify(result) });
   }
   return Object.freeze({ kind: transport, format, serialized: transport === "cli_json" ? text2 + "\n" : text2 });
+}
+var RECEIPT_PREFIXES = ["", "\n", "\n\n", " \n", "\n ", "	", "	\n", "\n	", "\r\n", "\n \n", " \n ", "\n	\n", "\n\n\n", " \n \n", "	 \n", "\r\n\r\n"];
+function settleEmission(value, limit, byteLimit, transport, format = "expanded-v2") {
+  const initial = { usedTokens: value.budget.usedTokens, remainingTokens: value.budget.remainingTokens };
+  let overCap = null;
+  for (const prefix of RECEIPT_PREFIXES) {
+    value.budget.usedTokens = initial.usedTokens;
+    value.budget.remainingTokens = initial.remainingTokens;
+    const seen = /* @__PURE__ */ new Set();
+    for (let i = 0; i < 32; i++) {
+      const state = `${value.budget.usedTokens}:${value.budget.remainingTokens}`;
+      if (seen.has(state))
+        break;
+      seen.add(state);
+      const emission = finalizeEmission(value, transport, format, prefix), serialized = emission.serialized, tokens = countTokens(serialized), remaining = Math.max(0, limit - tokens);
+      if (value.budget.usedTokens === tokens && value.budget.remainingTokens === remaining) {
+        const payload = { emission, serialized, tokens, bytes: Buffer.byteLength(serialized) };
+        if (prefix === "" || tokens <= limit && payload.bytes <= byteLimit)
+          return payload;
+        if (!overCap)
+          overCap = { payload, usedTokens: tokens, remainingTokens: remaining };
+        break;
+      }
+      value.budget.usedTokens = tokens;
+      value.budget.remainingTokens = remaining;
+    }
+  }
+  value.budget.usedTokens = overCap?.usedTokens ?? initial.usedTokens;
+  value.budget.remainingTokens = overCap?.remainingTokens ?? initial.remainingTokens;
+  return overCap?.payload ?? null;
 }
 function emittedMcpResult(planned) {
   if (planned.emission.kind !== "mcp")
@@ -31039,18 +31071,7 @@ function planResponse(original, budget3, options = {}) {
     });
     return protectedKeys.length;
   };
-  const settle = () => {
-    for (let i = 0; i < 32; i++) {
-      const emission = finalizeEmission(response2, transport, format), encoded = emission.serialized;
-      const tokens = countTokens(encoded);
-      if (response2.budget.usedTokens === tokens && response2.budget.remainingTokens === Math.max(0, limit - tokens)) {
-        return { emission, serialized: encoded, tokens, bytes: Buffer.byteLength(encoded) };
-      }
-      response2.budget.usedTokens = tokens;
-      response2.budget.remainingTokens = Math.max(0, limit - tokens);
-    }
-    throw new Error("Token receipt did not converge");
-  };
+  const settle = () => settleEmission(response2, limit, byteLimit, transport, format);
   if (!nav)
     response2.candidates = response2.candidates.map(({ evidence: _e, ...candidate }) => candidate);
   for (; ; ) {
@@ -31082,7 +31103,7 @@ function planResponse(original, budget3, options = {}) {
         delete response2.continuation;
     }
     let payload = settle();
-    if (payload.tokens <= limit && payload.bytes <= byteLimit) {
+    if (payload && payload.tokens <= limit && payload.bytes <= byteLimit) {
       if (nav && !mechanical && response2.coverage.state === "complete_snapshot") {
         const exposed = /* @__PURE__ */ new Set([...response2.evidence.map((item2) => refKey(item2.ref)), ...response2.candidates.map((candidate) => refKey(candidate.ref))]);
         for (const key2 of initialEvidence) {
@@ -31094,7 +31115,7 @@ function planResponse(original, budget3, options = {}) {
           response2.candidates.push({ ref: structuredClone(candidate.ref), score: candidate.score, lanes: [...candidate.lanes] });
           response2.budget.omittedItems--;
           const proposed = settle();
-          if (proposed.tokens <= limit && proposed.bytes <= byteLimit) {
+          if (proposed && proposed.tokens <= limit && proposed.bytes <= byteLimit) {
             payload = proposed;
             exposed.add(key2);
           } else {
@@ -31170,16 +31191,9 @@ function planWriteReceipt(receipt, budget3 = defaultBudget(), transport = "json"
     throw new RangeError("Unsupported transport tokenizer");
   const limit = Math.min(budget3.maxTokens, budget3.remainingJourneyTokens ?? budget3.maxTokens);
   const value = { ...receipt, budget: { tokenizerId: TOKENIZER_ID, usedTokens: 0, remainingTokens: 0, truncated: false, omittedItems: 0 } };
-  for (let i = 0; i < 32; i++) {
-    const emission2 = finalizeEmission(value, transport), encoded2 = emission2.serialized, used2 = countTokens(encoded2);
-    if (value.budget.usedTokens === used2 && value.budget.remainingTokens === Math.max(0, limit - used2)) {
-      if (used2 <= limit && Buffer.byteLength(encoded2) <= (budget3.maxBytes ?? DEFAULT_RESPONSE_BYTES))
-        return { response: value, emission: emission2, serialized: encoded2, usedTokens: used2, usedBytes: Buffer.byteLength(encoded2) };
-      break;
-    }
-    value.budget.usedTokens = used2;
-    value.budget.remainingTokens = Math.max(0, limit - used2);
-  }
+  const settled = settleEmission(value, limit, budget3.maxBytes ?? DEFAULT_RESPONSE_BYTES, transport);
+  if (settled && settled.tokens <= limit && settled.bytes <= (budget3.maxBytes ?? DEFAULT_RESPONSE_BYTES))
+    return { response: value, emission: settled.emission, serialized: settled.serialized, usedTokens: settled.tokens, usedBytes: settled.bytes };
   const error51 = { error: "write_receipt_over_budget", committed: true, requestKey: receipt.requestKey };
   const emission = finalizeEmission(error51, transport), encoded = emission.serialized, used = countTokens(encoded);
   if (used > limit || Buffer.byteLength(encoded) > (budget3.maxBytes ?? DEFAULT_RESPONSE_BYTES))

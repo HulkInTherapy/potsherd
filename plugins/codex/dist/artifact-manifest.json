@@ -1,15 +1,15 @@
 {
   "contractVersion": 2,
   "version": "1.6.2",
-  "sourceRevision": "8270d6ebe35a5ef40a211d7e51b7362d2f296e06",
+  "sourceRevision": "d6502c4935c211a55ceed763e5529e8a706daad1",
   "files": {
     "dist/potsherd.js": {
-      "bytes": 3303493,
-      "sha256": "ebd034ca09a9f834e1aa8c38af8750d46d3747a72364618bbea6aaf9787aedd8"
+      "bytes": 3304533,
+      "sha256": "51d18c831d0014cfc1b72c8d9ecfc76e7822db2686ec6cf2cd2aaf7fe9819c4a"
     },
     "dist/mcp.js": {
-      "bytes": 2909437,
-      "sha256": "7eb6c72abd97c1a14fa6b39cb6a07500e35f67fbd8172baa2687bf68cfd7439d"
+      "bytes": 2910449,
+      "sha256": "1ca68c3af6f9174e7eb944c322c5cb9aa3ac955f5ea633d7895df9b35849b753"
     }
   },
   "budgetTokenizer": "cl100k-base/js-tiktoken@1.0.21",
