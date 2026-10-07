@@ -10,6 +10,8 @@ Captured evidence uses existing immutable references, read scope, lineage, priva
 
 Claude and Codex have primary native-record support with parser gaps disclosed. pi and OpenCode retain their declared projection/native-journey limits. Source files are not conversation counts. Original-host token/cost totals are unavailable until their adapter-specific fields and inclusion semantics qualify; transport budgets and Potsherd inference costs are separate measurements.
 
+Explicit metadata or synthetic flags withhold Claude human-input eligibility even when a prompt marker is present. False or absent flags do not establish authorship. Flagged records retain their own record identity so they cannot consume a later ordinary event with the same prompt marker. Physical collection limits and semantic conversation selection are separate bounds; child sources can occupy collection capacity without becoming human work.
+
 ## Terminal and sharing
 
 The overview shows four counts, project/work or source bars, one activity graph and at most two short source-backed findings. At80×24, header/scope use at most two rows, main visual twelve, selected summary two and persistent footer two.120×40 expands useful context;40×20 pages a focused panel. Definitions are available with `?`.
@@ -27,6 +29,8 @@ Independent activities and explicit corrections/additions/preservation/verificat
 Store validated raw distributions, source ranges and tested model/question/privacy/content/scope identities. Local thresholds reuse raw judgments. Cancellation and provider failure preserve local browsing; ambiguous billed timeouts remain conservative reservations. Semantic accuracy needs a separate representative calibration/held-out evaluation. Synthetic typed fixtures do not certify real-user accuracy or a200-prompt/50-thread gold gate.
 
 `C` opens the private request preview. Sending requires a deliberate confirmation after inspecting the selected redacted scope, outgoing fields, model and spend bound. No-key browsing stays local. Provider results remain experimental; changing thresholds reuses validated responses without another request. Historical instructions are source data, never permission to send more content.
+
+The private preview API includes every complete bounded request state, question definition and source/content/scope commitment from the same preparation used by dispatch. Short on-screen samples are inspection conveniences; they are not the full outgoing state. Preview metadata and read routes stay local and are not additional provider fields.
 
 ## Current qualification limits
 

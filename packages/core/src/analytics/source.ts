@@ -66,12 +66,13 @@ export async function nativeFacts(file:string,harness:Exclude<AuditHarness,'open
    const text=extractTypedText(m.content);if(!text.trim())continue;
    const results=Array.isArray(m.content)&&m.content.some(b=>isRecord(b)&&b.type==='tool_result');
    const native=typeof r.promptId==='string'&&r.promptId.length>0&&!results;
+   const explicitMeta=r.isMeta===true||r.isSynthetic===true;
    const declared=typeof r.session_id==='string'&&r.session_id!==nativeId?r.session_id:undefined;
    const recordCopy={...r};delete recordCopy.sessionId;delete recordCopy.session_id;delete recordCopy.promptId;
    const stable=(value:unknown):unknown=>Array.isArray(value)?value.map(stable):isRecord(value)?Object.fromEntries(Object.keys(value).sort().map(k=>[k,stable(value[k])])):value;
-   const excluded=parent?'child_initialization':maintenance(text)?'maintenance_exclusion_marker':results?'tool_result':declared?'inherited_identity_unverified':programmatic?'programmatic_origin_unattested':native?null:'injected_or_origin_unknown';
-   if(programmatic&&!parent&&excluded!=='maintenance_exclusion_marker')gaps.add('human_attestation_unavailable');
-   put({...base,text:clean(text),origin:native&&!declared&&!programmatic?'claude_prompt_id':'unknown',eligible:native&&excluded===null,excluded,identity:native?`prompt:${r.promptId}`:`record:${key}`,...(typeof r.uuid==='string'&&r.uuid.length>0?{nativeRecordId:r.uuid,recordCommitment:digest(JSON.stringify(stable(recordCopy)))}:{}),...(declared?{declaredOrigin:declared}:{})});
+   const excluded=parent?'child_initialization':maintenance(text)?'maintenance_exclusion_marker':results?'tool_result':explicitMeta?'declared_meta_or_synthetic_input':declared?'inherited_identity_unverified':programmatic?'programmatic_origin_unattested':native?null:'injected_or_origin_unknown';
+   if(programmatic&&!parent&&excluded!=='maintenance_exclusion_marker')gaps.add('human_attestation_unavailable');if(explicitMeta&&!parent)gaps.add('explicit_meta_or_synthetic_origin_unattested');
+   put({...base,text:clean(text),origin:native&&!declared&&!programmatic&&!explicitMeta?'claude_prompt_id':'unknown',eligible:native&&excluded===null,excluded,identity:native&&!explicitMeta?`prompt:${r.promptId}`:`record:${key}`,...(typeof r.uuid==='string'&&r.uuid.length>0?{nativeRecordId:r.uuid,recordCommitment:digest(JSON.stringify(stable(recordCopy)))}:{}),...(declared?{declaredOrigin:declared}:{})});
   }else if(harness==='codex'){
    if(r.type==='session_meta'){
     nativeId=typeof p.session_id==='string'?p.session_id:typeof p.id==='string'?p.id:nativeId;

@@ -52,7 +52,14 @@ export interface AuditOverviewOptions {
   maxStoreBytes?: number;
 }
 export interface AuditSemanticSelection { conversationIds: readonly string[]; maxPrompts: number; maxRequests: number; budgetUsd: number; consent: true; confidenceThreshold?:number; signal?: AbortSignal; }
-export interface AuditSemanticPreview { snapshotId:string; model:string; selectedConversations:number; eligiblePrompts:number; selectedPrompts:number; maxRequests:number; budgetUsd:number; estimatedReservationUsd:number; keyAvailable:boolean; outgoingFields:readonly string[]; windowCoverage:'partial'|'truncated'; samples:readonly {promptId:string;excerpt:string}[]; gapCodes:readonly string[]; }
+/** Private consent material only: never attach to a public snapshot/default rendering. */
+export interface AuditSemanticPreparedRequest {
+ promptId:string;conversationId:string;sourceRoute:AuditEvidenceRoute;sourceVersion:string;
+ contentHash:string;scopeHash:string;normalizationVersion:string;questionVersion:string;
+ windowCoverage:'partial'|'truncated';requestHash:string;requestBytes:number;
+ request:{model:string;state:{target:{role:'user';text:string};precedingUser:readonly {role:'user';text:string}[];assistantContext:'unavailable'};questions:Readonly<Record<string,unknown>>};
+}
+export interface AuditSemanticPreview { snapshotId:string; model:string; selectedConversations:number; eligiblePrompts:number; selectedPrompts:number; maxRequests:number; budgetUsd:number; estimatedReservationUsd:number; keyAvailable:boolean; outgoingFields:readonly string[]; windowCoverage:'partial'|'truncated'; samples:readonly {promptId:string;excerpt:string}[]; gapCodes:readonly string[]; /** Full bounded candidate requests from the same preparation used by classify; dispatch remains capped separately. */ preparedRequests:readonly AuditSemanticPreparedRequest[]; }
 export interface AuditSession {
   run(onEvent?: (event: AuditEvent)=>void): Promise<AuditSnapshot>;
   snapshot(): AuditSnapshot;
