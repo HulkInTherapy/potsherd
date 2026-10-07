@@ -2,7 +2,7 @@
 
 [Slopie](https://github.com/HulkInTherapy/slopie), formerly Potsherd, is local memory for coding-agent sessions. Capture supported history, find exact source evidence, and save scoped handoffs with provenance.
 
-**This checkout is the Slopie 1.6.1 candidate; npm publication is pending.** Requires Node.js 22 or newer. The earlier Potsherd 1.6.0 upload is a separate release and does not establish availability of this new package.
+**Slopie 1.6.1 is published with provenance; this checkout prepares the 1.6.2 live-store patch.** Requires Node.js 22 or newer.
 
 ## Audit your recorded history
 
@@ -20,7 +20,7 @@ Use `slopie audit --legacy` for the local retention audit, or set `POTSHERD_OFFL
 
 ## Install and use
 
-After publication, install with `npm install -g slopie@1.6.1` and run `slopie audit`. The `potsherd` executable remains a compatibility alias. Until then, build this candidate from source:
+Install with `npm install -g slopie` and run `slopie audit`. The `potsherd` executable remains a compatibility alias. To build this checkout from source:
 
 ```sh
 pnpm install --frozen-lockfile

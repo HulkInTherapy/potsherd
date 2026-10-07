@@ -24,8 +24,58 @@ const pct=(value:number|null|undefined)=>value==null?'unknown':`${format.format(
 const day=(value:string|null|undefined)=>value?.slice(0,10)??'unknown';
 function safe(value:string):string{return value.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g,'').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g,'').replace(/[\r\n\t]/g,' ');}
 const line=(text:string,tone:AuditTone='normal'):AuditLine=>[{text:safe(text),tone}];
-function semanticScope(snapshot:AuditSnapshot):string {const window=snapshot.launch?.semantics?.window.selected;return window?window.selection?`Newest ${window.selection.selected} of ${window.selection.available} episodes · ${window.selection.eventFrom??'unknown'} to ${window.selection.eventTo??'unknown'} UTC · partial calendar coverage`:`${window.period==='all'?'All available history':`${window.period} days`} · ${window.from??'unknown start'} to ${window.until} UTC`:'Recent work · window pending';}
-function shortWorkScope(snapshot:AuditSnapshot):string {const window=snapshot.launch?.semantics?.window.selected;if(!window)return 'Work · window pending';if(window.selection){const selected=window.selection,date=selected.eventFrom?new Date(selected.eventFrom):null,label=date&&!Number.isNaN(date.valueOf())?date.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}):'undated';return `Work: ${selected.selected}/${selected.available} episodes · ${label} · partial`;}return `Work: ${window.period==='all'?'all available':`${window.period} days`} · ${snapshot.launch?.semantics?.state??'pending'}`;}
+interface LaunchAnalysisStatus {kind:'local'|'loading'|'empty'|'offline'|'allowance'|'provider'|'cancelled'|'not_run'|'ready';summary:string|null;action:string|null;code:string|null;}
+function launchIsLoading(snapshot:AuditSnapshot):boolean{return Boolean(snapshot.launch&&snapshot.launch.stage!=='ready'&&!['cancelled','error'].includes(snapshot.status));}
+function launchGaps(snapshot:AuditSnapshot):Set<string>{return new Set([...snapshot.coverage.gapCodes,...snapshot.sources.flatMap(source=>source.gapCodes),...(snapshot.launch?.semantics?.gaps??[]),...(snapshot.semantics.errorCode?[snapshot.semantics.errorCode]:[])]);}
+function localReadFailure(gaps:Set<string>):{summary:string;action:string;code:string}|null {
+ const causes:readonly [string,string,string][]=[
+  ['audit_snapshot_stale','Local history changed during this audit','Run slopie audit again to read current sources.'],
+  ['audit_sqlite_snapshot_stale','Local SQLite snapshot changed','Let local writes settle, then run slopie audit again.'],
+  ['source_or_policy_changed','Local source or privacy settings changed','Run slopie audit again with the current settings.'],
+  ['source_or_privacy_changed','Local source or privacy settings changed','Run slopie audit again with the current settings.'],
+  ['audit_sqlite_rollback_journal_unavailable','Local SQLite rollback journal is active','Let the database writer finish, then retry.'],
+  ['audit_sqlite_live_journal_unavailable','Local SQLite journal blocks safe reading','Let the database writer finish, then retry.'],
+  ['audit_sqlite_snapshot_byte_limit','Archive exceeds snapshot limit','Check archive size and supported snapshot limits before retrying.'],
+  ['audit_sqlite_snapshot_disk_limit','Not enough free space for a safe snapshot','Free local disk space, then retry.'],
+  ['audit_sqlite_wal_index_unavailable','Local WAL commit boundary is unavailable','Let the writer finish; check an owned backup if this persists.'],
+  ['audit_sqlite_wal_integrity_unavailable','Local WAL committed data failed integrity checks','Check the source database or an owned backup before retrying.'],
+  ['audit_sqlite_snapshot_time_limit','Local SQLite snapshot timed out','Retry after local database activity settles.'],
+  ['audit_sqlite_format_unavailable','Local store is not readable SQLite','Check the selected store path, then retry.'],
+  ['audit_sqlite_wal_header_unavailable','Local WAL snapshot failed integrity checks','Retry after local writes settle; check the source if it persists.'],
+  ['audit_sqlite_wal_incomplete_tail','Local WAL snapshot is incomplete','Let the database writer finish, then retry.'],
+  ['audit_sqlite_snapshot_corrupt','Local SQLite snapshot failed integrity checks','Check the source database or an owned backup before retrying.'],
+  ['ignore_policy_unavailable','Local ignore settings could not be read','Check access to your ignore settings, then retry.'],
+  ['privacy_refresh_required','Local history needs a privacy refresh','Refresh the local privacy normalization before retrying.'],
+  ['store_policy_unavailable','Local history policy could not be read','Check local store access and privacy settings, then retry.'],
+  ['raw_lane_policy_hold','Local history is held by its privacy policy','Check local store access and privacy settings, then retry.'],
+ ];
+ for(const [code,summary,action] of causes)if(gaps.has(code))return {summary,action,code};
+ const sqlite=[...gaps].find(code=>code.startsWith('audit_sqlite_'));if(sqlite)return {summary:'Local SQLite history could not be read',action:'Check store access and retry after local writes settle.',code:sqlite};
+ return null;
+}
+function launchAnalysisStatus(snapshot:AuditSnapshot):LaunchAnalysisStatus {
+ const sem=snapshot.launch?.semantics,gaps=launchGaps(snapshot),attempts=sem?.attempts??0,local=attempts===0?localReadFailure(gaps):null;
+ if(local)return {kind:'local',...local};
+ if(launchIsLoading(snapshot))return {kind:'loading',summary:sem?.state==='pending'?'Analysis pending. Results appear when judgments finish.':null,action:null,code:null};
+ if(snapshot.status==='cancelled'||sem?.state==='cancelled')return {kind:'cancelled',summary:'Analysis cancelled',action:null,code:null};
+ if(snapshot.status==='error')return {kind:'not_run',summary:'Audit did not finish',action:'Run slopie audit again to retry.',code:null};
+ if(sem?.state==='pending')return {kind:'not_run',summary:'Analysis did not finish',action:'Run slopie audit again to retry.',code:null};
+ if(attempts>0){
+  if(gaps.has('free_quota_unavailable'))return {kind:'provider',summary:'Jev quota exhausted',action:'Retry when free capacity returns.',code:'free_quota_unavailable'};
+  if(gaps.has('free_retry_delay_exceeded'))return {kind:'provider',summary:'Free analysis cooldown is active',action:'Retry when free capacity returns.',code:'free_retry_delay_exceeded'};
+  if(gaps.has('free_access_denied'))return {kind:'provider',summary:'Free analysis access was denied',action:'Local results remain available.',code:'free_access_denied'};
+  if(sem?.state==='unavailable')return {kind:'provider',summary:'Analysis unavailable after attempted requests',action:'Local results remain available.',code:null};
+ }
+ if(sem?.state==='complete'||sem?.state==='partial')return {kind:'ready',summary:null,action:null,code:null};
+ if(metricCount(snapshot.metrics.humanPrompts)===0)return {kind:'empty',summary:'No eligible user input in this scope',action:null,code:null};
+ if(gaps.has('offline_requested')||gaps.has('developer_prepare_only'))return {kind:'offline',summary:gaps.has('offline_requested')?'Offline mode · analysis not requested':'Preparation only · analysis not requested',action:null,code:null};
+ if(gaps.has('semantic_window_unavailable')||gaps.has('free_allowance_exhausted'))return {kind:'allowance',summary:'No work window fits this run’s allowance',action:'Inspect period estimates or choose a smaller scope.',code:null};
+ if(gaps.has('free_access_unverified'))return {kind:'not_run',summary:'Free analysis access is unverified',action:null,code:'free_access_unverified'};
+ return {kind:'not_run',summary:'Analysis not run',action:null,code:null};
+}
+function missingWorkScope(snapshot:AuditSnapshot,short=false):string {const state=launchAnalysisStatus(snapshot);return {local:short?'Work unavailable · local history':'Work window unavailable · local history could not be read',loading:short?'Work · preparing window':'Work window is being prepared',empty:short?'Work · no eligible input':'No eligible work window in this scope',offline:short?'Work · offline / preparation only':'No analyzed work window · offline or preparation only',allowance:short?'Work · no fitting window':'No work window fits this run’s allowance',provider:short?'Work · window unavailable':'Work window unavailable',cancelled:short?'Work · cancelled':'Work window cancelled',not_run:short?'Work · not analyzed':'No analyzed work window',ready:short?'Work · no window selected':'No work window selected'}[state.kind];}
+function semanticScope(snapshot:AuditSnapshot):string {const window=snapshot.launch?.semantics?.window.selected;return window?window.selection?`Newest ${window.selection.selected} of ${window.selection.available} episodes · ${window.selection.eventFrom??'unknown'} to ${window.selection.eventTo??'unknown'} UTC · partial calendar coverage`:`${window.period==='all'?'All available history':`${window.period} days`} · ${window.from??'unknown start'} to ${window.until} UTC`:missingWorkScope(snapshot);}
+function shortWorkScope(snapshot:AuditSnapshot):string {const window=snapshot.launch?.semantics?.window.selected;if(!window)return missingWorkScope(snapshot,true);if(window.selection){const selected=window.selection,date=selected.eventFrom?new Date(selected.eventFrom):null,label=date&&!Number.isNaN(date.valueOf())?date.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}):'undated';return `Work: ${selected.selected}/${selected.available} episodes · ${label} · partial`;}return `Work: ${window.period==='all'?'all available':`${window.period} days`} · ${snapshot.launch?.semantics?.state==='pending'&&!launchIsLoading(snapshot)?'not completed':snapshot.launch?.semantics?.state??(launchIsLoading(snapshot)?'pending':'not analyzed')}`;}
 function modelTokens(model:ModelAggregate):string {return model.totalTokens!==null?`${num(model.totalTokens)} tokens`:model.knownTokens!==undefined&&model.knownTokens>0?`${num(model.knownTokens)} known tokens · total unknown`:'tokens unknown';}
 function knownTokens(snapshot:AuditSnapshot):number|null {const facts=snapshot.launch?.facts;if(!facts||!facts.knownTokenResponses)return null;const values=facts.models.map(model=>model.knownTokens??model.totalTokens).filter((value):value is number=>value!==null&&value!==undefined);return values.length?values.reduce((sum,value)=>sum+value,0):null;}
 function metricCount(metric:AuditSnapshot['metrics']['conversations']):number|null{return metric.state==='not_run'||metric.state==='unavailable'?null:metric.value;}
@@ -61,14 +111,15 @@ export function buildLaunchScreen(snapshot:AuditSnapshot,nav:LaunchNavigation,ge
  const body:AuditLine[]=[];
  const add=(text:string,tone:AuditTone='normal')=>body.push(line(text,tone));
  const wrap=(text:string,tone:AuditTone='normal')=>{const tokens=safe(text).split(/\s+/);let current='';for(const token of tokens){if(widthOf((current?`${current} `:'')+token)<=width){current+=(current?' ':'')+token;continue;}if(current)body.push(line(current,tone));current='';let rest=token;while(widthOf(rest)>width){const clipped=auditClip(rest,width,widthOf);if(!clipped)break;body.push(line(clipped,tone));rest=rest.slice(clipped.length);}current=rest;}if(current)body.push(line(current,tone));};
- const facts=snapshot.launch?.facts,sem=snapshot.launch?.semantics,stage=snapshot.launch?.stage??'discovering',active=stage!=='ready'&&!['cancelled','error'].includes(snapshot.status);
+ const facts=snapshot.launch?.facts,sem=snapshot.launch?.semantics,stage=snapshot.launch?.stage??'discovering',active=launchIsLoading(snapshot),analysis=launchAnalysisStatus(snapshot);
+ const showAnalysisStatus=(detailed=false)=>{if(analysis.summary)wrap(analysis.summary,analysis.kind==='local'?'amber':'dim');if(analysis.kind==='local'||detailed){if(analysis.action)wrap(analysis.action,'dim');if((sem?.attempts??0)===0&&analysis.kind!=='loading'&&analysis.kind!=='ready'&&analysis.kind!=='empty')add('No analysis requests made','dim');if(detailed&&analysis.code)add(`Reason: ${analysis.code}`,'dim');}};
  if(nav.view==='evidence'){
   add('SOURCE EVIDENCE','cyan');
   if(geometry.busy)add('Reading scoped source…','dim');else if(geometry.evidence?.state==='available'&&geometry.evidence.text!==null){add(`${geometry.evidence.role??'unknown role'} · ${day(geometry.evidence.eventAt)}`,'dim');for(const paragraph of geometry.evidence.text.split('\n'))wrap(paragraph);}else wrap(geometry.evidence?.state==='stale'?'Source changed. Re-run audit to read current evidence.':'Source evidence unavailable.');
  }else if(nav.view==='periods'){
-  wrap(`Analyzed scope: ${semanticScope(snapshot)}`,'cyan');wrap(`Allowance: ${num(sem?.window.tokenLimit)} total input tokens`,'dim');
+  wrap(`Analyzed scope: ${semanticScope(snapshot)}`,'cyan');showAnalysisStatus(true);wrap(`Allowance: ${num(sem?.window.tokenLimit)} total input tokens`,'dim');
   for(const [index,row] of launchRows(snapshot,nav).entries()){const choice=sem?.window.choices.find(item=>row.id===`period:${item.period}`);add(`${row.id===nav.selectedId||!nav.selectedId&&index===nav.selectedIndex?'›':' '} ${row.label}${choice?.period===sem?.window.selected?.period&&!sem?.window.selected?.selection?' · selected':''}`,'amber');wrap(row.value,'dim');if(choice?.reason)wrap(words(choice.reason),'dim');}
-  wrap('Remaining-analysis estimates include questions and retry allowance. Local inventory has already run; these are not total cold-audit times. Enter uses this run’s remaining allowance.','dim');if(sem?.window.reason)wrap(words(sem.window.reason),'dim');
+  if(sem?.window.choices.length&&analysis.kind!=='local')wrap('Remaining-analysis estimates include questions and retry allowance. Local inventory has already run; these are not total cold-audit times. Enter uses this run’s remaining allowance.','dim');else if(!active)add('No period estimates are available.','dim');if(sem?.window.reason)wrap(words(sem.window.reason),'dim');
  }else if(nav.view==='prompts'){
   add('DIRECT USER INPUTS','cyan');if(geometry.busy)add('Reading scoped conversation…','dim');
   for(const row of launchRows(snapshot,nav,geometry.promptPage)){add(`${row.id===nav.selectedId?'›':' '} ${row.label}`);add(`  ${row.value}`,'dim');}if(!geometry.busy&&!geometry.promptPage?.prompts.length)add('No accessible inputs in this bounded read.','dim');
@@ -91,7 +142,7 @@ export function buildLaunchScreen(snapshot:AuditSnapshot,nav:LaunchNavigation,ge
    add(`${ascii?'>':'◆'} ${words(stage)}${stage==='analyzing'?' · Jev':''}`,'amber');
    if(!compact)add(stages.map(step=>`${step===stage?'[':''}${step}${step===stage?']':''}`).join(' → '),'dim');
    if(snapshot.progress.total!==null)add(`${num(snapshot.progress.completed)} / ${num(snapshot.progress.total)} ${words(snapshot.progress.unit)}`,'dim');
-   if(sem?.state==='unavailable')wrap('Jev unavailable · local facts continue.','dim');
+
   }
   if(facts){
    add(`${usd(equivalent(facts))}  recorded API-equivalent value`,'amberLight');
@@ -103,7 +154,7 @@ export function buildLaunchScreen(snapshot:AuditSnapshot,nav:LaunchNavigation,ge
   if(snapshot.projects.length){add('PROJECTS','violet');for(const project of snapshot.projects.slice(0,compact?2:3))body.push([{text:`${project.displayName} `,tone:'normal'},{text:bar(project.share,compact?5:wide?20:10,ascii),tone:'violet'},{text:` ${num(project.humanPrompts)} prompts`,tone:'dim'}]);}
   add(shortWorkScope(snapshot),'cyan');
   if(sem?.work.length){const total=sem.work.reduce((sum,row)=>sum+row.count,0);add(sem.work.slice(0,compact?2:3).map(row=>`${words(row.label)} ${num(row.count)}`).join(' · '),'violet');if(wide)add(spark(sem.work.map(row=>row.count),30,ascii)+`  ${num(total)} judged segments`,'dim');}
-  else if(sem?.state==='unavailable')wrap('Jev route unavailable · see Work for coverage.','dim');
+  showAnalysisStatus();
   const direct=snapshot.profanity?.buckets.find(bucket=>bucket.kind==='direct_prose'),highlight=snapshot.profanity?.matches?.find(match=>match.kind==='direct_prose');
   if(direct){const attributed=snapshot.launch?.languageByModel?.find(row=>highlight&&row.promptIds.includes(highlight.promptId));add(compact?`LANGUAGE ${highlight?`“${highlight.term}” ×${num(direct.occurrences)}`:num(direct.occurrences)+' matches'}${attributed?.model?` · ${attributed.model}`:''}`:`YOUR LANGUAGE  ${highlight?`“${highlight.term}” · `:''}${num(direct.occurrences)} direct-use matches${attributed?.model?` · ${attributed.model}`:''}`,'amber');}else if(!active)add('Your language · direct-use coverage unavailable','dim');
   for(const story of (sem?.hallOfFame??[]).filter(story=>story.quote&&story.promptIds.length).slice(0,2)){const status=compact?{attempted:'attempted',assistant_reported:'reported',supported:'supported',uncertain:'uncertain'}[story.outcome]:outcome(story);const quote=auditClip(story.quote??story.caption,Math.max(4,width-widthOf(status)-10),widthOf);add(`HALL  ${quote} · ${status}`,'green');}
@@ -113,16 +164,15 @@ export function buildLaunchScreen(snapshot:AuditSnapshot,nav:LaunchNavigation,ge
   if(nav.section==='models'){wrap(`${factScope(snapshot)} · native recorded usage`,'dim');for(const pricing of pricingLines(snapshot))wrap(pricing,'dim');if(facts?.favourite)wrap(`Favourite combines known-token share and conversation share equally (50/50)`,'dim');if(facts?.referenceValueUsd!==null&&facts?.referenceValueUsd!==undefined)wrap(`${usd(facts.referenceValueUsd)} first-party reference · ${(facts.referenceProviders??[]).map(reference=>reference.provider+'/'+reference.model).join(', ')} · actual provider unknown`,'dim');}
   if(nav.section==='projects')wrap(`${factScope(snapshot)} · direct human prompts`,'dim');
   if(nav.section==='work'||nav.section==='hall'){
-   wrap(`${semanticScope(snapshot)} · Jev ${sem?.state??'pending'} · tone ${sem?.tone??'elegant'}`,'cyan');
-   if(sem?.state==='pending')wrap('Analysis pending. Semantic stories appear when judgments finish.','dim');
-   if(sem?.state==='unavailable')wrap('Jev unavailable. The free route has not supplied this analysis.','dim');
-   if(sem?.gaps.length)wrap(`Coverage: ${sem.gaps.map(words).join(', ')}`,'dim');
+   wrap(`${semanticScope(snapshot)} · tone ${sem?.tone??'elegant'}`,'cyan');
+   showAnalysisStatus(true);
+   const requestFailures=new Set(['free_quota_unavailable','free_retry_delay_exceeded','free_access_denied','free_service_unavailable','transport_failure','attempt_timeout','retry_limit']),visibleGaps=(sem?.gaps??[]).filter(gap=>(sem?.attempts??0)>0||!requestFailures.has(gap));if(visibleGaps.length)wrap(`Coverage: ${visibleGaps.map(words).join(', ')}`,'dim');
    if(nav.section==='work'&&sem?.work.length){const total=sem.work.reduce((sum,item)=>sum+item.count,0);for(const item of sem.work)body.push([{text:words(item.label)+' ',tone:'normal'},{text:bar(total?item.count/total:0,compact?6:18,ascii),tone:'violet'},{text:` ${num(item.count)} segments`,tone:'dim'}]);}
   }
   if(nav.section==='language'){wrap('Direct user language · English explicit lexicon','cyan');if(snapshot.profanity){for(const bucket of snapshot.profanity.buckets)add(`${words(bucket.kind)}: ${num(bucket.occurrences)} matches / ${num(bucket.containingPrompts)} inputs`,bucket.kind==='direct_prose'?'amber':'dim');for(const owner of snapshot.launch?.languageByModel??[])add(`${owner.model??'Unknown model'} · ${num(owner.occurrences)} direct matches`,'violet');wrap(`Coverage: ${num(snapshot.profanity.eligiblePrompts)} eligible inputs · ${snapshot.profanity.coverageGaps.map(words).join(', ')||'no listed gaps'}`,'dim');}else add('Language coverage unavailable','dim');}
   if(nav.section==='timeline'){add(`Human prompts · ${snapshot.scope.timezone}`,'cyan');add(spark(snapshot.activity.map(bucket=>bucket.count),width-2,ascii),'violet');}
   for(const [index,row] of rows.entries()){body.push([{text:`${index===selectedIndex?ascii?'> ':'› ':'  '}${row.label}`,tone:index===selectedIndex?'amber':'normal'}]);add(`  ${row.value}`,'dim');}
-  if(!rows.length&&!['pending','unavailable'].includes(sem?.state??''))add('No recorded rows for this scope.','dim');
+  if(!rows.length&&analysis.kind==='ready')add('No recorded rows for this scope.','dim');
  }
  if(geometry.notice)wrap(geometry.notice,'amber');
  // Navigation chrome stays in view; the content scrolls independently.
@@ -146,7 +196,7 @@ export async function runLaunchTerminal(session:AuditSession,options:AuditTermin
  function App(){
   const [live,setLive]=useState(finalSnapshot),[nav,setNav]=useState(createLaunchNavigation()),[frozen,setFrozen]=useState<AuditSnapshot|null>(null),[page,setPage]=useState<AuditPromptPage|null>(null),[evidence,setEvidence]=useState<AuditEvidence|null>(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
   const {columns,rows}=useWindowSize(),{exit}=useApp(),mounted=useRef(true),generation=useRef(0),pending=useRef<ReturnType<typeof setTimeout>|null>(null),readBusy=useRef(false);
-  const snapshot=nav.frozen&&frozen?frozen:live,active=live.launch?.stage!=='ready'&&!['error','cancelled'].includes(live.status),visible=Math.max(1,rows-6),items=launchRows(snapshot,nav,page);
+  const snapshot=nav.frozen&&frozen?frozen:live,active=launchIsLoading(live),visible=Math.max(1,rows-6),items=launchRows(snapshot,nav,page);
   const {frame}=useAnimation({interval:120,isActive:active&&!nav.frozen&&nav.section==='overview'&&nav.view==='section'&&options.motion!==false});
   useEffect(()=>{mounted.current=true;const publish=(event:AuditEvent)=>{finalSnapshot=applyAuditEvent(finalSnapshot,event);if(pending.current===null)pending.current=setTimeout(()=>{pending.current=null;if(mounted.current)setLive(finalSnapshot);},80);};scan=Promise.resolve().then(()=>session.run(publish)).then(value=>{settled=true;finalSnapshot=value;if(pending.current!==null){clearTimeout(pending.current);pending.current=null;}if(mounted.current)setLive(value);return value;},()=>{settled=true;finalSnapshot={...finalSnapshot,status:'error',launch:finalSnapshot.launch?{...finalSnapshot.launch,stage:'ready'}:undefined};if(mounted.current){setLive(finalSnapshot);setNotice('Audit interrupted · available results retained');}return finalSnapshot;});return()=>{mounted.current=false;generation.current++;if(pending.current!==null)clearTimeout(pending.current);};},[]);
   const stop=(cancel=false)=>{reason=!settled||periodJob||cancel?'cancelled':'quit';generation.current++;if(!settled||periodJob||cancel)session.cancel();exit();};
@@ -167,6 +217,7 @@ export async function runLaunchTerminal(session:AuditSession,options:AuditTermin
    if(!selected)return;
    if(selected.kind==='conversation'){await readPage(launchPush(nav,{view:'prompts',conversationId:selected.id}));return;}
    if(selected.kind==='period'){
+    const sourceFailure=launchAnalysisStatus(snapshot);if(sourceFailure.kind==='local'){setNotice(sourceFailure.summary??'Local history is unavailable');return;}
     const choice=snapshot.launch?.semantics?.window.choices.find(window=>selected.id===`period:${window.period}`);
     if(!choice||!choice.fits){setNotice('This period exceeds the available allowance · choose a smaller scope');return;}
     if(!settled||periodJob){setNotice('Current analysis is still running');return;}
@@ -175,7 +226,7 @@ export async function runLaunchTerminal(session:AuditSession,options:AuditTermin
     const publish=(event:AuditEvent)=>{finalSnapshot=applyAuditEvent(finalSnapshot,event);if(mounted.current)setLive(finalSnapshot);};
     periodJob=session.analyzePeriod(choice.period,publish);
     try{const value=await periodJob;finalSnapshot=value;if(mounted.current){setLive(value);if(token===generation.current){setNav({...createLaunchNavigation('work')});setNotice('');}}}
-    catch{if(mounted.current&&token===generation.current)setNotice('Period analysis stopped or unavailable · retained results remain');}
+    catch{refreshCurrent();if(mounted.current&&token===generation.current)setNotice(launchAnalysisStatus(finalSnapshot).summary??'Period analysis stopped · retained results remain');}
     finally{periodJob=null;if(mounted.current&&token===generation.current)setBusy(false);}
     return;
    }

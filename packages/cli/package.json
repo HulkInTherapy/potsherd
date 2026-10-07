@@ -1,6 +1,6 @@
 {
   "name": "slopie",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "Slopie: inspect retained coding-agent history with a terminal audit and sourced local memory.",
   "type": "module",
   "license": "MIT",
