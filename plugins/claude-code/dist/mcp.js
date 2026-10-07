@@ -29072,12 +29072,15 @@ function backfillLegacyNotes(db, limit = 100) {
   return count2;
 }
 
+// packages/core/dist/memory/source-identity.js
+import { createHash as createHash6 } from "node:crypto";
+function sourceId(harness, nativeSessionId) {
+  return createHash6("sha256").update(`source/v1\0${harness}\0${nativeSessionId}`).digest("hex");
+}
+
 // packages/core/dist/memory/source.js
 var OUTCOME_REFRESH_SQL = `s.harness='codex' AND u.role='tool_result' AND CASE WHEN r.adapter_version IN ('codex-records-v1','codex-records-v2') THEN 1 WHEN r.adapter_version='codex-records-v5' AND u.outcome IN ('success','error') AND (u.tool_name IS NULL OR u.tool_name IN ('exec_command','write_stdin')) THEN 1 WHEN r.adapter_version IN ('codex-records-v3','codex-records-v4') AND u.outcome IN ('success','error') THEN CASE WHEN u.tool_name IS NULL OR u.tool_name IN ('exec_command','write_stdin') OR u.tool_call_id IS NULL THEN 1 WHEN (SELECT COUNT(*) FROM revision_units cr JOIN evidence_units cu ON cu.unit_revision_id=cr.unit_revision_id WHERE cr.revision_id=r.revision_id AND cu.role='tool_input' AND cu.tool_call_id=u.tool_call_id)<>1 THEN 1 WHEN NOT EXISTS(SELECT 1 FROM revision_units cr JOIN evidence_units cu ON cu.unit_revision_id=cr.unit_revision_id JOIN revision_units result ON result.revision_id=cr.revision_id AND result.unit_revision_id=u.unit_revision_id WHERE cr.revision_id=r.revision_id AND cu.role='tool_input' AND cu.tool_call_id=u.tool_call_id AND cu.tool_name=u.tool_name AND cr.ordinal<result.ordinal) THEN 1 ELSE 0 END ELSE 0 END`;
 var historyVersion = (version2) => /^(claude|codex)-history-records-v1$/.test(version2);
-function sourceId(harness, nativeSessionId) {
-  return hash2(`source/v1\0${harness}\0${nativeSessionId}`);
-}
 function readEpochs(db) {
   const r = db.prepare("SELECT * FROM memory_epochs WHERE singleton=1").get();
   return { evidence: r.evidence_epoch, notes: r.notes_epoch, lineage: r.lineage_epoch, deletion: r.deletion_epoch, vector: r.vector_epoch };
@@ -30237,7 +30240,7 @@ function schemaResponse(error51, scope3 = {}) {
 }
 
 // packages/core/dist/memory/budget.js
-import { createHash as createHash6 } from "node:crypto";
+import { createHash as createHash7 } from "node:crypto";
 
 // node_modules/.pnpm/js-tiktoken@1.0.21/node_modules/js-tiktoken/dist/chunk-VL2OQCWN.js
 var import_base64_js = __toESM(require_base64_js(), 1);
@@ -30807,7 +30810,7 @@ function matchesNoteScope(note, scope3, resolved = false) {
 }
 
 // packages/core/dist/memory/budget.js
-var TOKENIZER_ASSET_HASH = createHash6("sha256").update(JSON.stringify(cl100k_base_default)).digest("hex");
+var TOKENIZER_ASSET_HASH = createHash7("sha256").update(JSON.stringify(cl100k_base_default)).digest("hex");
 var TOKENIZER_ID = `cl100k-base/js-tiktoken@1.0.21/${TOKENIZER_ASSET_HASH}`;
 var DEFAULT_RESPONSE_TOKENS = 4096;
 var DEFAULT_RESPONSE_BYTES = 65536;
@@ -34179,7 +34182,7 @@ function rebuildEvidenceSpans(db, options) {
 // packages/core/dist/memory/tokenization.js
 import fs21 from "node:fs";
 import path19 from "node:path";
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 import { pathToFileURL as pathToFileURL2 } from "node:url";
 function inspectSpanTokenizerHash(cacheDir) {
   const blobs = [];
@@ -34187,14 +34190,14 @@ function inspectSpanTokenizerHash(cacheDir) {
     const file2 = requiredFiles().find((asset) => asset.name === name);
     try {
       const bytes2 = fs21.readFileSync(path19.join(cacheDir, name));
-      if (bytes2.length !== file2.bytes || createHash7("sha256").update(bytes2).digest("hex") !== file2.sha256)
+      if (bytes2.length !== file2.bytes || createHash8("sha256").update(bytes2).digest("hex") !== file2.sha256)
         return null;
       blobs.push(bytes2);
     } catch {
       return null;
     }
   }
-  return createHash7("sha256").update(blobs[0]).update(blobs[1]).update(blobs[2]).digest("hex");
+  return createHash8("sha256").update(blobs[0]).update(blobs[1]).update(blobs[2]).digest("hex");
 }
 async function loadSpanTokenizer(cacheDir) {
   const names = [`${MODEL_ID}/tokenizer.json`, `${MODEL_ID}/tokenizer_config.json`, `${RUNTIME_SUBDIR}/tokenizers.mjs`];
@@ -34207,13 +34210,13 @@ async function loadSpanTokenizer(cacheDir) {
     } catch {
       return null;
     }
-    if (bytes2.length !== file2.bytes || createHash7("sha256").update(bytes2).digest("hex") !== file2.sha256)
+    if (bytes2.length !== file2.bytes || createHash8("sha256").update(bytes2).digest("hex") !== file2.sha256)
       return null;
     blobs.push(bytes2);
   }
   const runtime = await import(pathToFileURL2(path19.join(cacheDir, names[2])).href);
   const tokenizer2 = new runtime.Tokenizer(JSON.parse(blobs[0].toString()), JSON.parse(blobs[1].toString()));
-  const assetHash = createHash7("sha256").update(blobs[0]).update(blobs[1]).update(blobs[2]).digest("hex");
+  const assetHash = createHash8("sha256").update(blobs[0]).update(blobs[1]).update(blobs[2]).digest("hex");
   return {
     id: "bge-small-en-v1.5/wordpiece@0.1.3",
     assetHash,
