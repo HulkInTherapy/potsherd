@@ -1,15 +1,15 @@
 {
-  "name": "potsherd",
-  "version": "1.6.0",
-  "description": "Rescue, index, search, interrogate and re-enter every coding-agent session on your machine. Local-first.",
+  "name": "slopie",
+  "version": "1.6.1",
+  "description": "Slopie: inspect retained coding-agent history with a terminal audit and sourced local memory.",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://github.com/HulkInTherapy/potsherd",
+  "homepage": "https://github.com/HulkInTherapy/slopie",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/HulkInTherapy/potsherd.git"
+    "url": "git+https://github.com/HulkInTherapy/slopie.git"
   },
-  "bugs": "https://github.com/HulkInTherapy/potsherd/issues",
+  "bugs": "https://github.com/HulkInTherapy/slopie/issues",
   "keywords": [
     "claude-code",
     "codex",
@@ -27,6 +27,7 @@
     "node": ">=22"
   },
   "bin": {
+    "slopie": "bin/slopie.js",
     "potsherd": "bin/potsherd.js"
   },
   "files": [

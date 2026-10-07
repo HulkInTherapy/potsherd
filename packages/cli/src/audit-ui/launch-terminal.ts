@@ -126,7 +126,7 @@ export function buildLaunchScreen(snapshot:AuditSnapshot,nav:LaunchNavigation,ge
  }
  if(geometry.notice)wrap(geometry.notice,'amber');
  // Navigation chrome stays in view; the content scrolls independently.
- const header:AuditLine[]=[[{text:ascii?'POTSHERD  ':'▟  POTSHERD  ',tone:'amber'},{text:nav.frozen?'FROZEN · current view':nav.view==='section'?({elegant:'your recorded work',witty:'the receipts',chaotic:'the session pile',roast:'receipts, served cold'}[sem?.tone??'elegant']):NAMES[nav.section],tone:'dim'}]];
+ const header:AuditLine[]=[[{text:ascii?'SLOPIE  ':'▟  SLOPIE  ',tone:'amber'},{text:nav.frozen?'FROZEN · current view':nav.view==='section'?({elegant:'your recorded work',witty:'the receipts',chaotic:'the session pile',roast:'receipts, served cold'}[sem?.tone??'elegant']):NAMES[nav.section],tone:'dim'}]];
  if(compact)header.push(line(`${NAMES[nav.section]}  ${LAUNCH_SECTIONS.indexOf(nav.section)+1}/7${nav.view!=='section'?` · ${nav.view}`:''}`,'cyan'));
  else header.push(LAUNCH_SECTIONS.flatMap((section,index)=>[{text:`${index?'  ':''}${section===nav.section?'[':''}${NAMES[section]}${section===nav.section?']':''}`,tone:section===nav.section?'cyan':'dim' as AuditTone}]));
  header.push(line(`Coverage: ${snapshot.coverage.state==='complete_snapshot'?'retained snapshot':snapshot.coverage.state}${active?` · ${words(stage)}`:''}`,'dim'));

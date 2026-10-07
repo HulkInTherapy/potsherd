@@ -10,13 +10,13 @@
       "name": "potsherd",
       "source": "./plugins/claude-code",
       "description": "Takes a copy of every Claude Code session before the 30-day sweep can delete it, then makes the whole archive searchable from inside Claude Code.",
-      "version": "1.6.0",
+      "version": "1.6.1",
       "author": {
         "name": "HulkInTherapy",
         "url": "https://github.com/HulkInTherapy"
       },
-      "homepage": "https://github.com/HulkInTherapy/potsherd",
-      "repository": "https://github.com/HulkInTherapy/potsherd",
+      "homepage": "https://github.com/HulkInTherapy/slopie",
+      "repository": "https://github.com/HulkInTherapy/slopie",
       "license": "MIT",
       "category": "productivity",
       "keywords": [
