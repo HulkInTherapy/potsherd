@@ -73,3 +73,5 @@ This tokenizer is a transport accounting unit, not the host model tokenizer.
 Models.dev
 ----------
 The terminal audit includes reduced public model/pricing metadata from Models.dev (Anomaly). Source: https://github.com/anomalyco/models.dev. Licensed under MIT; see licenses/models-dev-MIT.txt. Snapshot retrieval date and hash are retained in each audit price basis.
+
+Native usage discovery and duplicate normalization were adapted with reference to ccusage (https://github.com/ccusage/ccusage), commit 656f7f86c5b832eedd8227f6174761852aa6c2fb, Copyright (c) 2025 ryoppippi. Licensed under MIT; see licenses/ccusage-MIT.txt. Slopie current-catalog reference valuation is separate from ccusage recorded/historical cost modes.

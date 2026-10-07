@@ -19,8 +19,8 @@ var __commonJS = (cb, mod) => function __require2() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
+  for (var name2 in all)
+    __defProp(target, name2, { get: all[name2], enumerable: true });
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -338,14 +338,14 @@ function duration(ms) {
   const s = Math.round(ms % 6e4 / 1e3);
   return s ? `${m}m ${s}s` : `${m}m`;
 }
-function money(usd2) {
-  if (usd2 === 0)
+function money(usd) {
+  if (usd === 0)
     return "$0";
-  if (usd2 < 0.01)
-    return `$${usd2.toFixed(4)}`;
-  if (usd2 < 1)
-    return `$${usd2.toFixed(3)}`;
-  return `$${usd2.toFixed(2)}`;
+  if (usd < 0.01)
+    return `$${usd.toFixed(4)}`;
+  if (usd < 1)
+    return `$${usd.toFixed(3)}`;
+  return `$${usd.toFixed(2)}`;
 }
 function bytes(n3) {
   const units2 = ["B", "KB", "MB", "GB", "TB"];
@@ -413,23 +413,23 @@ function wrap(s, width) {
       out.push("");
       continue;
     }
-    let line2 = "";
+    let line = "";
     for (const word of paragraph.split(/[ \t]+/).filter(Boolean)) {
-      if (!line2) {
-        line2 = word;
-      } else if (line2.length + 1 + word.length <= max2) {
-        line2 += " " + word;
+      if (!line) {
+        line = word;
+      } else if (line.length + 1 + word.length <= max2) {
+        line += " " + word;
       } else {
-        out.push(line2);
-        line2 = word;
+        out.push(line);
+        line = word;
       }
-      while (line2.length > max2) {
-        out.push(line2.slice(0, max2));
-        line2 = line2.slice(max2);
+      while (line.length > max2) {
+        out.push(line.slice(0, max2));
+        line = line.slice(max2);
       }
     }
-    if (line2)
-      out.push(line2);
+    if (line)
+      out.push(line);
   }
   return out;
 }
@@ -590,19 +590,19 @@ function wrap2(db) {
     transaction(fn) {
       const make = (begin) => (...args) => {
         const parentDepth = depth;
-        const name = `potsherd_sp_${parentDepth}`;
-        db.exec(parentDepth === 0 ? begin : `SAVEPOINT ${name}`);
+        const name2 = `potsherd_sp_${parentDepth}`;
+        db.exec(parentDepth === 0 ? begin : `SAVEPOINT ${name2}`);
         depth = parentDepth + 1;
         try {
           const out = fn(...args);
-          db.exec(parentDepth === 0 ? "COMMIT" : `RELEASE ${name}`);
+          db.exec(parentDepth === 0 ? "COMMIT" : `RELEASE ${name2}`);
           depth = parentDepth;
           return out;
         } catch (error) {
           try {
-            db.exec(parentDepth === 0 ? "ROLLBACK" : `ROLLBACK TO ${name}`);
+            db.exec(parentDepth === 0 ? "ROLLBACK" : `ROLLBACK TO ${name2}`);
             if (parentDepth > 0)
-              db.exec(`RELEASE ${name}`);
+              db.exec(`RELEASE ${name2}`);
           } catch {
           } finally {
             depth = parentDepth;
@@ -615,11 +615,11 @@ function wrap2(db) {
         Object.assign(variant, variants);
       return variants.default;
     },
-    loadExtension(path46) {
+    loadExtension(path50) {
       db.enableLoadExtension?.(true);
       if (!db.loadExtension)
         throw new Error("this sqlite cannot load extensions");
-      db.loadExtension(path46);
+      db.loadExtension(path50);
     },
     // 5. **`function()` registers an application-defined function.** Both
     //    drivers spell it the same way and both take the arity from
@@ -630,10 +630,10 @@ function wrap2(db) {
     //    no vector search at all. It stays a shim method rather than a call-site
     //    branch for the same reason as the other four: no query in the codebase
     //    should know which driver it is on.
-    function(name, options, impl) {
+    function(name2, options, impl) {
       if (!db.function)
         throw new Error("this sqlite cannot register functions");
-      db.function(name, options, impl);
+      db.function(name2, options, impl);
     },
     get inTransaction() {
       return depth > 0;
@@ -744,9 +744,9 @@ function runtimeFiles() {
 }
 function modelFiles() {
   const base2 = `${modelBase()}/${MODEL_ID}/resolve/main`;
-  const at2 = (name, bytes3, sha256) => ({
-    name: `${MODEL_ID}/${name}`,
-    url: `${base2}/${name}`,
+  const at2 = (name2, bytes3, sha256) => ({
+    name: `${MODEL_ID}/${name2}`,
+    url: `${base2}/${name2}`,
     bytes: bytes3,
     sha256
   });
@@ -826,11 +826,11 @@ async function acquire(cacheDir = modelsDir(), onProgress) {
       if (!res.ok || !res.body) {
         throw new Error(`${res.status} ${res.statusText || "no body"}`);
       }
-      const hash4 = crypto.createHash("sha256");
+      const hash5 = crypto.createHash("sha256");
       const out = fs2.createWriteStream(part);
       try {
         for await (const chunk of res.body) {
-          hash4.update(chunk);
+          hash5.update(chunk);
           done += chunk.byteLength;
           if (!out.write(chunk)) {
             await new Promise((resolve) => out.once("drain", () => resolve()));
@@ -840,7 +840,7 @@ async function acquire(cacheDir = modelsDir(), onProgress) {
       } finally {
         await new Promise((resolve, reject) => out.end((err) => err ? reject(err) : resolve()));
       }
-      const digest3 = hash4.digest("hex");
+      const digest3 = hash5.digest("hex");
       if (digest3 !== file.sha256) {
         throw new Error(`checksum mismatch (got ${digest3.slice(0, 12)}\u2026)`);
       }
@@ -1165,17 +1165,17 @@ function vectorReport(counts2) {
 function fetchClause(r, bytes3) {
   return `fetching the ${bytes3(r.acquireBytes)} runtime`;
 }
-function warmingLine(r, num5 = String, bytes3 = (n3) => `${Math.round(n3 / 1e6)} MB`) {
-  const head = warmingHead(r, num5);
+function warmingLine(r, num4 = String, bytes3 = (n3) => `${Math.round(n3 / 1e6)} MB`) {
+  const head = warmingHead(r, num4);
   if (r.embedded > 0 || r.runtimeReady)
     return head;
   return `${head} \u2014 ${fetchClause(r, bytes3)}`;
 }
-function warmingHead(r, num5 = String) {
-  return `semantic search: warming (${num5(r.embedded)} of ${num5(r.total)} embedded)`;
+function warmingHead(r, num4 = String) {
+  return `semantic search: warming (${num4(r.embedded)} of ${num4(r.total)} embedded)`;
 }
-function stoppedLine(r, num5 = String, bytes3 = (n3) => `${Math.round(n3 / 1e6)} MB`) {
-  const head = `semantic search: not running (${num5(r.embedded)} of ${num5(r.total)} embedded)`;
+function stoppedLine(r, num4 = String, bytes3 = (n3) => `${Math.round(n3 / 1e6)} MB`) {
+  const head = `semantic search: not running (${num4(r.embedded)} of ${num4(r.total)} embedded)`;
   if (r.embedded > 0)
     return `${head} \u2014 it stopped partway`;
   if (!r.runtimeReady)
@@ -1183,22 +1183,22 @@ function stoppedLine(r, num5 = String, bytes3 = (n3) => `${Math.round(n3 / 1e6)}
   return head;
 }
 function vectorNote(r, opts = {}) {
-  const num5 = opts.num ?? String;
+  const num4 = opts.num ?? String;
   const bytes3 = opts.bytes ?? ((n3) => `${Math.round(n3 / 1e6)} MB`);
   const dash = opts.dash ?? "\u2014";
   const runtime = r.backend === "native" ? "bge-small, 384-d" : "bge-small, 384-d, wasm";
   switch (r.phase) {
     case "ready":
-      return { value: num5(r.embedded), parts: [runtime, "every exchange"], tone: "ok" };
+      return { value: num4(r.embedded), parts: [runtime, "every exchange"], tone: "ok" };
     // FIX-F round 2 §4.3 — the row says `warming` for the same reason the
     // sentence did, and it is wrong in the same state. `working === false` is
     // a live worker's absence; `undefined` is a caller who could not ask, and
     // an absent measurement must not become a claim, so it keeps the old word.
     case "warming":
       return {
-        value: num5(r.embedded),
+        value: num4(r.embedded),
         parts: [
-          r.working === false ? `stopped at ${num5(r.embedded)} of ${num5(r.total)}` : `warming ${num5(r.embedded)} of ${num5(r.total)}`,
+          r.working === false ? `stopped at ${num4(r.embedded)} of ${num4(r.total)}` : `warming ${num4(r.embedded)} of ${num4(r.total)}`,
           runtime
         ],
         tone: "ok"
@@ -1221,10 +1221,10 @@ function vectorNote(r, opts = {}) {
       return {
         value: dash,
         parts: r.runtimeReady ? [
-          r.working === false ? `not running, 0 of ${num5(r.total)}` : `warming 0 of ${num5(r.total)}`,
+          r.working === false ? `not running, 0 of ${num4(r.total)}` : `warming 0 of ${num4(r.total)}`,
           runtime
         ] : [
-          `0 of ${num5(r.total)}`,
+          `0 of ${num4(r.total)}`,
           r.working === true ? fetchClause(r, bytes3) : r.working === false ? `not running \u2014 ${bytes3(r.acquireBytes)} runtime not fetched` : `${bytes3(r.acquireBytes)} runtime not fetched yet`
         ],
         tone: "dim"
@@ -1234,7 +1234,7 @@ function vectorNote(r, opts = {}) {
     case "unavailable":
     default:
       return {
-        value: r.embedded > 0 ? num5(r.embedded) : dash,
+        value: r.embedded > 0 ? num4(r.embedded) : dash,
         parts: [r.reason ?? "semantic search is not running here", "text search still works"],
         tone: "dim"
       };
@@ -1300,16 +1300,16 @@ function acquire2(op, opts = {}) {
   try {
     fs3.writeFileSync(path3.join(claim3, ownerFile), JSON.stringify(info), { mode: 384 });
     for (; ; ) {
-      let observed = fs3.existsSync(lockPath) ? readOwner(lockPath) : null;
+      let observed2 = fs3.existsSync(lockPath) ? readOwner(lockPath) : null;
       if (fs3.existsSync(lockPath)) {
-        if (isStale(lockPath, observed?.info ?? null)) {
-          retire(lockPath, observed?.file);
+        if (isStale(lockPath, observed2?.info ?? null)) {
+          retire(lockPath, observed2?.file);
           if (!fs3.existsSync(lockPath))
             continue;
-          observed = readOwner(lockPath);
+          observed2 = readOwner(lockPath);
         }
         if (Date.now() >= deadline2)
-          throw new LockBusyError(observed?.info ?? null, lockPath);
+          throw new LockBusyError(observed2?.info ?? null, lockPath);
         sleepSync(100);
         continue;
       }
@@ -1378,7 +1378,7 @@ async function withLockAsync(op, fn, opts = {}) {
 function readOwner(lockPath) {
   try {
     const files = fs3.readdirSync(lockPath);
-    const file = files.find((name) => /^owner\.[0-9a-f-]+\.json$/.test(name)) ?? (files.includes("owner.json") ? "owner.json" : void 0);
+    const file = files.find((name2) => /^owner\.[0-9a-f-]+\.json$/.test(name2)) ?? (files.includes("owner.json") ? "owner.json" : void 0);
     if (!file)
       return null;
     try {
@@ -1570,9 +1570,9 @@ function strandedVecTables(db) {
   }
   return out;
 }
-function statementsCompile(db, name) {
+function statementsCompile(db, name2) {
   try {
-    db.prepare(`SELECT 1 FROM "${name}" LIMIT 1`);
+    db.prepare(`SELECT 1 FROM "${name2}" LIMIT 1`);
     return true;
   } catch {
     return false;
@@ -1818,9 +1818,9 @@ function legacyVectorCount(db, legacy, rows, key2) {
     }
   }
 }
-function legacyVecTable(db, name) {
+function legacyVecTable(db, name2) {
   try {
-    const row2 = db.prepare(`SELECT type, sql FROM sqlite_master WHERE name = ?`).get(name);
+    const row2 = db.prepare(`SELECT type, sql FROM sqlite_master WHERE name = ?`).get(name2);
     return Boolean(row2 && row2.type === "table" && /USING\s+vec0/i.test(row2.sql ?? ""));
   } catch {
     return false;
@@ -2868,7 +2868,7 @@ INSERT INTO source_activations(source_id,revision_id,activated_at,evidence_epoch
 import fs5 from "node:fs";
 import path5 from "node:path";
 import process6 from "node:process";
-function onPath(name = "potsherd", env = process6.env) {
+function onPath(name2 = "potsherd", env = process6.env) {
   const raw = env["PATH"];
   if (!raw)
     return null;
@@ -2877,7 +2877,7 @@ function onPath(name = "potsherd", env = process6.env) {
     if (!dir)
       continue;
     for (const ext of exts) {
-      const candidate = path5.join(dir, name + ext);
+      const candidate = path5.join(dir, name2 + ext);
       try {
         const st = fs5.statSync(candidate);
         if (st.isFile()) {
@@ -3109,13 +3109,13 @@ function proposeGuardHook(dir, opts = {}) {
   }
   const json5 = st.files.user.json ? structuredClone(st.files.user.json) : {};
   const hooks = json5["hooks"] ??= {};
-  const list = Array.isArray(hooks["SessionStart"]) ? [...hooks["SessionStart"]] : [];
+  const list2 = Array.isArray(hooks["SessionStart"]) ? [...hooks["SessionStart"]] : [];
   const isOurs = (e) => (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(GUARD_MARKER));
-  const already = list.some(isOurs);
+  const already = list2.some(isOurs);
   if (opts.remove) {
     if (!already)
       return { path: p, before, after: before, diff: "", safe: true, noop: true };
-    const kept = list.filter((e) => !isOurs(e));
+    const kept = list2.filter((e) => !isOurs(e));
     if (kept.length)
       hooks["SessionStart"] = kept;
     else
@@ -3125,11 +3125,11 @@ function proposeGuardHook(dir, opts = {}) {
   } else {
     if (already)
       return { path: p, before, after: before, diff: "", safe: true, noop: true };
-    list.push({
+    list2.push({
       matcher: GUARD_MATCHER,
       hooks: [{ type: "command", command: opts.command ?? GUARD_COMMAND, timeout: 10 }]
     });
-    hooks["SessionStart"] = list;
+    hooks["SessionStart"] = list2;
   }
   const after = stringifySettings(json5);
   return {
@@ -3150,10 +3150,10 @@ function guardInstalled(dir) {
 function installedGuardCommand(dir) {
   const st = readCleanupStatus(dir);
   const hooks = st.files.user.json?.["hooks"];
-  const list = hooks?.["SessionStart"];
-  if (!Array.isArray(list))
+  const list2 = hooks?.["SessionStart"];
+  if (!Array.isArray(list2))
     return null;
-  for (const entry of list) {
+  for (const entry of list2) {
     for (const h of entry.hooks ?? []) {
       if (typeof h.command === "string" && h.command.includes(GUARD_MARKER))
         return h.command;
@@ -3462,9 +3462,9 @@ function table(t, rows, opts = {}) {
   }
   return rows.map((r) => t.asciiLine((indent + r.map((cell, c) => {
     const w = widths[c] ?? 0;
-    const clipped = fitCell(t, cell, w);
-    const pad5 = " ".repeat(Math.max(0, w - Theme.len(clipped)));
-    return opts.align?.[c] === "right" ? pad5 + clipped : clipped + pad5;
+    const clipped2 = fitCell(t, cell, w);
+    const pad5 = " ".repeat(Math.max(0, w - Theme.len(clipped2)));
+    return opts.align?.[c] === "right" ? pad5 + clipped2 : clipped2 + pad5;
   }).join(" ".repeat(gap2))).trimEnd()));
 }
 var INDENT, LABEL_W, VALUE_W, GAP, Card, MIN_HEAD;
@@ -3488,8 +3488,8 @@ var init_render = __esm({
        * caller. The fold is width-preserving (see {@link Theme.asciiLine}), so it
        * runs after the line has already been fitted.
        */
-      push(line2) {
-        this.lines.push(this.t.asciiLine(line2));
+      push(line) {
+        this.lines.push(this.t.asciiLine(line));
       }
       /**
        * `potsherd audit · ~/.claude · 21 aug 2026`. Middle parts are paths, so
@@ -3514,8 +3514,8 @@ var init_render = __esm({
         this.lines.push("");
         return this;
       }
-      raw(line2 = "") {
-        this.push(line2);
+      raw(line = "") {
+        this.push(line);
         return this;
       }
       /** An indented prose line, clipped (never wrapped) to the terminal width. */
@@ -3532,8 +3532,8 @@ var init_render = __esm({
         const value = rawValue.length > VALUE_W ? rawValue : rawValue.padStart(VALUE_W);
         const note = r.note ? clip(r.note, noteW, this.t) : "";
         const coloured = this.tone(value, r.tone);
-        const line2 = `${INDENT}${label4}${coloured}${note ? "   " + this.noteTone(note, r.tone) : ""}`;
-        this.push(line2.trimEnd());
+        const line = `${INDENT}${label4}${coloured}${note ? "   " + this.noteTone(note, r.tone) : ""}`;
+        this.push(line.trimEnd());
         return this;
       }
       rows(rs) {
@@ -3679,7 +3679,7 @@ function deadline(maxMs) {
       throw new Error("audit_sqlite_snapshot_time_limit");
   };
 }
-function stream(file, size, identity4, buffer, check, destination) {
+function stream(file, size, identity5, buffer, check, destination) {
   check();
   let fd;
   try {
@@ -3691,11 +3691,11 @@ function stream(file, size, identity4, buffer, check, destination) {
   }
   let out;
   try {
-    if (fingerprint(fs8.fstatSync(fd, { bigint: true })) !== identity4)
+    if (fingerprint(fs8.fstatSync(fd, { bigint: true })) !== identity5)
       throw new Error("audit_sqlite_snapshot_stale");
     if (destination)
       out = fs8.openSync(destination, fs8.constants.O_WRONLY | fs8.constants.O_CREAT | fs8.constants.O_EXCL | fs8.constants.O_NOFOLLOW, 384);
-    const header = Buffer.alloc(Math.min(size, 100)), hash4 = createHash2("sha256");
+    const header = Buffer.alloc(Math.min(size, 100)), hash5 = createHash2("sha256");
     let offset = 0;
     while (offset < size) {
       check();
@@ -3703,7 +3703,7 @@ function stream(file, size, identity4, buffer, check, destination) {
       if (!n3)
         throw new Error("audit_sqlite_snapshot_stale");
       const chunk = buffer.subarray(0, n3);
-      hash4.update(chunk);
+      hash5.update(chunk);
       if (offset < header.length)
         chunk.copy(header, offset, 0, Math.min(n3, header.length - offset));
       if (out !== void 0) {
@@ -3721,9 +3721,9 @@ function stream(file, size, identity4, buffer, check, destination) {
     if (out !== void 0)
       fs8.fsyncSync(out);
     check();
-    if (fingerprint(fs8.fstatSync(fd, { bigint: true })) !== identity4)
+    if (fingerprint(fs8.fstatSync(fd, { bigint: true })) !== identity5)
       throw new Error("audit_sqlite_snapshot_stale");
-    return { header, hash: hash4.digest("hex") };
+    return { header, hash: hash5.digest("hex") };
   } finally {
     fs8.closeSync(fd);
     if (out !== void 0)
@@ -3732,14 +3732,14 @@ function stream(file, size, identity4, buffer, check, destination) {
 }
 function capture(file, maxBytes, check, buffer, directory) {
   check();
-  const identity4 = inspect(file, maxBytes), copy = directory ? path7.join(directory, "snapshot.db") : void 0;
-  const database = stream(file, identity4.databaseBytes, identity4.database, buffer, check, copy), wal = identity4.wal === null ? null : stream(file + "-wal", identity4.walBytes, identity4.wal, buffer, check, copy ? copy + "-wal" : void 0);
-  if (!same(identity4, inspect(file, maxBytes)))
+  const identity5 = inspect(file, maxBytes), copy = directory ? path7.join(directory, "snapshot.db") : void 0;
+  const database = stream(file, identity5.databaseBytes, identity5.database, buffer, check, copy), wal = identity5.wal === null ? null : stream(file + "-wal", identity5.walBytes, identity5.wal, buffer, check, copy ? copy + "-wal" : void 0);
+  if (!same(identity5, inspect(file, maxBytes)))
     throw new Error("audit_sqlite_snapshot_stale");
   check();
-  const hash4 = createHash2("sha256").update(JSON.stringify([identity4.database, identity4.wal, identity4.journal, identity4.shm])).update(database.hash).update(wal === null ? "absent" : wal.hash).digest("hex");
+  const hash5 = createHash2("sha256").update(JSON.stringify([identity5.database, identity5.wal, identity5.journal, identity5.shm])).update(database.hash).update(wal === null ? "absent" : wal.hash).digest("hex");
   check();
-  return { identity: identity4, databaseHeader: database.header, walHeader: wal?.header ?? null, hash: hash4 };
+  return { identity: identity5, databaseHeader: database.header, walHeader: wal?.header ?? null, hash: hash5 };
 }
 function validateEnvelope(captured) {
   const db = captured.databaseHeader, wal = captured.walHeader;
@@ -3755,9 +3755,9 @@ function validateEnvelope(captured) {
   if ((captured.identity.walBytes - 32) % (pageSize + 24) !== 0)
     throw new Error("audit_sqlite_wal_incomplete_tail");
 }
-function validateCommittedWal(captured, copy, buffer, check) {
+function validateCommittedWal(captured, walFile, buffer, check) {
   if (!captured.identity.walBytes)
-    return;
+    return 0;
   const wal = captured.walHeader, shm = captured.identity.shmHeader;
   const bigEndian = wal.readUInt32BE(0) === 931071619, pageSize = wal.readUInt32BE(8), rawShmPage = nativeBigEndian ? shm.readUInt16BE(14) : shm.readUInt16LE(14), shmPage = rawShmPage === 1 ? 65536 : rawShmPage;
   let sum2 = checksum(wal, 0, 24, bigEndian);
@@ -3767,7 +3767,7 @@ function validateCommittedWal(captured, copy, buffer, check) {
   };
   if (sum2[0] !== wal.readUInt32BE(24) || sum2[1] !== wal.readUInt32BE(28) || shm[13] !== Number(bigEndian) || shmPage !== pageSize || !shm.subarray(32, 40).equals(wal.subarray(16, 24)) || committedBytes > captured.identity.walBytes)
     fail6();
-  const fd = fs8.openSync(copy + "-wal", fs8.constants.O_RDONLY | fs8.constants.O_NOFOLLOW);
+  const fd = fs8.openSync(walFile, fs8.constants.O_RDONLY | fs8.constants.O_NOFOLLOW);
   try {
     for (let frame = 1; frame <= mxFrame; frame++) {
       check();
@@ -3791,8 +3791,8 @@ function validateCommittedWal(captured, copy, buffer, check) {
   } finally {
     fs8.closeSync(fd);
   }
-  fs8.truncateSync(copy + "-wal", committedBytes);
   check();
+  return committedBytes;
 }
 function openAuditSqliteSnapshot(file, maxBytes = MAX_DISK_BYTES, options = {}) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 100 || maxBytes > MAX_DISK_BYTES)
@@ -3816,13 +3816,15 @@ function openAuditSqliteSnapshot(file, maxBytes = MAX_DISK_BYTES, options = {}) 
     if (captured.hash !== confirmed.hash || !same(captured.identity, confirmed.identity))
       throw new Error("audit_sqlite_snapshot_stale");
     const copy = path7.join(directory, "snapshot.db");
-    validateCommittedWal(captured, copy, buffer, check);
+    const committedBytes = validateCommittedWal(captured, copy + "-wal", buffer, check);
+    if (captured.identity.walBytes)
+      fs8.truncateSync(copy + "-wal", committedBytes);
     db = openDatabase(copy, { readonly: true, fileMustExist: true });
     db.pragma("temp_store = MEMORY");
     db.pragma("query_only = ON");
     db.prepare("SELECT count(*) FROM sqlite_schema").get();
-    for (const name of fs8.readdirSync(directory))
-      fs8.chmodSync(path7.join(directory, name), 384);
+    for (const name2 of fs8.readdirSync(directory))
+      fs8.chmodSync(path7.join(directory, name2), 384);
     check();
     const assertCurrent = () => {
       const now = capture(file, maxBytes, deadline(maxCaptureMs), Buffer.allocUnsafe(BUFFER_BYTES));
@@ -3860,6 +3862,39 @@ function openAuditSqliteSnapshot(file, maxBytes = MAX_DISK_BYTES, options = {}) 
       throw new Error("audit_sqlite_snapshot_corrupt", { cause: error });
     throw error;
   }
+}
+function verifyAuditPolicyWal(file) {
+  const check = deadline(1e4), initial = inspect(file, MAX_DISK_BYTES);
+  if (initial.walBytes > 256 * 1024 * 1024)
+    throw new Error("audit_policy_wal_byte_limit");
+  const header = (name2, length) => {
+    const fd = fs8.openSync(name2, fs8.constants.O_RDONLY | fs8.constants.O_NOFOLLOW);
+    try {
+      const bytes3 = Buffer.alloc(length);
+      let offset = 0;
+      while (offset < length) {
+        const n3 = fs8.readSync(fd, bytes3, offset, length - offset, offset);
+        if (!n3)
+          throw new Error("audit_sqlite_format_unavailable");
+        offset += n3;
+      }
+      return bytes3;
+    } finally {
+      fs8.closeSync(fd);
+    }
+  };
+  const captured = { identity: initial, databaseHeader: header(file, 100), walHeader: initial.walBytes ? header(file + "-wal", 32) : null, hash: "" };
+  validateEnvelope(captured);
+  validateCommittedWal(captured, file + "-wal", Buffer.allocUnsafe(65536 + 24), check);
+  const semantic = (header2) => header2 ? Buffer.concat([header2.subarray(0, 8), header2.subarray(12, 40)]).toString("hex") : null;
+  const assertCurrent = () => {
+    const next = inspect(file, MAX_DISK_BYTES);
+    const sameWal = initial.walBytes === 0 && next.walBytes === 0 || initial.wal === next.wal;
+    if (initial.database !== next.database || !sameWal || initial.journal !== next.journal || semantic(initial.shmHeader) !== semantic(next.shmHeader))
+      throw new Error("audit_policy_changed");
+  };
+  assertCurrent();
+  return { assertCurrent };
 }
 var MAX_DISK_BYTES, BUFFER_BYTES, DISK_HEADROOM, fingerprint, same, nativeBigEndian, native32;
 var init_audit_sqlite = __esm({
@@ -4060,8 +4095,8 @@ function splitLines(text2, o) {
   return lines;
 }
 function applyRecords(rec, lines) {
-  for (const line2 of lines) {
-    const s = line2.trim();
+  for (const line of lines) {
+    const s = line.trim();
     if (!s || s[0] !== "{")
       continue;
     let r;
@@ -4154,8 +4189,8 @@ async function readHistory(dir, opts = {}) {
     input: fs11.createReadStream(p, { encoding: "utf8" }),
     crlfDelay: Infinity
   });
-  for await (const line2 of rl) {
-    const s = line2.trim();
+  for await (const line of rl) {
+    const s = line.trim();
     if (!s)
       continue;
     scan2.lines++;
@@ -4806,8 +4841,8 @@ function recordCaptureResult(db, f, j, report, captured = report.totals.failed =
     assertFence(db, f);
     if (!db.prepare("SELECT 1 FROM maintenance_jobs WHERE job_id=? AND state='running' AND owner_token=? AND lease_generation=?").get(j.job_id, f.ownerToken, f.generation))
       throw new Error("job_superseded");
-    const safe2 = { ...report, harnesses: report.harnesses.map((h) => ({ ...h, errors: h.errors.map(() => "capture_failed") })) };
-    db.prepare("INSERT INTO maintenance_events(job_id,kind,at,detail_json) VALUES(?,'capture_result',?,?)").run(j.job_id, (/* @__PURE__ */ new Date()).toISOString(), JSON.stringify({ captured, report: safe2 }));
+    const safe = { ...report, harnesses: report.harnesses.map((h) => ({ ...h, errors: h.errors.map(() => "capture_failed") })) };
+    db.prepare("INSERT INTO maintenance_events(job_id,kind,at,detail_json) VALUES(?,'capture_result',?,?)").run(j.job_id, (/* @__PURE__ */ new Date()).toISOString(), JSON.stringify({ captured, report: safe }));
   }).immediate();
 }
 function recoverJobs(db, f, now = Date.now()) {
@@ -4862,8 +4897,8 @@ function drainSpool(db, root) {
   if (!fs14.existsSync(dir))
     return 0;
   let n3 = 0;
-  for (const name of fs14.readdirSync(dir).filter((x) => /^[a-f0-9]{64}\.json$/u.test(x)).sort()) {
-    const file = path11.join(dir, name);
+  for (const name2 of fs14.readdirSync(dir).filter((x) => /^[a-f0-9]{64}\.json$/u.test(x)).sort()) {
+    const file = path11.join(dir, name2);
     try {
       const r = JSON.parse(fs14.readFileSync(file, "utf8"));
       if (!["discover", "capture", "parse", "lineage", "embed", "rebuild", "forget"].includes(r.kind) || typeof r.targetId !== "string" || typeof r.inputHash !== "string")
@@ -5093,11 +5128,11 @@ async function collectEvidence(file, harness, start = 0, options = {}) {
   let last2 = null;
   let project;
   let branch;
-  for await (const line2 of readJsonlLines(file, { start, snapshot: before })) {
-    if (!line2.terminated)
+  for await (const line of readJsonlLines(file, { start, snapshot: before })) {
+    if (!line.terminated)
       break;
-    consumed = line2.end;
-    const r = parseJsonLine(line2.text);
+    consumed = line.end;
+    const r = parseJsonLine(line.text);
     if (!isRecord(r))
       continue;
     const p = isRecord(r.payload) ? r.payload : r;
@@ -5112,13 +5147,13 @@ async function collectEvidence(file, harness, start = 0, options = {}) {
       branch = p.git.branch;
     const timestamp = typeof r.timestamp === "string" && Number.isFinite(Date.parse(r.timestamp)) ? new Date(r.timestamp).toISOString() : null;
     const uuid = typeof r.uuid === "string" ? r.uuid : typeof p.id === "string" ? p.id : null;
-    const key2 = uuid ?? `record:${line2.lineNumber}`;
+    const key2 = uuid ?? `record:${line.lineNumber}`;
     last2 = key2;
-    const locator = { recordKey: key2, rawStart: line2.start, rawEnd: line2.end, mapping: "record_container", ...typeof r.session_id === "string" ? { parentNativeSessionId: r.session_id } : {} };
+    const locator = { recordKey: key2, rawStart: line.start, rawEnd: line.end, mapping: "record_container", ...typeof r.session_id === "string" ? { parentNativeSessionId: r.session_id } : {} };
     const add = (role, text2, suffix, extra = {}) => {
       if (!text2)
         return;
-      records.push({ unitKey: `${role}:${key2}:${suffix}`, role, text: text2, eventAt: timestamp, timeBasis: timestamp ? "record" : "unknown", locator: { recordKey: key2, rawStart: line2.start, rawEnd: line2.end, mapping: "record_container", ...typeof r.session_id === "string" ? { parentNativeSessionId: r.session_id } : {} }, locatorFidelity: uuid ? "record_id" : "record_ordinal", ...project ? { project } : {}, ...branch ? { branch } : {}, recordType: `${type}/${String(p.type ?? "")}`, ...options.legacyByOffset?.get(line2.start), ...extra });
+      records.push({ unitKey: `${role}:${key2}:${suffix}`, role, text: text2, eventAt: timestamp, timeBasis: timestamp ? "record" : "unknown", locator: { recordKey: key2, rawStart: line.start, rawEnd: line.end, mapping: "record_container", ...typeof r.session_id === "string" ? { parentNativeSessionId: r.session_id } : {} }, locatorFidelity: uuid ? "record_id" : "record_ordinal", ...project ? { project } : {}, ...branch ? { branch } : {}, recordType: `${type}/${String(p.type ?? "")}`, ...options.legacyByOffset?.get(line.start), ...extra });
     };
     if (harness === "claude") {
       if (!isRecord(r.message)) {
@@ -5135,7 +5170,7 @@ async function collectEvidence(file, harness, start = 0, options = {}) {
         const text2 = extractTypedText(content2);
         if (text2) {
           add("user", text2, "text");
-          reopen = line2.start;
+          reopen = line.start;
         }
       } else if (m.role === "assistant")
         add("assistant", extractTypedText(content2), "text");
@@ -5164,16 +5199,16 @@ async function collectEvidence(file, harness, start = 0, options = {}) {
       if (subtype === "message" && (p.role === "user" || p.role === "assistant")) {
         add(p.role, extractTextFromContent(p.content), "text");
         if (p.role === "user")
-          reopen = line2.start;
+          reopen = line.start;
       }
       if (["function_call", "custom_tool_call", "tool_search_call", "local_shell_call"].includes(subtype))
         add("tool_input", stringifyToolInput(p.arguments ?? p.input ?? p.action), "call", { ...typeof p.name === "string" && p.name ? { toolName: p.name } : {}, ...call ? { toolCallId: call } : {}, locator: { ...locator, nativeKind: `codex:${subtype}` } });
       if (["function_call_output", "custom_tool_call_output", "tool_search_output", "local_shell_call_output"].includes(subtype)) {
         const output = stringifyToolOutput(p.output) ?? "";
-        const outcome2 = structuredToolOutcome(p);
+        const outcome = structuredToolOutcome(p);
         if (subtype === "function_call_output" && typeof p.output === "string")
           nativeWrapperPayloads.set(`tool_result:${key2}:output`, p);
-        add("tool_result", output, "output", { ...call ? { toolCallId: call } : {}, outcome: outcome2, locator: { ...locator, nativeKind: `codex:${subtype}` } });
+        add("tool_result", output, "output", { ...call ? { toolCallId: call } : {}, outcome, locator: { ...locator, nativeKind: `codex:${subtype}` } });
       }
     }
   }
@@ -5197,9 +5232,9 @@ function resolveToolNames(records) {
     const prior = record4.toolCallId ? calls.get(record4.toolCallId) : void 0;
     const input = prior?.length === 1 ? prior[0] : void 0;
     const expected = CALL_KINDS[String(record4.locator.nativeKind ?? "")];
-    const name = input && expected && input.locator.nativeKind === expected ? input.toolName : void 0;
+    const name2 = input && expected && input.locator.nativeKind === expected ? input.toolName : void 0;
     const { toolName: _old, ...rest } = record4;
-    return { ...rest, ...name ? { toolName: name } : {}, locator: { ...record4.locator, toolNameBasis: name ? "unique_preceding_call_id" : "unavailable_call_identity" } };
+    return { ...rest, ...name2 ? { toolName: name2 } : {}, locator: { ...record4.locator, toolNameBasis: name2 ? "unique_preceding_call_id" : "unavailable_call_identity" } };
   });
 }
 function toolError(payload) {
@@ -5352,13 +5387,13 @@ async function parseClaudeTranscript(filePath, options = {}) {
     });
   };
   const sessionIdSoFar = () => resolveSessionId(absolute2, options, recordSessionId, sidechainFlag);
-  for await (const line2 of readJsonlLines(absolute2, { start: fromOffset, snapshot })) {
-    if (!line2.terminated)
+  for await (const line of readJsonlLines(absolute2, { start: fromOffset, snapshot })) {
+    if (!line.terminated)
       break;
-    endOffset = line2.end;
-    const parsed = parseJsonLine(line2.text);
+    endOffset = line.end;
+    const parsed = parseJsonLine(line.text);
     if (parsed === void 0) {
-      if (line2.text.trim())
+      if (line.text.trim())
         malformedLines += 1;
       continue;
     }
@@ -5420,11 +5455,11 @@ async function parseClaudeTranscript(filePath, options = {}) {
           files: [],
           ...typeof parsed.parentUuid === "string" ? { parentUuid: parsed.parentUuid } : {}
         };
-        seqByOffset.set(line2.start, seq);
+        seqByOffset.set(line.start, seq);
         continue;
       }
       if (current) {
-        seqByOffset.set(line2.start, current.seq);
+        seqByOffset.set(line.start, current.seq);
         for (const block2 of results) {
           const id = typeof block2.tool_use_id === "string" ? block2.tool_use_id : void 0;
           if (!id)
@@ -5450,7 +5485,7 @@ ${text3}` : text3;
     }
     if (role !== "assistant" || !current)
       continue;
-    seqByOffset.set(line2.start, current.seq);
+    seqByOffset.set(line.start, current.seq);
     if (typeof message2.model === "string")
       model = message2.model;
     const text2 = extractTypedText(content2);
@@ -5459,8 +5494,8 @@ ${text3}` : text3;
       assistantTurns += 1;
     }
     for (const block2 of toolUseBlocks(content2)) {
-      const name = typeof block2.name === "string" ? block2.name : "unknown";
-      const call = { name, input: stringifyToolInput(block2.input) };
+      const name2 = typeof block2.name === "string" ? block2.name : "unknown";
+      const call = { name: name2, input: stringifyToolInput(block2.input) };
       current.toolCalls.push(call);
       toolCallCount += 1;
       if (typeof block2.id === "string")
@@ -5691,8 +5726,8 @@ function bestTable(tables2, patterns) {
   }
   return void 0;
 }
-function quoteIdent(name) {
-  return `"${name.replace(/"/g, '""')}"`;
+function quoteIdent(name2) {
+  return `"${name2.replace(/"/g, '""')}"`;
 }
 function findStores(override) {
   const root = sourceDir(override);
@@ -5919,8 +5954,8 @@ async function parse(source, options = {}) {
     db.close();
   }
 }
-function col(name, alias) {
-  return name ? `${quoteIdent(name)} as ${alias}` : `null as ${alias}`;
+function col(name2, alias) {
+  return name2 ? `${quoteIdent(name2)} as ${alias}` : `null as ${alias}`;
 }
 function buildExchanges(rows, sessionId, counts2, unknownTypes, onMalformed) {
   const out = [];
@@ -6044,13 +6079,13 @@ function parseContent(raw, unknownTypes, onMalformed) {
     }
     if (type === "tool" || type === "tool-invocation" || type === "tool_use" || type === "tool-call") {
       const state = isRecord(p["state"]) ? p["state"] : {};
-      const name = String(p["tool"] ?? p["name"] ?? state["tool"] ?? "unknown");
+      const name2 = String(p["tool"] ?? p["name"] ?? state["tool"] ?? "unknown");
       const input = state["input"] ?? p["input"] ?? p["args"] ?? p["arguments"];
       const output = state["output"] ?? state["error"] ?? p["output"] ?? p["result"];
       const status3 = String(state["status"] ?? p["status"] ?? "").toLowerCase();
       const result = stringifyToolOutput(output);
       const call = {
-        name,
+        name: name2,
         input: stringifyToolInput(input),
         ...result !== void 0 ? { result } : {},
         ...status3 === "error" || status3 === "failed" ? { isError: true } : {}
@@ -6263,8 +6298,8 @@ function scan(override) {
   return { sources, unreadable };
 }
 function stateFileIn(dir) {
-  for (const name of STATE_FILES) {
-    const candidate = path14.join(dir, name);
+  for (const name2 of STATE_FILES) {
+    const candidate = path14.join(dir, name2);
     try {
       if (fs19.statSync(candidate).isFile())
         return candidate;
@@ -6373,10 +6408,10 @@ function readDocument(file, raw) {
     const turns = [];
     let meta;
     let malformed = 0;
-    for (const line2 of raw.split("\n")) {
-      if (!line2.trim())
+    for (const line of raw.split("\n")) {
+      if (!line.trim())
         continue;
-      const parsed = safeParseJson(line2.trim());
+      const parsed = safeParseJson(line.trim());
       if (typeof parsed === "string") {
         malformed += 1;
         continue;
@@ -6522,26 +6557,26 @@ function absorb(b, blocks2, counts2, unknownTypes, asUser) {
     }
     if (type === "tool_call" || type === "tool-call" || type === "function_call" || type === "tool_use") {
       const fn = isRecord(block2["function"]) ? block2["function"] : {};
-      const name = String(block2["name"] ?? fn["name"] ?? block2["tool"] ?? "unknown");
+      const name2 = String(block2["name"] ?? fn["name"] ?? block2["tool"] ?? "unknown");
       const rawArgs = block2["arguments"] ?? fn["arguments"] ?? block2["input"] ?? block2["args"];
       const args = typeof rawArgs === "string" ? safeParseJson(rawArgs) : rawArgs;
-      b.toolCalls.push({ name, input: stringifyToolInput(args) });
+      b.toolCalls.push({ name: name2, input: stringifyToolInput(args) });
       counts2.toolCalls += 1;
       const id = block2["id"] ?? block2["tool_call_id"] ?? block2["toolCallId"];
       if (typeof id === "string" && id)
         b.byId.set(id, b.toolCalls.length - 1);
       else
-        b.byId.set(`name:${name}`, b.toolCalls.length - 1);
+        b.byId.set(`name:${name2}`, b.toolCalls.length - 1);
       for (const f of filesFromToolInput(args))
         b.files.push(f);
       continue;
     }
     if (type === "tool_result" || type === "tool-result" || type === "function_response" || type === "tool_response") {
-      const name = String(block2["name"] ?? block2["tool"] ?? "unknown");
+      const name2 = String(block2["name"] ?? block2["tool"] ?? "unknown");
       const id = block2["tool_call_id"] ?? block2["toolCallId"] ?? block2["id"];
       const result = stringifyToolOutput(block2["content"] ?? block2["output"] ?? block2["result"] ?? block2["response"]);
       const isError = block2["is_error"] === true || block2["isError"] === true || void 0;
-      const key3 = typeof id === "string" && id ? id : `name:${name}`;
+      const key3 = typeof id === "string" && id ? id : `name:${name2}`;
       const at2 = b.byId.get(key3);
       if (at2 !== void 0) {
         const call = b.toolCalls[at2];
@@ -6555,7 +6590,7 @@ function absorb(b, blocks2, counts2, unknownTypes, asUser) {
         continue;
       }
       b.toolCalls.push({
-        name,
+        name: name2,
         input: "",
         ...result !== void 0 ? { result } : {},
         ...isError ? { isError: true } : {}
@@ -6881,9 +6916,9 @@ function looksLikeProse(token) {
 function looksLikeAlphabetConstant(token) {
   return token.length >= 24 && new Set(token).size === token.length;
 }
-function nameLooksLikeSecret(name) {
-  const segments = name.split(/[^A-Za-z0-9]+/).flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])/)).filter(Boolean);
-  const last2 = segments[segments.length - 1];
+function nameLooksLikeSecret(name2) {
+  const segments2 = name2.split(/[^A-Za-z0-9]+/).flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])/)).filter(Boolean);
+  const last2 = segments2[segments2.length - 1];
   if (!last2)
     return false;
   const lower = last2.toLowerCase();
@@ -7059,8 +7094,8 @@ var init_redact_rules = __esm({
           let nameStart = m.index;
           while (nameStart > 0 && NAME_CHAR_RE.test(text2[nameStart - 1] ?? ""))
             nameStart--;
-          const name = text2.slice(nameStart, keywordEnd);
-          if (!nameLooksLikeSecret(name))
+          const name2 = text2.slice(nameStart, keywordEnd);
+          if (!nameLooksLikeSecret(name2))
             continue;
           GENERIC_VALUE.lastIndex = opEnd;
           const v = GENERIC_VALUE.exec(text2);
@@ -7744,9 +7779,9 @@ function canonical(value) {
     return `{${Object.entries(value).filter(([, v]) => v !== void 0).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`;
   return JSON.stringify(value);
 }
-function validDate(value, name) {
+function validDate(value, name2) {
   if (value !== void 0 && !Number.isFinite(Date.parse(value)))
-    throw new Error(`invalid ${name}`);
+    throw new Error(`invalid ${name2}`);
 }
 function utc(value) {
   return value === void 0 ? null : new Date(value).toISOString();
@@ -7781,8 +7816,8 @@ function writeMemoryNotes(db, input, origin = input.origin) {
   for (const e of input.entries) {
     if (!["decision", "open", "next", "observation", "retraction"].includes(e.kind))
       throw new Error("invalid note kind");
-    for (const [name, value] of Object.entries({ eventAt: e.eventAt, validFrom: e.validFrom ?? input.validFrom, validUntil: e.validUntil ?? input.validUntil }))
-      validDate(value, name);
+    for (const [name2, value] of Object.entries({ eventAt: e.eventAt, validFrom: e.validFrom ?? input.validFrom, validUntil: e.validUntil ?? input.validUntil }))
+      validDate(value, name2);
     if ((e.validFrom ?? input.validFrom) && (e.validUntil ?? input.validUntil) && Date.parse(e.validFrom ?? input.validFrom) > Date.parse(e.validUntil ?? input.validUntil))
       throw new Error("invalid validity interval");
   }
@@ -8256,9 +8291,9 @@ function tagsForSessions(db, ids) {
   const rows = db.prepare(`SELECT session_id, tag FROM tags WHERE session_id IN (${ids.map(() => "?").join(",")})
         ORDER BY session_id, tag`).all(...ids);
   for (const r of rows) {
-    const list = out.get(r.session_id);
-    if (list)
-      list.push(r.tag);
+    const list2 = out.get(r.session_id);
+    if (list2)
+      list2.push(r.tag);
     else
       out.set(r.session_id, [r.tag]);
   }
@@ -8348,8 +8383,8 @@ function sessionLinks(db, sessionId) {
     direction: r.direction
   }));
 }
-function unique(list) {
-  return [...new Set(list)];
+function unique(list2) {
+  return [...new Set(list2)];
 }
 var MAX_TAG_LENGTH, LINKED_TO_SQL;
 var init_tags = __esm({
@@ -8693,8 +8728,8 @@ function stripBoilerplate(text2) {
 }
 function isMostlyBoilerplate(text2) {
   const rest = stripBoilerplate(text2);
-  const words4 = rest.match(/[\p{L}]{2,}/gu) ?? [];
-  return words4.length < 4;
+  const words3 = rest.match(/[\p{L}]{2,}/gu) ?? [];
+  return words3.length < 4;
 }
 function snapStart(spans, at2, masks = []) {
   if (at2 <= 0)
@@ -8996,23 +9031,23 @@ function readIgnoreConfig(root = potsherdDir()) {
   if (!Array.isArray(raw)) {
     return { list: [], rest, file, error: `config.json "${IGNORE_KEY}" is not an array` };
   }
-  const list = [];
+  const list2 = [];
   for (const value of raw) {
     if (typeof value !== "string")
       continue;
     const entry = normalizeIgnoreEntry(value);
-    if (entry && !list.some((e) => sameEntry(e, entry)))
-      list.push(entry);
+    if (entry && !list2.some((e) => sameEntry(e, entry)))
+      list2.push(entry);
   }
-  return { list, rest, file };
+  return { list: list2, rest, file };
 }
 function readIgnoreList(root = potsherdDir()) {
   return readIgnoreConfig(root).list;
 }
-function writeIgnoreList(root, list) {
+function writeIgnoreList(root, list2) {
   const current = readIgnoreConfig(root);
   const clean4 = [];
-  for (const value of list) {
+  for (const value of list2) {
     const entry = normalizeIgnoreEntry(value);
     if (entry && !clean4.some((e) => sameEntry(e, entry)))
       clean4.push(entry);
@@ -9033,8 +9068,8 @@ function addIgnored(root, project) {
   const before = readIgnoreList(root);
   if (before.some((e) => sameEntry(e, entry)))
     return { list: before, entry, changed: false };
-  const list = writeIgnoreList(root, [...before, entry]);
-  return { list, entry, changed: true };
+  const list2 = writeIgnoreList(root, [...before, entry]);
+  return { list: list2, entry, changed: true };
 }
 function removeIgnored(root, project) {
   const entry = normalizeIgnoreEntry(project);
@@ -9043,8 +9078,8 @@ function removeIgnored(root, project) {
   const before = readIgnoreList(root);
   if (!before.some((e) => sameEntry(e, entry)))
     return { list: before, entry, changed: false };
-  const list = writeIgnoreList(root, before.filter((e) => !sameEntry(e, entry)));
-  return { list, entry, changed: true };
+  const list2 = writeIgnoreList(root, before.filter((e) => !sameEntry(e, entry)));
+  return { list: list2, entry, changed: true };
 }
 function normalizeIgnoreEntry(value) {
   const trimmed = expandTilde(value.trim());
@@ -9254,7 +9289,7 @@ function estimate(input) {
   const timeRatio = cal && cal.samples > 0 ? cal.timeRatio : 1;
   const rawUsd = calls === 0 ? 0 : callUsd(calls, promptChars, inputTokens, outputTokens, profile, price, priceScale);
   const unquoted = derivedCalls === 0 ? 0 : (PIPELINE_COST_FACTOR - 1) * callUsd(derivedCalls, derivedChars, derivedInputTokens, derivedOutputTokens, profile, price, priceScale);
-  const usd2 = hostSeam ? 0 : (rawUsd + unquoted) * usdRatio;
+  const usd = hostSeam ? 0 : (rawUsd + unquoted) * usdRatio;
   const serialMs = calls * profile.baseMs + promptChars / 1e3 * profile.msPerKChar;
   const eff = effectiveConcurrency(concurrency, profile);
   const seconds = calls === 0 || hostSeam ? 0 : serialMs / 1e3 / eff * timeRatio;
@@ -9263,9 +9298,9 @@ function estimate(input) {
     calls,
     inputTokens,
     outputTokens,
-    usd: usd2,
-    usdLow: usd2 * profile.spread.usdLow,
-    usdHigh: usd2 * profile.spread.usdHigh,
+    usd,
+    usdLow: usd * profile.spread.usdLow,
+    usdHigh: usd * profile.spread.usdHigh,
     seconds,
     secondsLow: seconds * profile.spread.timeLow,
     secondsHigh: seconds * profile.spread.timeHigh,
@@ -9419,18 +9454,18 @@ function parseClaudeCli(stdout) {
   }
   const text2 = said;
   const usage = asRecord(obj2["usage"]);
-  const num5 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
-  const inputTokens = usage ? num5(usage["input_tokens"]) + num5(usage["cache_creation_input_tokens"]) + num5(usage["cache_read_input_tokens"]) : 0;
-  const outputTokens = usage ? num5(usage["output_tokens"]) : 0;
+  const num4 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+  const inputTokens = usage ? num4(usage["input_tokens"]) + num4(usage["cache_creation_input_tokens"]) + num4(usage["cache_read_input_tokens"]) : 0;
+  const outputTokens = usage ? num4(usage["output_tokens"]) : 0;
   const modelUsage = asRecord(obj2["modelUsage"]);
   const model = modelUsage ? Object.keys(modelUsage)[0] : void 0;
-  const usd2 = typeof obj2["total_cost_usd"] === "number" ? obj2["total_cost_usd"] : void 0;
+  const usd = typeof obj2["total_cost_usd"] === "number" ? obj2["total_cost_usd"] : void 0;
   return {
     text: text2,
     ...model ? { model } : {},
     ...inputTokens > 0 ? { inputTokens } : {},
     ...outputTokens > 0 ? { outputTokens } : {},
-    ...usd2 !== void 0 ? { usd: usd2 } : {}
+    ...usd !== void 0 ? { usd } : {}
   };
 }
 function asRecord(v) {
@@ -9447,13 +9482,13 @@ function lastAgentMessage(stdout) {
   const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
   const events = [];
   let allJson = lines.length > 0;
-  for (const line2 of lines) {
-    if (!line2.trimStart().startsWith("{")) {
+  for (const line of lines) {
+    if (!line.trimStart().startsWith("{")) {
       allJson = false;
       break;
     }
     try {
-      const ev = JSON.parse(line2);
+      const ev = JSON.parse(line);
       const text2 = pickText(ev);
       if (text2)
         events.push(text2);
@@ -9794,20 +9829,20 @@ var init_llm = __esm({
        * life of the `Budget`.
        */
       admit(projected = {}) {
-        const usd2 = projected.usd ?? 0;
+        const usd = projected.usd ?? 0;
         const tokens = projected.tokens ?? 0;
         const { maxUsd, maxTokens } = this.limits;
         const committedUsd = this.spent.usd + this.reservedUsd;
-        if (maxUsd !== void 0 && committedUsd + usd2 > maxUsd) {
+        if (maxUsd !== void 0 && committedUsd + usd > maxUsd) {
           const inFlight = this.reservedUsd > 0 ? ` (${fmtUsd(this.reservedUsd)} of it in flight)` : "";
-          throw new BudgetError(`stopped at --max-usd ${maxUsd.toFixed(2)}: ${this.done} of ${this.total} done, ${fmtUsd(committedUsd)} committed${inFlight}, next call needs ${fmtUsd(usd2)}`, {
+          throw new BudgetError(`stopped at --max-usd ${maxUsd.toFixed(2)}: ${this.done} of ${this.total} done, ${fmtUsd(committedUsd)} committed${inFlight}, next call needs ${fmtUsd(usd)}`, {
             kind: "usd",
             limit: maxUsd,
-            projected: committedUsd + usd2,
+            projected: committedUsd + usd,
             done: this.done,
             total: this.total,
             spend: this.spend
-          }, `potsherd card --all --max-usd ${Math.ceil(committedUsd + usd2 + 1)}`);
+          }, `potsherd card --all --max-usd ${Math.ceil(committedUsd + usd + 1)}`);
         }
         const spentTokens = this.spent.inputTokens + this.spent.outputTokens;
         const committedTokens = spentTokens + this.reservedTokens;
@@ -9821,18 +9856,18 @@ var init_llm = __esm({
             spend: this.spend
           }, `potsherd card --all --max-tokens ${committedTokens + tokens + maxTokens}`);
         }
-        this.reservedUsd += usd2;
+        this.reservedUsd += usd;
         this.reservedTokens += tokens;
         let live = true;
         const self = this;
         return {
-          usd: usd2,
+          usd,
           tokens,
           release() {
             if (!live)
               return;
             live = false;
-            self.reservedUsd -= usd2;
+            self.reservedUsd -= usd;
             self.reservedTokens -= tokens;
             if (self.reservedUsd < 1e-12)
               self.reservedUsd = 0;
@@ -10343,7 +10378,7 @@ ${prompt.text}`;
         const reportedIn = sent.inputTokens;
         const inputTokensEstimated = typeof reportedIn !== "number" || reportedIn <= 0 || reportedIn * IMPLAUSIBLE_TOKEN_FACTOR < inTokens;
         const inputTokens = inputTokensEstimated ? inTokens : reportedIn;
-        const usd2 = sent.usd ?? inputTokens / 1e6 * price.inputPerMTok + outputTokens / 1e6 * price.outputPerMTok;
+        const usd = sent.usd ?? inputTokens / 1e6 * price.inputPerMTok + outputTokens / 1e6 * price.outputPerMTok;
         const result = {
           text: sent.text,
           backend: this.backend,
@@ -10352,7 +10387,7 @@ ${prompt.text}`;
           outputTokens,
           inputTokensEstimated,
           outputTokensEstimated,
-          usd: usd2,
+          usd,
           ms,
           redactions,
           chargeable: this.chargeable
@@ -10706,17 +10741,17 @@ function bestSnippet(userText, assistantText, query, tokens) {
     return matchSnippet(chosen3.text, query);
   return denseSnippet(chosen3.text, tokens, void 0, chosen3.spans);
 }
-function countRows(db, name) {
+function countRows(db, name2) {
   try {
-    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get();
+    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM "${name2}"`).get();
     return row2.n;
   } catch {
     return 0;
   }
 }
-function tableExists(db, name) {
+function tableExists(db, name2) {
   try {
-    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = ?`).get(name);
+    const row2 = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = ?`).get(name2);
     return row2.n > 0;
   } catch {
     return false;
@@ -11105,9 +11140,9 @@ async function recallLegacyRaw(db, query, requested = {}, options = {}) {
     return empty(vectors);
   const wanted = new Set(options.lists ?? LISTS);
   if (exact !== void 0) {
-    for (const name of [...wanted]) {
-      if (name !== "exchanges_fts" && name !== "ghost_prompts_fts")
-        wanted.delete(name);
+    for (const name2 of [...wanted]) {
+      if (name2 !== "exchanges_fts" && name2 !== "ghost_prompts_fts")
+        wanted.delete(name2);
     }
   }
   if (ghosts === "only") {
@@ -11143,8 +11178,8 @@ async function recallLegacyRaw(db, query, requested = {}, options = {}) {
   const quoteTerm = (t) => `"${t.replace(/"/g, '""')}"`;
   const distinctMeaningful = new Set(fts.tokens.filter((t) => !STOPWORDS.has(t))).size;
   const keyOr = key2.terms.length > 0 && key2.terms.length < distinctMeaningful ? key2.terms.map((t) => t.length >= PREFIX_MIN ? `${quoteTerm(t)}*` : quoteTerm(t)).join(" OR ") : "";
-  const textList = (list, fn) => {
-    if (!wanted.has(list))
+  const textList = (list2, fn) => {
+    if (!wanted.has(list2))
       return [];
     const t0 = Date.now();
     let hits = [];
@@ -11169,13 +11204,13 @@ async function recallLegacyRaw(db, query, requested = {}, options = {}) {
       hits = [];
     }
     if (usedOr) {
-      relaxedLists.add(list);
+      relaxedLists.add(list2);
       if (usedKeyphrase)
-        keyphraseLists.add(list);
+        keyphraseLists.add(list2);
       if (hits.length > 0)
         relaxed = true;
     }
-    listReports.push({ list, candidates: hits.length, ms: Date.now() - t0 });
+    listReports.push({ list: list2, candidates: hits.length, ms: Date.now() - t0 });
     return hits;
   };
   const titles = wanted.has("titles") ? titled(db, fts.tokens, filters, depth, listReports) : { hits: [], coverage: 0 };
@@ -11237,40 +11272,40 @@ async function recallLegacyRaw(db, query, requested = {}, options = {}) {
   const requiredTerms = key2.terms.slice(0, KEY_TERMS_REQUIRED);
   const fused = /* @__PURE__ */ new Map();
   const effectiveWeights = {};
-  for (const [name, hits] of Object.entries(lists)) {
-    const weight = (baseWeights[name] ?? 1) * (name === "titles" ? titles.coverage : 1) * (relaxedLists.has(name) ? RELAXED_PENALTY : 1);
-    if (wanted.has(name))
-      effectiveWeights[name] = weight;
+  for (const [name2, hits] of Object.entries(lists)) {
+    const weight = (baseWeights[name2] ?? 1) * (name2 === "titles" ? titles.coverage : 1) * (relaxedLists.has(name2) ? RELAXED_PENALTY : 1);
+    if (wanted.has(name2))
+      effectiveWeights[name2] = weight;
     hits.forEach((hit2, i) => {
       const rank = i + 1;
       const contribution = weight * rrfScore(rank, k);
       const seen = fused.get(hit2.key);
       if (seen) {
         seen.score += contribution;
-        seen.from.push({ list: name, rank, raw: hit2.raw, contribution });
+        seen.from.push({ list: name2, rank, raw: hit2.raw, contribution });
         if (!seen.assistantText && hit2.assistantText)
           seen.assistantText = hit2.assistantText;
       } else {
         fused.set(hit2.key, {
           ...hit2,
           score: contribution,
-          from: [{ list: name, rank, raw: hit2.raw, contribution }]
+          from: [{ list: name2, rank, raw: hit2.raw, contribution }]
         });
       }
     });
   }
   const ranked = [...fused.values()].sort((a, b) => b.score - a.score || (a.seq ?? 0) - (b.seq ?? 0));
   const bestRaw = /* @__PURE__ */ new Map();
-  for (const [name, hits] of Object.entries(lists)) {
+  for (const [name2, hits] of Object.entries(lists)) {
     if (hits.length === 0)
       continue;
-    const kind2 = rawKind(name);
+    const kind2 = rawKind(name2);
     if (kind2 === "flat")
       continue;
     let best = hits[0].raw;
     for (const h of hits)
       best = kind2 === "bm25" ? Math.min(best, h.raw) : Math.max(best, h.raw);
-    bestRaw.set(name, best);
+    bestRaw.set(name2, best);
   }
   const strengthOf = (from) => combinedStrength(from.map((f) => ({
     list: f.list,
@@ -11451,10 +11486,10 @@ async function recallLegacyRaw(db, query, requested = {}, options = {}) {
     ms: Date.now() - started
   };
 }
-function rawKind(list) {
-  if (list === "titles")
+function rawKind(list2) {
+  if (list2 === "titles")
     return "flat";
-  return list.startsWith("vec_") ? "cosine" : "bm25";
+  return list2.startsWith("vec_") ? "cosine" : "bm25";
 }
 function conversationKeys(db, ids) {
   const distinct = [...new Set(ids)];
@@ -11581,14 +11616,14 @@ function sessionScore(hits, cap3 = CORROBORATION) {
 }
 function titled(db, tokens, filters, depth, reports) {
   const t0 = Date.now();
-  let list = { hits: [], coverage: 0 };
+  let list2 = { hits: [], coverage: 0 };
   try {
-    list = titleMatches(db, tokens, filters, depth);
+    list2 = titleMatches(db, tokens, filters, depth);
   } catch {
-    list = { hits: [], coverage: 0 };
+    list2 = { hits: [], coverage: 0 };
   }
-  reports.push({ list: "titles", candidates: list.hits.length, ms: Date.now() - t0 });
-  return list;
+  reports.push({ list: "titles", candidates: list2.hits.length, ms: Date.now() - t0 });
+  return list2;
 }
 function countGhosts(db) {
   try {
@@ -12297,7 +12332,7 @@ async function ghostPass(db, src, disk, result, opts) {
   }
 }
 function sha256File(p) {
-  const hash4 = crypto4.createHash("sha256");
+  const hash5 = crypto4.createHash("sha256");
   const fd = fs23.openSync(p, "r");
   try {
     const buf = Buffer.allocUnsafe(1 << 20);
@@ -12305,12 +12340,12 @@ function sha256File(p) {
       const read = fs23.readSync(fd, buf, 0, buf.length, null);
       if (read <= 0)
         break;
-      hash4.update(buf.subarray(0, read));
+      hash5.update(buf.subarray(0, read));
     }
   } finally {
     fs23.closeSync(fd);
   }
-  return hash4.digest("hex");
+  return hash5.digest("hex");
 }
 function safeSize(p) {
   try {
@@ -12620,6 +12655,113 @@ var init_readiness = __esm({
   }
 });
 
+// packages/core/dist/analytics/policy-authority.js
+import fs25 from "node:fs";
+import { createHash as createHash7 } from "node:crypto";
+function currentWal(file) {
+  const previous = verifiedWal.get(file);
+  if (previous) {
+    try {
+      previous.assertCurrent();
+      return previous;
+    } catch {
+      verifiedWal.delete(file);
+    }
+  }
+  const next = verifyAuditPolicyWal(file);
+  if (verifiedWal.size >= 32)
+    verifiedWal.delete(verifiedWal.keys().next().value);
+  verifiedWal.set(file, next);
+  return next;
+}
+function configHash(file) {
+  try {
+    const fd = fs25.openSync(file, fs25.constants.O_RDONLY | fs25.constants.O_NOFOLLOW);
+    try {
+      const before = fs25.fstatSync(fd, { bigint: true });
+      if (!before.isFile() || before.size > 1048576n)
+        throw new Error("ignore_policy_unavailable");
+      const bytes3 = fs25.readFileSync(fd), after = fs25.fstatSync(fd, { bigint: true });
+      if (before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs)
+        throw new Error("ignore_policy_unavailable");
+      return hash2(bytes3);
+    } finally {
+      fs25.closeSync(fd);
+    }
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return null;
+    throw error;
+  }
+}
+function openAuditPolicyDb(file) {
+  identity2(file);
+  try {
+    if (fs25.statSync(file + "-journal").size > 0)
+      throw new Error("audit_policy_rollback_journal_unavailable");
+  } catch (error) {
+    if (error.code !== "ENOENT")
+      throw error;
+  }
+  const db = openDatabase(file, { readonly: true, fileMustExist: true });
+  try {
+    db.pragma("query_only = ON");
+    assertMemorySchema(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+function readAuditAuthority(dbFile, configFile) {
+  const configuration = configHash(configFile);
+  if (!fs25.existsSync(dbFile))
+    return { epochs: null, forgottenSourceIds: /* @__PURE__ */ new Set(), configHash: configuration, commitment: hash2(JSON.stringify(["absent", configuration])) };
+  const before = identity2(dbFile), guard = currentWal(dbFile), db = openAuditPolicyDb(dbFile);
+  try {
+    db.exec("BEGIN");
+    let epochs, tombstones, forgotten;
+    try {
+      epochs = readEpochs(db);
+      tombstones = db.prepare("SELECT tombstone_id,source_id,note_id,scope_hash,state FROM forget_tombstones WHERE state<>'reversed' ORDER BY tombstone_id LIMIT 100001").all();
+      forgotten = db.prepare("SELECT source_id FROM memory_sources WHERE availability='forgotten' ORDER BY source_id LIMIT 100001").all();
+      if (tombstones.length > 1e5 || forgotten.length > 1e5)
+        throw new Error("audit_policy_row_limit");
+      db.exec("COMMIT");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+      }
+      throw error;
+    }
+    guard.assertCurrent();
+    if (identity2(dbFile) !== before || configHash(configFile) !== configuration)
+      throw new Error("audit_policy_changed");
+    return { epochs, forgottenSourceIds: /* @__PURE__ */ new Set([...forgotten.map((row2) => row2.source_id), ...tombstones.flatMap((row2) => row2.source_id ? [row2.source_id] : [])]), configHash: configuration, commitment: hash2(JSON.stringify([before, configuration, epochs.deletion, tombstones, forgotten])) };
+  } finally {
+    db.close();
+  }
+}
+var identity2, hash2, verifiedWal;
+var init_policy_authority = __esm({
+  "packages/core/dist/analytics/policy-authority.js"() {
+    "use strict";
+    init_sqlite_driver();
+    init_readiness();
+    init_source();
+    init_audit_sqlite();
+    identity2 = (file) => {
+      const s = fs25.lstatSync(file, { bigint: true });
+      if (!s.isFile())
+        throw new Error("audit_policy_format_unavailable");
+      return `${s.dev}:${s.ino}`;
+    };
+    hash2 = (value) => createHash7("sha256").update(value).digest("hex");
+    verifiedWal = /* @__PURE__ */ new Map();
+  }
+});
+
 // node_modules/.pnpm/base64-js@1.5.1/node_modules/base64-js/index.js
 var require_base64_js = __commonJS({
   "node_modules/.pnpm/base64-js@1.5.1/node_modules/base64-js/index.js"(exports) {
@@ -12684,8 +12826,8 @@ var require_base64_js = __commonJS({
       }
       return arr;
     }
-    function tripletToBase64(num5) {
-      return lookup[num5 >> 18 & 63] + lookup[num5 >> 12 & 63] + lookup[num5 >> 6 & 63] + lookup[num5 & 63];
+    function tripletToBase64(num4) {
+      return lookup[num4 >> 18 & 63] + lookup[num4 >> 12 & 63] + lookup[num4 >> 6 & 63] + lookup[num4 & 63];
     }
     function encodeChunk(uint8, start, end) {
       var tmp;
@@ -13317,34 +13459,34 @@ var init_support = __esm({
 });
 
 // packages/core/dist/memory/budget.js
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 function countTokens(text2) {
   return tokenizer.encode(text2, [], []).length;
 }
-function assertResponseFormat(transport, format2) {
-  if (format2 !== "expanded-v2" && format2 !== "compact-v1")
+function assertResponseFormat(transport, format) {
+  if (format !== "expanded-v2" && format !== "compact-v1")
     throw new RangeError("Unsupported response format");
-  if (format2 === "compact-v1" && (transport === "human" || typeof transport === "object"))
+  if (format === "compact-v1" && (transport === "human" || typeof transport === "object"))
     throw new RangeError("Compact response format requires JSON transport");
 }
-function finalizeEmission(value, transport = "json", format2 = "expanded-v2", prefix3 = "") {
-  assertResponseFormat(transport, format2);
+function finalizeEmission(value, transport = "json", format = "expanded-v2", prefix3 = "") {
+  assertResponseFormat(transport, format);
   if (prefix3.length > 32 || /[^ \t\r\n]/u.test(prefix3))
     throw new RangeError("Invalid emission whitespace");
   if (transport === "human" || typeof transport === "object")
     return Object.freeze({ kind: "human", format: "expanded-v2", serialized: prefix3 + serializeResponse(value, transport) });
-  const body = format2 === "compact-v1" && value && typeof value === "object" && "evidence" in value ? encodeCompactMemoryPacket(value) : value;
+  const body = format === "compact-v1" && value && typeof value === "object" && "evidence" in value ? encodeCompactMemoryPacket(value) : value;
   const text2 = prefix3 + JSON.stringify(body);
   if (transport === "mcp") {
     const block2 = Object.freeze({ type: "text", text: text2 });
     const result = { content: [block2] };
     Object.freeze(result.content);
     Object.freeze(result);
-    return Object.freeze({ kind: "mcp", format: format2, result, serialized: JSON.stringify(result) });
+    return Object.freeze({ kind: "mcp", format, result, serialized: JSON.stringify(result) });
   }
-  return Object.freeze({ kind: transport, format: format2, serialized: transport === "cli_json" ? text2 + "\n" : text2 });
+  return Object.freeze({ kind: transport, format, serialized: transport === "cli_json" ? text2 + "\n" : text2 });
 }
-function settleEmission(value, limit, byteLimit, transport, format2 = "expanded-v2") {
+function settleEmission(value, limit, byteLimit, transport, format = "expanded-v2") {
   const initial = { usedTokens: value.budget.usedTokens, remainingTokens: value.budget.remainingTokens };
   let overCap = null;
   for (const prefix3 of RECEIPT_PREFIXES) {
@@ -13356,7 +13498,7 @@ function settleEmission(value, limit, byteLimit, transport, format2 = "expanded-
       if (seen.has(state))
         break;
       seen.add(state);
-      const emission = finalizeEmission(value, transport, format2, prefix3), serialized = emission.serialized, tokens = countTokens(serialized), remaining = Math.max(0, limit - tokens);
+      const emission = finalizeEmission(value, transport, format, prefix3), serialized = emission.serialized, tokens = countTokens(serialized), remaining = Math.max(0, limit - tokens);
       if (value.budget.usedTokens === tokens && value.budget.remainingTokens === remaining) {
         const payload = { emission, serialized, tokens, bytes: Buffer.byteLength(serialized) };
         if (prefix3 === "" || tokens <= limit && payload.bytes <= byteLimit)
@@ -13492,10 +13634,10 @@ function responseLimits(budget2) {
     throw new RangeError("Invalid response budget");
   return { limit, byteLimit };
 }
-function planBudgetFailure(budget2, transport = "json", format2 = "expanded-v2") {
+function planBudgetFailure(budget2, transport = "json", format = "expanded-v2") {
   const { limit, byteLimit } = responseLimits(budget2);
   for (const response2 of [{ error: "budget_too_small" }, {}]) {
-    const emission = finalizeEmission(response2, transport, format2), serialized = emission.serialized;
+    const emission = finalizeEmission(response2, transport, format), serialized = emission.serialized;
     const usedTokens = countTokens(serialized), usedBytes = Buffer.byteLength(serialized);
     if (usedTokens <= limit && usedBytes <= byteLimit)
       return { response: response2, emission, serialized, usedTokens, usedBytes };
@@ -13505,9 +13647,9 @@ function planBudgetFailure(budget2, transport = "json", format2 = "expanded-v2")
 function planResponse(original, budget2, options = {}) {
   const { limit, byteLimit } = responseLimits(budget2);
   const transport = options.transport ?? "json";
-  const format2 = options.responseFormat ?? "expanded-v2";
-  assertResponseFormat(transport, format2);
-  if (options.navigation && format2 !== "compact-v1")
+  const format = options.responseFormat ?? "expanded-v2";
+  assertResponseFormat(transport, format);
+  if (options.navigation && format !== "compact-v1")
     throw new RangeError("Inspect navigation requires compact-v1");
   const response2 = structuredClone(original);
   response2.budget.tokenizerId = TOKENIZER_ID;
@@ -13565,7 +13707,7 @@ function planResponse(original, budget2, options = {}) {
     });
     return protectedKeys.length;
   };
-  const settle = () => settleEmission(response2, limit, byteLimit, transport, format2);
+  const settle = () => settleEmission(response2, limit, byteLimit, transport, format);
   if (!nav)
     response2.candidates = response2.candidates.map(({ evidence: _e, ...candidate }) => candidate);
   for (; ; ) {
@@ -13677,7 +13819,7 @@ function planResponse(original, budget2, options = {}) {
       offeredLimit = seedLimit;
       continue;
     }
-    return planBudgetFailure(budget2, transport, format2);
+    return planBudgetFailure(budget2, transport, format);
   }
 }
 function planWriteReceipt(receipt4, budget2 = defaultBudget(), transport = "json") {
@@ -13705,7 +13847,7 @@ var init_budget = __esm({
     init_support();
     init_format();
     init_theme();
-    TOKENIZER_ASSET_HASH = createHash7("sha256").update(JSON.stringify(cl100k_base_default)).digest("hex");
+    TOKENIZER_ASSET_HASH = createHash8("sha256").update(JSON.stringify(cl100k_base_default)).digest("hex");
     TOKENIZER_ID = `cl100k-base/js-tiktoken@1.0.21/${TOKENIZER_ASSET_HASH}`;
     DEFAULT_RESPONSE_TOKENS = 4096;
     DEFAULT_RESPONSE_BYTES = 65536;
@@ -13954,13 +14096,13 @@ function adjacentDialogueContext(db, anchors, query, filter, options = {}) {
       continue;
     expanded.add(`${anchor.ref.revisionId}:${row2.unit_revision_id}`);
     visited++;
-    const words4 = new Set(queryTerms(canonical3.text).filter((word) => !queryWords.has(word)));
+    const words3 = new Set(queryTerms(canonical3.text).filter((word) => !queryWords.has(word)));
     const comparesPrior = options.allowComparison !== false && /\b(replaces?|replaced|previous|earlier|instead|rather than|original|reversed?)\b/iu.test(canonical3.text);
     const nearby = db.prepare(`SELECT u.unit_revision_id,u.text,ru.ordinal FROM memory_sources s JOIN source_revisions r ON r.source_id=s.source_id JOIN revision_units ru ON ru.revision_id=r.revision_id JOIN evidence_units u ON u.unit_revision_id=ru.unit_revision_id WHERE ${filter.sql} AND s.source_id=? AND r.revision_id=? AND ru.ordinal>=? AND ru.ordinal<? AND u.role IN (${roles.map(() => "?").join(",")}) AND length(u.text)<=? ORDER BY ru.ordinal`).all(...filter.params, anchor.ref.sourceId, anchor.ref.revisionId, Math.max(0, row2.ordinal - distance), row2.ordinal, ...roles, maxUnit);
     for (const unit of nearby) {
       if (unit.text.length > maxUnit || unit.text.length > remaining || !unit.text.trim())
         continue;
-      if (!comparesPrior && queryTerms(unit.text).filter((word) => words4.has(word)).length < 2)
+      if (!comparesPrior && queryTerms(unit.text).filter((word) => words3.has(word)).length < 2)
         continue;
       const context = [];
       let position = 0;
@@ -14015,12 +14157,12 @@ function validateMemoryResponseFormat(value) {
     fail2("unsupported_response_format");
   return value;
 }
-function validateRecallNavigation(value, format2) {
+function validateRecallNavigation(value, format) {
   if (value === void 0)
     return void 0;
   if (value !== "inspect-v1")
     fail2("unsupported_navigation");
-  if (format2 !== "compact-v1")
+  if (format !== "compact-v1")
     fail2("navigation_requires_compact");
   return "inspect-v1";
 }
@@ -14379,9 +14521,9 @@ var init_service = __esm({
         return { contractVersion: 2, requestId: randomUUID5(), coverage, support: { state: "unassessed", method: "none", requirements: [], unresolved: [] }, evidence: [], assertions: [], candidates: [], budget: { tokenizerId: defaultBudget().tokenizerId, usedTokens: 0, remainingTokens: 0, truncated: false, omittedItems: 0 }, warnings: coverage.omittedKinds.includes("activation_history_unknown") ? ["Source activation history before the recorded upgrade baseline is unknown; this does not establish historical absence."] : [] };
       }
       format(value) {
-        const format2 = validateMemoryResponseFormat(value);
-        assertResponseFormat(this.options.transport ?? "json", format2);
-        return format2;
+        const format = validateMemoryResponseFormat(value);
+        assertResponseFormat(this.options.transport ?? "json", format);
+        return format;
       }
       plan(response2, budget2 = defaultBudget(), requirements2, literalMatches, responseFormat = "expanded-v2", navigation, evidenceFirst = false) {
         return planResponse(response2, budget2, { transport: this.options.transport ?? "json", responseFormat, navigation, evidenceFirst, requirements: requirements2, knownLiteralMatches: literalMatches, noteScopeEligible: (note, scope2) => this.noteScopeEligible(note, scope2) });
@@ -14701,29 +14843,29 @@ var init_service = __esm({
 });
 
 // packages/core/dist/analytics/source.js
-import fs25 from "node:fs";
+import fs26 from "node:fs";
 import path19 from "node:path";
-import { createHash as createHash8 } from "node:crypto";
+import { createHash as createHash9 } from "node:crypto";
 function boundedBytes(file, max2) {
-  const fd = fs25.openSync(file, "r");
+  const fd = fs26.openSync(file, "r");
   try {
-    const before = fs25.fstatSync(fd);
+    const before = fs26.fstatSync(fd);
     if (!before.isFile() || before.size > max2)
       throw new Error("source_bytes_limit");
     const bytes3 = Buffer.alloc(before.size);
     let offset = 0;
     while (offset < bytes3.length) {
-      const n3 = fs25.readSync(fd, bytes3, offset, bytes3.length - offset, offset);
+      const n3 = fs26.readSync(fd, bytes3, offset, bytes3.length - offset, offset);
       if (!n3)
         throw new Error("source_changed");
       offset += n3;
     }
-    const after = fs25.fstatSync(fd);
+    const after = fs26.fstatSync(fd);
     if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || before.dev !== after.dev || before.ino !== after.ino)
       throw new Error("source_changed");
     return bytes3;
   } finally {
-    fs25.closeSync(fd);
+    fs26.closeSync(fd);
   }
 }
 async function* walk(root, maxEntries, signal, maxDepth = 8) {
@@ -14735,7 +14877,7 @@ async function* walk(root, maxEntries, signal, maxDepth = 8) {
       throw new Error("discovery_depth_limit");
     let handle;
     try {
-      handle = await fs25.promises.opendir(dir);
+      handle = await fs26.promises.opendir(dir);
     } catch (error) {
       if (error.code === "ENOENT")
         return;
@@ -14767,21 +14909,21 @@ async function nativeFacts(file, harness, bytes3, maxRecords) {
   const gaps = /* @__PURE__ */ new Set();
   let project = null, parent = null, title = null;
   let nativeId = path19.basename(file, ".jsonl"), consumed = 0, records = 0, turn = null, programmatic = false;
-  const identity4 = /* @__PURE__ */ new Map();
+  const identity5 = /* @__PURE__ */ new Map();
   const responses = [];
   const markers = [];
   const put2 = (event) => {
-    const previous = identity4.get(event.identity);
+    const previous = identity5.get(event.identity);
     if (previous !== void 0) {
       if (previous !== event.text)
         gaps.add("native_event_identity_conflict");
       return;
     }
-    identity4.set(event.identity, event.text);
+    identity5.set(event.identity, event.text);
     events.push(event);
   };
-  for await (const line2 of readJsonlLines(file, { snapshot: bytes3 })) {
-    if (!line2.terminated) {
+  for await (const line of readJsonlLines(file, { snapshot: bytes3 })) {
+    if (!line.terminated) {
       gaps.add("unfinished_tail");
       break;
     }
@@ -14789,10 +14931,10 @@ async function nativeFacts(file, harness, bytes3, maxRecords) {
       gaps.add("source_records_limit");
       break;
     }
-    consumed = line2.end;
-    const r = parseJsonLine(line2.text);
+    consumed = line.end;
+    const r = parseJsonLine(line.text);
     if (!isRecord(r)) {
-      if (line2.text.trim())
+      if (line.text.trim())
         gaps.add("malformed_record");
       continue;
     }
@@ -14801,9 +14943,9 @@ async function nativeFacts(file, harness, bytes3, maxRecords) {
       project = r.cwd;
     if (typeof p.cwd === "string")
       project = p.cwd;
-    const key2 = typeof r.uuid === "string" ? r.uuid : typeof p.id === "string" ? p.id : `record:${line2.lineNumber}`;
+    const key2 = typeof r.uuid === "string" ? r.uuid : typeof p.id === "string" ? p.id : `record:${line.lineNumber}`;
     const at2 = clock(r.timestamp);
-    const base2 = { key: key2, rawStart: line2.start, rawEnd: line2.end, role: "user", eventAt: at2, project };
+    const base2 = { key: key2, rawStart: line.start, rawEnd: line.end, role: "user", eventAt: at2, project };
     const maintenance = (text2) => hasExclusionMarker(text2);
     if (harness === "claude") {
       if (typeof r.sessionId === "string" && !file.includes(`${path19.sep}subagents${path19.sep}`))
@@ -14841,12 +14983,12 @@ async function nativeFacts(file, harness, bytes3, maxRecords) {
       delete recordCopy.session_id;
       delete recordCopy.promptId;
       const stable2 = (value) => Array.isArray(value) ? value.map(stable2) : isRecord(value) ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable2(value[k])])) : value;
-      const excluded = parent ? "child_initialization" : maintenance(text2) ? "maintenance_exclusion_marker" : results ? "tool_result" : explicitMeta ? "declared_meta_or_synthetic_input" : declared ? "inherited_identity_unverified" : programmatic ? "programmatic_origin_unattested" : native ? null : "injected_or_origin_unknown";
+      const excluded = parent && events.length === 0 ? "child_initialization" : maintenance(text2) ? "maintenance_exclusion_marker" : results ? "tool_result" : explicitMeta ? "declared_meta_or_synthetic_input" : declared ? "inherited_identity_unverified" : programmatic ? "programmatic_origin_unattested" : native ? null : "injected_or_origin_unknown";
       if (programmatic && !parent && excluded !== "maintenance_exclusion_marker")
         gaps.add("human_attestation_unavailable");
       if (explicitMeta && !parent)
         gaps.add("explicit_meta_or_synthetic_origin_unattested");
-      put2({ ...base2, text: clean(text2), origin: native && !declared && !programmatic && !explicitMeta ? "claude_prompt_id" : "unknown", eligible: native && excluded === null, excluded, identity: native && !explicitMeta ? `prompt:${r.promptId}` : `record:${key2}`, ...typeof r.uuid === "string" && r.uuid.length > 0 ? { nativeRecordId: r.uuid, recordCommitment: digest(JSON.stringify(stable2(recordCopy))) } : {}, ...declared ? { declaredOrigin: declared } : {} });
+      put2({ ...base2, observed: !results && !explicitMeta && !maintenance(text2) && !declared && !(parent && events.length === 0), text: clean(text2), origin: native && !declared && !programmatic && !explicitMeta ? "claude_prompt_id" : "unknown", eligible: native && excluded === null, excluded, identity: native && !explicitMeta ? `prompt:${r.promptId}` : `record:${key2}`, ...typeof r.uuid === "string" && r.uuid.length > 0 ? { nativeRecordId: r.uuid, recordCommitment: digest(JSON.stringify(stable2(recordCopy))) } : {}, ...declared ? { declaredOrigin: declared } : {} });
     } else if (harness === "codex") {
       if (r.type === "session_meta") {
         nativeId = typeof p.session_id === "string" ? p.session_id : typeof p.id === "string" ? p.id : nativeId;
@@ -14861,7 +15003,7 @@ async function nativeFacts(file, harness, bytes3, maxRecords) {
       if (r.type === "response_item" && p.type === "message" && p.role === "user") {
         const text3 = extractTextFromContent(p.content);
         if (text3.trim())
-          responses.push({ text: text3, cleanText: clean(text3), turn, start: line2.start, end: line2.end, key: key2, time: at2, project });
+          responses.push({ text: text3, cleanText: clean(text3), turn, start: line.start, end: line.end, key: key2, time: at2, project });
       }
       if (r.type !== "response_item" && r.type !== "event_msg" && p.role === "user") {
         const text3 = extractTextFromContent(p.content);
@@ -14876,11 +15018,11 @@ async function nativeFacts(file, harness, bytes3, maxRecords) {
       const text2 = p.type === "user_message" && typeof p.message === "string" ? p.message : p.type === "item_completed" && item.type === "UserMessage" ? extractTextFromContent(item.content) : "";
       if (!text2.trim())
         continue;
-      const id = typeof item.id === "string" ? `item:${item.id}` : `marker:${line2.start}`;
-      const excluded = parent ? "child_initialization" : maintenance(text2) ? "maintenance_exclusion_marker" : programmatic ? "programmatic_origin_unattested" : null;
+      const id = typeof item.id === "string" ? `item:${item.id}` : `marker:${line.start}`;
+      const excluded = parent && events.length === 0 ? "child_initialization" : maintenance(text2) ? "maintenance_exclusion_marker" : programmatic ? "programmatic_origin_unattested" : null;
       if (programmatic && !parent && excluded !== "maintenance_exclusion_marker")
         gaps.add("human_attestation_unavailable");
-      const event = { ...base2, text: clean(text2), origin: programmatic ? "unknown" : "codex_human_marker", eligible: excluded === null, excluded, identity: id };
+      const event = { ...base2, observed: excluded === null || excluded === "programmatic_origin_unattested", text: clean(text2), origin: programmatic ? "unknown" : "codex_human_marker", eligible: excluded === null, excluded, identity: id };
       const before = events.length;
       put2(event);
       if (events.length > before)
@@ -14900,7 +15042,7 @@ async function nativeFacts(file, harness, bytes3, maxRecords) {
       const text2 = extractTypedText(m.content);
       if (!text2.trim())
         continue;
-      put2({ ...base2, text: clean(text2), origin: "pi_user_projection", eligible: false, excluded: "projection_origin_unverified", identity: `node:${typeof r.id === "string" ? r.id : key2}` });
+      put2({ ...base2, observed: r.isMeta !== true && r.isSynthetic !== true && !maintenance(text2), text: clean(text2), origin: "pi_user_projection", eligible: false, excluded: "projection_origin_unverified", identity: `node:${typeof r.id === "string" ? r.id : key2}` });
       gaps.add("pi_exchange_projection_fidelity");
     }
   }
@@ -14928,10 +15070,8 @@ async function nativeFacts(file, harness, bytes3, maxRecords) {
   if (parent && harness === "claude")
     nativeId = `${parent}:${path19.basename(file, ".jsonl")}`;
   if (parent) {
-    for (const event of events) {
+    for (const event of events)
       event.eligible = false;
-      event.excluded = "child_initialization";
-    }
   }
   if (harness === "pi")
     gaps.add("pi_exchange_projection_fidelity");
@@ -14947,57 +15087,45 @@ var init_source2 = __esm({
     init_redact();
     init_redact_elide();
     init_markers();
-    digest = (value) => createHash8("sha256").update(value).digest("hex");
+    digest = (value) => createHash9("sha256").update(value).digest("hex");
     clean = (text2) => redact(elideBinary(text2)).text;
     clock = (value) => typeof value === "string" && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
   }
 });
 
 // packages/core/dist/analytics/native-usage.js
-import { createHash as createHash9 } from "node:crypto";
-function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
-  const text2 = Buffer.isBuffer(bytes3) ? bytes3.toString("utf8") : bytes3;
+import { createHash as createHash10 } from "node:crypto";
+function createNativeUsageAccumulator(harness, conversationId, options = {}) {
+  let observed2 = 0, excluded = 0;
   const records = /* @__PURE__ */ new Map();
   let project = options.project ?? null, model = null, provider = null, session = conversationId, offset = 0, seq = 0;
   let previous = null;
   const seenTotals = /* @__PURE__ */ new Set();
+  const identities = /* @__PURE__ */ new Map();
+  const score = (v) => (v.inputTokens ?? 0) + (v.outputTokens ?? 0) + (v.cacheReadTokens ?? 0) + Math.max(v.cacheWriteTokens ?? 0, (v.cacheWrite5mTokens ?? 0) + (v.cacheWrite1hTokens ?? 0)) + (v.reasoningTokens ?? 0);
   const put2 = (r) => {
-    const old = records.get(r.id);
-    if (!old) {
-      records.set(r.id, r);
-      return;
-    }
-    const conflict = old.model !== r.model || old.provider !== r.provider;
-    for (const k of ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens"]) {
-      const a = old[k], b = r[k];
-      old[k] = a === null ? b : b === null ? a : Math.max(a, b);
-    }
-    old.reportedCostUsd = old.reportedCostUsd === null ? r.reportedCostUsd : r.reportedCostUsd === null ? old.reportedCostUsd : Math.max(old.reportedCostUsd, r.reportedCostUsd);
-    old.gaps = [.../* @__PURE__ */ new Set([...old.gaps, ...r.gaps, ...conflict ? ["response_identity_model_conflict"] : []])];
-    if (conflict) {
-      old.model = null;
-      old.provider = null;
-    }
+    const old = records.get(r.id), identity5 = identities.get(r.id) ?? { models: /* @__PURE__ */ new Set(), providers: /* @__PURE__ */ new Set() };
+    if (r.model !== null)
+      identity5.models.add(r.model);
+    if (r.provider !== null)
+      identity5.providers.add(r.provider);
+    identities.set(r.id, identity5);
+    const chosen3 = !old || score(r) > score(old) ? r : old;
+    const conflict = identity5.models.size > 1 || identity5.providers.size > 1;
+    records.set(r.id, conflict ? { ...chosen3, model: null, provider: null, gaps: [.../* @__PURE__ */ new Set([...chosen3.gaps, "response_identity_model_conflict"])] } : chosen3);
   };
-  const lines = text2.trimStart().startsWith("[") ? (() => {
-    try {
-      return JSON.parse(text2).map((x) => JSON.stringify(x));
-    } catch {
-      return [];
-    }
-  })() : text2.split("\n");
-  for (const line2 of lines) {
+  const pushLine = (line) => {
     const start = offset;
-    offset += Buffer.byteLength(line2) + 1;
-    if (!line2.trim())
-      continue;
+    offset += Buffer.byteLength(line) + 1;
+    if (!line.trim())
+      return;
     if (++seq > (options.maxRecords ?? 1e5))
-      break;
+      return;
     let r;
     try {
-      r = obj(JSON.parse(line2));
+      r = obj(JSON.parse(line));
     } catch {
-      continue;
+      return;
     }
     if (harness === "opencode") {
       r = { ...r, ...obj(r.message) };
@@ -15012,11 +15140,15 @@ function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
     }
     const p = obj(r.payload), m = obj(r.message);
     project = str2(r.cwd, p.cwd, r.directory) ?? project;
+    if (harness === "claude")
+      session = str2(r.sessionId) ?? session;
+    if (harness === "pi" && r.type === "session")
+      session = str2(r.id) ?? session;
     if (harness === "codex" && (r.type === "session_meta" || r.type === "turn_context")) {
       session = str2(p.session_id, p.id) ?? session;
       model = str2(p.model) ?? model;
       provider = str2(p.model_provider, p.provider) ?? provider;
-      continue;
+      return;
     }
     const eventAt = at(r.timestamp) ?? at(m.timestamp) ?? at(obj(r.time).created);
     const key2 = str2(r.uuid, r.id, p.id, m.id) ?? `record:${seq}`;
@@ -15026,15 +15158,16 @@ function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
     const gaps = [];
     if (harness === "codex") {
       if (r.type !== "event_msg" || p.type !== "token_count")
-        continue;
+        return;
       const info = obj(p.info), last2 = obj(info.last_token_usage), total = obj(info.total_token_usage);
       if (!Object.keys(last2).length && !Object.keys(total).length)
-        continue;
+        return;
+      observed2++;
       const previousTotal = previous;
       previous = Object.keys(total).length ? total : previous;
       const signature = Object.keys(total).length ? JSON.stringify([session, total.input_tokens, total.output_tokens, total.cached_input_tokens, total.reasoning_output_tokens]) : null;
       if (signature && seenTotals.has(signature))
-        continue;
+        return;
       if (signature)
         seenTotals.add(signature);
       const delta = (field2) => {
@@ -15056,27 +15189,31 @@ function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
       observedProvider = str2(p.model_provider, p.provider, info.provider) ?? provider;
       includesCache = true;
       basis = "codex_last_response_with_cumulative_dedup";
-      id = `codex:${hash2(JSON.stringify([session, str2(p.response_id, info.response_id) ?? signature ?? [eventAt, last2]]))}`;
+      id = `codex:${hash3(JSON.stringify([session, str2(p.response_id, info.response_id) ?? signature ?? [eventAt, last2]]))}`;
       write = write ?? 0;
     } else if (harness === "claude") {
       if (r.type !== "assistant" || m.role !== "assistant")
-        continue;
+        return;
       const u = obj(m.usage);
       input = num2(u.input_tokens);
       output = num2(u.output_tokens);
       read = num2(u.cache_read_input_tokens) ?? (input !== null ? 0 : null);
       write = num2(u.cache_creation_input_tokens) ?? (input !== null ? 0 : null);
       reasoning = num2(u.reasoning_tokens);
-      if (num2(obj(u.cache_creation).ephemeral_1h_input_tokens))
+      const duration3 = obj(u.cache_creation);
+      const five = num2(duration3.ephemeral_5m_input_tokens), hour = num2(duration3.ephemeral_1h_input_tokens);
+      if (five !== null && hour !== null && write !== null && five + hour !== write)
+        gaps.push("cache_write_duration_conflict");
+      if (hour !== null && hour > 0 && (five === null || write === null || five + hour !== write))
         gaps.push("cache_write_duration_unknown");
       observedModel = str2(m.model, r.model);
       observedProvider = str2(m.provider, r.provider, r.modelProvider);
       reported = cost(r.costUSD) ?? cost(m.costUSD);
       basis = "claude_response_usage";
-      id = `claude:${str2(m.id, r.uuid) ?? hash2(JSON.stringify([conversationId, key2, eventAt]))}`;
+      id = `claude:${hash3(JSON.stringify([str2(m.id, r.uuid) ?? key2, str2(r.requestId) ?? [session, eventAt]]))}`;
     } else if (harness === "pi") {
       if (r.type !== "message" || m.role !== "assistant")
-        continue;
+        return;
       const u = obj(m.usage);
       input = num2(u.input);
       output = num2(u.output);
@@ -15087,10 +15224,10 @@ function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
       observedModel = str2(m.model);
       observedProvider = str2(m.provider);
       basis = "pi_response_usage";
-      id = `pi:${str2(r.id) ?? hash2(JSON.stringify([conversationId, key2, eventAt]))}`;
+      id = `pi:${hash3(JSON.stringify([session, str2(r.id) ?? key2, eventAt]))}`;
     } else {
       if (r.role !== "assistant")
-        continue;
+        return;
       const u = obj(r.tokens), cache = obj(u.cache);
       input = num2(u.input);
       output = num2(u.output);
@@ -15098,14 +15235,26 @@ function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
       write = num2(cache.write) ?? (input !== null ? 0 : null);
       reasoning = num2(u.reasoning);
       reported = cost(r.cost);
-      observedModel = str2(r.modelID, obj(r.model).modelID, r.model);
+      observedModel = str2(r.modelID, obj(r.model).modelID, obj(r.model).id, r.model);
       observedProvider = str2(r.providerID, obj(r.model).providerID, r.provider);
       basis = "opencode_response_tokens";
       includesReasoning = false;
-      id = `opencode:${str2(r.id) ?? hash2(JSON.stringify([conversationId, key2, eventAt]))}`;
+      id = `opencode:${str2(r.id) ?? hash3(JSON.stringify([conversationId, key2, eventAt]))}`;
     }
-    if (!accepted)
-      continue;
+    if (observedModel === "codex-auto-review") {
+      observedModel = null;
+      gaps.push("workflow_model_identity_unavailable");
+    }
+    if (harness !== "codex")
+      observed2++;
+    if (r.isSynthetic === true || r.isMeta === true || m.isSynthetic === true || observedModel === "<synthetic>") {
+      excluded++;
+      return;
+    }
+    if (!accepted) {
+      excluded++;
+      return;
+    }
     if (!observedModel)
       gaps.push("model_unrecorded");
     if (!observedProvider)
@@ -15118,11 +15267,29 @@ function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
       gaps.push("cache_exceeds_input");
     if (includesReasoning && output !== null && reasoning !== null && reasoning > output)
       gaps.push("reasoning_exceeds_output");
-    put2({ id, conversationId, harness, eventAt, project, provider: observedProvider, model: observedModel, canonicalModel: null, inputTokens: input, outputTokens: output, cacheReadTokens: read, cacheWriteTokens: write, reasoningTokens: reasoning, inputIncludesCache: includesCache, outputIncludesReasoning: includesReasoning, reportedCostUsd: reported, basis, gaps });
-  }
-  return [...records.values()];
+    put2({ id, conversationId, harness, eventAt, project, provider: observedProvider, model: observedModel, canonicalModel: null, inputTokens: input, outputTokens: output, cacheReadTokens: read, cacheWriteTokens: write, reasoningTokens: reasoning, inputIncludesCache: includesCache, outputIncludesReasoning: includesReasoning, reportedCostUsd: reported, basis, gaps, ...harness === "claude" ? { cacheWrite5mTokens: num2(obj(obj(m.usage).cache_creation).ephemeral_5m_input_tokens), cacheWrite1hTokens: num2(obj(obj(m.usage).cache_creation).ephemeral_1h_input_tokens) } : {} });
+  };
+  return { invalidateContext: () => {
+    project = null;
+    model = null;
+    provider = null;
+    previous = null;
+  }, pushLine, records: () => [...records.values()], counts: () => ({ observed: observed2, excluded, deduplicated: Math.max(0, observed2 - excluded - records.size) }) };
 }
-var obj, str2, num2, cost, hash2, at;
+function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
+  const text2 = Buffer.isBuffer(bytes3) ? bytes3.toString("utf8") : bytes3, acc = createNativeUsageAccumulator(harness, conversationId, options);
+  const lines = text2.trimStart().startsWith("[") ? (() => {
+    try {
+      return JSON.parse(text2).map((x) => JSON.stringify(x));
+    } catch {
+      return [];
+    }
+  })() : text2.split("\n");
+  for (const line of lines)
+    acc.pushLine(line);
+  return acc.records();
+}
+var obj, str2, num2, cost, hash3, at;
 var init_native_usage = __esm({
   "packages/core/dist/analytics/native-usage.js"() {
     "use strict";
@@ -15130,7 +15297,7 @@ var init_native_usage = __esm({
     str2 = (...v) => v.find((x) => typeof x === "string" && x.length > 0) ?? null;
     num2 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : null;
     cost = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
-    hash2 = (v) => createHash9("sha256").update(v).digest("hex");
+    hash3 = (v) => createHash10("sha256").update(v).digest("hex");
     at = (v) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) < 864e13 ? new Date(v).toISOString() : typeof v === "string" && Number.isFinite(Date.parse(v)) ? new Date(v).toISOString() : null;
   }
 });
@@ -15145,7 +15312,7 @@ var init_model_pricing_snapshot = __esm({
 });
 
 // packages/core/dist/analytics/model-catalog.js
-import { createHash as createHash10 } from "node:crypto";
+import { createHash as createHash11 } from "node:crypto";
 function validateModelCatalog(value) {
   if (!value || typeof value !== "object")
     return false;
@@ -15165,7 +15332,7 @@ function validateModelCatalog(value) {
     if (m.tiers !== void 0 && (!Array.isArray(m.tiers) || m.tiers.some((t) => !Number.isSafeInteger(t.threshold) || t.threshold < 0 || !t.rates || Object.values(t.rates).some((v) => !valid(v)))))
       return false;
   }
-  return createHash10("sha256").update(JSON.stringify(c.models)).digest("hex") === c.basis.sha256;
+  return createHash11("sha256").update(JSON.stringify(c.models)).digest("hex") === c.basis.sha256;
 }
 function resolveCatalogModel(provider, model, catalog = bundledModelCatalog) {
   if (!provider || !model)
@@ -15197,8 +15364,8 @@ function amount(tokens, rate) {
 function valueInference(record4, catalog = bundledModelCatalog, options = {}) {
   const gaps = [...record4.gaps];
   const local = record4.provider === "local" || record4.provider === "ollama" || record4.provider === "llama.cpp";
-  const firstPartyCandidate = record4.provider === null && record4.model !== null ? (options.approvedFirstPartyReferences ?? approvedFirstPartyReferences)[record4.model] : void 0;
-  const firstParty = firstPartyCandidate && record4.model !== null && approvedFirstPartyReferences[record4.model] && firstPartyCandidate.provider === "anthropic" && firstPartyCandidate.model === record4.model ? firstPartyCandidate : void 0;
+  const firstPartyCandidate = record4.provider === null && record4.model !== null ? options.approvedFirstPartyReferences === void 0 && resolveCatalogModel("anthropic", record4.model, catalog)?.id.startsWith("claude-") ? { provider: "anthropic", model: record4.model } : options.approvedFirstPartyReferences?.[record4.model] : void 0;
+  const firstParty = firstPartyCandidate && record4.model !== null && resolveCatalogModel("anthropic", record4.model, catalog)?.id.startsWith("claude-") && firstPartyCandidate.provider === "anthropic" && firstPartyCandidate.model === record4.model ? firstPartyCandidate : void 0;
   const reference = local ? options.localReferences?.[`${record4.provider}/${record4.model}`] : firstParty;
   const referenceBasis = local && reference ? "explicit_local_hosted_reference" : firstParty ? "approved_anthropic_first_party" : null;
   const entry = reference ? resolveCatalogModel(reference.provider, reference.model, catalog) : resolveCatalogModel(record4.provider, record4.model, catalog);
@@ -15229,7 +15396,9 @@ function valueInference(record4, catalog = bundledModelCatalog, options = {}) {
           raw = { ...raw, ...tier.rates };
   }
   const rates2 = normalizedRates(raw);
-  let complete = input !== null && output !== null && !gaps.includes("context_tier_evidence_missing") && !gaps.includes("response_identity_model_conflict") && !gaps.includes("cache_write_duration_unknown") && !gaps.includes("cache_exceeds_input") && !gaps.includes("reasoning_exceeds_output");
+  if (entry.provider === "anthropic" && write !== null && write > 0 && (record4.cacheWrite5mTokens === void 0 || record4.cacheWrite5mTokens === null || record4.cacheWrite1hTokens === void 0 || record4.cacheWrite1hTokens === null || record4.cacheWrite5mTokens + record4.cacheWrite1hTokens !== write))
+    gaps.push("cache_write_duration_unknown");
+  let complete = input !== null && output !== null && !gaps.includes("context_tier_evidence_missing") && !gaps.includes("response_identity_model_conflict") && !gaps.includes("cache_write_duration_unknown") && !gaps.includes("cache_write_duration_conflict") && !gaps.includes("cache_exceeds_input") && !gaps.includes("reasoning_exceeds_output");
   let nano = 0n;
   const add = (n3, r, field2) => {
     if (n3 === 0)
@@ -15278,17 +15447,30 @@ function valueInference(record4, catalog = bundledModelCatalog, options = {}) {
   add(plainInput, rates2.input, "input");
   add(plainOutput, rates2.output, "output");
   add(read, rates2.cacheRead, "cache_read");
-  add(write, rates2.cacheWrite, "cache_write");
+  if (record4.cacheWrite5mTokens !== void 0 && record4.cacheWrite5mTokens !== null && record4.cacheWrite1hTokens !== void 0 && record4.cacheWrite1hTokens !== null && write !== null && record4.cacheWrite5mTokens + record4.cacheWrite1hTokens === write) {
+    add(record4.cacheWrite5mTokens, entry.provider === "anthropic" && rates2.input !== null ? rates2.input * 1.25 : rates2.cacheWrite, "cache_write_5m");
+    const hourRate = entry.provider === "anthropic" && rates2.input !== null ? rates2.input * 2 : null;
+    add(record4.cacheWrite1hTokens, hourRate, "cache_write_1h");
+  } else
+    add(write, rates2.cacheWrite, "cache_write");
   const value = complete ? Number(nano) / 1e18 : null;
   return { record: record4, valueUsd: reference ? null : value, referenceValueUsd: reference ? value : null, referenceProvider: reference?.provider ?? null, referenceModel: reference?.model ?? null, referenceBasis, provider: record4.provider, canonicalModel, rates: rates2, gaps: [.../* @__PURE__ */ new Set([...gaps, ...local ? ["local_hosted_reference_value"] : [], ...firstParty ? ["approved_anthropic_first_party_reference_value", "recorded_endpoint_unknown"] : []])] };
 }
 function aggregateLaunchFacts(input, catalog = bundledModelCatalog, options = {}) {
-  const seen = /* @__PURE__ */ new Set(), records = input.filter((r) => {
-    if (seen.has(r.id))
-      return false;
-    seen.add(r.id);
-    return true;
-  });
+  const unique2 = /* @__PURE__ */ new Map(), identities = /* @__PURE__ */ new Map();
+  for (const r of input) {
+    if (r.model === "<synthetic>")
+      continue;
+    const old = unique2.get(r.id), identity5 = identities.get(r.id) ?? { models: /* @__PURE__ */ new Set(), providers: /* @__PURE__ */ new Set() };
+    if (r.model !== null)
+      identity5.models.add(r.model);
+    if (r.provider !== null)
+      identity5.providers.add(r.provider);
+    identities.set(r.id, identity5);
+    const score = (v) => (v.inputTokens ?? 0) + (v.outputTokens ?? 0) + (v.cacheReadTokens ?? 0) + Math.max(v.cacheWriteTokens ?? 0, (v.cacheWrite5mTokens ?? 0) + (v.cacheWrite1hTokens ?? 0)) + (v.reasoningTokens ?? 0), chosen3 = !old || score(r) > score(old) ? r : old;
+    unique2.set(r.id, identity5.models.size > 1 || identity5.providers.size > 1 ? { ...chosen3, model: null, provider: null, canonicalModel: null, gaps: [.../* @__PURE__ */ new Set([...chosen3.gaps, "response_identity_model_conflict"])] } : chosen3);
+  }
+  const records = [...unique2.values()];
   const valued = records.map((r) => valueInference(r, catalog, options));
   const groups = /* @__PURE__ */ new Map();
   for (const v of valued) {
@@ -15312,17 +15494,17 @@ function aggregateLaunchFacts(input, catalog = bundledModelCatalog, options = {}
     return r.inputTokens + r.outputTokens + (r.inputIncludesCache ? 0 : (r.cacheReadTokens ?? 0) + (r.cacheWriteTokens ?? 0)) + (r.outputIncludesReasoning ? 0 : r.reasoningTokens ?? 0);
   };
   const overall = valued.map(total), totalKnown = overall.filter((n3) => n3 !== null).reduce((a, b) => a + b, 0), conversations = new Set(records.map((r) => r.conversationId)).size;
-  const money4 = (vs, key2) => {
+  const money3 = (vs, key2) => {
     const known = vs.map((v) => v[key2]).filter((n3) => n3 !== null);
     return known.length ? known.reduce((a, b) => a + b, 0) : null;
   };
   const models = [...groups].map(([id, vs]) => {
     const totals = vs.map(total), tokens = totals.every((n3) => n3 !== null) ? totals.reduce((a, b) => a + (b ?? 0), 0) : null, participation = new Set(vs.map((v) => v.record.conversationId)).size;
-    const knownTokens2 = totals.filter((n3) => n3 !== null).reduce((a, b) => a + b, 0);
-    const tokenShare = totalKnown > 0 && totals.some((n3) => n3 !== null) ? knownTokens2 / totalKnown : null;
+    const knownTokens3 = totals.filter((n3) => n3 !== null).reduce((a, b) => a + b, 0);
+    const tokenShare = totalKnown > 0 && totals.some((n3) => n3 !== null) ? knownTokens3 / totalKnown : null;
     const conversationShare = conversations ? participation / conversations : 0;
     const endpoints = new Set(vs.map((v) => v.provider)), names = new Set(vs.map((v) => v.record.model));
-    return { id, provider: endpoints.size === 1 ? vs[0].provider : null, model: names.size === 1 ? vs[0].record.model : vs[0].canonicalModel, canonicalModel: vs[0].canonicalModel, inputTokens: sum2(vs, "inputTokens"), outputTokens: sum2(vs, "outputTokens"), totalTokens: tokens, knownTokens: knownTokens2, conversations: participation, tokenShare, conversationShare, favouriteScore: tokenShare === null ? null : (tokenShare + conversationShare) / 2, valueUsd: money4(vs, "valueUsd"), referenceValueUsd: money4(vs, "referenceValueUsd"), gaps: [.../* @__PURE__ */ new Set([...vs.flatMap((v) => v.gaps), ...endpoints.size > 1 ? ["multiple_serving_endpoints"] : [], ...overall.some((n3) => n3 === null) ? ["token_share_known_portion_only"] : []])] };
+    return { id, provider: endpoints.size === 1 ? vs[0].provider : null, model: names.size === 1 ? vs[0].record.model : vs[0].canonicalModel, canonicalModel: vs[0].canonicalModel, inputTokens: sum2(vs, "inputTokens"), outputTokens: sum2(vs, "outputTokens"), totalTokens: tokens, knownTokens: knownTokens3, conversations: participation, tokenShare, conversationShare, favouriteScore: tokenShare === null ? null : (tokenShare + conversationShare) / 2, valueUsd: money3(vs, "valueUsd"), referenceValueUsd: money3(vs, "referenceValueUsd"), gaps: [.../* @__PURE__ */ new Set([...vs.flatMap((v) => v.gaps), ...endpoints.size > 1 ? ["multiple_serving_endpoints"] : [], ...overall.some((n3) => n3 === null) ? ["token_share_known_portion_only"] : []])] };
   });
   models.sort((a, b) => (b.favouriteScore ?? -1) - (a.favouriteScore ?? -1) || b.conversations - a.conversations || a.id.localeCompare(b.id));
   const priced = valued.filter((v) => v.valueUsd !== null).length, referencePricedResponses = valued.filter((v) => v.referenceValueUsd !== null).length, equivalentPricedResponses = valued.filter((v) => v.valueUsd !== null || v.referenceValueUsd !== null).length;
@@ -15336,7 +15518,7 @@ function aggregateLaunchFacts(input, catalog = bundledModelCatalog, options = {}
     group.valueUsd += v.referenceValueUsd;
     referenceGroups.set(key2, group);
   }
-  return { records, models, referencePricedResponses, equivalentPricedResponses, referenceProviders: [...referenceGroups.values()].sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)), favourite: models.find((m) => m.favouriteScore !== null && m.model !== null) ?? null, valueUsd: money4(valued, "valueUsd"), referenceValueUsd: money4(valued, "referenceValueUsd"), pricing: catalog.basis, recordedResponses: records.length, knownTokenResponses: valued.filter((v) => total(v) !== null).length, pricedResponses: priced, unknownModelResponses: records.filter((r) => r.model === null).length, gaps: [.../* @__PURE__ */ new Set([...valued.flatMap((v) => v.gaps), ...priced < records.length ? ["pricing_coverage_partial"] : [], ...equivalentPricedResponses < records.length ? ["equivalent_pricing_coverage_partial"] : []])] };
+  return { records, models, referencePricedResponses, equivalentPricedResponses, referenceProviders: [...referenceGroups.values()].sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)), favourite: models.find((m) => m.favouriteScore !== null && m.model !== null) ?? null, valueUsd: money3(valued, "valueUsd"), referenceValueUsd: money3(valued, "referenceValueUsd"), pricing: catalog.basis, recordedResponses: records.length, knownTokenResponses: valued.filter((v) => total(v) !== null).length, pricedResponses: priced, unknownModelResponses: records.filter((r) => r.model === null).length, gaps: [.../* @__PURE__ */ new Set([...valued.flatMap((v) => v.gaps), ...priced < records.length ? ["pricing_coverage_partial"] : [], ...equivalentPricedResponses < records.length ? ["equivalent_pricing_coverage_partial"] : []])] };
 }
 var bundledModelCatalog, valid, providerAliases, approvedFirstPartyReferences;
 var init_model_catalog = __esm({
@@ -15346,18 +15528,12 @@ var init_model_catalog = __esm({
     bundledModelCatalog = pricingSnapshot;
     valid = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
     providerAliases = { "google-vertex-ai": "google-vertex", "openai-codex": "openai", "opencode-zen": "opencode" };
-    approvedFirstPartyReferences = Object.freeze(Object.fromEntries([
-      "claude-opus-4-8",
-      "claude-fable-5",
-      "claude-opus-5",
-      "claude-haiku-4-5-20251001",
-      "claude-sonnet-5"
-    ].map((model) => [model, Object.freeze({ provider: "anthropic", model })])));
+    approvedFirstPartyReferences = Object.freeze(Object.fromEntries(bundledModelCatalog.models.filter((m) => m.provider === "anthropic" && m.id.startsWith("claude-")).map((m) => [m.id, Object.freeze({ provider: "anthropic", model: m.id })])));
   }
 });
 
 // packages/core/dist/analytics/catalog-service.js
-import { createHash as createHash11 } from "node:crypto";
+import { createHash as createHash12 } from "node:crypto";
 function rates(value) {
   if (!object3(value))
     return {};
@@ -15399,7 +15575,7 @@ function reducePublicCatalog(raw, retrievedAt = (/* @__PURE__ */ new Date()).toI
         throw new Error("catalog_entries_limit");
     }
   }
-  const result = { basis: { source: SOURCE, retrievedAt, sha256: createHash11("sha256").update(JSON.stringify(models)).digest("hex") }, models };
+  const result = { basis: { source: SOURCE, retrievedAt, sha256: createHash12("sha256").update(JSON.stringify(models)).digest("hex") }, models };
   if (!models.length || !validateModelCatalog(result))
     throw new Error("catalog_validation_failed");
   return result;
@@ -15460,10 +15636,1024 @@ var init_catalog_service = __esm({
   }
 });
 
+// packages/core/dist/analytics/opencode-json.js
+import path20 from "node:path";
+function readLegacyOpenCode(files, maxBytes = 128 * 1024 * 1024) {
+  const sessions = /* @__PURE__ */ new Map(), messages = /* @__PURE__ */ new Map(), parts = /* @__PURE__ */ new Map(), captured = /* @__PURE__ */ new Map(), gaps = /* @__PURE__ */ new Set();
+  let bytes3 = 0, parsed = 0;
+  for (const item of files) {
+    if (bytes3 + item.bytes > maxBytes) {
+      gaps.add("opencode_json_total_bytes_limit");
+      break;
+    }
+    try {
+      const buffer = boundedBytes(item.file, 8 * 1024 * 1024);
+      bytes3 += buffer.length;
+      const r = JSON.parse(buffer.toString("utf8"));
+      if (!isRecord(r)) {
+        gaps.add("opencode_json_record_invalid");
+        continue;
+      }
+      parsed++;
+      if (typeof r.role === "string") {
+        const id = typeof r.id === "string" ? r.id : path20.basename(item.file, ".json"), session = typeof r.sessionID === "string" ? r.sessionID : path20.basename(path20.dirname(item.file));
+        messages.set(id, { value: { ...r, id, sessionID: session }, file: item.file });
+        captured.set(item.file, { file: item.file, hash: digest(buffer), session });
+      } else if (typeof r.messageID === "string" || /[\\/]part[\\/]/u.test(item.file)) {
+        const message2 = typeof r.messageID === "string" ? r.messageID : path20.basename(path20.dirname(item.file)), rows = parts.get(message2) ?? [];
+        rows.push(r);
+        parts.set(message2, rows);
+        captured.set(item.file, { file: item.file, hash: digest(buffer), message: message2, session: typeof r.sessionID === "string" ? r.sessionID : null });
+      } else if (typeof r.id === "string") {
+        sessions.set(r.id, r);
+        captured.set(item.file, { file: item.file, hash: digest(buffer), session: r.id });
+      }
+    } catch {
+      gaps.add("opencode_json_record_unavailable");
+    }
+  }
+  const groups = [];
+  const ids = /* @__PURE__ */ new Set([...sessions.keys(), ...[...messages.values()].map((m) => String(m.value.sessionID))]);
+  for (const id of ids) {
+    const session = sessions.get(id), project = typeof session?.directory === "string" ? session.directory : null, parent = typeof session?.parentID === "string" ? session.parentID : null, rows = [...messages.entries()].filter(([, m]) => m.value.sessionID === id).sort((a, b) => Number(a[1].value.time?.created ?? 0) - Number(b[1].value.time?.created ?? 0) || a[0].localeCompare(b[0])), events = [], records = [];
+    let maintenance = false;
+    for (const [key2, row2] of rows) {
+      const actualParts = parts.get(key2) ?? [], eligibleParts = actualParts.filter((p) => p.synthetic !== true && p.ignored !== true), m = row2.value, stamp = m.time?.created, time2 = typeof stamp === "number" ? new Date(stamp).toISOString() : null;
+      records.push({ type: "message", id: key2, timestamp: time2, cwd: project, message: m, content: eligibleParts });
+      if (m.role !== "user")
+        continue;
+      const text2 = clean(typeof m.content === "string" ? m.content : extractTypedText(eligibleParts));
+      if (hasExclusionMarker(text2))
+        maintenance = true;
+      const excluded = actualParts.length > 0 && eligibleParts.length === 0 ? "declared_meta_or_synthetic_input" : parent && events.length === 0 ? "child_initialization" : null;
+      events.push({ key: key2, rawStart: events.length + 1, rawEnd: events.length + 1, role: "user", text: text2, eventAt: time2, project, origin: "opencode_user_projection", eligible: false, observed: excluded === null, excluded, identity: `message:${key2}` });
+    }
+    if (maintenance) {
+      gaps.add("maintenance_source_excluded");
+      continue;
+    }
+    const owned = [...captured.values()].filter((f) => f.session === id || f.message !== void 0 && rows.some(([key2]) => key2 === f.message)), hash5 = digest(JSON.stringify(records)), root = rows[0]?.[1].file ?? files[0]?.file ?? "";
+    groups.push({ facts: { nativeId: id, project, parent, child: parent !== null, title: null, events, gaps: [...gaps], hash: hash5, consumed: 0, bytes: Buffer.alloc(0) }, records, files: owned.map(({ file, hash: hash6 }) => ({ file, hash: hash6 })), root });
+  }
+  return { groups, parsed, gaps: [...gaps] };
+}
+var init_opencode_json = __esm({
+  "packages/core/dist/analytics/opencode-json.js"() {
+    "use strict";
+    init_content();
+    init_markers();
+    init_source2();
+  }
+});
+
+// packages/core/dist/analytics/native-census.js
+import fs27 from "node:fs";
+import os7 from "node:os";
+import path21 from "node:path";
+function nativeAuditRoots(harness, options, env = process.env, home2 = os7.homedir()) {
+  if (harness === "claude") {
+    const configured = options.claudeDir ?? env.CLAUDE_CONFIG_DIR;
+    const roots = configured ? list(configured) : [path21.join(env.XDG_CONFIG_HOME && path21.isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : path21.join(home2, ".config"), "claude"), path21.join(home2, ".claude")];
+    return [...new Set(roots.map((p) => path21.basename(p) === "projects" ? p : path21.join(p, "projects")))];
+  }
+  if (harness === "codex") {
+    const roots = list(options.codexDir ?? env.POTSHERD_CODEX_DIR ?? env.CODEX_HOME ?? path21.join(home2, ".codex"));
+    return [...new Set(roots.flatMap((p) => ["sessions", "archived_sessions"].includes(path21.basename(p)) ? [p] : [path21.join(p, "sessions"), path21.join(p, "archived_sessions")]))];
+  }
+  if (harness === "pi") {
+    if (!options.piDir && !env.POTSHERD_PI_DIR && env.PI_CODING_AGENT_DIR)
+      return list(env.PI_CODING_AGENT_DIR).map((p) => path21.join(p, "sessions"));
+    if (!options.piDir && !env.POTSHERD_PI_DIR && env.PI_AGENT_DIR)
+      return list(env.PI_AGENT_DIR);
+    return list(options.piDir ?? env.POTSHERD_PI_DIR ?? path21.join(home2, ".pi")).map((p) => path21.join(p, "agent", "sessions"));
+  }
+  return list(options.opencodeDir ?? env.POTSHERD_OPENCODE_DIR ?? env.OPENCODE_DATA_DIR ?? path21.join(env.XDG_DATA_HOME && path21.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path21.join(home2, ".local", "share"), "opencode"));
+}
+async function censusNativeSources(harnesses, options, signal, onHost) {
+  const files = [], gaps = [], seen = /* @__PURE__ */ new Set();
+  for (const harness of harnesses) {
+    const found = [], own = [], roots = nativeAuditRoots(harness, options);
+    for (const root of roots) {
+      try {
+        for await (const file of walk(root, 2e5, signal, harness === "opencode" ? 8 : 12)) {
+          if (signal.aborted)
+            break;
+          let kind2 = null;
+          if (harness === "opencode") {
+            if (/\.(?:db|sqlite|sqlite3)$/iu.test(file))
+              kind2 = "database";
+            else if (file.endsWith(".json") && /[\\/]storage[\\/](?:session|message|part)[\\/]/u.test(file))
+              kind2 = "opencode-json";
+          } else if (file.endsWith(".jsonl") && (harness !== "codex" || path21.basename(file).startsWith("rollout-")))
+            kind2 = "jsonl";
+          if (!kind2 || seen.has(file))
+            continue;
+          seen.add(file);
+          const stat = fs27.statSync(file);
+          const entry = { file, harness, bytes: stat.size, kind: kind2 };
+          found.push(entry);
+          files.push(entry);
+          if (files.length >= 1e5) {
+            own.push("native_census_file_limit");
+            break;
+          }
+        }
+      } catch (e) {
+        own.push(e instanceof Error ? e.message : "native_census_unavailable");
+      }
+    }
+    gaps.push(...own);
+    onHost(harness, found, roots.length, own);
+  }
+  return { files, gaps: [...new Set(gaps)] };
+}
+var list;
+var init_native_census = __esm({
+  "packages/core/dist/analytics/native-census.js"() {
+    "use strict";
+    init_paths();
+    init_source2();
+    list = (s) => s.split(",").map((p) => p.trim()).filter(Boolean).map((p) => path21.resolve(expandTilde(p))).filter((p, i, a) => a.indexOf(p) === i);
+  }
+});
+
+// packages/core/dist/analytics/native-metadata-projection.js
+import { StringDecoder } from "node:string_decoder";
+var NativeMetadataProjection;
+var init_native_metadata_projection = __esm({
+  "packages/core/dist/analytics/native-metadata-projection.js"() {
+    "use strict";
+    init_markers();
+    NativeMetadataProjection = class {
+      maxBytes;
+      decoder = new StringDecoder("utf8");
+      frames = [];
+      root;
+      done = false;
+      mode = "idle";
+      token = "";
+      isKey = false;
+      keep = false;
+      escape = false;
+      unicode = "";
+      markerTail = "";
+      retained = 0;
+      error = null;
+      marker = false;
+      scanString = false;
+      scanEscape = false;
+      scanUnicode = "";
+      scanTail = "";
+      constructor(maxBytes = 8 * 1024 * 1024) {
+        this.maxBytes = maxBytes;
+      }
+      fail(code = "native_metadata_invalid") {
+        this.error ??= code;
+      }
+      add(c) {
+        if (this.keep || this.isKey) {
+          this.retained += Buffer.byteLength(JSON.stringify(c)) - 2;
+          if (this.retained > this.maxBytes || this.isKey && this.token.length > 32768) {
+            this.fail("native_metadata_bytes_limit");
+            return;
+          }
+          this.token += c;
+        }
+        const searchable = this.markerTail + c;
+        if (EXCLUSION_MARKERS.some((m) => searchable.includes(m)))
+          this.marker = true;
+        this.markerTail = searchable.slice(-256);
+      }
+      expectedValue() {
+        const f = this.frames.at(-1);
+        return f ? f.state === "value" || f.state === "valueRequired" : !this.done;
+      }
+      retainValue() {
+        const f = this.frames.at(-1);
+        return !f || f.keep && !(f.key === "content" || f.key === "text");
+      }
+      accept(value) {
+        if (this.retainValue()) {
+          this.retained += 16;
+          if (this.retained > this.maxBytes) {
+            this.fail("native_metadata_bytes_limit");
+            return;
+          }
+        }
+        const f = this.frames.at(-1);
+        if (!f) {
+          if (this.done) {
+            this.fail();
+            return;
+          }
+          this.root = value;
+          this.done = true;
+          return;
+        }
+        if (f.state !== "value" && f.state !== "valueRequired") {
+          this.fail();
+          return;
+        }
+        if (f.keep) {
+          if (f.array)
+            f.value.push(value);
+          else if (f.key !== null && f.key !== "content" && f.key !== "text")
+            Object.defineProperty(f.value, f.key, { value, writable: true, enumerable: true, configurable: true });
+        }
+        f.key = null;
+        f.state = "comma";
+      }
+      scalarEnd() {
+        if (this.mode === "number") {
+          if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(this.token)) {
+            this.fail();
+            return;
+          }
+          this.accept(this.keep ? Number(this.token) : null);
+        } else if (this.mode === "literal") {
+          if (!["true", "false", "null"].includes(this.token)) {
+            this.fail();
+            return;
+          }
+          this.accept(this.keep ? JSON.parse(this.token) : null);
+        }
+        this.mode = "idle";
+        this.token = "";
+      }
+      char(c) {
+        if (this.error)
+          return;
+        if (this.mode === "string") {
+          if (this.unicode) {
+            if (!/[0-9a-f]/i.test(c)) {
+              this.fail();
+              return;
+            }
+            this.unicode += c;
+            if (this.unicode.length === 5) {
+              this.add(String.fromCharCode(parseInt(this.unicode.slice(1), 16)));
+              this.unicode = "";
+            }
+            return;
+          }
+          if (this.escape) {
+            this.escape = false;
+            if (c === "u") {
+              this.unicode = "u";
+              return;
+            }
+            const decoded = { '"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "	" };
+            if (!(c in decoded)) {
+              this.fail();
+              return;
+            }
+            this.add(decoded[c]);
+            return;
+          }
+          if (c === "\\") {
+            this.escape = true;
+            return;
+          }
+          if (c === '"') {
+            if (this.isKey) {
+              const f2 = this.frames.at(-1);
+              f2.key = this.token;
+              f2.state = "colon";
+            } else
+              this.accept(this.keep ? this.token : null);
+            this.mode = "idle";
+            this.token = "";
+            this.markerTail = "";
+            return;
+          }
+          if (c.charCodeAt(0) < 32) {
+            this.fail();
+            return;
+          }
+          this.add(c);
+          return;
+        }
+        if (this.mode === "number" || this.mode === "literal") {
+          const allowed = this.mode === "number" ? /[0-9eE+.-]/ : /[a-z]/;
+          if (allowed.test(c)) {
+            if (this.token.length >= 256) {
+              this.fail("native_metadata_scalar_limit");
+              return;
+            }
+            this.token += c;
+            return;
+          }
+          this.scalarEnd();
+          if (this.error)
+            return;
+        }
+        if (/\s/.test(c)) {
+          if (![" ", "	", "\r", "\n"].includes(c))
+            this.fail();
+          return;
+        }
+        const f = this.frames.at(-1);
+        if (c === '"') {
+          this.isKey = !!f && !f.array && (f.state === "key" || f.state === "keyRequired");
+          if (!this.isKey && !this.expectedValue()) {
+            this.fail();
+            return;
+          }
+          this.keep = this.isKey || this.retainValue() && f?.key !== "message";
+          this.token = "";
+          this.markerTail = "";
+          this.mode = "string";
+          return;
+        }
+        if (c === "{" || c === "[") {
+          if (!this.expectedValue() || this.frames.length >= 128) {
+            this.fail("native_metadata_depth_limit");
+            return;
+          }
+          const keep = this.retainValue();
+          this.frames.push({ array: c === "[", state: c === "[" ? "value" : "key", key: null, keep, value: keep ? c === "[" ? [] : {} : null });
+          return;
+        }
+        if (c === "}" || c === "]") {
+          if (!f || f.array !== (c === "]") || !["comma", f.array ? "value" : "key"].includes(f.state)) {
+            this.fail();
+            return;
+          }
+          this.frames.pop();
+          this.accept(f.value);
+          return;
+        }
+        if (c === ":") {
+          if (!f || f.state !== "colon") {
+            this.fail();
+            return;
+          }
+          f.state = "valueRequired";
+          return;
+        }
+        if (c === ",") {
+          if (!f || f.state !== "comma") {
+            this.fail();
+            return;
+          }
+          f.state = f.array ? "valueRequired" : "keyRequired";
+          return;
+        }
+        if (!this.expectedValue()) {
+          this.fail();
+          return;
+        }
+        this.keep = this.retainValue();
+        this.token = c;
+        if (c === "-" || /[0-9]/.test(c))
+          this.mode = "number";
+        else if (/[tfn]/.test(c))
+          this.mode = "literal";
+        else
+          this.fail();
+      }
+      scanMarkers(text2) {
+        const special = /["\\]/g;
+        let at2 = 0;
+        const add = (value) => {
+          const combined = this.scanTail + value;
+          if (EXCLUSION_MARKERS.some((m) => combined.includes(m)))
+            this.marker = true;
+          this.scanTail = combined.slice(-256);
+        };
+        while (at2 < text2.length) {
+          if (this.scanString && !this.scanEscape && !this.scanUnicode) {
+            special.lastIndex = at2;
+            const hit2 = special.exec(text2), end = hit2?.index ?? text2.length;
+            add(text2.slice(at2, end));
+            at2 = end;
+            if (at2 >= text2.length)
+              break;
+          }
+          const c = text2[at2++];
+          if (this.scanUnicode) {
+            this.scanUnicode += c;
+            if (this.scanUnicode.length === 5) {
+              if (/^u[0-9a-f]{4}$/i.test(this.scanUnicode))
+                add(String.fromCharCode(parseInt(this.scanUnicode.slice(1), 16)));
+              this.scanUnicode = "";
+            }
+            continue;
+          }
+          if (this.scanEscape) {
+            this.scanEscape = false;
+            if (c === "u")
+              this.scanUnicode = "u";
+            else
+              add({ n: "\n", r: "\r", t: "	" }[c] ?? c);
+            continue;
+          }
+          if (c === '"') {
+            this.scanString = !this.scanString;
+            this.scanTail = "";
+          } else if (this.scanString && c === "\\")
+            this.scanEscape = true;
+        }
+      }
+      push(bytes3) {
+        const text2 = this.decoder.write(bytes3);
+        this.scanMarkers(text2);
+        const special = /["\\\x00-\x1f]/g;
+        let at2 = 0;
+        while (at2 < text2.length && !this.error) {
+          if (this.mode === "string" && !this.escape && !this.unicode) {
+            special.lastIndex = at2;
+            const hit2 = special.exec(text2), end = hit2?.index ?? text2.length;
+            if (end > at2)
+              this.add(text2.slice(at2, end));
+            at2 = end;
+            if (at2 >= text2.length)
+              break;
+          }
+          this.char(text2[at2++]);
+        }
+      }
+      finish() {
+        for (const c of this.decoder.end())
+          this.char(c);
+        if (this.mode === "number" || this.mode === "literal")
+          this.scalarEnd();
+        if (this.mode !== "idle" || this.frames.length || !this.done)
+          this.fail();
+        if (!this.error && (!this.root || typeof this.root !== "object" || Array.isArray(this.root)))
+          this.fail();
+        if (!this.error && Buffer.byteLength(JSON.stringify(this.root)) > this.maxBytes)
+          this.fail("native_metadata_bytes_limit");
+        return { record: this.error ? null : this.root, code: this.error, exclusionMarker: this.marker };
+      }
+    };
+  }
+});
+
+// packages/core/dist/analytics/native-stream.js
+import fs28 from "node:fs";
+import path22 from "node:path";
+import { createHash as createHash13 } from "node:crypto";
+async function streamNativeFacts(file, harness, options) {
+  const before = fs28.statSync(file, { bigint: true });
+  if (!before.isFile() || before.size > BigInt(options.maxBytes))
+    throw new Error("native_usage_bytes_limit");
+  let nativeId = path22.basename(file, ".jsonl"), project = null, parent = null, records = 0, offset = 0, promptBytes = 0, maintenance = false, programmatic = false, currentModel = null, currentProvider = null;
+  const events = [], language = [], gaps = /* @__PURE__ */ new Set(), seen = /* @__PURE__ */ new Set(), hash5 = createHash13("sha256");
+  let usage = null;
+  let held = Buffer.alloc(0), projection = null, projected = false;
+  const turnLimit = options.captureBytes ?? 0, turns = [];
+  let turnLines = [], turnBytes = 0, turnPrefix = "", keptBytes = 0, capturedRecords = 0, scopeUncertain = false;
+  const finishTurn = () => {
+    if (!turnLines.length) {
+      if (turnBytes > 0)
+        gaps.add("context_turn_oversize");
+      turnBytes = 0;
+      return;
+    }
+    if (turnBytes + Buffer.byteLength(turnPrefix) <= turnLimit) {
+      turns.push({ lines: turnLines, bytes: turnBytes, prefix: turnPrefix });
+      keptBytes += turnBytes;
+      while (turns.length > 1 && keptBytes + Buffer.byteLength(turns[0].prefix) > turnLimit)
+        keptBytes -= turns.shift().bytes;
+    } else
+      gaps.add("context_turn_oversize");
+    turnLines = [];
+    turnBytes = 0;
+  };
+  const process26 = (raw, end) => {
+    if (++records > (options.maxRecords ?? 1e6)) {
+      gaps.add("native_usage_records_limit");
+      return;
+    }
+    const line = raw.toString("utf8");
+    let r;
+    try {
+      const parsed = JSON.parse(line);
+      if (!isRecord(parsed))
+        return;
+      r = parsed;
+    } catch {
+      gaps.add("malformed_record");
+      return;
+    }
+    if (r.entrypoint === "sdk-ts" || r.originator === "codex_exec")
+      programmatic = true;
+    const p = isRecord(r.payload) ? r.payload : r;
+    if (p.originator === "codex_exec" || p.source === "exec")
+      programmatic = true;
+    const m = isRecord(r.message) ? r.message : {};
+    if (typeof r.cwd === "string")
+      project = r.cwd;
+    if (typeof p.cwd === "string")
+      project = p.cwd;
+    if (harness === "claude" && typeof r.sessionId === "string") {
+      if (file.includes(`${path22.sep}subagents${path22.sep}`) || r.isSidechain === true) {
+        parent = r.sessionId;
+        nativeId = `${parent}:${path22.basename(file, ".jsonl")}`;
+      } else
+        nativeId = r.sessionId;
+    }
+    if (harness === "codex" && r.type === "session_meta") {
+      nativeId = typeof p.id === "string" ? p.id : typeof p.session_id === "string" ? p.session_id : nativeId;
+      const source = isRecord(p.source) ? p.source : {}, sub = isRecord(source.subagent) ? source.subagent : {}, spawn4 = isRecord(sub.thread_spawn) ? sub.thread_spawn : {};
+      if (typeof spawn4.parent_thread_id === "string")
+        parent = spawn4.parent_thread_id;
+    }
+    if (harness === "pi" && r.type === "session") {
+      if (typeof r.id === "string")
+        nativeId = r.id;
+      if (typeof r.parentSessionId === "string")
+        parent = r.parentSessionId;
+    }
+    if (r.type === "turn_context" || r.type === "session_meta" || r.type === "model_change") {
+      currentModel = typeof p.model === "string" ? p.model : typeof r.modelId === "string" ? r.modelId : currentModel;
+      currentProvider = typeof p.model_provider === "string" ? p.model_provider : typeof r.provider === "string" ? r.provider : currentProvider;
+    }
+    if (scopeUncertain && project !== null && (harness === "claude" && typeof r.sessionId === "string" || harness === "codex" && r.type === "session_meta" && (typeof p.id === "string" || typeof p.session_id === "string") || harness === "pi" && r.type === "session" && typeof r.id === "string"))
+      scopeUncertain = false;
+    if (options.sourceAllowed && !options.sourceAllowed(nativeId, project))
+      throw new Error("native_source_policy_excluded");
+    if (hasExclusionMarker(extractTypedText(m.content)) || typeof p.message === "string" && hasExclusionMarker(p.message))
+      maintenance = true;
+    const isInput = harness === "claude" && r.type === "user" && m.role === "user" && !(Array.isArray(m.content) && m.content.some((b) => isRecord(b) && b.type === "tool_result")) || harness === "codex" && r.type === "event_msg" && p.type === "user_message" || harness === "pi" && r.type === "message" && m.role === "user";
+    if (isInput) {
+      finishTurn();
+      turnPrefix = JSON.stringify({ type: "turn_context", payload: { cwd: project, model: currentModel, model_provider: currentProvider } }) + "\n";
+    }
+    if (projected && turnLimit > 0) {
+      turnLines = [];
+      turnBytes = turnLimit + 1;
+      gaps.add("context_turn_oversize");
+    }
+    if (turnLimit > 0 && !projected) {
+      const recordKey = typeof r.uuid === "string" ? r.uuid : typeof r.id === "string" ? r.id : typeof p.id === "string" ? p.id : `record:${records}`;
+      const encoded = JSON.stringify({ ...r, _auditRecordKey: recordKey }) + "\n";
+      turnBytes += Buffer.byteLength(encoded);
+      if (turnBytes <= turnLimit)
+        turnLines.push(encoded);
+      else if (turnLines.length)
+        turnLines = [];
+    }
+    if (!usage)
+      usage = createNativeUsageAccumulator(harness, sourceId(harness, nativeId), { maxRecords: 1e6, acceptRecord: (_r, scope2) => !maintenance && !scopeUncertain && options.accept(scope2.project, scope2.eventAt) });
+    usage.pushLine(line);
+    if (scopeUncertain)
+      return;
+    let text2 = "", identity5 = "", origin = "unknown", eligible2 = false, excluded = null;
+    const time2 = clock(r.timestamp), key2 = typeof r.uuid === "string" ? r.uuid : typeof r.id === "string" ? r.id : typeof p.id === "string" ? p.id : `record:${records}`;
+    if (harness === "claude" && r.type === "user" && m.role === "user") {
+      if (Array.isArray(m.content) && m.content.some((b) => isRecord(b) && b.type === "tool_result"))
+        return;
+      text2 = extractTypedText(m.content);
+      identity5 = typeof r.promptId === "string" ? `prompt:${r.promptId}` : `record:${key2}`;
+      origin = typeof r.promptId === "string" ? "claude_prompt_id" : "unknown";
+      eligible2 = typeof r.promptId === "string" && !programmatic;
+    } else if (harness === "codex" && r.type === "event_msg" && p.type === "user_message") {
+      text2 = typeof p.message === "string" ? p.message : "";
+      identity5 = `marker:${offset}`;
+      origin = programmatic ? "unknown" : "codex_human_marker";
+      eligible2 = !programmatic;
+    } else if (harness === "pi" && r.type === "message" && m.role === "user") {
+      text2 = extractTypedText(m.content);
+      identity5 = `node:${key2}`;
+      origin = "pi_user_projection";
+    } else {
+      const info = isRecord(p.info) ? p.info : {};
+      const observedModel = typeof m.model === "string" ? m.model : typeof p.model === "string" ? p.model : typeof info.model === "string" ? info.model : currentModel, observedProvider = typeof m.provider === "string" ? m.provider : typeof p.provider === "string" ? p.provider : currentProvider;
+      if ((m.role === "assistant" || harness === "codex" && r.type === "event_msg" && p.type === "token_count") && observedModel !== "<synthetic>" && r.isSynthetic !== true && options.accept(project, time2))
+        language.push({ id: `metadata:${records}`, conversationId: sourceId(harness, nativeId), parentId: parent, harness, eventAt: time2, project, role: "assistant", text: "", model: observedModel === "codex-auto-review" ? null : observedModel, provider: observedProvider, directUser: false, route: null });
+      return;
+    }
+    if (!text2.trim() && !projected)
+      return;
+    if (hasExclusionMarker(text2)) {
+      maintenance = true;
+      excluded = "maintenance_exclusion_marker";
+    } else if (r.isMeta === true || r.isSynthetic === true || m.isSynthetic === true)
+      excluded = "declared_meta_or_synthetic_input";
+    else if (parent && events.length === 0)
+      excluded = "child_initialization";
+    else if (typeof r.session_id === "string" && r.session_id !== nativeId)
+      excluded = "inherited_identity_unverified";
+    if (seen.has(identity5))
+      return;
+    seen.add(identity5);
+    if (!options.accept(project, time2))
+      return;
+    const redacted = clean(text2);
+    if (promptBytes + Buffer.byteLength(redacted) > (options.maxPromptBytes ?? 64 * 1024 * 1024)) {
+      gaps.add("native_input_text_limit");
+      return;
+    }
+    promptBytes += Buffer.byteLength(redacted);
+    language.push({ id: digest(`${sourceId(harness, nativeId)}:${identity5}`).slice(0, 32), conversationId: sourceId(harness, nativeId), parentId: parent, harness, eventAt: time2, project, role: "user", text: "", model: null, provider: null, directUser: excluded === null && parent === null, route: null });
+    const proofRecord = { ...r };
+    delete proofRecord.sessionId;
+    delete proofRecord.session_id;
+    delete proofRecord.promptId;
+    const stable2 = (value) => Array.isArray(value) ? value.map(stable2) : isRecord(value) ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable2(value[k])])) : value;
+    events.push({ key: key2, rawStart: offset, rawEnd: end, role: "user", text: redacted, eventAt: time2, project, origin, eligible: eligible2 && excluded === null && parent === null, languageEligible: parent === null && !projected, excluded, identity: identity5, observed: excluded === null, ...harness === "claude" && typeof r.uuid === "string" ? { nativeRecordId: r.uuid, recordCommitment: digest(JSON.stringify(stable2(proofRecord))) } : {}, ...harness === "claude" && typeof r.session_id === "string" && r.session_id !== nativeId ? { declaredOrigin: r.session_id } : {} });
+  };
+  const finishLine = (end) => {
+    if (projection) {
+      const result = projection.finish();
+      projection = null;
+      gaps.add("native_record_body_omitted");
+      if (result.exclusionMarker)
+        maintenance = true;
+      if (result.record) {
+        projected = true;
+        process26(Buffer.from(JSON.stringify(result.record)), end);
+        projected = false;
+      } else {
+        turnLines = [];
+        turnBytes = turnLimit + 1;
+        records++;
+        gaps.add(result.code ?? "native_metadata_invalid");
+        gaps.add("native_scope_record_unavailable");
+        usage?.invalidateContext();
+        scopeUncertain = true;
+        project = null;
+        currentModel = null;
+        currentProvider = null;
+      }
+    } else
+      process26(held, end);
+    held = Buffer.alloc(0);
+    offset = end;
+  };
+  const stream2 = fs28.createReadStream(file, { highWaterMark: 64 * 1024, ...before.size > 0n ? { end: Number(before.size) - 1 } : {} });
+  try {
+    let consumed = 0;
+    for await (const chunk of stream2) {
+      if (options.signal.aborted) {
+        stream2.destroy();
+        throw new Error("cancelled");
+      }
+      const bytes3 = chunk;
+      hash5.update(bytes3);
+      let at2 = 0;
+      while (at2 < bytes3.length) {
+        const newline = bytes3.indexOf(10, at2), end = newline < 0 ? bytes3.length : newline, part = bytes3.subarray(at2, end);
+        if (projection)
+          projection.push(part);
+        else if (held.length + part.length > 8 * 1024 * 1024) {
+          projection = new NativeMetadataProjection();
+          projection.push(held);
+          projection.push(part);
+          held = Buffer.alloc(0);
+        } else
+          held = held.length ? Buffer.concat([held, part]) : Buffer.from(part);
+        if (newline < 0)
+          break;
+        finishLine(consumed + newline + 1);
+        at2 = newline + 1;
+      }
+      consumed += bytes3.length;
+    }
+  } finally {
+    stream2.destroy();
+  }
+  if (held.length || projection)
+    gaps.add("unfinished_tail");
+  const after = fs28.statSync(file, { bigint: true });
+  if (before.dev !== after.dev || before.ino !== after.ino || after.size < before.size)
+    throw new Error("source_changed");
+  if (before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) {
+    const verify = createHash13("sha256"), fd = fs28.openSync(file, "r"), buffer = Buffer.allocUnsafe(65536);
+    try {
+      let at2 = 0;
+      while (at2 < Number(before.size)) {
+        const n3 = fs28.readSync(fd, buffer, 0, Math.min(buffer.length, Number(before.size) - at2), at2);
+        if (!n3)
+          throw new Error("source_changed");
+        verify.update(buffer.subarray(0, n3));
+        at2 += n3;
+      }
+    } finally {
+      fs28.closeSync(fd);
+    }
+    if (verify.digest("hex") !== hash5.copy().digest("hex"))
+      throw new Error("source_changed");
+    gaps.add("native_appended_after_capture");
+  }
+  if (maintenance) {
+    gaps.add("maintenance_source_excluded");
+    for (const event of events) {
+      event.observed = false;
+      event.eligible = false;
+      event.excluded = "maintenance_exclusion_marker";
+    }
+  }
+  const artifactHash = hash5.digest("hex"), acc = usage, all = acc?.records() ?? [];
+  finishTurn();
+  const captured = Buffer.from((turns[0]?.prefix ?? "") + turns.flatMap((t) => t.lines).join(""));
+  capturedRecords = turns.reduce((n3, t) => n3 + t.lines.length, 0);
+  if (capturedRecords < records)
+    gaps.add("context_capture_partial");
+  return { facts: { nativeId, project, parent, child: parent !== null, title: null, events, gaps: [...gaps], hash: artifactHash, consumed: offset, bytes: captured }, usage: maintenance ? [] : all, language: maintenance ? [] : language, hash: artifactHash, bytes: Number(before.size), counts: acc?.counts() ?? { observed: 0, excluded: 0, deduplicated: 0 } };
+}
+var init_native_stream = __esm({
+  "packages/core/dist/analytics/native-stream.js"() {
+    "use strict";
+    init_content();
+    init_markers();
+    init_source();
+    init_source2();
+    init_native_metadata_projection();
+    init_native_usage();
+  }
+});
+
+// packages/core/dist/analytics/profanity.js
+function labels(text2) {
+  const map = new Uint8Array(text2.length);
+  let ambiguous2 = false, offset = 0, fence = null;
+  for (const line of text2.split(/(?<=\n)/u)) {
+    const marker2 = line.match(/^ {0,3}(`{3,}|~{3,})/u);
+    if (fence) {
+      if (marker2 && marker2[1][0] === fence.char && marker2[1].length >= fence.length && line.slice(marker2[0].length).trim() === "") {
+        map.fill(CODE, fence.start, offset + line.length);
+        fence = null;
+      }
+    } else if (marker2)
+      fence = { char: marker2[1][0], length: marker2[1].length, start: offset };
+    else if (/^ {0,3}>/u.test(line))
+      map.fill(QUOTE, offset, offset + line.length);
+    else if (/^(?: {4}|\t)\S/u.test(line)) {
+      map.fill(UNKNOWN, offset, offset + line.length);
+      ambiguous2 = true;
+    }
+    offset += line.length;
+  }
+  if (fence) {
+    map.fill(UNKNOWN, fence.start);
+    ambiguous2 = true;
+  }
+  const sourceRows = text2.split(/(?<=\n)/u), timestamp = /^\s*(?:(?:[-*#]+|\*\*)\s*)?\[?\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\]?/u;
+  if (/(?:transcript|captions|youtube|youtu\.be|video transcription)/iu.test(text2) && sourceRows.filter((line) => timestamp.test(line)).length >= 3) {
+    let at2 = 0;
+    for (const line of sourceRows) {
+      if (timestamp.test(line))
+        map.fill(QUOTE, at2, at2 + line.length);
+      at2 += line.length;
+    }
+  }
+  for (let i = 0; i < text2.length; i++) {
+    if (map[i] || escaped(text2, i))
+      continue;
+    const char = text2[i];
+    if (char === "`") {
+      let count2 = 1;
+      while (text2[i + count2] === "`")
+        count2++;
+      const token = "`".repeat(count2);
+      let end2 = text2.indexOf(token, i + count2);
+      while (end2 >= 0 && (map[end2] !== 0 || text2[end2 - 1] === "`" || text2[end2 + count2] === "`"))
+        end2 = text2.indexOf(token, end2 + count2);
+      if (end2 < 0) {
+        map.fill(UNKNOWN, i);
+        ambiguous2 = true;
+        break;
+      }
+      map.fill(CODE, i, end2 + count2);
+      i = end2 + count2 - 1;
+      continue;
+    }
+    if (!['"', "'", "\u201C", "\u2018"].includes(char))
+      continue;
+    if ((char === "'" || char === "\u2018") && wordChar(text2[i - 1]) && wordChar(text2[i + 1]))
+      continue;
+    const closing3 = char === "\u201C" ? "\u201D" : char === "\u2018" ? "\u2019" : char;
+    let end = i + 1;
+    while (end < text2.length) {
+      if (text2[end] === closing3 && !escaped(text2, end) && map[end] === 0 && !((closing3 === "'" || closing3 === "\u2019") && wordChar(text2[end - 1]) && wordChar(text2[end + 1])))
+        break;
+      end++;
+    }
+    if (end >= text2.length) {
+      map.fill(UNKNOWN, i);
+      ambiguous2 = true;
+      break;
+    }
+    map.fill(QUOTE, i, end + 1);
+    i = end;
+  }
+  return { labels: map, ambiguous: ambiguous2 };
+}
+function proseLabels(text2) {
+  return labels(text2).labels;
+}
+function auditProfanity(prompts, partial = false) {
+  const knownExcluded = /* @__PURE__ */ new Set(["child_initialization", "maintenance_exclusion_marker", "tool_result", "inherited_native_event", "declared_meta_or_synthetic_input", "declared_synthetic_input"]);
+  const eligible2 = prompts.filter((p) => p.languageEligible !== false).filter((p) => p.eligibleNativeInput === true && !knownExcluded.has(p.excludedReason ?? "") || p.eligibleNativeInput === void 0 && p.eligibleHuman && p.excludedReason === null && ["claude_prompt_id", "codex_human_marker"].includes(p.originBasis)), bucketCounts = new Map(["direct_prose", "quoted", "code", "unknown"].map((k) => [k, { occurrences: 0, prompts: /* @__PURE__ */ new Set() }])), containing = /* @__PURE__ */ new Set(), matches = [];
+  const terms = /* @__PURE__ */ new Map();
+  let occurrences = 0, ambiguous2 = false;
+  for (const prompt of eligible2) {
+    const spans = labels(prompt.text);
+    ambiguous2 ||= spans.ambiguous;
+    const pattern = /[\p{L}\p{N}\p{M}_\u200c\u200d]+(?:['’][\p{L}\p{N}\p{M}_\u200c\u200d]+)*/gu;
+    let token;
+    while ((token = pattern.exec(prompt.text)) !== null) {
+      if (!words2.has(token[0].toLowerCase()))
+        continue;
+      const start = token.index, end = start + token[0].length, bucket = kind(spans.labels[start] ?? 0), counter = bucketCounts.get(bucket);
+      occurrences++;
+      containing.add(prompt.id);
+      counter.occurrences++;
+      counter.prompts.add(prompt.id);
+      const normalized = token[0].toLowerCase(), key2 = JSON.stringify([normalized, bucket]);
+      const term = terms.get(key2) ?? { term: normalized, kind: bucket, occurrences: 0, ids: /* @__PURE__ */ new Set(), samples: [] };
+      term.occurrences++;
+      term.ids.add(prompt.id);
+      if (term.samples.length < 3)
+        term.samples.push({ promptId: prompt.id, conversationId: prompt.conversationId, startUtf16: start, endUtf16: end, route: prompt.route });
+      terms.set(key2, term);
+      if (matches.length < 8)
+        matches.push({ term: token[0], kind: bucket, promptId: prompt.id, conversationId: prompt.conversationId, startUtf16: start, endUtf16: end, route: prompt.route });
+    }
+  }
+  const measurementBasis = "literal_english_lexicon_observed_native_input_utf16_v2", definition2 = "Literal occurrences of the documented eight-word English lexicon in eligible observed native user-role inputs after existing redaction/elision; this does not attest universal human authorship. Unicode whole-word tokens; containing inputs counted once. No emotion, intent or universal-language inference. Ranges are relative to the immutable redacted containing input; routes identify that input.";
+  return { lexiconVersion: PROFANITY_LEXICON_VERSION, language: "en-explicit-lexicon", measurementBasis, eligiblePrompts: eligible2.length, occurrences: { value: occurrences, numerator: occurrences, denominator: eligible2.length, unit: "english_lexicon_occurrence", measurementBasis, state: partial ? "partial" : "observed", definition: definition2 }, containingPrompts: { value: containing.size, numerator: containing.size, denominator: eligible2.length, unit: "eligible_input_containing_english_lexicon_match", measurementBasis, state: partial ? "partial" : "observed", definition: definition2 }, buckets: [...bucketCounts].map(([kind2, value]) => ({ kind: kind2, occurrences: value.occurrences, containingPrompts: value.prompts.size })), coverageGaps: ["outside_english_lexicon_unassessed", "hindi_hinglish_and_other_languages_unassessed", ...ambiguous2 ? ["ambiguous_quote_or_code_span"] : []], terms: [...terms.values()].map((t) => ({ term: t.term, kind: t.kind, occurrences: t.occurrences, containingPrompts: t.ids.size, samples: t.samples })).sort((a, b) => b.occurrences - a.occurrences || a.term.localeCompare(b.term) || a.kind.localeCompare(b.kind)), matches };
+}
+var ENGLISH_EXPLICIT_LEXICON, PROFANITY_LEXICON_VERSION, words2, CODE, QUOTE, UNKNOWN, kind, escaped, wordChar;
+var init_profanity = __esm({
+  "packages/core/dist/analytics/profanity.js"() {
+    "use strict";
+    ENGLISH_EXPLICIT_LEXICON = Object.freeze(["fuck", "fucked", "fucking", "shit", "shitty", "bullshit", "asshole", "bastard"]);
+    PROFANITY_LEXICON_VERSION = "en-explicit-8-v1";
+    words2 = new Set(ENGLISH_EXPLICIT_LEXICON);
+    CODE = 2;
+    QUOTE = 1;
+    UNKNOWN = 3;
+    kind = (label4) => label4 === CODE ? "code" : label4 === QUOTE ? "quoted" : label4 === UNKNOWN ? "unknown" : "direct_prose";
+    escaped = (text2, index) => {
+      let count2 = 0;
+      for (let i = index - 1; i >= 0 && text2[i] === "\\"; i--)
+        count2++;
+      return count2 % 2 === 1;
+    };
+    wordChar = (char) => char !== void 0 && /[\p{L}\p{N}\p{M}_\u200c\u200d]/u.test(char);
+  }
+});
+
+// packages/core/dist/analytics/project-focus.js
+function requestedProjectFocus(prompts) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const prompt of prompts) {
+    if (prompt.languageEligible === false || !(prompt.eligibleNativeInput ?? prompt.eligibleHuman))
+      continue;
+    const labels2 = proseLabels(prompt.text), text2 = Array.from({ length: prompt.text.length }, (_, i) => labels2[i] === 0 ? prompt.text[i] : " ").join("");
+    for (const [label4, pattern] of categories) {
+      if (!pattern.test(text2))
+        continue;
+      const rows = groups.get(label4) ?? [];
+      if (!rows.some((p) => p.id === prompt.id))
+        rows.push(prompt);
+      groups.set(label4, rows);
+    }
+  }
+  return [...groups].map(([label4, rows]) => ({ label: label4, inputs: rows.length, promptIds: rows.slice(0, 3).map((p) => p.id), evidenceRoutes: rows.slice(0, 3).map((p) => p.route), basis: "lexical_requested_work_v1" })).sort((a, b) => b.inputs - a.inputs || a.label.localeCompare(b.label)).slice(0, 2);
+}
+var categories;
+var init_project_focus = __esm({
+  "packages/core/dist/analytics/project-focus.js"() {
+    "use strict";
+    init_profanity();
+    categories = [
+      ["Documentation", /\b(?:write|update|fix|add|edit|draft|revise)\b.{0,64}\b(?:docs?|documentation|readme|guide|changelog)\b/iu],
+      ["Review", /\b(?:review|audit|inspect)\b.{0,64}\b(?:code|diff|pr|pull request|implementation|tests?|changes|repo|repository)\b/iu],
+      ["Debugging", /\b(?:fix|debug|repair|resolve|reproduce)\b.{0,64}\b(?:bug|error|crash|failure|issue|test|broken|timeout|memory|hang|problem)\b/iu],
+      ["Development", /\b(?:build|implement|add|create|develop|refactor|ship|integrate)\b.{0,64}\b(?:feature|app|api|cli|function|component|command|module|tool|parser|service|code|support)\b/iu],
+      ["Research", /\b(?:research|look up|investigate|compare|verify)\b.{0,64}\b(?:docs?|source|pricing|model|library|approach|behavior|format|implementation)\b/iu]
+    ];
+  }
+});
+
+// packages/core/dist/analytics/language-feedback.js
+import { createHash as createHash14 } from "node:crypto";
+function summarizeDirectedLanguage(prompts, records) {
+  const namedModels = /* @__PURE__ */ new Map(), seenRecords = /* @__PURE__ */ new Set();
+  const preceding = /* @__PURE__ */ new Map(), groups = /* @__PURE__ */ new Map();
+  for (const r of records) {
+    const unique2 = JSON.stringify([r.conversationId, r.project, r.role, r.id]);
+    if (seenRecords.has(unique2))
+      continue;
+    seenRecords.add(unique2);
+    if (r.role === "assistant" && r.model) {
+      const names = namedModels.get(r.conversationId) ?? /* @__PURE__ */ new Map(), providers = names.get(r.model) ?? /* @__PURE__ */ new Set();
+      providers.add(r.provider);
+      names.set(r.model, providers);
+      namedModels.set(r.conversationId, names);
+    }
+    const key2 = JSON.stringify([r.conversationId, r.project]);
+    const rows = groups.get(key2) ?? [];
+    rows.push(r);
+    groups.set(key2, rows);
+  }
+  for (const rows of groups.values()) {
+    let models = /* @__PURE__ */ new Map();
+    for (const r of rows) {
+      if (r.role === "user") {
+        preceding.set(r.id, models.size === 1 ? [...models.values()][0] : { model: null, provider: null });
+        models = /* @__PURE__ */ new Map();
+      } else if (r.role === "assistant")
+        models.set(JSON.stringify([r.model, r.provider]), { model: r.model, provider: r.provider });
+    }
+  }
+  const lines = /* @__PURE__ */ new Map(), feedback = /* @__PURE__ */ new Map(), gaps = /* @__PURE__ */ new Set(["lexical_directed_feedback_only", "unknown_authorship_not_universally_attested"]);
+  for (const prompt of prompts) {
+    if (prompt.languageEligible === false || !(prompt.eligibleNativeInput ?? prompt.eligibleHuman))
+      continue;
+    const fullLabels = proseLabels(prompt.text);
+    let owner = preceding.get(prompt.id) ?? { model: null, provider: null };
+    const named2 = /* @__PURE__ */ new Map();
+    for (const [model, providers] of namedModels.get(prompt.conversationId) ?? []) {
+      const at2 = prompt.text.indexOf(model);
+      if (at2 < 0 || fullLabels[at2] !== 0 || /[\p{L}\p{N}_/-]/u.test(prompt.text[at2 - 1] ?? "") || /[\p{L}\p{N}_/-]/u.test(prompt.text[at2 + model.length] ?? ""))
+        continue;
+      named2.set(model, { model, providers });
+    }
+    if (named2.size === 1) {
+      const item = [...named2.values()][0];
+      owner = { model: item.model, provider: item.providers.size === 1 ? [...item.providers][0] : null };
+    }
+    if (!preceding.has(prompt.id))
+      gaps.add("language_context_capture_partial");
+    if (owner.model) {
+      const key2 = JSON.stringify(owner), row2 = feedback.get(key2) ?? { ...owner, negative: /* @__PURE__ */ new Set(), praise: /* @__PURE__ */ new Set(), associated: /* @__PURE__ */ new Set(), ids: /* @__PURE__ */ new Set() };
+      row2.associated.add(prompt.id);
+      feedback.set(key2, row2);
+    }
+    let offset = 0, negative = false, praise = false;
+    for (const line of prompt.text.split("\n")) {
+      const start = offset;
+      offset += line.length + 1;
+      const trimmed = line.trim();
+      if (!trimmed)
+        continue;
+      const at2 = start + line.indexOf(trimmed), end = at2 + trimmed.length;
+      const local = auditProfanity([{ ...prompt, text: line }]);
+      const direct = local.terms?.some((t) => t.kind === "direct_prose" && t.samples.some((sample) => fullLabels[start + sample.startUtf16] === 0)) ?? false;
+      const nonprose = local.terms?.some((t) => t.kind !== "direct_prose") ?? false;
+      const address = named2.size === 1 || /\b(?:you|your|you['’]re)\b/iu.test(trimmed), positiveMatch = trimmed.match(/\b(?:good (?:work|job)|well done|you understood (?:me|it)|you (?:got|nailed) (?:it|this)|you(?:['’]re| are) (?:fucking )?(?:great|awesome))\b/iu), positive2 = !!positiveMatch && fullLabels[at2 + (positiveMatch.index ?? 0)] === 0, negated = /\b(?:not|never|don['’]?t|didn['’]?t|no)\b.{0,35}\b(?:good|well done|understood|nailed|great|awesome)\b/iu.test(trimmed);
+      const quoted = fullLabels[at2] !== 0 || /^\s*(?:>|[`~]{3}|["“'])/u.test(line) || /^ {4}|^\t/u.test(line);
+      const explicitNegative = address && direct && !positive2 && /\b(?:wrong|broken|stupid|missed|failed|why|mess|didn['’]?t|not|bullshit|fuck(?:ed|ing)? (?:up|off))\b/iu.test(trimmed);
+      if (!quoted && !nonprose) {
+        negative ||= explicitNegative;
+        praise ||= positive2 && !negated;
+      }
+      if (!direct || quoted || (trimmed.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) < 2)
+        continue;
+      const candidates2 = trimmed.length <= 160 ? [{ text: trimmed, start: at2, end }] : [...trimmed.matchAll(/[^.!?;\n]+[.!?;]?/gu)].map((match) => {
+        const value = match[0].trim(), begin = at2 + match.index + match[0].indexOf(value);
+        return { text: value, start: begin, end: begin + value.length };
+      }).filter((span3) => span3.text.length <= 160 && (span3.text.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) >= 2 && auditProfanity([{ ...prompt, text: span3.text }]).terms?.some((t) => t.kind === "direct_prose" && fullLabels[span3.start + t.samples[0].startUtf16] === 0));
+      if (!candidates2.length)
+        gaps.add("long_profane_lines_not_displayed");
+      for (const span3 of candidates2) {
+        const key2 = span3.text.toLocaleLowerCase("en").replace(/\s+/gu, " ").replace(/[\p{P}]+$/gu, "").trim(), item = lines.get(key2) ?? { text: span3.text, count: 0, ids: /* @__PURE__ */ new Set(), models: /* @__PURE__ */ new Map(), samples: [] };
+        item.count++;
+        item.ids.add(prompt.id);
+        if (item.samples.length < 3)
+          item.samples.push({ promptId: prompt.id, conversationId: prompt.conversationId, startUtf16: span3.start, endUtf16: span3.end, route: prompt.route });
+        if (explicitNegative && !quoted && !nonprose && owner.model) {
+          const k = JSON.stringify(owner), row2 = item.models.get(k) ?? { ...owner, occurrences: 0 };
+          row2.occurrences++;
+          item.models.set(k, row2);
+        }
+        lines.set(key2, item);
+      }
+    }
+    if ((negative || praise) && owner.model) {
+      const key2 = JSON.stringify(owner), row2 = feedback.get(key2) ?? { ...owner, negative: /* @__PURE__ */ new Set(), praise: /* @__PURE__ */ new Set(), associated: /* @__PURE__ */ new Set(), ids: /* @__PURE__ */ new Set() };
+      if (negative)
+        row2.negative.add(prompt.id);
+      if (praise)
+        row2.praise.add(prompt.id);
+      row2.ids.add(prompt.id);
+      feedback.set(key2, row2);
+    } else if (negative || praise)
+      gaps.add("feedback_model_unattributed");
+  }
+  return { languageLines: [...lines.entries()].map(([key2, row2]) => ({ id: createHash14("sha256").update(key2).digest("hex").slice(0, 20), text: row2.text, occurrences: row2.count, containingInputs: row2.ids.size, models: [...row2.models.values()].sort((a, b) => b.occurrences - a.occurrences), samples: row2.samples })).sort((a, b) => b.occurrences - a.occurrences || a.text.localeCompare(b.text)).slice(0, 6), modelFeedback: [...feedback.values()].map((row2) => ({ provider: row2.provider, model: row2.model, associatedInputs: row2.associated.size, directedNegativeInputs: row2.negative.size, praiseInputs: row2.praise.size, promptIds: [...row2.ids].slice(0, 12) })).sort((a, b) => b.directedNegativeInputs - a.directedNegativeInputs || b.praiseInputs - a.praiseInputs || (a.model ?? "").localeCompare(b.model ?? "")), languageGaps: [...gaps] };
+}
+var init_language_feedback = __esm({
+  "packages/core/dist/analytics/language-feedback.js"() {
+    "use strict";
+    init_profanity();
+  }
+});
+
 // packages/core/dist/analytics/language-models.js
-function attributeDirectLanguage(profanity, records) {
-  const matches = (profanity?.matches ?? []).filter((m) => m.kind === "direct_prose"), groups = /* @__PURE__ */ new Map();
+function responseAttributions(records) {
+  const groups = /* @__PURE__ */ new Map(), seen = /* @__PURE__ */ new Set();
   for (const record4 of records) {
+    const unique2 = JSON.stringify([record4.conversationId, record4.project, record4.role, record4.id]);
+    if (seen.has(unique2))
+      continue;
+    seen.add(unique2);
     const key2 = JSON.stringify([record4.conversationId, record4.project]);
     const group = groups.get(key2) ?? [];
     group.push(record4);
@@ -15480,11 +16670,18 @@ function attributeDirectLanguage(profanity, records) {
         const next = group[j];
         if (next.role === "user")
           break;
-        if (next.role === "assistant" && next.model)
+        if (next.role === "assistant")
           models.set(JSON.stringify([next.model, next.provider]), { model: next.model, provider: next.provider });
       }
       attribution.set(user.id, models.size === 1 ? [...models.values()][0] : { model: null, provider: null });
     }
+  return attribution;
+}
+function attributeDirectLanguage(profanity, records, prompts) {
+  const matches = prompts ? prompts.flatMap((p) => {
+    const count2 = auditProfanity([p]).terms?.filter((t) => t.kind === "direct_prose").reduce((n3, t) => n3 + t.occurrences, 0) ?? 0;
+    return count2 ? [{ promptId: p.id, kind: "direct_prose", occurrences: count2 }] : [];
+  }) : (profanity?.matches ?? []).filter((m) => m.kind === "direct_prose").map((m) => ({ ...m, occurrences: 1 })), attribution = responseAttributions(records);
   const result = /* @__PURE__ */ new Map();
   for (const match of matches) {
     const owner = attribution.get(match.promptId) ?? { model: null, provider: null }, key2 = JSON.stringify(owner);
@@ -15493,28 +16690,45 @@ function attributeDirectLanguage(profanity, records) {
       row2 = { ...owner, occurrences: 0, ids: /* @__PURE__ */ new Set() };
       result.set(key2, row2);
     }
-    row2.occurrences++;
+    row2.occurrences += match.occurrences;
     row2.ids.add(match.promptId);
   }
   return [...result.values()].map((row2) => ({ model: row2.model, provider: row2.provider, occurrences: row2.occurrences, containingInputs: row2.ids.size, promptIds: [...row2.ids] })).sort((a, b) => b.occurrences - a.occurrences || (a.model ?? "").localeCompare(b.model ?? ""));
 }
+function attributeLanguageTerms(profanity, records, prompts) {
+  const attribution = responseAttributions(records);
+  const modelRows = /* @__PURE__ */ new Map();
+  for (const prompt of prompts) {
+    const lexical = auditProfanity([prompt]);
+    const attributed = attribution.get(prompt.id);
+    for (const term of lexical.terms ?? []) {
+      const key2 = JSON.stringify([term.term, term.kind]), models = modelRows.get(key2) ?? /* @__PURE__ */ new Map();
+      const owner = term.kind === "direct_prose" && attributed ? { provider: attributed.provider, model: attributed.model } : { provider: null, model: null }, modelKey = JSON.stringify(owner), row2 = models.get(modelKey) ?? { ...owner, occurrences: 0 };
+      row2.occurrences += term.occurrences;
+      models.set(modelKey, row2);
+      modelRows.set(key2, models);
+    }
+  }
+  return { ...profanity, terms: profanity.terms?.map((term) => ({ ...term, models: [...modelRows.get(JSON.stringify([term.term, term.kind]))?.values() ?? []].sort((a, b) => b.occurrences - a.occurrences) })) };
+}
 var init_language_models = __esm({
   "packages/core/dist/analytics/language-models.js"() {
     "use strict";
+    init_profanity();
   }
 });
 
 // packages/core/dist/analytics/derived-cache.js
-import fs26 from "node:fs";
-import path20 from "node:path";
-import { createHash as createHash12, randomUUID as randomUUID6 } from "node:crypto";
+import fs29 from "node:fs";
+import path23 from "node:path";
+import { createHash as createHash15, randomUUID as randomUUID6 } from "node:crypto";
 function validDerivedBinding(v) {
   if (!v || typeof v !== "object")
     return false;
   const b = v;
   return ["sourceId", "sourceIdentity", "contentHash", "currentness", "privacyPolicy", "forgetEpoch", "normalizationVersion"].every((k) => typeof b[k] === "string" && b[k].length > 0) && ["questionVersion", "model", "segmentationVersion", "scopeHash"].every((k) => b[k] === void 0 || typeof b[k] === "string");
 }
-function identity2(b) {
+function identity3(b) {
   return derivedDigest([b.sourceId, b.sourceIdentity, b.contentHash, b.currentness, b.privacyPolicy, b.forgetEpoch, b.normalizationVersion, b.questionVersion ?? null, b.model ?? null, b.segmentationVersion ?? null, b.scopeHash ?? null]);
 }
 function bodyFree(v, depth = 0) {
@@ -15536,7 +16750,7 @@ var derivedDigest, forbidden, DerivedCache;
 var init_derived_cache = __esm({
   "packages/core/dist/analytics/derived-cache.js"() {
     "use strict";
-    derivedDigest = (v) => createHash12("sha256").update(JSON.stringify(v)).digest("hex");
+    derivedDigest = (v) => createHash15("sha256").update(JSON.stringify(v)).digest("hex");
     forbidden = /* @__PURE__ */ new Set(["text", "content", "messages", "prompt", "prompts", "request", "requests", "quote", "caption", "raw", "body", "transcript", "conversationText", "assistantContext", "precedingUser"]);
     DerivedCache = class {
       directory;
@@ -15548,62 +16762,62 @@ var init_derived_cache = __esm({
       file(namespace, binding2) {
         if (!/^[a-z0-9-]{1,64}$/.test(namespace) || !validDerivedBinding(binding2))
           throw new Error("derived_cache_binding_invalid");
-        return path20.join(this.directory, `${namespace}-${derivedDigest(binding2.sourceId)}.json`);
+        return path23.join(this.directory, `${namespace}-${derivedDigest(binding2.sourceId)}.json`);
       }
       read(namespace, binding2, validate3) {
         const file = this.file(namespace, binding2);
         let fd;
         try {
-          const directory = fs26.lstatSync(this.directory);
+          const directory = fs29.lstatSync(this.directory);
           if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 63) !== 0)
             return null;
-          fd = fs26.openSync(file, fs26.constants.O_RDONLY | fs26.constants.O_NOFOLLOW);
-          const st = fs26.fstatSync(fd);
+          fd = fs29.openSync(file, fs29.constants.O_RDONLY | fs29.constants.O_NOFOLLOW);
+          const st = fs29.fstatSync(fd);
           if (!st.isFile() || (st.mode & 63) !== 0 || st.size > this.maxEntryBytes)
             return null;
-          const text2 = fs26.readFileSync(fd, "utf8"), r = JSON.parse(text2);
-          if (r.schema !== "launch-derived-v1" || r.binding !== identity2(binding2) || !bodyFree(r.value) || !validate3(r.value))
+          const text2 = fs29.readFileSync(fd, "utf8"), r = JSON.parse(text2);
+          if (r.schema !== "launch-derived-v1" || r.binding !== identity3(binding2) || !bodyFree(r.value) || !validate3(r.value))
             return null;
           return r.value;
         } catch {
           return null;
         } finally {
           if (fd !== void 0)
-            fs26.closeSync(fd);
+            fs29.closeSync(fd);
         }
       }
       write(namespace, binding2, value, validate3) {
         const file = this.file(namespace, binding2);
         if (!bodyFree(value) || !validate3(value))
           throw new Error("derived_cache_value_invalid");
-        const text2 = JSON.stringify({ schema: "launch-derived-v1", binding: identity2(binding2), value });
+        const text2 = JSON.stringify({ schema: "launch-derived-v1", binding: identity3(binding2), value });
         if (Buffer.byteLength(text2) > this.maxEntryBytes)
           throw new Error("derived_cache_entry_limit");
-        fs26.mkdirSync(this.directory, { recursive: true, mode: 448 });
-        const st = fs26.lstatSync(this.directory);
+        fs29.mkdirSync(this.directory, { recursive: true, mode: 448 });
+        const st = fs29.lstatSync(this.directory);
         if (!st.isDirectory() || st.isSymbolicLink())
           throw new Error("derived_cache_directory_invalid");
-        fs26.chmodSync(this.directory, 448);
-        const temp = path20.join(this.directory, `.launch-${randomUUID6()}.tmp`);
+        fs29.chmodSync(this.directory, 448);
+        const temp = path23.join(this.directory, `.launch-${randomUUID6()}.tmp`);
         let fd;
         try {
-          fd = fs26.openSync(temp, fs26.constants.O_WRONLY | fs26.constants.O_CREAT | fs26.constants.O_EXCL | fs26.constants.O_NOFOLLOW, 384);
-          fs26.writeFileSync(fd, text2, "utf8");
-          fs26.fsyncSync(fd);
-          fs26.closeSync(fd);
+          fd = fs29.openSync(temp, fs29.constants.O_WRONLY | fs29.constants.O_CREAT | fs29.constants.O_EXCL | fs29.constants.O_NOFOLLOW, 384);
+          fs29.writeFileSync(fd, text2, "utf8");
+          fs29.fsyncSync(fd);
+          fs29.closeSync(fd);
           fd = void 0;
-          fs26.renameSync(temp, file);
-          const dir = fs26.openSync(this.directory, "r");
+          fs29.renameSync(temp, file);
+          const dir = fs29.openSync(this.directory, "r");
           try {
-            fs26.fsyncSync(dir);
+            fs29.fsyncSync(dir);
           } finally {
-            fs26.closeSync(dir);
+            fs29.closeSync(dir);
           }
         } finally {
           if (fd !== void 0)
-            fs26.closeSync(fd);
+            fs29.closeSync(fd);
           try {
-            fs26.unlinkSync(temp);
+            fs29.unlinkSync(temp);
           } catch {
           }
         }
@@ -15611,7 +16825,7 @@ var init_derived_cache = __esm({
       /** Removes one derived source entry, never the retained source archive. */
       invalidate(namespace, binding2) {
         try {
-          fs26.unlinkSync(this.file(namespace, binding2));
+          fs29.unlinkSync(this.file(namespace, binding2));
         } catch (error) {
           if (error.code !== "ENOENT")
             throw error;
@@ -15645,8 +16859,8 @@ function indexHistoryBytes(bytes3, harness, binding2, options = {}) {
     complete = false;
     gaps.add("unfinished_tail");
   }
-  for (const line2 of lines) {
-    if (!line2.trim())
+  for (const line of lines) {
+    if (!line.trim())
       continue;
     if (records >= (options.maxRecords ?? 1e5)) {
       complete = false;
@@ -15656,7 +16870,7 @@ function indexHistoryBytes(bytes3, harness, binding2, options = {}) {
     records++;
     let r;
     try {
-      r = record(JSON.parse(line2));
+      r = record(JSON.parse(line));
     } catch {
       complete = false;
       unknownDates++;
@@ -15730,11 +16944,11 @@ function parseContextualNative(options) {
     return { records, gaps: ["context_invalid_utf8"] };
   let project = options.project ?? null, parent = options.parentId ?? null, model = null, provider = null, offset = 0, lineNumber = 0, count2 = 0;
   const seen = /* @__PURE__ */ new Map();
-  for (const line2 of decoded.split("\n")) {
+  for (const line of decoded.split("\n")) {
     lineNumber++;
     const start = offset;
-    offset += Buffer.byteLength(line2) + 1;
-    if (!line2.trim())
+    offset += Buffer.byteLength(line) + 1;
+    if (!line.trim())
       continue;
     if (offset > bytes3.length) {
       gaps.add("context_unfinished_tail");
@@ -15746,7 +16960,7 @@ function parseContextualNative(options) {
     }
     let raw;
     try {
-      raw = JSON.parse(line2);
+      raw = JSON.parse(line);
     } catch {
       gaps.add("context_malformed_record");
       continue;
@@ -15756,6 +16970,10 @@ function parseContextualNative(options) {
       continue;
     }
     const p = isRecord(raw.payload) ? raw.payload : raw, m = isRecord(raw.message) ? raw.message : isRecord(raw.info) ? raw.info : raw;
+    if (raw.isSynthetic === true || m.model === "<synthetic>") {
+      gaps.add("context_synthetic_excluded");
+      continue;
+    }
     const nextProject = string2(raw.cwd) ?? string2(p.cwd) ?? string2(raw.project) ?? string2(raw.directory) ?? string2(m.directory);
     if (nextProject !== null)
       project = nextProject;
@@ -15768,13 +16986,15 @@ function parseContextualNative(options) {
       continue;
     }
     if (raw.type === "turn_context" || raw.type === "model_change") {
-      model = string2(p.model) ?? model;
+      model = string2(p.model) ?? string2(p.modelId) ?? model;
+      if (model === "codex-auto-review")
+        model = null;
       provider = string2(p.model_provider) ?? string2(p.provider) ?? provider;
       continue;
     }
     if (["session_meta", "session", "ai-title"].includes(String(raw.type)))
       continue;
-    const nativeKey = string2(raw.uuid) ?? string2(raw.id) ?? string2(p.id) ?? string2(m.id) ?? `record:${lineNumber}`;
+    const nativeKey = string2(raw._auditRecordKey) ?? string2(raw.uuid) ?? string2(raw.id) ?? string2(p.id) ?? string2(m.id) ?? `record:${lineNumber}`;
     const eligible2 = options.eligiblePrompts.get(nativeKey) ?? options.eligiblePrompts.get(`record:${lineNumber}`) ?? options.eligiblePrompts.get(String(start)) ?? options.eligiblePrompts.get(`marker:${start}`) ?? (string2(raw.promptId) ? options.eligiblePrompts.get(`prompt:${raw.promptId}`) : void 0);
     const stamp = clock(raw.timestamp) ?? clock(m.timestamp) ?? clock(raw.eventAt) ?? clock(raw.created) ?? numericTime(raw.created) ?? numericTime(isRecord(m.time) ? m.time.created : null);
     const put2 = (role2, text2, suffix = "", direct = false) => {
@@ -15801,7 +17021,7 @@ function parseContextualNative(options) {
         project: project === null ? null : clean(project),
         role: role2,
         text: cleaned,
-        model: role2 === "user" ? null : string2(m.model) ?? string2(m.modelID) ?? string2(p.model) ?? model,
+        model: role2 === "user" ? null : string2(m.model) ?? string2(m.modelID) ?? string2(isRecord(m.model) ? m.model.id : null) ?? string2(p.model) ?? model,
         provider: role2 === "user" ? null : string2(m.provider) ?? string2(m.providerID) ?? string2(p.model_provider) ?? provider,
         directUser: direct && eligible2 !== void 0 && parent === null,
         route: direct && eligible2 ? eligible2.route : null
@@ -15837,7 +17057,7 @@ function parseContextualNative(options) {
     } else if (["tool", "toolResult", "tool_result"].includes(role ?? ""))
       put2("tool", content(m.content ?? raw.content ?? raw.parts));
     else if (role === "user") {
-      const body = m.content ?? raw.content ?? raw.parts, results = blocks(body).filter((b) => b.type === "tool_result");
+      const body = m.content ?? m.text ?? raw.content ?? raw.parts, results = blocks(body).filter((b) => b.type === "tool_result");
       if (results.length) {
         for (const [i, result] of results.entries())
           put2("tool", content(result.content), `:result:${i}`);
@@ -15865,13 +17085,13 @@ function content(value) {
 }
 function toolText(value) {
   const state = isRecord(value.state) ? value.state : {};
-  return JSON.stringify({ tool: string2(value.name) ?? string2(value.tool), callId: string2(value.call_id) ?? string2(value.id), input: value.input ?? value.arguments ?? state.input ?? null, output: value.output ?? state.output ?? null, status: state.status ?? null });
+  return JSON.stringify({ tool: string2(value.name) ?? string2(value.tool), callId: string2(value.call_id) ?? string2(value.id), input: value.input ?? value.arguments ?? state.input ?? null, output: value.output ?? state.output ?? state.content ?? null, status: state.status ?? null });
 }
 function segmentContext(records, options = {}) {
   const max2 = options.maxSegmentBytes ?? 24 * 1024;
   if (!Number.isSafeInteger(max2) || max2 < 1)
     throw new Error("invalid_segment_bounds");
-  const segments = [], gaps = new Set(options.gaps ?? []), groups = /* @__PURE__ */ new Map();
+  const segments2 = [], gaps = new Set(options.gaps ?? []), groups = /* @__PURE__ */ new Map();
   for (const record4 of records) {
     const key2 = JSON.stringify([record4.conversationId, record4.project]);
     const group = groups.get(key2) ?? [];
@@ -15891,7 +17111,7 @@ function segmentContext(records, options = {}) {
       }
       const unknown = targetRecords.some((r) => r.role === "user" && !r.directUser);
       const segmentGaps = [.../* @__PURE__ */ new Set([...options.gaps ?? [], ...localGaps, ...unknown ? ["context_user_origin_unverified"] : []])];
-      segments.push({
+      segments2.push({
         id: `${target.conversationId}:turn:${target.id}`,
         conversationId: target.conversationId,
         parentId: target.parentId,
@@ -15914,7 +17134,7 @@ function segmentContext(records, options = {}) {
       emit(group.slice(previous, end), group.slice(start, end), [group[start].id], previous > 0 ? ["earlier_context_not_in_segment"] : []);
     }
   }
-  return { segments, gaps: [...gaps] };
+  return { segments: segments2, gaps: [...gaps] };
 }
 var CONTEXT_SEGMENTATION_VERSION, string2, numericTime, blocks;
 var init_contextual_native = __esm({
@@ -16279,7 +17499,7 @@ var init_free_jev = __esm({
       dispose() {
         this.options.signal?.removeEventListener("abort", this.abort);
       }
-      async evaluate(input, identity4) {
+      async evaluate(input, identity5) {
         let request, tokens;
         try {
           request = structuredClone(input);
@@ -16288,7 +17508,7 @@ var init_free_jev = __esm({
         } catch (e) {
           return { state: "skipped", code: failure(e) };
         }
-        const route = this.provider.options.route, key2 = digest(JSON.stringify({ request, identity: identity4, route: { kind: route.kind, endpoint: FREE_JEV_ENDPOINT }, model: FREE_JEV_MODEL }));
+        const route = this.provider.options.route, key2 = digest(JSON.stringify({ request, identity: identity5, route: { kind: route.kind, endpoint: FREE_JEV_ENDPOINT }, model: FREE_JEV_MODEL }));
         try {
           const cached4 = await abortable(Promise.resolve(this.provider.options.cache?.get(key2)), this.signal);
           this.assertCurrent();
@@ -16335,6 +17555,8 @@ var init_free_jev = __esm({
           this.signal.addEventListener("abort", abort, { once: true });
           const timer = setTimeout(() => controller.abort(), this.provider.options.timeoutMs ?? 1e4);
           try {
+            await abortable(Promise.resolve(this.provider.options.beforeDispatch?.({ model: FREE_JEV_MODEL, attempt: this.attemptCount, notice: this.provider.notice })), controller.signal);
+            this.assertCurrent();
             const route = this.provider.options.route, endpoint = FREE_JEV_ENDPOINT;
             const auth = route.kind === "zen-public" ? "Bearer public" : `Bearer ${route.apiKey}`;
             const headers = { "Content-Type": "application/json", Authorization: auth };
@@ -16387,8 +17609,8 @@ function candidates(segment) {
   const firstTarget = segment.records.findIndex((r) => target.has(r.id));
   for (const [index, record4] of segment.records.entries()) {
     if (record4.role === "user" && target.has(record4.id)) {
-      for (const line2 of clean(record4.text).split(/\n|(?<=[.!?])\s+/u)) {
-        const text2 = line2.trim();
+      for (const line of clean(record4.text).split(/\n|(?<=[.!?])\s+/u)) {
+        const text2 = line.trim();
         if (!text2)
           continue;
         if (text2.length > 200 || topics.length >= 32) {
@@ -16438,9 +17660,9 @@ function buildLaunchRequest(segment) {
     tone: { type: "choice", instructions: safeInstructions + "Which presentation tone suits the direct user language in the target turn? Roast requires explicit playful invitation or self-directed roasting; profanity alone does not invite ridicule. Use elegant for uncertain or unsupported language.", criteria: { elegant: "Clear neutral professional voice.", witty: "Light playful wit.", chaotic: "Expressive emphatic informal language.", roast: "Explicit invitation to playful roasting." } }
   } };
 }
-function segmentsInWindow(segments, period, until) {
+function segmentsInWindow(segments2, period, until) {
   const to = Date.parse(until), from = period === "all" ? -Infinity : to - period * 864e5;
-  return segments.flatMap((segment) => {
+  return segments2.flatMap((segment) => {
     const targets = new Set(segment.promptIds), promptIds = segment.records.filter((r) => targets.has(r.id) && r.eventAt !== null && Date.parse(r.eventAt) >= from && Date.parse(r.eventAt) <= to).map((r) => r.id);
     if (!promptIds.length)
       return [];
@@ -16451,17 +17673,17 @@ function segmentsInWindow(segments, period, until) {
     return [{ ...segment, promptIds, contentHash: digest(JSON.stringify({ records: segment.records.map(({ route: _, ...record4 }) => record4), promptIds })) }];
   });
 }
-function selectedSegments(window2, segments) {
+function selectedSegments(window2, segments2) {
   const selected = window2.selected;
   if (!selected)
     return [];
-  const candidates2 = segmentsInWindow(segments, selected.period, selected.until);
+  const candidates2 = segmentsInWindow(segments2, selected.period, selected.until);
   if (!selected.selection)
     return candidates2;
   const byId = new Map(candidates2.map((segment) => [segment.id, segment]));
   return selected.selection.segmentIds.flatMap((id) => byId.has(id) ? [byId.get(id)] : []);
 }
-function selectSemanticWindow(segments, options) {
+function selectSemanticWindow(segments2, options) {
   const until = new Date(options.until).toISOString(), limit = Math.min(1e5, options.tokenLimit ?? 1e5), tokenizer2 = options.estimateTokens ?? estimateFreeJevTokens;
   if (!Number.isSafeInteger(limit) || limit < 0)
     throw new Error("invalid_semantic_token_limit");
@@ -16485,7 +17707,7 @@ function selectSemanticWindow(segments, options) {
     }
   };
   const choices = ["all", 45, 30, 7, 3].map((period) => {
-    const selected2 = segmentsInWindow(segments, period, until);
+    const selected2 = segmentsInWindow(segments2, period, until);
     let tokens = 0, invalid = false;
     for (const segment of selected2) {
       try {
@@ -16500,7 +17722,7 @@ function selectSemanticWindow(segments, options) {
   });
   let selected = (options.period === void 0 ? choices.find((c) => c.fits && c.segments > 0) : choices.find((c) => c.period === options.period && c.fits && c.segments > 0)) ?? null;
   if (selected === null && options.period === void 0) {
-    const available = segmentsInWindow(segments, 45, until).sort((a, b) => Date.parse(b.eventTo ?? b.eventFrom ?? "") - Date.parse(a.eventTo ?? a.eventFrom ?? "") || a.id.localeCompare(b.id));
+    const available = segmentsInWindow(segments2, 45, until).sort((a, b) => Date.parse(b.eventTo ?? b.eventFrom ?? "") - Date.parse(a.eventTo ?? a.eventFrom ?? "") || a.id.localeCompare(b.id));
     const picked = [], gaps = /* @__PURE__ */ new Set();
     let tokens = 0;
     const latency = (count2) => (options.preparationMs ?? 0) + Math.ceil(count2 / 2) * (options.requestLatencyMs ?? 1e3) * (1 + (options.retries ?? 1));
@@ -16554,19 +17776,19 @@ function composeLaunchStory(segment, judgment) {
   const request = buildLaunchRequest(segment), checked = validateFreeJevResponse({ model: judgment.model, answers: judgment.answers, usage: { input_tokens: 0, output_tokens: 0 } }, request), answers = checked.answers, pool = candidates(segment);
   const work = answers.work, intent = work?.type === "choice" && work.confidence >= 0.55 && work.choice !== "insufficient_context" ? work.choice : null;
   const topic = pool.topics.find((c) => c.key === chosen(answers, "topic"))?.text ?? null;
-  let outcome2 = chosen(answers, "outcome");
+  let outcome = chosen(answers, "outcome");
   if (answers.outcome?.type !== "choice" || answers.outcome.confidence < 0.6)
-    outcome2 = "uncertain";
-  if (outcome2 === "supported" && !(answers.supports?.type === "noul" && answers.supports.noul >= 0.85 && pool.results.some((c) => c.key === chosen(answers, "evidence"))))
-    outcome2 = "uncertain";
+    outcome = "uncertain";
+  if (outcome === "supported" && !(answers.supports?.type === "noul" && answers.supports.noul >= 0.85 && pool.results.some((c) => c.key === chosen(answers, "evidence"))))
+    outcome = "uncertain";
   const quoteAnswer = answers.quote;
   const quote2 = quoteAnswer?.type === "choice" ? pool.quotes.find((c) => c.key === quoteAnswer.choice)?.text ?? null : null;
-  const status3 = { attempted: "Work attempted", assistant_reported: "Assistant reported success", supported: "Supported by recorded results", uncertain: "Outcome uncertain" }[outcome2];
-  return { id: segment.id, conversationId: segment.conversationId, project: segment.project, intent, outcome: outcome2, caption: [intent ? workLabels[intent] : "Uncertain work", topic, status3].filter(Boolean).join(" \xB7 "), quote: quote2, promptIds: segment.promptIds, confidence: work?.type === "choice" ? work.confidence : null };
+  const status3 = { attempted: "Work attempted", assistant_reported: "Assistant reported success", supported: "Supported by recorded results", uncertain: "Outcome uncertain" }[outcome];
+  return { id: segment.id, conversationId: segment.conversationId, project: segment.project, intent, outcome, caption: [intent ? workLabels[intent] : "Uncertain work", topic, status3].filter(Boolean).join(" \xB7 "), quote: quote2, promptIds: segment.promptIds, confidence: work?.type === "choice" ? work.confidence : null };
 }
 async function runLaunchSemantics(options) {
-  const segments = structuredClone(options.segments), window2 = selectSemanticWindow(segments, options), gaps = new Set(options.gaps ?? []);
-  if (segments.some((s) => s.eventFrom === null))
+  const segments2 = structuredClone(options.segments), window2 = selectSemanticWindow(segments2, options), gaps = new Set(options.gaps ?? []);
+  if (segments2.some((s) => s.eventFrom === null))
     gaps.add("semantic_date_unavailable");
   const base2 = { state: "unavailable", recipientNotice: options.provider?.notice ?? FREE_JEV_RECIPIENTS, model: null, window: window2, stories: [], hallOfFame: [], work: [], tone: options.tone ?? "elegant", judgments: [], attempts: 0, cacheHits: 0, inputTokens: 0, outputTokens: 0, reservedTokens: 0, gaps: [] };
   if (!options.isCurrent())
@@ -16581,7 +17803,7 @@ async function runLaunchSemantics(options) {
     gaps.add("semantic_window_unavailable");
     return { ...base2, gaps: [...gaps] };
   }
-  const selected = selectedSegments(window2, segments), judgments = [], stories = [], tones = [];
+  const selected = selectedSegments(window2, segments2), judgments = [], stories = [], tones = [];
   for (const gap2 of window2.selected.selection?.gaps ?? [])
     gaps.add(gap2);
   for (const segment of selected) {
@@ -16593,7 +17815,7 @@ async function runLaunchSemantics(options) {
   const run3 = options.provider.beginRun({ tokenLimit: window2.tokenLimit, maxAttempts: options.maxAttempts, retries: options.retries, signal: options.signal, isCurrent: options.isCurrent, estimateTokens: options.estimateTokens, estimateBasis: options.estimateBasis });
   let completed = 0, cursor = 0;
   try {
-    const identity4 = (segment) => ({ sourceVersion: options.sourceVersion, privacyVersion: options.privacyVersion, segmentationVersion: CONTEXT_SEGMENTATION_VERSION, questionVersion: LAUNCH_QUESTION_VERSION, contentHash: segment.contentHash, scopeHash: options.scopeHash ?? digest(JSON.stringify({ conversation: segment.conversationId, targets: segment.promptIds })) });
+    const identity5 = (segment) => ({ sourceVersion: options.sourceVersion, privacyVersion: options.privacyVersion, segmentationVersion: CONTEXT_SEGMENTATION_VERSION, questionVersion: LAUNCH_QUESTION_VERSION, contentHash: segment.contentHash, scopeHash: options.scopeHash ?? digest(JSON.stringify({ conversation: segment.conversationId, targets: segment.promptIds })) });
     const consume = (segment, result) => {
       if (result.state === "ok") {
         const judgment = { segmentId: segment.id, conversationId: segment.conversationId, model: result.response.model, answers: result.response.answers, contentHash: segment.contentHash, questionVersion: LAUNCH_QUESTION_VERSION };
@@ -16610,7 +17832,7 @@ async function runLaunchSemantics(options) {
     const worker = async () => {
       while (cursor < selected.length && !run3.signal.aborted) {
         const segment = selected[cursor++];
-        consume(segment, await run3.evaluate(buildLaunchRequest(segment), identity4(segment)));
+        consume(segment, await run3.evaluate(buildLaunchRequest(segment), identity5(segment)));
       }
     };
     await Promise.all([worker(), worker()]);
@@ -16650,26 +17872,63 @@ var init_launch_semantics = __esm({
 });
 
 // packages/core/dist/analytics/opencode.js
-function openSessions(file, max2, maxStoreBytes) {
-  const snapshot = openAuditSqliteSnapshot(file, maxStoreBytes), db = snapshot.db;
+function openSessions(file, max2, maxStoreBytes, reader) {
+  const snapshot = reader ?? openAuditSqliteSnapshot(file, maxStoreBytes), db = snapshot.db;
   try {
-    const description = describeStore(file, db);
-    if (!description.ok)
-      return { gap: "opencode_store_unsupported" };
-    const schema = description.schema, c = schema.sessions.columns;
+    const tables2 = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+    let schema;
+    if (tables2.includes("session_message") && (tables2.includes("session") || tables2.includes("session_v2"))) {
+      const table2 = tables2.includes("session") ? "session" : "session_v2", cols = db.pragma(`table_info(${quote(table2)})`).map((c2) => c2.name), mc = db.pragma("table_info(session_message)").map((c2) => c2.name);
+      if (!["id", "session_id", "type", "data"].every((k) => mc.includes(k)))
+        return { gap: "opencode_v2_schema_unsupported" };
+      const parent = cols.includes("parent_id") ? "parent_id" : cols.includes("fork_session_id") ? "fork_session_id" : void 0;
+      const forkCutoffs = /* @__PURE__ */ new Map();
+      if (cols.includes("fork_session_id") && cols.includes("fork_boundary") && mc.includes("seq")) {
+        for (const f of db.prepare(`SELECT id,fork_session_id parent,fork_boundary boundary FROM ${quote(table2)} WHERE fork_session_id IS NOT NULL`).all()) {
+          try {
+            const b = JSON.parse(f.boundary), r = db.prepare("SELECT seq FROM session_message WHERE session_id=? AND id=?").get(f.parent, b.messageID);
+            if (r) {
+              if (!Number.isSafeInteger(r.seq) || r.seq < 0)
+                return { gap: "opencode_fork_boundary_invalid" };
+              if (b.type === "through")
+                forkCutoffs.set(f.id, r.seq);
+              else if (b.type === "before") {
+                const n3 = db.prepare("SELECT max(seq) n FROM session_message WHERE session_id=? AND seq<?").get(f.parent, r.seq);
+                if (n3.n !== null) {
+                  if (!Number.isSafeInteger(n3.n) || n3.n < 0)
+                    return { gap: "opencode_fork_boundary_invalid" };
+                  forkCutoffs.set(f.id, n3.n);
+                }
+              }
+            }
+          } catch {
+          }
+        }
+      }
+      const old = describeStore(file, db);
+      schema = { dbPath: file, v2: true, forkCutoffs, ...old.ok && old.schema.messages.table === "message" && old.schema.parts ? { legacy: old.schema } : {}, sessions: { table: table2, columns: { id: "id", directory: cols.includes("directory") ? "directory" : void 0, parent, title: cols.includes("title") ? "title" : void 0 } }, messages: { table: "session_message", columns: { id: "id", session: "session_id", role: "type", content: "data", created: mc.includes("time_created") ? "time_created" : void 0 } } };
+    } else {
+      const description = describeStore(file, db);
+      if (!description.ok)
+        return { gap: "opencode_store_unsupported" };
+      schema = description.schema;
+    }
+    const c = schema.sessions.columns;
     const rows = db.prepare(`SELECT ${quote(c.id)} AS id,${col2(c.directory, "project")},${col2(c.parent, "parent")},${col2(c.title, "title")} FROM ${quote(schema.sessions.table)} ORDER BY ${quote(c.id)} LIMIT ?`).all(max2 + 1);
-    snapshot.assertCurrent();
-    return { schema, assertCurrent: snapshot.assertCurrent, assertIdentityCurrent: snapshot.assertIdentityCurrent, more: rows.length > max2, sessions: rows.slice(0, max2).map((r) => ({ id: String(r.id), project: typeof r.project === "string" ? r.project : null, parent: typeof r.parent === "string" ? r.parent : null, title: typeof r.title === "string" ? clean(r.title) : null })) };
+    if (!reader)
+      snapshot.assertCurrent();
+    return { schema, assertCurrent: snapshot.assertCurrent, assertIdentityCurrent: snapshot.assertIdentityCurrent, more: rows.length > max2, sessions: rows.slice(0, max2).map((r) => ({ id: String(r.id), project: typeof r.project === "string" ? r.project : null, parent: typeof r.parent === "string" ? r.parent : null, initialization: c.parent !== "fork_session_id", title: typeof r.title === "string" ? clean(r.title) : null })) };
   } finally {
-    db.close();
+    if (!reader)
+      db.close();
   }
 }
-function openPrompts(schema, id, maxRecords, maxBytes, maxStoreBytes) {
-  const snapshot = openAuditSqliteSnapshot(schema.dbPath, maxStoreBytes), db = snapshot.db, c = schema.messages.columns;
-  const gaps = /* @__PURE__ */ new Set(["opencode_exchange_projection_fidelity"]);
+function openPrompts(schema, id, maxRecords, maxBytes, maxStoreBytes, reader) {
+  const snapshot = reader ?? openAuditSqliteSnapshot(schema.dbPath, maxStoreBytes), db = snapshot.db, c = schema.messages.columns;
+  const gaps = new Set(schema.v2 ? [] : ["opencode_exchange_projection_fidelity"]);
   try {
     const result = db.transaction(() => {
-      const content2 = quote(c.content), rows = db.prepare(`SELECT ${col2(c.id, "id")},${col2(c.role, "role")},${col2(c.created, "created")},CASE WHEN length(CAST(${content2} AS BLOB))<=? THEN ${content2} ELSE NULL END AS content FROM ${quote(schema.messages.table)} WHERE ${quote(c.session)}=? ORDER BY ${c.created ? quote(c.created) + "," : ""}${c.id ? quote(c.id) : "rowid"} LIMIT ?`).iterate(maxBytes, id, maxRecords + 1);
+      const fork2 = forkFilter(schema, id), content2 = quote(c.content), rows = db.prepare(`SELECT ${col2(c.id, "id")},${col2(c.role, "role")},${col2(c.created, "created")},CASE WHEN length(CAST(${content2} AS BLOB))<=? THEN ${content2} ELSE NULL END AS content FROM ${quote(schema.messages.table)} WHERE ${quote(c.session)}=? ${fork2.sql} ORDER BY ${schema.v2 ? "seq," : c.created ? quote(c.created) + "," : ""}${c.id ? quote(c.id) : "rowid"} LIMIT ?`).iterate(maxBytes, id, ...fork2.params, maxRecords + 1);
       const prompts = [];
       let bytes3 = 0, seq = 0, records = 0;
       const commitments = [];
@@ -16692,6 +17951,18 @@ function openPrompts(schema, id, maxRecords, maxBytes, maxStoreBytes) {
           break;
         }
         bytes3 += messageBytes;
+        if (schema.v2) {
+          try {
+            const message2 = JSON.parse(raw);
+            nativeMessage = { ...message2, role };
+            time2 = typeof message2.time?.created === "number" ? new Date(message2.time.created).toISOString() : typeof row2.created === "number" ? new Date(row2.created).toISOString() : time2;
+            nativeParts = Array.isArray(message2.content) ? message2.content : typeof message2.text === "string" ? [{ type: "text", text: message2.text }] : [];
+            raw = JSON.stringify(nativeParts);
+          } catch {
+            gaps.add("opencode_native_message_invalid");
+            continue;
+          }
+        }
         if (schema.parts) {
           let doc;
           try {
@@ -16751,19 +18022,112 @@ function openPrompts(schema, id, maxRecords, maxBytes, maxStoreBytes) {
       }
       return { prompts, hash: digest(JSON.stringify(commitments)), gaps: [...gaps], bytes: bytes3, nativeRecords };
     })();
-    snapshot.assertCurrent();
+    if (!reader)
+      snapshot.assertCurrent();
     return result;
   } finally {
-    db.close();
+    if (!reader)
+      db.close();
   }
 }
-var quote, col2;
+function openUsageMetadata(schema, id, reader, maxRecords = 1e6, maxBytes = 64 * 1024 * 1024) {
+  if (!schema.parts && !schema.v2)
+    return { records: [], gaps: ["opencode_native_usage_unavailable"] };
+  const fork2 = forkFilter(schema, id), c = schema.messages.columns, data = quote(c.content), projection = schema.v2 ? `CASE WHEN json_valid(${data}) THEN json_object('role',${quote(c.role)},'model',json_extract(${data},'$.model'),'modelID',json_extract(${data},'$.modelID'),'providerID',json_extract(${data},'$.providerID'),'tokens',json_extract(${data},'$.tokens'),'time',json_extract(${data},'$.time'),'cost',json_extract(${data},'$.cost')) ELSE NULL END` : `CASE WHEN length(CAST(${data} AS BLOB))<=1048576 THEN ${data} ELSE NULL END`, rows = reader.db.prepare(`SELECT ${col2(c.id, "id")},${col2(c.created, "created")},${projection} data FROM ${quote(schema.messages.table)} WHERE ${quote(c.session)}=? ${fork2.sql} ORDER BY ${schema.v2 ? "seq," : c.created ? quote(c.created) + "," : ""}${c.id ? quote(c.id) : "rowid"} LIMIT ?`).iterate(id, ...fork2.params, maxRecords + 1);
+  const records = [], gaps = [];
+  let bytes3 = 0;
+  for (const row2 of rows) {
+    if (records.length >= maxRecords) {
+      gaps.push("opencode_usage_records_limit");
+      break;
+    }
+    if (typeof row2.data !== "string") {
+      gaps.push("opencode_usage_record_bytes_limit");
+      continue;
+    }
+    bytes3 += Buffer.byteLength(row2.data);
+    if (bytes3 > maxBytes) {
+      gaps.push("opencode_usage_bytes_limit");
+      break;
+    }
+    try {
+      const message2 = JSON.parse(row2.data);
+      records.push({ type: "message", id: String(row2.id), timestamp: typeof message2.time?.created === "number" ? new Date(message2.time.created).toISOString() : typeof row2.created === "number" ? new Date(row2.created).toISOString() : null, message: message2, content: [] });
+    } catch {
+      gaps.push("opencode_usage_record_invalid");
+    }
+  }
+  return { records, gaps: [...new Set(gaps)] };
+}
+function openNativeInputs(schema, metadata, reader, maxBytes = 64 * 1024 * 1024) {
+  const prompts = [], excluded = /* @__PURE__ */ new Set(), gaps = [];
+  let bytes3 = 0;
+  const pc = schema.parts?.columns;
+  const query = pc ? reader.db.prepare(`SELECT ${quote(pc.content)} data FROM ${quote(schema.parts.table)} WHERE ${quote(pc.message)}=? ORDER BY ${quote(pc.id)}`) : null;
+  for (const record4 of metadata) {
+    const message2 = record4.message;
+    if (message2?.role !== "user")
+      continue;
+    const key2 = String(record4.id);
+    let parts = [];
+    if (schema.v2) {
+      const row2 = reader.db.prepare(`SELECT CASE WHEN length(CAST(${quote(schema.messages.columns.content)} AS BLOB))<=8388608 THEN json_extract(${quote(schema.messages.columns.content)},'$.text') ELSE NULL END text FROM session_message WHERE id=?`).get(key2);
+      if (row2?.text !== null && row2?.text !== void 0) {
+        bytes3 += Buffer.byteLength(row2.text);
+        if (bytes3 <= maxBytes)
+          parts = [{ type: "text", text: row2.text }];
+        else
+          gaps.push("native_input_text_limit");
+      } else
+        gaps.push("native_input_text_unavailable");
+    }
+    if (query) {
+      for (const row2 of query.iterate(key2)) {
+        if (typeof row2.data !== "string")
+          continue;
+        bytes3 += Buffer.byteLength(row2.data);
+        if (bytes3 > maxBytes) {
+          gaps.push("native_input_text_limit");
+          break;
+        }
+        try {
+          const p = JSON.parse(row2.data);
+          if (p && typeof p === "object")
+            parts.push(p);
+        } catch {
+          gaps.push("opencode_native_part_invalid");
+        }
+      }
+    }
+    if (parts.length && parts.every((p) => p.synthetic === true || p.ignored === true)) {
+      excluded.add(key2);
+      continue;
+    }
+    parts = parts.filter((p) => p.synthetic !== true && p.ignored !== true);
+    const unknown = {};
+    const parsed = parseContent(JSON.stringify(parts), unknown, () => gaps.push("opencode_native_part_invalid"));
+    prompts.push({ key: key2, text: clean(parsed.text), time: clock(record4.timestamp), seq: prompts.length + 1 });
+  }
+  return { prompts, excluded, gaps: [...new Set(gaps)] };
+}
+function selectOpenSchema(schema, id, reader) {
+  return schema.v2 && schema.legacy && !reader.db.prepare("SELECT 1 FROM session_message WHERE session_id=? LIMIT 1").get(id) ? schema.legacy : schema;
+}
+var forkFilter, quote, col2;
 var init_opencode2 = __esm({
   "packages/core/dist/analytics/opencode.js"() {
     "use strict";
     init_audit_sqlite();
     init_opencode();
     init_source2();
+    forkFilter = (schema, id) => {
+      const seq = schema.v2 ? schema.forkCutoffs?.get(id) : void 0;
+      if (seq === void 0)
+        return { sql: "", params: [] };
+      if (!Number.isSafeInteger(seq) || seq < 0)
+        throw new Error("opencode_fork_boundary_invalid");
+      return { sql: "AND seq>?", params: [seq] };
+    };
     quote = (s) => `"${s.replaceAll('"', '""')}"`;
     col2 = (s, alias) => s ? `${quote(s)} AS ${quote(alias)}` : `NULL AS ${quote(alias)}`;
   }
@@ -16921,19 +18285,19 @@ var init_jev_provider = __esm({
       ledger() {
         return structuredClone(this.attempts);
       }
-      key(request, identity4) {
-        return digest(JSON.stringify({ request, identity: identity4 }));
+      key(request, identity5) {
+        return digest(JSON.stringify({ request, identity: identity5 }));
       }
-      evaluate(job, request, identity4) {
+      evaluate(job, request, identity5) {
         try {
           request = structuredClone(request);
-          identity4 = structuredClone(identity4);
+          identity5 = structuredClone(identity5);
           validateJevRequest(request);
           job.assertCurrent();
         } catch (error) {
           return Promise.resolve({ state: "failed", code: coded(error) });
         }
-        const key2 = this.key(request, identity4), cached4 = this.cache.get(key2);
+        const key2 = this.key(request, identity5), cached4 = this.cache.get(key2);
         if (cached4) {
           this.cache.delete(key2);
           this.cache.set(key2, cached4);
@@ -16943,7 +18307,7 @@ var init_jev_provider = __esm({
         if (this.queue.length >= 128)
           return Promise.resolve({ state: "skipped", code: "queue_limit" });
         return new Promise((resolve) => {
-          const queued = { job, request, identity: identity4, key: key2, resolve, cleanup: () => {
+          const queued = { job, request, identity: identity5, key: key2, resolve, cleanup: () => {
           } };
           this.queue.push(queued);
           const cancelled = () => {
@@ -16976,7 +18340,7 @@ var init_jev_provider = __esm({
         }
       }
       async dispatch(item) {
-        const { job, request, key: key2, identity: identity4 } = item;
+        const { job, request, key: key2, identity: identity5 } = item;
         const requestHash = digest(JSON.stringify(request));
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
@@ -16988,7 +18352,7 @@ var init_jev_provider = __esm({
             return { state: "skipped", code: "ledger_limit" };
           if (!job.reserve())
             return { state: "skipped", code: "budget_or_request_limit" };
-          const row2 = { id: randomUUID7(), requestHash, scopeHash: identity4.scopeHash, model: JEV_MODEL, dispatchedAt: (/* @__PURE__ */ new Date()).toISOString(), completedAt: null, status: null, outcome: "running", billing: "reserved", reservedUsd: JEV_ATTEMPT_RESERVATION_USD, reportedUsd: null, inputTokens: null, outputTokens: null, requestId: null, errorCode: null };
+          const row2 = { id: randomUUID7(), requestHash, scopeHash: identity5.scopeHash, model: JEV_MODEL, dispatchedAt: (/* @__PURE__ */ new Date()).toISOString(), completedAt: null, status: null, outcome: "running", billing: "reserved", reservedUsd: JEV_ATTEMPT_RESERVATION_USD, reportedUsd: null, inputTokens: null, outputTokens: null, requestId: null, errorCode: null };
           this.attempts.push(row2);
           job.attempts.push(row2);
           const controller = new AbortController(), abort = () => controller.abort();
@@ -17155,8 +18519,8 @@ var init_jev_provider = __esm({
         this.dispatches++;
         return true;
       }
-      evaluate(request, identity4) {
-        return this.provider.evaluate(this, request, identity4);
+      evaluate(request, identity5) {
+        return this.provider.evaluate(this, request, identity5);
       }
       stats() {
         return { requestCount: this.dispatches, cacheHits: this.cacheHits, reportedCostUsd: this.attempts.reduce((n3, a) => n3 + (a.reportedUsd ?? 0), 0), unresolvedCostUsd: this.attempts.filter((a) => a.billing !== "reported").reduce((n3, a) => n3 + a.reservedUsd, 0), estimatedCostUsd: this.dispatches * JEV_ATTEMPT_RESERVATION_USD };
@@ -17240,7 +18604,7 @@ function validate(selection) {
     throw new Error("invalid semantic bounds");
   if (selection.confidenceThreshold !== void 0 && (!Number.isFinite(selection.confidenceThreshold) || selection.confidenceThreshold < 0 || selection.confidenceThreshold > 1))
     throw new Error("invalid semantic threshold");
-  if (selection.approvedRequestHashes !== void 0 && (!Array.isArray(selection.approvedRequestHashes) || selection.approvedRequestHashes.length > 200 || selection.approvedRequestHashes.some((hash4) => typeof hash4 !== "string" || !/^[a-f0-9]{64}$/.test(hash4))))
+  if (selection.approvedRequestHashes !== void 0 && (!Array.isArray(selection.approvedRequestHashes) || selection.approvedRequestHashes.length > 200 || selection.approvedRequestHashes.some((hash5) => typeof hash5 !== "string" || !/^[a-f0-9]{64}$/.test(hash5))))
     throw new Error("invalid semantic approved hashes");
 }
 function prepare(selection, conversations) {
@@ -17276,7 +18640,7 @@ function composeJevJudgments(judgments, base2, confidenceThreshold = 0.65) {
     const decision = primaryIntent(j.answers.primary_intent, confidenceThreshold);
     return { ...j, primaryIntent: j.windowCoverage === "truncated" ? null : decision.intent, abstained: j.windowCoverage === "truncated" || decision.abstained };
   }), accepted = recomposed.filter((j) => !j.abstained && j.primaryIntent !== null), denominator = base2.eligiblePrompts;
-  const work = AUDIT_INTENTS.map((label4) => ({ label: label4, count: accepted.filter((j) => j.primaryIntent === label4).length, denominator, state: "partial" })).filter((bar2) => bar2.count > 0);
+  const work = AUDIT_INTENTS.map((label4) => ({ label: label4, count: accepted.filter((j) => j.primaryIntent === label4).length, denominator, state: "partial" })).filter((bar3) => bar3.count > 0);
   return { judgments: recomposed, semantics: { ...base2, qualified: false, classifiedPrompts: accepted.length, unclassifiedPrompts: Math.max(0, denominator - accepted.length), uncertainPrompts: Math.max(0, denominator - accepted.length), work } };
 }
 var AUDIT_SEMANTIC_POLICY_VERSION, isEligible, semantics, JevSessionRunner;
@@ -17342,8 +18706,8 @@ var init_jev_session = __esm({
         onUpdate(summarize("running"), [], selected.gapCodes);
         try {
           await Promise.all(selected.prepared.map(async (input) => {
-            const identity4 = { contentHash: input.contentHash, scopeHash, privacyVersion: AUDIT_SEMANTIC_POLICY_VERSION, normalizationVersion: NORMALIZATION_VERSION, questionVersion: JEV_QUESTION_VERSION, sourceVersion: input.sourceVersion, segmentationVersion: "target-prefix3500-prior-user2-prefix768-v1" };
-            const result = await job.evaluate(input.request, identity4);
+            const identity5 = { contentHash: input.contentHash, scopeHash, privacyVersion: AUDIT_SEMANTIC_POLICY_VERSION, normalizationVersion: NORMALIZATION_VERSION, questionVersion: JEV_QUESTION_VERSION, sourceVersion: input.sourceVersion, segmentationVersion: "target-prefix3500-prior-user2-prefix768-v1" };
+            const result = await job.evaluate(input.request, identity5);
             if (!isCurrent()) {
               this.invalidate();
               errorCode = "privacy_changed";
@@ -17370,124 +18734,33 @@ var init_jev_session = __esm({
   }
 });
 
-// packages/core/dist/analytics/profanity.js
-function labels(text2) {
-  const map = new Uint8Array(text2.length);
-  let ambiguous2 = false, offset = 0, fence = null;
-  for (const line2 of text2.split(/(?<=\n)/u)) {
-    const marker2 = line2.match(/^ {0,3}(`{3,}|~{3,})/u);
-    if (fence) {
-      if (marker2 && marker2[1][0] === fence.char && marker2[1].length >= fence.length && line2.slice(marker2[0].length).trim() === "") {
-        map.fill(CODE, fence.start, offset + line2.length);
-        fence = null;
-      }
-    } else if (marker2)
-      fence = { char: marker2[1][0], length: marker2[1].length, start: offset };
-    else if (/^ {0,3}>/u.test(line2))
-      map.fill(QUOTE, offset, offset + line2.length);
-    else if (/^(?: {4}|\t)\S/u.test(line2)) {
-      map.fill(UNKNOWN, offset, offset + line2.length);
-      ambiguous2 = true;
-    }
-    offset += line2.length;
-  }
-  if (fence) {
-    map.fill(UNKNOWN, fence.start);
-    ambiguous2 = true;
-  }
-  for (let i = 0; i < text2.length; i++) {
-    if (map[i] || escaped(text2, i))
-      continue;
-    const char = text2[i];
-    if (char === "`") {
-      let count2 = 1;
-      while (text2[i + count2] === "`")
-        count2++;
-      const token = "`".repeat(count2);
-      let end2 = text2.indexOf(token, i + count2);
-      while (end2 >= 0 && (map[end2] !== 0 || text2[end2 - 1] === "`" || text2[end2 + count2] === "`"))
-        end2 = text2.indexOf(token, end2 + count2);
-      if (end2 < 0) {
-        map.fill(UNKNOWN, i);
-        ambiguous2 = true;
-        break;
-      }
-      map.fill(CODE, i, end2 + count2);
-      i = end2 + count2 - 1;
-      continue;
-    }
-    if (!['"', "'", "\u201C", "\u2018"].includes(char))
-      continue;
-    if ((char === "'" || char === "\u2018") && wordChar(text2[i - 1]) && wordChar(text2[i + 1]))
-      continue;
-    const closing3 = char === "\u201C" ? "\u201D" : char === "\u2018" ? "\u2019" : char;
-    let end = i + 1;
-    while (end < text2.length) {
-      if (text2[end] === closing3 && !escaped(text2, end) && map[end] === 0 && !((closing3 === "'" || closing3 === "\u2019") && wordChar(text2[end - 1]) && wordChar(text2[end + 1])))
-        break;
-      end++;
-    }
-    if (end >= text2.length) {
-      map.fill(UNKNOWN, i);
-      ambiguous2 = true;
-      break;
-    }
-    map.fill(QUOTE, i, end + 1);
-    i = end;
-  }
-  return { labels: map, ambiguous: ambiguous2 };
-}
-function auditProfanity(prompts, partial = false) {
-  const eligible2 = prompts.filter((p) => p.eligibleHuman && p.excludedReason === null && ["claude_prompt_id", "codex_human_marker"].includes(p.originBasis)), bucketCounts = new Map(["direct_prose", "quoted", "code", "unknown"].map((k) => [k, { occurrences: 0, prompts: /* @__PURE__ */ new Set() }])), containing = /* @__PURE__ */ new Set(), matches = [];
-  let occurrences = 0, ambiguous2 = false;
-  for (const prompt of eligible2) {
-    const spans = labels(prompt.text);
-    ambiguous2 ||= spans.ambiguous;
-    const pattern = /[\p{L}\p{N}\p{M}_\u200c\u200d]+(?:['’][\p{L}\p{N}\p{M}_\u200c\u200d]+)*/gu;
-    let token;
-    while ((token = pattern.exec(prompt.text)) !== null) {
-      if (!words2.has(token[0].toLowerCase()))
-        continue;
-      const start = token.index, end = start + token[0].length, bucket = kind(spans.labels[start] ?? 0), counter = bucketCounts.get(bucket);
-      occurrences++;
-      containing.add(prompt.id);
-      counter.occurrences++;
-      counter.prompts.add(prompt.id);
-      if (matches.length < 8)
-        matches.push({ term: token[0], kind: bucket, promptId: prompt.id, conversationId: prompt.conversationId, startUtf16: start, endUtf16: end, route: prompt.route });
-    }
-  }
-  const measurementBasis = "literal_english_lexicon_redacted_prompt_utf16_v1", definition2 = "Literal occurrences of the documented eight-word English lexicon in eligible scoped native inputs after existing redaction/elision. Unicode whole-word tokens; containing inputs counted once. No emotion, intent or universal-language inference. Ranges are relative to the immutable redacted containing input; routes identify that input.";
-  return { lexiconVersion: PROFANITY_LEXICON_VERSION, language: "en-explicit-lexicon", measurementBasis, eligiblePrompts: eligible2.length, occurrences: { value: occurrences, numerator: occurrences, denominator: eligible2.length, unit: "english_lexicon_occurrence", measurementBasis, state: partial ? "partial" : "observed", definition: definition2 }, containingPrompts: { value: containing.size, numerator: containing.size, denominator: eligible2.length, unit: "eligible_input_containing_english_lexicon_match", measurementBasis, state: partial ? "partial" : "observed", definition: definition2 }, buckets: [...bucketCounts].map(([kind2, value]) => ({ kind: kind2, occurrences: value.occurrences, containingPrompts: value.prompts.size })), coverageGaps: ["outside_english_lexicon_unassessed", "hindi_hinglish_and_other_languages_unassessed", ...ambiguous2 ? ["ambiguous_quote_or_code_span"] : []], matches };
-}
-var ENGLISH_EXPLICIT_LEXICON, PROFANITY_LEXICON_VERSION, words2, CODE, QUOTE, UNKNOWN, kind, escaped, wordChar;
-var init_profanity = __esm({
-  "packages/core/dist/analytics/profanity.js"() {
-    "use strict";
-    ENGLISH_EXPLICIT_LEXICON = Object.freeze(["fuck", "fucked", "fucking", "shit", "shitty", "bullshit", "asshole", "bastard"]);
-    PROFANITY_LEXICON_VERSION = "en-explicit-8-v1";
-    words2 = new Set(ENGLISH_EXPLICIT_LEXICON);
-    CODE = 2;
-    QUOTE = 1;
-    UNKNOWN = 3;
-    kind = (label4) => label4 === CODE ? "code" : label4 === QUOTE ? "quoted" : label4 === UNKNOWN ? "unknown" : "direct_prose";
-    escaped = (text2, index) => {
-      let count2 = 0;
-      for (let i = index - 1; i >= 0 && text2[i] === "\\"; i--)
-        count2++;
-      return count2 % 2 === 1;
-    };
-    wordChar = (char) => char !== void 0 && /[\p{L}\p{N}\p{M}_\u200c\u200d]/u.test(char);
-  }
-});
-
 // packages/core/dist/analytics/index.js
-import fs27 from "node:fs";
-import path21 from "node:path";
-import { randomUUID as randomUUID8 } from "node:crypto";
+import fs30 from "node:fs";
+import path24 from "node:path";
+import { randomUUID as randomUUID8, createHash as createHash16 } from "node:crypto";
 import { setImmediate as pause2 } from "node:timers/promises";
+function digestFile(file) {
+  const fd = fs30.openSync(file, "r");
+  try {
+    const before = fs30.fstatSync(fd, { bigint: true }), buffer = Buffer.allocUnsafe(1024 * 1024), hash5 = createHash16("sha256");
+    let offset = 0;
+    while (offset < Number(before.size)) {
+      const n3 = fs30.readSync(fd, buffer, 0, Math.min(buffer.length, Number(before.size) - offset), offset);
+      if (!n3)
+        throw new Error("source_changed");
+      hash5.update(buffer.subarray(0, n3));
+      offset += n3;
+    }
+    const after = fs30.fstatSync(fd, { bigint: true });
+    if (before.size !== after.size || before.ino !== after.ino || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs)
+      throw new Error("source_changed");
+    return hash5.digest("hex");
+  } finally {
+    fs30.closeSync(fd);
+  }
+}
 function publicAuditSnapshot(snapshot) {
-  return immutable({ ...snapshot, ...snapshot.launch ? { launch: { ...snapshot.launch, languageByModel: snapshot.launch.languageByModel?.map((row2) => ({ ...row2, promptIds: [] })), facts: snapshot.launch.facts ? { ...snapshot.launch.facts, records: [] } : null, semantics: snapshot.launch.semantics ? { ...snapshot.launch.semantics, stories: [], hallOfFame: [], judgments: [] } : null } } : {}, ...snapshot.profanity ? { profanity: { ...snapshot.profanity, matches: [] } } : {}, scope: { ...snapshot.scope, project: snapshot.scope.project ? "selected_project" : null }, conversations: snapshot.conversations.map((c, i) => ({ ...c, nativeSessionId: `Conversation ${i + 1}`, title: null })), projects: snapshot.projects.map((p) => ({ ...p, path: null, displayName: p.alias })), phrases: [], judgments: [], insights: snapshot.insights.map((i) => ({ ...i, caption: i.publicCaption })), warnings: snapshot.warnings.map((w) => w.split(":")[0].slice(0, 96)) });
+  return immutable({ ...snapshot, ...snapshot.launch ? { launch: { ...snapshot.launch, languageLines: [], modelFeedback: snapshot.launch.modelFeedback?.map((row2) => ({ ...row2, promptIds: [] })), languageByModel: snapshot.launch.languageByModel?.map((row2) => ({ ...row2, promptIds: [] })), facts: snapshot.launch.facts ? { ...snapshot.launch.facts, records: [] } : null, semantics: snapshot.launch.semantics ? { ...snapshot.launch.semantics, stories: [], hallOfFame: [], judgments: [] } : null } } : {}, ...snapshot.profanity ? { profanity: { ...snapshot.profanity, matches: [], terms: [] } } : {}, scope: { ...snapshot.scope, project: snapshot.scope.project ? "selected_project" : null }, conversations: snapshot.conversations.map((c, i) => ({ ...c, nativeSessionId: `Conversation ${i + 1}`, title: null })), projects: snapshot.projects.map((p) => ({ ...p, focus: p.focus?.map((f) => ({ ...f, promptIds: [], evidenceRoutes: [] })), path: null, displayName: p.alias })), phrases: [], judgments: [], insights: snapshot.insights.map((i) => ({ ...i, caption: i.publicCaption })), warnings: snapshot.warnings.map((w) => w.split(":")[0].slice(0, 96)) });
 }
 function createAuditSession(options = {}) {
   return new LocalAuditSession(options);
@@ -17497,9 +18770,9 @@ var init_analytics = __esm({
   "packages/core/dist/analytics/index.js"() {
     "use strict";
     init_audit_sqlite();
+    init_policy_authority();
     init_paths();
     init_ignore();
-    init_readiness();
     init_source();
     init_scope();
     init_service();
@@ -17510,6 +18783,11 @@ var init_analytics = __esm({
     init_native_usage();
     init_model_catalog();
     init_catalog_service();
+    init_opencode_json();
+    init_native_census();
+    init_native_stream();
+    init_project_focus();
+    init_language_feedback();
     init_language_models();
     init_derived_cache();
     init_history_index();
@@ -17548,6 +18826,7 @@ var init_analytics = __esm({
       disposed = false;
       started = false;
       stale = false;
+      authority = null;
       db = null;
       storeSnapshot = null;
       policyChecked = false;
@@ -17556,6 +18835,7 @@ var init_analytics = __esm({
       epochs = null;
       policyCommitment = null;
       hadStore = false;
+      nativeLedger = [];
       entries = /* @__PURE__ */ new Map();
       routes = /* @__PURE__ */ new Map();
       totalBytes = 0;
@@ -17569,6 +18849,10 @@ var init_analytics = __esm({
       callback;
       limits;
       root;
+      nativeReadBytes = 0;
+      globalUsageDuplicates = 0;
+      lastParsingEmit = 0;
+      funnel = { nativeFilesDiscovered: 0, nativeFilesParsed: 0, retainedSources: 0, selectedSources: 0, responsesObserved: 0, responsesDeduplicated: 0, responsesExcluded: 0, responsesPriced: 0, excludedReasons: {}, gaps: [], sourceFiles: [] };
       derived = null;
       semanticReservedTokens = 0;
       launchRunning = false;
@@ -17580,6 +18864,8 @@ var init_analytics = __esm({
       dayFormatter;
       constructor(options) {
         this.options = options;
+        if (options.sessionIdentity)
+          this.id = options.sessionIdentity;
         const harnesses = options.harnesses ? [...new Set(options.harnesses)] : options.launch ? ["codex", "claude", "opencode", "pi"] : HARNESSES;
         if (!harnesses.every((h) => HARNESSES.includes(h)))
           throw new Error("unsupported audit harness");
@@ -17594,14 +18880,14 @@ var init_analytics = __esm({
           throw new Error("invalid audit SQLite byte limit");
         this.root = potsherdDir(options.potsherdDir);
         if (options.launch) {
-          this.derived = new DerivedCache(options.derivedCacheDir ?? path21.join(this.root, "audit-derived"));
+          this.derived = new DerivedCache(options.derivedCacheDir ?? path24.join(this.root, "audit-derived"));
           this.catalog = cachedPublicCatalog(this.derived);
         }
-        this.limits = { source: cap(options.maxSourceBytes, 2 * 1024 * 1024, 16 * 1024 * 1024), candidates: cap(options.maxCandidates, 500, 5e3), total: cap(options.maxTotalBytes, 32 * 1024 * 1024, 128 * 1024 * 1024), prompts: cap(options.maxPrompts, 1e4, 5e4), records: cap(options.maxRecordsPerSource, 1e4, 5e4), store };
+        this.limits = { source: cap(options.maxSourceBytes, 2 * 1024 * 1024, 16 * 1024 * 1024), candidates: cap(options.maxCandidates, options.launch ? 5e4 : 500, options.launch ? 1e5 : 5e3), total: cap(options.maxTotalBytes, 32 * 1024 * 1024, 128 * 1024 * 1024), prompts: cap(options.maxPrompts, options.launch ? 15e4 : 1e4, options.launch ? 5e5 : 5e4), records: cap(options.maxRecordsPerSource, 1e4, 5e4), store };
         options.signal?.addEventListener("abort", () => this.cancel(), { once: true });
         if (options.signal?.aborted)
           this.cancel();
-        this.current = immutable({ schemaVersion: "audit-v1", snapshotId: this.id, sequence: 0, measuredAt: (/* @__PURE__ */ new Date()).toISOString(), scope: { harnesses, project: options.project ? path21.resolve(options.project) : null, eventFrom: from, asOf: to, timezone }, status: "discovering", coverage: emptyCoverage(), progress: { stage: "discovering", completed: 0, total: null, unit: "candidate_source", provisional: true, cancellable: true }, metrics: { conversations: metric(null, "top_level_conversation", "native_identity", "Distinct selected top-level conversations"), humanPrompts: metric(null, "eligible_human_input_event", "native_origin_discriminator_v1", "Eligible recorded human input events; child initialization excluded"), projects: metric(null, "known_project", "exact_path", "Distinct known projects in selected conversations"), linkedChildren: metric(null, "supported_child_source", "declared_parent_identity", "Selected child conversations with recorded parents") }, sources: harnesses.map((h) => ({ harness: h, state: "absent", candidateFiles: 0, conversations: 0, humanPrompts: null, humanOrigin: h === "pi" || h === "opencode" ? "projection" : "native_marker", evidence: "unavailable", usage: "unavailable", firstUnsupportedStep: null, gapCodes: [] })), projects: [], activity: [], conversations: [], insights: [], usage: { state: "unavailable", inputTokens: null, outputTokens: null, cacheTokens: null, reasoningTokens: null, costUsd: null, measurementBasis: null, inclusion: null, priceVersion: null }, ...options.launch ? { launch: { facts: null, semantics: null, stage: "discovering", notice: process.env["POTSHERD_OFFLINE"] === "1" ? "Offline audit. Conversation text stays on this machine; no analysis requests will be made. Esc cancels." : "Conversation text is redacted locally. OpenCode Zen and TypeSafe/Jev receive selected conversations for free analysis. Esc cancels." } } : {}, semantics: { state: "not_run", qualified: false, model: null, classifiedPrompts: 0, eligiblePrompts: 0, uncertainPrompts: 0, work: [], requestCount: 0, cacheHits: 0, estimatedCostUsd: null, reportedCostUsd: null, unresolvedCostUsd: null, errorCode: null }, warnings: [], sourceEpochs: null });
+        this.current = immutable({ schemaVersion: "audit-v1", snapshotId: this.id, sequence: 0, measuredAt: (/* @__PURE__ */ new Date()).toISOString(), scope: { harnesses, project: options.project ? path24.resolve(options.project) : null, eventFrom: from, asOf: to, timezone }, status: "discovering", coverage: emptyCoverage(), progress: { stage: "discovering", completed: 0, total: null, unit: "candidate_source", provisional: true, cancellable: true }, metrics: { conversations: metric(null, "top_level_conversation", "native_identity", "Distinct selected top-level conversations"), humanPrompts: metric(null, "eligible_human_input_event", "native_origin_discriminator_v1", "Eligible recorded human input events; child initialization excluded"), projects: metric(null, "known_project", "exact_path", "Distinct known projects in selected conversations"), linkedChildren: metric(null, "supported_child_source", "declared_parent_identity", "Selected child conversations with recorded parents") }, sources: harnesses.map((h) => ({ harness: h, state: options.launch ? "checking" : "absent", candidateFiles: 0, conversations: 0, humanPrompts: null, humanOrigin: h === "pi" || h === "opencode" ? "projection" : "native_marker", evidence: "unavailable", usage: "unavailable", firstUnsupportedStep: null, gapCodes: [] })), projects: [], activity: [], conversations: [], insights: [], usage: { state: "unavailable", inputTokens: null, outputTokens: null, cacheTokens: null, reasoningTokens: null, costUsd: null, measurementBasis: null, inclusion: null, priceVersion: null }, ...options.launch ? { launch: { facts: null, semantics: null, stage: "discovering", notice: process.env["POTSHERD_OFFLINE"] === "1" ? "Offline audit. Conversation text stays on this machine; no analysis requests will be made. Esc cancels." : "Conversation text is redacted locally. OpenCode Zen and TypeSafe/Jev receive selected conversations for free analysis. Esc cancels." } } : {}, semantics: { state: "not_run", qualified: false, model: null, classifiedPrompts: 0, eligiblePrompts: 0, uncertainPrompts: 0, work: [], requestCount: 0, cacheHits: 0, estimatedCostUsd: null, reportedCostUsd: null, unresolvedCostUsd: null, errorCode: null }, warnings: [], sourceEpochs: null });
       }
       snapshot() {
         return this.current;
@@ -17619,6 +18905,7 @@ var init_analytics = __esm({
         this.db = null;
         this.storeSnapshot = null;
         this.entries.clear();
+        this.nativeLedger = [];
         this.routes.clear();
         this.dayMemo.clear();
         this.launchSegments = [];
@@ -17633,6 +18920,12 @@ var init_analytics = __esm({
         this.current = freeze({ ...this.current, ...immutable(patch) });
       }
       emit(stage) {
+        if (stage === "parsing" && this.options.launch) {
+          const now = Date.now();
+          if (now - this.lastParsingEmit < 80)
+            return;
+          this.lastParsingEmit = now;
+        }
         if (this.policyChecked && !this.fresh()) {
           this.invalidate();
           this.policyAvailable = false;
@@ -17643,27 +18936,45 @@ var init_analytics = __esm({
         if (stage === "cancelled")
           this.gap("cancelled_scan_scope_unmeasured");
         const entries = [...this.entries.values()], partial = this.gaps.size > 0 || this.omitted > 0;
-        const prompts = entries.flatMap((e) => e.prompts), eligible2 = prompts.filter((p) => p.eligibleHuman);
+        const prompts = entries.flatMap((e) => e.prompts), eligible2 = prompts.filter((p) => p.eligibleHuman), native = prompts.filter((p) => p.eligibleNativeInput ?? p.eligibleHuman);
         const unknown = prompts.filter((p) => p.originBasis === "unknown" && !["unpaired_user_response", "child_initialization", "tool_result", "maintenance_exclusion_marker", "inherited_native_event"].includes(p.excludedReason ?? "")).length;
         const excluded = prompts.length - eligible2.length - unknown;
         const projectMap = /* @__PURE__ */ new Map();
+        const projectInputs = /* @__PURE__ */ new Map(), projectConversations = /* @__PURE__ */ new Map();
         for (const entry of entries) {
-          if (entry.project === null)
-            continue;
-          const id = digest(entry.project).slice(0, 20);
-          let project = projectMap.get(id);
-          if (!project) {
-            project = { id, alias: "", displayName: "", path: entry.project, humanPrompts: 0, conversations: 0, share: null };
-            projectMap.set(id, project);
+          const candidates2 = entry.prompts.length ? entry.prompts : [void 0];
+          for (const prompt of candidates2) {
+            const projectPath = prompt?.project === void 0 ? entry.project : prompt.project;
+            if (projectPath === null)
+              continue;
+            const id = digest(projectPath).slice(0, 20);
+            let row2 = projectMap.get(id);
+            if (!row2) {
+              row2 = { id, alias: "", displayName: "", path: projectPath, humanPrompts: 0, nativeUserInputs: 0, conversations: 0, share: null };
+              projectMap.set(id, row2);
+            }
+            if (!entry.conversation.child) {
+              const ids = projectConversations.get(id) ?? /* @__PURE__ */ new Set();
+              ids.add(entry.conversation.id);
+              projectConversations.set(id, ids);
+              row2.conversations = ids.size;
+            }
+            if (prompt) {
+              if (prompt.eligibleHuman)
+                row2.humanPrompts++;
+              if (prompt.eligibleNativeInput ?? prompt.eligibleHuman)
+                row2.nativeUserInputs = (row2.nativeUserInputs ?? 0) + 1;
+              const rows = projectInputs.get(id) ?? [];
+              rows.push(prompt);
+              projectInputs.set(id, rows);
+            }
           }
-          project.conversations += entry.conversation.child ? 0 : 1;
-          project.humanPrompts += entry.prompts.filter((p) => p.eligibleHuman).length;
         }
-        const projects = [...projectMap.values()].sort((a, b) => a.id.localeCompare(b.id)).map((p, i) => ({ ...p, alias: `Project ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`, displayName: this.options.launch ? clean(path21.basename(p.path)) : `Project ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`, share: eligible2.length ? p.humanPrompts / eligible2.length : null }));
+        const projects = [...projectMap.values()].sort((a, b) => a.id.localeCompare(b.id)).map((p, i) => ({ ...p, ...this.options.launch && ["ready", "partial", "cancelled"].includes(stage) && !this.stale ? { focus: requestedProjectFocus(projectInputs.get(p.id) ?? []) } : {}, alias: `Project ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`, displayName: this.options.launch ? clean(path24.basename(p.path)) : `Project ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`, share: native.length ? (p.nativeUserInputs ?? p.humanPrompts) / native.length : null }));
         if (this.options.launch)
-          projects.sort((a, b) => b.humanPrompts - a.humanPrompts || b.conversations - a.conversations || a.id.localeCompare(b.id));
+          projects.sort((a, b) => (b.nativeUserInputs ?? b.humanPrompts) - (a.nativeUserInputs ?? a.humanPrompts) || b.conversations - a.conversations || a.id.localeCompare(b.id));
         const dates = /* @__PURE__ */ new Map();
-        for (const prompt of eligible2) {
+        for (const prompt of native) {
           if (prompt.eventAt) {
             let date3 = this.dayMemo.get(prompt.eventAt);
             if (date3 === void 0) {
@@ -17685,11 +18996,11 @@ var init_analytics = __esm({
           return { ...source, state: !this.policyAvailable ? "unavailable" : ownGaps.length ? "partial" : group.length ? "available" : source.state, conversations: group.length, humanPrompts: projection || !n3 && ownGaps.length ? null : n3, evidence: group.some((e) => e.prompts.some((p) => p.route.basis === "canonical")) ? "canonical" : group.length ? projection ? "projection" : "transient" : source.evidence, gapCodes: ownGaps };
         });
         const humanValue = eligible2.length ? eligible2.length : unknown || this.omitted || this.gaps.size || entries.some((e) => e.conversation.harness === "pi" || e.conversation.harness === "opencode") ? null : 0;
-        const progress = { stage, completed: this.parsed, total: stage === "ready" || stage === "partial" ? this.candidates : null, unit: "candidate_source", provisional: !["ready", "partial", "cancelled", "error"].includes(stage), cancellable: !["ready", "partial", "cancelled", "error"].includes(stage) };
+        const progress = { stage, label: stage === "discovering" ? "Discovering native sources" : stage === "parsing" ? this.current.progress.label ?? "Reading native history" : "Local facts ready", completed: this.parsed, total: stage === "ready" || stage === "partial" ? this.candidates : null, unit: "candidate_source", provisional: !["ready", "partial", "cancelled", "error"].includes(stage), cancellable: !["ready", "partial", "cancelled", "error"].includes(stage) };
         const final = ["ready", "partial", "cancelled"].includes(stage) && !this.stale;
-        const profanity = final ? auditProfanity(eligible2, partial) : void 0;
-        const findings = final ? deterministicFindings(entries.map((e) => e.conversation), eligible2, this.current.scope.timezone, partial, digest(JSON.stringify(this.current.scope))) : { insights: [], phrases: [] };
-        this.update({ ...findings, profanity, sequence: ++this.sequence, measuredAt: (/* @__PURE__ */ new Date()).toISOString(), status: stage, sourceEpochs: this.epochs, coverage, progress, sources, projects, conversations: entries.map((e) => e.conversation), activity: [...dates].sort(([a], [b]) => a.localeCompare(b)).map(([date3, count2]) => ({ date: date3, count: count2 })), metrics: { conversations: metric(!this.policyAvailable && !entries.length ? null : top, "top_level_conversation", "harness_native_identity", "Distinct selected top-level conversation identities", partial), humanPrompts: metric(!this.policyAvailable && !entries.length ? null : humanValue, "eligible_human_input_event", "native_origin_discriminator_v1", "Eligible native input markers; known maintenance and programmatic inputs excluded. This is recorded-origin evidence, not universal human attestation.", partial), projects: metric(!this.policyAvailable && !entries.length ? null : projects.length, "known_project", "normalized_exact_path", "Distinct known project paths; unknown projects excluded", partial), linkedChildren: metric(!this.policyAvailable && !entries.length ? null : children, "supported_child_source", "declared_parent_identity", "Distinct selected child conversations with declared parent identities", partial) }, semantics: { ...this.current.semantics, eligiblePrompts: eligible2.length }, commitment: digest(JSON.stringify(entries.map((e) => [e.conversation.id, e.hash]))), warnings: [...this.gaps] });
+        const profanity = final ? auditProfanity(prompts, partial) : void 0;
+        const findings = final ? deterministicFindings(entries.map((e) => e.conversation), native, this.current.scope.timezone, partial, digest(JSON.stringify(this.current.scope))) : { insights: [], phrases: [] };
+        this.update({ ...findings, profanity, sequence: ++this.sequence, measuredAt: (/* @__PURE__ */ new Date()).toISOString(), status: stage, sourceEpochs: this.epochs, coverage, progress, sources, projects, conversations: entries.map((e) => e.conversation), activity: [...dates].sort(([a], [b]) => a.localeCompare(b)).map(([date3, count2]) => ({ date: date3, count: count2 })), funnel: { ...this.funnel, selectedSources: this.entries.size, gaps: [...this.gaps] }, metrics: { nativeUserInputs: metric(!this.policyAvailable && !entries.length ? null : native.length, "observed_native_user_input", "native_role_with_known_machine_exclusions", "Observed native user-role inputs; authorship attestation is separate", partial), conversations: metric(!this.policyAvailable && !entries.length ? null : top, "top_level_conversation", "harness_native_identity", "Distinct selected top-level conversation identities", partial), humanPrompts: metric(!this.policyAvailable && !entries.length ? null : humanValue, "eligible_human_input_event", "native_origin_discriminator_v1", "Eligible native input markers; known maintenance and programmatic inputs excluded. This is recorded-origin evidence, not universal human attestation.", partial), projects: metric(!this.policyAvailable && !entries.length ? null : projects.length, "known_project", "normalized_exact_path", "Distinct known project paths; unknown projects excluded", partial), linkedChildren: metric(!this.policyAvailable && !entries.length ? null : children, "supported_child_source", "declared_parent_identity", "Distinct selected child conversations with declared parent identities", partial) }, semantics: { ...this.current.semantics, eligiblePrompts: eligible2.length }, commitment: digest(JSON.stringify(entries.map((e) => [e.conversation.id, e.hash]))), warnings: [...this.gaps] });
         this.callback?.({ type: "progress", snapshotId: this.id, sequence: this.sequence, progress: this.current.progress, sources: this.current.sources });
         this.callback?.({ type: "snapshot", snapshot: this.current });
       }
@@ -17731,8 +19042,10 @@ var init_analytics = __esm({
               continue;
             const originId = sourceId("claude", proof.declaredOrigin), original = bySource.get(originId)?.get(proof.recordId);
             prompt.eligibleHuman = false;
+            prompt.languageEligible = false;
             prompt.originBasis = "unknown";
             if (original && original.proof.commitment === proof.commitment && original.proof.declaredOrigin !== this.entries.get(id)?.conversation.nativeSessionId) {
+              prompt.eligibleNativeInput = false;
               prompt.excludedReason = "inherited_native_event";
               prompt.identityBasis = "declared_parent_native_record_commitment_v1";
             } else {
@@ -17747,6 +19060,7 @@ var init_analytics = __esm({
           if (owners.length > 1) {
             for (const item of owners) {
               item.prompt.eligibleHuman = false;
+              item.prompt.languageEligible = false;
               item.prompt.originBasis = "unknown";
               item.prompt.excludedReason = "cross_source_identity_unverified";
             }
@@ -17771,45 +19085,51 @@ var init_analytics = __esm({
         this.semanticRunner.invalidate();
         this.dayMemo.clear();
         this.entries.clear();
+        this.nativeLedger = [];
         this.routes.clear();
         this.launchSegments = [];
         this.totalPrompts = 0;
         const metrics = Object.fromEntries(Object.entries(this.current.metrics).map(([key2, value]) => [key2, { ...value, value: null, numerator: null, state: "unavailable" }]));
-        this.update({ ...this.current.launch ? { launch: { ...this.current.launch, languageByModel: [], facts: null, semantics: null, stage: "ready" } } : {}, status: "partial", sequence: ++this.sequence, metrics, projects: [], activity: [], conversations: [], insights: [], phrases: [], judgments: [], profanity: void 0, semantics: { ...this.current.semantics, state: this.current.semantics.state === "not_run" || this.current.semantics.state === "no_key" ? this.current.semantics.state : "cancelled", qualified: false, classifiedPrompts: 0, eligiblePrompts: 0, uncertainPrompts: 0, unclassifiedPrompts: 0, work: [], errorCode: "source_or_policy_changed" }, coverage: { ...this.current.coverage, state: "partial", gapCodes: [.../* @__PURE__ */ new Set([...this.current.coverage.gapCodes, "audit_snapshot_stale"])] } });
+        this.update({ ...this.current.launch ? { launch: { ...this.current.launch, languageByModel: [], languageLines: [], modelFeedback: [], facts: null, semantics: null, stage: "ready" } } : {}, status: "partial", sequence: ++this.sequence, metrics, projects: [], activity: [], conversations: [], insights: [], phrases: [], judgments: [], profanity: void 0, semantics: { ...this.current.semantics, state: this.current.semantics.state === "not_run" || this.current.semantics.state === "no_key" ? this.current.semantics.state : "cancelled", qualified: false, classifiedPrompts: 0, eligiblePrompts: 0, uncertainPrompts: 0, unclassifiedPrompts: 0, work: [], errorCode: "source_or_policy_changed" }, coverage: { ...this.current.coverage, state: "partial", gapCodes: [.../* @__PURE__ */ new Set([...this.current.coverage.gapCodes, "audit_snapshot_stale"])] } });
       }
       fresh(content2 = false) {
         if (this.stale)
           return false;
         try {
+          if (this.authority && readAuditAuthority(dbPath(this.root), configPath(this.root)).commitment !== this.authority.commitment)
+            return false;
+          if (content2)
+            for (const source of this.nativeLedger) {
+              const stat = fs30.statSync(source.file);
+              if (stat.size !== source.bytes || digestFile(source.file) !== source.hash)
+                return false;
+            }
           if (content2)
             this.storeSnapshot?.assertCurrent();
           else
             this.storeSnapshot?.assertIdentityCurrent();
           const verifiedReaders = /* @__PURE__ */ new Set();
           for (const entry of this.entries.values()) {
+            if (content2 && entry.nativeFiles && entry.nativeFiles.some((f) => digestFile(f.file) !== f.hash))
+              return false;
             const verify = entry.open ? content2 ? entry.open.assertCurrent : entry.open.assertIdentityCurrent : null;
-            if (verify && !verifiedReaders.has(verify)) {
+            if (content2 && verify && !verifiedReaders.has(verify)) {
               verify();
               verifiedReaders.add(verify);
             }
-            if (this.options.launch && entry.file && entry.fileStat) {
-              const stat = fs27.statSync(entry.file, { bigint: true });
+            if (content2 && this.options.launch && entry.file && entry.fileStat) {
+              const stat = fs30.statSync(entry.file, { bigint: true });
               if (Number(stat.size) !== entry.fileStat.size || String(stat.dev) !== entry.fileStat.dev || String(stat.ino) !== entry.fileStat.ino || String(stat.mtimeNs) !== entry.fileStat.mtimeNs || String(stat.ctimeNs) !== entry.fileStat.ctimeNs)
                 return false;
-              if (content2 && entry.fileHash !== null && digest(boundedBytes(entry.file, this.limits.source)) !== entry.fileHash)
+              if (content2 && entry.fileHash !== null && digestFile(entry.file) !== entry.fileHash)
                 return false;
             }
           }
-          if (!this.hadStore && fs27.existsSync(dbPath(this.root)))
+          if (!this.hadStore && fs30.existsSync(dbPath(this.root)))
             return false;
-          const config = configPath(this.root), current = fs27.existsSync(config) ? digest(boundedBytes(config, 1024 * 1024)) : null;
+          const config = configPath(this.root), current = fs30.existsSync(config) ? digest(boundedBytes(config, 1024 * 1024)) : null;
           if (current !== this.policyCommitment)
             return false;
-          if (this.db && this.epochs) {
-            const next = readEpochs(this.db);
-            if (["evidence", "notes", "lineage", "deletion"].some((k) => next[k] !== this.epochs[k]))
-              return false;
-          }
           return true;
         } catch {
           return false;
@@ -17819,11 +19139,11 @@ var init_analytics = __esm({
         this.policyChecked = true;
         const config = configPath(this.root);
         try {
-          if (fs27.existsSync(config)) {
-            const s = fs27.statSync(config);
+          if (fs30.existsSync(config)) {
+            const s = fs30.statSync(config);
             if (!s.isFile() || s.size > 1024 * 1024)
               throw new Error("ignore_policy_unavailable");
-            fs27.accessSync(config, fs27.constants.R_OK);
+            fs30.accessSync(config, fs30.constants.R_OK);
             this.policyCommitment = digest(boundedBytes(config, 1024 * 1024));
             const ignored = readIgnoreConfig(this.root);
             if (ignored.error)
@@ -17834,26 +19154,39 @@ var init_analytics = __esm({
           this.policyAvailable = false;
           this.gap("ignore_policy_unavailable");
         }
-        this.hadStore = fs27.existsSync(dbPath(this.root));
-        if (!this.hadStore)
+        this.hadStore = fs30.existsSync(dbPath(this.root));
+        if (!this.hadStore) {
+          this.authority = readAuditAuthority(dbPath(this.root), config);
           return;
+        }
         try {
-          this.storeSnapshot = openAuditSqliteSnapshot(dbPath(this.root), this.limits.store);
-          this.db = this.storeSnapshot.db;
-          assertMemorySchema(this.db);
-          this.epochs = readEpochs(this.db);
+          if (this.options.launch) {
+            if (fs30.statSync(dbPath(this.root)).size > this.limits.store)
+              throw new Error("audit_sqlite_snapshot_byte_limit");
+            this.authority = readAuditAuthority(dbPath(this.root), config);
+            this.db = openAuditPolicyDb(dbPath(this.root));
+            this.epochs = this.authority.epochs;
+          } else {
+            this.storeSnapshot = openAuditSqliteSnapshot(dbPath(this.root), this.limits.store);
+            this.db = this.storeSnapshot.db;
+            this.epochs = readEpochs(this.db);
+          }
         } catch (error) {
           this.db?.close();
           this.db = null;
           this.storeSnapshot = null;
           this.policyAvailable = false;
           this.gap("store_policy_unavailable");
-          if (error instanceof Error && error.message.startsWith("audit_sqlite_"))
+          if (error instanceof Error && (error.message.startsWith("audit_sqlite_") || error.message.startsWith("audit_policy_")))
             this.gap(error.message);
         }
       }
       denied(id, project) {
         if (project && isIgnoredProject(project, this.ignored))
+          return true;
+        if (this.options.launch && this.authority)
+          return this.authority.forgottenSourceIds.has(id);
+        if (this.authority?.forgottenSourceIds.has(id))
           return true;
         return !!this.db?.prepare("SELECT 1 FROM forget_tombstones WHERE source_id=? AND state<>'reversed'").get(id);
       }
@@ -17904,7 +19237,7 @@ var init_analytics = __esm({
             break;
           }
           const route = canonical3?.refs.get(event.evidenceStart ?? event.rawStart) ?? { basis: "transient_snapshot", sourceId: id, artifactHash: facts.hash, sourcePath: file, recordKey: event.key, rawStart: event.rawStart, rawEnd: event.rawEnd, startUtf16: 0, endUtf16: event.text.length, snapshotId: this.id };
-          const prompt = { id: digest(`${id}:${event.identity}`).slice(0, 32), conversationId: id, role: "user", originBasis: event.origin, identityBasis: event.identity, eligibleHuman: event.eligible, excludedReason: event.excluded, eventAt: event.eventAt, text: event.text, route };
+          const prompt = { id: digest(`${id}:${event.identity}`).slice(0, 32), conversationId: id, role: "user", originBasis: event.origin, identityBasis: event.identity, eligibleHuman: event.eligible, eligibleNativeInput: event.observed ?? event.eligible, languageEligible: event.languageEligible ?? !facts.child, project: event.project, excludedReason: event.excluded, eventAt: event.eventAt, text: event.text, route };
           prompts.push(prompt);
           for (const key2 of [event.key, event.identity, String(event.rawStart), ...event.evidenceStart !== void 0 ? [String(event.evidenceStart)] : []])
             nativeKeys.set(key2, prompt.id);
@@ -17920,7 +19253,7 @@ var init_analytics = __esm({
         const coverage = { ...emptyCoverage(), knownSources: 1, parsedSources: 1, unknownOriginEvents: ownUnknown, excludedEvents: prompts.filter((p) => !p.eligibleHuman).length, state: facts.gaps.length ? "partial" : "complete_snapshot", gapCodes: facts.gaps };
         const measuredProject = this.current.scope.project ?? facts.project;
         const title = this.current.scope.project || this.ignored.length ? null : facts.title;
-        this.entries.set(id, { conversation: { id, sourceId: id, harness, nativeSessionId: facts.nativeId, projectId: measuredProject ? digest(measuredProject).slice(0, 20) : null, title, alias: `Conversation ${this.entries.size + 1}`, promptCount: harness === "pi" || harness === "opencode" ? null : prompts.filter((p) => p.eligibleHuman).length, unknownOriginEvents: ownUnknown, eventFrom: dates[0] ?? null, eventTo: dates.at(-1) ?? null, child: facts.child, parentId: facts.parent ? sourceId(harness, facts.parent) : null, coverage }, project: measuredProject, prompts, proofs, nativeKeys, hash: facts.hash, committedBytes: facts.bytes, file, fileHash, ...file && fileHash ? { fileStat: (({ size, dev, ino, mtimeNs, ctimeNs }) => ({ size: Number(size), dev: String(dev), ino: String(ino), mtimeNs: String(mtimeNs), ctimeNs: String(ctimeNs) }))(fs27.statSync(file, { bigint: true })) } : {} });
+        this.entries.set(id, { conversation: { id, sourceId: id, harness, nativeSessionId: facts.nativeId, projectId: measuredProject ? digest(measuredProject).slice(0, 20) : null, title, alias: `Conversation ${this.entries.size + 1}`, promptCount: harness === "pi" || harness === "opencode" ? null : prompts.filter((p) => p.eligibleHuman).length, unknownOriginEvents: ownUnknown, eventFrom: dates[0] ?? null, eventTo: dates.at(-1) ?? null, child: facts.child, parentId: facts.parent ? sourceId(harness, facts.parent) : null, coverage }, project: measuredProject, prompts, proofs, nativeKeys, hash: facts.hash, committedBytes: facts.bytes, file, fileHash, ...file && fileHash ? { fileStat: (({ size, dev, ino, mtimeNs, ctimeNs }) => ({ size: Number(size), dev: String(dev), ino: String(ino), mtimeNs: String(mtimeNs), ctimeNs: String(ctimeNs) }))(fs30.statSync(file, { bigint: true })) } : {} });
         this.parsed++;
       }
       remove(id) {
@@ -17946,30 +19279,35 @@ var init_analytics = __esm({
         this.update({ launch: { ...this.current.launch, ...patch }, sequence: ++this.sequence });
         this.callback?.({ type: "snapshot", snapshot: this.current });
       }
-      cacheBinding(id, identity4, contentHash, currentness) {
-        return { sourceId: id, sourceIdentity: identity4, contentHash, currentness, privacyPolicy: digest(JSON.stringify([this.policyCommitment, this.current.scope.project, this.ignored])), forgetEpoch: digest(JSON.stringify(this.epochs ?? "no-store")), normalizationVersion: NORMALIZATION_VERSION };
+      cacheBinding(id, identity5, contentHash, currentness) {
+        return { sourceId: id, sourceIdentity: identity5, contentHash, currentness, privacyPolicy: digest(JSON.stringify([this.policyCommitment, this.current.scope.project, this.ignored])), forgetEpoch: digest(JSON.stringify(this.epochs ?? "no-store")), normalizationVersion: NORMALIZATION_VERSION + "/audit-native-v3-observed-inputs" };
       }
       launchAllowed(project) {
         return !(project && isIgnoredProject(project, this.ignored)) && (!this.current.scope.project || project === this.current.scope.project);
       }
       async assembleLaunch(period) {
-        if (!this.fresh(true)) {
+        if (!this.fresh()) {
           this.invalidate();
           return;
         }
         this.launchPublish({ stage: "sizing" });
-        const records = [], contexts = [], contextGaps = /* @__PURE__ */ new Set();
+        const nativeIds = new Set(this.nativeLedger.map((source) => source.id));
+        const records = this.nativeLedger.flatMap((source) => source.usage), contexts = [], language = this.nativeLedger.flatMap((source) => source.language), contextGaps = /* @__PURE__ */ new Set();
         for (const entry of this.entries.values()) {
           if (this.controller.signal.aborted)
             break;
           const bytes3 = entry.nativeRecords ? Buffer.from(entry.nativeRecords.map((r) => JSON.stringify(r)).join("\n") + "\n") : entry.committedBytes;
+          if (entry.languageRecords && !nativeIds.has(entry.conversation.id))
+            language.push(...entry.languageRecords);
+          if (entry.fullUsage && !nativeIds.has(entry.conversation.id))
+            records.push(...entry.fullUsage);
           if (!bytes3?.length) {
             contextGaps.add("native_context_unavailable");
             continue;
           }
           const id = entry.conversation.id, binding2 = { ...this.cacheBinding(id, entry.file ?? id, entry.hash, digest(JSON.stringify(entry.fileStat ?? entry.hash))), scopeHash: digest(JSON.stringify([this.current.scope.eventFrom, this.current.scope.asOf, this.current.scope.harnesses])) };
           const validateUsage = (v) => Array.isArray(v) && v.every((r) => r && typeof r === "object" && typeof r.id === "string" && r.conversationId === id && ["claude", "codex", "pi", "opencode"].includes(r.harness) && Array.isArray(r.gaps) && ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens"].every((k) => r[k] === null || Number.isSafeInteger(r[k]) && r[k] >= 0));
-          let usage = this.derived?.read("native-usage", binding2, validateUsage) ?? null;
+          let usage = entry.fullUsage ?? this.derived?.read("native-usage", binding2, validateUsage) ?? null;
           if (!usage) {
             usage = extractNativeUsage(bytes3, entry.conversation.harness, id, { project: entry.project, maxRecords: this.limits.records, acceptRecord: (_record, scope2) => this.launchAllowed(scope2.project) && (!this.current.scope.eventFrom || scope2.eventAt !== null && scope2.eventAt >= this.current.scope.eventFrom) && (!this.current.scope.asOf || scope2.eventAt !== null && scope2.eventAt <= this.current.scope.asOf) });
             try {
@@ -17979,15 +19317,16 @@ var init_analytics = __esm({
               contextGaps.add("derived_cache_unavailable");
             }
           }
-          records.push(...usage);
+          if (!entry.fullUsage && !nativeIds.has(entry.conversation.id))
+            records.push(...usage);
           const eligible2 = /* @__PURE__ */ new Map();
           for (const [key2, id2] of entry.nativeKeys ?? []) {
             const prompt = entry.prompts.find((p) => p.id === id2);
-            if (prompt?.eligibleHuman)
+            if (prompt && (prompt.eligibleNativeInput ?? prompt.eligibleHuman))
               eligible2.set(key2, { id: id2, route: prompt.route });
           }
           for (const prompt of entry.prompts) {
-            if (!prompt.eligibleHuman)
+            if (!(prompt.eligibleNativeInput ?? prompt.eligibleHuman))
               continue;
             const value = { id: prompt.id, route: prompt.route };
             eligible2.set(prompt.identityBasis, value);
@@ -18001,12 +19340,14 @@ var init_analytics = __esm({
           }
           const parsed = parseContextualNative({ bytes: bytes3, harness: entry.conversation.harness, conversationId: id, parentId: entry.conversation.parentId, project: entry.project, allowRecord: (project) => this.launchAllowed(project), eligiblePrompts: eligible2, maxBytes: this.limits.source, maxRecords: this.limits.records });
           contexts.push(...parsed.records);
+          if (!entry.languageRecords)
+            language.push(...parsed.records);
           for (const gap2 of parsed.gaps)
             contextGaps.add(gap2);
         }
         const facts = aggregateLaunchFacts(records, this.catalog ?? void 0);
         const known = (fields2) => {
-          const values = records.flatMap((r) => fields2.map((k) => r[k])).filter((n3) => typeof n3 === "number");
+          const values = facts.records.flatMap((r) => fields2.map((k) => r[k])).filter((n3) => typeof n3 === "number");
           return values.length ? values.reduce((a, b) => a + b, 0) : null;
         };
         this.update({ usage: { state: records.length ? facts.gaps.length ? "partial" : "observed" : "unavailable", inputTokens: known(["inputTokens"]), outputTokens: known(["outputTokens"]), cacheTokens: known(["cacheReadTokens", "cacheWriteTokens"]), reasoningTokens: known(["reasoningTokens"]), costUsd: facts.valueUsd, measurementBasis: "recorded_native_response_usage_current_catalog", inclusion: "Native cache and reasoning inclusion normalized per host; unknown records excluded from known totals", priceVersion: facts.pricing.sha256 } });
@@ -18014,14 +19355,30 @@ var init_analytics = __esm({
           const rows = records.filter((r) => r.harness === source.harness);
           return { ...source, usage: rows.length ? rows.some((r) => r.inputTokens === null || r.outputTokens === null) ? "partial" : "reported" : "unavailable" };
         }) });
-        this.launchPublish({ facts, languageByModel: attributeDirectLanguage(this.current.profanity, contexts), stage: "preparing" });
+        const allPrompts = [...this.entries.values()].flatMap((e) => e.prompts);
+        if (this.current.profanity)
+          this.update({ profanity: attributeLanguageTerms(this.current.profanity, language, allPrompts) });
+        this.funnel.responsesPriced = facts.equivalentPricedResponses;
+        const globalDuplicates = Math.max(0, records.length - facts.recordedResponses);
+        this.funnel.responsesDeduplicated += globalDuplicates - this.globalUsageDuplicates;
+        this.globalUsageDuplicates = globalDuplicates;
+        this.update({ funnel: { ...this.funnel, selectedSources: this.entries.size, gaps: [...this.gaps] } });
+        this.launchPublish({ facts, ...summarizeDirectedLanguage(allPrompts, language), languageByModel: attributeDirectLanguage(this.current.profanity, language, allPrompts), stage: "preparing" });
         const segmented = segmentContext(contexts, { gaps: [...contextGaps] });
         this.launchSegments = segmented.segments;
-        const sourceVersion = this.current.commitment ?? digest(JSON.stringify(this.epochs));
+        const sourceVersion = digest(JSON.stringify([this.current.commitment ?? this.epochs, this.nativeLedger.map((source) => [source.id, source.hash])]));
         const cacheBase = this.cacheBinding("semantic-job", "selected-context", sourceVersion, digest(JSON.stringify(this.epochs ?? "no-store")));
         let provider;
         if (!this.options.launchPrepareOnly && process.env["POTSHERD_OFFLINE"] !== "1")
-          provider = new FreeJevProvider({ route: { kind: "zen-public" }, cache: { get: (key2) => {
+          provider = new FreeJevProvider({ route: { kind: "zen-public" }, beforeDispatch: async ({ model, attempt, notice }) => {
+            const event = { type: "transfer", snapshotId: this.id, sequence: ++this.sequence, model, recipients: ["OpenCode Zen", "TypeSafe/Jev"], attempt, selectedSegments: 1, notice };
+            if (this.options.onTransfer)
+              await this.options.onTransfer(event);
+            else
+              this.callback?.(event);
+            if (this.controller.signal.aborted)
+              throw new Error("cancelled");
+          }, cache: { get: (key2) => {
             const saved = this.derived?.read("semantic-answer", { ...cacheBase, sourceId: key2, questionVersion: LAUNCH_QUESTION_VERSION, model: FREE_JEV_MODEL, segmentationVersion: CONTEXT_SEGMENTATION_VERSION }, (v) => v !== null && typeof v === "object" && "model" in v && typeof v.model === "string" && "answers" in v && Array.isArray(v.answers) && v.answers.every((a) => a && typeof a.id === "string" && a.answer && typeof a.answer === "object") && "usage" in v);
             return saved ? { ...saved, answers: Object.fromEntries(saved.answers.map((a) => [a.id, a.answer])) } : null;
           }, set: (key2, value) => {
@@ -18029,7 +19386,7 @@ var init_analytics = __esm({
               this.derived?.write("semantic-answer", { ...cacheBase, sourceId: key2, questionVersion: LAUNCH_QUESTION_VERSION, model: FREE_JEV_MODEL, segmentationVersion: CONTEXT_SEGMENTATION_VERSION }, { ...value, answers: Object.entries(value.answers).map(([id, answer]) => ({ id, answer })) }, (v) => v !== null && typeof v === "object" && "answers" in v && Array.isArray(v.answers));
           } } });
         this.launchPublish({ stage: "analyzing" });
-        const semantics3 = await runLaunchSemantics({ segments: segmented.segments, period, tokenLimit: Math.max(0, 1e5 - this.semanticReservedTokens), gaps: segmented.gaps, preparationMs: 0, tone: this.options.tone, until: this.current.scope.asOf ?? (/* @__PURE__ */ new Date()).toISOString(), provider, isCurrent: () => this.fresh(true), privacyVersion: cacheBase.privacyPolicy, sourceVersion, signal: this.controller.signal });
+        const semantics3 = await runLaunchSemantics({ segments: segmented.segments, period, tokenLimit: Math.max(0, 1e5 - this.semanticReservedTokens), gaps: segmented.gaps, preparationMs: 0, tone: this.options.tone, until: this.current.scope.asOf ?? (/* @__PURE__ */ new Date()).toISOString(), provider, isCurrent: () => this.fresh(provider !== void 0), privacyVersion: cacheBase.privacyPolicy, sourceVersion, signal: this.controller.signal });
         if (this.options.launchPrepareOnly || process.env["POTSHERD_OFFLINE"] === "1")
           semantics3.gaps = [...semantics3.gaps.filter((g) => g !== "free_access_unverified"), this.options.launchPrepareOnly ? "developer_prepare_only" : "offline_requested"];
         this.semanticReservedTokens += semantics3.reservedTokens ?? 0;
@@ -18038,8 +19395,49 @@ var init_analytics = __esm({
         this.launchPublish({ semantics: semantics3, stage: "assembling" });
         this.launchPublish({ stage: "ready" });
       }
+      detailAuthorityCurrent() {
+        try {
+          if (this.authority && readAuditAuthority(dbPath(this.root), configPath(this.root)).commitment !== this.authority.commitment)
+            return false;
+          this.storeSnapshot?.assertIdentityCurrent();
+          const config = configPath(this.root), current = fs30.existsSync(config) ? digest(boundedBytes(config, 1024 * 1024)) : null;
+          return current === this.policyCommitment && (!this.hadStore ? !fs30.existsSync(dbPath(this.root)) : true);
+        } catch {
+          return false;
+        }
+      }
+      async streamPrimary(file, harness) {
+        const remaining = 4 * 1024 * 1024 * 1024 - this.nativeReadBytes;
+        if (remaining <= 0)
+          throw new Error("native_usage_total_bytes_limit");
+        this.sourceCandidate(harness, false);
+        const snapshot = await streamNativeFacts(file, harness, { signal: this.controller.signal, maxBytes: remaining, maxPromptBytes: 64 * 1024 * 1024, captureBytes: Math.max(0, Math.min(this.limits.source, this.limits.total - this.totalBytes)), sourceAllowed: (nativeId, project) => !this.denied(sourceId(harness, nativeId), project), accept: (project, time2) => this.launchAllowed(project) && (!this.current.scope.eventFrom || time2 !== null && time2 >= this.current.scope.eventFrom) && (!this.current.scope.asOf || time2 !== null && time2 <= this.current.scope.asOf) });
+        this.nativeReadBytes += snapshot.bytes;
+        this.totalBytes += snapshot.facts.bytes.length;
+        this.funnel.nativeFilesParsed++;
+        this.funnel.responsesObserved += snapshot.counts.observed;
+        this.funnel.responsesExcluded += snapshot.counts.excluded;
+        this.funnel.responsesDeduplicated += snapshot.counts.deduplicated;
+        this.funnel.sourceFiles.push({ fileHash: digest(file), harness, bytes: snapshot.bytes, state: snapshot.facts.gaps.includes("maintenance_source_excluded") ? "excluded" : "parsed", code: snapshot.facts.gaps.find((g) => g.startsWith("native_metadata_") || g === "native_scope_record_unavailable") ?? snapshot.facts.gaps[0] ?? null, responsesObserved: snapshot.counts.observed, responsesExcluded: snapshot.facts.gaps.includes("maintenance_source_excluded") ? snapshot.counts.observed : snapshot.counts.excluded, responsesDeduplicated: snapshot.counts.deduplicated });
+        if (snapshot.facts.gaps.includes("maintenance_source_excluded")) {
+          this.funnel.excludedReasons = { ...this.funnel.excludedReasons, maintenance_source: (this.funnel.excludedReasons.maintenance_source ?? 0) + 1 };
+          return;
+        }
+        const id = sourceId(harness, snapshot.facts.nativeId);
+        this.nativeLedger.push({ id, file, hash: snapshot.hash, bytes: snapshot.bytes, usage: snapshot.usage, language: snapshot.language });
+        for (const gap2 of snapshot.facts.gaps)
+          this.gap(gap2, harness);
+        if (!snapshot.facts.events.length && !snapshot.usage.length)
+          return;
+        this.add(harness, snapshot.facts, file, snapshot.hash);
+        const entry = this.entries.get(sourceId(harness, snapshot.facts.nativeId));
+        if (entry) {
+          entry.fullUsage = [...entry.fullUsage ?? [], ...snapshot.usage];
+          entry.languageRecords = [...entry.languageRecords ?? [], ...snapshot.language];
+        }
+      }
       async primary(file, harness, canonical3) {
-        const stat = fs27.statSync(file, { bigint: true }), stamp = digest([stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":"));
+        const stat = fs30.statSync(file, { bigint: true }), stamp = digest([stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":"));
         const pointerBinding = this.cacheBinding(digest(file), file, "file-pointer-v1", stamp);
         const validPointer = (v) => v !== null && typeof v === "object" && "artifactHash" in v && typeof v.artifactHash === "string" && /^[a-f0-9]{64}$/.test(v.artifactHash);
         const pointer = this.derived?.read("file-pointer", pointerBinding, validPointer) ?? null;
@@ -18091,16 +19489,16 @@ var init_analytics = __esm({
           return;
         const db = this.db, scope2 = this.memoryScope(), filter = scopeSql(scope2);
         const harnesses = this.current.scope.harnesses;
-        const rows = db.prepare(`SELECT s.source_id,s.native_session_id,s.harness,s.project,s.active_revision_id,(SELECT parent.native_session_id FROM source_relations rel JOIN memory_sources parent ON parent.source_id=rel.from_source_id WHERE rel.to_source_id=s.source_id AND rel.evidence_revision_id=s.active_revision_id AND rel.kind='spawn' LIMIT 1) parent_native_id FROM memory_sources s JOIN source_revisions r ON r.revision_id=s.active_revision_id WHERE s.harness IN (${harnesses.map(() => "?").join(",") || "NULL"}) AND EXISTS(SELECT 1 FROM revision_units ru JOIN evidence_units u ON u.unit_revision_id=ru.unit_revision_id WHERE ru.revision_id=r.revision_id AND ${filter.sql}) ORDER BY s.source_id LIMIT ?`).all(...harnesses, ...filter.params, this.limits.candidates + 1);
+        const rows = db.prepare(`SELECT s.source_id,s.native_session_id,s.harness,s.project,s.active_revision_id,(SELECT parent.native_session_id FROM source_relations rel JOIN memory_sources parent ON parent.source_id=rel.from_source_id WHERE rel.to_source_id=s.source_id AND rel.evidence_revision_id=s.active_revision_id AND rel.kind='spawn' LIMIT 1) parent_native_id FROM memory_sources s JOIN source_revisions r ON r.revision_id=s.active_revision_id WHERE s.harness IN (${harnesses.map(() => "?").join(",") || "NULL"}) ${this.options.launch ? "" : `AND EXISTS(SELECT 1 FROM revision_units ru JOIN evidence_units u ON u.unit_revision_id=ru.unit_revision_id WHERE ru.revision_id=r.revision_id AND ${filter.sql})`} ORDER BY s.source_id LIMIT ?`).all(...harnesses, ...this.options.launch ? [] : filter.params, this.limits.candidates + 1);
         if (rows.length > this.limits.candidates) {
           this.omitted++;
           this.gap("candidate_limit");
         }
-        const coverageBinding = this.cacheBinding("canonical-coverage", this.root, this.storeSnapshot.hash, digest(JSON.stringify([this.storeSnapshot.hash, this.current.scope.eventFrom, this.current.scope.asOf, this.current.scope.harnesses])));
+        const coverageBinding = this.cacheBinding("canonical-coverage", this.root, this.authority?.commitment ?? "no-authority", digest(JSON.stringify([this.authority?.commitment ?? "no-authority", this.current.scope.eventFrom, this.current.scope.asOf, this.current.scope.harnesses])));
         const validateCoverage = (v) => v !== null && typeof v === "object" && "omittedKinds" in v && Array.isArray(v.omittedKinds) && v.omittedKinds.every((g) => typeof g === "string");
         const cachedCoverage = this.derived?.read("source-coverage", coverageBinding, validateCoverage);
-        const coverage = cachedCoverage ?? inspectCoverage(db, scope2, "disabled", { harnesses: [...harnesses] });
-        if (!cachedCoverage && this.derived) {
+        const coverage = this.options.launch ? { state: "partial", snapshotEpochs: this.epochs, scope: scope2, capturedThrough: null, pendingSources: 0, failedSources: 0, omittedKinds: [], semantic: "disabled" } : cachedCoverage ?? inspectCoverage(db, scope2, "disabled", { harnesses: [...harnesses] });
+        if (!this.options.launch && !cachedCoverage && this.derived) {
           try {
             if (this.fresh())
               this.derived.write("source-coverage", coverageBinding, coverage, validateCoverage);
@@ -18113,8 +19511,9 @@ var init_analytics = __esm({
         for (const row2 of rows.slice(0, this.limits.candidates)) {
           if (this.controller.signal.aborted)
             break;
-          if (this.denied(row2.source_id, row2.project))
+          if (this.entries.has(row2.source_id) || this.denied(row2.source_id, row2.project))
             continue;
+          this.funnel.retainedSources++;
           this.sourceCandidate(row2.harness);
           const revision = getSourceRevision(db, row2.source_id, row2.active_revision_id);
           if (!revision)
@@ -18154,11 +19553,11 @@ var init_analytics = __esm({
             const route = { basis: "canonical", refs: unit.span_id ? [{ sourceId: row2.source_id, revisionId: row2.active_revision_id, spanId: String(unit.span_id) }] : [], scope: { ...scope2, sourceIds: [row2.source_id] } };
             if (route.refs.length)
               refs2.set(start, route);
-            events.push({ key: String(unit.unit_key), rawStart: start, rawEnd: typeof locator.rawEnd === "number" ? locator.rawEnd : -1, role: "user", text: text2, eventAt: clock(unit.event_at), project: typeof unit.project === "string" ? unit.project : null, origin: "unknown", eligible: false, excluded: row2.parent_native_id ? "child_initialization" : "human_origin_unavailable", identity: String(unit.unit_key) });
+            events.push({ observed: !row2.parent_native_id || events.length > 0, key: String(unit.unit_key), rawStart: start, rawEnd: typeof locator.rawEnd === "number" ? locator.rawEnd : -1, role: "user", text: text2, eventAt: clock(unit.event_at), project: typeof unit.project === "string" ? unit.project : null, origin: "unknown", eligible: false, excluded: row2.parent_native_id ? "child_initialization" : "human_origin_unavailable", identity: String(unit.unit_key) });
           }
           if (revision.archiveRelativePath && revision.artifactBasis === "raw_prefix" && (row2.harness === "claude" || row2.harness === "codex")) {
-            const file = path21.resolve(this.root, revision.archiveRelativePath);
-            if (file.startsWith(this.root + path21.sep))
+            const file = path24.resolve(this.root, revision.archiveRelativePath);
+            if (file.startsWith(this.root + path24.sep))
               try {
                 await this.primary(file, row2.harness, { revisionId: row2.active_revision_id, refs: refs2, hash: revision.artifactHash, nativeId: row2.native_session_id, parent: row2.parent_native_id });
                 this.emit("parsing");
@@ -18188,16 +19587,66 @@ var init_analytics = __esm({
         this.started = true;
         this.callback = onEvent;
         this.emit("discovering");
+        const inventory = this.options.launch ? await censusNativeSources(this.current.scope.harnesses, this.options, this.controller.signal, (h, files, roots, gaps) => {
+          this.funnel.nativeFilesDiscovered += files.length;
+          this.update({ sources: this.current.sources.map((source) => source.harness === h ? { ...source, state: gaps.length ? "unavailable" : files.length ? "available" : "absent", census: { checked: true, files: files.length, bytes: files.reduce((n3, f) => n3 + f.bytes, 0), roots, unit: h === "opencode" && !files.some((f) => f.kind === "opencode-json") ? "database" : "file" }, candidateFiles: files.length } : source) });
+          for (const gap2 of gaps)
+            this.gap(gap2, h);
+          this.emit("discovering");
+        }) : null;
+        this.update({ progress: { ...this.current.progress, label: "Checking local privacy" } });
+        this.callback?.({ type: "progress", snapshotId: this.id, sequence: ++this.sequence, progress: this.current.progress, sources: this.current.sources });
         this.policy();
+        this.update({ progress: { ...this.current.progress, label: "Reading native history" } });
+        if (this.policyAvailable && inventory) {
+          for (const candidate of inventory.files) {
+            if (this.controller.signal.aborted)
+              break;
+            if (this.candidates >= this.limits.candidates) {
+              this.gap("candidate_limit", candidate.harness);
+              this.omitted++;
+              continue;
+            }
+            try {
+              if (candidate.kind === "database")
+                await this.openCode(candidate.file);
+              else if (candidate.kind === "jsonl")
+                await this.streamPrimary(candidate.file, candidate.harness);
+              else
+                continue;
+            } catch (error) {
+              const code = error instanceof Error && /^[a-z][a-z0-9_]+$/.test(error.message) ? error.message : "source_unreadable";
+              this.funnel.sourceFiles.push({ fileHash: digest(candidate.file), harness: candidate.harness, bytes: candidate.bytes, state: code === "native_source_policy_excluded" ? "excluded" : "failed", code, responsesObserved: 0, responsesExcluded: 0, responsesDeduplicated: 0 });
+              if (error instanceof Error && error.message === "native_source_policy_excluded")
+                this.funnel.excludedReasons = { ...this.funnel.excludedReasons, source_policy: (this.funnel.excludedReasons.source_policy ?? 0) + 1 };
+              else {
+                this.omitted++;
+                this.gap(code, candidate.harness);
+              }
+            }
+            this.emit("parsing");
+            await pause2();
+          }
+        }
+        if (inventory && this.policyAvailable) {
+          const legacy = readLegacyOpenCode(inventory.files.filter((f) => f.kind === "opencode-json"));
+          this.funnel.nativeFilesParsed += legacy.parsed;
+          for (const gap2 of legacy.gaps)
+            this.gap(gap2, "opencode");
+          for (const group of legacy.groups)
+            this.addOpenJson(group);
+        }
         if (this.options.launch && !this.options.launchPrepareOnly && process.env["POTSHERD_OFFLINE"] !== "1" && this.catalog)
           void refreshPublicCatalog(this.derived, this.catalog, this.controller.signal);
-        if (this.policyAvailable)
+        if (this.policyAvailable) {
+          this.update({ progress: { ...this.current.progress, label: "Reading retained history" } });
           await this.canonical();
-        if (this.policyAvailable)
+        }
+        if (this.policyAvailable && !inventory)
           for (const harness of this.current.scope.harnesses) {
             if (this.controller.signal.aborted)
               break;
-            const roots = harness === "claude" ? [path21.join(claudeDir(this.options.claudeDir), "projects")] : harness === "codex" ? [codexPaths(codexDir(this.options.codexDir)).sessions, codexPaths(codexDir(this.options.codexDir)).archived] : harness === "pi" ? [piSessionsDir(this.options.piDir)] : [opencodeDir(this.options.opencodeDir)];
+            const roots = harness === "claude" ? [path24.join(claudeDir(this.options.claudeDir), "projects")] : harness === "codex" ? [codexPaths(codexDir(this.options.codexDir)).sessions, codexPaths(codexDir(this.options.codexDir)).archived] : harness === "pi" ? [piSessionsDir(this.options.piDir)] : [opencodeDir(this.options.opencodeDir)];
             for (const root of roots) {
               try {
                 for await (const file of walk(root, this.limits.candidates * 32, this.controller.signal, harness === "opencode" ? 3 : 8)) {
@@ -18228,7 +19677,7 @@ var init_analytics = __esm({
                       await this.primary(file, harness);
                   } catch (error) {
                     this.omitted++;
-                    this.gap(error instanceof Error && (["source_bytes_limit", "source_changed"].includes(error.message) || error.message.startsWith("audit_sqlite_")) ? error.message : "source_unreadable", harness);
+                    this.gap(error instanceof Error && (["source_bytes_limit", "source_changed"].includes(error.message) || (error.message.startsWith("audit_sqlite_") || error.message.startsWith("audit_policy_"))) ? error.message : "source_unreadable", harness);
                   }
                   this.emit("parsing");
                   await pause2();
@@ -18256,48 +19705,100 @@ var init_analytics = __esm({
         this.callback = void 0;
         return this.current;
       }
-      async openCode(file) {
-        boundedBytes(file, this.limits.source);
-        const discovered = openSessions(file, Math.max(1, this.limits.candidates - this.candidates), this.limits.source);
-        if ("gap" in discovered) {
-          this.candidates++;
-          this.gap(discovered.gap, "opencode");
+      addOpenJson(group) {
+        const id = sourceId("opencode", group.facts.nativeId);
+        if (this.denied(id, group.facts.project))
           return;
-        }
-        if (discovered.more)
-          this.gap("candidate_limit", "opencode");
-        for (const row2 of discovered.sessions) {
-          if (this.controller.signal.aborted)
-            break;
-          if (this.candidates >= this.limits.candidates) {
-            this.omitted++;
-            this.gap("candidate_limit", "opencode");
-            break;
-          }
-          const id = sourceId("opencode", row2.id);
-          if (this.entries.has(id) || this.denied(id, row2.project))
-            continue;
+        const previous = this.entries.get(id);
+        if (!previous) {
           this.sourceCandidate("opencode", false);
-          const maxBytes = Math.min(this.limits.source, this.limits.total - this.totalBytes);
-          const snapshot = openPrompts(discovered.schema, row2.id, this.limits.records, maxBytes, this.limits.source);
-          this.totalBytes += snapshot.bytes;
-          const events = snapshot.prompts.map((p) => ({ key: p.key, rawStart: p.seq, rawEnd: p.seq, role: "user", text: p.text, eventAt: p.time, project: row2.project, origin: "unknown", eligible: false, excluded: "projection_origin_unverified", identity: `message:${p.key}` }));
-          const facts = { nativeId: row2.id, project: row2.project, parent: row2.parent, child: row2.parent !== null, title: row2.title, events, gaps: snapshot.gaps, hash: snapshot.hash, consumed: 0, bytes: Buffer.alloc(0) };
-          this.add("opencode", facts, file, "");
-          const entry = this.entries.get(id);
-          if (entry) {
-            entry.open = { schema: discovered.schema, id: row2.id, maxBytes, assertCurrent: discovered.assertCurrent, assertIdentityCurrent: discovered.assertIdentityCurrent };
-            entry.committedBytes = void 0;
-            entry.fileHash = null;
-            entry.nativeRecords = snapshot.nativeRecords.map((record4) => ({ ...record4, cwd: row2.project }));
-            entry.prompts = entry.prompts.map((p, i) => {
-              this.routes.delete(routeKey(p.route));
-              const route = { basis: "projection_snapshot", sourceId: id, artifactHash: snapshot.hash, sourcePath: file, nativeSessionId: row2.id, seq: p.route.basis === "transient_snapshot" && p.route.rawStart !== null ? p.route.rawStart : i + 1, snapshotId: this.id, fidelity: "exchange_projection" };
-              const prompt = { ...p, originBasis: "opencode_user_projection", route };
-              this.routes.set(routeKey(route), prompt);
-              return prompt;
-            });
+          this.add("opencode", group.facts, group.root, "");
+        }
+        const entry = this.entries.get(id);
+        if (!entry)
+          return;
+        const existing = new Set(entry.prompts.map((p) => p.identityBasis));
+        if (previous)
+          for (const event of group.facts.events) {
+            if (existing.has(event.identity) || !this.selected(event))
+              continue;
+            const route = { basis: "projection_snapshot", sourceId: id, artifactHash: group.facts.hash, sourcePath: group.root, nativeSessionId: group.facts.nativeId, seq: event.rawStart, snapshotId: this.id, fidelity: "exchange_projection" }, prompt = { id: digest(`${id}:${event.identity}`).slice(0, 32), conversationId: id, role: "user", originBasis: "opencode_user_projection", identityBasis: event.identity, eligibleHuman: false, eligibleNativeInput: event.observed, languageEligible: !group.facts.child, project: event.project, excludedReason: event.excluded, eventAt: event.eventAt, text: event.text, route };
+            entry.prompts.push(prompt);
+            this.routes.set(routeKey(route), prompt);
+            this.totalPrompts++;
           }
+        const usage = extractNativeUsage(Buffer.from(group.records.map((r) => JSON.stringify(r)).join("\n") + "\n"), "opencode", id, { project: group.facts.project, acceptRecord: (_r, scope2) => this.launchAllowed(scope2.project) && (!this.current.scope.eventFrom || scope2.eventAt !== null && scope2.eventAt >= this.current.scope.eventFrom) && (!this.current.scope.asOf || scope2.eventAt !== null && scope2.eventAt <= this.current.scope.asOf) });
+        entry.fullUsage = [...entry.fullUsage ?? [], ...usage];
+        entry.nativeFiles = [...entry.nativeFiles ?? [], ...group.files];
+        if (!previous)
+          entry.nativeRecords = group.records;
+        const language = group.records.map((r, i) => {
+          const m = r.message, prompt = entry.prompts.find((p) => p.identityBasis === `message:${r.id}`);
+          return { id: prompt?.id ?? `response:${r.id}`, conversationId: id, parentId: group.facts.parent, harness: "opencode", eventAt: clock(r.timestamp), project: group.facts.project, role: m.role === "user" ? "user" : "assistant", text: "", model: typeof m.modelID === "string" ? m.modelID : null, provider: typeof m.providerID === "string" ? m.providerID : null, directUser: !!prompt?.eligibleNativeInput, route: null };
+        });
+        entry.languageRecords = [...entry.languageRecords ?? [], ...language];
+        this.funnel.responsesObserved += group.records.filter((r) => r.message?.role === "assistant").length;
+      }
+      async openCode(file) {
+        const reader = openAuditSqliteSnapshot(file, this.limits.store);
+        try {
+          const discovered = openSessions(file, Math.max(1, this.limits.candidates - this.candidates), this.limits.store, reader);
+          if ("gap" in discovered) {
+            this.candidates++;
+            this.gap(discovered.gap, "opencode");
+            return;
+          }
+          if (discovered.more)
+            this.gap("candidate_limit", "opencode");
+          for (const row2 of discovered.sessions) {
+            if (this.controller.signal.aborted)
+              break;
+            if (this.candidates >= this.limits.candidates) {
+              this.omitted++;
+              this.gap("candidate_limit", "opencode");
+              break;
+            }
+            const id = sourceId("opencode", row2.id);
+            if (this.entries.has(id) || this.denied(id, row2.project))
+              continue;
+            this.sourceCandidate("opencode", false);
+            const maxBytes = Math.min(this.limits.source, this.limits.total - this.totalBytes);
+            const sessionSchema = selectOpenSchema(discovered.schema, row2.id, reader), snapshot = openPrompts(sessionSchema, row2.id, this.limits.records, Math.max(1, maxBytes), this.limits.store, reader), fullMetadata = openUsageMetadata(sessionSchema, row2.id, reader), observed2 = openNativeInputs(sessionSchema, fullMetadata.records, reader);
+            for (const gap2 of [...fullMetadata.gaps, ...observed2.gaps])
+              this.gap(gap2, "opencode");
+            this.totalBytes += Math.min(snapshot.bytes, Math.max(0, maxBytes));
+            const firstUser = fullMetadata.records.find((r) => r.message?.role === "user")?.id;
+            const events = (this.options.launch && (sessionSchema.parts || sessionSchema.v2) ? observed2.prompts : snapshot.prompts).map((p) => ({ key: p.key, rawStart: p.seq, rawEnd: p.seq, role: "user", observed: row2.parent === null || row2.initialization === false || p.key !== firstUser, text: p.text, eventAt: p.time, project: row2.project, origin: "unknown", eligible: false, excluded: row2.parent && row2.initialization !== false && p.key === firstUser ? "child_initialization" : null, identity: `message:${p.key}` }));
+            const facts = { nativeId: row2.id, project: row2.project, parent: row2.parent, child: row2.parent !== null, title: row2.title, events, gaps: snapshot.gaps, hash: snapshot.hash, consumed: 0, bytes: Buffer.alloc(0) };
+            this.add("opencode", facts, file, "");
+            const entry = this.entries.get(id);
+            if (entry) {
+              entry.open = { schema: sessionSchema, id: row2.id, maxBytes, assertCurrent: discovered.assertCurrent, assertIdentityCurrent: discovered.assertIdentityCurrent };
+              entry.committedBytes = void 0;
+              entry.fileHash = null;
+              entry.nativeRecords = snapshot.nativeRecords.map((record4) => ({ ...record4, cwd: row2.project }));
+              const metadata = fullMetadata;
+              for (const gap2 of metadata.gaps)
+                this.gap(gap2, "opencode");
+              entry.languageRecords = metadata.records.map((record4, i) => {
+                const m = record4.message;
+                const prompt = entry.prompts.find((p) => p.identityBasis === `message:${record4.id}`);
+                return { id: prompt?.id ?? `response:${record4.id}`, conversationId: id, parentId: row2.parent, harness: "opencode", eventAt: clock(record4.timestamp), project: row2.project, role: m.role === "user" ? "user" : "assistant", text: "", model: typeof m.modelID === "string" ? m.modelID : typeof m.model?.id === "string" ? String(m.model.id) : null, provider: typeof m.providerID === "string" ? m.providerID : null, directUser: !!prompt?.eligibleNativeInput, route: null };
+              });
+              entry.fullUsage = extractNativeUsage(Buffer.from(metadata.records.map((r) => JSON.stringify({ ...r, cwd: row2.project })).join("\n") + "\n"), "opencode", id, { project: row2.project, acceptRecord: (_r, scope2) => this.launchAllowed(scope2.project) && (!this.current.scope.eventFrom || scope2.eventAt !== null && scope2.eventAt >= this.current.scope.eventFrom) && (!this.current.scope.asOf || scope2.eventAt !== null && scope2.eventAt <= this.current.scope.asOf) });
+              this.funnel.responsesObserved += metadata.records.filter((r) => r.message?.role === "assistant").length;
+              entry.prompts = entry.prompts.map((p, i) => {
+                this.routes.delete(routeKey(p.route));
+                const route = { basis: "projection_snapshot", sourceId: id, artifactHash: snapshot.hash, sourcePath: file, nativeSessionId: row2.id, seq: p.route.basis === "transient_snapshot" && p.route.rawStart !== null ? p.route.rawStart : i + 1, snapshotId: this.id, fidelity: "exchange_projection" };
+                const prompt = { ...p, originBasis: "opencode_user_projection", route };
+                this.routes.set(routeKey(route), prompt);
+                return prompt;
+              });
+            }
+          }
+          this.funnel.nativeFilesParsed++;
+        } finally {
+          reader.db.close();
         }
       }
       async previewLaunch() {
@@ -18305,8 +19806,8 @@ var init_analytics = __esm({
         if (!this.options.launchPrepareOnly || !this.fresh(true))
           throw new Error("launch_preview_unavailable");
         const semantic = this.current.launch?.semantics, selected = semantic?.window.selected;
-        const segments = selected ? selectedSegments(semantic.window, this.launchSegments) : [];
-        const requests = segments.map((segment) => {
+        const segments2 = selected ? selectedSegments(semantic.window, this.launchSegments) : [];
+        const requests = segments2.map((segment) => {
           const request = buildLaunchRequest(segment), serialized = JSON.stringify(request);
           return { segmentId: segment.id, hash: digest(serialized), bytes: Buffer.byteLength(serialized), request };
         });
@@ -18358,7 +19859,7 @@ var init_analytics = __esm({
         const prompt = this.routes.get(routeKey(route));
         if (!prompt)
           return unavailable("unavailable", "unknown_evidence_route");
-        if (!this.fresh(true)) {
+        if (!this.detailAuthorityCurrent()) {
           this.invalidate();
           return unavailable("stale", "source_or_policy_changed");
         }
@@ -18370,7 +19871,7 @@ var init_analytics = __esm({
           const item = result.evidence?.[0];
           if (!item)
             return unavailable("unavailable", result.warnings?.[0] ?? "canonical_evidence_unavailable");
-          if (!this.fresh(true)) {
+          if (!this.detailAuthorityCurrent()) {
             this.invalidate();
             return unavailable("stale", "source_or_policy_changed");
           }
@@ -18381,17 +19882,19 @@ var init_analytics = __esm({
         const entry = this.entries.get(prompt.conversationId);
         if (!entry?.file)
           return unavailable("unavailable", "source_unavailable");
-        try {
-          if (entry.open) {
-            const current = openPrompts(entry.open.schema, entry.open.id, this.limits.records, entry.open.maxBytes, this.limits.source);
-            if (current.hash !== entry.hash)
+        if (!this.options.launch) {
+          try {
+            if (entry.open) {
+              const current = openPrompts(entry.open.schema, entry.open.id, this.limits.records, entry.open.maxBytes, this.limits.source);
+              if (current.hash !== entry.hash)
+                return unavailable("stale", "source_changed");
+            } else if (digestFile(entry.file) !== entry.fileHash)
               return unavailable("stale", "source_changed");
-          } else if (digest(boundedBytes(entry.file, this.limits.source)) !== entry.fileHash)
-            return unavailable("stale", "source_changed");
-        } catch {
-          return unavailable("unavailable", "source_missing_or_unreadable");
+          } catch {
+            return unavailable("unavailable", "source_missing_or_unreadable");
+          }
         }
-        if (!this.fresh(true)) {
+        if (!this.detailAuthorityCurrent()) {
           this.invalidate();
           return unavailable("stale", "source_or_policy_changed");
         }
@@ -18416,7 +19919,7 @@ var init_analytics = __esm({
             if (!entry)
               throw new Error("source unavailable");
             entry.open?.assertCurrent();
-            if (entry.file && entry.fileHash !== null && digest(boundedBytes(entry.file, this.limits.source)) !== entry.fileHash)
+            if (entry.file && entry.fileHash !== null && digestFile(entry.file) !== entry.fileHash)
               throw new Error("source changed");
           }
           return true;
@@ -18628,8 +20131,8 @@ function renderVerify(claudeDir2, t = new Theme()) {
   card.text("every number on the audit card with the python standard library and");
   card.text("nothing else \u2014 no potsherd, no database, no checkout needed. paste it:");
   card.blank();
-  for (const line2 of snippetFor(claudeDir2).split("\n"))
-    card.raw(line2);
+  for (const line of snippetFor(claudeDir2).split("\n"))
+    card.raw(line);
   card.blank();
   card.text("the definitions it implements:");
   card.blank();
@@ -18932,13 +20435,13 @@ __export(claude_exports, {
   recordTypeStats: () => recordTypeStats,
   sourceDir: () => sourceDir3
 });
-import fs28 from "node:fs";
-import path22 from "node:path";
+import fs31 from "node:fs";
+import path25 from "node:path";
 function sourceDir3(claudeConfigDir) {
   return claudePaths(claudeDir(claudeConfigDir)).projects;
 }
 function archiveSourceDir(root) {
-  return path22.join(archiveDir(root ?? potsherdDir()), "claude");
+  return path25.join(archiveDir(root ?? potsherdDir()), "claude");
 }
 function discover3(options = {}) {
   const live = walkProjects(sourceDir3(options.claudeDir), "live");
@@ -18950,7 +20453,7 @@ function discover3(options = {}) {
     for (const found of walkProjects(archiveRoot, "archived")) {
       if (byRel.has(found.rel))
         continue;
-      found.originalPath = path22.join(sourceDir3(options.claudeDir), found.rel);
+      found.originalPath = path25.join(sourceDir3(options.claudeDir), found.rel);
       byRel.set(found.rel, found);
     }
   }
@@ -18987,7 +20490,7 @@ function doctorLine3(options = {}) {
   } catch {
     found = [];
   }
-  const exists2 = fs28.existsSync(dir);
+  const exists2 = fs31.existsSync(dir);
   const sidechains = found.filter((f) => f.isSidechain).length;
   const archived = found.filter((f) => f.status === "archived").length;
   const sessions = found.length - sidechains;
@@ -19026,14 +20529,14 @@ function walkProjects(projectsDir, status3) {
     if (!slugEntry.isDirectory())
       continue;
     const slug = slugEntry.name;
-    const dir = path22.join(projectsDir, slug);
+    const dir = path25.join(projectsDir, slug);
     for (const entry of readdirSafe3(dir, true)) {
       if (entry.isFile()) {
         if (!entry.name.endsWith(".jsonl"))
           continue;
         push(out, {
-          file: path22.join(dir, entry.name),
-          rel: path22.join(slug, entry.name),
+          file: path25.join(dir, entry.name),
+          rel: path25.join(slug, entry.name),
           slug,
           sessionId: basename3(entry.name),
           isSidechain: false,
@@ -19046,16 +20549,16 @@ function walkProjects(projectsDir, status3) {
       if (entry.name === "memory")
         continue;
       const flat = entry.name === SIDECHAIN_DIR;
-      const subDir = flat ? path22.join(dir, entry.name) : path22.join(dir, entry.name, SIDECHAIN_DIR);
-      const relDir = flat ? path22.join(slug, entry.name) : path22.join(slug, entry.name, SIDECHAIN_DIR);
-      for (const name of readdirSafe3(subDir)) {
-        if (!name.endsWith(".jsonl"))
+      const subDir = flat ? path25.join(dir, entry.name) : path25.join(dir, entry.name, SIDECHAIN_DIR);
+      const relDir = flat ? path25.join(slug, entry.name) : path25.join(slug, entry.name, SIDECHAIN_DIR);
+      for (const name2 of readdirSafe3(subDir)) {
+        if (!name2.endsWith(".jsonl"))
           continue;
         push(out, {
-          file: path22.join(subDir, name),
-          rel: path22.join(relDir, name),
+          file: path25.join(subDir, name2),
+          rel: path25.join(relDir, name2),
           slug,
-          sessionId: flat ? basename3(name) : `${entry.name}:${basename3(name)}`,
+          sessionId: flat ? basename3(name2) : `${entry.name}:${basename3(name2)}`,
           isSidechain: true,
           ...flat ? {} : { parentSessionId: entry.name },
           status: status3
@@ -19112,11 +20615,11 @@ function foldContinuations(exchanges, fromSeq) {
 async function readTranscriptVersion(filePath) {
   let seen = 0;
   try {
-    for await (const line2 of readJsonlLines(filePath)) {
+    for await (const line of readJsonlLines(filePath)) {
       if (seen >= VERSION_SCAN_LINES)
         break;
       seen += 1;
-      const parsed = parseJsonLine(line2.text);
+      const parsed = parseJsonLine(line.text);
       if (!isRecord(parsed))
         continue;
       if (typeof parsed.version === "string" && parsed.version)
@@ -19159,14 +20662,14 @@ function basename3(fileName) {
 }
 function statSafe(file) {
   try {
-    return fs28.statSync(file);
+    return fs31.statSync(file);
   } catch {
     return null;
   }
 }
 function readdirSafe3(dir, withFileTypes) {
   try {
-    return withFileTypes ? fs28.readdirSync(dir, { withFileTypes: true }) : fs28.readdirSync(dir);
+    return withFileTypes ? fs31.readdirSync(dir, { withFileTypes: true }) : fs31.readdirSync(dir);
   } catch {
     return [];
   }
@@ -19218,12 +20721,12 @@ var init_claude2 = __esm({
 });
 
 // packages/core/dist/parser/codex.js
-import fs29 from "node:fs";
-import path23 from "node:path";
+import fs32 from "node:fs";
+import path26 from "node:path";
 async function parseCodexTranscript(filePath, options = {}) {
-  const absolute2 = path23.resolve(filePath);
+  const absolute2 = path26.resolve(filePath);
   const fromOffset = options.fromOffset ?? 0;
-  const snapshot = fs29.readFileSync(absolute2);
+  const snapshot = fs32.readFileSync(absolute2);
   const seqByOffset = /* @__PURE__ */ new Map();
   const humanPrompts = await collectHumanPrompts(absolute2, fromOffset, snapshot);
   const unknownTypes = {};
@@ -19264,13 +20767,13 @@ async function parseCodexTranscript(filePath, options = {}) {
       redacted: false
     });
   };
-  for await (const line2 of readJsonlLines(absolute2, { start: fromOffset, snapshot })) {
-    if (!line2.terminated)
+  for await (const line of readJsonlLines(absolute2, { start: fromOffset, snapshot })) {
+    if (!line.terminated)
       break;
-    endOffset = line2.end;
-    const parsed = parseJsonLine(line2.text);
+    endOffset = line.end;
+    const parsed = parseJsonLine(line.text);
     if (parsed === void 0) {
-      if (line2.text.trim())
+      if (line.text.trim())
         malformedLines += 1;
       continue;
     }
@@ -19340,9 +20843,9 @@ async function parseCodexTranscript(filePath, options = {}) {
           byCallId: /* @__PURE__ */ new Map(),
           files: []
         };
-        seqByOffset.set(line2.start, seq);
+        seqByOffset.set(line.start, seq);
       } else if (payload.role === "assistant" && current) {
-        seqByOffset.set(line2.start, current.seq);
+        seqByOffset.set(line.start, current.seq);
         current.assistantTexts.push(text2);
         current.ts = ts;
         assistantTurns += 1;
@@ -19350,7 +20853,7 @@ async function parseCodexTranscript(filePath, options = {}) {
       continue;
     }
     if (TOOL_CALL_TYPES.has(kind2) && current) {
-      seqByOffset.set(line2.start, current.seq);
+      seqByOffset.set(line.start, current.seq);
       let input = payload.arguments;
       if (typeof input === "string")
         input = safeParseJson(input);
@@ -19358,8 +20861,8 @@ async function parseCodexTranscript(filePath, options = {}) {
         input = payload.input;
       else if (payload.action !== void 0)
         input = payload.action;
-      const name = typeof payload.name === "string" && payload.name || typeof payload.namespace === "string" && payload.namespace || kind2;
-      const call = { name, input: stringifyToolInput(input) };
+      const name2 = typeof payload.name === "string" && payload.name || typeof payload.namespace === "string" && payload.namespace || kind2;
+      const call = { name: name2, input: stringifyToolInput(input) };
       current.toolCalls.push(call);
       toolCallCount += 1;
       if (typeof payload.call_id === "string") {
@@ -19370,7 +20873,7 @@ async function parseCodexTranscript(filePath, options = {}) {
       continue;
     }
     if (TOOL_OUTPUT_TYPES.has(kind2) && current) {
-      seqByOffset.set(line2.start, current.seq);
+      seqByOffset.set(line.start, current.seq);
       const callId = typeof payload.call_id === "string" ? payload.call_id : void 0;
       if (!callId)
         continue;
@@ -19387,7 +20890,7 @@ async function parseCodexTranscript(filePath, options = {}) {
   }
   finalize();
   const id = resolvedId();
-  const projectSlug = options.projectSlug ?? (cwd ? path23.basename(cwd) : "unknown");
+  const projectSlug = options.projectSlug ?? (cwd ? path26.basename(cwd) : "unknown");
   const bytes3 = options.bytes ?? statBytes2(absolute2);
   const session = {
     id,
@@ -19419,10 +20922,10 @@ async function parseCodexTranscript(filePath, options = {}) {
 }
 async function collectHumanPrompts(absolute2, start, snapshot) {
   const out = /* @__PURE__ */ new Set();
-  for await (const line2 of readJsonlLines(absolute2, { start, snapshot })) {
-    if (!line2.terminated)
+  for await (const line of readJsonlLines(absolute2, { start, snapshot })) {
+    if (!line.terminated)
       break;
-    const parsed = parseJsonLine(line2.text);
+    const parsed = parseJsonLine(line.text);
     if (!isRecord(parsed) || parsed.type !== "event_msg")
       continue;
     const payload = parsed.payload;
@@ -19442,14 +20945,14 @@ function normalise(text2) {
   return text2.trim();
 }
 function sessionIdFromPath2(filePath) {
-  const base2 = path23.basename(filePath, ".jsonl");
+  const base2 = path26.basename(filePath, ".jsonl");
   const matches = base2.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
   const last2 = matches?.[matches.length - 1];
   return last2 ?? base2;
 }
 function statBytes2(absolute2) {
   try {
-    return fs29.statSync(absolute2).size;
+    return fs32.statSync(absolute2).size;
   } catch {
     return 0;
   }
@@ -19533,10 +21036,10 @@ __export(codex_exports, {
   renderCodexDoctorLine: () => renderCodexDoctorLine,
   sessionIdFromRolloutPath: () => sessionIdFromRolloutPath
 });
-import fs30 from "node:fs";
-import path24 from "node:path";
+import fs33 from "node:fs";
+import path27 from "node:path";
 function sessionIdFromRolloutPath(filePath) {
-  const base2 = path24.basename(filePath, ".jsonl");
+  const base2 = path27.basename(filePath, ".jsonl");
   const matches = base2.match(UUID);
   return matches?.[matches.length - 1] ?? base2;
 }
@@ -19553,12 +21056,12 @@ function walk2(dir, status3, depth, out) {
     return;
   let entries;
   try {
-    entries = fs30.readdirSync(dir, { withFileTypes: true });
+    entries = fs33.readdirSync(dir, { withFileTypes: true });
   } catch {
     return;
   }
   for (const entry of entries) {
-    const full = path24.join(dir, entry.name);
+    const full = path27.join(dir, entry.name);
     if (entry.isDirectory()) {
       walk2(full, status3, depth + 1, out);
       continue;
@@ -19569,7 +21072,7 @@ function walk2(dir, status3, depth, out) {
       continue;
     let stat;
     try {
-      stat = fs30.statSync(full);
+      stat = fs33.statSync(full);
     } catch {
       continue;
     }
@@ -19592,14 +21095,14 @@ function readSessionIndex(options = {}) {
   const out = /* @__PURE__ */ new Map();
   let text2;
   try {
-    text2 = fs30.readFileSync(file, "utf8");
+    text2 = fs33.readFileSync(file, "utf8");
   } catch {
     return out;
   }
-  for (const line2 of text2.split("\n")) {
-    if (!line2.trim())
+  for (const line of text2.split("\n")) {
+    if (!line.trim())
       continue;
-    const parsed = parseJsonLine(line2);
+    const parsed = parseJsonLine(line);
     if (!isRecord(parsed) || typeof parsed["id"] !== "string")
       continue;
     const id = parsed["id"];
@@ -19617,7 +21120,7 @@ function sessionIndexCached(codexHome) {
   const file = codexPaths(codexDir(codexHome)).sessionIndex;
   let mtimeMs = -1;
   try {
-    mtimeMs = fs30.statSync(file).mtimeMs;
+    mtimeMs = fs33.statSync(file).mtimeMs;
   } catch {
   }
   const hit2 = indexCache.get(file);
@@ -19631,10 +21134,10 @@ function clearSessionIndexCache() {
   indexCache.clear();
 }
 async function readCodexHeader(filePath) {
-  for await (const line2 of readJsonlLines(filePath)) {
-    if (!line2.terminated)
+  for await (const line of readJsonlLines(filePath)) {
+    if (!line.terminated)
       return void 0;
-    const parsed = parseJsonLine(line2.text);
+    const parsed = parseJsonLine(line.text);
     if (!isRecord(parsed) || parsed["type"] !== "session_meta")
       return void 0;
     const payload = parsed["payload"];
@@ -19775,7 +21278,7 @@ async function parse4(source, options = {}) {
 function pickSlug(session, cwd) {
   if (session.projectSlug && session.projectSlug !== "unknown")
     return session.projectSlug;
-  return path24.basename(cwd) || "unknown";
+  return path27.basename(cwd) || "unknown";
 }
 async function codexDoctor(options = {}) {
   const paths = codexPaths(codexDir(options.codexHome));
@@ -19811,7 +21314,7 @@ async function codexDoctor(options = {}) {
     harness: "codex",
     displayName: "Codex CLI",
     sourceDir: paths.sessions,
-    present: fs30.existsSync(paths.root),
+    present: fs33.existsSync(paths.root),
     sessions: sources.length,
     archived,
     bytes: bytes3,
@@ -19934,8 +21437,8 @@ __export(cursor_exports, {
   recoverCwd: () => recoverCwd,
   toolName: () => toolName
 });
-import fs31 from "node:fs";
-import path25 from "node:path";
+import fs34 from "node:fs";
+import path28 from "node:path";
 function cursorSlug(cwd) {
   return cwd.replace(/^[/\\]+/, "").replace(/[/\\_]/g, "-");
 }
@@ -19950,24 +21453,24 @@ function discover5(dirOverride) {
   const root = cursorProjectsDir(dirOverride);
   const out = [];
   for (const slug of readdirSafe4(root, "dir")) {
-    const transcripts = path25.join(root, slug, TRANSCRIPTS_DIR);
+    const transcripts = path28.join(root, slug, TRANSCRIPTS_DIR);
     for (const sessionId of readdirSafe4(transcripts, "dir")) {
-      const sessionDir = path25.join(transcripts, sessionId);
+      const sessionDir = path28.join(transcripts, sessionId);
       for (const file of readdirSafe4(sessionDir, "file")) {
         if (!file.endsWith(".jsonl"))
           continue;
-        const source = statSource(path25.join(sessionDir, file), slug, {
+        const source = statSource(path28.join(sessionDir, file), slug, {
           sessionId: basenameId(file),
           isSidechain: false
         });
         if (source)
           out.push(source);
       }
-      const sidechains = path25.join(sessionDir, SIDECHAIN_DIR3);
+      const sidechains = path28.join(sessionDir, SIDECHAIN_DIR3);
       for (const file of readdirSafe4(sidechains, "file")) {
         if (!file.endsWith(".jsonl"))
           continue;
-        const source = statSource(path25.join(sidechains, file), slug, {
+        const source = statSource(path28.join(sidechains, file), slug, {
           sessionId: basenameId(file),
           isSidechain: true,
           parentSessionId: sessionId
@@ -19985,7 +21488,7 @@ function basenameId(file) {
 function readdirSafe4(dir, want) {
   let entries;
   try {
-    entries = fs31.readdirSync(dir, { withFileTypes: true });
+    entries = fs34.readdirSync(dir, { withFileTypes: true });
   } catch {
     return [];
   }
@@ -20001,7 +21504,7 @@ function readdirSafe4(dir, want) {
 function statSource(file, projectSlug, rest) {
   let st;
   try {
-    st = fs31.statSync(file);
+    st = fs34.statSync(file);
   } catch {
     return null;
   }
@@ -20064,18 +21567,18 @@ async function parse5(source, options = {}) {
     seq += 1;
     open2 = { seq, ts, userText, assistantTexts: [], toolCalls: [], files: [] };
   };
-  for await (const line2 of readJsonlLines(source.path, { start: options.fromOffset ?? 0 })) {
-    const record4 = parseJsonLine(line2.text);
-    if (!line2.terminated) {
+  for await (const line of readJsonlLines(source.path, { start: options.fromOffset ?? 0 })) {
+    const record4 = parseJsonLine(line.text);
+    if (!line.terminated) {
       if (record4 === void 0) {
-        if (line2.text.trim())
+        if (line.text.trim())
           malformedLines += 1;
         break;
       }
     }
-    endOffset = line2.end;
+    endOffset = line.end;
     if (record4 === void 0) {
-      if (line2.text.trim())
+      if (line.text.trim())
         malformedLines += 1;
       continue;
     }
@@ -20197,7 +21700,7 @@ function parseCursorTimestamp(raw) {
   const month = MONTHS2.indexOf(m[1].toLowerCase());
   if (month < 0)
     return void 0;
-  const day2 = Number(m[2]);
+  const day = Number(m[2]);
   const year = Number(m[3]);
   let hour = Number(m[4]);
   const minute = Number(m[5]);
@@ -20207,21 +21710,21 @@ function parseCursorTimestamp(raw) {
     hour = 0;
   if (meridiem === "p")
     hour += 12;
-  if (day2 < 1 || day2 > 31 || minute > 59 || second > 59 || hour > 23)
+  if (day < 1 || day > 31 || minute > 59 || second > 59 || hour > 23)
     return void 0;
   const offsetHours = m[8] ? Number(m[8]) : 0;
   const offsetMinutes = m[9] ? Number(m[9]) : 0;
   const sign = m[8]?.startsWith("-") ? -1 : 1;
   const offset = offsetHours * 60 + sign * offsetMinutes;
-  const ms = Date.UTC(year, month, day2, hour, minute, second) - offset * 6e4;
+  const ms = Date.UTC(year, month, day, hour, minute, second) - offset * 6e4;
   if (!Number.isFinite(ms))
     return void 0;
   return new Date(ms).toISOString();
 }
-function toolName(name) {
-  if (typeof name !== "string")
+function toolName(name2) {
+  if (typeof name2 !== "string")
     return "unknown";
-  const first = name.split("\n")[0].trim();
+  const first = name2.split("\n")[0].trim();
   return first || "unknown";
 }
 function filesFromCursorInput(input) {
@@ -20291,7 +21794,7 @@ function recoverCwd(projectSlug, candidates2) {
         hits.set(dir, (hits.get(dir) ?? 0) + 1);
         break;
       }
-      const parent = path25.dirname(dir);
+      const parent = path28.dirname(dir);
       if (parent === dir)
         break;
       dir = parent;
@@ -20334,7 +21837,7 @@ function doctorLine5(dirOverride) {
   } catch {
     found = [];
   }
-  const exists2 = fs31.existsSync(dir);
+  const exists2 = fs34.existsSync(dir);
   const sidechains = found.filter((f) => f.isSidechain).length;
   const sessions = found.length - sidechains;
   const parts = [`${sessions} session${sessions === 1 ? "" : "s"}`];
@@ -20406,8 +21909,8 @@ __export(pi_exports, {
   sourceDir: () => sourceDir4,
   unslugifyPi: () => unslugifyPi
 });
-import fs32 from "node:fs";
-import path26 from "node:path";
+import fs35 from "node:fs";
+import path29 from "node:path";
 import crypto5 from "node:crypto";
 function sourceDir4(override) {
   return piSessionsDir(override);
@@ -20420,7 +21923,7 @@ function doctorLine6(override) {
   } catch {
     sessions = 0;
   }
-  const exists2 = fs32.existsSync(dir);
+  const exists2 = fs35.existsSync(dir);
   const status3 = exists2 ? "ready" : "absent";
   const note = exists2 ? `${sessions} session${sessions === 1 ? "" : "s"}` : "pi not installed";
   return formatDoctorLine({ harness: "pi", status: status3, dir, note });
@@ -20430,27 +21933,27 @@ function discover6(override) {
   const out = [];
   let slugs;
   try {
-    slugs = fs32.readdirSync(root, { withFileTypes: true });
+    slugs = fs35.readdirSync(root, { withFileTypes: true });
   } catch {
     return out;
   }
   for (const slug of slugs) {
     if (!slug.isDirectory())
       continue;
-    const dir = path26.join(root, slug.name);
+    const dir = path29.join(root, slug.name);
     let files;
     try {
-      files = fs32.readdirSync(dir);
+      files = fs35.readdirSync(dir);
     } catch {
       continue;
     }
     for (const file of files) {
       if (!file.endsWith(".jsonl"))
         continue;
-      const full = path26.join(dir, file);
+      const full = path29.join(dir, file);
       let stat;
       try {
-        stat = fs32.statSync(full);
+        stat = fs35.statSync(full);
       } catch {
         continue;
       }
@@ -20472,13 +21975,13 @@ function discover6(override) {
   return out;
 }
 function sessionIdFromFilename(file) {
-  const base2 = path26.basename(file, ".jsonl");
+  const base2 = path29.basename(file, ".jsonl");
   const at2 = base2.lastIndexOf("_");
   return at2 === -1 ? base2 : base2.slice(at2 + 1);
 }
 async function parse6(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path26.resolve(typeof source === "string" ? source : source.path);
+  const absolute2 = path29.resolve(typeof source === "string" ? source : source.path);
   const unknownTypes = {};
   let malformedLines = 0;
   let endOffset = 0;
@@ -20486,13 +21989,13 @@ async function parse6(source, options = {}) {
   const byId = /* @__PURE__ */ new Map();
   let header;
   let order = 0;
-  for await (const line2 of readJsonlLines(absolute2)) {
-    if (!line2.terminated)
+  for await (const line of readJsonlLines(absolute2)) {
+    if (!line.terminated)
       break;
-    endOffset = line2.end;
-    const parsed = parseJsonLine(line2.text);
+    endOffset = line.end;
+    const parsed = parseJsonLine(line.text);
     if (parsed === void 0 || !isRecord(parsed)) {
-      if (line2.text.trim())
+      if (line.text.trim())
         malformedLines += 1;
       continue;
     }
@@ -20555,7 +22058,7 @@ async function parse6(source, options = {}) {
       title = node.record.name;
     }
   }
-  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path26.basename(path26.dirname(absolute2));
+  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path29.basename(path29.dirname(absolute2));
   const headerCwd = header && typeof header.cwd === "string" ? header.cwd : void 0;
   const startedAt = header && typeof header.timestamp === "string" ? header.timestamp : nodes[0]?.ts ?? "";
   let endedAt = startedAt;
@@ -20680,8 +22183,8 @@ function buildExchanges3(chain, sessionId, isSidechain, startSeq, out, counts2) 
       if (text2.trim())
         b.assistantTexts.push(text2);
       for (const block2 of toolCallBlocks(message2.content)) {
-        const name2 = typeof block2.name === "string" ? block2.name : "unknown";
-        const call = { name: name2, input: stringifyToolInput(block2.arguments) };
+        const name3 = typeof block2.name === "string" ? block2.name : "unknown";
+        const call = { name: name3, input: stringifyToolInput(block2.arguments) };
         b.toolCalls.push(call);
         counts2.toolCalls += 1;
         if (typeof block2.id === "string")
@@ -20704,9 +22207,9 @@ function buildExchanges3(chain, sessionId, isSidechain, startSeq, out, counts2) 
       }
       continue;
     }
-    const name = typeof message2.toolName === "string" ? message2.toolName : "unknown";
+    const name2 = typeof message2.toolName === "string" ? message2.toolName : "unknown";
     b.toolCalls.push({
-      name,
+      name: name2,
       input: "",
       ...result !== void 0 ? { result } : {},
       ...message2.isError === true ? { isError: true } : {}
@@ -20727,7 +22230,7 @@ function unslugifyPi(slug) {
 }
 function statBytes3(absolute2) {
   try {
-    return fs32.statSync(absolute2).size;
+    return fs35.statSync(absolute2).size;
   } catch {
     return 0;
   }
@@ -20789,8 +22292,8 @@ __export(gemini_exports, {
   sessionIdFromFilename: () => sessionIdFromFilename2,
   sourceDir: () => sourceDir5
 });
-import fs33 from "node:fs";
-import path27 from "node:path";
+import fs36 from "node:fs";
+import path30 from "node:path";
 import crypto6 from "node:crypto";
 function sourceDir5(override) {
   return geminiTmpDir(override);
@@ -20800,37 +22303,37 @@ function discover7(override) {
   const out = [];
   let hashes;
   try {
-    hashes = fs33.readdirSync(root, { withFileTypes: true });
+    hashes = fs36.readdirSync(root, { withFileTypes: true });
   } catch {
     return out;
   }
-  for (const hash4 of hashes) {
-    if (!hash4.isDirectory())
+  for (const hash5 of hashes) {
+    if (!hash5.isDirectory())
       continue;
-    const dir = path27.join(root, hash4.name, CHATS_DIR);
+    const dir = path30.join(root, hash5.name, CHATS_DIR);
     let files;
     try {
-      files = fs33.readdirSync(dir);
+      files = fs36.readdirSync(dir);
     } catch {
       continue;
     }
     for (const file of files) {
       if (!file.endsWith(".json"))
         continue;
-      const full = path27.join(dir, file);
+      const full = path30.join(dir, file);
       let stat;
       try {
-        stat = fs33.statSync(full);
+        stat = fs36.statSync(full);
       } catch {
         continue;
       }
       if (!stat.isFile())
         continue;
       out.push({
-        sessionId: sessionIdFromFilename2(file, hash4.name),
+        sessionId: sessionIdFromFilename2(file, hash5.name),
         harness: "gemini",
         path: full,
-        projectSlug: hash4.name,
+        projectSlug: hash5.name,
         bytes: stat.size,
         mtimeMs: stat.mtimeMs,
         isSidechain: false,
@@ -20842,17 +22345,17 @@ function discover7(override) {
   return out;
 }
 function sessionIdFromFilename2(file, projectHash) {
-  const base2 = path27.basename(file, ".json").replace(/^checkpoint-/, "") || "checkpoint";
+  const base2 = path30.basename(file, ".json").replace(/^checkpoint-/, "") || "checkpoint";
   return `${projectHash.slice(0, 12)}-${base2}`;
 }
 async function parse7(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
-  const absolute2 = path27.resolve(typeof source === "string" ? source : source.path);
+  const absolute2 = path30.resolve(typeof source === "string" ? source : source.path);
   const unknownTypes = {};
   let malformedLines = 0;
   let raw = "";
   try {
-    raw = fs33.readFileSync(absolute2, "utf8");
+    raw = fs36.readFileSync(absolute2, "utf8");
   } catch {
     raw = "";
   }
@@ -20868,7 +22371,7 @@ async function parse7(source, options = {}) {
   const { turns, meta } = unwrap(doc);
   if (doc !== void 0 && turns.length === 0 && !meta)
     malformedLines += 1;
-  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path27.basename(path27.dirname(path27.dirname(absolute2)));
+  const projectSlug = options.projectSlug ?? src?.projectSlug ?? path30.basename(path30.dirname(path30.dirname(absolute2)));
   const sessionId = options.sessionId ?? (meta && typeof meta.sessionId === "string" && meta.sessionId.trim() ? meta.sessionId : sessionIdFromFilename2(absolute2, projectSlug));
   const mtimeMs = options.mtimeMs ?? src?.mtimeMs ?? statMtime2(absolute2);
   const fileTime = new Date(mtimeMs).toISOString();
@@ -20989,11 +22492,11 @@ function buildExchanges4(turns, sessionId, fileTime, counts2, unknownTypes, cwdC
         b.assistantTexts.push(p.text);
       const call = p.functionCall;
       if (isRecord(call)) {
-        const name2 = typeof call.name === "string" ? call.name : "unknown";
+        const name3 = typeof call.name === "string" ? call.name : "unknown";
         const args = call.args ?? call.arguments;
-        b.toolCalls.push({ name: name2, input: stringifyToolInput(args) });
+        b.toolCalls.push({ name: name3, input: stringifyToolInput(args) });
         counts2.toolCalls += 1;
-        b.byName.set(name2, b.toolCalls.length - 1);
+        b.byName.set(name3, b.toolCalls.length - 1);
         for (const f of filesFromToolInput(args)) {
           b.files.push(f);
           cwdCandidates.push(f);
@@ -21002,10 +22505,10 @@ function buildExchanges4(turns, sessionId, fileTime, counts2, unknownTypes, cwdC
       const res = p.functionResponse;
       if (!isRecord(res))
         continue;
-      const name = typeof res.name === "string" ? res.name : "unknown";
+      const name2 = typeof res.name === "string" ? res.name : "unknown";
       const result = stringifyToolOutput(res.response ?? res.output ?? res.content);
       const isError = isRecord(res.response) && typeof res.response["error"] !== "undefined" ? true : void 0;
-      const at2 = b.byName.get(name);
+      const at2 = b.byName.get(name2);
       if (at2 !== void 0) {
         const answered = b.toolCalls[at2];
         if (answered) {
@@ -21014,11 +22517,11 @@ function buildExchanges4(turns, sessionId, fileTime, counts2, unknownTypes, cwdC
           if (isError)
             answered.isError = true;
         }
-        b.byName.delete(name);
+        b.byName.delete(name2);
         continue;
       }
       b.toolCalls.push({
-        name,
+        name: name2,
         input: "",
         ...result !== void 0 ? { result } : {},
         ...isError ? { isError: true } : {}
@@ -21064,7 +22567,7 @@ function isHumanTurn(role, parts) {
 function projectHashes(cwd) {
   const sha = (s) => crypto6.createHash("sha256").update(s).digest("hex");
   const trimmed = cwd.length > 1 ? cwd.replace(/[/\\]+$/, "") : cwd;
-  return uniq([sha(cwd), sha(trimmed), sha(trimmed + path27.sep)]);
+  return uniq([sha(cwd), sha(trimmed), sha(trimmed + path30.sep)]);
 }
 function recoverCwd2(projectHash, candidates2) {
   if (!/^[0-9a-f]{16,}$/i.test(projectHash))
@@ -21072,15 +22575,15 @@ function recoverCwd2(projectHash, candidates2) {
   const seen = /* @__PURE__ */ new Set();
   const dirs = [];
   for (const c of candidates2) {
-    if (!path27.isAbsolute(c))
+    if (!path30.isAbsolute(c))
       continue;
-    let dir = path27.dirname(path27.resolve(c));
+    let dir = path30.dirname(path30.resolve(c));
     for (let i = 0; i < 40; i += 1) {
       if (seen.has(dir))
         break;
       seen.add(dir);
       dirs.push(dir);
-      const up = path27.dirname(dir);
+      const up = path30.dirname(dir);
       if (up === dir)
         break;
       dir = up;
@@ -21096,7 +22599,7 @@ function recoverCwd2(projectHash, candidates2) {
 }
 function statMtime2(absolute2) {
   try {
-    return fs33.statSync(absolute2).mtimeMs;
+    return fs36.statSync(absolute2).mtimeMs;
   } catch {
     return 0;
   }
@@ -21110,8 +22613,8 @@ function doctorLine7(override) {
   } catch {
     found = [];
   }
-  const installed = fs33.existsSync(root);
-  const tmpExists = fs33.existsSync(tmp);
+  const installed = fs36.existsSync(root);
+  const tmpExists = fs36.existsSync(tmp);
   let status3;
   let note;
   if (found.length > 0) {
@@ -21154,13 +22657,13 @@ var init_gemini = __esm({
 });
 
 // packages/core/dist/memory/history.js
-import fs34 from "node:fs";
-import path28 from "node:path";
+import fs37 from "node:fs";
+import path31 from "node:path";
 import crypto7 from "node:crypto";
 function captureHistoryEvidence(db, options) {
-  if (!fs34.existsSync(options.historyPath))
+  if (!fs37.existsSync(options.historyPath))
     return { captured: 0, malformed: 0, pendingBytes: 0 };
-  const snapshot = fs34.readFileSync(options.historyPath), groups = /* @__PURE__ */ new Map();
+  const snapshot = fs37.readFileSync(options.historyPath), groups = /* @__PURE__ */ new Map();
   let start = 0, malformed = 0;
   for (let end = 0; end < snapshot.length; end++) {
     if (snapshot[end] !== 10)
@@ -21206,31 +22709,31 @@ function captureHistoryEvidence(db, options) {
     const current = db.prepare("SELECT s.active_revision_id,r.adapter_version FROM memory_sources s LEFT JOIN source_revisions r ON r.revision_id=s.active_revision_id WHERE s.source_id=?").get(sid);
     if (current?.active_revision_id && !isHistoryVersion(current.adapter_version ?? "") && current.adapter_version !== "ghost-retained-prompts-v1")
       continue;
-    const bytes3 = Buffer.concat(g.raw), digest3 = hash(bytes3), relative = path28.join("archive", "evidence", `${digest3}.jsonl`), file = path28.join(options.root, relative);
-    fs34.mkdirSync(path28.dirname(file), { recursive: true, mode: 448 });
-    if (fs34.existsSync(file)) {
-      if (hash(fs34.readFileSync(file)) !== digest3)
+    const bytes3 = Buffer.concat(g.raw), digest3 = hash(bytes3), relative = path31.join("archive", "evidence", `${digest3}.jsonl`), file = path31.join(options.root, relative);
+    fs37.mkdirSync(path31.dirname(file), { recursive: true, mode: 448 });
+    if (fs37.existsSync(file)) {
+      if (hash(fs37.readFileSync(file)) !== digest3)
         throw new Error("history artifact corruption");
     } else {
       const tmp = `${file}.${crypto7.randomUUID()}.tmp`;
       try {
-        const fd = fs34.openSync(tmp, "wx", 384);
+        const fd = fs37.openSync(tmp, "wx", 384);
         try {
-          fs34.writeFileSync(fd, bytes3);
-          fs34.fsyncSync(fd);
+          fs37.writeFileSync(fd, bytes3);
+          fs37.fsyncSync(fd);
         } finally {
-          fs34.closeSync(fd);
+          fs37.closeSync(fd);
         }
-        fs34.renameSync(tmp, file);
-        const dir = fs34.openSync(path28.dirname(file), "r");
+        fs37.renameSync(tmp, file);
+        const dir = fs37.openSync(path31.dirname(file), "r");
         try {
-          fs34.fsyncSync(dir);
+          fs37.fsyncSync(dir);
         } finally {
-          fs34.closeSync(dir);
+          fs37.closeSync(dir);
         }
       } finally {
         try {
-          fs34.unlinkSync(tmp);
+          fs37.unlinkSync(tmp);
         } catch {
         }
       }
@@ -21243,11 +22746,11 @@ function captureHistoryEvidence(db, options) {
     const compatible = [];
     let older = false;
     for (const row2 of db.prepare("SELECT revision_id,artifact_hash,archive_relative_path FROM source_revisions WHERE source_id=? AND adapter_version LIKE '%-history-records-v1' AND archive_relative_path IS NOT NULL").all(sid)) {
-      const original = path28.resolve(options.root, row2.archive_relative_path);
-      if (!original.startsWith(path28.resolve(options.root) + path28.sep))
+      const original = path31.resolve(options.root, row2.archive_relative_path);
+      if (!original.startsWith(path31.resolve(options.root) + path31.sep))
         continue;
       try {
-        const priorBytes = fs34.readFileSync(original);
+        const priorBytes = fs37.readFileSync(original);
         if (hash(priorBytes) !== row2.artifact_hash)
           continue;
         const n3 = Math.min(bytes3.length, priorBytes.length);
@@ -21357,43 +22860,43 @@ var init_backfill = __esm({
 });
 
 // packages/core/dist/memory/tokenization.js
-import fs35 from "node:fs";
-import path29 from "node:path";
-import { createHash as createHash13 } from "node:crypto";
+import fs38 from "node:fs";
+import path32 from "node:path";
+import { createHash as createHash17 } from "node:crypto";
 import { pathToFileURL as pathToFileURL2 } from "node:url";
 function inspectSpanTokenizerHash(cacheDir) {
   const blobs = [];
-  for (const name of [`${MODEL_ID}/tokenizer.json`, `${MODEL_ID}/tokenizer_config.json`, `${RUNTIME_SUBDIR}/tokenizers.mjs`]) {
-    const file = requiredFiles().find((asset) => asset.name === name);
+  for (const name2 of [`${MODEL_ID}/tokenizer.json`, `${MODEL_ID}/tokenizer_config.json`, `${RUNTIME_SUBDIR}/tokenizers.mjs`]) {
+    const file = requiredFiles().find((asset) => asset.name === name2);
     try {
-      const bytes3 = fs35.readFileSync(path29.join(cacheDir, name));
-      if (bytes3.length !== file.bytes || createHash13("sha256").update(bytes3).digest("hex") !== file.sha256)
+      const bytes3 = fs38.readFileSync(path32.join(cacheDir, name2));
+      if (bytes3.length !== file.bytes || createHash17("sha256").update(bytes3).digest("hex") !== file.sha256)
         return null;
       blobs.push(bytes3);
     } catch {
       return null;
     }
   }
-  return createHash13("sha256").update(blobs[0]).update(blobs[1]).update(blobs[2]).digest("hex");
+  return createHash17("sha256").update(blobs[0]).update(blobs[1]).update(blobs[2]).digest("hex");
 }
 async function loadSpanTokenizer(cacheDir) {
   const names = [`${MODEL_ID}/tokenizer.json`, `${MODEL_ID}/tokenizer_config.json`, `${RUNTIME_SUBDIR}/tokenizers.mjs`];
   const blobs = [];
-  for (const name of names) {
-    const file = requiredFiles().find((asset) => asset.name === name);
+  for (const name2 of names) {
+    const file = requiredFiles().find((asset) => asset.name === name2);
     let bytes3;
     try {
-      bytes3 = fs35.readFileSync(path29.join(cacheDir, name));
+      bytes3 = fs38.readFileSync(path32.join(cacheDir, name2));
     } catch {
       return null;
     }
-    if (bytes3.length !== file.bytes || createHash13("sha256").update(bytes3).digest("hex") !== file.sha256)
+    if (bytes3.length !== file.bytes || createHash17("sha256").update(bytes3).digest("hex") !== file.sha256)
       return null;
     blobs.push(bytes3);
   }
-  const runtime = await import(pathToFileURL2(path29.join(cacheDir, names[2])).href);
+  const runtime = await import(pathToFileURL2(path32.join(cacheDir, names[2])).href);
   const tokenizer2 = new runtime.Tokenizer(JSON.parse(blobs[0].toString()), JSON.parse(blobs[1].toString()));
-  const assetHash = createHash13("sha256").update(blobs[0]).update(blobs[1]).update(blobs[2]).digest("hex");
+  const assetHash = createHash17("sha256").update(blobs[0]).update(blobs[1]).update(blobs[2]).digest("hex");
   return {
     id: "bge-small-en-v1.5/wordpiece@0.1.3",
     assetHash,
@@ -21664,7 +23167,7 @@ __export(sentinel_exports, {
   isErroredSentinel: () => isErroredSentinel,
   shouldQueueForCard: () => shouldQueueForCard
 });
-import fs36 from "node:fs";
+import fs39 from "node:fs";
 function formatErrorSentinel(error) {
   const message2 = error instanceof Error ? error.message : String(error);
   return `${ERROR_MARKER}
@@ -21685,7 +23188,7 @@ function getErrorRetryMs() {
 function hasRealCard(cardPath2) {
   let content2;
   try {
-    content2 = fs36.readFileSync(cardPath2, "utf-8");
+    content2 = fs39.readFileSync(cardPath2, "utf-8");
   } catch {
     return false;
   }
@@ -21696,14 +23199,14 @@ function hasRealCard(cardPath2) {
 function shouldQueueForCard(cardPath2) {
   let content2;
   try {
-    content2 = fs36.readFileSync(cardPath2, "utf-8");
+    content2 = fs39.readFileSync(cardPath2, "utf-8");
   } catch (error) {
     return error.code === "ENOENT";
   }
   if (!isErroredSentinel(content2))
     return false;
   try {
-    return Date.now() - fs36.statSync(cardPath2).mtimeMs >= getErrorRetryMs();
+    return Date.now() - fs39.statSync(cardPath2).mtimeMs >= getErrorRetryMs();
   } catch {
     return false;
   }
@@ -21720,18 +23223,18 @@ var init_sentinel = __esm({
 });
 
 // packages/core/dist/cards/write.js
-import fs37 from "node:fs";
-import path30 from "node:path";
+import fs40 from "node:fs";
+import path33 from "node:path";
 function cardEmbeddingText(card) {
   return [card.title, card.summary, card.topics.join(", ")].filter((s) => s.trim()).join("\n");
 }
 function cardPath(root, harness, slug, id) {
   const filename = id.replace(/[%/\\\0]/g, (c) => encodeURIComponent(c));
-  return path30.join(cardsDir(root), harness, safeSlug(slug), `${filename}.md`);
+  return path33.join(cardsDir(root), harness, safeSlug(slug), `${filename}.md`);
 }
 function safeSlug(slug) {
-  const segments = (slug ?? "").split(/[/\\]+/).map((part) => part.trim()).filter((part) => part.length > 0 && part !== "." && part !== "..");
-  const s = segments.join("-");
+  const segments2 = (slug ?? "").split(/[/\\]+/).map((part) => part.trim()).filter((part) => part.length > 0 && part !== "." && part !== "..");
+  const s = segments2.join("-");
   return s.length > 0 ? s.slice(0, 120) : "unknown";
 }
 function yamlString(s) {
@@ -21851,8 +23354,8 @@ function writeCard(db, root, record4, embedding) {
   });
   write();
   const file = cardPath(root, record4.harness, record4.projectSlug, record4.sessionId);
-  fs37.mkdirSync(path30.dirname(file), { recursive: true });
-  fs37.writeFileSync(file, md, { mode: 384 });
+  fs40.mkdirSync(path33.dirname(file), { recursive: true });
+  fs40.writeFileSync(file, md, { mode: 384 });
   return file;
 }
 function vecCardsExist(db) {
@@ -21866,12 +23369,12 @@ function vecCardsExist(db) {
 function exportCards(root, dest) {
   const from = cardsDir(root);
   const result = { files: 0, bytes: 0, dest, skipped: 0 };
-  if (!fs37.existsSync(from))
+  if (!fs40.existsSync(from))
     return result;
   const walk3 = (dir, rel) => {
-    for (const entry of fs37.readdirSync(dir, { withFileTypes: true })) {
-      const source = path30.join(dir, entry.name);
-      const relative = path30.join(rel, entry.name);
+    for (const entry of fs40.readdirSync(dir, { withFileTypes: true })) {
+      const source = path33.join(dir, entry.name);
+      const relative = path33.join(rel, entry.name);
       if (entry.isDirectory()) {
         walk3(source, relative);
         continue;
@@ -21880,7 +23383,7 @@ function exportCards(root, dest) {
         continue;
       let content2;
       try {
-        content2 = fs37.readFileSync(source, "utf-8");
+        content2 = fs40.readFileSync(source, "utf-8");
       } catch {
         result.skipped += 1;
         continue;
@@ -21889,9 +23392,9 @@ function exportCards(root, dest) {
         result.skipped += 1;
         continue;
       }
-      const target = path30.join(dest, relative);
-      fs37.mkdirSync(path30.dirname(target), { recursive: true });
-      fs37.writeFileSync(target, content2, { mode: 384 });
+      const target = path33.join(dest, relative);
+      fs40.mkdirSync(path33.dirname(target), { recursive: true });
+      fs40.writeFileSync(target, content2, { mode: 384 });
       result.files += 1;
       result.bytes += Buffer.byteLength(content2);
     }
@@ -22382,9 +23885,9 @@ function deriveThreads(db) {
   const shared = sharedCounts(db);
   const declared = /* @__PURE__ */ new Map();
   for (const r of db.prepare("SELECT session_id, parent_id, records FROM session_declared_parents").all()) {
-    const list = declared.get(r.session_id) ?? [];
-    list.push({ parent: r.parent_id, records: r.records });
-    declared.set(r.session_id, list);
+    const list2 = declared.get(r.session_id) ?? [];
+    list2.push({ parent: r.parent_id, records: r.records });
+    declared.set(r.session_id, list2);
   }
   const best = /* @__PURE__ */ new Map();
   const refused = [];
@@ -22415,8 +23918,8 @@ function deriveThreads(db) {
       overlap: overlap2
     });
   }
-  for (const [child, list] of declared) {
-    for (const d of list) {
+  for (const [child, list2] of declared) {
+    for (const d of list2) {
       const key2 = child < d.parent ? `${child}\0${d.parent}` : `${d.parent}\0${child}`;
       const count2 = shared.get(key2) ?? 0;
       const edge = best.get(child);
@@ -22464,9 +23967,9 @@ function deriveThreads(db) {
       shared: edge?.shared ?? 0,
       overlap: edge?.overlap ?? 0
     });
-    const list = members.get(root) ?? [];
-    list.push(id);
-    members.set(root, list);
+    const list2 = members.get(root) ?? [];
+    list2.push(id);
+    members.set(root, list2);
   }
   const byId = new Map(rows.map((r) => [r.sessionId, r]));
   const threads = [];
@@ -22539,8 +24042,8 @@ var init_threads = __esm({
 
 // packages/core/dist/ingest.js
 import crypto8 from "node:crypto";
-import fs38 from "node:fs";
-import path31 from "node:path";
+import fs41 from "node:fs";
+import path34 from "node:path";
 function adapterSpecs(o = {}) {
   return [
     {
@@ -22867,12 +24370,12 @@ function writeIndexState(db, key2, value) {
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(key2, value, (/* @__PURE__ */ new Date()).toISOString());
 }
 function sourceFingerprint(sources) {
-  const hash4 = crypto8.createHash("sha256");
+  const hash5 = crypto8.createHash("sha256");
   for (const s of [...sources].sort((a, b) => a.path < b.path ? -1 : 1)) {
-    hash4.update(`${s.path}:${s.bytes}:${Math.floor(s.mtimeMs)}
+    hash5.update(`${s.path}:${s.bytes}:${Math.floor(s.mtimeMs)}
 `);
   }
-  return `${sources.length}:${hash4.digest("hex").slice(0, 32)}`;
+  return `${sources.length}:${hash5.digest("hex").slice(0, 32)}`;
 }
 async function indexAll(options = {}) {
   const started = Date.now();
@@ -23006,7 +24509,7 @@ async function indexHarness(db, spec, options, recordTypes) {
       harness: spec.harness,
       done,
       total: sources.length,
-      note: path31.basename(source.path)
+      note: path34.basename(source.path)
     });
     if (db.prepare("SELECT 1 FROM forget_tombstones WHERE source_id=? AND state<>'reversed'").get(sourceId(source.harness, source.sessionId))) {
       report.skipped += 1;
@@ -23021,7 +24524,7 @@ async function indexHarness(db, spec, options, recordTypes) {
           throw new Error("native snapshot unavailable");
         raw = databaseParsed.artifactSnapshot;
       } else
-        raw = fs38.readFileSync(source.path);
+        raw = fs41.readFileSync(source.path);
     } catch (err) {
       report.failed += 1;
       report.errors.push(`${source.path}: ${err.message}`);
@@ -23043,11 +24546,11 @@ async function indexHarness(db, spec, options, recordTypes) {
     let scratch;
     try {
       if (source.harness === "claude" || source.harness === "codex") {
-        const scratchRoot = path31.join(options.root ?? potsherdDir(options.potsherdDir), "capture-scratch");
-        fs38.mkdirSync(scratchRoot, { recursive: true, mode: 448 });
-        scratch = fs38.mkdtempSync(path31.join(scratchRoot, "capture-"));
-        const file = path31.join(scratch, path31.basename(source.path));
-        fs38.writeFileSync(file, raw, { mode: 384 });
+        const scratchRoot = path34.join(options.root ?? potsherdDir(options.potsherdDir), "capture-scratch");
+        fs41.mkdirSync(scratchRoot, { recursive: true, mode: 448 });
+        scratch = fs41.mkdtempSync(path34.join(scratchRoot, "capture-"));
+        const file = path34.join(scratch, path34.basename(source.path));
+        fs41.writeFileSync(file, raw, { mode: 384 });
         capturedSource = { ...source, path: file, bytes: raw.length };
       }
       parsed = databaseParsed ?? await spec.parse(capturedSource);
@@ -23060,12 +24563,12 @@ async function indexHarness(db, spec, options, recordTypes) {
       } catch {
       }
       if (scratch)
-        fs38.rmSync(scratch, { recursive: true, force: true });
+        fs41.rmSync(scratch, { recursive: true, force: true });
       continue;
     }
     if (db.prepare("SELECT 1 FROM forget_tombstones WHERE source_id=? AND state<>'reversed'").get(sourceId(source.harness, parsed.session.id))) {
       if (scratch)
-        fs38.rmSync(scratch, { recursive: true, force: true });
+        fs41.rmSync(scratch, { recursive: true, force: true });
       report.skipped += 1;
       continue;
     }
@@ -23076,7 +24579,7 @@ async function indexHarness(db, spec, options, recordTypes) {
       const consumed = parsed.artifactSnapshot ?? raw.subarray(0, parsed.endOffset);
       if (parsed.artifactHash && parsed.artifactHash !== hash(consumed))
         throw new Error("source changed during parse");
-      if (!scratch && !parsed.artifactSnapshot && !consumed.equals(fs38.readFileSync(source.path).subarray(0, parsed.endOffset)))
+      if (!scratch && !parsed.artifactSnapshot && !consumed.equals(fs41.readFileSync(source.path).subarray(0, parsed.endOffset)))
         throw new Error("source changed before publication");
       const artifactHash = hash(consumed);
       const proof = sourcePrefixProof(db, options.root ?? potsherdDir(options.potsherdDir), sourceId(source.harness, parsed.session.id), consumed);
@@ -23124,7 +24627,7 @@ async function indexHarness(db, spec, options, recordTypes) {
       continue;
     } finally {
       if (scratch)
-        fs38.rmSync(scratch, { recursive: true, force: true });
+        fs41.rmSync(scratch, { recursive: true, force: true });
     }
     report.parsed += 1;
     report.malformedLines += parsed.malformedLines;
@@ -23164,10 +24667,10 @@ async function prepareLineage(db, harness, source, sessionId) {
     };
   const ids = [];
   const declared = /* @__PURE__ */ new Map();
-  for await (const line2 of readJsonlLines(source.path)) {
-    if (!line2.terminated)
+  for await (const line of readJsonlLines(source.path)) {
+    if (!line.terminated)
       break;
-    const record4 = parseJsonLine(line2.text);
+    const record4 = parseJsonLine(line.text);
     if (!isRecord(record4))
       continue;
     const id = record4[fields2.id];
@@ -23386,32 +24889,32 @@ function recordCaptureFailure(db, source, errorCode, fence) {
   })();
 }
 function preserveEvidenceArtifact(root, artifactHash, bytes3) {
-  const relative = path31.join("archive", "evidence", `${artifactHash}.jsonl`), file = path31.join(root, relative);
-  fs38.mkdirSync(path31.dirname(file), { recursive: true, mode: 448 });
-  if (fs38.existsSync(file)) {
-    if (hash(fs38.readFileSync(file)) !== artifactHash)
+  const relative = path34.join("archive", "evidence", `${artifactHash}.jsonl`), file = path34.join(root, relative);
+  fs41.mkdirSync(path34.dirname(file), { recursive: true, mode: 448 });
+  if (fs41.existsSync(file)) {
+    if (hash(fs41.readFileSync(file)) !== artifactHash)
       throw new Error("immutable archive hash mismatch");
     return relative;
   }
   const temp = `${file}.${process.pid}.${crypto8.randomUUID()}.tmp`;
   try {
-    const fd = fs38.openSync(temp, "wx", 384);
+    const fd = fs41.openSync(temp, "wx", 384);
     try {
-      fs38.writeFileSync(fd, bytes3);
-      fs38.fsyncSync(fd);
+      fs41.writeFileSync(fd, bytes3);
+      fs41.fsyncSync(fd);
     } finally {
-      fs38.closeSync(fd);
+      fs41.closeSync(fd);
     }
-    fs38.renameSync(temp, file);
-    const dir = fs38.openSync(path31.dirname(file), "r");
+    fs41.renameSync(temp, file);
+    const dir = fs41.openSync(path34.dirname(file), "r");
     try {
-      fs38.fsyncSync(dir);
+      fs41.fsyncSync(dir);
     } finally {
-      fs38.closeSync(dir);
+      fs41.closeSync(dir);
     }
   } finally {
     try {
-      fs38.unlinkSync(temp);
+      fs41.unlinkSync(temp);
     } catch {
     }
   }
@@ -23435,13 +24938,13 @@ function resolveEnrolledSources(db, input) {
   const options = { ...prior?.options ?? {} };
   for (const h of harnesses) {
     const key2 = names[h];
-    options[key2] = path31.resolve(input[key2] ?? options[key2] ?? defaults[h]());
+    options[key2] = path34.resolve(input[key2] ?? options[key2] ?? defaults[h]());
   }
   const removed = new Set(input.removeHarnesses ?? []);
   const savedHarnesses = [.../* @__PURE__ */ new Set([...prior?.harnesses ?? harnesses, ...explicit, ...input.enrollHarnesses ?? []])].filter((h) => !removed.has(h));
   for (const h of savedHarnesses) {
     const key2 = names[h];
-    options[key2] = path31.resolve(input[key2] ?? options[key2] ?? defaults[h]());
+    options[key2] = path34.resolve(input[key2] ?? options[key2] ?? defaults[h]());
   }
   const enrollment = { version: 1, harnesses: savedHarnesses, options };
   if (!prior || explicit.length || input.enrollHarnesses || input.removeHarnesses) {
@@ -23482,18 +24985,18 @@ function sourcePrefixProof(db, root, sid, incoming) {
   let olderThanActive = false;
   let retainedArchivePath;
   for (const r of rows) {
-    const file = path31.resolve(root, r.archive_relative_path);
-    if (!file.startsWith(path31.resolve(root) + path31.sep) || !r.archive_relative_path.startsWith("archive/"))
+    const file = path34.resolve(root, r.archive_relative_path);
+    if (!file.startsWith(path34.resolve(root) + path34.sep) || !r.archive_relative_path.startsWith("archive/"))
       continue;
     let fd;
     try {
-      fd = fs38.openSync(file, "r");
+      fd = fs41.openSync(file, "r");
       const digest3 = crypto8.createHash("sha256");
       const chunk = Buffer.alloc(65536);
       let offset = 0;
       let equal = true;
       while (true) {
-        const count2 = fs38.readSync(fd, chunk, 0, chunk.length, null);
+        const count2 = fs41.readSync(fd, chunk, 0, chunk.length, null);
         if (count2 === 0)
           break;
         digest3.update(chunk.subarray(0, count2));
@@ -23508,13 +25011,13 @@ function sourcePrefixProof(db, root, sid, incoming) {
       if (r.active && incoming.length < offset) {
         olderThanActive = true;
         const liveAliases = db.prepare("SELECT path FROM source_aliases WHERE source_id=? AND kind='live' AND missing_at IS NULL").all(sid);
-        if (!liveAliases.some((a) => fs38.existsSync(a.path)))
+        if (!liveAliases.some((a) => fs41.existsSync(a.path)))
           retainedArchivePath = file;
       }
     } catch {
     } finally {
       if (fd !== void 0)
-        fs38.closeSync(fd);
+        fs41.closeSync(fd);
     }
   }
   return { compatibleHashes: [...new Set(compatibleHashes)], olderThanActive, retainedArchivePath };
@@ -23530,9 +25033,9 @@ function discoverEnrolledHistoryInputs(db, root) {
     const dir = harness === "claude" ? enrolled.options.claudeDir : enrolled.options.codexHome;
     if (!dir)
       continue;
-    const live = path31.join(dir, "history.jsonl"), fallback = path31.join(root, "archive", "history.jsonl");
-    const historyPath = fs38.existsSync(live) ? live : harness === "claude" ? fallback : live;
-    if (fs38.existsSync(historyPath))
+    const live = path34.join(dir, "history.jsonl"), fallback = path34.join(root, "archive", "history.jsonl");
+    const historyPath = fs41.existsSync(live) ? live : harness === "claude" ? fallback : live;
+    if (fs41.existsSync(historyPath))
       inputs.push({ harness, historyPath });
   }
   return inputs;
@@ -23574,7 +25077,7 @@ var init_ingest = __esm({
 });
 
 // packages/core/dist/stats.js
-import fs39 from "node:fs";
+import fs42 from "node:fs";
 function stats(db, options = {}) {
   const root = potsherdDir(options.root);
   const entries = options.all ? [] : [...options.ignore ?? readIgnoreList(root)];
@@ -23713,7 +25216,7 @@ function freshness(db, root, stat) {
     if (r.status === "archived" || r.archived_path)
       archived++;
     try {
-      const st = fs39.statSync(r.source_path);
+      const st = fs42.statSync(r.source_path);
       if (r.source_mtime !== null && Math.floor(st.mtimeMs) !== r.source_mtime)
         stale++;
     } catch {
@@ -23736,7 +25239,7 @@ function freshness(db, root, stat) {
   }
   if (dbBytes === 0) {
     try {
-      dbBytes = fs39.statSync(file).size;
+      dbBytes = fs42.statSync(file).size;
     } catch {
       dbBytes = 0;
     }
@@ -23806,10 +25309,10 @@ function explain(result, k = result.k ?? RRF_K) {
   return {
     query: result.query,
     k,
-    weights: Object.entries(result.weights ?? {}).map(([list, weight]) => ({
-      list,
+    weights: Object.entries(result.weights ?? {}).map(([list2, weight]) => ({
+      list: list2,
       weight: weight ?? 1,
-      relaxed: relaxed.has(list)
+      relaxed: relaxed.has(list2)
     })).sort((a, b) => b.weight - a.weight || a.list.localeCompare(b.list)),
     lists: result.lists,
     sessions,
@@ -23869,12 +25372,12 @@ function labelOf(hit2) {
 }
 function solveWeights(hits, k = RRF_K) {
   const samples = /* @__PURE__ */ new Map();
-  const add = (list, value) => {
+  const add = (list2, value) => {
     if (!Number.isFinite(value) || value <= 0)
       return;
-    const arr = samples.get(list) ?? [];
+    const arr = samples.get(list2) ?? [];
     arr.push(value);
-    samples.set(list, arr);
+    samples.set(list2, arr);
   };
   for (const hit2 of hits) {
     if (hit2.from.length === 1) {
@@ -23884,8 +25387,8 @@ function solveWeights(hits, k = RRF_K) {
   }
   const known = () => {
     const out2 = /* @__PURE__ */ new Map();
-    for (const [list, values] of samples)
-      out2.set(list, median2(values));
+    for (const [list2, values] of samples)
+      out2.set(list2, median2(values));
     return out2;
   };
   for (let pass = 0; pass < 3; pass++) {
@@ -23922,14 +25425,14 @@ function marginOf(sessions) {
   const [a, b] = [sessions[0], sessions[1]];
   const bestA = a.hits[0];
   const bestB = b.hits[0];
-  const list = bestA?.lists[0]?.list ?? null;
+  const list2 = bestA?.lists[0]?.list ?? null;
   return {
     by: a.score - b.score,
     reason: a.best > b.best + 1e-12 ? "best" : "corroboration",
-    list,
+    list: list2,
     firstRank: bestA?.lists[0]?.rank ?? null,
     // The same list's rank on the runner-up, so the two numbers compare.
-    secondRank: bestB?.lists.find((l) => l.list === list)?.rank ?? null,
+    secondRank: bestB?.lists.find((l) => l.list === list2)?.rank ?? null,
     firstHits: a.hits.length,
     secondHits: b.hits.length
   };
@@ -23977,8 +25480,8 @@ function renderFind(result, t = new Theme(), now = /* @__PURE__ */ new Date(), o
   if (notes)
     lines.push(INDENT + t.dim(notes));
   if (!result.vectors.used && result.vectors.reason && !supersededBySemantic(opts, result.vectors.reason)) {
-    for (const line2 of wrap(`text search only ${t.dash} ${result.vectors.reason}`, t.width - INDENT.length)) {
-      lines.push(INDENT + t.dim(line2));
+    for (const line of wrap(`text search only ${t.dash} ${result.vectors.reason}`, t.width - INDENT.length)) {
+      lines.push(INDENT + t.dim(line));
     }
   }
   lines.push(...semanticNote(opts, t));
@@ -23997,8 +25500,8 @@ function withheldNote(result, t) {
   if (Theme.len(INDENT + wide) <= t.width) {
     out.push(INDENT + t.dim(wide));
   } else {
-    for (const line2 of wrap(what, t.width - INDENT.length))
-      out.push(INDENT + t.dim(line2));
+    for (const line of wrap(what, t.width - INDENT.length))
+      out.push(INDENT + t.dim(line));
     out.push(INDENT + t.dim(`${flag}  shows them anyway`));
   }
   out.push("");
@@ -24009,14 +25512,14 @@ function nearestNote(result, opts, t) {
   if (rows.length === 0)
     return [];
   const out = [];
-  const bar2 = t.g("\u2500", "-");
+  const bar3 = t.g("\u2500", "-");
   const plain = `nearest by meaning ${t.sep} not an answer`;
   const headed = `${plain} ${t.sep} last active`;
   const room = t.width - INDENT.length - 3;
   const caption = Theme.len(headed) + 1 <= room ? headed : plain;
-  const drawn = `${bar2}${bar2} ${caption} `;
+  const drawn = `${bar3}${bar3} ${caption} `;
   const fill = Math.max(0, t.width - INDENT.length - Theme.len(drawn));
-  out.push(INDENT + t.dim(drawn + bar2.repeat(fill)));
+  out.push(INDENT + t.dim(drawn + bar3.repeat(fill)));
   for (const s of rows) {
     const at2 = sessionDate(s);
     const when2 = at2 ? date(at2) : t.dash;
@@ -24024,9 +25527,9 @@ function nearestNote(result, opts, t) {
     const label4 = s.confidence.padEnd(5);
     const room2 = t.width - INDENT.length - 2 - label4.length - 1 - Theme.len(where) - 2;
     const title = elide(s.displayTitle, Math.max(12, room2), t.ellip);
-    const line2 = `  ${label4} ${title}`;
-    const pad5 = Math.max(1, t.width - INDENT.length - Theme.len(line2) - Theme.len(where));
-    out.push(INDENT + t.dim(line2 + " ".repeat(pad5) + where));
+    const line = `  ${label4} ${title}`;
+    const pad5 = Math.max(1, t.width - INDENT.length - Theme.len(line) - Theme.len(where));
+    out.push(INDENT + t.dim(line + " ".repeat(pad5) + where));
   }
   out.push("");
   return out;
@@ -24049,12 +25552,12 @@ function ignoreNote(result, t) {
   const what = `not searching ${num(n3)} ${plural(n3, "session")} in ${num(p)} ignored ${plural(p, "project")}`;
   const wide = `${what}  ${t.sep}  --all`;
   const text2 = Theme.len(INDENT + wide) <= t.width ? wide : what;
-  return wrap(text2, t.width - INDENT.length).map((line2) => INDENT + t.dim(line2));
+  return wrap(text2, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
 }
 function semanticNote(opts, t) {
   if (!opts.semantic)
     return [];
-  return wrap(opts.semantic, t.width - INDENT.length).map((line2) => INDENT + t.dim(line2));
+  return wrap(opts.semantic, t.width - INDENT.length).map((line) => INDENT + t.dim(line));
 }
 function supersededBySemantic(opts, reason) {
   return Boolean(opts.semantic) && reason.startsWith("the words matched;");
@@ -24326,16 +25829,16 @@ function hitLedger(hit2, t, width) {
 }
 function detailRow(l, t, width) {
   const times = t.g("\xD7", "x");
-  const name = l.list.padEnd(LIST_COL);
+  const name2 = l.list.padEnd(LIST_COL);
   const rank = `r${l.rank}`.padEnd(4);
   const weight = `${times}${l.weight.toFixed(2)}${l.relaxed ? "~" : ""}`.padEnd(7);
   const contribution = l.contribution.toFixed(4);
   const share = `${Math.round(l.share * 100)}%`.padStart(4);
   const raw = rawColumn(l).padEnd(12);
-  const wide = `${name} ${rank} ${raw} ${weight} ${contribution} ${share}`;
-  const narrow = `${name} ${rank} ${weight} ${contribution} ${share}`;
-  const line2 = Theme.len(wide) <= width ? wide : narrow;
-  return t.dim(clip(line2, width, t));
+  const wide = `${name2} ${rank} ${raw} ${weight} ${contribution} ${share}`;
+  const narrow = `${name2} ${rank} ${weight} ${contribution} ${share}`;
+  const line = Theme.len(wide) <= width ? wide : narrow;
+  return t.dim(clip(line, width, t));
 }
 function rawColumn(l) {
   if (l.list === "vec_exchanges" || l.list === "vec_cards" || l.list === "vec_ghost_prompts")
@@ -24403,8 +25906,8 @@ function renderLs(result, t = new Theme(), now = /* @__PURE__ */ new Date(), ech
   }));
   lines.push("");
   lines.push(INDENT + t.dim(summary(result, t)));
-  for (const line2 of ignoreNote2(result, t))
-    lines.push(line2);
+  for (const line of ignoreNote2(result, t))
+    lines.push(line);
   lines.push(fitLine(t, `${t.dim("run")}  potsherd show <id8>  ${t.dim("to read one, or  potsherd find <words>")}`, `${t.dim("run")}  potsherd show <id8>  ${t.dim("to read one")}`, `${t.dim("run")}  potsherd show <id8>`));
   return lines.join("\n");
 }
@@ -24624,9 +26127,9 @@ function cardBlock(stored, t, width) {
   const c = stored.card;
   const out = [];
   const body = Math.max(24, width - 8);
-  const section = (name) => {
+  const section = (name2) => {
     out.push("");
-    out.push(INDENT + t.dim(name));
+    out.push(INDENT + t.dim(name2));
   };
   if (c.summary.trim()) {
     section("summary");
@@ -24635,11 +26138,11 @@ function cardBlock(stored, t, width) {
   }
   const claimIndent = INDENT + "    ";
   const avail = Math.max(16, width - claimIndent.length);
-  const claims = (name, list2) => {
-    if (list2.length === 0)
+  const claims = (name2, list3) => {
+    if (list3.length === 0)
       return;
-    section(name);
-    for (const claim3 of list2) {
+    section(name2);
+    for (const claim3 of list3) {
       const cite = claim3.evidence_seq.length ? `[${claim3.evidence_seq.map(String).join(", ")}]` : "";
       const wrapped = wrap(claim3.what.trim(), avail);
       const last2 = wrapped[wrapped.length - 1] ?? "";
@@ -24661,28 +26164,28 @@ function cardBlock(stored, t, width) {
   };
   claims("decisions", c.decisions);
   claims("open threads", c.open_threads);
-  const list = (name, items) => {
+  const list2 = (name2, items) => {
     if (items.length === 0)
       return;
-    section(name);
+    section(name2);
     const sep = ` ${t.mid} `;
-    let line2 = "";
+    let line = "";
     for (const raw of items) {
       const item = raw.length > body ? elideMiddle(raw, body, t) : raw;
-      if (line2 === "") {
-        line2 = item;
-      } else if (line2.length + sep.length + item.length <= body) {
-        line2 += sep + item;
+      if (line === "") {
+        line = item;
+      } else if (line.length + sep.length + item.length <= body) {
+        line += sep + item;
       } else {
-        out.push(INDENT + "  " + line2 + ` ${t.mid}`);
-        line2 = item;
+        out.push(INDENT + "  " + line + ` ${t.mid}`);
+        line = item;
       }
     }
-    if (line2 !== "")
-      out.push(INDENT + "  " + line2);
+    if (line !== "")
+      out.push(INDENT + "  " + line);
   };
-  list("files", c.files);
-  list("tags", [.../* @__PURE__ */ new Set([...c.topics, ...c.tags])]);
+  list2("files", c.files);
+  list2("tags", [.../* @__PURE__ */ new Set([...c.topics, ...c.tags])]);
   const v = stored.verified;
   const bits = [];
   if (v)
@@ -24723,7 +26226,7 @@ function toolNote(e, t) {
       seen.errors++;
     byName.set(c.name, seen);
   }
-  const parts = [...byName.entries()].map(([name, v]) => `${name}${v.n > 1 ? `(${v.n})` : ""}${v.errors ? "!" : ""}`);
+  const parts = [...byName.entries()].map(([name2, v]) => `${name2}${v.n > 1 ? `(${v.n})` : ""}${v.errors ? "!" : ""}`);
   return `tools  ${parts.join(` ${t.mid} `)}`;
 }
 function base(p) {
@@ -24756,12 +26259,12 @@ function renderShowMarkdown(r) {
       out.push(c.summary.trim());
       out.push("");
     }
-    const claims = (name, list) => {
-      if (list.length === 0)
+    const claims = (name2, list2) => {
+      if (list2.length === 0)
         return;
-      out.push(`**${name}**`);
+      out.push(`**${name2}**`);
       out.push("");
-      for (const claim3 of list) {
+      for (const claim3 of list2) {
         const cite = claim3.evidence_seq.length ? ` [${claim3.evidence_seq.join(", ")}]` : "";
         const why2 = (claim3.why ?? "").trim();
         out.push(`- ${claim3.what.trim()}${cite}${why2 ? ` \u2014 _${why2}_` : ""}`);
@@ -24835,7 +26338,7 @@ function esc(s) {
 function renderShowHtml(r, version) {
   const s = r.session;
   const out = [];
-  const p = (line2) => void out.push(line2);
+  const p = (line) => void out.push(line);
   p("<!doctype html>");
   p('<html lang="en"><head>');
   p('<meta charset="utf-8">');
@@ -24862,12 +26365,12 @@ function renderShowHtml(r, version) {
     p('<div class="card">');
     if (c.summary.trim())
       p(`<p>${esc(c.summary.trim())}</p>`);
-    const claims = (name, list) => {
-      if (list.length === 0)
+    const claims = (name2, list2) => {
+      if (list2.length === 0)
         return;
-      p(`<h3>${esc(name)}</h3>`);
+      p(`<h3>${esc(name2)}</h3>`);
       p("<ul>");
-      for (const claim3 of list) {
+      for (const claim3 of list2) {
         const cite = claim3.evidence_seq.length ? ` <span class="cite">[${esc(claim3.evidence_seq.join(", "))}]</span>` : "";
         const why2 = (claim3.why ?? "").trim();
         p(`<li>${esc(claim3.what.trim())}${cite}` + (why2 ? ` <span class="why">\u2014 ${esc(why2)}</span>` : "") + "</li>");
@@ -24979,12 +26482,12 @@ function renderStats(r, t = new Theme()) {
     header.map((h) => t.dim(h)),
     ...r.harnesses.map((h) => harnessRow(h, t))
   ];
-  for (const line2 of table(t, rows, {
+  for (const line of table(t, rows, {
     gap: 2,
     grow: 6,
     align: ["left", "right", "right", "right", "right", "right", "left"]
   })) {
-    card.raw(line2);
+    card.raw(line);
   }
   card.blank();
   const tot = r.totals;
@@ -25142,11 +26645,11 @@ function absolute(raw, v) {
       return null;
     return { start: raw, end: raw, label: raw };
   }
-  const day2 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
-  if (day2) {
-    const y = Number(day2[1]);
-    const mo = Number(day2[2]);
-    const d = Number(day2[3]);
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (day) {
+    const y = Number(day[1]);
+    const mo = Number(day[2]);
+    const d = Number(day[3]);
     if (!validYmd(y, mo, d))
       return null;
     return utcRange(Date.UTC(y, mo - 1, d), Date.UTC(y, mo - 1, d + 1), v);
@@ -25225,15 +26728,15 @@ function named(v, now) {
   }
 }
 function mondayOf(d) {
-  const day2 = (d.getDay() + 6) % 7;
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - day2);
+  const day = (d.getDay() + 6) % 7;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - day);
 }
 function monthPhrase(v, now) {
   const m = /^(?:in |during )?([a-z]{3,9})(?: (\d{4}))?$/.exec(v);
   if (!m)
     return null;
-  const name = m[1];
-  const idx = MONTHS3.findIndex((full) => full === name || full.slice(0, 3) === name);
+  const name2 = m[1];
+  const idx = MONTHS3.findIndex((full) => full === name2 || full.slice(0, 3) === name2);
   if (idx === -1)
     return null;
   let year = m[2] ? Number(m[2]) : now.getFullYear();
@@ -25246,8 +26749,8 @@ function weekday(v, now) {
   const m = /^(last |this |on )?([a-z]{3,9})$/.exec(v);
   if (!m)
     return null;
-  const name = m[2];
-  const idx = WEEKDAYS.findIndex((full) => full === name || full.slice(0, 3) === name);
+  const name2 = m[2];
+  const idx = WEEKDAYS.findIndex((full) => full === name2 || full.slice(0, 3) === name2);
   if (idx === -1)
     return null;
   const back = (m[1] ?? "").trim() === "last";
@@ -25449,8 +26952,8 @@ assistant: ${assistant}`;
   return assistant ? `assistant: ${assistant}` : "";
 }
 function unitHeader(unit) {
-  const day2 = unit.ts ? unit.ts.slice(0, 10) : "";
-  return day2 ? `[seq ${unit.seq} \xB7 ${day2}]` : `[seq ${unit.seq}]`;
+  const day = unit.ts ? unit.ts.slice(0, 10) : "";
+  return day ? `[seq ${unit.seq} \xB7 ${day}]` : `[seq ${unit.seq}]`;
 }
 function renderUnit(unit, maxChars) {
   const body = maxChars !== void 0 ? elideMiddle2(unit.text, maxChars) : unit.text;
@@ -25717,7 +27220,7 @@ function renderEstimate(plan, t = new Theme(), o = {}) {
     }
   ]);
   card.blank();
-  const money4 = `~${approxMoney(e.usd)}`;
+  const money3 = `~${approxMoney(e.usd)}`;
   const time2 = `~${approxDuration(e.seconds)}`;
   const overTime = e.secondsLow > TARGET_SECONDS;
   const overMoney = e.usdLow > TARGET_USD;
@@ -25759,7 +27262,7 @@ function renderEstimate(plan, t = new Theme(), o = {}) {
       },
       {
         label: e.chargeable ? "estimated cost" : "equivalent cost",
-        value: money4,
+        value: money3,
         tone: e.chargeable ? overMoney ? "warn" : "accent" : "dim",
         note: e.chargeable ? `est. ${moneyRange} ${t.sep} target ${money(TARGET_USD)}` : `$0 charged ${t.sep} ${moneyRange} on an api key`
       }
@@ -25777,8 +27280,8 @@ function renderEstimate(plan, t = new Theme(), o = {}) {
     ] : []
   ]);
   card.blank();
-  for (const line2 of basisLines(e, t))
-    card.text(line2, "dim");
+  for (const line of basisLines(e, t))
+    card.text(line, "dim");
   card.blank();
   if (o.dryRun === false) {
     card.text("this is what the run will do.");
@@ -25797,12 +27300,12 @@ function approxDuration(seconds) {
 function perCallOutput(e) {
   return e.calls > 0 ? Math.round(e.outputTokens / e.calls) : 0;
 }
-function approxMoney(usd2) {
-  if (usd2 >= 10)
-    return `$${Math.round(usd2)}`;
-  if (usd2 >= 1)
-    return `$${(Math.round(usd2 * 10) / 10).toFixed(1)}`;
-  return money(usd2);
+function approxMoney(usd) {
+  if (usd >= 10)
+    return `$${Math.round(usd)}`;
+  if (usd >= 1)
+    return `$${(Math.round(usd * 10) / 10).toFixed(1)}`;
+  return money(usd);
 }
 function basisLines(e, t) {
   const first = e.measured ? `time and cost are estimates, fitted to ${e.basis}.` : `time and cost are estimates: ${e.basis}.`;
@@ -25913,10 +27416,10 @@ function clampChars(s) {
   return s.length <= MAX_CLAIM_CHARS ? s : `${s.slice(0, MAX_CLAIM_CHARS - 1).trimEnd()}\u2026`;
 }
 function clampWords(s, max2) {
-  const words4 = s.split(/\s+/).filter(Boolean);
-  if (words4.length <= max2)
-    return words4.join(" ");
-  return `${words4.slice(0, max2).join(" ")}\u2026`;
+  const words3 = s.split(/\s+/).filter(Boolean);
+  if (words3.length <= max2)
+    return words3.join(" ");
+  return `${words3.slice(0, max2).join(" ")}\u2026`;
 }
 function asOutcome(v) {
   const s = asString(v).toLowerCase();
@@ -26094,10 +27597,10 @@ function rankedWindows(text2, probe2, size = 1800, max2 = 4) {
   if (wanted.size === 0)
     return all.slice(0, max2);
   const scored = all.map((w, i) => {
-    const words4 = new Set(w.toLowerCase().match(WORD) ?? []);
+    const words3 = new Set(w.toLowerCase().match(WORD) ?? []);
     let hits = 0;
     for (const token of wanted)
-      if (words4.has(token))
+      if (words3.has(token))
         hits += 1;
     return { w, i, score: hits / wanted.size };
   });
@@ -26174,7 +27677,7 @@ async function measureCoverage(units2, card, embed) {
   };
 }
 function mergeSupplement(base2, extra) {
-  const seen = (list) => new Set(list.map((s) => s.toLowerCase().trim()));
+  const seen = (list2) => new Set(list2.map((s) => s.toLowerCase().trim()));
   const topics = [...base2.topics];
   const topicSeen = seen(topics);
   for (const t of extra.topics) {
@@ -26300,18 +27803,18 @@ var init_dedupe = __esm({
 
 // packages/core/dist/cards/slice.js
 function sliceUnits(units2, options = {}) {
-  const list = units2.filter((u) => u.text.trim().length > 0);
-  if (list.length === 0)
+  const list2 = units2.filter((u) => u.text.trim().length > 0);
+  if (list2.length === 0)
     return [];
   const threshold = options.thresholdChars ?? SLICE_THRESHOLD_CHARS;
   const chunkChars = Math.max(1e3, options.chunkChars ?? SLICE_CHUNK_CHARS);
-  const total = list.reduce((n3, u) => n3 + Math.min(u.text.length, MAX_UNIT_CHARS), 0);
+  const total = list2.reduce((n3, u) => n3 + Math.min(u.text.length, MAX_UNIT_CHARS), 0);
   if (total <= threshold)
-    return [list];
+    return [list2];
   const chunks = [];
   let current = [];
   let size = 0;
-  for (const unit of list) {
+  for (const unit of list2) {
     const cost2 = Math.min(unit.text.length, MAX_UNIT_CHARS);
     if (current.length > 0 && size + cost2 > chunkChars) {
       chunks.push(current);
@@ -26758,8 +28261,8 @@ var init_pipeline = __esm({
 });
 
 // packages/core/dist/cards/run.js
-import fs40 from "node:fs";
-import path32 from "node:path";
+import fs43 from "node:fs";
+import path35 from "node:path";
 async function runCards(db, llm, options) {
   const started = Date.now();
   const kinds2 = new Set(options.kinds ?? ["session", "ghost"]);
@@ -26948,8 +28451,8 @@ function absorb2(report, result, target, file) {
 function writeSentinel(root, target, error) {
   try {
     const file = cardPath(root, target.harness, projectSlugOf(target), target.id);
-    fs40.mkdirSync(path32.dirname(file), { recursive: true });
-    fs40.writeFileSync(file, formatErrorSentinel(error), { mode: 384 });
+    fs43.mkdirSync(path35.dirname(file), { recursive: true });
+    fs43.writeFileSync(file, formatErrorSentinel(error), { mode: 384 });
   } catch {
   }
 }
@@ -27083,14 +28586,14 @@ function renderCardRun(report, t = new Theme(), o = {}) {
     card.blank();
     card.text(listed.length < report.cards.length ? `${listed.length} of ${report.cards.length} cards, most-filtered first:` : "the cards:");
     card.blank();
-    for (const line2 of table(t, listed.map((c) => [
+    for (const line of table(t, listed.map((c) => [
       c.title || idTag(c.id),
       c.outcome,
       `${c.decisions}d ${c.openThreads}o`,
       c.dropped ? `-${c.dropped}` : t.g("\xB7", "."),
       c.coverage === null ? t.g("\xB7", ".") : `${Math.round(c.coverage * 100)}%`
     ]), { grow: 0, align: ["left", "left", "right", "right", "right"] })) {
-      card.raw(line2);
+      card.raw(line);
     }
   }
   if (report.errors.length > 0) {
@@ -27532,11 +29035,11 @@ function oneSentence(raw) {
 }
 function validateVerdicts(value) {
   const rec = value && typeof value === "object" ? value : null;
-  const list = Array.isArray(rec?.["results"]) ? rec["results"] : Array.isArray(value) ? value : null;
-  if (!list)
+  const list2 = Array.isArray(rec?.["results"]) ? rec["results"] : Array.isArray(value) ? value : null;
+  if (!list2)
     return null;
   const results = [];
-  for (const item of list) {
+  for (const item of list2) {
     if (!item || typeof item !== "object")
       continue;
     const r = item;
@@ -27873,19 +29376,19 @@ function wordCount(text2) {
 function trimToWordBudget(sentences2, maxWords = ANSWER_MAX_WORDS) {
   const kept = [];
   const trimmed = [];
-  let words4 = 0;
+  let words3 = 0;
   for (const s of sentences2) {
     if (trimmed.length > 0) {
       trimmed.push(s.text);
       continue;
     }
     const n3 = wordCount(s.text);
-    if (kept.length > 0 && words4 + n3 > maxWords) {
+    if (kept.length > 0 && words3 + n3 > maxWords) {
       trimmed.push(s.text);
       continue;
     }
     kept.push(s);
-    words4 += n3;
+    words3 += n3;
   }
   return { kept, trimmed };
 }
@@ -28243,9 +29746,9 @@ async function shortlist(db, sessions, k, o) {
         seqs.set(id, []);
         inBlock.push(id);
       }
-      const list = seqs.get(id);
-      if (h.seq !== void 0 && h.seq !== null && !list.includes(h.seq))
-        list.push(h.seq);
+      const list2 = seqs.get(id);
+      if (h.seq !== void 0 && h.seq !== null && !list2.includes(h.seq))
+        list2.push(h.seq);
       scores.set(id, Math.max(scores.get(id) ?? 0, h.score));
     }
     if (!seqs.has(s.id)) {
@@ -28713,8 +30216,8 @@ function cheapNote(r, t) {
   const full = `--cheap ${t.sep} about half the cost, not faster ${t.sep} ${warn}`;
   const mid = `--cheap ${t.sep} ${warn}`;
   const bare = `--cheap ${t.sep} it can miss`;
-  const line2 = full.length <= room ? full : mid.length <= room ? mid : bare;
-  return INDENT + t.dim(clip(line2, room, t));
+  const line = full.length <= room ? full : mid.length <= room ? mid : bare;
+  return INDENT + t.dim(clip(line, room, t));
 }
 function renderAsk(r, t = new Theme(), now = /* @__PURE__ */ new Date(), opts = {}) {
   const lines = [];
@@ -28737,8 +30240,8 @@ function renderAsk(r, t = new Theme(), now = /* @__PURE__ */ new Date(), opts = 
   lines.push(t.dim(headline3(r, t)));
   lines.push("");
   lines.push("ANSWER");
-  for (const line2 of wrap(answerText(b.sentences, t), width))
-    lines.push(INDENT + line2);
+  for (const line of wrap(answerText(b.sentences, t), width))
+    lines.push(INDENT + line);
   lines.push("");
   lines.push("EVIDENCE");
   for (const e of b.evidence)
@@ -28854,8 +30357,8 @@ function threadLines(o, t, now, notes = true) {
   const width = t.width - INDENT.length;
   const head = `${t.warn(OPEN_THREAD_LABEL)} ${t.sep} decided in ${projectName(o.project)}, not seen in ${projectName(o.otherProject)}`;
   const out = [INDENT + clip(head, t.width, t)];
-  for (const line2 of wrap(o.what, width - 4))
-    out.push(INDENT + "    " + line2);
+  for (const line of wrap(o.what, width - 4))
+    out.push(INDENT + "    " + line);
   const seqs = o.evidenceSeqs.length ? `@${o.evidenceSeqs.join(",")}` : "";
   const src = `${projectName(o.project)}/${o.id8}${seqs}  ${o.ts ? shortDateTime(o.ts, now) : t.dash}`;
   out.push(INDENT + "    " + t.dim(clip(src, width - 4, t)));
@@ -28949,8 +30452,8 @@ function footer2(r, t, opts, b) {
   const next = opts.next ?? (r.evidence[0] ? `potsherd graft ${r.evidence[0].id8}` : null);
   if (next) {
     const gloss = opts.next ? "" : "  to carry it into the agent you are in";
-    const line2 = INDENT + "run  " + next + gloss;
-    out.push(Theme.len(line2) <= t.width ? INDENT + t.dim("run") + "  " + next + t.dim(gloss) : INDENT + t.dim("run") + "  " + clip(next, t.width - INDENT.length - 5, t));
+    const line = INDENT + "run  " + next + gloss;
+    out.push(Theme.len(line) <= t.width ? INDENT + t.dim("run") + "  " + next + t.dim(gloss) : INDENT + t.dim("run") + "  " + clip(next, t.width - INDENT.length - 5, t));
   }
   return out;
 }
@@ -29001,12 +30504,12 @@ var init_ask2 = __esm({
 });
 
 // packages/core/dist/graft.js
-import fs41 from "node:fs";
-import path33 from "node:path";
+import fs44 from "node:fs";
+import path36 from "node:path";
 import process10 from "node:process";
 import { spawnSync } from "node:child_process";
-function expandCitationGroups(line2) {
-  return line2.replace(/\[([^\][\n]{0,400})\]/g, (whole, inner) => {
+function expandCitationGroups(line) {
+  return line.replace(/\[([^\][\n]{0,400})\]/g, (whole, inner) => {
     const lead = /^\s*([0-9a-f]{6,40})@\d+/i.exec(inner);
     if (!lead)
       return whole;
@@ -29111,8 +30614,8 @@ function resolveCitations(db, text2, o = {}) {
   const lines = text2.split("\n");
   const kept = [];
   const droppedLines = [];
-  for (const line2 of lines) {
-    const cleaned = expandCitationGroups(line2.replace(/\[?\s*[0-9a-f]{6,40}@<[^>\]]*>\s*\]?/gi, "")).trimEnd();
+  for (const line of lines) {
+    const cleaned = expandCitationGroups(line.replace(/\[?\s*[0-9a-f]{6,40}@<[^>\]]*>\s*\]?/gi, "")).trimEnd();
     const found = [...cleaned.matchAll(new RegExp(CITATION_RE.source, "gi"))];
     let anyResolved = false;
     let out = cleaned;
@@ -29137,11 +30640,11 @@ function resolveCitations(db, text2, o = {}) {
   }
   return { text: kept.join("\n"), citations, droppedLines };
 }
-function isClaim(line2) {
-  return !STRUCTURAL.some((re) => re.test(line2));
+function isClaim(line) {
+  return !STRUCTURAL.some((re) => re.test(line));
 }
-function tidyBrackets(line2) {
-  return line2.replace(/,\s*(?=[,\]])/g, "").replace(/\[\s*,\s*/g, "[").replace(/\s*,\s*\]/g, "]").replace(/\[\s*\]/g, "").replace(/[ \t]{2,}/g, " ").trimEnd();
+function tidyBrackets(line) {
+  return line.replace(/,\s*(?=[,\]])/g, "").replace(/\[\s*,\s*/g, "[").replace(/\s*,\s*\]/g, "]").replace(/\[\s*\]/g, "").replace(/[ \t]{2,}/g, " ").trimEnd();
 }
 function citationResolves(db, id8, seq, expected) {
   if (!Number.isSafeInteger(seq) || seq < 0)
@@ -29406,10 +30909,10 @@ function legalSeqs(src) {
     for (const s of [...seqs, ...prompts].slice(0, 12))
       add(s, src.id8);
   }
-  const list = [...out];
+  const list2 = [...out];
   if (!chained)
-    list.sort((a, b) => Number(a) - Number(b));
-  return list.slice(0, 40);
+    list2.sort((a, b) => Number(a) - Number(b));
+  return list2.slice(0, 40);
 }
 function cardOnlyBody(src) {
   const out = [];
@@ -29447,18 +30950,18 @@ function cardOnlyBody(src) {
   return out;
 }
 function graftDir(cwd = process10.cwd()) {
-  return path33.join(cwd, ".potsherd");
+  return path36.join(cwd, ".potsherd");
 }
 function graftPath(id8, cwd = process10.cwd()) {
-  return path33.join(graftDir(cwd), `graft-${id8}.md`);
+  return path36.join(graftDir(cwd), `graft-${id8}.md`);
 }
 function ensureGraftDir(cwd = process10.cwd()) {
   const dir = graftDir(cwd);
-  fs41.mkdirSync(dir, { recursive: true });
-  const ignore = path33.join(dir, ".gitignore");
-  if (fs41.existsSync(ignore))
+  fs44.mkdirSync(dir, { recursive: true });
+  const ignore = path36.join(dir, ".gitignore");
+  if (fs44.existsSync(ignore))
     return { dir, wroteGitignore: false };
-  fs41.writeFileSync(ignore, GITIGNORE_BODY, { mode: 384 });
+  fs44.writeFileSync(ignore, GITIGNORE_BODY, { mode: 384 });
   return { dir, wroteGitignore: true };
 }
 function copyToClipboard(text2) {
@@ -29545,7 +31048,7 @@ async function graft(db, target, o = {}) {
   if (write) {
     const dir = ensureGraftDir(cwd);
     wroteGitignore = dir.wroteGitignore;
-    fs41.writeFileSync(outPath, budgeted.brief, { mode: 384 });
+    fs44.writeFileSync(outPath, budgeted.brief, { mode: 384 });
   } else {
     outPath = "";
   }
@@ -29900,8 +31403,8 @@ __export(setup_exports, {
   tomlValue: () => tomlValue,
   tomlWithout: () => tomlWithout
 });
-import fs42 from "node:fs";
-import path34 from "node:path";
+import fs45 from "node:fs";
+import path37 from "node:path";
 import process11 from "node:process";
 function resolveMcpServer(entry = process11.argv[1], env = process11.env) {
   const found = onPath(MCP_BIN, env);
@@ -29920,43 +31423,43 @@ function resolveMcpServer(entry = process11.argv[1], env = process11.env) {
   return { command: MCP_BIN, args: [], via: "assumed", exists: false };
 }
 function findMcpEntry(entry) {
-  const start = entry && fs42.existsSync(entry) ? path34.dirname(path34.resolve(entry)) : process11.cwd();
+  const start = entry && fs45.existsSync(entry) ? path37.dirname(path37.resolve(entry)) : process11.cwd();
   let dir = start;
   let workspace = null;
-  const bundled = path34.join(start, "mcp.js");
-  if (path34.basename(start) === "dist" && fs42.existsSync(bundled)) {
+  const bundled = path37.join(start, "mcp.js");
+  if (path37.basename(start) === "dist" && fs45.existsSync(bundled)) {
     return { file: bundled, exists: true };
   }
   for (let i = 0; i < 8; i++) {
     for (const rel of [MCP_ENTRY_RELATIVE, MCP_PACKAGE_RELATIVE]) {
-      const candidate = path34.join(dir, rel);
-      if (fs42.existsSync(candidate))
+      const candidate = path37.join(dir, rel);
+      if (fs45.existsSync(candidate))
         return { file: candidate, exists: true };
     }
-    if (!dir.split(path34.sep).includes("node_modules") && fs42.existsSync(path34.join(dir, "package.json")) && fs42.existsSync(path34.join(dir, "packages"))) {
+    if (!dir.split(path37.sep).includes("node_modules") && fs45.existsSync(path37.join(dir, "package.json")) && fs45.existsSync(path37.join(dir, "packages"))) {
       workspace = dir;
       break;
     }
-    const up = path34.dirname(dir);
+    const up = path37.dirname(dir);
     if (up === dir)
       break;
     dir = up;
   }
-  return { file: workspace ? path34.join(workspace, MCP_ENTRY_RELATIVE) : null, exists: false };
+  return { file: workspace ? path37.join(workspace, MCP_ENTRY_RELATIVE) : null, exists: false };
 }
 function stdio(res) {
   return { command: res.command, args: [...res.args] };
 }
 function opencodeConfigDir(env = process11.env) {
   const xdg = env["XDG_CONFIG_HOME"];
-  const base2 = xdg && xdg.trim() ? path34.resolve(expandTilde(xdg.trim())) : path34.join(home(), ".config");
-  return path34.join(base2, "opencode");
+  const base2 = xdg && xdg.trim() ? path37.resolve(expandTilde(xdg.trim())) : path37.join(home(), ".config");
+  return path37.join(base2, "opencode");
 }
 function claudeJsonPath(dir, env = process11.env) {
   const override = dir ?? (env["CLAUDE_CONFIG_DIR"]?.trim() || void 0);
   if (override)
-    return path34.join(claudeDir(override), ".claude.json");
-  return path34.join(home(), ".claude.json");
+    return path37.join(claudeDir(override), ".claude.json");
+  return path37.join(home(), ".claude.json");
 }
 function clientSpec(id) {
   const spec = CLIENTS.find((c) => c.id === id);
@@ -29969,8 +31472,8 @@ function detectClient(spec, opts = {}) {
   const p = spec.id === "claude" ? claudeJsonPath(opts.claudeDir, env) : spec.configPath(env);
   const dir = spec.homeDir(env);
   const bin = spec.bins.map((b) => onPath(b, env)).find((x) => Boolean(x)) ?? null;
-  const configExists = fs42.existsSync(p);
-  const dirExists = Boolean(dir && fs42.existsSync(dir));
+  const configExists = fs45.existsSync(p);
+  const dirExists = Boolean(dir && fs45.existsSync(dir));
   const read = readServers(spec, p);
   const registered = Object.prototype.hasOwnProperty.call(read.servers, SERVER_NAME);
   const evidence2 = bin ? "binary" : configExists ? "config" : dirExists ? "directory" : "none";
@@ -30013,22 +31516,22 @@ function commandRunnable(command) {
   if (!bin)
     return false;
   if (bin.includes("/") || bin.includes("\\")) {
-    if (!fs42.existsSync(bin))
+    if (!fs45.existsSync(bin))
       return false;
   } else if (onPath(bin) === null) {
     return false;
   }
-  const script = command.trim().split(/\s+/).slice(1).find((a) => a.includes(path34.sep));
+  const script = command.trim().split(/\s+/).slice(1).find((a) => a.includes(path37.sep));
   if (script)
-    return fs42.existsSync(script);
+    return fs45.existsSync(script);
   return true;
 }
 function readServers(spec, p) {
-  if (!fs42.existsSync(p))
+  if (!fs45.existsSync(p))
     return { servers: {}, text: null };
   let text2;
   try {
-    text2 = fs42.readFileSync(p, "utf8");
+    text2 = fs45.readFileSync(p, "utf8");
   } catch (err) {
     return { servers: {}, text: null, blocked: `${p} is unreadable (${err.message})` };
   }
@@ -30091,8 +31594,8 @@ function setIn(obj2, keys6, value) {
   if (last2 !== void 0)
     cur[last2] = value;
 }
-function tomlServerName(line2) {
-  const m = TOML_TABLE_RE.exec(line2);
+function tomlServerName(line) {
+  const m = TOML_TABLE_RE.exec(line);
   if (!m)
     return null;
   const quoted = m[1] ?? m[2];
@@ -30105,10 +31608,10 @@ function tomlServerName(line2) {
 }
 function tomlServers(text2) {
   const out = {};
-  for (const line2 of text2.split("\n")) {
-    const name = tomlServerName(line2);
-    if (name)
-      out[name] = {};
+  for (const line of text2.split("\n")) {
+    const name2 = tomlServerName(line);
+    if (name2)
+      out[name2] = {};
   }
   return out;
 }
@@ -30122,26 +31625,26 @@ function tomlValue(value) {
     return String(value);
   return JSON.stringify(String(value));
 }
-function tomlTable(name, entry) {
-  const lines = [`[mcp_servers.${name}]`];
+function tomlTable(name2, entry) {
+  const lines = [`[mcp_servers.${name2}]`];
   for (const [k, v] of Object.entries(entry))
     lines.push(`${k} = ${tomlValue(v)}`);
   return lines.join("\n") + "\n";
 }
-function tomlWithout(text2, name) {
+function tomlWithout(text2, name2) {
   const out = [];
   let skipping = false;
-  for (const line2 of text2.split("\n")) {
-    const found = tomlServerName(line2);
+  for (const line of text2.split("\n")) {
+    const found = tomlServerName(line);
     if (found !== null) {
-      skipping = found === name;
+      skipping = found === name2;
       if (skipping)
         continue;
-    } else if (skipping && /^[ \t]*\[/.test(line2)) {
+    } else if (skipping && /^[ \t]*\[/.test(line)) {
       skipping = false;
     }
     if (!skipping)
-      out.push(line2);
+      out.push(line);
   }
   return out.join("\n").replace(/\n{3,}/g, "\n\n");
 }
@@ -30247,13 +31750,13 @@ function applySetupPlan(plan, now = /* @__PURE__ */ new Date()) {
   if (plan.format === "json")
     return applyProposal(plan, now);
   let backup = null;
-  if (fs42.existsSync(plan.path)) {
+  if (fs45.existsSync(plan.path)) {
     backup = backupPath(plan.path, now);
-    fs42.copyFileSync(plan.path, backup);
+    fs45.copyFileSync(plan.path, backup);
   } else {
-    fs42.mkdirSync(path34.dirname(plan.path), { recursive: true });
+    fs45.mkdirSync(path37.dirname(plan.path), { recursive: true });
   }
-  fs42.writeFileSync(plan.path, plan.after, { mode: 384 });
+  fs45.writeFileSync(plan.path, plan.after, { mode: 384 });
   return { written: true, backup };
 }
 function manualSteps(plan) {
@@ -30279,8 +31782,8 @@ var init_setup = __esm({
     init_resolve_bin();
     SERVER_NAME = "potsherd";
     MCP_BIN = "potsherd-mcp";
-    MCP_ENTRY_RELATIVE = path34.join("packages", "mcp", "dist", "index.js");
-    MCP_PACKAGE_RELATIVE = path34.join("node_modules", "@potsherd", "mcp", "dist", "index.js");
+    MCP_ENTRY_RELATIVE = path37.join("packages", "mcp", "dist", "index.js");
+    MCP_PACKAGE_RELATIVE = path37.join("node_modules", "@potsherd", "mcp", "dist", "index.js");
     CLIENTS = [
       {
         id: "claude",
@@ -30302,7 +31805,7 @@ var init_setup = __esm({
         bins: ["codex"],
         verified: "config",
         evidenceNote: "read from a real ~/.codex/config.toml on this machine, which already carries two [mcp_servers.*] tables",
-        configPath: () => path34.join(codexDir(), "config.toml"),
+        configPath: () => path37.join(codexDir(), "config.toml"),
         homeDir: () => codexDir(),
         entry: (res) => stdio(res)
       },
@@ -30313,7 +31816,7 @@ var init_setup = __esm({
         bins: ["cursor", "cursor-agent"],
         verified: "config",
         evidenceNote: "read from a real ~/.cursor/mcp.json on this machine",
-        configPath: () => path34.join(cursorDir(), "mcp.json"),
+        configPath: () => path37.join(cursorDir(), "mcp.json"),
         homeDir: () => cursorDir(),
         jsonPath: ["mcpServers"],
         entry: (res) => stdio(res),
@@ -30326,7 +31829,7 @@ var init_setup = __esm({
         bins: ["gemini"],
         verified: "docs",
         evidenceNote: "documentation only: no gemini on this machine, and no settings.json to read",
-        configPath: () => path34.join(geminiDir(), "settings.json"),
+        configPath: () => path37.join(geminiDir(), "settings.json"),
         homeDir: () => geminiDir(),
         jsonPath: ["mcpServers"],
         entry: (res) => stdio(res)
@@ -30338,7 +31841,7 @@ var init_setup = __esm({
         bins: ["opencode"],
         verified: "docs",
         evidenceNote: "documentation only: no opencode on this machine, and no opencode.json to read",
-        configPath: (env) => path34.join(opencodeConfigDir(env), "opencode.json"),
+        configPath: (env) => path37.join(opencodeConfigDir(env), "opencode.json"),
         homeDir: (env) => opencodeConfigDir(env),
         jsonPath: ["mcp"],
         // opencode is the one schema here that is not `mcpServers`: the map is
@@ -30353,7 +31856,7 @@ var init_setup = __esm({
         bins: ["copilot"],
         verified: "docs",
         evidenceNote: "documentation only: ~/.copilot exists here but holds no mcp-config.json, and copilot is not on PATH",
-        configPath: () => path34.join(copilotDir(), "mcp-config.json"),
+        configPath: () => path37.join(copilotDir(), "mcp-config.json"),
         homeDir: () => copilotDir(),
         jsonPath: ["mcpServers"],
         entry: (res) => ({ type: "local", ...stdio(res), tools: ["*"] })
@@ -30365,7 +31868,7 @@ var init_setup = __esm({
         bins: ["pi"],
         verified: "tool",
         evidenceNote: "native pi 0.74.0 loader/tool/lifecycle probe verified with synthetic MCP; model journey not qualified",
-        configPath: () => path34.join(piDir(), "agent", "extensions", "potsherd.ts"),
+        configPath: () => path37.join(piDir(), "agent", "extensions", "potsherd.ts"),
         homeDir: () => piDir(),
         entry: (res) => stdio(res)
       }
@@ -30394,15 +31897,15 @@ __export(stack_exports, {
   toolSpec: () => toolSpec
 });
 import { existsSync } from "node:fs";
-import path35 from "node:path";
+import path38 from "node:path";
 import process12 from "node:process";
 function claimLegend(verifiedOn = VERIFIED_ON) {
   return `claim: potsherd's row was measured by running potsherd on this machine. every other row was read from that project's own documentation on ${verifiedOn} and was never run here. sources and fetch dates: ${CLAIM_SOURCE}`;
 }
 function episodicIndexPath(env = process12.env) {
   const xdg = env["XDG_CONFIG_HOME"];
-  const base2 = xdg && xdg.trim() ? path35.resolve(expandTilde(xdg.trim())) : path35.join(home(), ".config");
-  return path35.join(base2, "superpowers", "conversation-index", "db.sqlite");
+  const base2 = xdg && xdg.trim() ? path38.resolve(expandTilde(xdg.trim())) : path38.join(home(), ".config");
+  return path38.join(base2, "superpowers", "conversation-index", "db.sqlite");
 }
 function toolSpec(id) {
   const spec = TOOLS.find((t) => t.id === id);
@@ -30561,7 +32064,7 @@ var init_stack = __esm({
         verified: "docs",
         evidenceNote: "README and the GitHub licence API, read " + VERIFIED_ON + "; not installed here, so nothing was exercised",
         source: "https://github.com/thedotmack/claude-mem (README + api.github.com/repos)",
-        markers: () => [path35.join(home(), ".claude-mem")],
+        markers: () => [path38.join(home(), ".claude-mem")],
         coverage: ["no", "yes", "no", "no"],
         note: "five hooks, injects at SessionStart. its README documents no import of transcripts from before install.",
         capturesLive: true,
@@ -30581,8 +32084,8 @@ var init_stack = __esm({
         // detector that only knows the wrong path reports "absent" on a machine
         // where the tool is running.
         markers: (env = process12.env) => [
-          path35.join(home(), ".agentmemory"),
-          process12.platform === "darwin" ? path35.join(home(), "Library", "Application Support", "agentmemory") : path35.join(env["XDG_DATA_HOME"]?.trim() ? expandTilde(env["XDG_DATA_HOME"].trim()) : path35.join(home(), ".local", "share"), "agentmemory")
+          path38.join(home(), ".agentmemory"),
+          process12.platform === "darwin" ? path38.join(home(), "Library", "Application Support", "agentmemory") : path38.join(env["XDG_DATA_HOME"]?.trim() ? expandTilde(env["XDG_DATA_HOME"].trim()) : path38.join(home(), ".local", "share"), "agentmemory")
         ],
         coverage: ["no", "yes", "partial", "partial"],
         note: "the only one here that backfills: `import-jsonl` reads ~/.claude/projects. only what the sweep left.",
@@ -30598,8 +32101,8 @@ var init_stack = __esm({
         evidenceNote: "README and the GitHub licence API, read " + VERIFIED_ON + "; not installed here. needs postgres or its embedded pg0, so detection is weak",
         source: "https://github.com/vectorize-io/hindsight (README + api.github.com/repos)",
         markers: () => [
-          path35.join(home(), ".hindsight"),
-          path35.join(home(), ".pg0")
+          path38.join(home(), ".hindsight"),
+          path38.join(home(), ".pg0")
         ],
         coverage: ["no", "yes", "no", "partial"],
         note: "retain/recall per bank, one bank per project. no documented import of old transcripts.",
@@ -30632,7 +32135,7 @@ var init_stack = __esm({
         verified: "docs",
         evidenceNote: "README and the GitHub licence API, read " + VERIFIED_ON + "; not installed here. it is per-repo, so a home-directory marker is the weakest signal on this list",
         source: "https://github.com/Autoloops/greplica (README + api.github.com/repos)",
-        markers: () => [path35.join(home(), ".greplica")],
+        markers: () => [path38.join(home(), ".greplica")],
         coverage: ["no", "partial", "no", "partial"],
         note: 'one knowledge graph per repo. cannot answer "which project was that in".',
         capturesLive: true,
@@ -30646,7 +32149,7 @@ var init_stack = __esm({
         verified: "docs",
         evidenceNote: "README and the GitHub licence API, read " + VERIFIED_ON + "; not installed here. its vault path is fixed, which makes the marker a strong one",
         source: "https://github.com/m3talux/superbrain (README + api.github.com/repos)",
-        markers: () => [path35.join(home(), ".superbrain")],
+        markers: () => [path38.join(home(), ".superbrain")],
         coverage: ["no", "yes", "no", "no"],
         note: "obsidian vault at ~/.superbrain/vault, injects a brief at start. capture-only from install.",
         capturesLive: true,
@@ -30661,8 +32164,8 @@ var init_stack = __esm({
         evidenceNote: "the files themselves were found on this machine, and the behaviour read from code.claude.com/docs/en/memory on " + VERIFIED_ON,
         source: "https://code.claude.com/docs/en/memory",
         markers: () => [
-          path35.join(claudeDir(), "CLAUDE.md"),
-          path35.join(claudeDir(), "projects")
+          path38.join(claudeDir(), "CLAUDE.md"),
+          path38.join(claudeDir(), "projects")
         ],
         // The one row on this table with a documented immunity to the 30-day
         // sweep: *"Claude Code deletes old session transcripts after the
@@ -30834,13 +32337,13 @@ var VERSION;
 var init_version2 = __esm({
   "packages/core/dist/version.js"() {
     "use strict";
-    VERSION = "1.6.2";
+    VERSION = "1.7.0";
   }
 });
 
 // packages/core/dist/memory/delete.js
-import fs43 from "node:fs";
-import path36 from "node:path";
+import fs46 from "node:fs";
+import path39 from "node:path";
 function finishArchive(db, id, journal, root) {
   const remaining = [];
   const absoluteRemaining = [];
@@ -30849,8 +32352,8 @@ function finishArchive(db, id, journal, root) {
       absoluteRemaining.push(owned);
       continue;
     }
-    const relative = path36.relative(root, owned);
-    if (relative.startsWith("..") || path36.isAbsolute(relative)) {
+    const relative = path39.relative(root, owned);
+    if (relative.startsWith("..") || path39.isAbsolute(relative)) {
       absoluteRemaining.push(owned);
       continue;
     }
@@ -30862,18 +32365,18 @@ function finishArchive(db, id, journal, root) {
       remaining.push(relative);
       continue;
     }
-    const file = path36.resolve(root, relative);
-    if (!file.startsWith(path36.resolve(root) + path36.sep) || !(relative.startsWith("archive/") || relative.startsWith("cards/"))) {
+    const file = path39.resolve(root, relative);
+    if (!file.startsWith(path39.resolve(root) + path39.sep) || !(relative.startsWith("archive/") || relative.startsWith("cards/"))) {
       remaining.push(relative);
       continue;
     }
     try {
-      const actualRoot = fs43.realpathSync(root), actualParent = fs43.realpathSync(path36.dirname(file));
-      if (actualParent !== actualRoot && !actualParent.startsWith(actualRoot + path36.sep)) {
+      const actualRoot = fs46.realpathSync(root), actualParent = fs46.realpathSync(path39.dirname(file));
+      if (actualParent !== actualRoot && !actualParent.startsWith(actualRoot + path39.sep)) {
         remaining.push(relative);
         continue;
       }
-      fs43.unlinkSync(file);
+      fs46.unlinkSync(file);
     } catch (err) {
       if (err.code !== "ENOENT")
         remaining.push(relative);
@@ -31024,8 +32527,8 @@ var init_dense = __esm({
 
 // packages/core/dist/memory/embedding-workset.js
 import { randomUUID as randomUUID9 } from "node:crypto";
-function setting(db, name) {
-  return Number(Object.values(db.prepare(`PRAGMA ${name}`).get())[0]);
+function setting(db, name2) {
+  return Number(Object.values(db.prepare(`PRAGMA ${name2}`).get())[0]);
 }
 var reservations, EmbeddingWorkset;
 var init_embedding_workset = __esm({
@@ -31059,9 +32562,9 @@ var init_embedding_workset = __esm({
         const compiled = Number(declared?.split("=")[1]);
         if (![0, 1, 2].includes(compiled))
           throw new Error("embedding_file_temp_unsupported");
-        const name = "memory_embedding_" + randomUUID9().replaceAll("-", "");
-        this.pendingTable = name + "_pending";
-        this.targetTable = name + "_targets";
+        const name2 = "memory_embedding_" + randomUUID9().replaceAll("-", "");
+        this.pendingTable = name2 + "_pending";
+        this.targetTable = name2 + "_targets";
         try {
           db.exec("PRAGMA temp_store=FILE;PRAGMA temp.cache_size=-2048");
           const tempStore = setting(db, "temp_store"), tempCacheKiB = setting(db, "temp.cache_size");
@@ -31084,7 +32587,7 @@ var init_embedding_workset = __esm({
         this.assertOpen();
         if (setting(this.db, "temp_store") !== 1 || setting(this.db, "temp.cache_size") !== -2048)
           throw new Error("embedding_temp_configuration_changed");
-        const name = randomUUID9().replaceAll("-", ""), membership = "memory_vector_membership_" + name, debt = "memory_vector_debt_" + name;
+        const name2 = randomUUID9().replaceAll("-", ""), membership = "memory_vector_membership_" + name2, debt = "memory_vector_debt_" + name2;
         let madeMembership = false, madeDebt = false;
         try {
           this.db.exec(`CREATE TEMP TABLE ${membership}(span_id TEXT NOT NULL,revision_id TEXT NOT NULL,source_id TEXT NOT NULL,PRIMARY KEY(span_id,revision_id)) WITHOUT ROWID`);
@@ -31180,8 +32683,8 @@ var init_embedding_workset = __esm({
 });
 
 // packages/core/dist/memory/maintenance.js
-import fs44 from "node:fs";
-import path37 from "node:path";
+import fs47 from "node:fs";
+import path40 from "node:path";
 function openMaintenanceDb(root) {
   const file = dbPath(root), reader = openSqliteReadOnly(file);
   try {
@@ -31277,7 +32780,7 @@ function commitSpanVector(db, f, j, spanId, inputHash, vector) {
 }
 function prepareMigration(root) {
   const file = dbPath(root);
-  if (!fs44.existsSync(file))
+  if (!fs47.existsSync(file))
     return null;
   const db = openSqliteReadOnly(file);
   try {
@@ -31286,22 +32789,22 @@ function prepareMigration(root) {
     const check = db.prepare("PRAGMA integrity_check").all();
     if (check.length !== 1 || Object.values(check[0])[0] !== "ok")
       throw new Error("integrity_check_failed");
-    const dir = path37.join(root, "backups");
-    fs44.mkdirSync(dir, { recursive: true, mode: 448 });
-    const backup = path37.join(dir, `pre-memory-${Date.now()}-${process.pid}.db`);
+    const dir = path40.join(root, "backups");
+    fs47.mkdirSync(dir, { recursive: true, mode: 448 });
+    const backup = path40.join(dir, `pre-memory-${Date.now()}-${process.pid}.db`);
     db.prepare("VACUUM INTO ?").run(backup);
-    fs44.chmodSync(backup, 384);
-    const fd = fs44.openSync(backup, "r");
+    fs47.chmodSync(backup, 384);
+    const fd = fs47.openSync(backup, "r");
     try {
-      fs44.fsyncSync(fd);
+      fs47.fsyncSync(fd);
     } finally {
-      fs44.closeSync(fd);
+      fs47.closeSync(fd);
     }
-    const parent = fs44.openSync(dir, "r");
+    const parent = fs47.openSync(dir, "r");
     try {
-      fs44.fsyncSync(parent);
+      fs47.fsyncSync(parent);
     } finally {
-      fs44.closeSync(parent);
+      fs47.closeSync(parent);
     }
     return backup;
   } finally {
@@ -31435,7 +32938,7 @@ var init_maintenance = __esm({
             const paths = source.harness === "opencode" ? [source.path, source.path + "-wal"] : [source.path];
             fingerprint2 = hash(JSON.stringify(paths.map((p) => {
               try {
-                const s = fs44.statSync(p);
+                const s = fs47.statSync(p);
                 return [s.dev, s.ino, s.size, s.mtimeMs, s.ctimeMs];
               } catch {
                 return null;
@@ -31453,7 +32956,7 @@ var init_maintenance = __esm({
         for (const { harness, historyPath } of discoverEnrolledHistoryInputs(db, this.root)) {
           let fingerprint2;
           try {
-            const stat = fs44.statSync(historyPath);
+            const stat = fs47.statSync(historyPath);
             fingerprint2 = hash(JSON.stringify([stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs, NORMALIZATION_VERSION, `${harness}-history-records-v1`, pipelinePolicy]));
           } catch {
             continue;
@@ -31761,7 +33264,7 @@ var init_delivery = __esm({
 });
 
 // packages/core/dist/memory/reader.js
-import { createHash as createHash14 } from "node:crypto";
+import { createHash as createHash18 } from "node:crypto";
 function stable(value) {
   if (Array.isArray(value))
     return "[" + value.map(stable).join(",") + "]";
@@ -31782,7 +33285,7 @@ function buildReaderTask(taskId, query, scope2, packets) {
       availability2 = "unavailable";
     const rows = [...packet.evidence.map((item) => ({ kind: "source", text: item.text, role: item.role, authority: item.authority, ref: { ...item.ref }, startUtf16: item.startUtf16, endUtf16: item.endUtf16, sourceEventAt: item.sourceEventAt, ...item.toolOutcome ? { toolOutcome: item.toolOutcome } : {}, historical: item.historical })), ...packet.assertions.map((note) => ({ kind: "note", text: note.text, role: "authored_assertion", authority: note.authority, noteId: note.noteId, sourceEventAt: note.eventAt, supportStatus: note.supportStatus }))];
     for (const row2 of rows) {
-      const id = createHash14("sha256").update(stable({ taskId, query, scope: scope2, ...row2 })).digest("hex").slice(0, 24);
+      const id = createHash18("sha256").update(stable({ taskId, query, scope: scope2, ...row2 })).digest("hex").slice(0, 24);
       if (!seen.has(id)) {
         seen.add(id);
         citations.push({ id, ...row2 });
@@ -32017,25 +33520,25 @@ var require_argument = __commonJS({
        * @param {string} name
        * @param {string} [description]
        */
-      constructor(name, description) {
+      constructor(name2, description) {
         this.description = description || "";
         this.variadic = false;
         this.parseArg = void 0;
         this.defaultValue = void 0;
         this.defaultValueDescription = void 0;
         this.argChoices = void 0;
-        switch (name[0]) {
+        switch (name2[0]) {
           case "<":
             this.required = true;
-            this._name = name.slice(1, -1);
+            this._name = name2.slice(1, -1);
             break;
           case "[":
             this.required = false;
-            this._name = name.slice(1, -1);
+            this._name = name2.slice(1, -1);
             break;
           default:
             this.required = true;
-            this._name = name;
+            this._name = name2;
             break;
         }
         if (this._name.length > 3 && this._name.slice(-3) === "...") {
@@ -32535,9 +34038,9 @@ var require_help = __commonJS({
           "g"
         );
         const lines = columnText.match(regex) || [];
-        return leadingStr + lines.map((line2, i) => {
-          if (line2 === "\n") return "";
-          return (i > 0 ? indentString : "") + line2.trimEnd();
+        return leadingStr + lines.map((line, i) => {
+          if (line === "\n") return "";
+          return (i > 0 ? indentString : "") + line.trimEnd();
         }).join("\n");
       }
     };
@@ -32652,8 +34155,8 @@ var require_option = __commonJS({
        * @param {string} name
        * @return {Option}
        */
-      env(name) {
-        this.envVar = name;
+      env(name2) {
+        this.envVar = name2;
         return this;
       }
       /**
@@ -32902,8 +34405,8 @@ var require_command = __commonJS({
   "node_modules/.pnpm/commander@12.1.0/node_modules/commander/lib/command.js"(exports) {
     var EventEmitter = __require("node:events").EventEmitter;
     var childProcess = __require("node:child_process");
-    var path46 = __require("node:path");
-    var fs60 = __require("node:fs");
+    var path50 = __require("node:path");
+    var fs64 = __require("node:fs");
     var process26 = __require("node:process");
     var { Argument: Argument2, humanReadableArgName } = require_argument();
     var { CommanderError: CommanderError2 } = require_error();
@@ -32916,7 +34419,7 @@ var require_command = __commonJS({
        *
        * @param {string} [name]
        */
-      constructor(name) {
+      constructor(name2) {
         super();
         this.commands = [];
         this.options = [];
@@ -32929,7 +34432,7 @@ var require_command = __commonJS({
         this.rawArgs = [];
         this.processedArgs = [];
         this._scriptPath = null;
-        this._name = name || "";
+        this._name = name2 || "";
         this._optionValues = {};
         this._optionValueSources = {};
         this._storeOptionsAsProperties = false;
@@ -33027,8 +34530,8 @@ var require_command = __commonJS({
           desc = null;
         }
         opts = opts || {};
-        const [, name, args] = nameAndArgs.match(/([^ ]+) *(.*)/);
-        const cmd = this.createCommand(name);
+        const [, name2, args] = nameAndArgs.match(/([^ ]+) *(.*)/);
+        const cmd = this.createCommand(name2);
         if (desc) {
           cmd.description(desc);
           cmd._executableHandler = true;
@@ -33052,8 +34555,8 @@ var require_command = __commonJS({
        * @param {string} [name]
        * @return {Command} new command
        */
-      createCommand(name) {
-        return new _Command(name);
+      createCommand(name2) {
+        return new _Command(name2);
       }
       /**
        * You can customise the help with a subclass of Help by overriding createHelp,
@@ -33152,8 +34655,8 @@ var require_command = __commonJS({
        * @param {string} [description]
        * @return {Argument} new argument
        */
-      createArgument(name, description) {
-        return new Argument2(name, description);
+      createArgument(name2, description) {
+        return new Argument2(name2, description);
       }
       /**
        * Define argument syntax for command.
@@ -33171,8 +34674,8 @@ var require_command = __commonJS({
        * @param {*} [defaultValue]
        * @return {Command} `this` command for chaining
        */
-      argument(name, description, fn, defaultValue) {
-        const argument = this.createArgument(name, description);
+      argument(name2, description, fn, defaultValue) {
+        const argument = this.createArgument(name2, description);
         if (typeof fn === "function") {
           argument.default(defaultValue).argParser(fn);
         } else {
@@ -33424,7 +34927,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
           return [cmd.name()].concat(cmd.aliases());
         };
         const alreadyUsed = knownBy(command).find(
-          (name) => this._findCommand(name)
+          (name2) => this._findCommand(name2)
         );
         if (alreadyUsed) {
           const existingCmd = knownBy(this._findCommand(alreadyUsed)).join("|");
@@ -33444,24 +34947,24 @@ Expecting one of '${allowedValues.join("', '")}'`);
       addOption(option) {
         this._registerOption(option);
         const oname = option.name();
-        const name = option.attributeName();
+        const name2 = option.attributeName();
         if (option.negate) {
           const positiveLongFlag = option.long.replace(/^--no-/, "--");
           if (!this._findOption(positiveLongFlag)) {
             this.setOptionValueWithSource(
-              name,
+              name2,
               option.defaultValue === void 0 ? true : option.defaultValue,
               "default"
             );
           }
         } else if (option.defaultValue !== void 0) {
-          this.setOptionValueWithSource(name, option.defaultValue, "default");
+          this.setOptionValueWithSource(name2, option.defaultValue, "default");
         }
         const handleOptionValue = (val, invalidValueMessage, valueSource) => {
           if (val == null && option.presetArg !== void 0) {
             val = option.presetArg;
           }
-          const oldValue = this.getOptionValue(name);
+          const oldValue = this.getOptionValue(name2);
           if (val !== null && option.parseArg) {
             val = this._callParseArg(option, val, oldValue, invalidValueMessage);
           } else if (val !== null && option.variadic) {
@@ -33476,7 +34979,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
               val = "";
             }
           }
-          this.setOptionValueWithSource(name, val, valueSource);
+          this.setOptionValueWithSource(name2, val, valueSource);
         };
         this.on("option:" + oname, (val) => {
           const invalidValueMessage = `error: option '${option.flags}' argument '${val}' is invalid.`;
@@ -33835,11 +35338,11 @@ Expecting one of '${allowedValues.join("', '")}'`);
         let launchWithNode = false;
         const sourceExt = [".js", ".ts", ".tsx", ".mjs", ".cjs"];
         function findFile(baseDir, baseName) {
-          const localBin = path46.resolve(baseDir, baseName);
-          if (fs60.existsSync(localBin)) return localBin;
-          if (sourceExt.includes(path46.extname(baseName))) return void 0;
+          const localBin = path50.resolve(baseDir, baseName);
+          if (fs64.existsSync(localBin)) return localBin;
+          if (sourceExt.includes(path50.extname(baseName))) return void 0;
           const foundExt = sourceExt.find(
-            (ext) => fs60.existsSync(`${localBin}${ext}`)
+            (ext) => fs64.existsSync(`${localBin}${ext}`)
           );
           if (foundExt) return `${localBin}${foundExt}`;
           return void 0;
@@ -33851,21 +35354,21 @@ Expecting one of '${allowedValues.join("', '")}'`);
         if (this._scriptPath) {
           let resolvedScriptPath;
           try {
-            resolvedScriptPath = fs60.realpathSync(this._scriptPath);
+            resolvedScriptPath = fs64.realpathSync(this._scriptPath);
           } catch (err) {
             resolvedScriptPath = this._scriptPath;
           }
-          executableDir = path46.resolve(
-            path46.dirname(resolvedScriptPath),
+          executableDir = path50.resolve(
+            path50.dirname(resolvedScriptPath),
             executableDir
           );
         }
         if (executableDir) {
           let localFile = findFile(executableDir, executableFile);
           if (!localFile && !subcommand._executableFile && this._scriptPath) {
-            const legacyName = path46.basename(
+            const legacyName = path50.basename(
               this._scriptPath,
-              path46.extname(this._scriptPath)
+              path50.extname(this._scriptPath)
             );
             if (legacyName !== this._name) {
               localFile = findFile(
@@ -33876,7 +35379,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
           }
           executableFile = localFile || executableFile;
         }
-        launchWithNode = sourceExt.includes(path46.extname(executableFile));
+        launchWithNode = sourceExt.includes(path50.extname(executableFile));
         let proc;
         if (process26.platform !== "win32") {
           if (launchWithNode) {
@@ -34188,10 +35691,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @private
        * @return {Command | undefined}
        */
-      _findCommand(name) {
-        if (!name) return void 0;
+      _findCommand(name2) {
+        if (!name2) return void 0;
         return this.commands.find(
-          (cmd) => cmd._name === name || cmd._aliases.includes(name)
+          (cmd) => cmd._name === name2 || cmd._aliases.includes(name2)
         );
       }
       /**
@@ -34465,8 +35968,8 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @param {string} name
        * @private
        */
-      missingArgument(name) {
-        const message2 = `error: missing required argument '${name}'`;
+      missingArgument(name2) {
+        const message2 = `error: missing required argument '${name2}'`;
         this.error(message2, { code: "commander.missingArgument" });
       }
       /**
@@ -34716,7 +36219,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @return {Command}
        */
       nameFromFilename(filename) {
-        this._name = path46.basename(filename, path46.extname(filename));
+        this._name = path50.basename(filename, path50.extname(filename));
         return this;
       }
       /**
@@ -34730,9 +36233,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @param {string} [path]
        * @return {(string|null|Command)}
        */
-      executableDir(path47) {
-        if (path47 === void 0) return this._executableDir;
-        this._executableDir = path47;
+      executableDir(path51) {
+        if (path51 === void 0) return this._executableDir;
+        this._executableDir = path51;
         return this;
       }
       /**
@@ -34949,9 +36452,9 @@ var require_commander = __commonJS({
     var { Help: Help2 } = require_help();
     var { Option: Option2 } = require_option();
     exports.program = new Command2();
-    exports.createCommand = (name) => new Command2(name);
+    exports.createCommand = (name2) => new Command2(name2);
     exports.createOption = (flags, description) => new Option2(flags, description);
-    exports.createArgument = (name, description) => new Argument2(name, description);
+    exports.createArgument = (name2, description) => new Argument2(name2, description);
     exports.Command = Command2;
     exports.Option = Option2;
     exports.Argument = Argument2;
@@ -35064,9 +36567,9 @@ var init_output = __esm({
         const width = 24;
         const frac = total > 0 ? Math.min(1, done / total) : 0;
         const filled = Math.round(frac * width);
-        const bar2 = "#".repeat(filled) + ".".repeat(width - filled);
-        const line2 = `  ${this.label} [${bar2}] ${done}/${total}${note ? "  " + note : ""}`;
-        process13.stderr.write("\r" + line2.slice(0, (process13.stderr.columns ?? 80) - 1) + "\x1B[K");
+        const bar3 = "#".repeat(filled) + ".".repeat(width - filled);
+        const line = `  ${this.label} [${bar3}] ${done}/${total}${note ? "  " + note : ""}`;
+        process13.stderr.write("\r" + line.slice(0, (process13.stderr.columns ?? 80) - 1) + "\x1B[K");
       }
       done() {
         if (this.active) process13.stderr.write("\r\x1B[K");
@@ -35076,10 +36579,7 @@ var init_output = __esm({
   }
 });
 
-// packages/cli/src/audit-ui/launch-terminal.ts
-function safe(value) {
-  return value.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "").replace(/[\r\n\t]/g, " ");
-}
+// packages/cli/src/audit-ui/report-status.ts
 function launchIsLoading(snapshot) {
   return Boolean(snapshot.launch && snapshot.launch.stage !== "ready" && !["cancelled", "error"].includes(snapshot.status));
 }
@@ -35127,350 +36627,729 @@ function launchAnalysisStatus(snapshot) {
     if (sem?.state === "unavailable") return { kind: "provider", summary: "Analysis unavailable after attempted requests", action: "Local results remain available.", code: null };
   }
   if (sem?.state === "complete" || sem?.state === "partial") return { kind: "ready", summary: null, action: null, code: null };
-  if (metricCount(snapshot.metrics.humanPrompts) === 0) return { kind: "empty", summary: "No eligible user input in this scope", action: null, code: null };
+  if (metricCount(snapshot.metrics.nativeUserInputs ?? snapshot.metrics.humanPrompts) === 0) return { kind: "empty", summary: "No eligible user input in this scope", action: null, code: null };
   if (gaps.has("offline_requested") || gaps.has("developer_prepare_only")) return { kind: "offline", summary: gaps.has("offline_requested") ? "Offline mode \xB7 analysis not requested" : "Preparation only \xB7 analysis not requested", action: null, code: null };
   if (gaps.has("semantic_window_unavailable") || gaps.has("free_allowance_exhausted")) return { kind: "allowance", summary: "No work window fits this run\u2019s allowance", action: "Inspect period estimates or choose a smaller scope.", code: null };
   if (gaps.has("free_access_unverified")) return { kind: "not_run", summary: "Free analysis access is unverified", action: null, code: "free_access_unverified" };
   return { kind: "not_run", summary: "Analysis not run", action: null, code: null };
 }
-function missingWorkScope(snapshot, short2 = false) {
-  const state = launchAnalysisStatus(snapshot);
-  return { local: short2 ? "Work unavailable \xB7 local history" : "Work window unavailable \xB7 local history could not be read", loading: short2 ? "Work \xB7 preparing window" : "Work window is being prepared", empty: short2 ? "Work \xB7 no eligible input" : "No eligible work window in this scope", offline: short2 ? "Work \xB7 offline / preparation only" : "No analyzed work window \xB7 offline or preparation only", allowance: short2 ? "Work \xB7 no fitting window" : "No work window fits this run\u2019s allowance", provider: short2 ? "Work \xB7 window unavailable" : "Work window unavailable", cancelled: short2 ? "Work \xB7 cancelled" : "Work window cancelled", not_run: short2 ? "Work \xB7 not analyzed" : "No analyzed work window", ready: short2 ? "Work \xB7 no window selected" : "No work window selected" }[state.kind];
-}
-function semanticScope(snapshot) {
-  const window2 = snapshot.launch?.semantics?.window.selected;
-  return window2 ? window2.selection ? `Newest ${window2.selection.selected} of ${window2.selection.available} episodes \xB7 ${window2.selection.eventFrom ?? "unknown"} to ${window2.selection.eventTo ?? "unknown"} UTC \xB7 partial calendar coverage` : `${window2.period === "all" ? "All available history" : `${window2.period} days`} \xB7 ${window2.from ?? "unknown start"} to ${window2.until} UTC` : missingWorkScope(snapshot);
-}
-function shortWorkScope(snapshot) {
-  const window2 = snapshot.launch?.semantics?.window.selected;
-  if (!window2) return missingWorkScope(snapshot, true);
-  if (window2.selection) {
-    const selected = window2.selection, date3 = selected.eventFrom ? new Date(selected.eventFrom) : null, label4 = date3 && !Number.isNaN(date3.valueOf()) ? date3.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "undated";
-    return `Work: ${selected.selected}/${selected.available} episodes \xB7 ${label4} \xB7 partial`;
+var metricCount;
+var init_report_status = __esm({
+  "packages/cli/src/audit-ui/report-status.ts"() {
+    "use strict";
+    metricCount = (metric3) => metric3.state === "unavailable" || metric3.state === "not_run" ? null : metric3.value;
   }
-  return `Work: ${window2.period === "all" ? "all available" : `${window2.period} days`} \xB7 ${snapshot.launch?.semantics?.state === "pending" && !launchIsLoading(snapshot) ? "not completed" : snapshot.launch?.semantics?.state ?? (launchIsLoading(snapshot) ? "pending" : "not analyzed")}`;
+});
+
+// packages/cli/src/audit-ui/report-document.ts
+function cleanReportText(text2) {
+  return text2.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "").replace(/[\r\t]/g, " ");
 }
-function modelTokens(model) {
-  return model.totalTokens !== null ? `${num3(model.totalTokens)} tokens` : model.knownTokens !== void 0 && model.knownTokens > 0 ? `${num3(model.knownTokens)} known tokens \xB7 total unknown` : "tokens unknown";
+function glyphs(text2, ascii) {
+  return ascii ? text2.replaceAll("\xB7", "|").replaceAll("\u2501", "#").replaceAll("\u2500", "-").replaceAll("\u201C", '"').replaceAll("\u201D", '"').replaceAll("\xD7", "x").replaceAll("\u2192", ">").replaceAll("\u2013", "-").replaceAll("\u2191", "^").replaceAll("\u2193", "v") : text2;
+}
+function reportWrap(text2, width, widthOf = auditCellWidth) {
+  const rows = [];
+  for (const paragraph of cleanReportText(text2).split("\n")) {
+    let rest = paragraph;
+    if (!rest) {
+      rows.push("");
+      continue;
+    }
+    while (widthOf(rest) > width) {
+      const clipped2 = auditClip(rest, width, widthOf);
+      if (!clipped2) break;
+      const split = clipped2.lastIndexOf(" "), useWordBoundary = split > Math.floor(clipped2.length * 0.55);
+      const part = useWordBoundary ? clipped2.slice(0, split) : clipped2;
+      rows.push(part);
+      rest = rest.slice(part.length + (useWordBoundary ? 1 : 0));
+    }
+    rows.push(rest);
+  }
+  return rows;
+}
+function builder(width, options) {
+  const doc = { lines: [], anchors: [] }, widthOf = options.widthOf ?? auditCellWidth;
+  return { ...doc, add: (text2, tone2 = "normal") => {
+    for (const row2 of reportWrap(glyphs(text2, Boolean(options.ascii)), width, widthOf)) doc.lines.push([{ text: row2, tone: tone2 }]);
+  }, blank: () => doc.lines.push([{ text: "", tone: "normal" }]), anchor: (value) => doc.anchors.push({ ...value, row: Math.max(0, doc.lines.length - 1) }) };
+}
+function bar(value, width, ascii = false) {
+  if (value === null || !Number.isFinite(value)) return "";
+  const fill = Math.min(width, Math.max(0, Math.round(value * width)));
+  return (ascii ? "#" : "\u2501").repeat(fill) + (ascii ? "." : "\u2500").repeat(width - fill);
+}
+function spark(values, width, ascii = false) {
+  const length = Math.min(width, values.length);
+  if (!length) return "";
+  const valuesByCell = Array.from({ length }, (_, i) => values.slice(Math.floor(i * values.length / length), Math.floor((i + 1) * values.length / length)).reduce((sum2, value) => sum2 + value, 0)), max2 = Math.max(...valuesByCell, 1), chars = ascii ? " .:-=+*#" : " \u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
+  return valuesByCell.map((value) => chars[Math.round(value / max2 * (chars.length - 1))]).join("");
+}
+function append(doc, block2) {
+  const offset = doc.lines.length;
+  doc.lines.push(...block2.lines);
+  doc.anchors.push(...block2.anchors.map((anchor) => ({ ...anchor, row: anchor.row + offset })));
+}
+function pair(doc, left, right, width, options) {
+  if (!left.lines.length) {
+    append(doc, right);
+    return;
+  }
+  if (!right.lines.length) {
+    append(doc, left);
+    return;
+  }
+  const column = Math.floor((width - 4) / 2), widthOf = options.widthOf ?? auditCellWidth, offset = doc.lines.length;
+  for (let i = 0; i < Math.max(left.lines.length, right.lines.length); i++) {
+    const l = left.lines[i] ?? [], r = right.lines[i] ?? [], used = l.reduce((sum2, s) => sum2 + widthOf(s.text), 0);
+    doc.lines.push([...l, { text: " ".repeat(Math.max(0, column - used) + 4), tone: "normal" }, ...r]);
+  }
+  doc.anchors.push(...left.anchors.map((a) => ({ ...a, row: a.row + offset })), ...right.anchors.map((a) => ({ ...a, row: a.row + offset })));
+}
+function shortScope(snapshot) {
+  if (snapshot.scope.eventFrom) return `${snapshot.scope.eventFrom.slice(0, 10)} to ${(snapshot.scope.asOf ?? snapshot.measuredAt).slice(0, 10)}`;
+  return "All recorded history";
 }
 function knownTokens(snapshot) {
   const facts = snapshot.launch?.facts;
-  if (!facts || !facts.knownTokenResponses) return null;
+  if (!facts || facts.knownTokenResponses === 0) return null;
   const values = facts.models.map((model) => model.knownTokens ?? model.totalTokens).filter((value) => value !== null && value !== void 0);
   return values.length ? values.reduce((sum2, value) => sum2 + value, 0) : null;
 }
-function metricCount(metric2) {
-  return metric2.state === "not_run" || metric2.state === "unavailable" ? null : metric2.value;
+function modelsBlock(snapshot, width, options) {
+  const b = builder(width, options), facts = snapshot.launch?.facts;
+  if (!facts?.models.length) return b;
+  b.add("MODELS", "amber");
+  if (facts.favourite) b.add(`Favourite  ${name(facts.favourite)}`, "cyan");
+  const max2 = Math.max(...facts.models.map((model) => model.knownTokens ?? model.totalTokens ?? 0), 1);
+  for (const model of facts.models) {
+    const known = model.knownTokens ?? model.totalTokens, total = known === 0 && model.totalTokens === null ? null : known, visual = bar(total === null ? null : (total ?? 0) / max2, width < 45 ? 9 : 14, options.ascii), tail2 = `${visual}  ${reportNumber(total)}${model.totalTokens === null ? " known" : ""} tokens  ${dollars(equivalent(model))}`;
+    if (width < 45) {
+      b.add(name(model));
+      b.add(tail2, model.id === facts.favourite?.id ? "amber" : "violet");
+    } else {
+      b.add(name(model));
+      b.add("  " + tail2, model.id === facts.favourite?.id ? "amber" : "violet");
+    }
+  }
+  b.blank();
+  return b;
 }
-function pricingLines(snapshot) {
-  const facts = snapshot.launch?.facts;
-  if (!facts) return [];
-  return [`Current catalog ${facts.pricing.retrievedAt} UTC`, `SHA-256 ${facts.pricing.sha256}`, `Source: ${facts.pricing.source} \xB7 current rates, not a historical invoice`, `${num3(facts.equivalentPricedResponses ?? facts.pricedResponses)}/${num3(facts.recordedResponses)} responses valued \xB7 ${num3(facts.knownTokenResponses)} with known normalized tokens`];
+function projectsBlock(snapshot, width, options) {
+  const b = builder(width, options);
+  if (!snapshot.projects.length) return b;
+  b.add("PROJECTS", "cyan");
+  const max2 = Math.max(...snapshot.projects.map((project) => project.humanPrompts), 1);
+  for (const project of snapshot.projects) {
+    const visual = bar((project.nativeUserInputs ?? project.humanPrompts) / max2, width < 45 ? 9 : 15, options.ascii);
+    b.add(`${project.displayName}  ${reportNumber(project.nativeUserInputs ?? project.humanPrompts)} inputs`);
+    b.add(visual, "cyan");
+  }
+  b.blank();
+  return b;
 }
-function factScope(snapshot) {
-  return snapshot.scope.eventFrom ? `Recorded history \xB7 ${day(snapshot.scope.eventFrom)} to ${day(snapshot.scope.asOf ?? snapshot.measuredAt)}` : "All-time recorded history";
+function activityBlock(snapshot, width, options) {
+  const b = builder(width, options);
+  if (!snapshot.activity.length) return b;
+  b.add("ACTIVITY \xB7 recorded inputs", "violet");
+  b.add(spark(snapshot.activity.map((day) => day.count), width, options.ascii), "violet");
+  b.add(`${snapshot.activity[0].date} to ${snapshot.activity.at(-1).date}`, "dim");
+  b.blank();
+  return b;
 }
-function outcome(story) {
-  return { attempted: "attempted", assistant_reported: "assistant reports success", supported: "supported by results", uncertain: "outcome uncertain" }[story.outcome];
+function wordsBlock(snapshot, width, options) {
+  const b = builder(width, options), lines = [...snapshot.launch?.languageLines ?? []].filter((line) => line.text.trim().split(/\s+/).length > 1 && line.occurrences > 0).sort((a, b2) => b2.occurrences - a.occurrences);
+  if (!lines.length) return b;
+  b.add("YOUR REPEATED LINES", "amber");
+  for (const line of lines) {
+    b.add(`\u201C${line.text}\u201D \xD7${reportNumber(line.occurrences)}`, "amber");
+    if (line.models.length) b.add(line.models.filter((model) => model.model !== null).map((model) => `${model.model} ${reportNumber(model.occurrences)}`).join(" \xB7 "), "dim");
+    const sample = line.samples[0];
+    if (sample) b.anchor({ label: line.text, route: sample.route });
+  }
+  b.blank();
+  return b;
 }
-function modelName(model) {
-  return model.canonicalModel ?? model.model ?? "Unknown model";
+function feedbackBlock(snapshot, width, options) {
+  const b = builder(width, options), models = snapshot.launch?.modelFeedback ?? [];
+  if (!models.some((model) => model.model !== null && (model.directedNegativeInputs > 0 || model.praiseInputs > 0))) return b;
+  b.add("RECORDED REACTIONS", "amber");
+  for (const [label4, key2] of [["Roasted", "directedNegativeInputs"], ["Praised", "praiseInputs"]]) {
+    const ranked = [...models].filter((model) => model.model !== null && model.associatedInputs > 0 && model[key2] > 0 && model[key2] <= model.associatedInputs).sort((a, b2) => b2[key2] / b2.associatedInputs - a[key2] / a.associatedInputs);
+    if (ranked.length) b.add(label4, "dim");
+    for (const model of ranked) b.add(`${model.model} ${model[key2]}/${model.associatedInputs} ${(model[key2] / model.associatedInputs * 100).toFixed(1)}%`);
+  }
+  b.add("Recorded reactions, not objective model quality.", "dim");
+  b.blank();
+  return b;
 }
-function bar(value, width, ascii) {
-  if (value === null) return "unknown";
-  const filled = Math.max(0, Math.min(width, Math.round(value * width)));
-  return (ascii ? "#" : "\u2501").repeat(filled) + (ascii ? "." : "\u2500").repeat(width - filled);
+function buildReportDocument(snapshot, options = {}) {
+  const width = Math.max(12, Math.min(options.columns ?? 80, options.width ?? Infinity)), inner = Math.max(10, width - 4), b = builder(inner, options), facts = snapshot.launch?.facts, sem = snapshot.launch?.semantics, status3 = launchAnalysisStatus(snapshot), wide = width >= 110;
+  b.add(`Slopie  \xB7  ${shortScope(snapshot)}`, "dim");
+  if (facts) {
+    const value = equivalent(facts);
+    b.add(value === null ? "Value unavailable" : dollars(value), "amberLight");
+    b.add("API-equivalent value \xB7 current rates", "dim");
+    const tokens = knownTokens(snapshot);
+    b.add(tokens === null ? "Known token total unavailable" : `${reportNumber(tokens)} known tokens`, "cyan");
+    b.add(`${reportNumber(metric2(snapshot.metrics.conversations))} chats \xB7 ${reportNumber(metric2(snapshot.metrics.projects))} projects`);
+    if (facts.referenceValueUsd !== null) b.add(`Includes ${[...new Set(facts.referenceProviders.map((ref3) => ref3.provider))].join(", ") || "first-party"} reference pricing; actual provider unknown`, "dim");
+  } else {
+    b.add("Value unavailable", "amberLight");
+    b.add("Recorded usage could not be valued.", "dim");
+  }
+  if (snapshot.coverage.state !== "complete_snapshot" || facts?.gaps.length) b.add("Partial history / usage \xB7 known portions shown", "dim");
+  b.blank();
+  if (wide) {
+    const column = Math.floor((inner - 4) / 2), left = builder(column, options), right = builder(column, options);
+    append(left, modelsBlock(snapshot, column, options));
+    append(left, wordsBlock(snapshot, column, options));
+    append(right, projectsBlock(snapshot, column, options));
+    append(right, activityBlock(snapshot, column, options));
+    pair(b, left, right, inner, options);
+  } else {
+    append(b, modelsBlock(snapshot, inner, options));
+    append(b, projectsBlock(snapshot, inner, options));
+    append(b, activityBlock(snapshot, inner, options));
+    append(b, wordsBlock(snapshot, inner, options));
+  }
+  append(b, feedbackBlock(snapshot, inner, options));
+  const supported = (sem?.stories ?? []).filter((story) => story.outcome === "supported" && story.promptIds.length > 0), work = (sem?.judgments.length ? sem.work : []).filter((item) => item.count > 0 && !["other", "mixed", "insufficient_context", "unclassified"].includes(item.label));
+  if (supported.length || work.length) {
+    b.add("WORK THEMES", "green");
+    const selected = sem?.window.selected;
+    if (selected) b.add(selected.selection ? `${selected.selection.selected}/${selected.selection.available} selected episodes \xB7 partial calendar scope` : selected.period === "all" ? "All available work" : `Recent ${selected.period} days`, "dim");
+    for (const item of work) b.add(`${item.label.replaceAll("_", " ")}  ${reportNumber(item.count)} segments`, "green");
+    for (const story of supported.slice(0, 4)) {
+      b.add(`${story.caption}${story.project ? " \xB7 " + story.project : ""}`);
+      b.anchor({ label: story.caption, conversationId: story.conversationId, promptIds: story.promptIds });
+    }
+    b.blank();
+  }
+  const quotes = (sem?.hallOfFame ?? []).filter((story) => story.quote && story.promptIds.length > 0 && story.outcome !== "uncertain").slice(0, 2);
+  for (const story of quotes) {
+    b.add(`\u201C${story.quote}\u201D`, "green");
+    if (story.project) b.add(story.project, "dim");
+    b.anchor({ label: story.quote, conversationId: story.conversationId, promptIds: story.promptIds });
+    b.blank();
+  }
+  if (status3.kind === "local") {
+    if (status3.summary) b.add(status3.summary, "amber");
+    if (status3.action) b.add(status3.action, "dim");
+    if ((sem?.attempts ?? 0) === 0) b.add("No analysis requests made", "dim");
+  } else if (status3.kind !== "ready" && status3.summary) b.add(status3.kind === "loading" ? "Work insights are still being prepared." : status3.summary, "dim");
+  if (options.notice) b.add(options.notice, "amber");
+  return { lines: b.lines.map((line) => [{ text: "  ", tone: "normal" }, ...line]), anchors: b.anchors };
 }
-function spark(values, width, ascii) {
-  if (!values.length) return "No recorded dates";
-  const buckets = Array.from({ length: Math.min(width, values.length) }, (_, i) => {
-    const start = Math.floor(i * values.length / Math.min(width, values.length)), end = Math.floor((i + 1) * values.length / Math.min(width, values.length));
-    return values.slice(start, end).reduce((sum2, v) => sum2 + v, 0);
+function buildReportHelp(snapshot, options = {}, transfers = []) {
+  const width = Math.max(10, (options.columns ?? 80) - 4), b = builder(width, options), facts = snapshot.launch?.facts, sem = snapshot.launch?.semantics;
+  b.add("Wallboard help", "amber");
+  b.blank();
+  b.add("\u2190 / \u2192             Mixed layout pages");
+  b.add("? / Esc            Help / return to wallboard");
+  b.add("S                  Freeze data and motion; keep paging");
+  b.add("Enter              Captured source on this page");
+  b.add("Paste              Ignored as a command");
+  b.add("q / Ctrl-C         Quit; cancel unfinished work");
+  b.blank();
+  b.add("Reading this report", "cyan");
+  b.add("Value revalues recorded usage at the captured current catalog. It is not an invoice or subscription bill. Unknown usage and unmatched prices are excluded from known totals.");
+  b.add("Chats are top-level conversations; model participation includes recorded subagent usage. Native user-role inputs are observed roles, not universal human attestation.");
+  if (snapshot.metrics.nativeUserInputs) b.add(`${reportNumber(metric2(snapshot.metrics.nativeUserInputs))} observed native user-role inputs`);
+  b.add("Repeated-line counts come from all eligible direct input. Roasted/Praised ranks show directed reaction inputs divided by associated inputs, sorted by rate. They are observations, not objective model quality. Quoted, code, unknown and self-directed material remain separate. Captured source samples are bounded independently of counts.");
+  if (snapshot.launch?.languageGaps?.length) b.add("Language gaps: " + snapshot.launch.languageGaps.join(", "), "dim");
+  for (const model of facts?.models ?? []) b.add(`Model identity: ${modelDisplayNameForHelp(model)} \xB7 ${model.provider ?? "provider unknown"}`, "dim");
+  if (snapshot.profanity) for (const bucket of snapshot.profanity.buckets) b.add(`${bucket.kind.replaceAll("_", " ")}: ${reportNumber(bucket.occurrences)} matches / ${reportNumber(bucket.containingPrompts)} inputs`, "dim");
+  b.blank();
+  if (facts) {
+    b.add("Pricing and usage", "cyan");
+    b.add(`Catalog ${facts.pricing.retrievedAt}`);
+    b.add(`SHA-256 ${facts.pricing.sha256}`);
+    b.add(facts.pricing.source);
+    b.add(`${facts.knownTokenResponses}/${facts.recordedResponses} responses with known normalized tokens; ${facts.equivalentPricedResponses} reference-valued responses.`);
+    b.add(`Recorded endpoint portion ${dollars(facts.valueUsd)}; first-party reference portion ${dollars(facts.referenceValueUsd)}.`);
+    if (facts.favourite) b.add(`Favourite combines token and conversation share equally. ${facts.favourite.tokenShare === null ? "unknown" : reportNumber(facts.favourite.tokenShare * 100) + "%"} known-token share / ${reportNumber(facts.favourite.conversationShare * 100)}% usage-chat share.`);
+    b.blank();
+  }
+  if (snapshot.funnel) {
+    b.add("Coverage funnel", "cyan");
+    for (const [label4, count2] of Object.entries(snapshot.funnel)) if (typeof count2 === "number") b.add(`${label4}: ${reportNumber(count2)}`);
+    for (const [reason, count2] of Object.entries(snapshot.funnel.excludedReasons)) b.add(`${reason}: ${reportNumber(count2)}`);
+    b.blank();
+  }
+  if (sem?.window.selected) {
+    const selected = sem.window.selected;
+    b.add("Selected work scope", "cyan");
+    b.add(`${selected.from ?? "unknown start"} to ${selected.until}`);
+    if (selected.selection) b.add(`${selected.selection.selected}/${selected.selection.available} newest episodes; ${selected.selection.eventFrom ?? "unknown"} to ${selected.selection.eventTo ?? "unknown"}; partial calendar coverage.`);
+    for (const choice of sem.window.choices) b.add(`${choice.period}: ${choice.estimatedInputTokens} input tokens / ${(choice.estimatedLatencyMs / 1e3).toFixed(1)}s remaining-analysis estimate / ${choice.fits ? "fits" : "does not fit"}`);
+    b.blank();
+  }
+  b.add("Actual transfers during this run", "cyan");
+  if (!transfers.length) b.add("No transfer event was observed. Offline and cache-only work do not imply an external send.");
+  else for (const event of transfers) b.add(`${event.recipients.join(", ")} \xB7 ${event.model} \xB7 attempt ${event.attempt}
+${event.notice}`);
+  const gaps = [...launchGaps(snapshot)];
+  if (gaps.length) {
+    b.blank();
+    b.add("Coverage details", "cyan");
+    for (const gap2 of gaps) b.add(gap2, "dim");
+  }
+  return { lines: b.lines.map((line) => [{ text: "  ", tone: "normal" }, ...line]), anchors: [] };
+}
+function buildEvidenceDocument(evidence2, options = {}) {
+  const b = builder(Math.max(10, (options.columns ?? 80) - 4), options);
+  b.add("Captured source", "cyan");
+  b.blank();
+  if (options.busy) b.add("Reading the captured source\u2026", "dim");
+  else if (evidence2?.state === "available" && evidence2.text !== null) {
+    b.add(`${evidence2.role ?? "recorded role"} \xB7 ${evidence2.eventAt?.slice(0, 10) ?? "date unknown"}`, "dim");
+    b.add(evidence2.text);
+  } else b.add(evidence2?.state === "stale" ? "Privacy authority changed. This source can no longer be read." : "Captured source is unavailable.", "dim");
+  if (options.notice) b.add(options.notice, "amber");
+  return { lines: b.lines.map((line) => [{ text: "  ", tone: "normal" }, ...line]), anchors: [] };
+}
+function buildReportLoader(snapshot, options = {}) {
+  const width = Math.max(12, options.columns ?? 80), height = Math.max(4, (options.rows ?? 24) - 1), b = builder(Math.max(10, width - 4), options), frame = options.frame ?? 0, blink = frame % 14 === 0, mark = options.ascii ? ["  ___  ", " /###\\ ", blink ? "|#- -#|" : "|#o o#|", " \\###/ ", "  ---  "] : ["  \u2584\u2584\u2584  ", " \u2588\u2588\u2588\u2588\u2588 ", blink ? "\u2590\u2588\u2212 \u2212\u2588\u258C" : "\u2590\u2588\u2022 \u2022\u2588\u258C", " \u2588\u2584\u2584\u2584\u2588 ", "  \u2580\u2580\u2580  "];
+  for (const row2 of mark) b.lines.push([...row2].map((text2, column) => ({ text: text2, tone: text2 === " " ? "normal" : column === frame % 7 ? "normal" : "amber" })));
+  b.blank();
+  const chips = snapshot.sources.map((source) => {
+    const census = source.census, checking = source.state === "checking" || !census?.checked && !["unavailable", "unsupported"].includes(source.state);
+    const status3 = checking ? "checking" : source.state === "unavailable" ? "unavailable" : source.state === "unsupported" ? "unsupported" : census?.checked ? `${reportNumber(census.files)} ${census.unit === "database" ? "databases" : "files"}` : "unknown";
+    return { text: `${sourceNames[source.harness] ?? source.harness} ${status3}`, tone: checking ? "dim" : "normal" };
   });
-  const max2 = Math.max(...buckets, 1), glyphs = ascii ? " .:-=+*#" : " \u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
-  return buckets.map((v) => glyphs[Math.round(v / max2 * (glyphs.length - 1))]).join("");
+  let current = [];
+  let used = 0;
+  for (const chip of chips) {
+    const size = (options.widthOf ?? auditCellWidth)(chip.text);
+    if (current.length && used + 3 + size > width - 4) {
+      b.lines.push(current.flatMap((item, index) => [...index ? [{ text: "   ", tone: "normal" }] : [], item]));
+      current = [];
+      used = 0;
+    }
+    current.push(chip);
+    used += size + (current.length > 1 ? 3 : 0);
+  }
+  if (current.length) b.lines.push(current.flatMap((item, index) => [...index ? [{ text: "   ", tone: "normal" }] : [], item]));
+  b.blank();
+  b.add(snapshot.progress.label ?? stageNames[snapshot.launch?.stage ?? "discovering"], "dim");
+  const output = [], top = Math.max(0, Math.floor((height - b.lines.length) / 2)), widthOf = options.widthOf ?? auditCellWidth;
+  for (let i = 0; i < top; i++) output.push([{ text: "", tone: "normal" }]);
+  for (const row2 of b.lines) {
+    const cells = row2.reduce((sum2, s) => sum2 + widthOf(s.text), 0);
+    output.push([{ text: " ".repeat(Math.max(0, Math.floor((width - cells) / 2))), tone: "normal" }, ...row2]);
+  }
+  return output.slice(0, height);
 }
-function createLaunchNavigation(section = "overview") {
-  return { section, view: "section", selectedId: null, selectedIndex: 0, scroll: 0, detailId: null, conversationId: null, stack: [], frozen: false };
+var nf, cf, reportNumber, dollars, equivalent, metric2, modelDisplayNameForHelp, name, stageNames, sourceNames, segments;
+var init_report_document = __esm({
+  "packages/cli/src/audit-ui/report-document.ts"() {
+    "use strict";
+    init_audit_ui();
+    init_report_status();
+    nf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+    cf = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+    reportNumber = (value) => value == null || !Number.isFinite(value) ? "unknown" : nf.format(value);
+    dollars = (value) => value == null || !Number.isFinite(value) ? "unpriced" : cf.format(value);
+    equivalent = (value) => value.valueUsd === null && value.referenceValueUsd === null ? null : (value.valueUsd ?? 0) + (value.referenceValueUsd ?? 0);
+    metric2 = (value) => !value || ["unavailable", "not_run"].includes(value.state) ? null : value.value;
+    modelDisplayNameForHelp = (model) => model.canonicalModel ?? model.model ?? "Unidentified model";
+    name = (model) => model.canonicalModel ?? model.model ?? "Unidentified model";
+    stageNames = { discovering: "Checking local history", sizing: "Measuring recorded usage", preparing: "Preparing selected work", analyzing: "Reading work insights", assembling: "Building your report", ready: "Report ready" };
+    sourceNames = { claude: "Claude Code", codex: "Codex", pi: "pi", opencode: "OpenCode" };
+    segments = new Intl.Segmenter("en", { granularity: "grapheme" });
+  }
+});
+
+// packages/cli/src/audit-ui/report-navigation.ts
+function createReportNavigation() {
+  return { mode: "report", scroll: 0, reportScroll: 0, helpScroll: 0, detailScroll: 0, frozen: false };
 }
-function launchPush(nav, next) {
-  const { stack: _stack, frozen: _frozen, ...frame } = nav;
-  return { ...nav, ...next, stack: [...nav.stack, frame], selectedId: null, selectedIndex: 0, scroll: 0 };
+function clampReportNavigation(nav, lines, visible) {
+  const scroll = Math.max(0, Math.min(nav.scroll, reportMaximum(lines, visible)));
+  return { ...nav, scroll, [`${nav.mode}Scroll`]: scroll };
 }
-function launchBack(nav) {
-  const frame = nav.stack.at(-1);
-  return frame ? { ...nav, ...frame, stack: nav.stack.slice(0, -1) } : nav;
+function moveReport(nav, delta, lines, visible) {
+  return clampReportNavigation({ ...nav, scroll: nav.scroll + delta }, lines, visible);
 }
-function launchSelectSection(nav, delta) {
-  const section = LAUNCH_SECTIONS[(LAUNCH_SECTIONS.indexOf(nav.section) + delta + LAUNCH_SECTIONS.length) % LAUNCH_SECTIONS.length];
-  return { ...createLaunchNavigation(section), frozen: nav.frozen };
+function reportEdge(nav, end, lines, visible) {
+  return clampReportNavigation({ ...nav, scroll: end ? reportMaximum(lines, visible) : 0 }, lines, visible);
 }
-function launchMove(nav, rows, delta, visible) {
-  if (!rows.length) return { ...nav, selectedId: null, selectedIndex: 0, scroll: 0 };
-  const found = rows.findIndex((row2) => row2.id === nav.selectedId), index = Math.max(0, Math.min(rows.length - 1, (found >= 0 ? found : nav.selectedIndex) + delta));
-  let scroll = Math.min(nav.scroll, Math.max(0, rows.length - visible));
-  if (index < scroll) scroll = index;
-  else if (index >= scroll + visible) scroll = Math.max(0, index - visible + 1);
-  return { ...nav, selectedId: rows[index].id, selectedIndex: index, scroll };
+function reportMode(nav, mode) {
+  return { ...nav, [`${nav.mode}Scroll`]: nav.scroll, mode, scroll: mode === nav.mode ? nav.scroll : nav[`${mode}Scroll`] };
 }
-function launchFreeze(nav) {
+function freezeReport(nav) {
   return { ...nav, frozen: !nav.frozen };
 }
-function launchRows(snapshot, nav, page = null) {
-  if (nav.view === "periods") return (snapshot.launch?.semantics?.window.choices ?? []).map((window2) => ({ id: `period:${window2.period}`, label: window2.period === "all" ? "All available history" : `${window2.period} days`, value: `${num3(window2.estimatedInputTokens)} input tokens \xB7 ${(window2.estimatedLatencyMs / 1e3).toFixed(1)}s estimate \xB7 ${window2.fits ? "fits" : "does not fit"}`, kind: "period" }));
-  if (nav.view === "prompts") return page?.snapshotId === snapshot.snapshotId && page.conversationId === nav.conversationId ? page.prompts.map((prompt) => ({ id: prompt.id, label: prompt.text, value: `${day(prompt.eventAt)} \xB7 ${prompt.eligibleHuman ? "direct user" : "origin unverified"}`, kind: "prompt", conversationId: prompt.conversationId })) : [];
-  if (nav.view === "detail" && (nav.section === "projects" || nav.section === "models" || nav.section === "timeline")) {
-    const records = snapshot.launch?.facts?.records ?? [];
-    const model = snapshot.launch?.facts?.models.find((item) => item.id === nav.detailId);
-    return snapshot.conversations.filter((conversation) => nav.section === "projects" ? conversation.projectId === nav.detailId : nav.section === "timeline" ? snapshot.activity.some((bucket) => bucket.date === nav.detailId) && ((conversation.eventFrom?.slice(0, 10) ?? "") <= nav.detailId && (conversation.eventTo?.slice(0, 10) ?? "") >= nav.detailId) : records.some((record4) => record4.conversationId === conversation.id && (record4.canonicalModel ?? record4.model) === (model?.canonicalModel ?? model?.model) && record4.provider === model?.provider)).map((conversation) => ({ id: conversation.id, label: conversation.title ?? conversation.alias, value: `${num3(conversation.promptCount)} prompts${conversation.child ? " \xB7 subagent" : ""}`, kind: "conversation", conversationId: conversation.id }));
+var reportMaximum;
+var init_report_navigation = __esm({
+  "packages/cli/src/audit-ui/report-navigation.ts"() {
+    "use strict";
+    reportMaximum = (lines, visible) => Math.max(0, lines - Math.max(1, visible));
   }
-  if (nav.section === "overview") return LAUNCH_SECTIONS.slice(1).map((section) => ({ id: section, label: NAMES[section], value: "Explore", kind: "project" }));
-  if (nav.section === "models") return (snapshot.launch?.facts?.models ?? []).map((model) => ({ id: model.id, label: modelName(model), value: `${modelTokens(model)} \xB7 ${pct2(model.tokenShare)} known-token share \xB7 ${pct2(model.conversationShare)} conversation share`, kind: "model" }));
-  if (nav.section === "projects") return snapshot.projects.map((project) => ({ id: project.id, label: project.displayName, value: `${num3(project.humanPrompts)} human prompts \xB7 ${num3(project.conversations)} conversations`, kind: "project" }));
-  if (nav.section === "work" || nav.section === "hall") return (nav.section === "hall" ? snapshot.launch?.semantics?.hallOfFame : snapshot.launch?.semantics?.stories ?? [])?.map((story) => ({ id: story.id, label: nav.section === "hall" ? story.quote ?? story.caption : story.caption, value: `${story.project ?? "Unattributed"} \xB7 ${outcome(story)}`, kind: "story", conversationId: story.conversationId, promptIds: story.promptIds })) ?? [];
-  if (nav.section === "language") return (snapshot.profanity?.matches ?? []).map((match, index) => ({ id: `language:${index}`, label: match.term, value: words3(match.kind), kind: "language", conversationId: match.conversationId, promptIds: [match.promptId] }));
-  return snapshot.activity.map((bucket) => ({ id: bucket.date, label: bucket.date, value: `${num3(bucket.count)} human prompts`, kind: "date" }));
+});
+
+// packages/cli/src/audit-ui/wallboard.ts
+function textLine(text2, tone2 = "normal") {
+  return [{ text: text2, tone: tone2 }];
 }
-function buildLaunchScreen(snapshot, nav, geometry = {}) {
-  const width = Math.max(12, Math.min(geometry.columns ?? 80, geometry.width ?? Infinity)), height = Math.max(8, geometry.rows ?? 24), widthOf = geometry.widthOf ?? auditCellWidth, ascii = Boolean(geometry.ascii), compact2 = width < 60, wide = width >= 100;
-  const body = [];
-  const add = (text2, tone2 = "normal") => body.push(line(text2, tone2));
-  const wrap5 = (text2, tone2 = "normal") => {
-    const tokens = safe(text2).split(/\s+/);
-    let current = "";
-    for (const token of tokens) {
-      if (widthOf((current ? `${current} ` : "") + token) <= width) {
-        current += (current ? " " : "") + token;
-        continue;
+function clipped(text2, width, options) {
+  text2 = asciiText(cleanReportText(text2).replaceAll("\n", " "), Boolean(options.ascii));
+  const widthOf = options.widthOf ?? auditCellWidth;
+  if (widthOf(text2) <= width) return text2;
+  const end = options.ascii ? "..." : "\u2026";
+  return auditClip(text2, Math.max(0, width - widthOf(end)), widthOf) + end;
+}
+function bar2(value, width, ascii) {
+  if (value === null || !Number.isFinite(value)) return "";
+  const fill = Math.min(width, Math.max(0, Math.round(value * width)));
+  return (ascii ? "#" : "\u2501").repeat(fill) + (ascii ? "." : "\u2500").repeat(width - fill);
+}
+function knownTokens2(snapshot) {
+  const facts = snapshot.launch?.facts;
+  if (!facts || facts.knownTokenResponses === 0) return null;
+  const values = facts.models.map((model) => model.knownTokens ?? model.totalTokens).filter((value) => value != null);
+  return values.length ? values.reduce((sum2, value) => sum2 + value, 0) : null;
+}
+function observed(metric3) {
+  return !metric3 || metric3.state === "unavailable" || metric3.state === "not_run" ? null : metric3.value;
+}
+function buildWallHero(snapshot, width, options = {}) {
+  const facts = snapshot.launch?.facts, value = facts ? wallEquivalent(facts) : null, rows = [textLine(value === null ? "Value unavailable" : `${dollars2(value)}  API-equivalent`, "amberLight")];
+  const tokens = knownTokens2(snapshot), counts2 = `${number2(observed(snapshot.metrics.conversations))} chats \xB7 ${number2(observed(snapshot.metrics.projects))} projects`;
+  for (const line of reportWrap(asciiText(`${tokens === null ? "Tokens unavailable" : number2(tokens) + " known tokens"} \xB7 ${counts2}`, Boolean(options.ascii)), width, options.widthOf)) rows.push(textLine(line));
+  const partial = snapshot.coverage.state !== "complete_snapshot" || Boolean(facts?.gaps.length), refs2 = facts?.referenceValueUsd != null ? [...new Set(facts.referenceProviders.map((ref3) => ref3.provider))].join(", ") : "";
+  const cue = refs2 ? `${partial ? "Partial \xB7 " : ""}${refs2} reference; provider unknown` : partial ? "Estimate \xB7 known usage only" : "Current-rate estimate";
+  for (const line of reportWrap(asciiText(cue, Boolean(options.ascii)), width, options.widthOf)) rows.push(textLine(line, "dim"));
+  return rows;
+}
+function modelCard(snapshot, width, options) {
+  const facts = snapshot.launch?.facts;
+  if (!facts?.models.length) return null;
+  const sorted = [...facts.models].filter((model) => model.model !== null || model.canonicalModel !== null).sort((a, b) => (b.knownTokens ?? b.totalTokens ?? -1) - (a.knownTokens ?? a.totalTokens ?? -1) || a.id.localeCompare(b.id)), models = sorted.slice(0, 5);
+  if (facts.favourite && !models.some((model) => model.id === facts.favourite.id)) models[models.length - 1] = facts.favourite;
+  const widthOf = options.widthOf ?? auditCellWidth, max2 = Math.max(...models.map((model) => model.knownTokens ?? model.totalTokens ?? 0), 1), lines = [textLine("MODELS + PRICING")];
+  if (facts.favourite) lines.push(textLine(clipped("Favourite " + modelDisplayName(facts.favourite), width, options), "amber"));
+  for (const model of models) {
+    const known = model.knownTokens ?? model.totalTokens, tokens = known === 0 && model.totalTokens === null ? null : known, price = options.ascii && wallEquivalent(model) === null ? "-" : dollars2(wallEquivalent(model)), label4 = modelDisplayName(model), visual = bar2(tokens === null ? null : (tokens ?? 0) / max2, width < 45 ? 7 : 8, Boolean(options.ascii));
+    if (width < 45) {
+      const tail2 = "  " + price, nameWidth = Math.max(8, width - widthOf(tail2));
+      lines.push(textLine(clipped(label4, nameWidth, options) + tail2));
+      lines.push(textLine(clipped(`${visual} ${number2(tokens)} ${model.totalTokens === null ? "known " : ""}tokens`, width, options), "dim"));
+    } else {
+      const tail2 = ` ${visual} ${number2(tokens)} ${price}`, nameWidth = Math.max(8, width - widthOf(tail2));
+      lines.push([{ text: clipped(label4, nameWidth, options), tone: "normal" }, { text: tail2, tone: model.id === facts.favourite?.id ? "amber" : "dim" }]);
+    }
+  }
+  return { id: "models", lines, anchors: [] };
+}
+function projectCard(snapshot, width, options) {
+  if (!snapshot.projects.length) return null;
+  const lines = [textLine("TOP 3 PROJECTS + WORK")], anchors = [];
+  for (const project of snapshot.projects.slice(0, 3)) {
+    const count2 = project.nativeUserInputs ?? project.humanPrompts, tail2 = ` ${number2(count2)} inputs`, widthOf = options.widthOf ?? auditCellWidth;
+    lines.push(textLine(clipped(project.displayName, Math.max(8, width - widthOf(tail2)), options) + tail2));
+    const focus = (project.focus ?? []).filter((item) => item.inputs > 0 && (item.promptIds.length > 0 || item.evidenceRoutes.length > 0)).sort((a, b) => b.inputs - a.inputs).slice(0, 2);
+    if (focus.length) {
+      lines.push(textLine(clipped("Requests: " + focus.map((item) => item.label).join(" \xB7 "), width, options), "dim"));
+      const first = focus.find((item) => item.evidenceRoutes.length);
+      if (first) anchors.push({ row: lines.length - 1, label: project.displayName + " requested work", route: first.evidenceRoutes[0] });
+    }
+  }
+  return { id: "projects", lines, anchors };
+}
+function repeatedLines(snapshot) {
+  return [...snapshot.launch?.languageLines ?? []].filter((line) => line.text.trim().split(/\s+/).length > 1 && line.occurrences > 0 && line.samples.length > 0).sort((a, b) => b.occurrences - a.occurrences || a.id.localeCompare(b.id)).slice(0, 6);
+}
+function phraseCard(snapshot, width, options) {
+  const phrases = repeatedLines(snapshot);
+  if (!phrases.length) return null;
+  const lines = [textLine(phrases.every((line) => line.occurrences > 1) ? "YOUR REPEATED LINES" : "YOUR LINES")], anchors = [], widthOf = options.widthOf ?? auditCellWidth;
+  for (const phrase of phrases) {
+    const tail2 = ` \xD7${number2(phrase.occurrences)}`, quoteWidth = Math.max(4, width - widthOf(asciiText(tail2, Boolean(options.ascii))) - 2);
+    lines.push(textLine(asciiText("\u201C" + clipped(phrase.text, quoteWidth, options) + "\u201D" + tail2, Boolean(options.ascii)), "amber"));
+    const sample = phrase.samples[0];
+    anchors.push({ row: lines.length - 1, label: phrase.text, route: sample.route });
+  }
+  return { id: "phrases", lines, anchors };
+}
+function rankedFeedback(snapshot, kind2) {
+  const key2 = kind2 === "negative" ? "directedNegativeInputs" : "praiseInputs";
+  return [...snapshot.launch?.modelFeedback ?? []].filter((model) => model.model !== null && Number.isFinite(model.associatedInputs) && model.associatedInputs > 0 && model[key2] > 0 && model[key2] <= model.associatedInputs).sort((a, b) => b[key2] / b.associatedInputs - a[key2] / a.associatedInputs || b[key2] - a[key2] || a.model.localeCompare(b.model)).slice(0, 3);
+}
+function feedbackCard(snapshot, width, options) {
+  const negative = rankedFeedback(snapshot, "negative"), praise = rankedFeedback(snapshot, "praise");
+  if (!negative.length && !praise.length) return null;
+  const lines = [textLine("RECORDED REACTIONS")], widthOf = options.widthOf ?? auditCellWidth, limit = width < 45 ? 2 : 3;
+  for (const [title, models, key2] of [["Roasted", negative, "directedNegativeInputs"], ["Praised", praise, "praiseInputs"]]) {
+    if (!models.length) continue;
+    lines.push(textLine(title, "dim"));
+    for (const model of models.slice(0, limit)) {
+      const tail2 = ` ${model[key2]}/${model.associatedInputs} ${(model[key2] / model.associatedInputs * 100).toFixed(1)}%`;
+      lines.push(textLine(clipped(model.model, Math.max(8, width - widthOf(tail2)), options) + tail2));
+    }
+  }
+  return { id: "reactions", lines, anchors: [] };
+}
+function momentCard(snapshot, width, options) {
+  const moment = snapshot.launch?.semantics?.hallOfFame.find((story) => story.quote && story.promptIds.length > 0 && story.outcome !== "uncertain");
+  if (!moment) return null;
+  const text2 = "\u201C" + moment.quote + "\u201D" + (moment.project ? " \xB7 " + moment.project : ""), lines = [textLine(clipped(text2, width, options), "amber")];
+  return { id: "moment", lines, anchors: [{ row: 0, label: moment.quote, conversationId: moment.conversationId, promptIds: moment.promptIds }] };
+}
+function appendCard(page, card, gap2 = true) {
+  if (gap2 && page.lines.length) page.lines.push(textLine(""));
+  const offset = page.lines.length;
+  page.lines.push(...card.lines);
+  page.cards.push(card.id);
+  page.anchors.push(...card.anchors.map((anchor) => ({ ...anchor, row: anchor.row + offset })));
+  if (page.anchor === "value") page.anchor = card.id;
+}
+function addPair(page, left, right, width, options) {
+  if (!left && !right) return;
+  if (!left || !right) {
+    appendCard(page, left ?? right);
+    return;
+  }
+  if (page.lines.length) page.lines.push(textLine(""));
+  const column = Math.floor((width - 3) / 2), offset = page.lines.length, widthOf = options.widthOf ?? auditCellWidth;
+  for (let i = 0; i < Math.max(left.lines.length, right.lines.length); i++) {
+    const l = left.lines[i] ?? [], r = right.lines[i] ?? [], used = l.reduce((sum2, segment) => sum2 + widthOf(segment.text), 0);
+    page.lines.push([...l, { text: " ".repeat(Math.max(0, column - used) + 3), tone: "normal" }, ...r]);
+  }
+  page.cards.push(left.id, right.id);
+  page.anchors.push(...left.anchors.map((anchor) => ({ ...anchor, row: anchor.row + offset })), ...right.anchors.map((anchor) => ({ ...anchor, row: anchor.row + offset })));
+  if (page.anchor === "value") page.anchor = left.id;
+}
+function splitCard(card, capacity) {
+  if (card.lines.length <= capacity) return [card];
+  const header = card.lines[0], size = Math.max(1, capacity - 1), chunks = [];
+  for (let start = 1; start < card.lines.length; start += size) {
+    const slice2 = card.lines.slice(start, start + size);
+    chunks.push({ ...card, lines: [header, ...slice2], anchors: card.anchors.filter((anchor) => anchor.row >= start && anchor.row < start + size).map((anchor) => ({ ...anchor, row: anchor.row - start + 1 })) });
+  }
+  return chunks;
+}
+function buildWallboard(snapshot, options = {}) {
+  const columns = Math.max(12, Math.min(options.columns ?? 80, options.width ?? Infinity)), rows = Math.max(4, options.rows ?? 24), width = Math.max(8, columns - 4), visible = rows - 1, hero = buildWallHero(snapshot, width, options), pages = [], make = () => ({ lines: [...hero], cards: ["value"], anchor: "value", anchors: [] }), wide = columns >= 120 && rows >= 32, column = Math.floor((width - 3) / 2);
+  if (columns < 40 || rows < 18) return { columns, rows, pages: [{ lines: [textLine(clipped("Resize to 40 \xD7 20 or larger", Math.max(8, columns - 4), options), "dim")], cards: ["value"], anchor: "value", anchors: [] }] };
+  const models = modelCard(snapshot, wide ? column : columns >= 75 ? column : width, options), projects = projectCard(snapshot, wide ? column : columns >= 75 ? column : width, options), phrases = phraseCard(snapshot, wide ? column : columns >= 75 ? column : width, options), feedback = feedbackCard(snapshot, wide ? column : columns >= 75 ? column : width, options), moment = momentCard(snapshot, width, options);
+  if (columns >= 75) {
+    const first = make();
+    addPair(first, models, projects, width, options);
+    if (wide) {
+      addPair(first, phrases, feedback, width, options);
+      if (moment) appendCard(first, moment);
+      if (first.lines.length <= visible) {
+        pages.push(first);
+      } else {
+        const main2 = make();
+        addPair(main2, models, projects, width, options);
+        if (moment) appendCard(main2, moment);
+        pages.push(main2);
+        const second = make();
+        addPair(second, phrases, feedback, width, options);
+        pages.push(second);
       }
-      if (current) body.push(line(current, tone2));
-      current = "";
-      let rest = token;
-      while (widthOf(rest) > width) {
-        const clipped = auditClip(rest, width, widthOf);
-        if (!clipped) break;
-        body.push(line(clipped, tone2));
-        rest = rest.slice(clipped.length);
+    } else {
+      if (moment) appendCard(first, moment);
+      pages.push(first);
+      if (phrases || feedback) {
+        const second = make();
+        addPair(second, phrases, feedback, width, options);
+        pages.push(second);
       }
-      current = rest;
-    }
-    if (current) body.push(line(current, tone2));
-  };
-  const facts = snapshot.launch?.facts, sem = snapshot.launch?.semantics, stage = snapshot.launch?.stage ?? "discovering", active2 = launchIsLoading(snapshot), analysis = launchAnalysisStatus(snapshot);
-  const showAnalysisStatus = (detailed = false) => {
-    if (analysis.summary) wrap5(analysis.summary, analysis.kind === "local" ? "amber" : "dim");
-    if (analysis.kind === "local" || detailed) {
-      if (analysis.action) wrap5(analysis.action, "dim");
-      if ((sem?.attempts ?? 0) === 0 && analysis.kind !== "loading" && analysis.kind !== "ready" && analysis.kind !== "empty") add("No analysis requests made", "dim");
-      if (detailed && analysis.code) add(`Reason: ${analysis.code}`, "dim");
-    }
-  };
-  if (nav.view === "evidence") {
-    add("SOURCE EVIDENCE", "cyan");
-    if (geometry.busy) add("Reading scoped source\u2026", "dim");
-    else if (geometry.evidence?.state === "available" && geometry.evidence.text !== null) {
-      add(`${geometry.evidence.role ?? "unknown role"} \xB7 ${day(geometry.evidence.eventAt)}`, "dim");
-      for (const paragraph of geometry.evidence.text.split("\n")) wrap5(paragraph);
-    } else wrap5(geometry.evidence?.state === "stale" ? "Source changed. Re-run audit to read current evidence." : "Source evidence unavailable.");
-  } else if (nav.view === "periods") {
-    wrap5(`Analyzed scope: ${semanticScope(snapshot)}`, "cyan");
-    showAnalysisStatus(true);
-    wrap5(`Allowance: ${num3(sem?.window.tokenLimit)} total input tokens`, "dim");
-    for (const [index, row2] of launchRows(snapshot, nav).entries()) {
-      const choice = sem?.window.choices.find((item) => row2.id === `period:${item.period}`);
-      add(`${row2.id === nav.selectedId || !nav.selectedId && index === nav.selectedIndex ? "\u203A" : " "} ${row2.label}${choice?.period === sem?.window.selected?.period && !sem?.window.selected?.selection ? " \xB7 selected" : ""}`, "amber");
-      wrap5(row2.value, "dim");
-      if (choice?.reason) wrap5(words3(choice.reason), "dim");
-    }
-    if (sem?.window.choices.length && analysis.kind !== "local") wrap5("Remaining-analysis estimates include questions and retry allowance. Local inventory has already run; these are not total cold-audit times. Enter uses this run\u2019s remaining allowance.", "dim");
-    else if (!active2) add("No period estimates are available.", "dim");
-    if (sem?.window.reason) wrap5(words3(sem.window.reason), "dim");
-  } else if (nav.view === "prompts") {
-    add("DIRECT USER INPUTS", "cyan");
-    if (geometry.busy) add("Reading scoped conversation\u2026", "dim");
-    for (const row2 of launchRows(snapshot, nav, geometry.promptPage)) {
-      add(`${row2.id === nav.selectedId ? "\u203A" : " "} ${row2.label}`);
-      add(`  ${row2.value}`, "dim");
-    }
-    if (!geometry.busy && !geometry.promptPage?.prompts.length) add("No accessible inputs in this bounded read.", "dim");
-    if (geometry.promptPage?.nextOffset !== null && geometry.promptPage?.nextOffset !== void 0) add("N: next page \xB7 P: previous page", "dim");
-  } else if (nav.view === "detail") {
-    const selected = launchRows(snapshot, { ...nav, view: "section" }).find((row2) => row2.id === nav.detailId);
-    wrap5(selected?.label ?? "Recorded detail", "amber");
-    if (nav.section === "models") {
-      const model = facts?.models.find((item) => item.id === nav.detailId);
-      if (model) {
-        wrap5(`Native endpoint: ${model.provider ?? "unknown"} / ${model.model ?? "unknown"}`, "dim");
-        wrap5(`${modelTokens(model)} \xB7 ${num3(model.conversations)} chats with recorded usage (includes agents)`);
-        wrap5(`Conversation share ${pct2(model.conversationShare)} uses chats with recorded usage, including agents`, "dim");
-        wrap5(`Favourite score ${pct2(model.favouriteScore)} \xB7 50/50 token / conversation weights`, "cyan");
-        wrap5(`Recorded API-equivalent ${usd(equivalent(model))} \xB7 endpoint ${usd(model.valueUsd)} \xB7 first-party reference ${usd(model.referenceValueUsd)}`);
-        wrap5(`Native input ${num3(model.inputTokens)} / output ${num3(model.outputTokens)}`);
-        const refs2 = (facts?.referenceProviders ?? []).filter((r) => r.model === model.model);
-        if (refs2.length) wrap5(`Reference basis: ${refs2.map((r) => r.provider + "/" + r.model).join(", ")}; actual endpoint remains unknown`, "dim");
-        if (model.gaps.length) wrap5(`Coverage: ${model.gaps.map(words3).join(", ")}`, "dim");
-      }
-      for (const pricing of pricingLines(snapshot)) wrap5(pricing, "dim");
-    } else if (nav.section === "projects") {
-      const project = snapshot.projects.find((item) => item.id === nav.detailId);
-      if (project) wrap5(`${num3(project.humanPrompts)} human prompts \xB7 ${num3(project.conversations)} conversations \xB7 ${pct2(project.share)} prompt share`, "cyan");
-    } else if (nav.section === "work" || nav.section === "hall") {
-      const story = [...sem?.stories ?? [], ...sem?.hallOfFame ?? []].find((item) => item.id === nav.detailId);
-      if (story) {
-        wrap5(`${story.project ?? "Unattributed"} \xB7 ${outcome(story)}`, "cyan");
-        wrap5(`${semanticScope(snapshot)} \xB7 Jev ${sem?.model ?? "unavailable"}`, "dim");
-        if (story.quote) wrap5(`\u201C${story.quote}\u201D`);
-        wrap5(`${num3(story.promptIds.length)} source input references \xB7 confidence ${pct2(story.confidence)}`, "dim");
-        add("Enter: read referenced user input", "amber");
-      }
-    } else if (nav.section === "language") {
-      const match = snapshot.profanity?.matches?.[Number(nav.detailId?.split(":")[1])];
-      if (match) {
-        wrap5(`${words3(match.kind)} \xB7 ${snapshot.profanity?.measurementBasis ?? "basis unavailable"}`, "dim");
-        add("Enter: containing input and source evidence", "amber");
-      }
-    }
-    const rows = launchRows(snapshot, nav);
-    for (const [index, row2] of rows.entries()) {
-      add(`${row2.id === nav.selectedId || !nav.selectedId && index === nav.selectedIndex ? "\u203A" : " "} ${row2.label}`);
-      add(`  ${row2.value}`, "dim");
-    }
-  } else if (nav.section === "overview") {
-    if (active2) {
-      wrap5(snapshot.launch?.notice ?? "Local source discovery is starting.", "dim");
-      add("");
-      const sources = snapshot.sources.length ? snapshot.sources : snapshot.scope.harnesses.map((harness) => ({ harness, state: "pending", candidateFiles: null }));
-      const arrow = ascii ? ["-->", "->-", ">--"][(geometry.frame ?? 0) % 3] : ["\u2500\u2500\u25B6", "\u2500\u25B6\u2500", "\u25B6\u2500\u2500"][(geometry.frame ?? 0) % 3], pieces = ascii ? [" /#\\", " |##", " #/", "  v "] : [" \u259F\u2588\u2599", " \u2588\u2588\u2588", " \u259C\u2588\u259B", "  \u2580 "], nameWidth = Math.max(...sources.map((source) => widthOf(SOURCE2[source.harness] ?? source.harness)));
-      for (const [index, source] of sources.entries()) {
-        const name = SOURCE2[source.harness] ?? source.harness;
-        body.push([{ text: name + " ".repeat(Math.max(0, nameWidth - widthOf(name))) + " ", tone: SOURCE_TONE[source.harness] ?? "normal" }, { text: `${arrow} `, tone: "dim" }, { text: pieces[index % pieces.length], tone: "amber" }, { text: ` ${source.state}${source.candidateFiles === null ? "" : ` \xB7 ${num3(source.candidateFiles)} files`}`, tone: "dim" }]);
-      }
-      add("");
-      const stages = ["discovering", "sizing", "preparing", "analyzing", "assembling"];
-      add(`${ascii ? ">" : "\u25C6"} ${words3(stage)}${stage === "analyzing" ? " \xB7 Jev" : ""}`, "amber");
-      if (!compact2) add(stages.map((step) => `${step === stage ? "[" : ""}${step}${step === stage ? "]" : ""}`).join(" \u2192 "), "dim");
-      if (snapshot.progress.total !== null) add(`${num3(snapshot.progress.completed)} / ${num3(snapshot.progress.total)} ${words3(snapshot.progress.unit)}`, "dim");
-    }
-    if (facts) {
-      add(`${usd(equivalent(facts))}  recorded API-equivalent value`, "amberLight");
-      if (facts.referenceValueUsd !== null) {
-        const providers = [...new Set((facts.referenceProviders ?? []).map((reference) => reference.provider))].join(", ") || "named provider";
-        add(`${usd(facts.referenceValueUsd)} ${providers} first-party reference`, "dim");
-        add("Actual provider unknown for reference", "dim");
-      }
-      const scope2 = snapshot.scope.eventFrom ? "Recorded scope" : "All-time", tokens = knownTokens(snapshot), chats = metricCount(snapshot.metrics.conversations);
-      if (compact2) {
-        add(`${scope2} \xB7 ${num3(tokens)} known tokens`, "dim");
-        add(`${num3(chats)} main chats`, "dim");
-      } else add(`${scope2} \xB7 ${num3(tokens)} known tokens \xB7 ${num3(chats)} main chats`, "dim");
-      if (facts.favourite) {
-        add(`Favourite: ${compact2 ? facts.favourite.model ?? modelName(facts.favourite) : modelName(facts.favourite)}`, "cyan");
-        add(`${pct2(facts.favourite.tokenShare)} known tokens \xB7 ${num3(facts.favourite.conversations)} usage chats`, "dim");
-      } else add("Favourite model unknown \xB7 usage incomplete", "dim");
-    } else if (!active2) add("Recorded API-equivalent value unknown \xB7 usage unavailable", "dim");
-    if (snapshot.projects.length) {
-      add("PROJECTS", "violet");
-      for (const project of snapshot.projects.slice(0, compact2 ? 2 : 3)) body.push([{ text: `${project.displayName} `, tone: "normal" }, { text: bar(project.share, compact2 ? 5 : wide ? 20 : 10, ascii), tone: "violet" }, { text: ` ${num3(project.humanPrompts)} prompts`, tone: "dim" }]);
-    }
-    add(shortWorkScope(snapshot), "cyan");
-    if (sem?.work.length) {
-      const total = sem.work.reduce((sum2, row2) => sum2 + row2.count, 0);
-      add(sem.work.slice(0, compact2 ? 2 : 3).map((row2) => `${words3(row2.label)} ${num3(row2.count)}`).join(" \xB7 "), "violet");
-      if (wide) add(spark(sem.work.map((row2) => row2.count), 30, ascii) + `  ${num3(total)} judged segments`, "dim");
-    }
-    showAnalysisStatus();
-    const direct = snapshot.profanity?.buckets.find((bucket) => bucket.kind === "direct_prose"), highlight = snapshot.profanity?.matches?.find((match) => match.kind === "direct_prose");
-    if (direct) {
-      const attributed = snapshot.launch?.languageByModel?.find((row2) => highlight && row2.promptIds.includes(highlight.promptId));
-      add(compact2 ? `LANGUAGE ${highlight ? `\u201C${highlight.term}\u201D \xD7${num3(direct.occurrences)}` : num3(direct.occurrences) + " matches"}${attributed?.model ? ` \xB7 ${attributed.model}` : ""}` : `YOUR LANGUAGE  ${highlight ? `\u201C${highlight.term}\u201D \xB7 ` : ""}${num3(direct.occurrences)} direct-use matches${attributed?.model ? ` \xB7 ${attributed.model}` : ""}`, "amber");
-    } else if (!active2) add("Your language \xB7 direct-use coverage unavailable", "dim");
-    for (const story of (sem?.hallOfFame ?? []).filter((story2) => story2.quote && story2.promptIds.length).slice(0, 2)) {
-      const status3 = compact2 ? { attempted: "attempted", assistant_reported: "reported", supported: "supported", uncertain: "uncertain" }[story.outcome] : outcome(story);
-      const quote2 = auditClip(story.quote ?? story.caption, Math.max(4, width - widthOf(status3) - 10), widthOf);
-      add(`HALL  ${quote2} \xB7 ${status3}`, "green");
     }
   } else {
-    const rows = launchRows(snapshot, nav);
-    const selectedIndex = Math.max(0, rows.findIndex((row2) => row2.id === nav.selectedId));
-    if (nav.section === "models") {
-      wrap5(`${factScope(snapshot)} \xB7 native recorded usage`, "dim");
-      for (const pricing of pricingLines(snapshot)) wrap5(pricing, "dim");
-      if (facts?.favourite) wrap5(`Favourite combines known-token share and conversation share equally (50/50)`, "dim");
-      if (facts?.referenceValueUsd !== null && facts?.referenceValueUsd !== void 0) wrap5(`${usd(facts.referenceValueUsd)} first-party reference \xB7 ${(facts.referenceProviders ?? []).map((reference) => reference.provider + "/" + reference.model).join(", ")} \xB7 actual provider unknown`, "dim");
-    }
-    if (nav.section === "projects") wrap5(`${factScope(snapshot)} \xB7 direct human prompts`, "dim");
-    if (nav.section === "work" || nav.section === "hall") {
-      wrap5(`${semanticScope(snapshot)} \xB7 tone ${sem?.tone ?? "elegant"}`, "cyan");
-      showAnalysisStatus(true);
-      const requestFailures = /* @__PURE__ */ new Set(["free_quota_unavailable", "free_retry_delay_exceeded", "free_access_denied", "free_service_unavailable", "transport_failure", "attempt_timeout", "retry_limit"]), visibleGaps = (sem?.gaps ?? []).filter((gap2) => (sem?.attempts ?? 0) > 0 || !requestFailures.has(gap2));
-      if (visibleGaps.length) wrap5(`Coverage: ${visibleGaps.map(words3).join(", ")}`, "dim");
-      if (nav.section === "work" && sem?.work.length) {
-        const total = sem.work.reduce((sum2, item) => sum2 + item.count, 0);
-        for (const item of sem.work) body.push([{ text: words3(item.label) + " ", tone: "normal" }, { text: bar(total ? item.count / total : 0, compact2 ? 6 : 18, ascii), tone: "violet" }, { text: ` ${num3(item.count)} segments`, tone: "dim" }]);
+    let current = make();
+    const remaining = Math.max(2, visible - hero.length - 1);
+    for (const original of [models, projects, moment, phrases, feedback].filter((card) => Boolean(card))) {
+      let card = original;
+      const free = visible - current.lines.length - 1;
+      if (card.id === "phrases" && free >= 3 && card.lines.length > free) {
+        const first = { ...card, lines: card.lines.slice(0, free), anchors: card.anchors.filter((a) => a.row < free) };
+        appendCard(current, first);
+        pages.push(current);
+        current = make();
+        card = { ...card, lines: [card.lines[0], ...card.lines.slice(free)], anchors: card.anchors.filter((a) => a.row >= free).map((a) => ({ ...a, row: a.row - free + 1 })) };
+      }
+      for (const chunk of splitCard(card, remaining)) {
+        if (current.lines.length + chunk.lines.length + 1 > visible && current.cards.length > 1) {
+          pages.push(current);
+          current = make();
+        }
+        appendCard(current, chunk);
       }
     }
-    if (nav.section === "language") {
-      wrap5("Direct user language \xB7 English explicit lexicon", "cyan");
-      if (snapshot.profanity) {
-        for (const bucket of snapshot.profanity.buckets) add(`${words3(bucket.kind)}: ${num3(bucket.occurrences)} matches / ${num3(bucket.containingPrompts)} inputs`, bucket.kind === "direct_prose" ? "amber" : "dim");
-        for (const owner of snapshot.launch?.languageByModel ?? []) add(`${owner.model ?? "Unknown model"} \xB7 ${num3(owner.occurrences)} direct matches`, "violet");
-        wrap5(`Coverage: ${num3(snapshot.profanity.eligiblePrompts)} eligible inputs \xB7 ${snapshot.profanity.coverageGaps.map(words3).join(", ") || "no listed gaps"}`, "dim");
-      } else add("Language coverage unavailable", "dim");
-    }
-    if (nav.section === "timeline") {
-      add(`Human prompts \xB7 ${snapshot.scope.timezone}`, "cyan");
-      add(spark(snapshot.activity.map((bucket) => bucket.count), width - 2, ascii), "violet");
-    }
-    for (const [index, row2] of rows.entries()) {
-      body.push([{ text: `${index === selectedIndex ? ascii ? "> " : "\u203A " : "  "}${row2.label}`, tone: index === selectedIndex ? "amber" : "normal" }]);
-      add(`  ${row2.value}`, "dim");
-    }
-    if (!rows.length && analysis.kind === "ready") add("No recorded rows for this scope.", "dim");
+    pages.push(current);
   }
-  if (geometry.notice) wrap5(geometry.notice, "amber");
-  const header = [[{ text: ascii ? "SLOPIE  " : "\u259F  SLOPIE  ", tone: "amber" }, { text: nav.frozen ? "FROZEN \xB7 current view" : nav.view === "section" ? { elegant: "your recorded work", witty: "the receipts", chaotic: "the session pile", roast: "receipts, served cold" }[sem?.tone ?? "elegant"] : NAMES[nav.section], tone: "dim" }]];
-  if (compact2) header.push(line(`${NAMES[nav.section]}  ${LAUNCH_SECTIONS.indexOf(nav.section) + 1}/7${nav.view !== "section" ? ` \xB7 ${nav.view}` : ""}`, "cyan"));
-  else header.push(LAUNCH_SECTIONS.flatMap((section, index) => [{ text: `${index ? "  " : ""}${section === nav.section ? "[" : ""}${NAMES[section]}${section === nav.section ? "]" : ""}`, tone: section === nav.section ? "cyan" : "dim" }]));
-  header.push(line(`Coverage: ${snapshot.coverage.state === "complete_snapshot" ? "retained snapshot" : snapshot.coverage.state}${active2 ? ` \xB7 ${words3(stage)}` : ""}`, "dim"));
-  const footer3 = [line(compact2 ? "\u2190/\u2192 Tab sections \xB7 \u2191/\u2193 move" : "\u2190/\u2192 or Tab: sections   \u2191/\u2193: select / scroll   Enter: details / evidence", "dim"), line(compact2 ? "Enter \xB7 Esc \xB7 W period \xB7 S freeze \xB7 q" : "Esc: back / cancel   S: freeze current view   W: period estimates   q: quit", "dim")];
-  const visible = Math.max(1, height - header.length - footer3.length - 1);
-  let scroll = Math.max(0, Math.min(nav.scroll, Math.max(0, body.length - visible)));
-  if (nav.selectedId && nav.view !== "evidence" && nav.section !== "overview") {
-    const selectedLine = body.findIndex((segments) => segments[0]?.text.startsWith("\u203A"));
-    if (selectedLine >= 0) {
-      if (selectedLine < scroll) scroll = selectedLine;
-      else if (selectedLine + 1 >= scroll + visible) scroll = Math.max(0, selectedLine - visible + 2);
+  if (pages.some((page) => page.lines.length > visible)) {
+    const stacked = [], capacity = Math.max(2, visible - hero.length - 1);
+    let current = make();
+    for (const card of [modelCard(snapshot, width, options), projectCard(snapshot, width, options), moment, phraseCard(snapshot, width, options), feedbackCard(snapshot, width, options)].filter((card2) => Boolean(card2))) {
+      for (const chunk of splitCard(card, capacity)) {
+        if (current.lines.length + chunk.lines.length + 1 > visible && current.cards.length > 1) {
+          stacked.push(current);
+          current = make();
+        }
+        appendCard(current, chunk);
+      }
     }
+    stacked.push(current);
+    pages.splice(0, pages.length, ...stacked);
   }
-  const rendered = [...header, line((ascii ? "-" : "\u2500").repeat(width), "dim"), ...body.slice(scroll, scroll + visible)];
-  while (rendered.length < height - footer3.length) rendered.push(line(""));
-  if (body.length > visible) footer3[0] = line(`${scroll + 1}\u2013${Math.min(scroll + visible, body.length)} / ${body.length} lines \xB7 \u2191/\u2193 scroll \xB7 \u2190/\u2192 sections`, "dim");
-  return [...rendered, ...footer3].slice(0, height).map((segments) => {
-    let remaining = width;
-    return segments.map((segment) => {
-      const normalized = ascii ? segment.text.replaceAll("\u203A", ">").replaceAll("\u2192", ">").replaceAll("\u2190", "<").replaceAll("\u2191", "^").replaceAll("\u2193", "v").replaceAll("\xB7", "|").replaceAll("\u201C", '"').replaceAll("\u201D", '"').replaceAll("\u2026", "...").replaceAll("\u2013", "-") : segment.text;
-      const text2 = auditClip(normalized, remaining, widthOf);
-      remaining -= widthOf(text2);
+  const status3 = launchAnalysisStatus(snapshot);
+  if (status3.kind === "local" || !snapshot.launch?.facts && status3.summary) {
+    const page = pages[0];
+    for (const line of reportWrap(status3.summary ?? "Local history unavailable", width, options.widthOf)) page.lines.push(textLine(line, "dim"));
+    if (status3.kind === "local" && (snapshot.launch?.semantics?.attempts ?? 0) === 0) page.lines.push(textLine("No analysis requests made", "dim"));
+  } else if (status3.kind === "provider") {
+    const page = pages.at(-1);
+    if (status3.summary && page.lines.length < visible) page.lines.push(textLine(status3.summary, "dim"));
+  }
+  return { columns, rows, pages: pages.filter((page) => page.cards.length > 1 || pages.length === 1 || status3.kind === "local" || !snapshot.launch?.facts && Boolean(status3.summary)).map((page) => ({ ...page, lines: page.lines.map((line) => [{ text: "  ", tone: "normal" }, ...line]) })) };
+}
+var cf2, dollars2, wallEquivalent, modelDisplayName, number2, asciiText;
+var init_wallboard = __esm({
+  "packages/cli/src/audit-ui/wallboard.ts"() {
+    "use strict";
+    init_audit_ui();
+    init_report_document();
+    init_report_status();
+    cf2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+    dollars2 = (value) => value == null || !Number.isFinite(value) ? "\u2014" : cf2.format(value);
+    wallEquivalent = (value) => value.valueUsd === null && value.referenceValueUsd === null ? null : (value.valueUsd ?? 0) + (value.referenceValueUsd ?? 0);
+    modelDisplayName = (model) => model.canonicalModel ?? model.model ?? "Unidentified model";
+    number2 = (value) => reportNumber(value);
+    asciiText = (text2, ascii) => ascii ? text2.replaceAll("\u2501", "#").replaceAll("\u2500", "-").replaceAll("\xD7", "x").replaceAll("\u201C", '"').replaceAll("\u201D", '"').replaceAll("\u2026", "...").replaceAll("\u2014", "?").replaceAll("\xB7", "|") : text2;
+  }
+});
+
+// packages/cli/src/audit-ui/wallboard-navigation.ts
+function createWallNavigation() {
+  return { mode: "board", page: 0, anchor: "models", boardPage: 0, boardAnchor: "models", frozen: false };
+}
+function clampWall(nav, count2) {
+  return { ...nav, page: Math.min(Math.max(0, nav.page), Math.max(0, count2 - 1)) };
+}
+function turnWall(nav, delta, count2, layout) {
+  const next = clampWall({ ...nav, page: nav.page + delta }, count2);
+  return { ...next, anchor: nav.mode === "board" ? layout?.pages[next.page]?.anchor ?? nav.anchor : nav.anchor };
+}
+function resizeWall(nav, layout) {
+  if (nav.mode !== "board") return nav;
+  const found = layout.pages.findIndex((page) => page.cards.includes(nav.anchor));
+  return clampWall({ ...nav, page: found >= 0 ? found : nav.page }, layout.pages.length);
+}
+function wallMode(nav, mode) {
+  if (mode === nav.mode) return nav;
+  if (mode === "board") return { ...nav, mode, page: nav.boardPage, anchor: nav.boardAnchor };
+  return { ...nav, mode, boardPage: nav.mode === "board" ? nav.page : nav.boardPage, boardAnchor: nav.mode === "board" ? nav.anchor : nav.boardAnchor, page: 0 };
+}
+function freezeWall(nav) {
+  return { ...nav, frozen: !nav.frozen };
+}
+var init_wallboard_navigation = __esm({
+  "packages/cli/src/audit-ui/wallboard-navigation.ts"() {
+    "use strict";
+  }
+});
+
+// packages/cli/src/audit-ui/launch-terminal.ts
+function hasReport(snapshot) {
+  return Boolean(snapshot.launch?.facts) || !launchIsLoading(snapshot);
+}
+function launchDocument(snapshot, nav, options = {}) {
+  return nav.mode === "help" ? buildReportHelp(snapshot, options, options.transfers) : nav.mode === "detail" ? buildEvidenceDocument(options.evidence, options) : buildReportDocument(snapshot, options);
+}
+function buildLaunchScreen(snapshot, nav, options = {}) {
+  const columns = Math.max(12, Math.min(options.columns ?? 80, options.width ?? Infinity)), rows = Math.max(4, options.rows ?? 24), visible = rows - 1, widthOf = options.widthOf ?? auditCellWidth;
+  let body, count2 = 1, page = 0;
+  if (nav.mode === "board" && !hasReport(snapshot)) body = buildReportLoader(snapshot, { ...options, transfer: null, columns, rows });
+  else if (nav.mode === "board") {
+    const layout = buildWallboard(snapshot, { ...options, columns, rows });
+    count2 = layout.pages.length;
+    page = clampWall(nav, count2).page;
+    body = [...layout.pages[page]?.lines ?? []];
+  } else {
+    const doc = launchDocument(snapshot, nav, { ...options, columns, rows });
+    count2 = Math.max(1, Math.ceil(doc.lines.length / visible));
+    page = clampWall(nav, count2).page;
+    body = doc.lines.slice(page * visible, (page + 1) * visible);
+  }
+  if (options.notice && body.length < visible) body.push([{ text: "  " + options.notice, tone: "dim" }]);
+  if (options.transfer) {
+    const notice = cleanReportText(options.transfer.notice), lines = buildReportHelpNotice(notice, columns, widthOf);
+    body = [...lines, ...body].slice(0, visible);
+  }
+  while (body.length < visible) body.push([{ text: "", tone: "normal" }]);
+  return [...body.slice(0, visible), footer3(Boolean(options.ascii), page, count2, nav.frozen)].map((line) => {
+    let left = columns;
+    return line.map((segment) => {
+      const text2 = auditClip(segment.text, left, widthOf);
+      left -= widthOf(text2);
       return { ...segment, text: text2 };
     });
   });
 }
+function buildReportHelpNotice(text2, columns, widthOf) {
+  return reportWrap(text2.replaceAll("\n", " "), Math.max(10, columns - 4), widthOf).map((row2) => [{ text: "  " + row2, tone: "amberLight" }]);
+}
+function transferFrameVisible(screen, event) {
+  const text2 = screen.flat().map((segment) => segment.text).join("").replace(/\s/g, "");
+  return text2.includes(cleanReportText(event.notice).replace(/\s/g, "")) && event.recipients.every((recipient) => text2.includes(recipient.replace(/\s/g, "")));
+}
 function renderLaunchPlain(snapshot, options = {}) {
-  return buildLaunchScreen(snapshot, createLaunchNavigation(), { ...options, columns: options.width ?? 80, rows: 40 }).map((segments) => segments.map((segment) => segment.text).join("").trimEnd()).join("\n").trimEnd() + "\n";
+  return buildReportDocument(snapshot, { ...options, columns: options.width ?? 80 }).lines.map((line) => line.map((segment) => segment.text).join("").trimEnd()).join("\n").trimEnd() + "\n";
 }
 async function runLaunchTerminal(session, options = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) return { snapshot: await session.run(), reason: "complete" };
-  const [{ default: React, useState, useRef, useEffect }, { render: render2, Box, Text, useInput, useApp, useWindowSize, useAnimation }, { default: stringWidth }] = await Promise.all([import("react"), import("ink"), import("string-width")]);
-  let finalSnapshot = session.snapshot(), reason = "quit", settled = false, scan2 = null, periodJob = null;
+  const [{ default: React, useState, useRef, useEffect }, { render: render2, Box, Text, useInput, usePaste, useApp, useWindowSize, useAnimation }, { default: stringWidth }] = await Promise.all([import("react"), import("ink"), import("string-width")]);
+  let finalSnapshot = session.snapshot(), reason = "quit", settled = false, scan2 = null, app = null;
   function App() {
-    const [live, setLive] = useState(finalSnapshot), [nav, setNav] = useState(createLaunchNavigation()), [frozen, setFrozen] = useState(null), [page, setPage] = useState(null), [evidence2, setEvidence] = useState(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState("");
-    const { columns, rows } = useWindowSize(), { exit } = useApp(), mounted = useRef(true), generation = useRef(0), pending = useRef(null), readBusy = useRef(false);
-    const snapshot = nav.frozen && frozen ? frozen : live, active2 = launchIsLoading(live), visible = Math.max(1, rows - 6), items = launchRows(snapshot, nav, page);
-    const { frame } = useAnimation({ interval: 120, isActive: active2 && !nav.frozen && nav.section === "overview" && nav.view === "section" && options.motion !== false });
+    const [live, setLive] = useState(finalSnapshot), [nav, setNav] = useState(createWallNavigation()), [frozen, setFrozen] = useState(null), [evidence2, setEvidence] = useState(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState(""), [transfer, setTransfer] = useState(null), [transfers, setTransfers] = useState([]);
+    const { columns: rawColumns, rows } = useWindowSize(), columns = Math.min(rawColumns, options.width ?? rawColumns), { exit } = useApp(), mounted = useRef(true), generation = useRef(0), pending = useRef(null), transferTimer = useRef(null), cueTimer = useRef(null), frozenFrame = useRef(0), transferSequence = useRef(-1), acknowledged = useRef(/* @__PURE__ */ new Set()), transferQueue = useRef([]), activeTransfer = useRef(null), terminating = useRef(false);
+    const snapshot = nav.frozen && frozen ? frozen : live, visible = Math.max(1, rows - 1), loading = !hasReport(snapshot), { frame } = useAnimation({ interval: 100, isActive: loading && nav.mode === "board" && !nav.frozen && options.motion !== false });
+    const geometry = { ...options, columns, rows, widthOf: stringWidth, frame: nav.frozen ? frozenFrame.current : frame, evidence: evidence2, busy, notice, transfer, transfers }, doc = nav.mode === "board" ? { lines: [], anchors: [] } : launchDocument(snapshot, nav, geometry), layout = buildWallboard(snapshot, geometry), pageCount = nav.mode === "board" ? layout.pages.length : Math.max(1, Math.ceil(doc.lines.length / visible));
+    useEffect(() => {
+      setNav((current) => current.mode === "board" ? resizeWall(current, layout) : clampWall(current, pageCount));
+    }, [columns, rows, pageCount, nav.mode]);
     useEffect(() => {
       mounted.current = true;
       const publish = (event) => {
+        if (terminating.current || !mounted.current) return;
+        if (event.type === "transfer") {
+          if (event.snapshotId !== finalSnapshot.snapshotId || event.sequence < finalSnapshot.sequence || event.sequence <= transferSequence.current) return;
+          if (event.ackId && (acknowledged.current.has(event.ackId) || transferQueue.current.some((queued) => queued.ackId === event.ackId))) return;
+          transferSequence.current = event.sequence;
+          if (transferQueue.current.length >= 128) {
+            terminating.current = true;
+            reason = "cancelled";
+            session.cancel();
+            exit();
+            return;
+          }
+          setTransfers((history) => [...history, event].slice(-100));
+          transferQueue.current.push(event);
+          if (transferTimer.current) {
+            clearTimeout(transferTimer.current);
+            transferTimer.current = null;
+          }
+          if (!activeTransfer.current) {
+            activeTransfer.current = event;
+            setTransfer(event);
+          }
+          return;
+        }
         finalSnapshot = applyAuditEvent(finalSnapshot, event);
+        if (event.type === "error" || event.type === "snapshot" && event.snapshot.launch?.stage === "ready") {
+          if (pending.current) {
+            clearTimeout(pending.current);
+            pending.current = null;
+          }
+          if (mounted.current) setLive(finalSnapshot);
+          return;
+        }
         if (pending.current === null) pending.current = setTimeout(() => {
           pending.current = null;
           if (mounted.current) setLive(finalSnapshot);
@@ -35479,7 +37358,7 @@ async function runLaunchTerminal(session, options = {}) {
       scan2 = Promise.resolve().then(() => session.run(publish)).then((value) => {
         settled = true;
         finalSnapshot = value;
-        if (pending.current !== null) {
+        if (pending.current) {
           clearTimeout(pending.current);
           pending.current = null;
         }
@@ -35487,221 +37366,154 @@ async function runLaunchTerminal(session, options = {}) {
         return value;
       }, () => {
         settled = true;
-        finalSnapshot = { ...finalSnapshot, status: "error", launch: finalSnapshot.launch ? { ...finalSnapshot.launch, stage: "ready" } : void 0 };
-        if (mounted.current) {
-          setLive(finalSnapshot);
-          setNotice("Audit interrupted \xB7 available results retained");
+        finalSnapshot = { ...finalSnapshot, status: reason === "cancelled" ? "cancelled" : "error", launch: finalSnapshot.launch ? { ...finalSnapshot.launch, stage: "ready" } : void 0 };
+        if (pending.current) {
+          clearTimeout(pending.current);
+          pending.current = null;
         }
+        if (mounted.current) setLive(finalSnapshot);
         return finalSnapshot;
       });
       return () => {
         mounted.current = false;
         generation.current++;
-        if (pending.current !== null) clearTimeout(pending.current);
+        for (const timer of [pending.current, transferTimer.current, cueTimer.current]) if (timer) clearTimeout(timer);
       };
     }, []);
-    const stop = (cancel = false) => {
-      reason = !settled || periodJob || cancel ? "cancelled" : "quit";
+    useEffect(() => {
+      if (!transfer || !transferFrameVisible(buildLaunchScreen(snapshot, nav, geometry), transfer)) return;
+      let cancelled = false;
+      void Promise.resolve().then(async () => {
+        const terminal = app;
+        if (!terminal) return;
+        await terminal.waitUntilRenderFlush();
+        if (cancelled || !mounted.current || terminating.current || activeTransfer.current !== transfer) return;
+        if (transfer.ackId && !acknowledged.current.has(transfer.ackId)) {
+          acknowledged.current.add(transfer.ackId);
+          session.acknowledgeTransfer?.(transfer.ackId);
+        }
+        if (transferQueue.current[0] === transfer) transferQueue.current.shift();
+        const next = transferQueue.current[0] ?? null;
+        activeTransfer.current = next;
+        if (next) {
+          setTransfer(next);
+          return;
+        }
+        if (transferTimer.current) clearTimeout(transferTimer.current);
+        transferTimer.current = setTimeout(() => {
+          transferTimer.current = null;
+          if (mounted.current) setTransfer(null);
+        }, 1800);
+      }).catch(() => {
+        if (mounted.current) setNotice("Transfer notice could not be painted \xB7 request remains held");
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [transfer?.ackId, transfer?.sequence, columns, rows, nav.mode]);
+    const stop = () => {
+      if (terminating.current) return;
+      terminating.current = true;
+      reason = settled && !transferQueue.current.length ? "quit" : "cancelled";
       generation.current++;
-      if (!settled || periodJob || cancel) session.cancel();
+      if (!settled || transferQueue.current.length) session.cancel();
+      transferQueue.current = [];
+      activeTransfer.current = null;
       exit();
     };
-    const refreshCurrent = () => {
-      if (!mounted.current) return;
-      const current = session.snapshot();
-      if (current.snapshotId === finalSnapshot.snapshotId && current.sequence >= finalSnapshot.sequence) {
-        finalSnapshot = current;
-        setLive(current);
-      }
+    useEffect(() => {
+      const stopSignal = () => stop();
+      process.on("SIGTERM", stopSignal);
+      process.on("SIGHUP", stopSignal);
+      return () => {
+        process.off("SIGTERM", stopSignal);
+        process.off("SIGHUP", stopSignal);
+      };
+    }, []);
+    const cue = (text2) => {
+      setNotice(text2);
+      if (cueTimer.current) clearTimeout(cueTimer.current);
+      cueTimer.current = setTimeout(() => {
+        cueTimer.current = null;
+        if (mounted.current) setNotice("");
+      }, 1100);
     };
-    const readPage = async (next, offset = 0, targetIds) => {
-      if (readBusy.current) return;
-      readBusy.current = true;
+    const readAnchor = async () => {
+      if (busy) return;
+      const anchor = layout.pages[clampWall(nav, layout.pages.length).page]?.anchors[0];
+      if (!anchor) {
+        cue("No captured source reference on this page");
+        return;
+      }
       const token = ++generation.current;
-      setNav(next);
-      setPage(null);
+      setNav((current) => wallMode(current, "detail"));
       setEvidence(null);
       setBusy(true);
       setNotice("");
       try {
-        let result = await session.prompts(next.conversationId, offset, 20);
-        if (targetIds?.length) {
-          let searched = 0;
-          while (!result.prompts.some((prompt) => targetIds.includes(prompt.id)) && result.nextOffset !== null && searched++ < 50 && token === generation.current) result = await session.prompts(next.conversationId, result.nextOffset, 20);
-          result = { ...result, prompts: result.prompts.filter((prompt) => targetIds.includes(prompt.id)), nextOffset: null };
-        }
-        if (mounted.current && token === generation.current && result.snapshotId === finalSnapshot.snapshotId) {
-          setPage(result);
-          setNav((current) => ({ ...current, selectedId: result.prompts[0]?.id ?? null, selectedIndex: 0, scroll: 0 }));
-        }
-      } catch {
-        refreshCurrent();
-        if (mounted.current && token === generation.current) setNotice("Source unavailable or changed \xB7 Esc returns");
-      } finally {
-        readBusy.current = false;
-        if (mounted.current && token === generation.current) setBusy(false);
-      }
-    };
-    const readEvidence = async (route) => {
-      if (readBusy.current) return;
-      readBusy.current = true;
-      const token = ++generation.current;
-      setNav(launchPush(nav, { view: "evidence" }));
-      setBusy(true);
-      setEvidence(null);
-      setNotice("");
-      try {
-        const value = await session.evidence(route);
-        refreshCurrent();
-        if (mounted.current && token === generation.current) setEvidence(value);
-      } catch {
-        refreshCurrent();
-        if (mounted.current && token === generation.current) setNotice("Exact source unavailable \xB7 Esc returns");
-      } finally {
-        readBusy.current = false;
-        if (mounted.current && token === generation.current) setBusy(false);
-      }
-    };
-    const open2 = async () => {
-      if (nav.frozen) {
-        setNotice("Frozen current view \xB7 S resumes navigation");
-        return;
-      }
-      if (nav.section === "overview" && nav.view === "section") {
-        setNav({ ...createLaunchNavigation("models") });
-        return;
-      }
-      const selected = items.find((item) => item.id === nav.selectedId) ?? items[nav.selectedIndex];
-      if (nav.view === "prompts") {
-        const prompt = page?.prompts.find((item) => item.id === selected?.id);
-        if (prompt) await readEvidence(prompt.route);
-        return;
-      }
-      if (nav.view === "detail" && (nav.section === "hall" || nav.section === "work")) {
-        const story = [...snapshot.launch?.semantics?.stories ?? [], ...snapshot.launch?.semantics?.hallOfFame ?? []].find((item) => item.id === nav.detailId);
-        if (story) await readPage(launchPush(nav, { view: "prompts", conversationId: story.conversationId }), 0, story.promptIds);
-        return;
-      }
-      if (nav.view === "detail" && nav.section === "language") {
-        const match = snapshot.profanity?.matches?.[Number(nav.detailId?.split(":")[1])];
-        if (match) await readEvidence(match.route);
-        return;
-      }
-      if (!selected) return;
-      if (selected.kind === "conversation") {
-        await readPage(launchPush(nav, { view: "prompts", conversationId: selected.id }));
-        return;
-      }
-      if (selected.kind === "period") {
-        const sourceFailure = launchAnalysisStatus(snapshot);
-        if (sourceFailure.kind === "local") {
-          setNotice(sourceFailure.summary ?? "Local history is unavailable");
-          return;
-        }
-        const choice = snapshot.launch?.semantics?.window.choices.find((window2) => selected.id === `period:${window2.period}`);
-        if (!choice || !choice.fits) {
-          setNotice("This period exceeds the available allowance \xB7 choose a smaller scope");
-          return;
-        }
-        if (!settled || periodJob) {
-          setNotice("Current analysis is still running");
-          return;
-        }
-        if (!session.analyzePeriod) {
-          setNotice("Period analysis is unavailable in this session");
-          return;
-        }
-        const token = ++generation.current;
-        setBusy(true);
-        setNotice("Preparing selected period \xB7 retained sources and cached judgments");
-        const publish = (event) => {
-          finalSnapshot = applyAuditEvent(finalSnapshot, event);
-          if (mounted.current) setLive(finalSnapshot);
-        };
-        periodJob = session.analyzePeriod(choice.period, publish);
-        try {
-          const value = await periodJob;
-          finalSnapshot = value;
-          if (mounted.current) {
-            setLive(value);
-            if (token === generation.current) {
-              setNav({ ...createLaunchNavigation("work") });
-              setNotice("");
-            }
+        let route = anchor.route;
+        if (!route && anchor.conversationId) {
+          let page = await session.prompts(anchor.conversationId, 0, 20), searched = 0, prompt = page.prompts.find((p) => anchor.promptIds?.includes(p.id));
+          while (!prompt && page.nextOffset !== null && searched++ < 50 && token === generation.current) {
+            page = await session.prompts(anchor.conversationId, page.nextOffset, 20);
+            prompt = page.prompts.find((p) => anchor.promptIds?.includes(p.id));
           }
-        } catch {
-          refreshCurrent();
-          if (mounted.current && token === generation.current) setNotice(launchAnalysisStatus(finalSnapshot).summary ?? "Period analysis stopped \xB7 retained results remain");
-        } finally {
-          periodJob = null;
-          if (mounted.current && token === generation.current) setBusy(false);
+          route = prompt?.route;
         }
-        return;
+        const result = route ? await session.evidence(route) : null;
+        if (mounted.current && token === generation.current) setEvidence(result);
+      } catch {
+        if (mounted.current && token === generation.current) setNotice("Captured source cannot be read under the current privacy policy");
+      } finally {
+        if (mounted.current && token === generation.current) setBusy(false);
       }
-      setNav(launchPush(nav, { view: "detail", detailId: selected.id, conversationId: selected.conversationId ?? null }));
     };
+    usePaste(() => {
+    });
     useInput((input, key2) => {
-      if (key2.ctrl && input === "c" || input === "q") {
+      if ([...input].length > 1) return;
+      if (input === "q" || key2.ctrl && input === "c") {
         stop();
         return;
       }
       if (input === "S" || input === "s") {
-        generation.current++;
-        setBusy(false);
+        frozenFrame.current = frame;
         setFrozen(nav.frozen ? null : snapshot);
-        setNav(launchFreeze(nav));
-        setNotice("");
+        setNav((current) => freezeWall(current));
+        cue(nav.frozen ? "Live view resumed" : "Frozen \xB7 pages/help work");
         return;
       }
-      if (nav.frozen) return;
+      if (input === "?") {
+        generation.current++;
+        setBusy(false);
+        setNotice("");
+        setNav((current) => wallMode(current, current.mode === "help" ? "board" : "help"));
+        return;
+      }
       if (key2.escape) {
-        if (periodJob) {
-          stop(true);
-          return;
-        }
         generation.current++;
         setBusy(false);
         setNotice("");
-        if (nav.stack.length) setNav(launchBack(nav));
-        else if (!settled) stop(true);
-        return;
-      }
-      if (key2.leftArrow || key2.rightArrow || key2.tab) {
-        generation.current++;
-        setBusy(false);
-        setNotice("");
-        setNav(launchSelectSection(nav, key2.leftArrow || key2.shift ? -1 : 1));
-        return;
-      }
-      if (input === "w" || input === "W" || input === "f") {
-        const choices = snapshot.launch?.semantics?.window.choices ?? [], selected = choices.findIndex((window2) => window2.period === snapshot.launch?.semantics?.window.selected?.period);
-        setNav({ ...launchPush(nav, { view: "periods" }), selectedId: choices[Math.max(0, selected)] ? `period:${choices[Math.max(0, selected)].period}` : null, selectedIndex: Math.max(0, selected) });
-        return;
-      }
-      if (nav.view === "prompts" && (input === "n" || input === "p")) {
-        const offset = input === "n" ? page?.nextOffset : Math.max(0, (page?.offset ?? 0) - 20);
-        if (offset != null) void readPage({ ...nav, scroll: 0, selectedIndex: 0 }, offset);
+        if (nav.mode !== "board") setNav((current) => wallMode(current, "board"));
+        else if (!settled) stop();
         return;
       }
       if (key2.return) {
-        void open2();
+        if (nav.mode === "help") setNav((current) => wallMode(current, "board"));
+        else if (nav.mode === "board") void readAnchor();
         return;
       }
-      if (key2.upArrow || key2.downArrow || input === "j" || input === "k") {
-        const delta = key2.upArrow || input === "k" ? -1 : 1;
-        if (nav.section === "overview" || nav.view === "evidence" || nav.view === "detail" && !items.length) setNav((current) => ({ ...current, scroll: Math.max(0, current.scroll + delta) }));
-        else setNav((current) => launchMove(current, items, delta, Math.max(1, Math.floor(visible / 2))));
-      }
+      const delta = key2.rightArrow ? 1 : key2.leftArrow ? -1 : 0;
+      if (delta) setNav((current) => turnWall(current, delta, pageCount, nav.mode === "board" ? layout : void 0));
     });
-    const screen = buildLaunchScreen(snapshot, nav, { ...options, color: options.color !== false && !("NO_COLOR" in process.env), columns, rows, widthOf: stringWidth, frame, promptPage: page, evidence: evidence2, busy, notice });
-    return React.createElement(Box, { flexDirection: "column", width: Math.min(columns, options.width ?? columns), height: rows }, ...screen.map((segments, index) => React.createElement(Box, { key: index, height: 1, flexShrink: 0, width: "100%" }, React.createElement(Text, { wrap: "truncate" }, ...segments.map((segment, i) => React.createElement(Text, { key: i, color: options.color === false || "NO_COLOR" in process.env ? void 0 : COLORS[segment.tone] }, segment.text))))));
+    const screen = buildLaunchScreen(snapshot, nav, geometry);
+    return React.createElement(Box, { flexDirection: "column", width: columns, height: rows }, ...screen.map((segments2, index) => React.createElement(Box, { key: index, height: 1, flexShrink: 0, width: "100%" }, React.createElement(Text, { wrap: "truncate" }, ...segments2.map((segment, i) => React.createElement(Text, { key: i, bold: segment.tone === "amberLight" || segment.tone === "amber", color: options.color === false || "NO_COLOR" in process.env ? void 0 : COLORS[segment.tone] }, segment.text))))));
   }
   const originalWrite = process.stdout.write;
   process.stdout.write = function(...args) {
     if (typeof args[0] === "string" && args[0].includes("\x1B[?1049h")) args[0] = args[0].replace("\x1B[?1049h", "\x1B[?1049h\x1B[H");
     return originalWrite.apply(process.stdout, args);
   };
-  let app;
   try {
     app = render2(React.createElement(App), { alternateScreen: true, incrementalRendering: true, maxFps: 12, exitOnCtrlC: false, patchConsole: false });
   } catch (error) {
@@ -35712,36 +37524,28 @@ async function runLaunchTerminal(session, options = {}) {
   }
   try {
     await app.waitUntilExit();
-    if (!settled || periodJob) session.cancel();
+    if (!settled) session.cancel();
     if (scan2) await scan2;
-    if (periodJob) await periodJob.catch(() => {
-    });
     return { snapshot: finalSnapshot, reason };
   } finally {
-    if (!settled || periodJob) session.cancel();
-    app.unmount();
-    await app.waitUntilRenderFlush();
+    if (!settled) session.cancel();
+    app?.unmount();
+    await app?.waitUntilRenderFlush();
   }
 }
-var LAUNCH_SECTIONS, NAMES, SOURCE2, SOURCE_TONE, COLORS, format, money2, words3, num3, equivalent, usd, pct2, day, line;
+var createLaunchNavigation, COLORS, footer3;
 var init_launch_terminal = __esm({
   "packages/cli/src/audit-ui/launch-terminal.ts"() {
     "use strict";
     init_audit_ui();
-    LAUNCH_SECTIONS = ["overview", "models", "projects", "work", "hall", "language", "timeline"];
-    NAMES = { overview: "Overview", models: "Models", projects: "Projects", work: "Work", hall: "Hall of Fame", language: "Language", timeline: "Timeline" };
-    SOURCE2 = { claude: "Claude Code", codex: "Codex", pi: "pi", opencode: "OpenCode" };
-    SOURCE_TONE = { claude: "amber", codex: "cyan", pi: "green", opencode: "violet" };
-    COLORS = { normal: "#e9e8e0", dim: "#819097", amberDim: "#be7337", amber: "#f9ae56", amberLight: "#ffd89b", cyan: "#47d7e2", green: "#79c9a3", violet: "#b29ddb", blue: "#80ade0" };
-    format = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
-    money2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
-    words3 = (value) => value.replaceAll("_", " ");
-    num3 = (value) => value == null || !Number.isFinite(value) ? "unknown" : format.format(value);
-    equivalent = (value) => value.valueUsd === null && value.referenceValueUsd === null ? null : (value.valueUsd ?? 0) + (value.referenceValueUsd ?? 0);
-    usd = (value) => value == null || !Number.isFinite(value) ? "unknown" : money2.format(value);
-    pct2 = (value) => value == null ? "unknown" : `${format.format(value * 100)}%`;
-    day = (value) => value?.slice(0, 10) ?? "unknown";
-    line = (text2, tone2 = "normal") => [{ text: safe(text2), tone: tone2 }];
+    init_report_document();
+    init_report_navigation();
+    init_wallboard();
+    init_wallboard_navigation();
+    init_report_status();
+    createLaunchNavigation = createWallNavigation;
+    COLORS = { normal: "#EEEAE4", dim: "#A6A29B", amberDim: "#68665F", amber: "#F2A45E", amberLight: "#F2A45E", cyan: "#EEEAE4", green: "#EEEAE4", violet: "#A6A29B", blue: "#A6A29B" };
+    footer3 = (ascii, page, count2, frozen = false) => [{ text: (count2 > 1 ? (ascii ? "< " : "\u2190 ") + (page + 1) + "/" + count2 + (ascii ? " > | " : " \u2192 \xB7 ") : "") + (ascii ? "? help | q quit" : "? help \xB7 q quit") + (frozen ? ascii ? " | frozen" : " \xB7 frozen" : ""), tone: "dim" }];
   }
 });
 
@@ -35799,9 +37603,9 @@ function looksLikeProse2(token) {
 function looksLikeAlphabetConstant2(token) {
   return token.length >= 24 && new Set(token).size === token.length;
 }
-function nameLooksLikeSecret2(name) {
-  const segments = name.split(/[^A-Za-z0-9]+/).flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])/)).filter(Boolean);
-  const last2 = segments[segments.length - 1];
+function nameLooksLikeSecret2(name2) {
+  const segments2 = name2.split(/[^A-Za-z0-9]+/).flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])/)).filter(Boolean);
+  const last2 = segments2[segments2.length - 1];
   if (!last2) return false;
   const lower = last2.toLowerCase();
   if (NAME_STOPWORDS2.has(lower)) return false;
@@ -35930,8 +37734,8 @@ var init_redact_rules2 = __esm({
           const keywordEnd = m.index + m[0].replace(/["']?[ \t]*(?::=|=>|[:=])$/, "").length;
           let nameStart = m.index;
           while (nameStart > 0 && NAME_CHAR_RE2.test(text2[nameStart - 1] ?? "")) nameStart--;
-          const name = text2.slice(nameStart, keywordEnd);
-          if (!nameLooksLikeSecret2(name)) continue;
+          const name2 = text2.slice(nameStart, keywordEnd);
+          if (!nameLooksLikeSecret2(name2)) continue;
           GENERIC_VALUE2.lastIndex = opEnd;
           const v = GENERIC_VALUE2.exec(text2);
           if (!v) continue;
@@ -36294,9 +38098,9 @@ var init_redact_elide2 = __esm({
 });
 
 // packages/core/src/redact.ts
-import { createHash as createHash15 } from "node:crypto";
+import { createHash as createHash19 } from "node:crypto";
 function secretDigest2(secret) {
-  return createHash15("sha256").update(secret, "utf8").digest("hex").slice(0, 8);
+  return createHash19("sha256").update(secret, "utf8").digest("hex").slice(0, 8);
 }
 function redact2(text2) {
   if (typeof text2 !== "string" || text2.length === 0) return { text: text2 ?? "", hits: [] };
@@ -36402,7 +38206,7 @@ var init_markers2 = __esm({
 });
 
 // packages/core/src/analytics/source.ts
-import { createHash as createHash16 } from "node:crypto";
+import { createHash as createHash20 } from "node:crypto";
 var digest2, clean2;
 var init_source3 = __esm({
   "packages/core/src/analytics/source.ts"() {
@@ -36412,7 +38216,7 @@ var init_source3 = __esm({
     init_redact2();
     init_redact_elide2();
     init_markers2();
-    digest2 = (value) => createHash16("sha256").update(value).digest("hex");
+    digest2 = (value) => createHash20("sha256").update(value).digest("hex");
     clean2 = (text2) => redact2(elideBinary3(text2)).text;
   }
 });
@@ -36452,7 +38256,7 @@ function validateJevRequest2(request) {
   if (Buffer.byteLength(JSON.stringify(request.state)) > 8192 || Buffer.byteLength(JSON.stringify(request)) > 32768) fail5("request_bytes_limit");
 }
 function distribution2(raw, expected, allowRounded = false) {
-  if (!record3(raw) || !keys5(raw, expected) || Object.values(raw).some((v) => !number2(v))) fail5("invalid_response");
+  if (!record3(raw) || !keys5(raw, expected) || Object.values(raw).some((v) => !number3(v))) fail5("invalid_response");
   const result = raw;
   const values = Object.values(result), rounded = allowRounded && values.every((v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-8);
   const tolerance = rounded ? Math.min(0.02, Math.max(1e-3, expected.length * 5e-3)) : 1e-3;
@@ -36463,22 +38267,22 @@ function validateJevResponse2(raw, request, allowRounded = false) {
   if (!record3(raw) || !keys5(raw, ["model", "answers", "usage"])) fail5("invalid_response");
   if (raw.model !== request.model) fail5("model_mismatch");
   if (!record3(raw.answers) || !keys5(raw.answers, Object.keys(request.questions)) || !record3(raw.usage) || !keys5(raw.usage, ["input_tokens", "output_tokens"])) fail5("invalid_response");
-  for (const count2 of Object.values(raw.usage)) if (!number2(count2, 0, Number.MAX_SAFE_INTEGER) || !Number.isSafeInteger(count2)) fail5("invalid_response");
+  for (const count2 of Object.values(raw.usage)) if (!number3(count2, 0, Number.MAX_SAFE_INTEGER) || !Number.isSafeInteger(count2)) fail5("invalid_response");
   const answers = /* @__PURE__ */ Object.create(null);
   for (const [id, q2] of Object.entries(request.questions)) {
     const a = raw.answers[id];
     if (!record3(a) || a.type !== q2.type) fail5("invalid_response");
     if (q2.type === "noul") {
-      if (!keys5(a, ["type", "noul"]) || !number2(a.noul)) fail5("invalid_response");
+      if (!keys5(a, ["type", "noul"]) || !number3(a.noul)) fail5("invalid_response");
       answers[id] = { type: "noul", noul: a.noul };
     } else if (q2.type === "choice") {
-      if (!keys5(a, ["type", "choice", "probabilities", "confidence"]) || typeof a.choice !== "string" || !Object.hasOwn(q2.criteria, a.choice) || !number2(a.confidence)) fail5("invalid_response");
+      if (!keys5(a, ["type", "choice", "probabilities", "confidence"]) || typeof a.choice !== "string" || !Object.hasOwn(q2.criteria, a.choice) || !number3(a.confidence)) fail5("invalid_response");
       const probabilities = distribution2(a.probabilities, Object.keys(q2.criteria), allowRounded);
       if (probabilities[a.choice] + 1e-3 < Math.max(...Object.values(probabilities))) fail5("invalid_response");
       answers[id] = { type: "choice", choice: a.choice, probabilities, confidence: a.confidence };
     } else {
       const levels = q2.criteria.map((_, i) => String(i));
-      if (!keys5(a, ["type", "score", "legend", "probabilities", "confidence"]) || !number2(a.score, 0, levels.length - 1) || !number2(a.confidence) || !record3(a.legend) || !keys5(a.legend, levels) || levels.some((level, i) => a.legend[level] !== q2.criteria[i])) fail5("invalid_response");
+      if (!keys5(a, ["type", "score", "legend", "probabilities", "confidence"]) || !number3(a.score, 0, levels.length - 1) || !number3(a.confidence) || !record3(a.legend) || !keys5(a.legend, levels) || levels.some((level, i) => a.legend[level] !== q2.criteria[i])) fail5("invalid_response");
       const probabilities = distribution2(a.probabilities, levels, allowRounded), mean = levels.reduce((n3, level) => n3 + Number(level) * probabilities[level], 0);
       if (Math.abs(a.score - mean) > 0.02) fail5("invalid_response");
       answers[id] = { type: "score", score: a.score, confidence: a.confidence, probabilities, legend: a.legend };
@@ -36486,7 +38290,7 @@ function validateJevResponse2(raw, request, allowRounded = false) {
   }
   return { model: request.model, answers, usage: raw.usage };
 }
-var JEV_MODEL2, JEV_PRICE_PER_MILLION_INPUT2, JEV_ATTEMPT_RESERVATION_USD2, JEV_QUESTION_VERSION2, JevFailure2, record3, keys5, number2;
+var JEV_MODEL2, JEV_PRICE_PER_MILLION_INPUT2, JEV_ATTEMPT_RESERVATION_USD2, JEV_QUESTION_VERSION2, JevFailure2, record3, keys5, number3;
 var init_jev_contract2 = __esm({
   "packages/core/src/analytics/jev-contract.ts"() {
     "use strict";
@@ -36502,7 +38306,7 @@ var init_jev_contract2 = __esm({
     };
     record3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
     keys5 = (value, expected) => Object.keys(value).length === expected.length && expected.every((k) => Object.hasOwn(value, k));
-    number2 = (value, min2 = 0, max2 = 1) => typeof value === "number" && Number.isFinite(value) && value >= min2 && value <= max2;
+    number3 = (value, min2 = 0, max2 = 1) => typeof value === "number" && Number.isFinite(value) && value >= min2 && value <= max2;
   }
 });
 
@@ -36573,19 +38377,19 @@ var init_jev_provider2 = __esm({
       ledger() {
         return structuredClone(this.attempts);
       }
-      key(request, identity4) {
-        return digest2(JSON.stringify({ request, identity: identity4 }));
+      key(request, identity5) {
+        return digest2(JSON.stringify({ request, identity: identity5 }));
       }
-      evaluate(job, request, identity4) {
+      evaluate(job, request, identity5) {
         try {
           request = structuredClone(request);
-          identity4 = structuredClone(identity4);
+          identity5 = structuredClone(identity5);
           validateJevRequest2(request);
           job.assertCurrent();
         } catch (error) {
           return Promise.resolve({ state: "failed", code: coded2(error) });
         }
-        const key2 = this.key(request, identity4), cached4 = this.cache.get(key2);
+        const key2 = this.key(request, identity5), cached4 = this.cache.get(key2);
         if (cached4) {
           this.cache.delete(key2);
           this.cache.set(key2, cached4);
@@ -36594,7 +38398,7 @@ var init_jev_provider2 = __esm({
         }
         if (this.queue.length >= 128) return Promise.resolve({ state: "skipped", code: "queue_limit" });
         return new Promise((resolve) => {
-          const queued = { job, request, identity: identity4, key: key2, resolve, cleanup: () => {
+          const queued = { job, request, identity: identity5, key: key2, resolve, cleanup: () => {
           } };
           this.queue.push(queued);
           const cancelled = () => {
@@ -36627,7 +38431,7 @@ var init_jev_provider2 = __esm({
         }
       }
       async dispatch(item) {
-        const { job, request, key: key2, identity: identity4 } = item;
+        const { job, request, key: key2, identity: identity5 } = item;
         const requestHash = digest2(JSON.stringify(request));
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
@@ -36637,7 +38441,7 @@ var init_jev_provider2 = __esm({
           }
           if (this.attempts.length >= (this.options.ledgerEntries ?? 256)) return { state: "skipped", code: "ledger_limit" };
           if (!job.reserve()) return { state: "skipped", code: "budget_or_request_limit" };
-          const row2 = { id: randomUUID10(), requestHash, scopeHash: identity4.scopeHash, model: JEV_MODEL2, dispatchedAt: (/* @__PURE__ */ new Date()).toISOString(), completedAt: null, status: null, outcome: "running", billing: "reserved", reservedUsd: JEV_ATTEMPT_RESERVATION_USD2, reportedUsd: null, inputTokens: null, outputTokens: null, requestId: null, errorCode: null };
+          const row2 = { id: randomUUID10(), requestHash, scopeHash: identity5.scopeHash, model: JEV_MODEL2, dispatchedAt: (/* @__PURE__ */ new Date()).toISOString(), completedAt: null, status: null, outcome: "running", billing: "reserved", reservedUsd: JEV_ATTEMPT_RESERVATION_USD2, reportedUsd: null, inputTokens: null, outputTokens: null, requestId: null, errorCode: null };
           this.attempts.push(row2);
           job.attempts.push(row2);
           const controller = new AbortController(), abort = () => controller.abort();
@@ -36785,8 +38589,8 @@ var init_jev_provider2 = __esm({
         this.dispatches++;
         return true;
       }
-      evaluate(request, identity4) {
-        return this.provider.evaluate(this, request, identity4);
+      evaluate(request, identity5) {
+        return this.provider.evaluate(this, request, identity5);
       }
       stats() {
         return { requestCount: this.dispatches, cacheHits: this.cacheHits, reportedCostUsd: this.attempts.reduce((n3, a) => n3 + (a.reportedUsd ?? 0), 0), unresolvedCostUsd: this.attempts.filter((a) => a.billing !== "reported").reduce((n3, a) => n3 + a.reservedUsd, 0), estimatedCostUsd: this.dispatches * JEV_ATTEMPT_RESERVATION_USD2 };
@@ -36879,7 +38683,7 @@ function validate2(selection) {
   if (!Array.isArray(selection.conversationIds) || !selection.conversationIds.length || selection.conversationIds.length > 20 || selection.conversationIds.some((id) => typeof id !== "string" || !id) || new Set(selection.conversationIds).size !== selection.conversationIds.length) throw new Error("invalid semantic conversations");
   if (!Number.isSafeInteger(selection.maxPrompts) || selection.maxPrompts < 1 || selection.maxPrompts > 200 || !Number.isSafeInteger(selection.maxRequests) || selection.maxRequests < 0 || selection.maxRequests > 50 || !Number.isFinite(selection.budgetUsd) || selection.budgetUsd < 0 || selection.budgetUsd > 10) throw new Error("invalid semantic bounds");
   if (selection.confidenceThreshold !== void 0 && (!Number.isFinite(selection.confidenceThreshold) || selection.confidenceThreshold < 0 || selection.confidenceThreshold > 1)) throw new Error("invalid semantic threshold");
-  if (selection.approvedRequestHashes !== void 0 && (!Array.isArray(selection.approvedRequestHashes) || selection.approvedRequestHashes.length > 200 || selection.approvedRequestHashes.some((hash4) => typeof hash4 !== "string" || !/^[a-f0-9]{64}$/.test(hash4)))) throw new Error("invalid semantic approved hashes");
+  if (selection.approvedRequestHashes !== void 0 && (!Array.isArray(selection.approvedRequestHashes) || selection.approvedRequestHashes.length > 200 || selection.approvedRequestHashes.some((hash5) => typeof hash5 !== "string" || !/^[a-f0-9]{64}$/.test(hash5)))) throw new Error("invalid semantic approved hashes");
 }
 function prepare2(selection, conversations) {
   validate2(selection);
@@ -36913,7 +38717,7 @@ function composeJevJudgments2(judgments, base2, confidenceThreshold = 0.65) {
     const decision = primaryIntent2(j.answers.primary_intent, confidenceThreshold);
     return { ...j, primaryIntent: j.windowCoverage === "truncated" ? null : decision.intent, abstained: j.windowCoverage === "truncated" || decision.abstained };
   }), accepted = recomposed.filter((j) => !j.abstained && j.primaryIntent !== null), denominator = base2.eligiblePrompts;
-  const work = AUDIT_INTENTS2.map((label4) => ({ label: label4, count: accepted.filter((j) => j.primaryIntent === label4).length, denominator, state: "partial" })).filter((bar2) => bar2.count > 0);
+  const work = AUDIT_INTENTS2.map((label4) => ({ label: label4, count: accepted.filter((j) => j.primaryIntent === label4).length, denominator, state: "partial" })).filter((bar3) => bar3.count > 0);
   return { judgments: recomposed, semantics: { ...base2, qualified: false, classifiedPrompts: accepted.length, unclassifiedPrompts: Math.max(0, denominator - accepted.length), uncertainPrompts: Math.max(0, denominator - accepted.length), work } };
 }
 var AUDIT_SEMANTIC_POLICY_VERSION2, isEligible2, semantics2, JevSessionRunner2;
@@ -36973,8 +38777,8 @@ var init_jev_session2 = __esm({
         onUpdate(summarize("running"), [], selected.gapCodes);
         try {
           await Promise.all(selected.prepared.map(async (input) => {
-            const identity4 = { contentHash: input.contentHash, scopeHash, privacyVersion: AUDIT_SEMANTIC_POLICY_VERSION2, normalizationVersion: NORMALIZATION_VERSION2, questionVersion: JEV_QUESTION_VERSION2, sourceVersion: input.sourceVersion, segmentationVersion: "target-prefix3500-prior-user2-prefix768-v1" };
-            const result = await job.evaluate(input.request, identity4);
+            const identity5 = { contentHash: input.contentHash, scopeHash, privacyVersion: AUDIT_SEMANTIC_POLICY_VERSION2, normalizationVersion: NORMALIZATION_VERSION2, questionVersion: JEV_QUESTION_VERSION2, sourceVersion: input.sourceVersion, segmentationVersion: "target-prefix3500-prior-user2-prefix768-v1" };
+            const result = await job.evaluate(input.request, identity5);
             if (!isCurrent()) {
               this.invalidate();
               errorCode = "privacy_changed";
@@ -37005,7 +38809,6 @@ var init_jev_session2 = __esm({
 var audit_ui_exports = {};
 __export(audit_ui_exports, {
   AuditSemanticActions: () => AuditSemanticActions,
-  LAUNCH_SECTIONS: () => LAUNCH_SECTIONS,
   applyAuditEvent: () => applyAuditEvent,
   auditActivityRange: () => auditActivityRange,
   auditBack: () => auditBack,
@@ -37019,22 +38822,31 @@ __export(audit_ui_exports, {
   auditSparkline: () => auditSparkline,
   buildAuditScreen: () => buildAuditScreen,
   buildLaunchScreen: () => buildLaunchScreen,
+  buildReportDocument: () => buildReportDocument,
+  buildReportHelp: () => buildReportHelp,
+  buildWallboard: () => buildWallboard,
+  clampReportNavigation: () => clampReportNavigation,
+  clampWall: () => clampWall,
   compactAuditWork: () => compactAuditWork,
   createAuditNavigation: () => createAuditNavigation,
   createAuditSemanticSelection: () => createAuditSemanticSelection,
   createLaunchNavigation: () => createLaunchNavigation,
-  launchBack: () => launchBack,
-  launchFreeze: () => launchFreeze,
-  launchMove: () => launchMove,
-  launchPush: () => launchPush,
-  launchRows: () => launchRows,
-  launchSelectSection: () => launchSelectSection,
+  createReportNavigation: () => createReportNavigation,
+  createWallNavigation: () => createWallNavigation,
+  freezeReport: () => freezeReport,
+  freezeWall: () => freezeWall,
+  moveReport: () => moveReport,
   reconcileAuditNavigation: () => reconcileAuditNavigation,
   renderAuditPlain: () => renderAuditPlain,
   renderAuditShareSvg: () => renderAuditShareSvg,
   renderLaunchPlain: () => renderLaunchPlain,
+  reportEdge: () => reportEdge,
+  reportMode: () => reportMode,
+  resizeWall: () => resizeWall,
   runAuditTerminal: () => runAuditTerminal,
-  runLaunchTerminal: () => runLaunchTerminal
+  runLaunchTerminal: () => runLaunchTerminal,
+  turnWall: () => turnWall,
+  wallMode: () => wallMode
 });
 function workLabel(label4) {
   return WORK_LABELS[label4] ?? WORK_LABELS[label4.replaceAll(" ", "_")] ?? "unclassified";
@@ -37066,8 +38878,8 @@ function pad3(text2, width, widthOf) {
 function n2(value, ascii = false) {
   return value === null || value === void 0 || !Number.isFinite(value) ? ascii ? "?" : "\u2014" : numberFormat.format(value);
 }
-function metricValue(metric2, ascii = false) {
-  return metric2.state === "unavailable" || metric2.state === "not_run" ? ascii ? "?" : "\u2014" : n2(metric2.value, ascii);
+function metricValue(metric3, ascii = false) {
+  return metric3.state === "unavailable" || metric3.state === "not_run" ? ascii ? "?" : "\u2014" : n2(metric3.value, ascii);
 }
 function units(unit) {
   const known = { eligible_human_input_event: "human prompts", human_prompt: "human prompts", prompt: "prompts", prompts: "prompts", top_level_conversation: "conversations", conversation: "conversations", conversations: "conversations", known_project: "projects", supported_child_source: "linked children", elapsed_days: "elapsed days", day: "days", days: "days", event: "events", events: "events", containing_prompts: "containing prompts" };
@@ -37148,6 +38960,7 @@ function reconcileAuditNavigation(nav, rows, visible = 10) {
   return auditMove(nav, rows, 0, visible);
 }
 function applyAuditEvent(snapshot, event) {
+  if (event.type === "transfer") return snapshot;
   if (event.type !== "snapshot" && event.snapshotId !== snapshot.snapshotId) return snapshot;
   if (event.type === "snapshot") return event.snapshot.snapshotId === snapshot.snapshotId && event.snapshot.sequence >= snapshot.sequence ? event.snapshot : snapshot;
   if (event.type === "progress") return event.sequence >= snapshot.sequence ? { ...snapshot, sequence: event.sequence, status: event.progress.stage, progress: event.progress, sources: event.sources } : snapshot;
@@ -37165,7 +38978,7 @@ function auditRows(snapshot, nav, page = null, privateView = false) {
   else if (nav.section === "sources" || nav.view === "source") rows = snapshot.sources.map((s) => ({ id: s.harness, label: HARNESS_NAMES[s.harness] ?? "Source", value: `${s.state} \xB7 ${n2(s.conversations)} conversations`, kind: "source" }));
   else if (nav.section === "activity") rows = snapshot.activity.map((bucket) => ({ id: bucket.date, label: bucket.date, value: `${n2(bucket.count)} human prompts`, kind: "activity" }));
   else if (nav.section === "words") rows = [...(snapshot.phrases ?? []).map((p, i) => ({ id: p.id, label: privateView ? single(p.text) : `Phrase ${i + 1}`, value: `${n2(p.prompts)} containing prompts`, kind: "phrase" })), ...(snapshot.profanity?.matches ?? []).map((match, i) => ({ id: `profanity:${i}`, label: privateView ? single(match.term) : `Matched input ${i + 1}`, value: match.kind.replaceAll("_", " "), kind: "profanity" }))];
-  else if (nav.section === "work") rows = snapshot.semantics.work.map((bar2, i) => ({ id: `work:${i}`, label: workLabel(bar2.label), value: `${n2(bar2.count)} / ${n2(bar2.denominator)} prompts`, kind: "work" }));
+  else if (nav.section === "work") rows = snapshot.semantics.work.map((bar3, i) => ({ id: `work:${i}`, label: workLabel(bar3.label), value: `${n2(bar3.count)} / ${n2(bar3.denominator)} prompts`, kind: "work" }));
   else if (nav.section === "usage") rows = [{ id: "input", label: "Input tokens", value: n2(snapshot.usage.inputTokens), kind: "usage" }, { id: "output", label: "Output tokens", value: n2(snapshot.usage.outputTokens), kind: "usage" }, { id: "cache", label: "Cache tokens", value: n2(snapshot.usage.cacheTokens), kind: "usage" }, { id: "reasoning", label: "Reasoning tokens", value: n2(snapshot.usage.reasoningTokens), kind: "usage" }, { id: "cost", label: "Cost", value: snapshot.usage.costUsd === null ? "unavailable" : `$${snapshot.usage.costUsd.toFixed(4)}`, kind: "usage" }];
   else rows = [{ id: "humanPrompts", label: "Human prompts", value: metricValue(snapshot.metrics.humanPrompts), kind: "metric" }, { id: "conversations", label: "Conversations", value: metricValue(snapshot.metrics.conversations), kind: "metric" }, { id: "projects", label: "Projects", value: metricValue(snapshot.metrics.projects), kind: "metric" }, { id: "linkedChildren", label: "Linked children", value: metricValue(snapshot.metrics.linkedChildren), kind: "metric" }];
   if (!nav.query) return rows;
@@ -37178,8 +38991,8 @@ function auditRows(snapshot, nav, page = null, privateView = false) {
 function compactAuditWork(work, limit = 4) {
   if (work.length <= limit) return [...work];
   const shown = work.slice(0, Math.max(1, limit - 1)), rest = work.slice(shown.length);
-  if (!rest.every((r) => r.denominator === rest[0].denominator)) return work.slice(0, limit).map((bar2, i) => i === limit - 1 ? { ...bar2, label: `${work.length - limit + 1} more labels \xB7 open` } : bar2);
-  return [...shown, { label: "other labels", count: rest.reduce((sum2, bar2) => sum2 + bar2.count, 0), denominator: rest[0].denominator, state: rest.some((r) => r.state === "partial") ? "partial" : "observed" }];
+  if (!rest.every((r) => r.denominator === rest[0].denominator)) return work.slice(0, limit).map((bar3, i) => i === limit - 1 ? { ...bar3, label: `${work.length - limit + 1} more labels \xB7 open` } : bar3);
+  return [...shown, { label: "other labels", count: rest.reduce((sum2, bar3) => sum2 + bar3.count, 0), denominator: rest[0].denominator, state: rest.some((r) => r.state === "partial") ? "partial" : "observed" }];
 }
 function calendarDay(date3) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date3)) return null;
@@ -37189,10 +39002,10 @@ function calendarDay(date3) {
 function auditActivityRange(activity) {
   let first = Infinity, last2 = -Infinity;
   for (const bucket of activity) {
-    const day2 = calendarDay(bucket.date);
-    if (day2 !== null) {
-      first = Math.min(first, day2);
-      last2 = Math.max(last2, day2);
+    const day = calendarDay(bucket.date);
+    if (day !== null) {
+      first = Math.min(first, day);
+      last2 = Math.max(last2, day);
     }
   }
   return Number.isFinite(first) ? { from: new Date(first * 864e5).toISOString().slice(0, 10), to: new Date(last2 * 864e5).toISOString().slice(0, 10), days: last2 - first + 1 } : { from: null, to: null, days: 0 };
@@ -37202,11 +39015,11 @@ function auditSparkline(activity, width, ascii = false) {
   if (!range.days || width < 1) return "";
   const first = calendarDay(range.from), bins = Math.min(Math.floor(width), range.days), values = Array.from({ length: bins }, () => 0);
   for (const bucket of activity) {
-    const day2 = calendarDay(bucket.date);
-    if (day2 !== null && Number.isFinite(bucket.count) && bucket.count >= 0) values[Math.min(bins - 1, Math.floor((day2 - first) * bins / range.days))] += bucket.count;
+    const day = calendarDay(bucket.date);
+    if (day !== null && Number.isFinite(bucket.count) && bucket.count >= 0) values[Math.min(bins - 1, Math.floor((day - first) * bins / range.days))] += bucket.count;
   }
-  const max2 = Math.max(...values, 1), glyphs = ascii ? "._-=+*#@" : "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
-  return values.map((value) => value === 0 ? " " : glyphs[Math.min(7, Math.floor(value / max2 * 7))]).join("");
+  const max2 = Math.max(...values, 1), glyphs2 = ascii ? "._-=+*#@" : "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
+  return values.map((value) => value === 0 ? " " : glyphs2[Math.min(7, Math.floor(value / max2 * 7))]).join("");
 }
 function wrap3(text2, width, widthOf) {
   const out = [];
@@ -37236,7 +39049,7 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
   const put2 = (y, text2, tone2 = "normal") => {
     if (y >= 0 && y < height) lines[y] = [{ text: "  ", tone: "normal" }, { text: auditClip(text2, w, widthOf), tone: tone2 }];
   };
-  const pair = (y, left, right, leftTone = "normal", rightTone = "blue") => {
+  const pair2 = (y, left, right, leftTone = "normal", rightTone = "blue") => {
     if (y >= 0 && y < height) {
       const half = Math.floor(w * 0.53);
       lines[y] = [{ text: "  ", tone: "normal" }, { text: pad3(left, half, widthOf), tone: leftTone }, { text: auditClip(right, w - half, widthOf), tone: rightTone }];
@@ -37247,13 +39060,13 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
   const narrowScope = columns < 60 ? `${coverageLabel} \xB7 ${snapshot.scope.project ? "selected project" : snapshot.scope.eventFrom || snapshot.scope.asOf ? "selected dates" : "all dates"} \xB7 ${snapshot.scope.timezone}` : `${safeScope(snapshot)} \xB7 ${coverageLabel}`;
   put2(0, `slopie / audit${title}${nav.screenshot ? " \xB7 screenshot" : ""}`, "amber");
   put2(1, `${narrowScope}${nav.query ? " \xB7 filtered" : ""}`, "dim");
-  const footer3 = height - 2, summary3 = height - 4, mainEnd = summary3 - 1, selected = rows.find((row2) => row2.id === nav.selectedId) ?? rows[Math.min(nav.selectedIndex, Math.max(0, rows.length - 1))];
-  put2(footer3, columns < 60 ? "jk/\u2191\u2193 enter esc / f ? S q" : "\u2191\u2193/jk  enter open  esc back  / find  f scope  ?  S freeze  C preview  q quit", "cyan");
-  put2(footer3 + 1, columns < 60 ? "1-8 sections \xB7 C preview" : "1 home 2 work 3 projects 4 activity 5 threads 6 usage 7 words 8 sources", "dim");
+  const footer4 = height - 2, summary3 = height - 4, mainEnd = summary3 - 1, selected = rows.find((row2) => row2.id === nav.selectedId) ?? rows[Math.min(nav.selectedIndex, Math.max(0, rows.length - 1))];
+  put2(footer4, columns < 60 ? "jk/\u2191\u2193 enter esc / f ? S q" : "\u2191\u2193/jk  enter open  esc back  / find  f scope  ?  S freeze  C preview  q quit", "cyan");
+  put2(footer4 + 1, columns < 60 ? "1-8 sections \xB7 C preview" : "1 home 2 work 3 projects 4 activity 5 threads 6 usage 7 words 8 sources", "dim");
   const coverage = `${snapshot.coverage.unknownOriginEvents ? `${n2(snapshot.coverage.unknownOriginEvents)} origin unknown \xB7 ` : ""}${snapshot.coverage.gapCodes.length ? friendlyGap(snapshot.coverage.gapCodes[0]) : "local facts"}${snapshot.usage.state === "unavailable" ? " \xB7 usage n/a" : ""}${snapshot.semantics.state === "not_run" || snapshot.semantics.state === "no_key" ? " \xB7 semantics not run" : ""}`;
   const sem = snapshot.semantics, semanticStatus = options.semanticRunning || !["not_run", "no_key"].includes(sem.state) ? `${sem.state} \xB7 ${n2(sem.requestCount)} requests \xB7 ${n2(sem.classifiedPrompts)}/${n2(sem.eligiblePrompts)} request labels${sem.errorCode?.includes("budget") ? " \xB7 budget limit" : ""}` : null;
   put2(summary3 + 1, options.notice ?? (options.busy ? "Reading source\u2026" : semanticStatus ?? coverage), "dim");
-  const list = (start, heading3) => {
+  const list2 = (start, heading3) => {
     put2(start, heading3, "dim");
     const visible = columns <= 80 && height <= 24 ? Math.min(11, Math.max(1, mainEnd - start - 1)) : Math.max(1, mainEnd - start - 1), scroll = Math.min(nav.scroll, Math.max(0, rows.length - visible));
     rows.slice(scroll, scroll + visible).forEach((row2, i) => put2(start + 1 + i, `${row2.id === selected?.id ? ascii ? "> " : "\u258E " : "  "}${pad3(row2.label, Math.max(8, w - 24), widthOf)} ${row2.value}`, row2.id === selected?.id ? "cyan" : "normal"));
@@ -37277,13 +39090,13 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
       put2(summary3, "esc back \xB7 no content sent", "green");
     } else {
       const body = [`Model: ${single(preview.model)} \xB7 ${preview.selectedConversations} conversations`, `Inputs: ${preview.selectedPrompts} selected / ${preview.eligiblePrompts} eligible`, `Bounds: ${preview.maxRequests} requests \xB7 $${preview.budgetUsd.toFixed(2)} budget`, `Reservation estimate: $${preview.estimatedReservationUsd.toFixed(4)} \xB7 not invoice cap`, `Window: ${preview.windowCoverage} \xB7 key ${preview.keyAvailable ? "available" : "absent \u2014 send disabled"}`, `Outgoing: ${preview.outgoingFields.join("; ")}`, nav.screenshot ? "Samples and read identities hidden." : "Redacted samples (up to 3):", ...!nav.screenshot ? preview.samples.slice(0, 3).map((sample, i) => `${i + 1}. ${single(sample.excerpt)}`) : []];
-      body.flatMap((value) => wrap3(value, w, widthOf)).slice(nav.scroll, nav.scroll + Math.max(1, mainEnd - 5)).forEach((line2, i) => put2(6 + i, line2, i === 0 ? "cyan" : "normal"));
+      body.flatMap((value) => wrap3(value, w, widthOf)).slice(nav.scroll, nav.scroll + Math.max(1, mainEnd - 5)).forEach((line, i) => put2(6 + i, line, i === 0 ? "cyan" : "normal"));
       put2(summary3, nav.screenshot ? "S returns to private review before sending" : !preview.keyAvailable ? "No key \xB7 upload disabled" : options.semanticSendSelected ? "[Send selected] \xB7 enter sends \xB7 esc cancels" : "Y explicitly sends \xB7 tab selects Send \xB7 esc cancels", "amber");
       put2(summary3 + 1, "Local preview only \xB7 jk scroll \xB7 no correctness guarantee", "dim");
     }
   } else if (nav.help) {
     put2(4, selected?.label.toUpperCase() ?? LABELS[nav.section].toUpperCase(), "amber");
-    wrap3(nav.screenshot ? "Recorded snapshot units, scope and coverage remain visible. Source identities and quoted text are hidden." : definition(snapshot, nav), w, widthOf).slice(0, mainEnd - 6).forEach((line2, i) => put2(6 + i, line2));
+    wrap3(nav.screenshot ? "Recorded snapshot units, scope and coverage remain visible. Source identities and quoted text are hidden." : definition(snapshot, nav), w, widthOf).slice(0, mainEnd - 6).forEach((line, i) => put2(6 + i, line));
     put2(summary3, "esc closes \xB7 focus stays on the same row", "dim");
   } else if (nav.view === "judgment") {
     const judgment = snapshot.judgments?.find((value) => value.promptId === nav.selectedId);
@@ -37292,13 +39105,13 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
     else if (!judgment) put2(7, "No stored judgment for this prompt", "dim");
     else {
       const body = [`Model: ${single(judgment.model)}`, `Question set: ${single(judgment.questionVersion)}`, `Window: ${judgment.windowCoverage} \xB7 ${judgment.abstained ? "abstained" : "request label recorded"}`, `Primary label: ${judgment.primaryIntent ? workLabel(judgment.primaryIntent) : "uncertain"}`, JSON.stringify({ answers: judgment.answers, questionDefinitions: judgment.questionDefinitions ?? {} }, null, 2)];
-      body.flatMap((value) => wrap3(value, w, widthOf)).slice(nav.scroll, nav.scroll + Math.max(1, mainEnd - 5)).forEach((line2, i) => put2(6 + i, line2));
+      body.flatMap((value) => wrap3(value, w, widthOf)).slice(nav.scroll, nav.scroll + Math.max(1, mainEnd - 5)).forEach((line, i) => put2(6 + i, line));
     }
     put2(summary3, "Stored Choice/Noul/Score \xB7 jk scroll \xB7 esc returns", "dim");
   } else if (nav.view === "receipt") {
     put2(4, "EXACT READ ROUTE \xB7 source-owned receipt", "dim");
     if (nav.screenshot) put2(7, "Read identity hidden \xB7 public screenshot view", "amber");
-    else if (options.evidence) wrap3(JSON.stringify(options.evidence.route, null, 2), w, widthOf).slice(nav.scroll, nav.scroll + Math.max(1, mainEnd - 6)).forEach((line2, i) => put2(6 + i, line2));
+    else if (options.evidence) wrap3(JSON.stringify(options.evidence.route, null, 2), w, widthOf).slice(nav.scroll, nav.scroll + Math.max(1, mainEnd - 6)).forEach((line, i) => put2(6 + i, line));
     else put2(7, "Read receipt unavailable", "amber");
     put2(summary3, "jk scroll \xB7 esc returns to exact evidence", "dim");
   } else if (nav.view === "evidence") {
@@ -37308,7 +39121,7 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
     else if (options.busy) put2(7, "Reading exact source\u2026", "cyan");
     else if (evidence2?.state === "stale") put2(7, "Source changed \xB7 exact read is stale", "amber");
     else if (evidence2?.state !== "available") put2(7, "Exact source unavailable \xB7 coverage retained", "amber");
-    else wrap3(evidence2.text ?? "", w, widthOf).slice(nav.scroll, nav.scroll + Math.max(1, mainEnd - 6)).forEach((line2, i) => put2(6 + i, line2));
+    else wrap3(evidence2.text ?? "", w, widthOf).slice(nav.scroll, nav.scroll + Math.max(1, mainEnd - 6)).forEach((line, i) => put2(6 + i, line));
     put2(summary3, nav.screenshot ? "No paths, names, refs or excerpts in this view" : evidence2?.state === "available" ? clean3(evidence2.text ?? "") !== evidence2.text ? "Exact read \xB7 terminal controls hidden \xB7 r receipt" : "Exact redacted source \xB7 r read receipt \xB7 jk scroll" : "Esc returns to the selected prompt", "dim");
   } else if (nav.view === "source") {
     const source = snapshot.sources.find((s) => s.harness === nav.sourceHarness);
@@ -37319,7 +39132,7 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
     }
   } else if (nav.view === "conversations" || nav.view === "prompts") {
     const project = snapshot.projects.find((p) => p.id === nav.projectId);
-    list(4, nav.view === "prompts" ? `RECORDED PROMPTS \xB7 ${options.promptPage?.coverage.state ?? snapshot.coverage.state}` : `${project ? auditProjectAlias(snapshot, project.id) : nav.category ? workLabel(nav.category).toUpperCase() : "RECORDED"} CONVERSATIONS`);
+    list2(4, nav.view === "prompts" ? `RECORDED PROMPTS \xB7 ${options.promptPage?.coverage.state ?? snapshot.coverage.state}` : `${project ? auditProjectAlias(snapshot, project.id) : nav.category ? workLabel(nav.category).toUpperCase() : "RECORDED"} CONVERSATIONS`);
     if (project && !nav.screenshot) put2(summary3, `${single(project.displayName)}${project.path ? ` \xB7 ${single(project.path)}` : ""}`, "amber");
     if (nav.view === "prompts" && options.promptPage && options.promptPage.nextOffset !== null) put2(summary3, "n next page \xB7 p previous \xB7 enter exact source", "dim");
   } else if (nav.section === "home" && active2) {
@@ -37338,8 +39151,8 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
       put2(4, "CANDIDATE FILES", "dim");
       snapshot.sources.slice(0, 4).forEach((source, i) => put2(5 + i, `${pad3(HARNESS_NAMES[source.harness] ?? "Source", 10, widthOf)} ${pending ? "checking" : n2(source.candidateFiles)}`, HARNESS_TONES[source.harness]));
       put2(9, "    \u2502", "dim");
-      gem.forEach((line2, i) => {
-        if (10 + i < summary3) lines[10 + i] = [{ text: "    ", tone: "normal" }, ...line2];
+      gem.forEach((line, i) => {
+        if (10 + i < summary3) lines[10 + i] = [{ text: "    ", tone: "normal" }, ...line];
       });
       if (height >= 20) put2(15, "    \u2193 measured facts", "cyan");
     }
@@ -37349,16 +39162,16 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
     const m = snapshot.metrics;
     put2(4, columns < 60 ? `${metricValue(m.conversations, ascii)} conversations \xB7 ${metricValue(m.humanPrompts, ascii)} prompts` : `${metricValue(m.conversations, ascii)} conversations   ${metricValue(m.humanPrompts, ascii)} human prompts   ${metricValue(m.projects, ascii)} projects   ${metricValue(m.linkedChildren, ascii)} linked children`);
     if (columns < 60) put2(5, `${metricValue(m.projects, ascii)} projects \xB7 ${metricValue(m.linkedChildren, ascii)} linked children`);
-    const classified = snapshot.semantics.qualified && snapshot.semantics.work.length > 0, work = compactAuditWork(snapshot.semantics.work, columns < 60 ? 3 : 4), left = classified ? work.map((bar2) => ({ label: workLabel(bar2.label), value: bar2.count })) : snapshot.sources.map((s) => ({ label: HARNESS_NAMES[s.harness] ?? "Source", value: s.humanPrompts }));
+    const classified = snapshot.semantics.qualified && snapshot.semantics.work.length > 0, work = compactAuditWork(snapshot.semantics.work, columns < 60 ? 3 : 4), left = classified ? work.map((bar3) => ({ label: workLabel(bar3.label), value: bar3.count })) : snapshot.sources.map((s) => ({ label: HARNESS_NAMES[s.harness] ?? "Source", value: s.humanPrompts }));
     const projectRows = snapshot.projects.slice(0, 3).map((p) => ({ label: auditProjectAlias(snapshot, p.id), value: p.humanPrompts }));
     if (snapshot.projects.length > 3) projectRows.push({ label: "other", value: snapshot.projects.slice(3).reduce((sum2, p) => sum2 + p.humanPrompts, 0) });
     const leftMax = Math.max(1, ...left.map((row2) => row2.value ?? 0)), projectMax = Math.max(1, ...projectRows.map((row2) => row2.value));
     const bars = (value, max2, size) => value === null ? ascii ? "?" : "\u2014" : (ascii ? "#" : "\u2588").repeat(Math.max(0, Math.round(value / max2 * size)));
     if (columns >= 60) {
-      pair(7, classified ? "WHAT YOU ASKED FOR" : "RECORDED HUMAN PROMPTS", "PROJECTS \xB7 PROMPTS", "dim", "dim");
+      pair2(7, classified ? "WHAT YOU ASKED FOR" : "RECORDED HUMAN PROMPTS", "PROJECTS \xB7 PROMPTS", "dim", "dim");
       for (let i = 0; i < 4; i++) {
         const l = left[i], r = projectRows[i];
-        pair(8 + i, l ? `${pad3(l.label, 14, widthOf)} ${pad3(n2(l.value, ascii), 6, widthOf)} ${bars(l.value, leftMax, Math.max(4, Math.floor(w * 0.15)))}` : "", r ? `${pad3(r.label, 10, widthOf)} ${pad3(n2(r.value), 6, widthOf)} ${bars(r.value, projectMax, Math.max(4, Math.floor(w * 0.12)))}` : "", i === 0 ? "cyan" : "normal", i === 0 ? "cyan" : "blue");
+        pair2(8 + i, l ? `${pad3(l.label, 14, widthOf)} ${pad3(n2(l.value, ascii), 6, widthOf)} ${bars(l.value, leftMax, Math.max(4, Math.floor(w * 0.15)))}` : "", r ? `${pad3(r.label, 10, widthOf)} ${pad3(n2(r.value), 6, widthOf)} ${bars(r.value, projectMax, Math.max(4, Math.floor(w * 0.12)))}` : "", i === 0 ? "cyan" : "normal", i === 0 ? "cyan" : "blue");
       }
       const range = auditActivityRange(snapshot.activity);
       put2(13, range.days ? `DAILY HUMAN PROMPTS \xB7 ${range.from} \u2192 ${range.to} \xB7 ${snapshot.scope.timezone}` : "DAILY HUMAN PROMPTS \xB7 dates unavailable", "dim");
@@ -37380,7 +39193,7 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
   } else if (nav.section === "work" && (snapshot.judgments?.length || snapshot.semantics.work.length)) {
     put2(4, snapshot.semantics.qualified ? "REQUEST LABELS" : "EXPERIMENTAL \xB7 UNQUALIFIED REQUEST LABELS", "amber");
     put2(5, `threshold ${(options.threshold ?? 0.65).toFixed(2)} \xB7 uncertain ${n2(snapshot.semantics.uncertainPrompts)} \xB7 unclassified ${n2(snapshot.semantics.unclassifiedPrompts ?? snapshot.semantics.uncertainPrompts)}`, "dim");
-    list(6, `${snapshot.semantics.state} \xB7 ${n2(snapshot.semantics.classifiedPrompts)} / ${n2(snapshot.semantics.eligiblePrompts)} selected prompts`);
+    list2(6, `${snapshot.semantics.state} \xB7 ${n2(snapshot.semantics.classifiedPrompts)} / ${n2(snapshot.semantics.eligiblePrompts)} selected prompts`);
     put2(summary3, "[ ] local threshold \xB7 enter supporting conversations", "dim");
   } else if (nav.section === "work" && (!snapshot.semantics.qualified || !snapshot.semantics.work.length)) {
     const ran = !["not_run", "no_key"].includes(snapshot.semantics.state);
@@ -37392,13 +39205,13 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
     put2(4, `DAILY HUMAN PROMPTS \xB7 ${range.days} calendar dates`, "dim");
     put2(5, range.days ? `${range.from} \u2192 ${range.to} \xB7 ${snapshot.scope.timezone} \xB7 recorded window` : "Event dates unavailable", "dim");
     put2(6, auditSparkline(snapshot.activity, w, ascii) || "No dated human prompts.", "cyan");
-    list(8, "RECORDED DATES");
+    list2(8, "RECORDED DATES");
   } else if (nav.section === "words" && snapshot.profanity) {
     const profanity = snapshot.profanity;
     put2(4, `ENGLISH EXPLICIT LEXICON \xB7 ${profanity.lexiconVersion}`, "dim");
     put2(5, `${metricValue(profanity.occurrences)} occurrences \xB7 ${metricValue(profanity.containingPrompts)} / ${n2(profanity.eligiblePrompts)} containing inputs`, "amber");
     put2(6, profanity.buckets.map((bucket) => `${bucket.kind.replaceAll("_", " ")} ${bucket.occurrences}`).join(" \xB7 "), "dim");
-    list(8, "SOURCE PHRASES / CONTAINING INPUT ROUTES");
+    list2(8, "SOURCE PHRASES / CONTAINING INPUT ROUTES");
     put2(summary3, "Literal matches only \xB7 other languages unassessed", "dim");
   } else if (nav.section === "usage" && snapshot.usage.state === "unavailable") {
     put2(4, "ORIGINAL HOST USAGE", "dim");
@@ -37407,7 +39220,7 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
     put2(11, "Usage fields were not captured.", "amber");
     put2(summary3, "8 source capabilities \xB7 ? definition", "dim");
   } else {
-    list(4, nav.section === "words" ? "SOURCE PHRASES \xB7 CONTAINING PROMPTS" : nav.section === "work" ? `REQUEST INTENT \xB7 ${n2(snapshot.semantics.classifiedPrompts)} classified prompts` : LABELS[nav.section].toUpperCase());
+    list2(4, nav.section === "words" ? "SOURCE PHRASES \xB7 CONTAINING PROMPTS" : nav.section === "work" ? `REQUEST INTENT \xB7 ${n2(snapshot.semantics.classifiedPrompts)} classified prompts` : LABELS[nav.section].toUpperCase());
   }
   if (nav.screenshot) put2(summary3 + 1, `Frozen \xB7 ${active2 ? "scanning" : snapshot.coverage.state === "complete_snapshot" ? "captured" : snapshot.coverage.state}${snapshot.coverage.unknownOriginEvents ? ` \xB7 ${n2(snapshot.coverage.unknownOriginEvents)} origin unknown` : " \xB7 public aliases"}`, "green");
   if (columns < 38 || height < 18) {
@@ -37415,32 +39228,32 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
     put2(3, "Resize to browse \xB7 q exits", "amber");
     if (height > 7) put2(5, `${metricValue(snapshot.metrics.conversations, ascii)} conversations \xB7 ${metricValue(snapshot.metrics.humanPrompts, ascii)} prompts`);
   }
-  put2(footer3, columns < 60 ? "jk/\u2191\u2193 enter esc / f ? S q" : "\u2191\u2193/jk  enter open  esc back  / find  f scope  ?  S freeze  C preview  q quit", "cyan");
-  put2(footer3 + 1, columns < 60 ? "1-8 sections \xB7 C preview" : "1 home 2 work 3 projects 4 activity 5 threads 6 usage 7 words 8 sources", "dim");
+  put2(footer4, columns < 60 ? "jk/\u2191\u2193 enter esc / f ? S q" : "\u2191\u2193/jk  enter open  esc back  / find  f scope  ?  S freeze  C preview  q quit", "cyan");
+  put2(footer4 + 1, columns < 60 ? "1-8 sections \xB7 C preview" : "1 home 2 work 3 projects 4 activity 5 threads 6 usage 7 words 8 sources", "dim");
   if (ascii) {
     const replacements = { "\u2192": "->", "\u2191": "^", "\u2193": "v", "\u2190": "<", "\u21B5": "enter", "\xB7": "|", "\u2014": "?", "\u2013": "-", "\u2026": "...", "\u258E": ">", "\u2500": "-", "\u2501": "-", "\u2584": "#", "\u2588": "#", "\u2580": "#", "\xD7": "x", "\u25B6": ">", "\u256E": "+", "\u2524": "+", "\u256F": "+", "\u256D": "+", "\u251C": "+", "\u2570": "+", "\u2502": "|" };
-    return lines.map((line2) => {
+    return lines.map((line) => {
       let remaining = columns;
-      return line2.map((segment) => {
+      return line.map((segment) => {
         const text2 = (nav.view === "evidence" || nav.view === "receipt") && !nav.screenshot && segment.tone === "normal" ? segment.text : segment.text.replace(/[→↑↓←↵·—–…▎─━▄█▀×▶╮┤╯╭├╰│]/g, (char) => replacements[char]);
-        const clipped = auditClip(text2, remaining, widthOf);
-        remaining -= widthOf(clipped);
-        return { ...segment, text: clipped };
+        const clipped2 = auditClip(text2, remaining, widthOf);
+        remaining -= widthOf(clipped2);
+        return { ...segment, text: clipped2 };
       });
     });
   }
   return lines;
 }
 function renderAuditPlain(snapshot, options = {}) {
-  return buildAuditScreen(snapshot, createAuditNavigation(), { ...options, private: false, columns: options.width ?? 80, rows: 24 }).map((line2) => line2.map((segment) => segment.text).join("").trimEnd()).join("\n").trimEnd() + "\n";
+  return buildAuditScreen(snapshot, createAuditNavigation(), { ...options, private: false, columns: options.width ?? 80, rows: 24 }).map((line) => line.map((segment) => segment.text).join("").trimEnd()).join("\n").trimEnd() + "\n";
 }
 function renderAuditShareSvg(snapshot, options = {}) {
   const width = Math.max(40, Math.min(160, options.width ?? 80)), nav = { ...createAuditNavigation(), screenshot: true }, lines = buildAuditScreen(snapshot, nav, { columns: width, rows: 24, ascii: options.ascii, private: false });
   const escape = (text3) => text3.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
   let text2 = "";
-  lines.forEach((line2, y) => {
+  lines.forEach((line, y) => {
     let x = 0;
-    for (const segment of line2) {
+    for (const segment of line) {
       text2 += `<text x="${16 + x * 10}" y="${28 + y * 20}" fill="${PALETTE[segment.tone]}">${escape(segment.text)}</text>`;
       x += auditCellWidth(segment.text);
     }
@@ -37596,8 +39409,8 @@ async function runAuditTerminal(session, options = {}) {
       if (selected.kind === "project") setNav(auditPush(nav, { view: "conversations", projectId: selected.id, conversationId: null }));
       else if (selected.kind === "conversation") await readPrompts(auditPush(nav, { view: "prompts", conversationId: selected.id }));
       else if (selected.kind === "work") {
-        const bar2 = snapshot.semantics.work[Number(selected.id.split(":")[1])];
-        if (bar2) setNav(auditPush(nav, { view: "conversations", category: bar2.label, projectId: null, conversationId: null }));
+        const bar3 = snapshot.semantics.work[Number(selected.id.split(":")[1])];
+        if (bar3) setNav(auditPush(nav, { view: "conversations", category: bar3.label, projectId: null, conversationId: null }));
       } else if (selected.kind === "profanity") {
         const match = snapshot.profanity?.matches?.[Number(selected.id.split(":")[1])];
         if (!match) return;
@@ -37796,7 +39609,7 @@ async function runAuditTerminal(session, options = {}) {
       if (key2.return) void open2();
     });
     const screen = buildAuditScreen(snapshot, nav, { ...options, columns: Math.min(columns, options.width ?? columns), rows: terminalRows, widthOf: stringWidth, frame, promptPage: page, evidence: evidence2, busy, notice: notice || void 0, scopeDraft, scopeField, semanticPreview, semanticSendSelected: sendSelected, semanticRunning, threshold });
-    return React.createElement(Box, { flexDirection: "column", width: Math.min(columns, options.width ?? columns), height: terminalRows }, ...screen.map((line2, index) => React.createElement(Box, { key: index, height: 1, flexShrink: 0, width: "100%" }, React.createElement(Text, { wrap: "truncate" }, ...line2.map((segment, i) => React.createElement(Text, { key: i, color: options.color === false ? void 0 : PALETTE[segment.tone] }, segment.text))))));
+    return React.createElement(Box, { flexDirection: "column", width: Math.min(columns, options.width ?? columns), height: terminalRows }, ...screen.map((line, index) => React.createElement(Box, { key: index, height: 1, flexShrink: 0, width: "100%" }, React.createElement(Text, { wrap: "truncate" }, ...line.map((segment, i) => React.createElement(Text, { key: i, color: options.color === false ? void 0 : PALETTE[segment.tone] }, segment.text))))));
   }
   const originalWrite = process.stdout.write;
   process.stdout.write = function(...args) {
@@ -37891,19 +39704,231 @@ var init_audit_ui = __esm({
   }
 });
 
+// packages/cli/src/audit-background.ts
+var audit_background_exports = {};
+__export(audit_background_exports, {
+  createBackgroundAuditSession: () => createBackgroundAuditSession,
+  runAuditWorkerHost: () => runAuditWorkerHost
+});
+import { fork } from "node:child_process";
+import fs54 from "node:fs";
+import os11 from "node:os";
+import path46 from "node:path";
+function createBackgroundAuditSession(options, entry = process.argv[1]) {
+  const seed = createAuditSession({ ...options, onTransfer: void 0, signal: void 0 });
+  let current = seed.snapshot();
+  seed.dispose();
+  let child = null, temporary = null, disposed = false, cancelled = false, next = 0, events;
+  const pending = /* @__PURE__ */ new Map();
+  let ready = null, resolveReady = () => {
+  }, rejectReady = () => {
+  };
+  let stopTimer, killTimer;
+  const stopped = () => {
+    if (stopTimer) clearTimeout(stopTimer);
+    if (killTimer) clearTimeout(killTimer);
+    const owned = temporary;
+    temporary = null;
+    if (owned) void fs54.promises.rm(owned, { recursive: true, force: true }).catch(() => {
+    });
+  };
+  const settleCancelled = () => {
+    current = { ...current, status: "cancelled", progress: { ...current.progress, stage: "cancelled", provisional: false, cancellable: false }, ...current.launch ? { launch: { ...current.launch, stage: "ready", semantics: current.launch.semantics ? { ...current.launch.semantics, state: "cancelled" } : null } } : {} };
+    for (const request2 of pending.values()) {
+      if (request2.op === "run" || request2.op === "analyzePeriod") request2.resolve(current);
+      else request2.reject(new Error("audit_cancelled"));
+    }
+    pending.clear();
+  };
+  const start = () => {
+    if (ready) return ready;
+    ready = new Promise((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    temporary = fs54.mkdtempSync(path46.join(os11.tmpdir(), "slopie-audit-run-"));
+    fs54.chmodSync(temporary, 448);
+    child = fork(path46.resolve(entry), ["__audit_worker"], { stdio: ["ignore", "ignore", "ignore", "ipc"], serialization: "advanced", env: { ...process.env, TMPDIR: temporary, TMP: temporary, TEMP: temporary } });
+    child.on("message", (raw) => {
+      if (disposed || cancelled) return;
+      if (raw?.kind === "ready") {
+        current = raw.snapshot;
+        events?.({ type: "snapshot", snapshot: current });
+        resolveReady();
+        return;
+      }
+      if (raw?.kind === "event") {
+        const event = raw.event;
+        if (event.type === "snapshot") current = event.snapshot;
+        else if (event.type === "progress") current = { ...current, sequence: event.sequence, progress: event.progress, sources: event.sources };
+        events?.(event);
+        return;
+      }
+      if (raw?.kind === "result") {
+        const request2 = pending.get(raw.id);
+        if (!request2) return;
+        pending.delete(raw.id);
+        if (raw.error) request2.reject(new Error(raw.error));
+        else {
+          if (request2.op === "run" || request2.op === "analyzePeriod") current = raw.value;
+          request2.resolve(raw.value);
+        }
+      }
+    });
+    child.once("error", (error) => {
+      rejectReady(error);
+      for (const p of pending.values()) p.reject(error);
+      pending.clear();
+      stopped();
+    });
+    child.once("exit", () => {
+      stopped();
+      if (cancelled || disposed) return;
+      const error = new Error("audit_background_worker_unavailable");
+      rejectReady(error);
+      for (const p of pending.values()) p.reject(error);
+      pending.clear();
+    });
+    const { signal: _, onTransfer: __, ...serializable } = options;
+    child.send({ kind: "init", options: { ...serializable, sessionIdentity: current.snapshotId } });
+    return ready;
+  };
+  const request = async (op, args = []) => {
+    if (disposed || cancelled) throw new Error("audit_cancelled");
+    await start();
+    if (disposed || cancelled) throw new Error("audit_cancelled");
+    return new Promise((resolve, reject) => {
+      const id = ++next;
+      pending.set(id, { op, resolve, reject });
+      child.send({ kind: "request", id, op, args });
+    });
+  };
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
+    settleCancelled();
+    rejectReady(new Error("audit_cancelled"));
+    if (child?.connected) child.send({ kind: "cancel" });
+    if (child && child.exitCode === null) {
+      const ownedChild = child;
+      stopTimer = setTimeout(() => {
+        ownedChild.kill("SIGTERM");
+        killTimer = setTimeout(() => ownedChild.kill("SIGKILL"), 250);
+        killTimer.unref();
+      }, 500);
+      stopTimer.unref();
+    }
+  };
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  if (options.signal?.aborted) cancel();
+  return {
+    snapshot: () => current,
+    run: async (callback) => {
+      events = callback;
+      try {
+        return await request("run");
+      } catch (error) {
+        if (cancelled) return current;
+        throw error;
+      }
+    },
+    analyzePeriod: async (period, callback) => {
+      events = callback;
+      return request("analyzePeriod", [period]);
+    },
+    prompts: (...args) => request("prompts", args),
+    evidence: (route) => request("evidence", [route]),
+    previewLaunch: () => request("previewLaunch"),
+    preview: (selection) => request("preview", [selection]),
+    classify: (selection, callback) => {
+      events = callback;
+      const { signal: _, ...safe } = selection;
+      return request("classify", [safe]);
+    },
+    acknowledgeTransfer: (ackId) => {
+      if (!cancelled && !disposed && child?.connected) child.send({ kind: "transfer_ack", ackId });
+    },
+    cancel,
+    dispose: () => {
+      if (disposed) return;
+      cancel();
+      disposed = true;
+      events = void 0;
+    }
+  };
+}
+async function runAuditWorkerHost() {
+  if (!process.send) throw new Error("audit_worker_requires_ipc");
+  let session = null, nextAck = 0;
+  const acknowledgements = /* @__PURE__ */ new Map();
+  const send = (value) => {
+    if (process.connected) process.send(value);
+  };
+  const emit = (event) => {
+    if (event.type !== "transfer") send({ kind: "event", event });
+  };
+  process.on("message", async (raw) => {
+    if (raw?.kind === "init") {
+      session = createAuditSession({ ...raw.options, onTransfer: (event) => new Promise((resolve, reject) => {
+        const ackId = String(++nextAck);
+        acknowledgements.set(ackId, { resolve, reject });
+        send({ kind: "event", event: { ...event, ackId } });
+      }) });
+      send({ kind: "ready", snapshot: session.snapshot() });
+      return;
+    }
+    if (raw?.kind === "transfer_ack") {
+      acknowledgements.get(raw.ackId)?.resolve();
+      acknowledgements.delete(raw.ackId);
+      return;
+    }
+    if (raw?.kind === "cancel") {
+      session?.cancel();
+      for (const ack of acknowledgements.values()) ack.reject(new Error("audit_cancelled"));
+      acknowledgements.clear();
+      session?.dispose();
+      if (process.connected) process.disconnect();
+      return;
+    }
+    if (raw?.kind !== "request" || !session) return;
+    const { id, op, args } = raw;
+    try {
+      let value;
+      if (op === "run") value = await session.run(emit);
+      else if (op === "analyzePeriod") value = await session.analyzePeriod(args[0], emit);
+      else if (op === "classify") value = await session.classify(args[0], emit);
+      else if (["prompts", "evidence", "preview", "previewLaunch"].includes(op)) value = await session[op](...args);
+      else throw new Error("audit_worker_operation_unavailable");
+      send({ kind: "result", id, value });
+    } catch (error) {
+      send({ kind: "result", id, error: error instanceof Error ? error.message : "audit_worker_failed" });
+    }
+  });
+  process.on("disconnect", () => {
+    session?.dispose();
+    process.exit(0);
+  });
+}
+var init_audit_background = __esm({
+  "packages/cli/src/audit-background.ts"() {
+    "use strict";
+    init_dist();
+  }
+});
+
 // packages/cli/src/commands/audit-overview.ts
 var audit_overview_exports = {};
 __export(audit_overview_exports, {
   runAuditOverview: () => runAuditOverview
 });
-import fs51 from "node:fs";
-import path43 from "node:path";
+import fs55 from "node:fs";
+import path47 from "node:path";
 async function runAuditOverview(o) {
   const harnesses = o.harness ? [...new Set(o.harness.split(",").map((h) => h.trim()))] : void 0;
   if (harnesses?.some((h) => !["claude", "codex", "pi", "opencode"].includes(h))) {
     throw new UserError("Choose overview sources from claude,codex,pi,opencode.");
   }
-  if (o.export && path43.extname(o.export).toLowerCase() !== ".svg") {
+  if (o.export && path47.extname(o.export).toLowerCase() !== ".svg") {
     throw new UserError("Use a .svg path for the safe share preview.");
   }
   if (o.tone && !["elegant", "witty", "chaotic", "roast"].includes(o.tone)) throw new UserError("Choose a tone: elegant, witty, chaotic, roast.");
@@ -37926,32 +39951,34 @@ async function runAuditOverview(o) {
   const interactive = !o.json && !o.plain && !o.export && Boolean(process.stdin.isTTY && process.stdout.isTTY) && width >= 38 && (process.stdout.rows ?? 24) >= 18;
   themeFrom(o);
   for (; ; ) {
-    const session = createAuditSession(options);
+    const { createBackgroundAuditSession: createBackgroundAuditSession2 } = await Promise.resolve().then(() => (init_audit_background(), audit_background_exports));
+    const session = createBackgroundAuditSession2(options);
     try {
       if (!interactive) {
-        const notice = session.snapshot().launch.notice.replace("Esc cancels.", "Ctrl-C cancels.");
-        if (o.json) process.stderr.write(notice + "\n");
-        else {
-          const lines = [];
-          let current = "";
-          for (const word of notice.split(" ")) {
-            if (current.length + word.length + 1 > width) {
-              lines.push(current);
-              current = word;
-            } else current += (current ? " " : "") + word;
-          }
-          if (current) lines.push(current);
-          print(lines.join("\n"));
+        const stop = () => session.cancel();
+        process.once("SIGTERM", stop);
+        process.once("SIGHUP", stop);
+        let snapshot;
+        try {
+          snapshot = await session.run((event) => {
+            if (event.type === "transfer") {
+              process.stderr.write(event.notice + "\n", () => {
+                if (event.ackId) session.acknowledgeTransfer?.(event.ackId);
+              });
+            }
+          });
+        } finally {
+          process.removeListener("SIGTERM", stop);
+          process.removeListener("SIGHUP", stop);
         }
-        const snapshot = await session.run();
         if (o.json) printJson(publicAuditSnapshot(snapshot));
         else print(ui.renderLaunchPlain(snapshot, { ascii: o.ascii, width }));
         if (o.export) {
-          const file = path43.resolve(o.export);
-          fs51.writeFileSync(file, ui.renderAuditShareSvg(snapshot, { width }), { flag: "wx" });
+          const file = path47.resolve(o.export);
+          fs55.writeFileSync(file, ui.renderAuditShareSvg(snapshot, { width }), { flag: "wx" });
           if (!o.json) print(`Saved safe share preview: ${file}`);
         }
-        return snapshot.status === "error" ? 1 : 0;
+        return snapshot.status === "cancelled" ? 130 : snapshot.status === "error" ? 1 : 0;
       }
       let requestedScope = null;
       const result = await ui.runLaunchTerminal(session, {
@@ -37969,7 +39996,6 @@ async function runAuditOverview(o) {
         options = { ...options, harnesses: scope2.harnesses, project: scope2.project ?? void 0, since: scope2.eventFrom ?? void 0, until: scope2.asOf ?? void 0, timezone: scope2.timezone };
         continue;
       }
-      print(ui.renderLaunchPlain(result.snapshot, { ascii: o.ascii, width }));
       return result.reason === "cancelled" ? 130 : result.snapshot.status === "error" ? 1 : 0;
     } finally {
       session.dispose();
@@ -37994,18 +40020,18 @@ __export(spans_exports, {
   currentSpanPolicy: () => currentSpanPolicy2,
   deriveCoveragePartitions: () => deriveCoveragePartitions2,
   hasCurrentSpanManifest: () => hasCurrentSpanManifest2,
-  hash: () => hash3,
-  identity: () => identity3,
+  hash: () => hash4,
+  identity: () => identity4,
   reassembleUnit: () => reassembleUnit2,
   spanEmbeddingText: () => spanEmbeddingText2,
   spanManifestHash: () => spanManifestHash2,
   spanWindows: () => spanWindows2
 });
 import crypto9 from "node:crypto";
-function hash3(text2) {
+function hash4(text2) {
   return crypto9.createHash("sha256").update(text2).digest("hex");
 }
-function identity3(...parts) {
+function identity4(...parts) {
   const h = crypto9.createHash("sha256");
   for (const p of parts) {
     const b = Buffer.from(p);
@@ -38059,14 +40085,14 @@ ${value}` : value;
     if (isSplit2(text2, start) || isSplit2(text2, end))
       throw new Error("surrogate split");
     const value = text2.slice(start, end);
-    out.push({ startUtf16: start, endUtf16: end, text: value, chunkPolicy: policy, embeddingInputHash: hash3(inputText(value)), embeddingContextJson: JSON.stringify({ partition: [start, end], tokenizerId: tokenizer2?.id ?? null, tokenizerHash: tokenizer2?.assetHash ?? null, context, contextTokens, recipe: "record-context-v1" }), isPartition: true });
+    out.push({ startUtf16: start, endUtf16: end, text: value, chunkPolicy: policy, embeddingInputHash: hash4(inputText(value)), embeddingContextJson: JSON.stringify({ partition: [start, end], tokenizerId: tokenizer2?.id ?? null, tokenizerHash: tokenizer2?.assetHash ?? null, context, contextTokens, recipe: "record-context-v1" }), isPartition: true });
     if (tokenizer2 && i > 0) {
       const overlapStart = offsets[Math.max(0, i - 32)];
       let overlapIndex = Math.min(j, i + payloadTokens - 32);
       while (overlapIndex > i && count2(inputText(text2.slice(overlapStart, offsets[overlapIndex]))) > 382) overlapIndex--;
       const overlapEnd = offsets[overlapIndex];
       const overlapText = text2.slice(overlapStart, overlapEnd);
-      out.push({ startUtf16: overlapStart, endUtf16: overlapEnd, text: overlapText, chunkPolicy: policy, embeddingInputHash: hash3(inputText(overlapText)), embeddingContextJson: JSON.stringify({ partition: null, neighborOverlap: 32, tokenizerId: tokenizer2.id, tokenizerHash: tokenizer2.assetHash, context, contextTokens, recipe: "record-context-v1" }), isPartition: false });
+      out.push({ startUtf16: overlapStart, endUtf16: overlapEnd, text: overlapText, chunkPolicy: policy, embeddingInputHash: hash4(inputText(overlapText)), embeddingContextJson: JSON.stringify({ partition: null, neighborOverlap: 32, tokenizerId: tokenizer2.id, tokenizerHash: tokenizer2.assetHash, context, contextTokens, recipe: "record-context-v1" }), isPartition: false });
     }
     i = j;
   }
@@ -38132,7 +40158,7 @@ ${value}` : value;
     if (end.offsetUtf16 <= previousEnd) throw new Error("v2 window must advance");
     const value = text2.slice(start.offsetUtf16, end.offsetUtf16);
     if (count2(input(value)) > 382) throw new Error("v2 wordpiece window exceeds384 including specials");
-    windows2.push({ startUtf16: start.offsetUtf16, endUtf16: end.offsetUtf16, text: value, chunkPolicy: policy, embeddingInputHash: hash3(input(value)), embeddingContextJson: JSON.stringify({ tokenizerId: tokenizer2.id, tokenizerHash: tokenizer2.assetHash, context, contextTokens, recipe: SPAN_CONTEXT_RECIPE2, targetSourceOverlap: 32, actualSourceOverlap: actualOverlap, sourceOverlapRounding: Math.max(0, actualOverlap - 32), sourceTokenStart: start.tokenEndOrdinal, sourceTokenEnd: end.tokenEndOrdinal }), isPartition: false });
+    windows2.push({ startUtf16: start.offsetUtf16, endUtf16: end.offsetUtf16, text: value, chunkPolicy: policy, embeddingInputHash: hash4(input(value)), embeddingContextJson: JSON.stringify({ tokenizerId: tokenizer2.id, tokenizerHash: tokenizer2.assetHash, context, contextTokens, recipe: SPAN_CONTEXT_RECIPE2, targetSourceOverlap: 32, actualSourceOverlap: actualOverlap, sourceOverlapRounding: Math.max(0, actualOverlap - 32), sourceTokenStart: start.tokenEndOrdinal, sourceTokenEnd: end.tokenEndOrdinal }), isPartition: false });
     previousEnd = end.offsetUtf16;
     if (endIndex === offsets.length - 1) break;
     const target = end.tokenEndOrdinal - 32;
@@ -38161,7 +40187,7 @@ function deriveCoveragePartitions2(windows2, expectedText, requireOverlap = true
   return coverage;
 }
 function spanManifestHash2(policy, units2) {
-  return hash3(JSON.stringify({ manifestVersion: SPAN_MANIFEST_VERSION2, policy, units: units2.map(({ id, manifest }) => ({ id, coverage: manifest.coveragePartitions, retrieval: manifest.windows.map((w) => ({ startUtf16: w.startUtf16, endUtf16: w.endUtf16, policy: w.chunkPolicy, sourceOverlap: JSON.parse(w.embeddingContextJson).actualSourceOverlap ?? 0, sourceOverlapRounding: JSON.parse(w.embeddingContextJson).sourceOverlapRounding ?? 0 })) })) }));
+  return hash4(JSON.stringify({ manifestVersion: SPAN_MANIFEST_VERSION2, policy, units: units2.map(({ id, manifest }) => ({ id, coverage: manifest.coveragePartitions, retrieval: manifest.windows.map((w) => ({ startUtf16: w.startUtf16, endUtf16: w.endUtf16, policy: w.chunkPolicy, sourceOverlap: JSON.parse(w.embeddingContextJson).actualSourceOverlap ?? 0, sourceOverlapRounding: JSON.parse(w.embeddingContextJson).sourceOverlapRounding ?? 0 })) })) }));
 }
 function hasCurrentSpanManifest2(gapsJson, tokenizer2) {
   if (!gapsJson) return false;
@@ -38186,11 +40212,11 @@ import process25 from "node:process";
 
 // packages/cli/src/reader-command.ts
 init_dist();
-import fs45 from "node:fs";
+import fs48 from "node:fs";
 function runReaderCommand(operation, inputFile) {
   try {
     if (!["prepare", "validate", "next-read"].includes(operation)) throw new Error("reader_operation_must_be_prepare_validate_or_next_read");
-    const input = JSON.parse(fs45.readFileSync(inputFile, "utf8"));
+    const input = JSON.parse(fs48.readFileSync(inputFile, "utf8"));
     if (!input || Array.isArray(input) || typeof input !== "object" || Object.keys(input).some((k) => !["taskId", "query", "scope", "packets", ...operation === "validate" ? ["raw"] : [], ...operation === "next-read" ? ["budget", "attemptedRefs"] : []].includes(k)) || typeof input.taskId !== "string" || typeof input.query !== "string" || !input.scope || typeof input.scope !== "object" || Array.isArray(input.scope) || !Array.isArray(input.packets) || operation === "validate" && typeof input.raw !== "string") throw new Error("invalid_reader_input");
     const task = buildReaderTask(input.taskId, input.query, input.scope, input.packets);
     if (operation === "next-read") {
@@ -38237,11 +40263,11 @@ init_dist();
 // packages/bridges/dist/types.js
 var SCHEMA_UNRECOGNISED = "schema not recognised";
 var SCHEMA_UNAVAILABLE = `bridge unavailable: ${SCHEMA_UNRECOGNISED}`;
-function absentStatus(bridge, path46, what) {
+function absentStatus(bridge, path50, what) {
   return {
     bridge,
     presence: "absent",
-    path: path46,
+    path: path50,
     available: false,
     detail: `not installed (${what})`,
     headline: "not installed",
@@ -38250,11 +40276,11 @@ function absentStatus(bridge, path46, what) {
     worker: null
   };
 }
-function emptyStatus(bridge, path46, why2) {
+function emptyStatus(bridge, path50, why2) {
   return {
     bridge,
     presence: "empty",
-    path: path46,
+    path: path50,
     available: false,
     detail: `installed, nothing to search (${why2})`,
     headline: "installed, nothing to search",
@@ -38278,11 +40304,11 @@ function unavailableList(status3, ms = 0) {
     relaxed: false
   };
 }
-function unrecognisedStatus(bridge, path46, why2, schema = null, headline4 = SCHEMA_UNAVAILABLE) {
+function unrecognisedStatus(bridge, path50, why2, schema = null, headline4 = SCHEMA_UNAVAILABLE) {
   return {
     bridge,
     presence: "unrecognised",
-    path: path46,
+    path: path50,
     available: false,
     detail: `${headline4} (${why2})`,
     // The default headline is the long form, because `detail` reads
@@ -38371,20 +40397,20 @@ function isFts5(info) {
 
 // packages/bridges/dist/claude-mem.js
 init_dist();
-import os7 from "node:os";
-import path38 from "node:path";
-import fs46 from "node:fs";
+import os8 from "node:os";
+import path41 from "node:path";
+import fs49 from "node:fs";
 var NO_UID = 77;
 var WORKER_TIMEOUT_MS = 1500;
 function claudeMemDir(opts = {}) {
   const env = opts.env ?? process.env;
   const override = env["CLAUDE_MEM_DATA_DIR"];
   if (override && override.trim())
-    return path38.resolve(override.trim());
-  return path38.join(opts.home ?? os7.homedir(), ".claude-mem");
+    return path41.resolve(override.trim());
+  return path41.join(opts.home ?? os8.homedir(), ".claude-mem");
 }
 function claudeMemDbPath(opts = {}) {
-  return path38.join(claudeMemDir(opts), "claude-mem.db");
+  return path41.join(claudeMemDir(opts), "claude-mem.db");
 }
 function claudeMemWorkerPort(opts = {}) {
   const env = opts.env ?? process.env;
@@ -38397,9 +40423,9 @@ function claudeMemWorkerPort(opts = {}) {
 async function detectClaudeMem(opts = {}) {
   const dir = claudeMemDir(opts);
   const file = claudeMemDbPath(opts);
-  if (!fs46.existsSync(dir))
+  if (!fs49.existsSync(dir))
     return absentStatus("claude-mem", file, `no ${tilde(dir)}`);
-  if (!fs46.existsSync(file)) {
+  if (!fs49.existsSync(file)) {
     return emptyStatus("claude-mem", file, `${tilde(dir)} exists, no claude-mem.db in it`);
   }
   const { db, error } = await openReadOnly(file);
@@ -38683,13 +40709,13 @@ function likeRows(db, schema, tokens, limit, requireAll) {
   const text2 = schema.textColumn;
   if (!text2)
     return [];
-  const words4 = tokens.filter((t) => t.length > 1).slice(0, 6);
-  if (words4.length === 0)
+  const words3 = tokens.filter((t) => t.length > 1).slice(0, 6);
+  if (words3.length === 0)
     return [];
-  const where = words4.map(() => `${q(text2)} like ? escape '\\'`).join(requireAll ? " and " : " or ");
+  const where = words3.map(() => `${q(text2)} like ? escape '\\'`).join(requireAll ? " and " : " or ");
   const order = schema.timeColumn ? `order by ${q(schema.timeColumn)} desc` : "order by rowid desc";
   try {
-    return db.prepare(`select * from ${q(schema.table)} where ${where} ${order} limit ?`).all(...words4.map((w) => `%${escapeLike(w)}%`), limit);
+    return db.prepare(`select * from ${q(schema.table)} where ${where} ${order} limit ?`).all(...words3.map((w) => `%${escapeLike(w)}%`), limit);
   } catch {
     return [];
   }
@@ -38697,8 +40723,8 @@ function likeRows(db, schema, tokens, limit, requireAll) {
 function escapeLike(s) {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
-function q(name) {
-  return `"${name.replace(/"/g, '""')}"`;
+function q(name2) {
+  return `"${name2.replace(/"/g, '""')}"`;
 }
 function sqliteHit(row2, schema, rank, file) {
   const text2 = String(row2[schema.textColumn ?? ""] ?? "").trim();
@@ -38735,46 +40761,46 @@ function oneLine(s) {
   return s.replace(/\s+/g, " ").trim().slice(0, 160);
 }
 function tilde(p) {
-  const home2 = os7.homedir();
+  const home2 = os8.homedir();
   return p.startsWith(home2) ? `~${p.slice(home2.length)}` : p;
 }
 
 // packages/bridges/dist/agentmemory.js
 import { spawn as spawn2 } from "node:child_process";
-import fs47 from "node:fs";
-import os8 from "node:os";
-import path39 from "node:path";
+import fs50 from "node:fs";
+import os9 from "node:os";
+import path42 from "node:path";
 var AGENTMEMORY_TIMEOUT_MS = 5e3;
 var SEARCH_TOOL = "memory_smart_search";
 function agentMemoryDirs(opts = {}) {
   const env = opts.env ?? process.env;
-  const home2 = opts.home ?? os8.homedir();
+  const home2 = opts.home ?? os9.homedir();
   const out = [];
   const push2 = (p, kind2) => {
     if (p && !out.some((e) => e.path === p))
       out.push({ path: p, kind: kind2 });
   };
   if (process.platform === "darwin") {
-    push2(path39.join(home2, "Library", "Application Support", "agentmemory"), "app-data");
+    push2(path42.join(home2, "Library", "Application Support", "agentmemory"), "app-data");
   } else if (process.platform === "win32") {
     const appData = env["APPDATA"];
     if (appData)
-      push2(path39.join(appData, "agentmemory"), "app-data");
+      push2(path42.join(appData, "agentmemory"), "app-data");
   }
   const xdgData = env["XDG_DATA_HOME"];
-  push2(path39.join(xdgData || path39.join(home2, ".local", "share"), "agentmemory"), "app-data");
+  push2(path42.join(xdgData || path42.join(home2, ".local", "share"), "agentmemory"), "app-data");
   const xdgConfig = env["XDG_CONFIG_HOME"];
-  push2(path39.join(xdgConfig || path39.join(home2, ".config"), "agentmemory"), "app-data");
-  push2(path39.join(home2, ".agentmemory"), "dotdir");
+  push2(path42.join(xdgConfig || path42.join(home2, ".config"), "agentmemory"), "app-data");
+  push2(path42.join(home2, ".agentmemory"), "dotdir");
   return out;
 }
 function agentMemoryDir(opts = {}) {
   const candidates2 = agentMemoryDirs(opts);
   for (const c of candidates2) {
-    if (fs47.existsSync(c.path))
+    if (fs50.existsSync(c.path))
       return c.path;
   }
-  return candidates2[0]?.path ?? path39.join(opts.home ?? os8.homedir(), ".agentmemory");
+  return candidates2[0]?.path ?? path42.join(opts.home ?? os9.homedir(), ".agentmemory");
 }
 function discoverLaunch(opts = {}) {
   const env = opts.env ?? process.env;
@@ -38786,15 +40812,15 @@ function discoverLaunch(opts = {}) {
     if (command)
       return { command, args: parts.slice(1), via: "env" };
   }
-  for (const name of [".mcp.json", "mcp.json"]) {
-    const found = fromMcpJson(path39.join(dir, name));
+  for (const name2 of [".mcp.json", "mcp.json"]) {
+    const found = fromMcpJson(path42.join(dir, name2));
     if (found)
       return found;
   }
   const onPath3 = which("agentmemory-mcp", env);
   if (onPath3)
     return { command: onPath3, args: [], via: "PATH" };
-  const local = path39.join(dir, "node_modules", ".bin", "agentmemory-mcp");
+  const local = path42.join(dir, "node_modules", ".bin", "agentmemory-mcp");
   if (isExecutable(local))
     return { command: local, args: [], via: "node_modules" };
   return null;
@@ -38802,31 +40828,31 @@ function discoverLaunch(opts = {}) {
 function fromMcpJson(file) {
   let parsed;
   try {
-    parsed = JSON.parse(fs47.readFileSync(file, "utf-8"));
+    parsed = JSON.parse(fs50.readFileSync(file, "utf-8"));
   } catch {
     return null;
   }
   const servers = parsed?.mcpServers;
   if (!servers || typeof servers !== "object")
     return null;
-  for (const [name, raw] of Object.entries(servers)) {
-    if (!name.toLowerCase().includes("agentmemory"))
+  for (const [name2, raw] of Object.entries(servers)) {
+    if (!name2.toLowerCase().includes("agentmemory"))
       continue;
     const entry = raw;
     const command = typeof entry.command === "string" ? entry.command : "";
     if (!command)
       continue;
     const args = Array.isArray(entry.args) ? entry.args.map(String) : [];
-    if (/^(npx|pnpx|bunx|yarn|npm)$/.test(path39.basename(command)))
+    if (/^(npx|pnpx|bunx|yarn|npm)$/.test(path42.basename(command)))
       continue;
     return { command, args, via: "mcp.json" };
   }
   return null;
 }
 function which(binary, env) {
-  const dirs = (env["PATH"] ?? "").split(path39.delimiter).filter(Boolean);
+  const dirs = (env["PATH"] ?? "").split(path42.delimiter).filter(Boolean);
   for (const dir of dirs) {
-    const candidate = path39.join(dir, binary);
+    const candidate = path42.join(dir, binary);
     if (isExecutable(candidate))
       return candidate;
   }
@@ -38834,15 +40860,15 @@ function which(binary, env) {
 }
 function isExecutable(file) {
   try {
-    fs47.accessSync(file, fs47.constants.X_OK);
-    return fs47.statSync(file).isFile();
+    fs50.accessSync(file, fs50.constants.X_OK);
+    return fs50.statSync(file).isFile();
   } catch {
     return false;
   }
 }
 function detectAgentMemory(opts = {}) {
   const dir = agentMemoryDir(opts);
-  if (!fs47.existsSync(dir)) {
+  if (!fs50.existsSync(dir)) {
     const probed = agentMemoryDirs(opts).map((c) => tilde2(c.path));
     return absentStatus("agentmemory", dir, `none of ${probed.join(", ")}`);
   }
@@ -38858,7 +40884,7 @@ function detectAgentMemory(opts = {}) {
     presence: "store",
     path: dir,
     available: true,
-    detail: `mcp server via ${launch.via} (${path39.basename(launch.command)}), one tool: ${SEARCH_TOOL}`,
+    detail: `mcp server via ${launch.via} (${path42.basename(launch.command)}), one tool: ${SEARCH_TOOL}`,
     headline: `mcp server via ${launch.via}`,
     schema: null,
     rows: null,
@@ -38867,7 +40893,7 @@ function detectAgentMemory(opts = {}) {
 }
 function isEmptyDir(dir) {
   try {
-    return fs47.readdirSync(dir).length === 0;
+    return fs50.readdirSync(dir).length === 0;
   } catch {
     return true;
   }
@@ -38903,7 +40929,7 @@ var StdioClient = class {
         env: { ...env }
       });
     } catch (err) {
-      this.failed = `could not start ${path39.basename(this.launch.command)}: ${firstLine5(err)}`;
+      this.failed = `could not start ${path42.basename(this.launch.command)}: ${firstLine5(err)}`;
       return false;
     }
     const child = this.child;
@@ -38931,7 +40957,7 @@ var StdioClient = class {
    * `{query: …}` to a tool that now wants `{q: …}` and getting an empty result
    * that looks like "you have no memories about this".
    */
-  async tool(name, timeoutMs) {
+  async tool(name2, timeoutMs) {
     const res = await this.request("tools/list", {}, timeoutMs);
     if (!res || res.error)
       return null;
@@ -38940,7 +40966,7 @@ var StdioClient = class {
       return null;
     for (const raw of tools) {
       const t = raw;
-      if (t?.name !== name)
+      if (t?.name !== name2)
         continue;
       const properties = Object.keys(t.inputSchema?.properties ?? {});
       return { properties };
@@ -38969,15 +40995,15 @@ var StdioClient = class {
       };
     }).filter((t) => t.name.length > 0);
   }
-  async call(name, args, timeoutMs) {
-    const res = await this.request("tools/call", { name, arguments: args }, timeoutMs);
+  async call(name2, args, timeoutMs) {
+    const res = await this.request("tools/call", { name: name2, arguments: args }, timeoutMs);
     if (!res)
-      return { text: "", error: `${name} timed out after ${timeoutMs} ms` };
+      return { text: "", error: `${name2} timed out after ${timeoutMs} ms` };
     if (res.error)
       return { text: "", error: rpcError(res) };
     const result = res.result;
     if (result?.isError === true)
-      return { text: "", error: `${name} reported an error` };
+      return { text: "", error: `${name2} reported an error` };
     const content2 = Array.isArray(result?.content) ? result.content : [];
     const text2 = content2.map((part) => {
       const p = part;
@@ -39005,11 +41031,11 @@ var StdioClient = class {
     this.buffer += chunk;
     let index = this.buffer.indexOf("\n");
     while (index >= 0) {
-      const line2 = this.buffer.slice(0, index).trim();
+      const line = this.buffer.slice(0, index).trim();
       this.buffer = this.buffer.slice(index + 1);
-      if (line2) {
+      if (line) {
         try {
-          const message2 = JSON.parse(line2);
+          const message2 = JSON.parse(line);
           const resolve = typeof message2.id === "number" ? this.pending.get(message2.id) : void 0;
           if (resolve) {
             this.pending.delete(message2.id);
@@ -39205,32 +41231,32 @@ function pick2(row2, keys6) {
   return "";
 }
 function tilde2(p) {
-  const home2 = os8.homedir();
+  const home2 = os9.homedir();
   return p.startsWith(home2) ? `~${p.slice(home2.length)}` : p;
 }
 
 // packages/bridges/dist/notes.js
 init_dist();
-import fs48 from "node:fs";
-import os9 from "node:os";
-import path40 from "node:path";
+import fs51 from "node:fs";
+import os10 from "node:os";
+import path43 from "node:path";
 var MAX_BYTES = 256 * 1024;
 function notesPaths(opts = {}) {
   const claude = paths_exports.claudePaths(opts.claudeDir ? paths_exports.expandTilde(opts.claudeDir) : void 0);
   const cwd = opts.cwd ?? process.cwd();
   const out = [];
   out.push({ path: memoryDir(claude.projects, cwd), kind: "auto-memory" });
-  const global = path40.join(claude.root, "CLAUDE.md");
-  let dir = path40.resolve(cwd);
+  const global = path43.join(claude.root, "CLAUDE.md");
+  let dir = path43.resolve(cwd);
   for (let depth = 0; depth < (opts.maxDepth ?? 6); depth += 1) {
     for (const candidate of [
-      path40.join(dir, "CLAUDE.md"),
-      path40.join(dir, ".claude", "CLAUDE.md")
+      path43.join(dir, "CLAUDE.md"),
+      path43.join(dir, ".claude", "CLAUDE.md")
     ]) {
       if (candidate !== global)
         out.push({ path: candidate, kind: "project-claude-md" });
     }
-    const parent = path40.dirname(dir);
+    const parent = path43.dirname(dir);
     if (parent === dir)
       break;
     dir = parent;
@@ -39239,7 +41265,7 @@ function notesPaths(opts = {}) {
   return out;
 }
 function memoryDir(projectsDir, cwd) {
-  return path40.join(projectsDir, paths_exports.slugify(path40.resolve(cwd)), "memory");
+  return path43.join(projectsDir, paths_exports.slugify(path43.resolve(cwd)), "memory");
 }
 function detectNotes(opts = {}) {
   const candidates2 = notesPaths(opts);
@@ -39247,7 +41273,7 @@ function detectNotes(opts = {}) {
   const files = readableFiles(candidates2);
   if (files.length > 0) {
     const bytes3 = files.reduce((n3, f) => n3 + f.bytes, 0);
-    const found = fs48.existsSync(memory) ? memory : files[0]?.path ?? memory;
+    const found = fs51.existsSync(memory) ? memory : files[0]?.path ?? memory;
     return {
       bridge: "notes",
       presence: "store",
@@ -39260,7 +41286,7 @@ function detectNotes(opts = {}) {
       worker: null
     };
   }
-  if (fs48.existsSync(memory)) {
+  if (fs51.existsSync(memory)) {
     return emptyStatus("notes", memory, "the memory directory exists and holds no markdown");
   }
   return absentStatus("notes", memory, "no auto-memory directory and no CLAUDE.md above the cwd");
@@ -39292,14 +41318,14 @@ function readableFiles(candidates2) {
 }
 function markdownIn(dir) {
   try {
-    return fs48.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => path40.join(dir, e.name)).sort();
+    return fs51.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => path43.join(dir, e.name)).sort();
   } catch {
     return [];
   }
 }
 function sizeOf(file) {
   try {
-    const stat = fs48.statSync(file);
+    const stat = fs51.statSync(file);
     return stat.isFile() ? stat.size : null;
   } catch {
     return null;
@@ -39314,7 +41340,7 @@ function describe2(files) {
 function sections(file, kind2, content2) {
   const lines = content2.split("\n");
   const out = [];
-  let heading3 = path40.basename(file);
+  let heading3 = path43.basename(file);
   let start = 1;
   let buffer = [];
   const flush = () => {
@@ -39323,15 +41349,15 @@ function sections(file, kind2, content2) {
       out.push({ file, kind: kind2, heading: heading3, text: text2, line: start });
     buffer = [];
   };
-  lines.forEach((line2, i) => {
-    const m = /^(#{1,6})\s+(.*\S)\s*$/.exec(line2);
+  lines.forEach((line, i) => {
+    const m = /^(#{1,6})\s+(.*\S)\s*$/.exec(line);
     if (m) {
       flush();
-      heading3 = m[2] ?? path40.basename(file);
+      heading3 = m[2] ?? path43.basename(file);
       start = i + 1;
       return;
     }
-    buffer.push(line2);
+    buffer.push(line);
   });
   flush();
   return out;
@@ -39360,7 +41386,7 @@ function queryNotes(query, opts = {}) {
     for (const file of readableFiles(notesPaths(opts))) {
       let content2;
       try {
-        content2 = fs48.readFileSync(file.path, "utf-8").slice(0, maxBytes);
+        content2 = fs51.readFileSync(file.path, "utf-8").slice(0, maxBytes);
       } catch {
         continue;
       }
@@ -39440,7 +41466,7 @@ function oneLine2(s) {
   return s.replace(/\s+/g, " ").trim().slice(0, 160);
 }
 function tildify2(p) {
-  const home2 = os9.homedir();
+  const home2 = os10.homedir();
   return p.startsWith(home2) ? `~${p.slice(home2.length)}` : p;
 }
 
@@ -39455,22 +41481,22 @@ function federate(result, lists, options = {}) {
   const k = result.k;
   const bridges = [];
   const external = [];
-  for (const list of lists) {
-    const base2 = options.weights?.[list.list] ?? BRIDGE_WEIGHTS[list.list] ?? 1;
-    const ranked = list.strategy !== "like";
+  for (const list2 of lists) {
+    const base2 = options.weights?.[list2.list] ?? BRIDGE_WEIGHTS[list2.list] ?? 1;
+    const ranked = list2.strategy !== "like";
     const weight = base2 * (ranked ? 1 : UNRANKED_PENALTY);
     bridges.push({
-      list: list.list,
-      candidates: list.hits.length,
-      ms: list.ms,
-      presence: list.status.presence,
-      unavailable: list.unavailable,
-      headline: list.status.headline,
-      strategy: list.strategy,
+      list: list2.list,
+      candidates: list2.hits.length,
+      ms: list2.ms,
+      presence: list2.status.presence,
+      unavailable: list2.unavailable,
+      headline: list2.status.headline,
+      strategy: list2.strategy,
       weight,
-      path: list.status.path
+      path: list2.status.path
     });
-    list.hits.forEach((hit2, i) => {
+    list2.hits.forEach((hit2, i) => {
       const rank = Number.isInteger(hit2.rank) && hit2.rank > 0 ? hit2.rank : i + 1;
       external.push({ ...hit2, rank, score: weight * (1 / (k + rank)) });
     });
@@ -39503,13 +41529,13 @@ function federationLine(bridges) {
 
 // packages/bridges/dist/export/markdown.js
 init_dist();
-import fs49 from "node:fs";
-import path41 from "node:path";
+import fs52 from "node:fs";
+import path44 from "node:path";
 var TRANSCRIPT_LIMIT = 500;
 function exportMarkdown(options) {
   const started = Date.now();
-  const dest = path41.resolve(options.dest);
-  fs49.mkdirSync(dest, { recursive: true });
+  const dest = path44.resolve(options.dest);
+  fs52.mkdirSync(dest, { recursive: true });
   const cards = exportCards(options.root, dest);
   const transcripts = options.transcripts ? writeTranscripts(dest, options) : null;
   return { dest, cards, transcripts, ms: Date.now() - started };
@@ -39522,7 +41548,7 @@ function writeTranscripts(dest, options) {
     return out;
   }
   const limit = Math.max(1, options.limit ?? TRANSCRIPT_LIMIT);
-  const root = path41.join(dest, "transcripts");
+  const root = path44.join(dest, "transcripts");
   let listed;
   try {
     listed = listSessions(db, {}, { limit });
@@ -39544,10 +41570,10 @@ function writeTranscripts(dest, options) {
       pushReason(out, firstLine5(err));
       continue;
     }
-    const file = path41.join(root, session.harness, safeSegment(session.projectName), `${session.id}.md`);
+    const file = path44.join(root, session.harness, safeSegment(session.projectName), `${session.id}.md`);
     try {
-      fs49.mkdirSync(path41.dirname(file), { recursive: true });
-      fs49.writeFileSync(file, markdown, { mode: 384 });
+      fs52.mkdirSync(path44.dirname(file), { recursive: true });
+      fs52.writeFileSync(file, markdown, { mode: 384 });
     } catch (err) {
       out.skipped += 1;
       pushReason(out, firstLine5(err));
@@ -39562,15 +41588,15 @@ function pushReason(out, reason) {
   if (out.reasons.length < 3 && !out.reasons.includes(reason))
     out.reasons.push(reason);
 }
-function safeSegment(name) {
-  const cleaned = (name ?? "").replace(/[^\w.-]+/g, "-").replace(/^[.-]+/, "").slice(0, 80);
+function safeSegment(name2) {
+  const cleaned = (name2 ?? "").replace(/[^\w.-]+/g, "-").replace(/^[.-]+/, "").slice(0, 80);
   return cleaned || "unknown";
 }
 
 // packages/bridges/dist/export/agentmemory.js
 init_dist();
-import fs50 from "node:fs";
-import path42 from "node:path";
+import fs53 from "node:fs";
+import path45 from "node:path";
 var WRITE_VERBS = ["store", "add", "create", "remember", "write", "upsert", "ingest", "save"];
 async function pushToAgentMemory(cards, opts = {}) {
   const status3 = detectAgentMemory(opts);
@@ -39640,12 +41666,12 @@ async function findWriteTool(client, timeoutMs) {
   const tools = await client.listTools(timeoutMs);
   for (const verb of WRITE_VERBS) {
     for (const tool of tools) {
-      const name = tool.name.toLowerCase();
-      if (!name.startsWith("memory"))
+      const name2 = tool.name.toLowerCase();
+      if (!name2.startsWith("memory"))
         continue;
-      if (!name.includes(verb))
+      if (!name2.includes(verb))
         continue;
-      if (/delete|remove|forget|clear|prune|purge|drop/.test(name))
+      if (/delete|remove|forget|clear|prune|purge|drop/.test(name2))
         continue;
       const textArg = tool.properties.find((p) => /^(content|text|memory|body|observation|value)$/i.test(p));
       if (!textArg)
@@ -39663,21 +41689,21 @@ async function findWriteTool(client, timeoutMs) {
 function collectCards(root, limit = 1e3) {
   const from = paths_exports.cardsDir(root);
   const out = [];
-  if (!fs50.existsSync(from))
+  if (!fs53.existsSync(from))
     return out;
   const walk3 = (dir) => {
     if (out.length >= limit)
       return;
     let entries;
     try {
-      entries = fs50.readdirSync(dir, { withFileTypes: true });
+      entries = fs53.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const entry of entries) {
       if (out.length >= limit)
         return;
-      const source = path42.join(dir, entry.name);
+      const source = path45.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk3(source);
         continue;
@@ -39686,7 +41712,7 @@ function collectCards(root, limit = 1e3) {
         continue;
       let markdown;
       try {
-        markdown = fs50.readFileSync(source, "utf-8");
+        markdown = fs53.readFileSync(source, "utf-8");
       } catch {
         continue;
       }
@@ -39700,8 +41726,8 @@ function collectCards(root, limit = 1e3) {
   return out;
 }
 function firstHeading(markdown) {
-  for (const line2 of markdown.split("\n", 40)) {
-    const m = /^#{1,3}\s+(.*\S)\s*$/.exec(line2);
+  for (const line of markdown.split("\n", 40)) {
+    const m = /^#{1,3}\s+(.*\S)\s*$/.exec(line);
     if (m?.[1])
       return m[1].slice(0, 160);
   }
@@ -39788,8 +41814,8 @@ async function runAudit(o) {
   const t = themeFrom(o);
   print(renderAuditCard(report, t));
   if (o.sweep) {
-    const list = renderSweepList(report, t, 20);
-    if (list) print(list);
+    const list2 = renderSweepList(report, t, 20);
+    if (list2) print(list2);
   }
   return 0;
 }
@@ -39837,7 +41863,7 @@ async function runRescue(o) {
       extras.settingsSkippedReason = proposal.reason ?? "settings.json cannot be edited safely";
       if (!o.json && !o.quiet) {
         print("");
-        for (const line2 of consent_exports.manualInstructions(proposal, "cleanup", days)) print(line2);
+        for (const line of consent_exports.manualInstructions(proposal, "cleanup", days)) print(line);
         print("");
       }
     } else {
@@ -39876,8 +41902,8 @@ async function askForSettings(diff, days, currentEffective, o) {
   );
   print(`  This is the only change potsherd ever makes outside ${paths_exports.tildify(paths_exports.potsherdDir())}.`);
   print("");
-  for (const line2 of diff.split("\n")) {
-    const tone2 = line2.startsWith("+") && !line2.startsWith("+++") ? t.ok(line2) : line2.startsWith("-") && !line2.startsWith("---") ? t.warn(line2) : t.dim(line2);
+  for (const line of diff.split("\n")) {
+    const tone2 = line.startsWith("+") && !line.startsWith("+++") ? t.ok(line) : line.startsWith("-") && !line.startsWith("---") ? t.warn(line) : t.dim(line);
     print("  " + tone2);
   }
   print("");
@@ -39893,7 +41919,7 @@ async function askForSettings(diff, days, currentEffective, o) {
 // packages/cli/src/commands/guard.ts
 init_dist();
 init_output();
-import fs52 from "node:fs";
+import fs56 from "node:fs";
 import process14 from "node:process";
 async function runGuard(o) {
   const t = themeFrom(o);
@@ -39918,7 +41944,7 @@ async function runGuard(o) {
       printJson({ changed: false, safe: false, reason: proposal.reason });
       return 1;
     }
-    for (const line2 of consent_exports.manualInstructions(proposal, "guard")) print(line2);
+    for (const line of consent_exports.manualInstructions(proposal, "guard")) print(line);
     return 1;
   }
   if (!o.json && !o.quiet) {
@@ -39950,8 +41976,8 @@ async function runGuard(o) {
       }
     }
     print("");
-    for (const line2 of proposal.diff.split("\n")) {
-      const tone2 = line2.startsWith("+") && !line2.startsWith("+++") ? t.ok(line2) : line2.startsWith("-") && !line2.startsWith("---") ? t.warn(line2) : t.dim(line2);
+    for (const line of proposal.diff.split("\n")) {
+      const tone2 = line.startsWith("+") && !line.startsWith("+++") ? t.ok(line) : line.startsWith("-") && !line.startsWith("---") ? t.warn(line) : t.dim(line);
       print("  " + tone2);
     }
     print("");
@@ -40041,17 +42067,17 @@ function status(o, t, installed, resolution) {
 }
 function commandLooksRunnable(command) {
   const quoted = command.match(/"([^"]+)"/);
-  if (quoted?.[1]) return fs52.existsSync(quoted[1]);
+  if (quoted?.[1]) return fs56.existsSync(quoted[1]);
   const bin = command.trim().split(/\s+/)[0] ?? "";
   if (!bin) return false;
-  if (bin.includes("/") || bin.includes("\\")) return fs52.existsSync(bin);
+  if (bin.includes("/") || bin.includes("\\")) return fs56.existsSync(bin);
   return onPath(bin) !== null;
 }
 
 // packages/cli/src/commands/doctor.ts
 init_dist();
 init_output();
-import fs53 from "node:fs";
+import fs57 from "node:fs";
 import nodePath from "node:path";
 import process15 from "node:process";
 
@@ -40089,7 +42115,7 @@ async function runDoctor(o) {
   const report = await audit(o.claudeDir, /* @__PURE__ */ new Date(), o.potsherdDir ? { potsherdDir: o.potsherdDir } : {});
   const root = paths_exports.potsherdDir(o.potsherdDir);
   const dbFile = paths_exports.dbPath(root);
-  const dbExists = fs53.existsSync(dbFile);
+  const dbExists = fs57.existsSync(dbFile);
   const counts2 = {};
   let schema = 0;
   let redaction = emptyCounts();
@@ -40202,13 +42228,13 @@ async function runDoctor(o) {
         card2.raw(`${pad5}${t2.dim(text2)}`);
         return;
       }
-      for (const line2 of format_exports.wrap(text2, Math.max(20, t2.width - indent - 1))) {
-        card2.raw(`${pad5}${t2.dim(line2)}`);
+      for (const line of format_exports.wrap(text2, Math.max(20, t2.width - indent - 1))) {
+        card2.raw(`${pad5}${t2.dim(line)}`);
       }
     };
     card2.text("reads (never modified):");
     for (const p of reads) {
-      card2.raw(`    ${show2(p)}${fs53.existsSync(p) ? "" : t2.dim("  (absent)")}`);
+      card2.raw(`    ${show2(p)}${fs57.existsSync(p) ? "" : t2.dim("  (absent)")}`);
     }
     note("potsherd only ever reads these. one directory appears under claude's own projects/ anyway \u2014 claude code creates it for the cwd potsherd spawns it in, and it is named under writes.", 4);
     note("\u2026and these, only when you name them with  --with / --to:", 4);
@@ -40260,8 +42286,8 @@ async function runDoctor(o) {
       const lead = "redacted slices of your transcripts";
       const body = `${lead}, sent to a model as the text of one prompt. redaction runs first, in one place, on every outgoing string \u2014 there is no --no-redact flag. nothing else is ever sent: no file is uploaded, no path, no index, no counts, no identifiers.`;
       const lines = format_exports.wrap(body, Math.max(20, t2.width - 5));
-      lines.forEach((line2, i) => {
-        card2.raw(`    ${i === 0 && line2.startsWith(lead) ? t2.accent(lead) + line2.slice(lead.length) : line2}`);
+      lines.forEach((line, i) => {
+        card2.raw(`    ${i === 0 && line.startsWith(lead) ? t2.accent(lead) + line.slice(lead.length) : line}`);
       });
     }
     card2.blank().text("only these verbs call a model:");
@@ -40283,7 +42309,7 @@ async function runDoctor(o) {
     };
     for (const verb of MODEL_CALL_VERBS) verbRow(verb, verbNote[verb]);
     card2.blank().text("these never do, and open no socket at all:");
-    for (const line2 of format_exports.wrap(OFFLINE_VERBS.join(", "), pathW)) card2.raw(`    ${line2}`);
+    for (const line of format_exports.wrap(OFFLINE_VERBS.join(", "), pathW)) card2.raw(`    ${line}`);
     card2.blank().text("this one calls no model and does reach the network,");
     note("because it acquires what it needs instead of asking you to:", 2);
     for (const verb of RUNTIME_FETCH_VERBS) verbRow(verb, "the embedding runtime, once per machine");
@@ -40294,20 +42320,20 @@ async function runDoctor(o) {
       "claude-mem is read over http://127.0.0.1; agentmemory by launching its mcp server, itself a shim over an http backend on localhost. nothing leaves this machine, and without the flag neither opens anything at all."
     );
     card2.blank().text("who receives them:");
-    for (const line2 of format_exports.wrap(network.to, pathW)) card2.raw(`    ${line2}`);
-    for (const line2 of network.detail) note(line2, 4);
+    for (const line of format_exports.wrap(network.to, pathW)) card2.raw(`    ${line}`);
+    for (const line of network.detail) note(line, 4);
     card2.blank().text("one other download, once per machine: the embedding runtime,").text("fetched by potsherd index without being asked.");
-    for (const line2 of format_exports.wrap(
+    for (const line of format_exports.wrap(
       `The first ${"`"}potsherd index${"`"} on a machine fetches from ${embeddings_exports.runtimeHosts()} \u2014 ${format_exports.bytes(embeddings_exports.ACQUIRE_BYTES)} of WebAssembly runtime and quantized model weights, into ${paths_exports.tildify(paths_exports.modelsDir(root))}. Every file is pinned to a size and a sha256 that ships in the source and is checked before it is kept. They are GET requests for public files: no transcript, no path, no identifier and no count leaves this machine, and nothing is installed into node_modules. It runs in a background process so the verb returns as soon as text search is live, which means ${"`"}--quiet${"`"} and ${"`"}--json${"`"} \u2014 and the plugin's SessionEnd hook, which runs ${"`"}index --quiet${"`"} \u2014 do it silently. ${"`"}potsherd index --no-embed${"`"} does not do it at all, and neither does any run on a machine with ${"`"}POTSHERD_OFFLINE${"`"} set; text search is unaffected either way.`,
       Math.max(20, t2.width - 3)
     )) {
-      card2.raw(`  ${line2}`);
+      card2.raw(`  ${line}`);
     }
-    for (const line2 of format_exports.wrap(
+    for (const line of format_exports.wrap(
       "no telemetry. no account. potsherd stores no credential of its own.",
       Math.max(20, t2.width - 3)
     )) {
-      card2.raw(`  ${line2}`);
+      card2.raw(`  ${line}`);
     }
     print(card2.toString());
     return 0;
@@ -40479,7 +42505,7 @@ async function runDoctor(o) {
   ]);
   if (indexedTypes.length > 0) {
     card.blank().text("record types the parsers did not consume, over the whole index:");
-    for (const line2 of recordTypeLines(foldRecordTypes(indexedTypes), t)) card.raw(line2);
+    for (const line of recordTypeLines(foldRecordTypes(indexedTypes), t)) card.raw(line);
     card.text(t.dim('"new" means no note in research/formats.md describes it yet.'));
   } else {
     card.blank().text("record types seen (head/tail scan \u2014 run potsherd index for exact counts):");
@@ -40489,8 +42515,8 @@ async function runDoctor(o) {
   }
   card.blank().text("adapters:");
   for (const a of adapters) {
-    const line2 = format_exports.clip(a.line, Math.max(20, t.width - 4), t);
-    card.raw(`    ${a.supported ? line2 : t.dim(line2)}`);
+    const line = format_exports.clip(a.line, Math.max(20, t.width - 4), t);
+    card.raw(`    ${a.supported ? line : t.dim(line)}`);
   }
   card.text(t.dim(format_exports.clip(cursor_exports.CURSOR_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
   card.text(t.dim(format_exports.clip(gemini_exports.GEMINI_DOCTOR_NOTE, Math.max(20, t.width - 4), t)));
@@ -40622,14 +42648,14 @@ function recordTypeLines(rows, t) {
   const nameW = Math.max(12, t.width - 4 - countW - 2 - versionW - 1 - markW);
   const out = [];
   for (const row2 of rows) {
-    const name = `${row2.harness} ${row2.type}`;
+    const name2 = `${row2.harness} ${row2.type}`;
     const mark = row2.novel ? t.warn("new") : t.dim("known");
     const versions = wide ? row2.versions === 1 ? "1 version" : `${row2.versions} versions` : `${row2.versions}v`;
     const tail2 = `${format_exports.num(row2.count).padStart(countW)}  ${t.dim(versions.padEnd(versionW))} ${mark}`;
-    if (name.length <= nameW) {
-      out.push(`    ${name.padEnd(nameW)}${tail2}`);
+    if (name2.length <= nameW) {
+      out.push(`    ${name2.padEnd(nameW)}${tail2}`);
     } else {
-      out.push(`    ${format_exports.elideMiddle(name, Math.max(12, t.width - 4), t)}`);
+      out.push(`    ${format_exports.elideMiddle(name2, Math.max(12, t.width - 4), t)}`);
       out.push(`    ${" ".repeat(nameW)}${tail2}`);
     }
   }
@@ -40742,7 +42768,7 @@ function vectorsRow2(vec, t, noteWidth2) {
 
 // packages/cli/src/commands/maintain.ts
 init_dist();
-import fs54 from "node:fs";
+import fs58 from "node:fs";
 import { randomUUID as randomUUID11 } from "node:crypto";
 import process18 from "node:process";
 
@@ -40872,18 +42898,18 @@ function wrap4(db) {
     transaction(fn) {
       const make = (begin) => (...args) => {
         const parentDepth = depth;
-        const name = `potsherd_sp_${parentDepth}`;
-        db.exec(parentDepth === 0 ? begin : `SAVEPOINT ${name}`);
+        const name2 = `potsherd_sp_${parentDepth}`;
+        db.exec(parentDepth === 0 ? begin : `SAVEPOINT ${name2}`);
         depth = parentDepth + 1;
         try {
           const out = fn(...args);
-          db.exec(parentDepth === 0 ? "COMMIT" : `RELEASE ${name}`);
+          db.exec(parentDepth === 0 ? "COMMIT" : `RELEASE ${name2}`);
           depth = parentDepth;
           return out;
         } catch (error) {
           try {
-            db.exec(parentDepth === 0 ? "ROLLBACK" : `ROLLBACK TO ${name}`);
-            if (parentDepth > 0) db.exec(`RELEASE ${name}`);
+            db.exec(parentDepth === 0 ? "ROLLBACK" : `ROLLBACK TO ${name2}`);
+            if (parentDepth > 0) db.exec(`RELEASE ${name2}`);
           } catch {
           } finally {
             depth = parentDepth;
@@ -40895,10 +42921,10 @@ function wrap4(db) {
       for (const variant of Object.values(variants)) Object.assign(variant, variants);
       return variants.default;
     },
-    loadExtension(path46) {
+    loadExtension(path50) {
       db.enableLoadExtension?.(true);
       if (!db.loadExtension) throw new Error("this sqlite cannot load extensions");
-      db.loadExtension(path46);
+      db.loadExtension(path50);
     },
     // 5. **`function()` registers an application-defined function.** Both
     //    drivers spell it the same way and both take the arity from
@@ -40909,9 +42935,9 @@ function wrap4(db) {
     //    no vector search at all. It stays a shim method rather than a call-site
     //    branch for the same reason as the other four: no query in the codebase
     //    should know which driver it is on.
-    function(name, options, impl) {
+    function(name2, options, impl) {
       if (!db.function) throw new Error("this sqlite cannot register functions");
-      db.function(name, options, impl);
+      db.function(name2, options, impl);
     },
     get inTransaction() {
       return depth > 0;
@@ -40971,9 +42997,9 @@ function runtimeFiles2() {
 }
 function modelFiles2() {
   const base2 = `${modelBase2()}/${MODEL_ID2}/resolve/main`;
-  const at2 = (name, bytes3, sha256) => ({
-    name: `${MODEL_ID2}/${name}`,
-    url: `${base2}/${name}`,
+  const at2 = (name2, bytes3, sha256) => ({
+    name: `${MODEL_ID2}/${name2}`,
+    url: `${base2}/${name2}`,
     bytes: bytes3,
     sha256
   });
@@ -41106,9 +43132,9 @@ function strandedVecTables2(db) {
   }
   return out;
 }
-function statementsCompile2(db, name) {
+function statementsCompile2(db, name2) {
   try {
-    db.prepare(`SELECT 1 FROM "${name}" LIMIT 1`);
+    db.prepare(`SELECT 1 FROM "${name2}" LIMIT 1`);
     return true;
   } catch {
     return false;
@@ -41334,9 +43360,9 @@ function forgetStrandedStamps2(db, stranded) {
   if (stranded.includes("vec_exchanges")) clear("exchanges");
   if (stranded.includes("vec_ghost_prompts")) clear("ghost_prompts");
 }
-function legacyVecTable2(db, name) {
+function legacyVecTable2(db, name2) {
   try {
-    const row2 = db.prepare(`SELECT type, sql FROM sqlite_master WHERE name = ?`).get(name);
+    const row2 = db.prepare(`SELECT type, sql FROM sqlite_master WHERE name = ?`).get(name2);
     return Boolean(row2 && row2.type === "table" && /USING\s+vec0/i.test(row2.sql ?? ""));
   } catch {
     return false;
@@ -41971,7 +43997,7 @@ async function runMaintainUnlocked(o) {
     spoolRequest(root, request);
     if (o.enqueueOnly) return 0;
   }
-  if (!fs54.existsSync(paths_exports.dbPath(root)) && !o.migrate) {
+  if (!fs58.existsSync(paths_exports.dbPath(root)) && !o.migrate) {
     if (o.json) printJson({ state: "initialization_required" });
     else if (!o.quiet) print("Memory initialization required: run potsherd maintain --migrate.");
     return 1;
@@ -42045,13 +44071,13 @@ import { randomUUID as randomUUID13 } from "node:crypto";
 
 // packages/core/src/memory/jobs.ts
 import { randomUUID as randomUUID12 } from "node:crypto";
-import fs55 from "node:fs";
-import path44 from "node:path";
+import fs59 from "node:fs";
+import path48 from "node:path";
 
 // packages/core/src/memory/leases.ts
-import os10 from "node:os";
+import os12 from "node:os";
 import { execFileSync as execFileSync3 } from "node:child_process";
-var HOST2 = os10.hostname();
+var HOST2 = os12.hostname();
 function processStart3(pid) {
   try {
     return execFileSync3("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8", timeout: 1e3 }).trim() || null;
@@ -42069,7 +44095,7 @@ init_spans2();
 var MODEL_HASH2 = requiredFiles2().find((f) => f.name.endsWith(".onnx")).sha256;
 var TOKENIZER_HASH2 = "771b89c9f8734b4609b7b3629c606cbc42d57336b4ec899218af2c0cb272300f";
 function namedSpace2(pooling) {
-  return identity3("span-space/v1", MODEL_ID2, MODEL_HASH2, TOKENIZER_HASH2, RUNTIME_VERSION2, "q8", pooling, BGE_QUERY_PREFIX2, "l2", "384", "record-context-v1");
+  return identity4("span-space/v1", MODEL_ID2, MODEL_HASH2, TOKENIZER_HASH2, RUNTIME_VERSION2, "q8", pooling, BGE_QUERY_PREFIX2, "l2", "384", "record-context-v1");
 }
 var DEFAULT_SPACE_ID2 = namedSpace2("mean");
 var CLS_SPACE_ID2 = namedSpace2("cls");
@@ -42113,22 +44139,22 @@ function captureStatus(db, jobId) {
   return { jobId, state: job.state, durable: true, captured: job.state === "done" && result?.captured === true, ...result ? { report: result.report } : {} };
 }
 function spoolRequest2(root, r) {
-  const dir = path44.join(root, "maintenance-spool");
-  fs55.mkdirSync(dir, { recursive: true, mode: 448 });
-  const file = path44.join(dir, identity3("spool/v1", r.kind, r.targetId, r.inputHash) + ".json"), temp = file + "." + randomUUID12() + ".tmp";
-  const fd = fs55.openSync(temp, "wx", 384);
+  const dir = path48.join(root, "maintenance-spool");
+  fs59.mkdirSync(dir, { recursive: true, mode: 448 });
+  const file = path48.join(dir, identity4("spool/v1", r.kind, r.targetId, r.inputHash) + ".json"), temp = file + "." + randomUUID12() + ".tmp";
+  const fd = fs59.openSync(temp, "wx", 384);
   try {
-    fs55.writeFileSync(fd, JSON.stringify({ ...r, requestId: r.requestId ?? randomUUID12() }));
-    fs55.fsyncSync(fd);
+    fs59.writeFileSync(fd, JSON.stringify({ ...r, requestId: r.requestId ?? randomUUID12() }));
+    fs59.fsyncSync(fd);
   } finally {
-    fs55.closeSync(fd);
+    fs59.closeSync(fd);
   }
-  fs55.renameSync(temp, file);
-  const d = fs55.openSync(dir, "r");
+  fs59.renameSync(temp, file);
+  const d = fs59.openSync(dir, "r");
   try {
-    fs55.fsyncSync(d);
+    fs59.fsyncSync(d);
   } finally {
-    fs55.closeSync(d);
+    fs59.closeSync(d);
   }
   return file;
 }
@@ -42138,7 +44164,7 @@ init_dist();
 init_output();
 import { spawn as spawn3 } from "node:child_process";
 import process19 from "node:process";
-import path45 from "node:path";
+import path49 from "node:path";
 var WORKER_ENV = "POTSHERD_EMBED_WORKER";
 var INDEXABLE = ["claude", "codex", "cursor", "pi", "opencode"];
 var NOT_YET = ["gemini", "copilot"];
@@ -42155,15 +44181,15 @@ async function runIndex(o) {
   }
   const harnesses = parseHarnesses(o.harness);
   const enrollment = { ...o.enroll ? { enrollHarnesses: parseHarnesses(o.enroll) } : {}, ...o.unenroll ? { removeHarnesses: parseHarnesses(o.unenroll) } : {} };
-  const hostRoots = { ...o.piDir ? { piDir: path45.resolve(paths_exports.expandTilde(o.piDir)) } : {}, ...o.opencodeDir ? { opencodeDir: path45.resolve(paths_exports.expandTilde(o.opencodeDir)) } : {} };
-  const bar2 = new Progress("indexing", showProgress);
+  const hostRoots = { ...o.piDir ? { piDir: path49.resolve(paths_exports.expandTilde(o.piDir)) } : {}, ...o.opencodeDir ? { opencodeDir: path49.resolve(paths_exports.expandTilde(o.opencodeDir)) } : {} };
+  const bar3 = new Progress("indexing", showProgress);
   let report;
   const queued = async () => {
-    const requestId = randomUUID13(), capture2 = { ...enrollment, ...hostRoots, ...o.claudeDir ? { claudeDir: path45.resolve(paths_exports.expandTilde(o.claudeDir)) } : {}, ...o.codexDir ? { codexHome: path45.resolve(paths_exports.expandTilde(o.codexDir)) } : {}, ...harnesses ? { harnesses } : {}, ...o.session ? { sessionId: o.session } : {}, full: Boolean(o.full) };
+    const requestId = randomUUID13(), capture2 = { ...enrollment, ...hostRoots, ...o.claudeDir ? { claudeDir: path49.resolve(paths_exports.expandTilde(o.claudeDir)) } : {}, ...o.codexDir ? { codexHome: path49.resolve(paths_exports.expandTilde(o.codexDir)) } : {}, ...harnesses ? { harnesses } : {}, ...o.session ? { sessionId: o.session } : {}, full: Boolean(o.full) };
     const request = { kind: "capture", targetId: o.session ?? "*", inputHash: requestId, requestId, capture: capture2 };
     spoolRequest2(root, request);
-    const { identity: identity4 } = await Promise.resolve().then(() => (init_spans2(), spans_exports));
-    const jobId = identity4("job/v1", request.kind, request.targetId, request.inputHash);
+    const { identity: identity5 } = await Promise.resolve().then(() => (init_spans2(), spans_exports));
+    const jobId = identity5("job/v1", request.kind, request.targetId, request.inputHash);
     startBackgroundEmbedding(root, o);
     const deadline2 = Date.now() + Math.max(0, 4e3 - process19.uptime() * 1e3);
     let status3 = null;
@@ -42196,7 +44222,7 @@ async function runIndex(o) {
   }
   if (owned) {
     const result = await queued();
-    bar2.done();
+    bar3.done();
     if (!result) return 0;
     report = result;
   } else try {
@@ -42218,7 +44244,7 @@ async function runIndex(o) {
         // not at all is decided below, once text search is already live.
         embed: false,
         onProgress: (p) => {
-          if (p.phase === "parse") bar2.update(p.done, p.total, `${p.harness}  ${p.note}`);
+          if (p.phase === "parse") bar3.update(p.done, p.total, `${p.harness}  ${p.note}`);
         }
       })),
       { root, wait: 2e3 }
@@ -42226,11 +44252,11 @@ async function runIndex(o) {
   } catch (error) {
     if (!(error instanceof Error) || error.message !== "maintenance_busy") throw error;
     const result = await queued();
-    bar2.done();
+    bar3.done();
     if (!result) return 0;
     report = result;
   }
-  bar2.done();
+  bar3.done();
   let vec = readVectors(root);
   let spawned = false;
   if (o.embed === true) {
@@ -42428,9 +44454,9 @@ function renderIndexReceipt(report, t, root, o = {}) {
     card.blank().text("record types no format note describes yet, in what this run read:");
     for (const row2 of novel.slice(0, 5)) {
       const nameW = Math.max(20, t.width - 4 - 7 - 3 - 8);
-      const name = `${row2.harness} ${row2.type}`;
+      const name2 = `${row2.harness} ${row2.type}`;
       card.raw(
-        `    ${format_exports.elide(name, nameW, t).padEnd(nameW)}${format_exports.num(row2.count).padStart(7)}   ${t.dim(format_exports.elide(row2.version, 8, t))}`
+        `    ${format_exports.elide(name2, nameW, t).padEnd(nameW)}${format_exports.num(row2.count).padStart(7)}   ${t.dim(format_exports.elide(row2.version, 8, t))}`
       );
     }
   }
@@ -42549,13 +44575,13 @@ function firstLine7(s) {
 
 // packages/cli/src/memory.ts
 init_dist();
-import { randomUUID as randomUUID14, createHash as createHash17 } from "node:crypto";
-import fs57 from "node:fs";
+import { randomUUID as randomUUID14, createHash as createHash21 } from "node:crypto";
+import fs61 from "node:fs";
 import process20 from "node:process";
 
 // packages/cli/src/filters.ts
 init_dist();
-import fs56 from "node:fs";
+import fs60 from "node:fs";
 
 // packages/cli/src/session-ref.ts
 init_dist();
@@ -42758,7 +44784,7 @@ function last(p) {
 function openIndex(o) {
   const root = paths_exports.potsherdDir(o.potsherdDir);
   const file = paths_exports.dbPath(root);
-  if (!fs56.existsSync(file)) {
+  if (!fs60.existsSync(file)) {
     throw new UserError(
       `nothing indexed yet \u2014 no database at ${paths_exports.tildify(file)}`,
       "potsherd index"
@@ -42779,7 +44805,7 @@ function parseLimit(value, fallback) {
 init_output();
 function openMemory(o) {
   const root = paths_exports.potsherdDir(o.potsherdDir), file = paths_exports.dbPath(root);
-  if (!fs57.existsSync(file)) return null;
+  if (!fs61.existsSync(file)) return null;
   const db = db_exports.openSqliteReadOnly(file);
   try {
     assertMemorySchema(db);
@@ -42871,8 +44897,8 @@ function legacySourceSelection(db, o) {
   const coverageGaps = projectionGap ? ["source_filter_projection_gap"] : [];
   const sourceIds = [...new Set(rows.filter((row2) => !blocked.has(row2.source_id)).map((r) => r.source_id))];
   sourceIds.sort();
-  const identity4 = JSON.stringify({ filters, sourceIds, coverageGaps });
-  return { sourceIds, ...coverageGaps.length ? { coverageGaps } : {}, ...filters.harness ? { harnesses: [filters.harness] } : {}, selectionId: createHash17("sha256").update(identity4).digest("hex"), warning: "Source filters applied: " + Object.entries(filters).filter(([key2, value]) => Boolean(value) && (!["sidechains", "ghosts"].includes(key2) || value !== "include")).map(([key2, value]) => `${key2}=${String(value)}`).join("; ").slice(0, 350) };
+  const identity5 = JSON.stringify({ filters, sourceIds, coverageGaps });
+  return { sourceIds, ...coverageGaps.length ? { coverageGaps } : {}, ...filters.harness ? { harnesses: [filters.harness] } : {}, selectionId: createHash21("sha256").update(identity5).digest("hex"), warning: "Source filters applied: " + Object.entries(filters).filter(([key2, value]) => Boolean(value) && (!["sidechains", "ghosts"].includes(key2) || value !== "include")).map(([key2, value]) => `${key2}=${String(value)}`).join("; ").slice(0, 350) };
 }
 function legacyMemoryRef(db, ref3) {
   const exact = db.prepare("SELECT native_session_id FROM memory_sources WHERE native_session_id=? AND availability<>'forgotten'").get(ref3);
@@ -43245,8 +45271,8 @@ async function runFind(o) {
       })
     );
     if (federated) {
-      for (const line2 of wrapOnSeparator(federationLine(federated.bridges), Math.max(20, t.width - 2))) {
-        print(`  ${t.dim(line2)}`);
+      for (const line of wrapOnSeparator(federationLine(federated.bridges), Math.max(20, t.width - 2))) {
+        print(`  ${t.dim(line)}`);
       }
     }
     return result.sessions.length ? 0 : 1;
@@ -43275,9 +45301,9 @@ function vectorMode(o) {
       return "auto";
   }
 }
-function wrapOnSeparator(line2, width, sep = "  \xB7  ") {
-  if (!line2) return [];
-  const parts = line2.split(sep);
+function wrapOnSeparator(line, width, sep = "  \xB7  ") {
+  if (!line) return [];
+  const parts = line.split(sep);
   const out = [];
   let current = "";
   for (const part of parts) {
@@ -43568,7 +45594,7 @@ async function runCard(o) {
       ...o.maxTokens !== void 0 ? { maxTokens: o.maxTokens } : {}
     });
     const showProgress = !o.json && !o.quiet && Boolean(process21.stderr.isTTY);
-    const bar2 = new Progress("carding", showProgress);
+    const bar3 = new Progress("carding", showProgress);
     const concurrency = o.concurrency ?? DEFAULT_CONCURRENCY;
     let report;
     try {
@@ -43578,12 +45604,12 @@ async function runCard(o) {
         concurrency,
         force: Boolean(o.force),
         onProgress: (p) => {
-          if (p.phase === "start") bar2.update(p.done, p.total, idTag(p.target.id));
-          else bar2.update(p.done, p.total, p.detail ?? "");
+          if (p.phase === "start") bar3.update(p.done, p.total, idTag(p.target.id));
+          else bar3.update(p.done, p.total, p.detail ?? "");
         }
       });
     } finally {
-      bar2.done();
+      bar3.done();
       await llm.close();
     }
     recordCardRun(db, {
@@ -44252,9 +46278,9 @@ function fields(t, n3) {
   ]) {
     if (!text2) continue;
     const lines = format_exports.wrap(text2, body);
-    lines.forEach((line2, i) => {
+    lines.forEach((line, i) => {
       const head = i === 0 ? t.dim(label4.padEnd(LABEL_W2)) : " ".repeat(LABEL_W2);
-      out.push(`  ${head}${line2}`);
+      out.push(`  ${head}${line}`);
     });
   }
   return out;
@@ -44567,7 +46593,7 @@ async function runPin(o) {
 // packages/cli/src/commands/ignore.ts
 init_dist();
 init_output();
-import fs58 from "node:fs";
+import fs62 from "node:fs";
 var { addIgnored: addIgnored2, countIgnoredSessions: countIgnoredSessions4, ignoredProjectsInIndex: ignoredProjectsInIndex3, readIgnoreConfig: readIgnoreConfig3, removeIgnored: removeIgnored2 } = search_exports;
 async function runIgnore(o) {
   const verb = o.remove ? "unignore" : "ignore";
@@ -44629,12 +46655,12 @@ async function runIgnore(o) {
   print(lines.join("\n"));
   return 0;
 }
-function show(o, root, list, verb) {
-  const matched = projectsFor(root, list);
+function show(o, root, list2, verb) {
+  const matched = projectsFor(root, list2);
   if (o.json) {
     printJson({
       verb,
-      ignore: list,
+      ignore: list2,
       projects: matched.projects,
       sessions: matched.sessions,
       config: paths_exports.configPath(root)
@@ -44643,7 +46669,7 @@ function show(o, root, list, verb) {
   }
   const t = themeFrom(o);
   const lines = [t.dim(format_exports.clip(`potsherd ignore ${t.sep} ${paths_exports.tildify(paths_exports.configPath(root))}`, t.width, t)), ""];
-  if (list.length === 0) {
+  if (list2.length === 0) {
     lines.push("  nothing is ignored");
     lines.push("");
     lines.push(
@@ -44657,7 +46683,7 @@ function show(o, root, list, verb) {
     print(lines.join("\n"));
     return 0;
   }
-  for (const entry of list) lines.push(`  ${format_exports.clip(entry, t.width - 2, t)}`);
+  for (const entry of list2) lines.push(`  ${format_exports.clip(entry, t.width - 2, t)}`);
   lines.push("");
   const n3 = matched.sessions;
   lines.push(
@@ -44677,9 +46703,9 @@ function show(o, root, list, verb) {
   print(lines.join("\n"));
   return 0;
 }
-function projectsFor(root, list) {
+function projectsFor(root, list2) {
   const file = paths_exports.dbPath(root);
-  if (list.length === 0 || !fs58.existsSync(file)) return { projects: [], sessions: 0 };
+  if (list2.length === 0 || !fs62.existsSync(file)) return { projects: [], sessions: 0 };
   let db;
   try {
     db = db_exports.open({ root, readonly: true });
@@ -44687,7 +46713,7 @@ function projectsFor(root, list) {
     return { projects: [], sessions: 0 };
   }
   try {
-    const projects = ignoredProjectsInIndex3(db, list);
+    const projects = ignoredProjectsInIndex3(db, list2);
     return { projects, sessions: countIgnoredSessions4(db, projects) };
   } catch {
     return { projects: [], sessions: 0 };
@@ -44709,7 +46735,7 @@ async function runLink(o) {
         printJson(result2);
         return 0;
       }
-      for (const line2 of renderSuggestions(result2, themeFrom(o), format_exports.wrap)) print(line2);
+      for (const line of renderSuggestions(result2, themeFrom(o), format_exports.wrap)) print(line);
       return 0;
     }
     if (!o.a || !o.b) {
@@ -44786,7 +46812,7 @@ function receipt3(t, verb, a, b, what, note) {
 // packages/cli/src/commands/ask.ts
 init_dist();
 init_output();
-import fs59 from "node:fs";
+import fs63 from "node:fs";
 import nodePath2 from "node:path";
 import process22 from "node:process";
 function askProgress(t, sink, enabled) {
@@ -44871,7 +46897,7 @@ async function runAsk(o) {
       k,
       cheap,
       strict: Boolean(o.strict),
-      maxUsd: money3(o.maxUsd),
+      maxUsd: money2(o.maxUsd),
       concurrency: positive(o.concurrency, ASK_CONCURRENCY, "--concurrency"),
       // Only when it was typed. `positive()` would substitute the default and
       // core could no longer tell 'unset' from 'five'; today those agree, and
@@ -44888,10 +46914,10 @@ async function runAsk(o) {
     if (synthesisOut) {
       return await recordSynthesis(db, question, base2, synthesisOut, readersIn, o, t, onProgress);
     }
-    const result = filterIn ? await filterHostAnswer(db, question, base2, filterIn, (line2) => {
-      if (!o.json && !o.quiet) print(`  ${t.dim(line2)}`);
-    }) : readersIn ? await replayReaders(db, question, base2, readersIn, (line2) => {
-      if (!o.json && !o.quiet) print(`  ${t.dim(line2)}`);
+    const result = filterIn ? await filterHostAnswer(db, question, base2, filterIn, (line) => {
+      if (!o.json && !o.quiet) print(`  ${t.dim(line)}`);
+    }) : readersIn ? await replayReaders(db, question, base2, readersIn, (line) => {
+      if (!o.json && !o.quiet) print(`  ${t.dim(line)}`);
     }) : await ask(db, question, { ...base2, onProgress });
     if (o.debug) reportDrops(drops);
     if (o.json) {
@@ -44916,8 +46942,8 @@ function recorder() {
   };
   return { fn, seen };
 }
-async function recordReaders(db, question, base2, path46, o, t) {
-  const { file, abs, probe: probe2 } = await writeReadersFile(db, question, base2, path46);
+async function recordReaders(db, question, base2, path50, o, t) {
+  const { file, abs, probe: probe2 } = await writeReadersFile(db, question, base2, path50);
   if (o.json) {
     printJson({
       kind: READERS_FILE_KIND,
@@ -44959,7 +46985,7 @@ async function recordReaders(db, question, base2, path46, o, t) {
   }
   return file.targets.length > 0 ? 0 : 1;
 }
-async function writeReadersFile(db, question, base2, path46) {
+async function writeReadersFile(db, question, base2, path50) {
   const rec = recorder();
   const probe2 = await ask(db, question, {
     ...base2,
@@ -44993,9 +47019,9 @@ async function writeReadersFile(db, question, base2, path46) {
     // that property worthless. Everything here is a function of the index.
     index: { ...indexState(db, base2.root), matching: probe2.matching }
   };
-  const abs = nodePath2.resolve(path46);
-  fs59.mkdirSync(nodePath2.dirname(abs), { recursive: true });
-  fs59.writeFileSync(abs, `${JSON.stringify(file, null, 2)}
+  const abs = nodePath2.resolve(path50);
+  fs63.mkdirSync(nodePath2.dirname(abs), { recursive: true });
+  fs63.writeFileSync(abs, `${JSON.stringify(file, null, 2)}
 `, "utf8");
   return { file, abs, probe: probe2 };
 }
@@ -45030,13 +47056,13 @@ function readersOutReceipt(file, abs, probe2, t) {
   lines.push(`    potsherd ask "${file.question}" --readers-in ${abs}`);
   return lines.join("\n");
 }
-async function replayReaders(db, question, base2, path46, onNote) {
-  const staged = await stageReaders(db, question, base2, path46);
-  for (const line2 of staged.notes) onNote?.(line2);
+async function replayReaders(db, question, base2, path50, onNote) {
+  const staged = await stageReaders(db, question, base2, path50);
+  for (const line of staged.notes) onNote?.(line);
   return ask(db, question, { ...base2, pin: staged.pin, readerFn: staged.readerFn });
 }
-async function stageReaders(db, question, base2, path46) {
-  const abs = nodePath2.resolve(path46);
+async function stageReaders(db, question, base2, path50) {
+  const abs = nodePath2.resolve(path50);
   const file = readReadersFile(abs);
   const q2 = redactOutgoing(question).text;
   if (file.question !== q2) {
@@ -45122,7 +47148,7 @@ function synthCapture() {
   };
   return { fn, seen };
 }
-async function writeSynthesisFile(db, question, base2, path46, readersPath, onProgress) {
+async function writeSynthesisFile(db, question, base2, path50, readersPath, onProgress) {
   const staged = readersPath ? await stageReaders(db, question, base2, readersPath) : null;
   const cap3 = synthCapture();
   const probe2 = await ask(db, question, {
@@ -45138,7 +47164,7 @@ async function writeSynthesisFile(db, question, base2, path46, readersPath, onPr
     synthFn: cap3.fn,
     openThreads: false
   });
-  const abs = nodePath2.resolve(path46);
+  const abs = nodePath2.resolve(path50);
   const notes = staged?.notes ?? [];
   if (!cap3.seen.input) return { file: null, abs, probe: probe2, notes };
   const input = cap3.seen.input;
@@ -45171,21 +47197,21 @@ async function writeSynthesisFile(db, question, base2, path46, readersPath, onPr
     readers: staged ? staged.outputs : [],
     instruction: REPLY_INSTRUCTION
   };
-  fs59.mkdirSync(nodePath2.dirname(abs), { recursive: true });
-  fs59.writeFileSync(abs, `${JSON.stringify(file, null, 2)}
+  fs63.mkdirSync(nodePath2.dirname(abs), { recursive: true });
+  fs63.writeFileSync(abs, `${JSON.stringify(file, null, 2)}
 `, "utf8");
   return { file, abs, probe: probe2, notes };
 }
-async function recordSynthesis(db, question, base2, path46, readersPath, o, t, onProgress) {
+async function recordSynthesis(db, question, base2, path50, readersPath, o, t, onProgress) {
   const { file, abs, probe: probe2, notes } = await writeSynthesisFile(
     db,
     question,
     base2,
-    path46,
+    path50,
     readersPath,
     onProgress
   );
-  if (!o.json && !o.quiet) for (const line2 of notes) print(`  ${t.dim(line2)}`);
+  if (!o.json && !o.quiet) for (const line of notes) print(`  ${t.dim(line)}`);
   if (o.json) {
     printJson({
       kind: SYNTHESIS_FILE_KIND,
@@ -45239,8 +47265,8 @@ function synthesisOutReceipt(file, abs, probe2, t) {
   lines.push(`    potsherd ask "${file.question}" --filter-in ${abs}`);
   return lines.join("\n");
 }
-async function filterHostAnswer(db, question, base2, path46, onNote) {
-  const abs = nodePath2.resolve(path46);
+async function filterHostAnswer(db, question, base2, path50, onNote) {
+  const abs = nodePath2.resolve(path50);
   const file = readSynthesisFile(abs);
   const q2 = redactOutgoing(question).text;
   if (file.question !== q2) {
@@ -45375,7 +47401,7 @@ function unfence(s) {
 function readSynthesisFile(abs) {
   let raw;
   try {
-    raw = fs59.readFileSync(abs, "utf8");
+    raw = fs63.readFileSync(abs, "utf8");
   } catch {
     throw new UserError(`cannot read ${abs}`, `potsherd ask "\u2026" --readers-in r.json --synthesis-out ${abs}`);
   }
@@ -45471,7 +47497,7 @@ function id8s(ids) {
 function readReadersFile(abs) {
   let raw;
   try {
-    raw = fs59.readFileSync(abs, "utf8");
+    raw = fs63.readFileSync(abs, "utf8");
   } catch {
     throw new UserError(`cannot read ${abs}`, `potsherd ask "\u2026" --readers-out ${abs}`);
   }
@@ -45610,7 +47636,7 @@ function positive(value, fallback, flag) {
   }
   return Math.floor(n3);
 }
-function money3(value) {
+function money2(value) {
   if (value === void 0 || value === null || value === "") return ASK_MAX_USD;
   const n3 = Number(value);
   if (!Number.isFinite(n3) || n3 <= 0) {
@@ -45810,7 +47836,7 @@ async function runSetup(o) {
   for (const plan of blocked) {
     refused++;
     print("");
-    for (const line2 of setup_exports.manualSteps(plan)) print("  " + line2);
+    for (const line of setup_exports.manualSteps(plan)) print("  " + line);
   }
   for (const plan of absent) {
     print("");
@@ -45819,7 +47845,7 @@ async function runSetup(o) {
     print(`  ${t.dim(`and no ${plan.detection.bins.join(" or ")} on your PATH`)}`);
     if (!o.remove) {
       print(`  ${t.dim("when you install it, this is the stanza:")}`);
-      for (const line2 of plan.snippet.trimEnd().split("\n")) print("    " + t.dim(line2));
+      for (const line of plan.snippet.trimEnd().split("\n")) print("    " + t.dim(line));
     }
   }
   if (!o.dryRun && !refused && (changed > 0 || done.length > 0)) {
@@ -45859,8 +47885,8 @@ function printPlan(plan, o, t, resolution, unbuilt = false) {
   }
   print("");
   for (const raw of plan.diff.split("\n")) {
-    const line2 = raw.startsWith("--- ") || raw.startsWith("+++ ") ? raw.slice(0, 4) + format_exports.elideMiddle(raw.slice(4), Math.max(24, t.width - 6), t) : raw;
-    const tone2 = line2.startsWith("+") && !line2.startsWith("+++") ? t.ok(line2) : line2.startsWith("-") && !line2.startsWith("---") ? t.warn(line2) : t.dim(line2);
+    const line = raw.startsWith("--- ") || raw.startsWith("+++ ") ? raw.slice(0, 4) + format_exports.elideMiddle(raw.slice(4), Math.max(24, t.width - 6), t) : raw;
+    const tone2 = line.startsWith("+") && !line.startsWith("+++") ? t.ok(line) : line.startsWith("-") && !line.startsWith("---") ? t.warn(line) : t.dim(line);
     print("  " + tone2);
   }
   print("");
@@ -46213,7 +48239,7 @@ async function runStack(o) {
     });
     return 0;
   }
-  for (const line2 of render(r, t, o)) print(line2);
+  for (const line of render(r, t, o)) print(line);
   return 0;
 }
 function render(r, t, o = {}) {
@@ -46231,7 +48257,7 @@ function render(r, t, o = {}) {
     L.push(`    ${f.n}  ${pad4(f.label, 16)}${wide ? pad4(f.when, 26) + state : f.when}`);
   }
   L.push("");
-  for (const line2 of format_exports.wrap(r.claimLegend, t.width - 4)) L.push(t.dim(`  ${line2}`));
+  for (const line of format_exports.wrap(r.claimLegend, t.width - 4)) L.push(t.dim(`  ${line}`));
   L.push("");
   const labelW = 15;
   const licW = wide ? 13 : 0;
@@ -46274,7 +48300,7 @@ function render(r, t, o = {}) {
     L.push("");
     for (const d of here) {
       L.push(`    ${t.ok(d.spec.label)}  ${t.dim(format_exports.elide(d.found[0] ?? "", Math.max(20, t.width - 8 - d.spec.label.length), t))}`);
-      for (const line2 of format_exports.wrap(d.spec.note, t.width - 6)) L.push(`      ${line2}`);
+      for (const line of format_exports.wrap(d.spec.note, t.width - 6)) L.push(`      ${line}`);
     }
     L.push("");
   } else {
@@ -46284,11 +48310,11 @@ function render(r, t, o = {}) {
   const absent = r.detections.filter((d) => !d.present && d.spec.id !== "potsherd");
   if (absent.length) {
     L.push(`  ${t.dim("not installed here")}`);
-    for (const line2 of format_exports.wrap(absent.map((d) => d.spec.label).join(", "), t.width - 6)) {
-      L.push(t.dim(`    ${line2}`));
+    for (const line of format_exports.wrap(absent.map((d) => d.spec.label).join(", "), t.width - 6)) {
+      L.push(t.dim(`    ${line}`));
     }
     const why2 = "potsherd looked for a directory each one creates and found none." + (o.paths ? "" : " potsherd stack --paths shows where it looked.");
-    for (const line2 of format_exports.wrap(why2, t.width - 4)) L.push(t.dim(`  ${line2}`));
+    for (const line of format_exports.wrap(why2, t.width - 4)) L.push(t.dim(`  ${line}`));
     if (o.paths) {
       for (const d of absent) {
         L.push(t.dim(`    ${pad4(d.spec.label, 15)}${format_exports.elideMiddle(d.looked.join("  "), t.width - 22, t)}`));
@@ -46298,23 +48324,23 @@ function render(r, t, o = {}) {
   }
   for (const ov of r.overlaps) {
     L.push(`  ${t.warn(ov.kind)}  ${t.dim(ov.tools.join(", "))}`);
-    for (const line2 of format_exports.wrap(ov.cost, t.width - 6)) L.push(`    ${line2}`);
-    for (const line2 of format_exports.wrap(ov.fix, t.width - 6)) L.push(`    ${t.dim(line2)}`);
+    for (const line of format_exports.wrap(ov.cost, t.width - 6)) L.push(`    ${line}`);
+    for (const line of format_exports.wrap(ov.fix, t.width - 6)) L.push(`    ${t.dim(line)}`);
     L.push("");
   }
   L.push(`  ${t.bold("recommended")}`);
   L.push("");
   for (const row2 of r.recommendation.rows) {
     L.push(`    ${row2.failure.n}  ${pad4(row2.failure.label, 16)}${t.arrow}  ${row2.use}`);
-    for (const line2 of format_exports.wrap(row2.why, t.width - 12)) L.push(t.dim(`       ${line2}`));
+    for (const line of format_exports.wrap(row2.why, t.width - 12)) L.push(t.dim(`       ${line}`));
   }
   L.push("");
   for (const a of r.recommendation.actions) {
-    for (const line2 of format_exports.wrap(a, t.width - 6)) L.push(`    ${line2}`);
+    for (const line of format_exports.wrap(a, t.width - 6)) L.push(`    ${line}`);
   }
   if (r.recommendation.actions.length) L.push("");
   const honesty = `${r.unverified} of these ${r.detections.length} rows are from the project's own docs, read ${r.verifiedOn}, and were never exercised here. the rest were read off this machine.`;
-  for (const line2 of format_exports.wrap(honesty, t.width - 4)) L.push(t.dim(`  ${line2}`));
+  for (const line of format_exports.wrap(honesty, t.width - 4)) L.push(t.dim(`  ${line}`));
   if (o.sources) {
     L.push("");
     for (const d of r.detections) {
@@ -46347,7 +48373,7 @@ function hang(label4, labelW, text2, indent, width) {
   const lead = " ".repeat(indent);
   const body = Math.max(20, width - indent - labelW);
   const lines = format_exports.wrap(text2, body);
-  return lines.map((line2, i) => `${lead}${i === 0 ? pad4(label4, labelW) : " ".repeat(labelW)}${line2}`);
+  return lines.map((line, i) => `${lead}${i === 0 ? pad4(label4, labelW) : " ".repeat(labelW)}${line}`);
 }
 function pad4(s, w) {
   if (w === 0) return "";
@@ -46366,9 +48392,9 @@ function publicHelpText(text2) {
   return publicCommandName === "slopie" ? text2.replace(/\bpotsherd(?=\s|:)/g, "slopie") : text2;
 }
 function addGlobals(cmd) {
-  const name = cmd.name();
-  if (name && name !== publicCommandName) {
-    cmd.showHelpAfterError(`(run  ${publicCommandName} ${name} --help  for its flags and an example)`);
+  const name2 = cmd.name();
+  if (name2 && name2 !== publicCommandName) {
+    cmd.showHelpAfterError(`(run  ${publicCommandName} ${name2} --help  for its flags and an example)`);
   }
   return cmd.option("--json", "machine-readable output, same data as the human view").option("--no-color", "disable colour (NO_COLOR is honoured too)").option("--ascii", "ASCII-only glyphs, for terminals without a unicode font").addOption(new Option("--width <n>", "render for this terminal width").argParser(Number)).option("--claude-dir <path>", "read Claude Code data from here (CLAUDE_CONFIG_DIR is honoured)").option("--codex-dir <path>", "read Codex data from this enrolled root").option("--pi-dir <path>", "read pi data from this enrolled root").option("--opencode-dir <path>", "read OpenCode data from this enrolled root").option("--potsherd-dir <path>", "potsherd's own directory (default ~/.potsherd)").option("--debug", "print full errors");
 }
@@ -47072,15 +49098,17 @@ function tour(o = {}) {
   const roomy = w >= 9 + col3 + 2 + Math.max(...REST.map(([, g]) => g.length));
   REST.forEach(([, gloss], i) => {
     const label4 = i === 0 ? "  also:  " : "         ";
-    const line2 = roomy ? `${label4}${names[i]?.padEnd(col3)}  ${gloss}` : `${label4}${names[i]}`;
-    print(t.dim(line2));
+    const line = roomy ? `${label4}${names[i]?.padEnd(col3)}  ${gloss}` : `${label4}${names[i]}`;
+    print(t.dim(line));
   });
   print(t.dim(`         ${publicCommandName} help <verb> for any of them`));
   print("");
   print(`  start here:  ${t.accent(`${publicCommandName} audit`)}`);
   print("");
 }
-main(process25.argv);
+if (process25.argv[2] === "__audit_worker" && process25.send) {
+  void Promise.resolve().then(() => (init_audit_background(), audit_background_exports)).then(({ runAuditWorkerHost: runAuditWorkerHost2 }) => runAuditWorkerHost2());
+} else main(process25.argv);
 export {
   VERSION
 };
