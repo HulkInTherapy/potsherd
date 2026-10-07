@@ -68,14 +68,14 @@ describe('potsherd cli', () => {
   });
 
   it('audit works read-only against a fixture directory', () => {
-    const r = run(['audit', '--claude-dir', FIXTURE_CLAUDE]);
+    const r = run(['audit', '--legacy', '--claude-dir', FIXTURE_CLAUDE]);
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('sessions ever started');
     expect(r.stdout).toContain('potsherd rescue');
   });
 
   it('accepts --json after the verb, which is what people type', () => {
-    const r = run(['audit', '--json', '--claude-dir', FIXTURE_CLAUDE]);
+    const r = run(['audit', '--legacy', '--json', '--claude-dir', FIXTURE_CLAUDE]);
     expect(r.code).toBe(0);
     const j = JSON.parse(r.stdout) as Record<string, number>;
     expect(j['deleted']).toBe(3);
@@ -83,13 +83,13 @@ describe('potsherd cli', () => {
   });
 
   it('accepts --json before the verb too', () => {
-    const r = run(['--json', 'audit', '--claude-dir', FIXTURE_CLAUDE]);
+    const r = run(['--json', 'audit', '--legacy', '--claude-dir', FIXTURE_CLAUDE]);
     expect(JSON.parse(r.stdout)['deleted']).toBe(3);
   });
 
   it('audit never creates the potsherd directory', () => {
     const root = path.join(scratchRoot(), 'nested');
-    run(['audit', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
+    run(['audit', '--legacy', '--claude-dir', FIXTURE_CLAUDE, '--potsherd-dir', root]);
     expect(fs.existsSync(root)).toBe(false);
   });
 
@@ -265,7 +265,7 @@ describe('potsherd cli', () => {
   });
 
   it('the audit card keeps its closing command whole at 60 columns', () => {
-    const r = run(['audit', '--claude-dir', FIXTURE_CLAUDE, '--width', '60']);
+    const r = run(['audit', '--legacy', '--claude-dir', FIXTURE_CLAUDE, '--width', '60']);
     expect(r.code).toBe(0);
     const lines = r.stdout.trimEnd().split('\n');
     for (const line of lines) expect(line.length).toBeLessThanOrEqual(60);
@@ -291,7 +291,7 @@ describe('potsherd cli', () => {
         JSON.stringify({ type: 'user', sessionId: id, timestamp: '2026-08-01T00:00:00.000Z' }) + '\n',
       );
     }
-    const card = run(['audit', '--claude-dir', claude, '--width', '100']).stdout;
+    const card = run(['audit', '--legacy', '--claude-dir', claude, '--width', '100']).stdout;
     expect(card).toContain('deleted by 30-day sweep');
     expect(card).not.toContain('all 1 are');
     expect(card).toMatch(/that one session/);
@@ -544,13 +544,13 @@ describe('potsherd cli', () => {
   });
 
   it('honours NO_COLOR and emits no escape codes', () => {
-    const r = run(['audit', '--claude-dir', FIXTURE_CLAUDE], { NO_COLOR: '1' });
+    const r = run(['audit', '--legacy', '--claude-dir', FIXTURE_CLAUDE], { NO_COLOR: '1' });
     // eslint-disable-next-line no-control-regex
     expect(/\[/.test(r.stdout)).toBe(false);
   });
 
   it('honours CLAUDE_CONFIG_DIR when no --claude-dir is given', () => {
-    const r = run(['audit', '--json'], { CLAUDE_CONFIG_DIR: FIXTURE_CLAUDE });
+    const r = run(['audit', '--legacy', '--json'], { CLAUDE_CONFIG_DIR: FIXTURE_CLAUDE });
     expect(JSON.parse(r.stdout)['deleted']).toBe(3);
   });
 

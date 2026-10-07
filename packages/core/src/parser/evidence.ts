@@ -7,7 +7,7 @@ export const LEGACY_EXCHANGE_MAPPING_VERSION='exchange-record-map-v1';
 export const CLAUDE_EVIDENCE_VERSION='claude-records-v4';
 export const CODEX_EVIDENCE_VERSION='codex-records-v6';
 /** Record-level evidence, including outcomes with no matching live exchange. */
-export async function collectEvidence(file: string, harness: 'claude' | 'codex', start = 0, options: { snapshot?: Buffer; legacyByOffset?: ReadonlyMap<number, { seq: number; exchangeId: string }> } = {}): Promise<{
+export async function collectEvidence(file: string, harness: 'claude' | 'codex', start = 0, options: { snapshot?: Buffer; legacyByOffset?: ReadonlyMap<number, { seq: number; exchangeId: string }>; /** Audit callers may verify through a bounded reader; ordinary capture remains unchanged. */ readCurrent?: () => Buffer } = {}): Promise<{
     records: EvidenceRecord[];
     continuation: Continuation;
     artifactHash: string;
@@ -102,7 +102,7 @@ export async function collectEvidence(file: string, harness: 'claude' | 'codex',
             }
         }
     }
-    const after = fs.readFileSync(file);
+    const after = options.readCurrent ? options.readCurrent() : fs.readFileSync(file);
     const prefix = before.subarray(0, consumed);
     if (!prefix.equals(after.subarray(0, consumed)))
         throw new Error('source changed during parse');

@@ -1,9 +1,10 @@
-import { claudeDir, claudePaths, tildify } from './paths.js';
+import fs from 'node:fs';
+import { claudeDir, claudePaths, tildify, dbPath, potsherdDir } from './paths.js';
 import { scanClaudeDisk, type DiskScan, type ScannedFile } from './claude/scan.js';
 import { readHistory, type HistoryScan } from './claude/history.js';
 import { readSessionsIndexes, type SessionIndexScan } from './claude/sessions-index.js';
 import { readCleanupStatus, CLAUDE_DEFAULT_CLEANUP_DAYS, type CleanupStatus } from './claude/settings.js';
-import { readArchiveState, type ArchiveState } from './archive-state.js';
+import { readArchiveState, ARCHIVE_UNAVAILABLE_WARNING, type ArchiveState } from './archive-state.js';
 import { isSubstantivePrompt } from './rescue.js';
 
 /**
@@ -135,6 +136,7 @@ export interface AuditInput {
   index: SessionIndexScan;
   cleanup: CleanupStatus;
   archive: ArchiveState | null;
+  archiveUnavailable?: boolean;
   claudeDir: string;
   now: Date;
 }
@@ -159,7 +161,8 @@ export async function collectAudit(
   const index = readSessionsIndexes(root);
   const cleanup = readCleanupStatus(root);
   const archive = readArchiveState(opts.potsherdDir);
-  return { disk, history, index, cleanup, archive, claudeDir: root, now };
+  const archiveUnavailable=archive===null&&fs.existsSync(dbPath(potsherdDir(opts.potsherdDir)));
+  return { disk, history, index, cleanup, archive, archiveUnavailable, claudeDir: root, now };
 }
 
 export async function audit(
@@ -178,6 +181,7 @@ export function computeAudit(input: AuditInput): AuditReport {
   const { disk, history, index, cleanup, archive, claudeDir: root, now } = input;
   const cp = claudePaths(root);
   const warnings: string[] = [];
+  if(input.archiveUnavailable)warnings.push(ARCHIVE_UNAVAILABLE_WARNING);
 
   const onDiskIds = new Set(disk.sessions.map((s) => s.sessionId));
   const everIds = new Set<string>(onDiskIds);

@@ -30,6 +30,12 @@ mkdirSync(path.join(here, 'dist'), { recursive: true });
 // bundle with none of them present still runs `audit`, `rescue`, `guard` and
 // `doctor` — the rescue path, which is what the product is named for.
 const external = [
+  // Deferred interactive dependencies keep their ESM/WASM asset resolution and
+  // must not be initialized by legacy/plain routes. The UI imports them only
+  // inside its async interactive entry, preserving this single canonical file.
+  'ink',
+  'react',
+  'string-width',
   'better-sqlite3',
   'sqlite-vec',
   '@huggingface/transformers',
@@ -74,3 +80,5 @@ for (const file of ['LICENSE', 'NOTICE', 'README.md']) {
 
 mkdirSync(path.join(here,'licenses'),{recursive:true});
 copyFileSync(path.join(repo,'licenses','js-tiktoken-MIT.txt'),path.join(here,'licenses','js-tiktoken-MIT.txt'));
+
+copyFileSync(path.join(repo,'licenses','models-dev-MIT.txt'),path.join(here,'licenses','models-dev-MIT.txt'));

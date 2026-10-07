@@ -114,7 +114,7 @@ describe('the shipped bundle, with no node_modules anywhere', () => {
   });
 
   it('audits — the first command anyone runs, and it needs no database', () => {
-    const r = run(['audit', '--claude-dir', FIXTURE, '--json']);
+    const r = run(['audit', '--legacy', '--claude-dir', FIXTURE, '--json']);
     expect(r.code, r.stderr).toBe(0);
     const j = JSON.parse(r.stdout) as Record<string, number>;
     expect(j['deleted']).toBe(3);

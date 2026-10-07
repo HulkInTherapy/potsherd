@@ -367,6 +367,7 @@ describe.each(PLUGINS)('%s hooks', (plugin) => {
         [
           path.join(dir, 'bin', 'potsherd'),
           'audit',
+          '--legacy',
           '--json',
           '--claude-dir',
           copyFixtureClaude(),

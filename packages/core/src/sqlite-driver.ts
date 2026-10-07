@@ -61,6 +61,8 @@ export type DriverKind = 'better-sqlite3' | 'node:sqlite';
 
 export interface Driver {
   kind: DriverKind;
+  /** Frozen deserialization is available only on the native driver. */
+  openSnapshot?(bytes: Buffer): Db;
   open(
     file: string,
     opts: {
@@ -143,6 +145,13 @@ export function openDatabase(
   return d.open(file, opts);
 }
 
+/** An audit snapshot is an in-memory copy, independent of ordinary driver selection. */
+export function openDatabaseSnapshot(bytes: Buffer): Db {
+  const native = loadBetterSqlite();
+  if (!native?.openSnapshot) throw new NoSqliteError(['frozen read-only snapshot driver unavailable']);
+  return native.openSnapshot(bytes);
+}
+
 /** Test seam: forget the cached driver so `POTSHERD_SQLITE` can be re-read. */
 export function resetDriverCache(): void {
   cached = undefined;
@@ -155,11 +164,12 @@ function loadBetterSqlite(): Driver | null {
   try {
     const mod = require_('better-sqlite3') as { default?: unknown };
     const Ctor = ((mod as { default?: unknown }).default ?? mod) as new (
-      file: string,
+      file: string | Buffer,
       options?: Database.Options,
     ) => Db;
     return {
       kind: 'better-sqlite3',
+      openSnapshot: bytes => new Ctor(bytes, { readonly: true }),
       open: (file, o) =>
         new Ctor(file, {
           ...(o.readonly ? { readonly: true } : {}),
