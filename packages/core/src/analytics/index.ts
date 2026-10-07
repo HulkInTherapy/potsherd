@@ -126,6 +126,7 @@ class LocalAuditSession implements AuditSession {
  }
  private denied(id:string,project:string|null):boolean{if(project&&isIgnoredProject(project,this.ignored))return true;return !!this.db?.prepare("SELECT 1 FROM forget_tombstones WHERE source_id=? AND state<>'reversed'").get(id);}
  private selected(event:NativeEvent):boolean{
+  if(this.ignored.length&&event.project&&isIgnoredProject(event.project,this.ignored))return false;
   if(this.current.scope.project&&event.project!==this.current.scope.project){if(event.project===null)this.gap('project_unknown');return false;}
   if(!event.eventAt){this.gap('event_time_unknown');return !this.current.scope.eventFrom&&!this.current.scope.asOf;}
   return (!this.current.scope.eventFrom||event.eventAt>=this.current.scope.eventFrom)&&(!this.current.scope.asOf||event.eventAt<=this.current.scope.asOf);
@@ -139,7 +140,9 @@ class LocalAuditSession implements AuditSession {
    const prompt:AuditPrompt={id:digest(`${id}:${event.identity}`).slice(0,32),conversationId:id,role:'user',originBasis:event.origin,identityBasis:event.identity,eligibleHuman:event.eligible,excludedReason:event.excluded,eventAt:event.eventAt,text:event.text,route};prompts.push(prompt);if(event.nativeRecordId&&event.recordCommitment)proofs.set(prompt.id,{recordId:event.nativeRecordId,commitment:event.recordCommitment,declaredOrigin:event.declaredOrigin??null});else if(event.declaredOrigin)this.gap('inherited_record_identity_unavailable',harness);this.routes.set(routeKey(route),prompt);this.totalPrompts++;}
   const ownUnknown=prompts.filter(p=>p.originBasis==='unknown').length;const dates=prompts.map(p=>p.eventAt).filter((t):t is string=>t!==null).sort();
   const coverage={...emptyCoverage(),knownSources:1,parsedSources:1,unknownOriginEvents:ownUnknown,excludedEvents:prompts.filter(p=>!p.eligibleHuman).length,state:facts.gaps.length?'partial' as const:'complete_snapshot' as const,gapCodes:facts.gaps};
-  this.entries.set(id,{conversation:{id,sourceId:id,harness,nativeSessionId:facts.nativeId,projectId:facts.project?digest(facts.project).slice(0,20):null,title:facts.title,alias:`Conversation ${this.entries.size+1}`,promptCount:harness==='pi'||harness==='opencode'?null:prompts.filter(p=>p.eligibleHuman).length,unknownOriginEvents:ownUnknown,eventFrom:dates[0]??null,eventTo:dates.at(-1)??null,child:facts.child,parentId:facts.parent?sourceId(harness,facts.parent):null,coverage},project:facts.project,prompts,proofs,hash:facts.hash,committedBytes:facts.bytes,file,fileHash});this.parsed++;
+  const measuredProject=this.current.scope.project??facts.project;
+  const title=this.current.scope.project||this.ignored.length?null:facts.title;
+  this.entries.set(id,{conversation:{id,sourceId:id,harness,nativeSessionId:facts.nativeId,projectId:measuredProject?digest(measuredProject).slice(0,20):null,title,alias:`Conversation ${this.entries.size+1}`,promptCount:harness==='pi'||harness==='opencode'?null:prompts.filter(p=>p.eligibleHuman).length,unknownOriginEvents:ownUnknown,eventFrom:dates[0]??null,eventTo:dates.at(-1)??null,child:facts.child,parentId:facts.parent?sourceId(harness,facts.parent):null,coverage},project:measuredProject,prompts,proofs,hash:facts.hash,committedBytes:facts.bytes,file,fileHash});this.parsed++;
  }
  private remove(id:string):void{const old=this.entries.get(id);if(old){this.totalPrompts-=old.prompts.length;for(const prompt of old.prompts)this.routes.delete(routeKey(prompt.route));this.entries.delete(id);}}
  private sourceCandidate(harness:AuditHarness,countFile=true):void{this.candidates++;this.update({sources:this.current.sources.map(s=>s.harness===harness?{...s,candidateFiles:s.candidateFiles+(countFile?1:0),state:'available'}:s)});}

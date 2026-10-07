@@ -27,7 +27,7 @@ export interface AuditPhrase { id: string; text: string; prompts: number; occurr
 export type AuditProseKind='direct_prose'|'quoted'|'code'|'unknown';
 export interface AuditProfanity { lexiconVersion:string; language:'en-explicit-lexicon'; measurementBasis:string; eligiblePrompts:number; occurrences:AuditMetric; containingPrompts:AuditMetric; buckets:readonly {kind:AuditProseKind;occurrences:number;containingPrompts:number}[]; coverageGaps:readonly string[]; matches?:readonly {term:string;kind:AuditProseKind;promptId:string;conversationId:string;startUtf16:number;endUtf16:number;route:AuditEvidenceRoute}[]; }
 export type AuditRawAnswer = { type:'choice'; choice: string; probabilities: Readonly<Record<string,number>>; confidence:number }|{ type:'noul'; noul:number }|{ type:'score'; score:number; legend: Readonly<Record<string,string>>; probabilities:Readonly<Record<string,number>>; confidence:number };
-export interface AuditPromptJudgment { promptId: string; conversationId: string; sourceRoute: AuditEvidenceRoute; contentHash:string; scopeHash:string; normalizationVersion:string; questionVersion:string; questionDefinitions?:Readonly<Record<string,unknown>>; model:string; answers:Readonly<Record<string,AuditRawAnswer>>; windowCoverage:'complete'|'truncated'|'partial'; primaryIntent:AuditIntent|null; abstained:boolean; }
+export interface AuditPromptJudgment { promptId: string; conversationId: string; sourceRoute: AuditEvidenceRoute; contentHash:string; scopeHash:string; normalizationVersion:string; questionVersion:string; policyVersion?:string; questionDefinitions?:Readonly<Record<string,unknown>>; model:string; answers:Readonly<Record<string,AuditRawAnswer>>; windowCoverage:'complete'|'truncated'|'partial'; primaryIntent:AuditIntent|null; abstained:boolean; }
 export interface AuditUsage { state: Availability; inputTokens: number|null; outputTokens: number|null; cacheTokens: number|null; reasoningTokens: number|null; costUsd: number|null; measurementBasis: string|null; inclusion: string|null; priceVersion: string|null; }
 export interface AuditWorkBar { label: string; count: number; denominator: number; state: Availability; }
 export interface AuditSemantics { state: 'not_run'|'no_key'|'running'|'partial'|'complete'|'cancelled'|'error'; qualified: boolean; model: string|null; classifiedPrompts: number; eligiblePrompts: number; uncertainPrompts: number; unclassifiedPrompts?:number; work: readonly AuditWorkBar[]; requestCount: number; cacheHits: number; estimatedCostUsd: number|null; reportedCostUsd: number|null; unresolvedCostUsd: number|null; errorCode: string|null; }
@@ -51,11 +51,11 @@ export interface AuditOverviewOptions {
   /** Frozen checkpoint allocation bound for this session only; default64MiB,100bytes..256MiB. */
   maxStoreBytes?: number;
 }
-export interface AuditSemanticSelection { conversationIds: readonly string[]; maxPrompts: number; maxRequests: number; budgetUsd: number; consent: true; confidenceThreshold?:number; signal?: AbortSignal; }
+export interface AuditSemanticSelection { conversationIds: readonly string[]; maxPrompts: number; maxRequests: number; budgetUsd: number; consent: true; confidenceThreshold?:number; signal?: AbortSignal; approvedRequestHashes?:readonly string[]; approvedPolicyVersion?:string; }
 /** Private consent material only: never attach to a public snapshot/default rendering. */
 export interface AuditSemanticPreparedRequest {
  promptId:string;conversationId:string;sourceRoute:AuditEvidenceRoute;sourceVersion:string;
- contentHash:string;scopeHash:string;normalizationVersion:string;questionVersion:string;
+ contentHash:string;scopeHash:string;normalizationVersion:string;questionVersion:string;policyVersion:string;
  windowCoverage:'partial'|'truncated';requestHash:string;requestBytes:number;
  request:{model:string;state:{target:{role:'user';text:string};precedingUser:readonly {role:'user';text:string}[];assistantContext:'unavailable'};questions:Readonly<Record<string,unknown>>};
 }
