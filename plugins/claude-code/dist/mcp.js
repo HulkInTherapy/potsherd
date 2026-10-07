@@ -25785,6 +25785,13 @@ function toAscii(s) {
 }
 var ANSI_RE = new RegExp("\\u001b\\[[0-9;]*m", "g");
 
+// packages/core/dist/audit-sqlite.js
+import os4 from "node:os";
+var MAX_DISK_BYTES = 4 * 1024 * 1024 * 1024;
+var BUFFER_BYTES = 1024 * 1024;
+var DISK_HEADROOM = 32 * 1024 * 1024;
+var nativeBigEndian = os4.endianness() === "BE";
+
 // packages/core/dist/claude/scan.js
 var HEAD_BYTES = 64 * 1024;
 var TAIL_BYTES = 64 * 1024;
@@ -25797,9 +25804,9 @@ import path6 from "node:path";
 
 // packages/core/dist/memory/leases.js
 import { randomUUID } from "node:crypto";
-import os4 from "node:os";
+import os5 from "node:os";
 import { execFileSync as execFileSync2 } from "node:child_process";
-var HOST = os4.hostname();
+var HOST = os5.hostname();
 function processStart2(pid) {
   try {
     return execFileSync2("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8", timeout: 1e3 }).trim() || null;
@@ -29279,7 +29286,7 @@ function inspectCoverage(db, scope3 = {}, semantic = "disabled", capabilityScope
     const historical = scopeSql({ ...scope3, learnedBy: void 0, includeHistory: true });
     unknownHistory = db.prepare(`SELECT COUNT(DISTINCT s.source_id) n ${join} LEFT JOIN source_activation_baselines b ON b.source_id=s.source_id WHERE ${historical.sql} AND (b.source_id IS NULL OR (b.history_complete=0 AND b.known_from>?))`).get(...historical.params, new Date(scope3.learnedBy).toISOString()).n;
   }
-  const fallback = Boolean(db.prepare(`SELECT 1 ${join} JOIN revision_spans rs ON rs.revision_id=r.revision_id JOIN evidence_spans p ON p.span_id=rs.span_id WHERE ${filter.sql} AND p.chunk_policy='span-conservative-utf8-v1' LIMIT 1`).get(...filter.params));
+  const fallback = Boolean(db.prepare(`SELECT 1 FROM evidence_spans p WHERE p.chunk_policy='span-conservative-utf8-v1' AND EXISTS(SELECT 1 FROM revision_spans rs JOIN source_revisions r ON r.revision_id=rs.revision_id JOIN memory_sources s ON s.source_id=r.source_id JOIN revision_units ru ON ru.revision_id=r.revision_id AND ru.unit_revision_id=p.unit_revision_id JOIN evidence_units u ON u.unit_revision_id=ru.unit_revision_id WHERE rs.span_id=p.span_id AND ${filter.sql}) LIMIT 1`).get(...filter.params));
   let unknownEventTimes = 0;
   if (scope3.eventFrom || scope3.asOf) {
     const unbounded = scopeSql({ ...scope3, eventFrom: void 0, asOf: void 0 });
@@ -36374,7 +36381,7 @@ function episodicIndexPath(env = process9.env) {
 }
 
 // packages/core/dist/version.js
-var VERSION = "1.6.1";
+var VERSION = "1.6.2";
 
 // packages/core/dist/memory/delete.js
 import fs23 from "node:fs";
@@ -37150,7 +37157,7 @@ var MaintenanceWorker = class {
 
 // packages/mcp/src/context.ts
 import fs25 from "node:fs";
-import os5 from "node:os";
+import os6 from "node:os";
 import path24 from "node:path";
 import process11 from "node:process";
 
@@ -37214,14 +37221,14 @@ function plausibleProjectDir(dir) {
 }
 function homeDir() {
   try {
-    return os5.homedir();
+    return os6.homedir();
   } catch {
     return null;
   }
 }
 function tmpDir() {
   try {
-    return os5.tmpdir();
+    return os6.tmpdir();
   } catch {
     return null;
   }
@@ -45353,7 +45360,7 @@ function createServer(ctx) {
 
 // packages/mcp/src/selftest.ts
 import fs26 from "node:fs";
-import os6 from "node:os";
+import os7 from "node:os";
 import path25 from "node:path";
 import process12 from "node:process";
 
@@ -46169,7 +46176,7 @@ async function call2(client, name, args) {
 // packages/mcp/src/selftest.ts
 var DEFAULT_WIDTH = 80;
 async function selftest(out = process12.stderr, width = DEFAULT_WIDTH) {
-  const start = Date.now(), tmp = fs26.mkdtempSync(path25.join(os6.tmpdir(), "potsherd-mcp-selftest-")), root = path25.join(tmp, "index"), project = path25.join(tmp, "project"), claude = path25.join(tmp, "claude");
+  const start = Date.now(), tmp = fs26.mkdtempSync(path25.join(os7.tmpdir(), "potsherd-mcp-selftest-")), root = path25.join(tmp, "index"), project = path25.join(tmp, "project"), claude = path25.join(tmp, "claude");
   fs26.mkdirSync(project, { recursive: true });
   const checks2 = [];
   const say = (message) => out.write(format_exports.clip(message, width) + "\n");
