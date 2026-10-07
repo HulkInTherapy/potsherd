@@ -52,6 +52,8 @@ export interface AuditDataFunnel {sourceFiles?:readonly {fileHash:string;harness
 
 export type AuditEvent = {type:'transfer';snapshotId:string;sequence:number;model:string;recipients:readonly string[];attempt:number;selectedSegments:number;notice:string;ackId?:string}|{ type: 'snapshot'; snapshot: AuditSnapshot }|{ type:'progress'; snapshotId: string; sequence: number; progress: AuditProgress; sources: readonly AuditSourceCapability[] }|{ type:'error'; snapshotId:string; code: string; message: string };
 export interface AuditOverviewOptions {
+  /** Internal local executor; injected after IPC initialization, never serialized or accepted by the CLI. */
+  nativeScanExecutor?:import('./native-pool.js').NativeScanExecutor;
   /** Internal parent/worker identity handoff; never a CLI input or authority token. */
   sessionIdentity?:string;
   claudeDir?: string; codexDir?: string; piDir?: string; opencodeDir?: string; potsherdDir?: string;

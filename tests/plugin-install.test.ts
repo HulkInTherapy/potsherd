@@ -110,6 +110,7 @@ describe('the plugin directory, installed on its own under a commonjs parent', (
     const ARTIFACTS: readonly (readonly [string, string])[] = [
       ['packages/cli/dist/potsherd.js', 'dist/potsherd.js'],
       ['packages/mcp/dist/index.js', 'dist/mcp.js'],
+      ['packages/cli/dist/audit-native-worker.js', 'dist/audit-native-worker.js'],
     ];
     const vendorScript = join(REPO, 'scripts', 'vendor-plugin.mjs');
     const script = readFileSync(vendorScript, 'utf8');

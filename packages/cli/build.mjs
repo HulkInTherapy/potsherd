@@ -47,6 +47,7 @@ const external = [
 
 const targets = [
   { in: 'src/index.ts', out: 'dist/potsherd.js' },
+  { in: 'src/audit-native-worker.ts', out: 'dist/audit-native-worker.js' },
 ];
 
 for (const t of targets) {

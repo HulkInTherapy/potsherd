@@ -11,6 +11,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ARTIFACTS = [
   ['packages/cli/dist/potsherd.js', 'dist/potsherd.js'],
   ['packages/mcp/dist/index.js', 'dist/mcp.js'],
+  ['packages/cli/dist/audit-native-worker.js', 'dist/audit-native-worker.js'],
 ];
 const PLUGINS = ['plugins/claude-code','plugins/codex'];
 

@@ -29,6 +29,10 @@ import { runStack } from './commands/stack.js';
 import { VERSION } from '@potsherd/core';
 export { VERSION };
 
+// React and Ink are loaded only by the interactive route, after this bootstrap.
+// Ordinary CLI processes use production rendering; explicit environments stay intact.
+if (process.env.NODE_ENV === undefined) process.env.NODE_ENV = 'production';
+
 /**
  * The `potsherd` binary.
  *

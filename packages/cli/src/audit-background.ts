@@ -3,12 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createAuditSession,type AuditSession,type AuditOverviewOptions,type AuditSnapshot,type AuditEvent} from '@potsherd/core';
+import {createNativeScanPool} from '../../core/src/analytics/native-pool.js';
 
 type Request={kind:'request';id:number;op:string;args:unknown[]};
 type Pending={op:string;resolve:(value:any)=>void;reject:(error:Error)=>void};
 /** The renderer owns this process; synchronous SQLite/file work owns a child. */
 export function createBackgroundAuditSession(options:AuditOverviewOptions,entry=process.argv[1]!):AuditSession {
- const seed=createAuditSession({...options,onTransfer:undefined,signal:undefined});let current=seed.snapshot();seed.dispose();
+ const seed=createAuditSession({...options,nativeScanExecutor:undefined,onTransfer:undefined,signal:undefined});let current=seed.snapshot();seed.dispose();
  let child:ChildProcess|null=null,temporary:string|null=null,disposed=false,cancelled=false,next=0,events:((event:AuditEvent)=>void)|undefined;
  const pending=new Map<number,Pending>();let ready:Promise<void>|null=null,resolveReady:()=>void=()=>{},rejectReady:(error:Error)=>void=()=>{};
  let stopTimer:ReturnType<typeof setTimeout>|undefined,killTimer:ReturnType<typeof setTimeout>|undefined;
@@ -27,7 +28,7 @@ export function createBackgroundAuditSession(options:AuditOverviewOptions,entry=
   });
   child.once('error',error=>{rejectReady(error);for(const p of pending.values())p.reject(error);pending.clear();stopped();});
   child.once('exit',()=>{stopped();if(cancelled||disposed)return;const error=new Error('audit_background_worker_unavailable');rejectReady(error);for(const p of pending.values())p.reject(error);pending.clear();});
-  const {signal:_,onTransfer:__,...serializable}=options;child.send({kind:'init',options:{...serializable,sessionIdentity:current.snapshotId}});return ready;
+  const {signal:_,onTransfer:__,nativeScanExecutor:___,...serializable}=options;child.send({kind:'init',options:{...serializable,sessionIdentity:current.snapshotId}});return ready;
  };
  const request=async(op:string,args:unknown[]=[]):Promise<any>=>{if(disposed||cancelled)throw new Error('audit_cancelled');await start();if(disposed||cancelled)throw new Error('audit_cancelled');return new Promise((resolve,reject)=>{const id=++next;pending.set(id,{op,resolve,reject});child!.send({kind:'request',id,op,args} satisfies Request);});};
  const cancel=()=>{if(cancelled)return;cancelled=true;settleCancelled();rejectReady(new Error('audit_cancelled'));if(child?.connected)child.send({kind:'cancel'});if(child&&child.exitCode===null){const ownedChild=child;stopTimer=setTimeout(()=>{ownedChild.kill('SIGTERM');killTimer=setTimeout(()=>ownedChild.kill('SIGKILL'),250);killTimer.unref();},500);stopTimer.unref();}};
@@ -52,7 +53,10 @@ export async function runAuditWorkerHost():Promise<void> {
  const emit=(event:AuditEvent)=>{if(event.type!=='transfer')send({kind:'event',event});};
  process.on('message',async(raw:any)=>{
   if(raw?.kind==='init'){
-   session=createAuditSession({...raw.options,onTransfer:(event:Extract<AuditEvent,{type:'transfer'}>)=>new Promise<void>((resolve,reject)=>{const ackId=String(++nextAck);acknowledgements.set(ackId,{resolve,reject});send({kind:'event',event:{...event,ackId}});})});send({kind:'ready',snapshot:session.snapshot()});return;
+   const entry=new URL('./audit-native-worker.js',import.meta.url);
+   if(raw.options?.launch&&!fs.existsSync(entry))throw new Error('audit_native_worker_asset_unavailable');
+   const nativeScanExecutor=raw.options?.launch?createNativeScanPool(entry):undefined;
+   session=createAuditSession({...raw.options,nativeScanExecutor,onTransfer:(event:Extract<AuditEvent,{type:'transfer'}>)=>new Promise<void>((resolve,reject)=>{const ackId=String(++nextAck);acknowledgements.set(ackId,{resolve,reject});send({kind:'event',event:{...event,ackId}});})});send({kind:'ready',snapshot:session.snapshot()});return;
   }
   if(raw?.kind==='transfer_ack'){acknowledgements.get(raw.ackId)?.resolve();acknowledgements.delete(raw.ackId);return;}
   if(raw?.kind==='cancel'){session?.cancel();for(const ack of acknowledgements.values())ack.reject(new Error('audit_cancelled'));acknowledgements.clear();session?.dispose();if(process.connected)process.disconnect();return;}

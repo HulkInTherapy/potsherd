@@ -12,7 +12,7 @@ const at=(v:unknown):string|null=>typeof v==='number'&&Number.isFinite(v)&&Math.
 export interface UsageRecordScope {key:string;rawStart:number;rawEnd:number;eventAt:string|null;project:string|null;}
 export interface NativeUsageOptions {project?:string|null;maxRecords?:number;acceptRecord?:(record:R,scope:UsageRecordScope)=>boolean;}
 /** Reads only the caller's bounded frozen bytes. Excluded records still advance native counters. */
-export interface NativeUsageAccumulator {invalidateContext():void;pushLine(line:string):void;records():RecordedInference[];counts():{observed:number;excluded:number;deduplicated:number};}
+export interface NativeUsageAccumulator {invalidateContext():void;pushLine(line:string):void;pushRecord(record:R,position?:{rawStart:number;rawEnd:number}):void;records():RecordedInference[];counts():{observed:number;excluded:number;deduplicated:number};}
 /** Stateful per-record extraction lets full usage stream independently of context captures. */
 export function createNativeUsageAccumulator(harness:AuditHarness,conversationId:string,options:NativeUsageOptions={}):NativeUsageAccumulator {
  let observed=0,excluded=0;
@@ -21,9 +21,8 @@ export function createNativeUsageAccumulator(harness:AuditHarness,conversationId
  const identities=new Map<string,{models:Set<string>;providers:Set<string>}>();
  const score=(v:RecordedInference)=> (v.inputTokens??0)+(v.outputTokens??0)+(v.cacheReadTokens??0)+Math.max(v.cacheWriteTokens??0,(v.cacheWrite5mTokens??0)+(v.cacheWrite1hTokens??0))+(v.reasoningTokens??0);
  const put=(r:RecordedInference)=>{const old=records.get(r.id),identity=identities.get(r.id)??{models:new Set<string>(),providers:new Set<string>()};if(r.model!==null)identity.models.add(r.model);if(r.provider!==null)identity.providers.add(r.provider);identities.set(r.id,identity);const chosen=!old||score(r)>score(old)?r:old;const conflict=identity.models.size>1||identity.providers.size>1;records.set(r.id,conflict?{...chosen,model:null,provider:null,gaps:[...new Set([...chosen.gaps,'response_identity_model_conflict'])]}:chosen);};
- const pushLine=(line:string):void=>{
-const start=offset;offset+=Buffer.byteLength(line)+1;if(!line.trim())return;if(++seq>(options.maxRecords??100_000))return;
-  let r:R;try{r=obj(JSON.parse(line));}catch{return;}
+ const pushRecord=(record:R,position?:{rawStart:number;rawEnd:number}):void=>{
+  const start=position?.rawStart??offset;if(position)offset=position.rawEnd;if(++seq>(options.maxRecords??100_000))return;let r=record;
   if(harness==='opencode'){r={...r,...obj(r.message)};const wrapped=r.data??r.content;if(typeof wrapped==='string'){try{r={...r,...obj(JSON.parse(wrapped))};}catch{/* unsupported projection remains unknown */}}else if(wrapped&&typeof wrapped==='object')r={...r,...obj(wrapped)};}
   const p=obj(r.payload),m=obj(r.message);
   project=str(r.cwd,p.cwd,r.directory)??project;if(harness==='claude')session=str(r.sessionId)??session;if(harness==='pi'&&r.type==='session')session=str(r.id)??session;
@@ -63,7 +62,8 @@ const start=offset;offset+=Buffer.byteLength(line)+1;if(!line.trim())return;if(+
   if(includesReasoning&&output!==null&&reasoning!==null&&reasoning>output)gaps.push('reasoning_exceeds_output');
   put({id,conversationId,harness,eventAt,project,provider:observedProvider,model:observedModel,canonicalModel:null,inputTokens:input,outputTokens:output,cacheReadTokens:read,cacheWriteTokens:write,reasoningTokens:reasoning,inputIncludesCache:includesCache,outputIncludesReasoning:includesReasoning,reportedCostUsd:reported,basis,gaps,...(harness==='claude'?{cacheWrite5mTokens:num(obj(obj(m.usage).cache_creation).ephemeral_5m_input_tokens),cacheWrite1hTokens:num(obj(obj(m.usage).cache_creation).ephemeral_1h_input_tokens)}:{})});
  };
- return {invalidateContext:()=>{project=null;model=null;provider=null;previous=null;},pushLine,records:()=>[...records.values()],counts:()=>({observed,excluded,deduplicated:Math.max(0,observed-excluded-records.size)})};
+ const pushLine=(line:string):void=>{const start=offset;offset+=Buffer.byteLength(line)+1;if(!line.trim())return;let r:R;try{r=obj(JSON.parse(line));}catch{seq++;return;}pushRecord(r,{rawStart:start,rawEnd:offset});};
+ return {pushRecord,invalidateContext:()=>{project=null;model=null;provider=null;previous=null;},pushLine,records:()=>[...records.values()],counts:()=>({observed,excluded,deduplicated:Math.max(0,observed-excluded-records.size)})};
 }
 export function extractNativeUsage(bytes:Buffer|string,harness:AuditHarness,conversationId:string,options:NativeUsageOptions={}):RecordedInference[]{
  const text=Buffer.isBuffer(bytes)?bytes.toString('utf8'):bytes,acc=createNativeUsageAccumulator(harness,conversationId,options);

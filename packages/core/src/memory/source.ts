@@ -17,7 +17,8 @@ import { elideBinary } from '../redact-elide.js';
 import { hash, identity, buildSpanManifest, spanManifestHash, currentSpanPolicy, SPAN_MANIFEST_VERSION, type SpanTokenizer } from './spans.js';
 import {NORMALIZATION_VERSION,requiresPrivacyRefresh,privacyAffectedRange} from './privacy.js';
 export {NORMALIZATION_VERSION} from './privacy.js';
-export function sourceId(harness: string, nativeSessionId: string): string { return hash(`source/v1\0${harness}\0${nativeSessionId}`); }
+import {sourceId} from './source-identity.js';
+export {sourceId} from './source-identity.js';
 export function readEpochs(db: Db): Epochs { const r = db.prepare('SELECT * FROM memory_epochs WHERE singleton=1').get() as Record<string, number>; return { evidence: r.evidence_epoch!, notes: r.notes_epoch!, lineage: r.lineage_epoch!, deletion: r.deletion_epoch!, vector: r.vector_epoch! }; }
 export function compatibilityRecords(parsed: ParseResult): EvidenceRecord[] {
     const records: EvidenceRecord[] = [];
