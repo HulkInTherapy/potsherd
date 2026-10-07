@@ -54,6 +54,7 @@ export function segmentsInWindow(segments:readonly ContextSegment[],period:Seman
   if(!promptIds.length)return [];
   // A historical cutoff cannot silently clip a task with later records.
   if(segment.records.some(r=>r.eventAt!==null&&Date.parse(r.eventAt)>to))return [];
+  if(promptIds.length===segment.promptIds.length&&promptIds.every((id,i)=>id===segment.promptIds[i]))return [segment];
   return [{...segment,promptIds,contentHash:digest(JSON.stringify({records:segment.records.map(({route:_,...record})=>record),promptIds}))}];
  });
 }
@@ -70,9 +71,10 @@ export function selectSemanticWindow(segments:readonly ContextSegment[],options:
  const until=new Date(options.until).toISOString(),limit=Math.min(100000,options.tokenLimit??100000),tokenizer=options.estimateTokens??estimateFreeJevTokens;
  if(!Number.isSafeInteger(limit)||limit<0)throw new Error('invalid_semantic_token_limit');
  const basis=options.estimateBasis??FREE_JEV_ESTIMATE_BASIS;
+ const measured=new Map<string,number|null>();const reservation=(segment:ContextSegment):number=>{const key=JSON.stringify([segment.id,segment.contentHash,segment.promptIds]);if(measured.has(key)){const value=measured.get(key);if(value===null)throw new Error('context_request_limit');return value!;}try{const value=validateFreeJevRequest(buildLaunchRequest(segment),tokenizer)*(1+(options.retries??1));measured.set(key,value);return value;}catch(error){measured.set(key,null);throw error;}};
  const choices:WindowEstimate[]=(['all',45,30,7,3] as const).map(period=>{
   const selected=segmentsInWindow(segments,period,until);let tokens=0,invalid=false;
-  for(const segment of selected){try{tokens+=validateFreeJevRequest(buildLaunchRequest(segment),tokenizer)*(1+(options.retries??1));}catch{invalid=true;}}
+  for(const segment of selected){try{tokens+=reservation(segment);}catch{invalid=true;}}
   const latency=(options.preparationMs??0)+Math.ceil(selected.length/2)*(options.requestLatencyMs??1000)*(1+(options.retries??1));
   const reason=invalid?'A complete contextual turn exceeds a request limit.':tokens>limit?'Total serialized state, questions and retry allowance exceed the free token budget.':latency>(options.maxLatencyMs??10000)?'Estimated preparation and inference exceed the latency target.':null;
   return {period,from:period==='all'?null:new Date(Date.parse(until)-period*86400000).toISOString(),until,segments:selected.length,estimatedInputTokens:tokens,estimatedLatencyMs:latency,fits:reason===null,reason:reason===null?`Token estimate: ${basis} Latency is an explicit estimate; installed timing remains unverified.`:reason};
@@ -85,10 +87,10 @@ export function selectSemanticWindow(segments:readonly ContextSegment[],options:
   const picked:ContextSegment[]=[],gaps=new Set<string>();let tokens=0;
   const latency=(count:number)=>(options.preparationMs??0)+Math.ceil(count/2)*(options.requestLatencyMs??1000)*(1+(options.retries??1));
   for(const segment of available){
-   let reservation:number;try{reservation=validateFreeJevRequest(buildLaunchRequest(segment),tokenizer)*(1+(options.retries??1));}catch{gaps.add('semantic_episode_oversize');continue;}
-   if(tokens+reservation>limit){gaps.add('semantic_episode_budget_omission');continue;}
+   let reserved:number;try{reserved=reservation(segment);}catch{gaps.add('semantic_episode_oversize');continue;}
+   if(tokens+reserved>limit){gaps.add('semantic_episode_budget_omission');continue;}
    if(latency(picked.length+1)>(options.maxLatencyMs??10000)){gaps.add('semantic_episode_latency_omission');continue;}
-   picked.push(segment);tokens+=reservation;
+   picked.push(segment);tokens+=reserved;
    for(const gap of segment.gaps)gaps.add(gap);if(segment.coverage==='partial')gaps.add('semantic_context_partial');
   }
   if(picked.length){
