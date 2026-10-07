@@ -22,6 +22,21 @@ describe('approved fullscreen wallboard',()=>{
  it('sanitizes terminal controls in project names, line quotes and evidence',()=>{const snapshot=reportFixture();snapshot.projects[0]!.displayName='Clean\x1b[2J\x1b]0;hidden\x07 project';snapshot.launch!.languageLines![0]!.text='line\x1b[2J words';expect(plain(buildWallboard(snapshot).pages.flatMap(page=>page.lines))).not.toContain('\x1b');expect(plain(buildEvidenceDocument({...evidenceFixture(),text:'A\x1b[2J\nB'}).lines)).not.toContain('\x1b');});
 });
 describe('wallboard interaction and honest loading/transfer states',()=>{
+ it('preserves every mixed-page card anchor and viewport bounds through120→40→80→120 and help',()=>{
+  const snapshot=reportFixture(),small=buildWallboard(snapshot,{columns:40,rows:20});
+  for(let page=0;page<small.pages.length;page++){
+   let nav=turnWall(createWallNavigation(),page,small.pages.length,small);
+   const anchor=nav.anchor;
+   for(const [columns,rows] of [[120,40],[40,20],[80,24],[120,40]] as const){
+    nav=wallMode(wallMode(nav,'help'),'board');
+    const layout=buildWallboard(snapshot,{columns,rows});nav=resizeWall(nav,layout);
+    expect(nav.anchor).toBe(anchor);expect(layout.pages[nav.page]!.cards).toContain(anchor);
+    const screen=buildLaunchScreen(snapshot,nav,{columns,rows});
+    expect(screen).toHaveLength(rows);expect(screen.every(line=>auditCellWidth(plain([line]))<=columns)).toBe(true);
+    expect(plain([screen.at(-1)!])).toContain(layout.pages.length>1?`${nav.page+1}/${layout.pages.length}`:'? help');
+   }
+  }
+ });
  it('clamps arrows, restores page/context from help and preserves nearest card after resize',()=>{const snapshot=reportFixture(),narrow=buildWallboard(snapshot,{columns:40,rows:20}),wide=buildWallboard(snapshot,{columns:120,rows:40});let nav=turnWall(createWallNavigation(),2,narrow.pages.length,narrow);const selected=nav.page,anchor=nav.anchor;nav=wallMode(nav,'help');nav=turnWall(nav,1,5);nav=wallMode(nav,'board');expect(nav.page).toBe(selected);expect(nav.anchor).toBe(anchor);expect(resizeWall(nav,wide).page).toBe(0);expect(resizeWall(resizeWall(nav,wide),narrow).anchor).toBe(anchor);expect(turnWall(createWallNavigation(),-99,3).page).toBe(0);expect(turnWall(nav,99,3).page).toBe(2);});
  it('freezes presentation without disabling pages/help or changing frozen data',()=>{const layout=buildWallboard(reportFixture(),{columns:40,rows:20});let nav=freezeWall(createWallNavigation());nav=turnWall(nav,1,layout.pages.length,layout);expect(nav.frozen).toBe(true);expect(nav.page).toBe(1);nav=wallMode(nav,'help');expect(nav.frozen).toBe(true);expect(wallMode(nav,'board').page).toBe(1);expect(freezeWall(wallMode(nav,'board')).frozen).toBe(false);});
  it('shows checking until true census, completed0files only aftercheck, no recipient claim duringlocalwork',()=>{const snapshot=loadingFixture();let output=plain(buildReportLoader(snapshot,{columns:40,rows:20}));expect(output).toContain('Claude Code checking');expect(output).not.toContain('0 files');snapshot.sources[0]!.state='available';snapshot.sources[0]!.census={checked:true,files:31,bytes:5000,roots:1,unit:'file'};snapshot.sources[1]!.state='absent';snapshot.sources[1]!.census={checked:true,files:0,bytes:0,roots:2,unit:'file'};output=plain(buildReportLoader(snapshot,{columns:40,rows:20}));expect(output).toContain('Claude Code 31 files');expect(output).toContain('Codex 0 files');expect(output).toContain('OpenCode checking');expect(output).not.toContain('TypeSafe');});
