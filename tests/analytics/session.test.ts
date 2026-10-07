@@ -133,6 +133,17 @@ describe('bounded local audit session',()=>{
   const f=fixture();claude(f,[user('a','one',{timestamp:'2026-10-01T00:00:00Z'}),user('b','two',{timestamp:undefined})]);const snap=await session({...f.options,harnesses:['claude']}).run();expect(snap.insights).toEqual([]);expect(snap.phrases).toEqual([]);
   fs.rmSync(path.join(f.options.claudeDir!,'projects'),{recursive:true});claude(f,[user('x','same',{entrypoint:'sdk-ts'}),user('y','same',{entrypoint:'sdk-ts'})]);const automatic=await session({...f.options,harnesses:['claude']}).run();expect(automatic.insights).toEqual([]);expect(automatic.phrases).toEqual([]);
  });
+ it('shares only frozen unchanged fields while isolating prior snapshots across occurrence updates and policy invalidation',async()=>{
+  const f=fixture();for(let source=0;source<3;source++)claude(f,[user(`old-${source}`,'outside scope',{sessionId:`s${source}`,timestamp:'2026-09-01T00:00:00Z'}),user(`a-${source}`,'same input',{sessionId:`s${source}`}),user(`b-${source}`,'same input',{sessionId:`s${source}`})],String(source));
+  const s=session({...f.options,harnesses:['claude'],since:'2026-10-01T00:00:00Z',timezone:'UTC'}),initial=s.snapshot(),held:{snapshot:ReturnType<AuditSession['snapshot']>;json:string}[]=[];
+  const final=await s.run(event=>{if(event.type==='snapshot'){held.push({snapshot:event.snapshot,json:JSON.stringify(event.snapshot)});expect(event.snapshot.scope).toBe(initial.scope);expect(Object.isFrozen(event.snapshot.conversations)).toBe(true);expect(Object.isFrozen(event.snapshot.sources[0])).toBe(true);}});
+  expect(final.metrics.humanPrompts.value).toBe(6);expect(final.activity).toEqual([{date:'2026-10-01',count:6}]);expect(final.conversations.map(c=>c.promptCount)).toEqual([2,2,2]);expect(held.some(h=>h.snapshot.metrics.humanPrompts.value===2)).toBe(true);
+  for(const h of held)expect(JSON.stringify(h.snapshot)).toBe(h.json);expect(()=>{final.sources[0]!.candidateFiles=99;}).toThrow();
+  const prompts=await s.prompts(final.conversations[0]!.id);expect(prompts.prompts.map(p=>p.text)).toEqual(['same input','same input']);
+  fs.mkdirSync(f.options.potsherdDir!,{recursive:true});fs.writeFileSync(path.join(f.options.potsherdDir!,'config.json'),JSON.stringify({ignore:['/private/customer/project']}));
+  expect((await s.evidence(prompts.prompts[0]!.route)).state).toBe('stale');expect(s.snapshot().conversations).toEqual([]);expect(s.snapshot().metrics.humanPrompts.value).toBeNull();
+  for(const h of held)expect(JSON.stringify(h.snapshot)).toBe(h.json);expect(JSON.stringify(publicAuditSnapshot(final))).not.toContain('/private/customer/project');
+ });
  it('memoizes repeated validated timestamps across progress snapshots without changing timezone counts',async()=>{
   const f=fixture();for(let source=0;source<3;source++)claude(f,Array.from({length:10},(_,i)=>user(`source-${source}-${i}`,'input '+i,{sessionId:'source-'+source})),String(source));const parts=vi.spyOn(Intl.DateTimeFormat.prototype,'formatToParts');const snap=await session({...f.options,harnesses:['claude'],timezone:'Asia/Kolkata'}).run();expect(snap.metrics.humanPrompts.value).toBe(30);expect(snap.activity).toEqual([{date:'2026-10-02',count:30}]);expect(parts).toHaveBeenCalledTimes(1);
  });
