@@ -35,10 +35,10 @@ export function parseContextualNative(options:ContextualNativeOptions):{records:
   // An ignored record is a boundary, never available as preceding context or title.
   if(!options.allowRecord(project,raw)){gaps.add('context_record_excluded');continue;}
   if(raw.type==='turn_context'||raw.type==='model_change'){
-   model=string(p.model)??string(p.modelId)??model;provider=string(p.model_provider)??string(p.provider)??provider;continue;
+   model=string(p.model)??string(p.modelId)??model;if(model==='codex-auto-review')model=null;provider=string(p.model_provider)??string(p.provider)??provider;continue;
   }
   if(['session_meta','session','ai-title'].includes(String(raw.type)))continue;
-  const nativeKey=string(raw.uuid)??string(raw.id)??string(p.id)??string(m.id)??`record:${lineNumber}`;
+  const nativeKey=string(raw._auditRecordKey)??string(raw.uuid)??string(raw.id)??string(p.id)??string(m.id)??`record:${lineNumber}`;
   const eligible=options.eligiblePrompts.get(nativeKey)??options.eligiblePrompts.get(`record:${lineNumber}`)??options.eligiblePrompts.get(String(start))??options.eligiblePrompts.get(`marker:${start}`)??(string(raw.promptId)?options.eligiblePrompts.get(`prompt:${raw.promptId}`):undefined);
   const stamp=clock(raw.timestamp)??clock(m.timestamp)??clock(raw.eventAt)??clock(raw.created)??numericTime(raw.created)??numericTime(isRecord(m.time)?m.time.created:null);
   const put=(role:ContextRecord['role'],text:string,suffix='',direct=false)=>{
@@ -47,7 +47,7 @@ export function parseContextualNative(options:ContextualNativeOptions):{records:
    const cleaned=clean(text),old=seen.get(id);if(old!==undefined){if(old!==cleaned)gaps.add('context_identity_conflict');return;}seen.set(id,cleaned);
    records.push({id,conversationId:options.conversationId,parentId:parent,harness,eventAt:stamp,project:project===null?null:clean(project),role,text:cleaned,
     model:role==='user'?null:string(m.model)??string(m.modelID)??string(isRecord(m.model)?m.model.id:null)??string(p.model)??model,provider:role==='user'?null:string(m.provider)??string(m.providerID)??string(p.model_provider)??provider,
-    directUser:direct&&eligible!==undefined,route:direct&&eligible?eligible.route:null});
+    directUser:direct&&eligible!==undefined&&parent===null,route:direct&&eligible?eligible.route:null});
   };
   if(harness==='codex'){
    if(raw.type==='event_msg'&&p.type==='user_message'){put('user',string(p.message)??'', '',Boolean(eligible));continue;}

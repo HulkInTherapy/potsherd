@@ -110,7 +110,7 @@ export class FreeJevRun {
    const controller=new AbortController(),abort=()=>controller.abort();this.signal.addEventListener('abort',abort,{once:true});
    const timer=setTimeout(()=>controller.abort(),this.provider.options.timeoutMs??10000);
    try{
-    await abortable(Promise.resolve(this.provider.options.beforeDispatch?.({model:FREE_JEV_MODEL,attempt:this.attemptCount,notice:this.provider.notice})),this.signal);this.assertCurrent();
+    await abortable(Promise.resolve(this.provider.options.beforeDispatch?.({model:FREE_JEV_MODEL,attempt:this.attemptCount,notice:this.provider.notice})),controller.signal);this.assertCurrent();
     const route=this.provider.options.route,endpoint=FREE_JEV_ENDPOINT;
     const auth=route.kind==='zen-public'?'Bearer public':`Bearer ${route.apiKey}`;
     const headers:Record<string,string>={'Content-Type':'application/json',Authorization:auth};

@@ -18,7 +18,9 @@ export function createNativeUsageAccumulator(harness:AuditHarness,conversationId
  let observed=0,excluded=0;
  const records=new Map<string,RecordedInference>();let project=options.project??null,model:string|null=null,provider:string|null=null,session=conversationId,offset=0,seq=0;
  let previous:R|null=null;const seenTotals=new Set<string>();
- const put=(r:RecordedInference)=>{const old=records.get(r.id);if(!old){records.set(r.id,r);return;}const conflict=old.model!==r.model||old.provider!==r.provider;if(conflict){records.set(r.id,{...old,model:null,provider:null,gaps:[...new Set([...old.gaps,...r.gaps,'response_identity_model_conflict'])]});return;}const total=(v:RecordedInference)=>[v.inputTokens,v.outputTokens,v.cacheReadTokens,v.cacheWriteTokens,v.reasoningTokens].reduce<number>((n,x)=>n+(x??0),0);if(total(r)>total(old))records.set(r.id,r);};
+ const identities=new Map<string,{models:Set<string>;providers:Set<string>}>();
+ const score=(v:RecordedInference)=> (v.inputTokens??0)+(v.outputTokens??0)+(v.cacheReadTokens??0)+Math.max(v.cacheWriteTokens??0,(v.cacheWrite5mTokens??0)+(v.cacheWrite1hTokens??0))+(v.reasoningTokens??0);
+ const put=(r:RecordedInference)=>{const old=records.get(r.id),identity=identities.get(r.id)??{models:new Set<string>(),providers:new Set<string>()};if(r.model!==null)identity.models.add(r.model);if(r.provider!==null)identity.providers.add(r.provider);identities.set(r.id,identity);const chosen=!old||score(r)>score(old)?r:old;const conflict=identity.models.size>1||identity.providers.size>1;records.set(r.id,conflict?{...chosen,model:null,provider:null,gaps:[...new Set([...chosen.gaps,'response_identity_model_conflict'])]}:chosen);};
  const pushLine=(line:string):void=>{
 const start=offset;offset+=Buffer.byteLength(line)+1;if(!line.trim())return;if(++seq>(options.maxRecords??100_000))return;
   let r:R;try{r=obj(JSON.parse(line));}catch{return;}
@@ -54,6 +56,7 @@ const start=offset;offset+=Buffer.byteLength(line)+1;if(!line.trim())return;if(+
   }else{
    if(r.role!=='assistant')return;const u=obj(r.tokens),cache=obj(u.cache);input=num(u.input);output=num(u.output);read=num(cache.read)??(input!==null?0:null);write=num(cache.write)??(input!==null?0:null);reasoning=num(u.reasoning);reported=cost(r.cost);observedModel=str(r.modelID,obj(r.model).modelID,obj(r.model).id,r.model);observedProvider=str(r.providerID,obj(r.model).providerID,r.provider);basis='opencode_response_tokens';includesReasoning=false;id=`opencode:${str(r.id)??hash(JSON.stringify([conversationId,key,eventAt]))}`;
   }
+  if(observedModel==='codex-auto-review'){observedModel=null;gaps.push('workflow_model_identity_unavailable');}
   if(harness!=='codex')observed++;if(r.isSynthetic===true||r.isMeta===true||m.isSynthetic===true||observedModel==='<synthetic>'){excluded++;return;}if(!accepted){excluded++;return;}if(!observedModel)gaps.push('model_unrecorded');if(!observedProvider)gaps.push('provider_unrecorded');if(input===null||output===null)gaps.push('usage_partial');
   if(includesCache&&read===null)gaps.push('cache_inclusion_unknown');
   if(includesCache&&input!==null&&read!==null&&write!==null&&read+write>input)gaps.push('cache_exceeds_input');

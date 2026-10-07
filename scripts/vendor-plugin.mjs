@@ -27,7 +27,7 @@ const BUILD_INPUTS = [
   ':(glob)plugins/*/package.json',
   ':(glob)plugins/*/.*-plugin/*.json',
   '.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json',
-  'LICENSE', 'NOTICE', 'licenses/js-tiktoken-MIT.txt', 'licenses/models-dev-MIT.txt',
+  'LICENSE', 'NOTICE', 'licenses/js-tiktoken-MIT.txt', 'licenses/models-dev-MIT.txt', 'licenses/ccusage-MIT.txt',
 ];
 const sourceRevision = execFileSync('git', ['log', '-1', '--format=%H', '--', ...BUILD_INPUTS], {
   cwd: repo, encoding: 'utf8',

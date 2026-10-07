@@ -121,5 +121,5 @@ export function verifyAuditPolicyWal(file:string):{assertCurrent():void} {
  // readShm independently validates both full headers/checksums before this
  // semantic comparison; the original snapshot whole-header fence is unchanged.
  const semantic=(header:Buffer|null)=>header?Buffer.concat([header.subarray(0,8),header.subarray(12,40)]).toString('hex'):null;
- const assertCurrent=()=>{const next=inspect(file,MAX_DISK_BYTES);if(initial.database!==next.database||initial.wal!==next.wal||initial.journal!==next.journal||semantic(initial.shmHeader)!==semantic(next.shmHeader))throw new Error('audit_policy_changed');};assertCurrent();return {assertCurrent};
+ const assertCurrent=()=>{const next=inspect(file,MAX_DISK_BYTES);const sameWal=initial.walBytes===0&&next.walBytes===0||initial.wal===next.wal;if(initial.database!==next.database||!sameWal||initial.journal!==next.journal||semantic(initial.shmHeader)!==semantic(next.shmHeader))throw new Error('audit_policy_changed');};assertCurrent();return {assertCurrent};
 }

@@ -10,7 +10,7 @@ const categories:readonly [string,RegExp][]=[
 ];
 export function requestedProjectFocus(prompts:readonly AuditPrompt[]):AuditProjectFocus[]{
  const groups=new Map<string,AuditPrompt[]>();
- for(const prompt of prompts){if(!(prompt.eligibleNativeInput??prompt.eligibleHuman))continue;const labels=proseLabels(prompt.text),text=Array.from({length:prompt.text.length},(_,i)=>labels[i]===0?prompt.text[i]:' ').join('');
+ for(const prompt of prompts){if(prompt.languageEligible===false||!(prompt.eligibleNativeInput??prompt.eligibleHuman))continue;const labels=proseLabels(prompt.text),text=Array.from({length:prompt.text.length},(_,i)=>labels[i]===0?prompt.text[i]:' ').join('');
   for(const [label,pattern]of categories){if(!pattern.test(text))continue;const rows=groups.get(label)??[];if(!rows.some(p=>p.id===prompt.id))rows.push(prompt);groups.set(label,rows);}
  }
  return [...groups].map(([label,rows])=>({label,inputs:rows.length,promptIds:rows.slice(0,3).map(p=>p.id),evidenceRoutes:rows.slice(0,3).map(p=>p.route),basis:'lexical_requested_work_v1' as const})).sort((a,b)=>b.inputs-a.inputs||a.label.localeCompare(b.label)).slice(0,2);

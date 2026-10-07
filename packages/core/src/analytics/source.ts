@@ -11,7 +11,7 @@ import type {AuditHarness} from './contracts.js';
 export const digest=(value:string|Buffer):string=>createHash('sha256').update(value).digest('hex');
 export const clean=(text:string):string=>redact(elideBinary(text)).text;
 export const clock=(value:unknown):string|null=>typeof value==='string'&&Number.isFinite(Date.parse(value))?new Date(value).toISOString():null;
-export interface NativeEvent {observed?:boolean;key:string;rawStart:number;rawEnd:number;role:'user';text:string;eventAt:string|null;project:string|null;origin:'claude_prompt_id'|'codex_human_marker'|'pi_user_projection'|'unknown';eligible:boolean;excluded:string|null;identity:string;evidenceStart?:number;nativeRecordId?:string;recordCommitment?:string;declaredOrigin?:string;}
+export interface NativeEvent {observed?:boolean;languageEligible?:boolean;key:string;rawStart:number;rawEnd:number;role:'user';text:string;eventAt:string|null;project:string|null;origin:'claude_prompt_id'|'codex_human_marker'|'pi_user_projection'|'opencode_user_projection'|'unknown';eligible:boolean;excluded:string|null;identity:string;evidenceStart?:number;nativeRecordId?:string;recordCommitment?:string;declaredOrigin?:string;}
 export interface NativeFacts {nativeId:string;project:string|null;parent:string|null;child:boolean;title:string|null;events:NativeEvent[];gaps:string[];hash:string;consumed:number;bytes:Buffer;}
 
 /** A size check and a bounded fd read, with identity rechecked after reading. */

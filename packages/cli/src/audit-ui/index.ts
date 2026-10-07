@@ -210,5 +210,5 @@ export async function runAuditTerminal(session:AuditSession,options:AuditTermina
 }
 
 // One scrolling consumer report; the explicit legacy renderer remains available.
-export {runLaunchTerminal,buildLaunchScreen,renderLaunchPlain,createLaunchNavigation,createReportNavigation,moveReport,reportEdge,reportMode,freezeReport,clampReportNavigation,buildReportDocument,buildReportHelp} from './launch-terminal.js';
-export type {LaunchNavigation,LaunchGeometry,ReportNavigation,ReportDocument,ReportAnchor} from './launch-terminal.js';
+export {runLaunchTerminal,buildLaunchScreen,renderLaunchPlain,createLaunchNavigation,createReportNavigation,moveReport,reportEdge,reportMode,freezeReport,clampReportNavigation,buildReportDocument,buildReportHelp,createWallNavigation,turnWall,wallMode,freezeWall,resizeWall,clampWall,buildWallboard} from './launch-terminal.js';
+export type {LaunchNavigation,LaunchGeometry,ReportNavigation,ReportDocument,ReportAnchor,WallNavigation,WallLayout} from './launch-terminal.js';
