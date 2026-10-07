@@ -1,0 +1,109 @@
+{
+  "fixtureProvenance": "Public, model-free synthetic one-assistant-unit store from tests/memory-cli.test.ts. Source text: Exact cache.X_9 recovered. Artifact hash input: raw; nativeSessionId: native-memory; project: /p. The request UUID was generated only for a bounded public serializer study and indexes no transcript or private session. Fixed observed timestamps preserve the proven decimal-receipt cycle; no real corpus data.",
+  "maxTokens": 2048,
+  "response": {
+    "contractVersion": 2,
+    "requestId": "8c93246e-bdf5-419b-a81e-4ffdf509379d",
+    "coverage": {
+      "state": "partial",
+      "snapshotEpochs": {
+        "evidence": 1,
+        "notes": 0,
+        "lineage": 1,
+        "deletion": 0,
+        "vector": 0
+      },
+      "scope": {
+        "project": "/p"
+      },
+      "capturedThrough": "2026-10-07T14:52:10.158Z",
+      "pendingSources": 0,
+      "failedSources": 0,
+      "omittedKinds": [
+        "source_coverage",
+        "chunking_tokenizer_unavailable"
+      ],
+      "semantic": "disabled"
+    },
+    "support": {
+      "state": "insufficient",
+      "method": "literal",
+      "requirements": [
+        {
+          "id": "literal",
+          "text": "The exact requested literal occurs in delivered source evidence.",
+          "state": "supported",
+          "refs": [
+            {
+              "sourceId": "566313e1418f5076854b813a9382034f4040639b3eb9fcdfec53f1d864268573",
+              "revisionId": "03ebf63467433e411d1a8a0751c21ad4cdbf591a0942988040ac6130a8e35e8b",
+              "spanId": "384ac0f851d20c91bee2eb884b67c63b2425fea24af7ac14e7bc50a43d03d993"
+            }
+          ]
+        }
+      ],
+      "unresolved": [
+        "Captured snapshot or retrieval capability is incomplete; a search miss does not establish absence."
+      ]
+    },
+    "evidence": [
+      {
+        "ref": {
+          "sourceId": "566313e1418f5076854b813a9382034f4040639b3eb9fcdfec53f1d864268573",
+          "revisionId": "03ebf63467433e411d1a8a0751c21ad4cdbf591a0942988040ac6130a8e35e8b",
+          "spanId": "384ac0f851d20c91bee2eb884b67c63b2425fea24af7ac14e7bc50a43d03d993"
+        },
+        "role": "assistant",
+        "text": "Exact cache.X_9 recovered",
+        "startUtf16": 0,
+        "endUtf16": 25,
+        "sourceEventAt": null,
+        "observedAt": "2026-10-07T14:52:10.147Z",
+        "project": "/p",
+        "branch": null,
+        "authority": "source_evidence",
+        "citation": "span:566313e1418f5076854b813a9382034f4040639b3eb9fcdfec53f1d864268573:03ebf63467433e411d1a8a0751c21ad4cdbf591a0942988040ac6130a8e35e8b:384ac0f851d20c91bee2eb884b67c63b2425fea24af7ac14e7bc50a43d03d993",
+        "historical": false,
+        "quoteBasis": "redacted_unit",
+        "provenance": {
+          "harness": "claude",
+          "nativeSessionId": "native-memory",
+          "artifactHash": "d7439bee24773bcbfa2d0a97947ee36227b10d1022b1a55847e928965bb6bfde",
+          "artifactBytes": 3,
+          "artifactBasis": "raw_prefix",
+          "adapterVersion": "test-v1",
+          "normalizationVersion": "redacted-evidence-v3",
+          "locator": {
+            "recordKey": "record",
+            "mapping": "unavailable"
+          },
+          "locatorFidelity": "record_id",
+          "timeBasis": "unknown",
+          "availability": "live",
+          "manifestHash": "9adab5175891a8c2e9bb66c91485818a02648e76b71d145c9d8513570e8cfdac",
+          "unitRevisionId": "f981eb01e7a869b5bcfe74caa8cc1ab16f5d56d7d4607bc2eb12e22214ba8e97",
+          "unitKey": "record",
+          "unitTextHash": "af72166d99983feb1ed876a4462f93c1e02054fc4cc7b01d48e8d8660a3fb1e2",
+          "spanTextHash": "af72166d99983feb1ed876a4462f93c1e02054fc4cc7b01d48e8d8660a3fb1e2",
+          "chunkPolicy": "span-conservative-utf8-v1",
+          "spanStartUtf16": 0,
+          "spanEndUtf16": 25,
+          "unitToolName": null,
+          "producerNameBasis": "recorded",
+          "unitToolCallId": null,
+          "parentNativeSessionId": null
+        }
+      }
+    ],
+    "assertions": [],
+    "candidates": [],
+    "budget": {
+      "tokenizerId": "cl100k-base/js-tiktoken@1.0.21/9b9ea7feb9945beda9196f3691a3cc2d0f339aec498bbae285ce6aded387455c",
+      "usedTokens": 1051,
+      "remainingTokens": 997,
+      "truncated": false,
+      "omittedItems": 0
+    },
+    "warnings": []
+  }
+}

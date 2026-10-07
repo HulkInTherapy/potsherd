@@ -27,17 +27,35 @@ export function assertResponseFormat(transport:Transport,format:MemoryResponseFo
   if(format==='compact-v1'&&(transport==='human'||typeof transport==='object'))throw new RangeError('Compact response format requires JSON transport');
 }
 /** One immutable counted emission. Never regenerate it from the semantic response. */
-export function finalizeEmission(value:unknown,transport:Transport='json',format:MemoryResponseFormat='expanded-v2'):FinalizedEmission {
+export function finalizeEmission(value:unknown,transport:Transport='json',format:MemoryResponseFormat='expanded-v2',prefix=''):FinalizedEmission {
   assertResponseFormat(transport,format);
-  if(transport==='human'||typeof transport==='object')return Object.freeze({kind:'human',format:'expanded-v2',serialized:serializeResponse(value,transport)});
+  if(prefix.length>32||/[^ \t\r\n]/u.test(prefix))throw new RangeError('Invalid emission whitespace');
+  if(transport==='human'||typeof transport==='object')return Object.freeze({kind:'human',format:'expanded-v2',serialized:prefix+serializeResponse(value,transport)});
   const body=format==='compact-v1'&&value&&typeof value==='object'&&'evidence' in value?encodeCompactMemoryPacket(value as MemoryResponse):value;
-  const text=JSON.stringify(body);
+  const text=prefix+JSON.stringify(body);
   if(transport==='mcp') {
     const block=Object.freeze({type:'text' as const,text});
     const result={content:[block]};Object.freeze(result.content);Object.freeze(result);
     return Object.freeze({kind:'mcp',format,result,serialized:JSON.stringify(result)});
   }
   return Object.freeze({kind:transport,format,serialized:transport==='cli_json'?text+'\n':text});
+}
+type SettledEmission={emission:FinalizedEmission;serialized:string;tokens:number;bytes:number};
+/** Receipt digits can have no fixed point in one encoding. Try only bounded legal
+ * whitespace in the actual immutable emission; ordinary serialization wins first. */
+const RECEIPT_PREFIXES=['','\n','\n\n',' \n','\n ','\t','\t\n','\n\t','\r\n','\n \n',' \n ','\n\t\n','\n\n\n',' \n \n','\t \n','\r\n\r\n'] as const;
+function settleEmission(value:{budget:{usedTokens:number;remainingTokens:number}},limit:number,byteLimit:number,transport:Transport,format:MemoryResponseFormat='expanded-v2'):SettledEmission|null {
+ const initial={usedTokens:value.budget.usedTokens,remainingTokens:value.budget.remainingTokens};let overCap:{payload:SettledEmission;usedTokens:number;remainingTokens:number}|null=null;
+ for(const prefix of RECEIPT_PREFIXES){
+  value.budget.usedTokens=initial.usedTokens;value.budget.remainingTokens=initial.remainingTokens;const seen=new Set<string>();
+  for(let i=0;i<32;i++){
+   const state=`${value.budget.usedTokens}:${value.budget.remainingTokens}`;if(seen.has(state))break;seen.add(state);
+   const emission=finalizeEmission(value,transport,format,prefix),serialized=emission.serialized,tokens=countTokens(serialized),remaining=Math.max(0,limit-tokens);
+   if(value.budget.usedTokens===tokens&&value.budget.remainingTokens===remaining){const payload={emission,serialized,tokens,bytes:Buffer.byteLength(serialized)};if(prefix===''||(tokens<=limit&&payload.bytes<=byteLimit))return payload;if(!overCap)overCap={payload,usedTokens:tokens,remainingTokens:remaining};break;}
+   value.budget.usedTokens=tokens;value.budget.remainingTokens=remaining;
+  }
+ }
+ value.budget.usedTokens=overCap?.usedTokens??initial.usedTokens;value.budget.remainingTokens=overCap?.remainingTokens??initial.remainingTokens;return overCap?.payload??null;
 }
 export function emittedMcpResult(planned:{emission:FinalizedEmission}):McpTextResult {
   if(planned.emission.kind!=='mcp')throw new TypeError('Planned emission is not MCP');
@@ -198,18 +216,7 @@ export function planResponse(original: MemoryResponse, budget: ResponseBudget, o
     });
     return protectedKeys.length;
   };
-  const settle = (): { emission:FinalizedEmission; serialized: string; tokens: number; bytes: number } => {
-    for (let i = 0; i < 32; i++) {
-      const emission=finalizeEmission(response,transport,format),encoded=emission.serialized;
-      const tokens = countTokens(encoded);
-      if (response.budget.usedTokens === tokens && response.budget.remainingTokens === Math.max(0, limit - tokens)) {
-        return { emission,serialized: encoded, tokens, bytes: Buffer.byteLength(encoded) };
-      }
-      response.budget.usedTokens = tokens;
-      response.budget.remainingTokens = Math.max(0, limit - tokens);
-    }
-    throw new Error('Token receipt did not converge');
-  };
+  const settle=()=>settleEmission(response,limit,byteLimit,transport,format);
   // Never duplicate full source text in the exploratory candidate section.
   if(!nav)response.candidates = response.candidates.map(({ evidence: _e, ...candidate }) => candidate);
   for (;;) {
@@ -240,7 +247,7 @@ export function planResponse(original: MemoryResponse, budget: ResponseBudget, o
       if(continuation)response.continuation=continuation;else delete response.continuation;
     }
     let payload = settle();
-    if (payload.tokens <= limit && payload.bytes <= byteLimit) {
+    if (payload&&payload.tokens <= limit && payload.bytes <= byteLimit) {
       // A large evidence removal can leave room after navigation was reduced.
       // Restore only bare routes to originally selected, now omitted sources.
       // Each exact wire check is bounded and never re-enters the trim loop.
@@ -253,7 +260,7 @@ export function planResponse(original: MemoryResponse, budget: ResponseBudget, o
           response.candidates.push({ref:structuredClone(candidate.ref),score:candidate.score,lanes:[...candidate.lanes]});
           response.budget.omittedItems--;
           const proposed=settle();
-          if(proposed.tokens<=limit&&proposed.bytes<=byteLimit){payload=proposed;exposed.add(key);}
+          if(proposed&&proposed.tokens<=limit&&proposed.bytes<=byteLimit){payload=proposed;exposed.add(key);}
           else {response.candidates.pop();response.budget=previousBudget;}
         }
       }
@@ -296,14 +303,8 @@ export function planWriteReceipt(receipt: import('./contracts.js').WriteReceipt,
   if(budget.tokenizerId!==TOKENIZER_ID)throw new RangeError('Unsupported transport tokenizer');
   const limit=Math.min(budget.maxTokens,budget.remainingJourneyTokens??budget.maxTokens);
   const value={...receipt,budget:{tokenizerId:TOKENIZER_ID,usedTokens:0,remainingTokens:0,truncated:false,omittedItems:0}};
-  for(let i=0;i<32;i++) {
-    const emission=finalizeEmission(value,transport),encoded=emission.serialized,used=countTokens(encoded);
-    if(value.budget.usedTokens===used&&value.budget.remainingTokens===Math.max(0,limit-used)) {
-      if(used<=limit&&Buffer.byteLength(encoded)<=(budget.maxBytes??DEFAULT_RESPONSE_BYTES))return {response:value,emission,serialized:encoded,usedTokens:used,usedBytes:Buffer.byteLength(encoded)};
-      break;
-    }
-    value.budget.usedTokens=used;value.budget.remainingTokens=Math.max(0,limit-used);
-  }
+  const settled=settleEmission(value,limit,budget.maxBytes??DEFAULT_RESPONSE_BYTES,transport);
+  if(settled&&settled.tokens<=limit&&settled.bytes<=(budget.maxBytes??DEFAULT_RESPONSE_BYTES))return {response:value,emission:settled.emission,serialized:settled.serialized,usedTokens:settled.tokens,usedBytes:settled.bytes};
   const error={error:'write_receipt_over_budget',committed:true,requestKey:receipt.requestKey};
   const emission=finalizeEmission(error,transport),encoded=emission.serialized,used=countTokens(encoded);
   if(used>limit||Buffer.byteLength(encoded)>(budget.maxBytes??DEFAULT_RESPONSE_BYTES))throw new RangeError('Budget cannot encode durable write acknowledgement');
