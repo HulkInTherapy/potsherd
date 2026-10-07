@@ -15786,6 +15786,7 @@ var init_native_metadata_projection = __esm({
     init_markers();
     NativeMetadataProjection = class {
       maxBytes;
+      harness;
       decoder = new StringDecoder("utf8");
       frames = [];
       root;
@@ -15804,8 +15805,22 @@ var init_native_metadata_projection = __esm({
       scanEscape = false;
       scanUnicode = "";
       scanTail = "";
-      constructor(maxBytes = 8 * 1024 * 1024) {
+      // Defer the producer check until the whole record is known, retaining unknown values only within the shared metadata budget.
+      imageBodies = [];
+      imageCandidate = null;
+      imageBytes = 0;
+      trimImages() {
+        for (let i = this.imageBodies.length - 1; i >= 0 && this.retained + this.imageBytes > this.maxBytes; i--) {
+          const body = this.imageBodies[i];
+          this.imageBytes -= body.bytes;
+          body.chunks = [];
+          body.bytes = 0;
+          body.overflow = true;
+        }
+      }
+      constructor(maxBytes = 8 * 1024 * 1024, harness = null) {
         this.maxBytes = maxBytes;
+        this.harness = harness;
       }
       fail(code = "native_metadata_invalid") {
         this.error ??= code;
@@ -15818,6 +15833,14 @@ var init_native_metadata_projection = __esm({
             return;
           }
           this.token += c;
+          this.trimImages();
+        }
+        if (this.imageCandidate && !this.imageCandidate.overflow) {
+          const bytes3 = Buffer.byteLength(JSON.stringify(c)) - 2;
+          this.imageCandidate.bytes += bytes3;
+          this.imageBytes += bytes3;
+          this.imageCandidate.chunks.push(c);
+          this.trimImages();
         }
         const searchable = this.markerTail + c;
         if (EXCLUSION_MARKERS.some((m) => searchable.includes(m)))
@@ -15828,13 +15851,17 @@ var init_native_metadata_projection = __esm({
         const f = this.frames.at(-1);
         return f ? f.state === "value" || f.state === "valueRequired" : !this.done;
       }
+      imageBody(f) {
+        return this.harness === "codex" && f.key === "image_url" && f.path.length === 3 && f.path[0] === "payload" && f.path[1] === "output" && f.path[2] === "[]";
+      }
       retainValue() {
         const f = this.frames.at(-1);
-        return !f || f.keep && !(f.key === "content" || f.key === "text");
+        return !f || f.keep && !(f.key === "content" || f.key === "text" || f.omitImage);
       }
       accept(value) {
         if (this.retainValue()) {
           this.retained += 16;
+          this.trimImages();
           if (this.retained > this.maxBytes) {
             this.fail("native_metadata_bytes_limit");
             return;
@@ -15857,10 +15884,11 @@ var init_native_metadata_projection = __esm({
         if (f.keep) {
           if (f.array)
             f.value.push(value);
-          else if (f.key !== null && f.key !== "content" && f.key !== "text")
+          else if (f.key !== null && this.retainValue())
             Object.defineProperty(f.value, f.key, { value, writable: true, enumerable: true, configurable: true });
         }
         f.key = null;
+        f.omitImage = false;
         f.state = "comma";
       }
       scalarEnd() {
@@ -15923,6 +15951,7 @@ var init_native_metadata_projection = __esm({
               this.accept(this.keep ? this.token : null);
             this.mode = "idle";
             this.token = "";
+            this.imageCandidate = null;
             this.markerTail = "";
             return;
           }
@@ -15959,6 +15988,11 @@ var init_native_metadata_projection = __esm({
             this.fail();
             return;
           }
+          if (!this.isKey && f && this.imageBody(f)) {
+            f.omitImage = true;
+            this.imageCandidate = { frame: f, chunks: [], bytes: 0, overflow: false };
+            this.imageBodies.push(this.imageCandidate);
+          }
           this.keep = this.isKey || this.retainValue() && f?.key !== "message";
           this.token = "";
           this.markerTail = "";
@@ -15971,7 +16005,7 @@ var init_native_metadata_projection = __esm({
             return;
           }
           const keep = this.retainValue();
-          this.frames.push({ array: c === "[", state: c === "[" ? "value" : "key", key: null, keep, value: keep ? c === "[" ? [] : {} : null });
+          this.frames.push({ path: f ? [...f.path, f.array ? "[]" : f.key] : [], omitImage: false, array: c === "[", state: c === "[" ? "value" : "key", key: null, keep, value: keep ? c === "[" ? [] : {} : null });
           return;
         }
         if (c === "}" || c === "]") {
@@ -16082,6 +16116,17 @@ var init_native_metadata_projection = __esm({
           this.fail();
         if (!this.error && (!this.root || typeof this.root !== "object" || Array.isArray(this.root)))
           this.fail();
+        if (!this.error && this.imageBodies.length) {
+          const root = this.root, payload = root.payload;
+          for (const body of this.imageBodies) {
+            if (root.type === "response_item" && payload?.type === "custom_tool_call_output" && body.frame.value?.type === "input_image")
+              continue;
+            if (body.overflow)
+              this.fail("native_metadata_bytes_limit");
+            else
+              Object.defineProperty(body.frame.value, "image_url", { value: body.chunks.join(""), writable: true, enumerable: true, configurable: true });
+          }
+        }
         if (!this.error && Buffer.byteLength(JSON.stringify(this.root)) > this.maxBytes)
           this.fail("native_metadata_bytes_limit");
         return { record: this.error ? null : this.root, code: this.error, exclusionMarker: this.marker };
@@ -16101,7 +16146,7 @@ async function streamNativeFacts(file, harness, options) {
   let nativeId = path22.basename(file, ".jsonl"), project = null, parent = null, records = 0, offset = 0, promptBytes = 0, maintenance = false, programmatic = false, currentModel = null, currentProvider = null;
   const events = [], language = [], gaps = /* @__PURE__ */ new Set(), seen = /* @__PURE__ */ new Set(), hash5 = createHash13("sha256");
   let usage = null;
-  let held = Buffer.alloc(0), projection = null, projected = false;
+  let held = [], heldBytes = 0, projection = null, projected = false;
   const turnLimit = options.captureBytes ?? 0, turns = [];
   let turnLines = [], turnBytes = 0, turnPrefix = "", keptBytes = 0, capturedRecords = 0, scopeUncertain = false;
   const finishTurn = () => {
@@ -16279,8 +16324,9 @@ async function streamNativeFacts(file, harness, options) {
         currentProvider = null;
       }
     } else
-      process26(held, end);
-    held = Buffer.alloc(0);
+      process26(held.length === 1 ? held[0] : Buffer.concat(held, heldBytes), end);
+    held = [];
+    heldBytes = 0;
     offset = end;
   };
   const stream2 = fs28.createReadStream(file, { highWaterMark: 64 * 1024, ...before.size > 0n ? { end: Number(before.size) - 1 } : {} });
@@ -16298,13 +16344,17 @@ async function streamNativeFacts(file, harness, options) {
         const newline = bytes3.indexOf(10, at2), end = newline < 0 ? bytes3.length : newline, part = bytes3.subarray(at2, end);
         if (projection)
           projection.push(part);
-        else if (held.length + part.length > 8 * 1024 * 1024) {
-          projection = new NativeMetadataProjection();
-          projection.push(held);
+        else if (heldBytes + part.length > 8 * 1024 * 1024) {
+          projection = new NativeMetadataProjection(void 0, harness);
+          for (const piece of held)
+            projection.push(piece);
           projection.push(part);
-          held = Buffer.alloc(0);
-        } else
-          held = held.length ? Buffer.concat([held, part]) : Buffer.from(part);
+          held = [];
+          heldBytes = 0;
+        } else {
+          held.push(part);
+          heldBytes += part.length;
+        }
         if (newline < 0)
           break;
         finishLine(consumed + newline + 1);
@@ -16315,7 +16365,7 @@ async function streamNativeFacts(file, harness, options) {
   } finally {
     stream2.destroy();
   }
-  if (held.length || projection)
+  if (heldBytes || projection)
     gaps.add("unfinished_tail");
   const after = fs28.statSync(file, { bigint: true });
   if (before.dev !== after.dev || before.ino !== after.ino || after.size < before.size)
@@ -16352,7 +16402,7 @@ async function streamNativeFacts(file, harness, options) {
   capturedRecords = turns.reduce((n3, t) => n3 + t.lines.length, 0);
   if (capturedRecords < records)
     gaps.add("context_capture_partial");
-  return { facts: { nativeId, project, parent, child: parent !== null, title: null, events, gaps: [...gaps], hash: artifactHash, consumed: offset, bytes: captured }, usage: maintenance ? [] : all, language: maintenance ? [] : language, hash: artifactHash, bytes: Number(before.size), counts: acc?.counts() ?? { observed: 0, excluded: 0, deduplicated: 0 } };
+  return { facts: { nativeId, project, parent, child: parent !== null, title: null, events, gaps: [...gaps], hash: artifactHash, consumed: offset, bytes: captured }, usage: maintenance ? [] : all, language: maintenance ? [] : language, hash: artifactHash, bytes: Number(before.size), counts: maintenance ? { observed: acc?.counts().observed ?? 0, excluded: acc?.counts().observed ?? 0, deduplicated: 0 } : acc?.counts() ?? { observed: 0, excluded: 0, deduplicated: 0 } };
 }
 var init_native_stream = __esm({
   "packages/core/dist/analytics/native-stream.js"() {
@@ -18851,6 +18901,7 @@ var init_analytics = __esm({
       root;
       nativeReadBytes = 0;
       globalUsageDuplicates = 0;
+      databaseResponsesObserved = 0;
       lastParsingEmit = 0;
       funnel = { nativeFilesDiscovered: 0, nativeFilesParsed: 0, retainedSources: 0, selectedSources: 0, responsesObserved: 0, responsesDeduplicated: 0, responsesExcluded: 0, responsesPriced: 0, excludedReasons: {}, gaps: [], sourceFiles: [] };
       derived = null;
@@ -19360,8 +19411,8 @@ var init_analytics = __esm({
           this.update({ profanity: attributeLanguageTerms(this.current.profanity, language, allPrompts) });
         this.funnel.responsesPriced = facts.equivalentPricedResponses;
         const globalDuplicates = Math.max(0, records.length - facts.recordedResponses);
-        this.funnel.responsesDeduplicated += globalDuplicates - this.globalUsageDuplicates;
         this.globalUsageDuplicates = globalDuplicates;
+        this.deriveResponseFunnel();
         this.update({ funnel: { ...this.funnel, selectedSources: this.entries.size, gaps: [...this.gaps] } });
         this.launchPublish({ facts, ...summarizeDirectedLanguage(allPrompts, language), languageByModel: attributeDirectLanguage(this.current.profanity, language, allPrompts), stage: "preparing" });
         const segmented = segmentContext(contexts, { gaps: [...contextGaps] });
@@ -19406,6 +19457,11 @@ var init_analytics = __esm({
           return false;
         }
       }
+      deriveResponseFunnel() {
+        this.funnel.responsesObserved = this.databaseResponsesObserved + this.funnel.sourceFiles.reduce((n3, r) => n3 + r.responsesObserved, 0);
+        this.funnel.responsesExcluded = this.funnel.sourceFiles.reduce((n3, r) => n3 + r.responsesExcluded, 0);
+        this.funnel.responsesDeduplicated = this.globalUsageDuplicates + this.funnel.sourceFiles.reduce((n3, r) => n3 + r.responsesDeduplicated, 0);
+      }
       async streamPrimary(file, harness) {
         const remaining = 4 * 1024 * 1024 * 1024 - this.nativeReadBytes;
         if (remaining <= 0)
@@ -19415,10 +19471,8 @@ var init_analytics = __esm({
         this.nativeReadBytes += snapshot.bytes;
         this.totalBytes += snapshot.facts.bytes.length;
         this.funnel.nativeFilesParsed++;
-        this.funnel.responsesObserved += snapshot.counts.observed;
-        this.funnel.responsesExcluded += snapshot.counts.excluded;
-        this.funnel.responsesDeduplicated += snapshot.counts.deduplicated;
         this.funnel.sourceFiles.push({ fileHash: digest(file), harness, bytes: snapshot.bytes, state: snapshot.facts.gaps.includes("maintenance_source_excluded") ? "excluded" : "parsed", code: snapshot.facts.gaps.find((g) => g.startsWith("native_metadata_") || g === "native_scope_record_unavailable") ?? snapshot.facts.gaps[0] ?? null, responsesObserved: snapshot.counts.observed, responsesExcluded: snapshot.facts.gaps.includes("maintenance_source_excluded") ? snapshot.counts.observed : snapshot.counts.excluded, responsesDeduplicated: snapshot.counts.deduplicated });
+        this.deriveResponseFunnel();
         if (snapshot.facts.gaps.includes("maintenance_source_excluded")) {
           this.funnel.excludedReasons = { ...this.funnel.excludedReasons, maintenance_source: (this.funnel.excludedReasons.maintenance_source ?? 0) + 1 };
           return;
@@ -19737,7 +19791,8 @@ var init_analytics = __esm({
           return { id: prompt?.id ?? `response:${r.id}`, conversationId: id, parentId: group.facts.parent, harness: "opencode", eventAt: clock(r.timestamp), project: group.facts.project, role: m.role === "user" ? "user" : "assistant", text: "", model: typeof m.modelID === "string" ? m.modelID : null, provider: typeof m.providerID === "string" ? m.providerID : null, directUser: !!prompt?.eligibleNativeInput, route: null };
         });
         entry.languageRecords = [...entry.languageRecords ?? [], ...language];
-        this.funnel.responsesObserved += group.records.filter((r) => r.message?.role === "assistant").length;
+        this.databaseResponsesObserved += group.records.filter((r) => r.message?.role === "assistant").length;
+        this.deriveResponseFunnel();
       }
       async openCode(file) {
         const reader = openAuditSqliteSnapshot(file, this.limits.store);
@@ -19786,7 +19841,8 @@ var init_analytics = __esm({
                 return { id: prompt?.id ?? `response:${record4.id}`, conversationId: id, parentId: row2.parent, harness: "opencode", eventAt: clock(record4.timestamp), project: row2.project, role: m.role === "user" ? "user" : "assistant", text: "", model: typeof m.modelID === "string" ? m.modelID : typeof m.model?.id === "string" ? String(m.model.id) : null, provider: typeof m.providerID === "string" ? m.providerID : null, directUser: !!prompt?.eligibleNativeInput, route: null };
               });
               entry.fullUsage = extractNativeUsage(Buffer.from(metadata.records.map((r) => JSON.stringify({ ...r, cwd: row2.project })).join("\n") + "\n"), "opencode", id, { project: row2.project, acceptRecord: (_r, scope2) => this.launchAllowed(scope2.project) && (!this.current.scope.eventFrom || scope2.eventAt !== null && scope2.eventAt >= this.current.scope.eventFrom) && (!this.current.scope.asOf || scope2.eventAt !== null && scope2.eventAt <= this.current.scope.asOf) });
-              this.funnel.responsesObserved += metadata.records.filter((r) => r.message?.role === "assistant").length;
+              this.databaseResponsesObserved += metadata.records.filter((r) => r.message?.role === "assistant").length;
+              this.deriveResponseFunnel();
               entry.prompts = entry.prompts.map((p, i) => {
                 this.routes.delete(routeKey(p.route));
                 const route = { basis: "projection_snapshot", sourceId: id, artifactHash: snapshot.hash, sourcePath: file, nativeSessionId: row2.id, seq: p.route.basis === "transient_snapshot" && p.route.rawStart !== null ? p.route.rawStart : i + 1, snapshotId: this.id, fidelity: "exchange_projection" };
