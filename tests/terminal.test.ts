@@ -311,6 +311,7 @@ describe('every verb fits the width it was given', () => {
 describe('every verb ends with the next verb', () => {
   /** Screens whose last line is deliberately something else, and why. */
   const EXEMPT: Record<string, string> = {
+    audit: 'terminal retrospective ends with section navigation; legacy retention keeps its command footer',
     guard: 'ends by asking for consent, or by refusing for want of a terminal',
     setup: 'ends by naming the flag it needs; there is no next verb until it has one',
     'doctor --privacy': 'ends with the privacy receipt, which is the point of it',

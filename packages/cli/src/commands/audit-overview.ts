@@ -26,7 +26,8 @@ export async function runAuditOverview(o: AuditOptions): Promise<number> {
     const session = createAuditSession(options);
     try {
       if (!interactive) {
-        if(o.json)process.stderr.write(session.snapshot().launch!.notice+'\n');else print(session.snapshot().launch!.notice);
+        const notice=session.snapshot().launch!.notice.replace('Esc cancels.','Ctrl-C cancels.');
+        if(o.json)process.stderr.write(notice+'\n');else{const lines:string[]=[];let current='';for(const word of notice.split(' ')){if(current.length+word.length+1>width){lines.push(current);current=word;}else current+=(current?' ':'')+word;}if(current)lines.push(current);print(lines.join('\n'));}
         const snapshot = await session.run();
         if (o.json) printJson(publicAuditSnapshot(snapshot));
         else print(ui.renderLaunchPlain(snapshot,{ascii:o.ascii,width}));

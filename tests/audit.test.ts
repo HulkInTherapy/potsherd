@@ -353,7 +353,7 @@ describe('audit --verify, piped the way the docs pipe it', () => {
     const { snippet } = JSON.parse(r.stdout) as { snippet: string };
 
     const a = JSON.parse(
-      run(['audit', '--json', '--claude-dir', FIXTURE_CLAUDE]).stdout,
+      run(['audit', '--legacy', '--json', '--claude-dir', FIXTURE_CLAUDE]).stdout,
     ) as Record<string, number>;
 
     // A shell with CLAUDE_CONFIG_DIR deliberately *cleared*: the point is that
@@ -385,7 +385,7 @@ describe('audit --verify, piped the way the docs pipe it', () => {
     // every number the card renders appears in the snippet's output, so a
     // sixth row added later without a sixth line here fails this test.
     const card = stripAnsi(
-      execFileSync(process.execPath, [bin, 'audit', '--claude-dir', FIXTURE_CLAUDE, '--width', '80'], {
+      execFileSync(process.execPath, [bin, 'audit', '--legacy', '--claude-dir', FIXTURE_CLAUDE, '--width', '80'], {
         encoding: 'utf8',
         env: { ...process.env, NO_COLOR: '1' },
       }),
@@ -435,7 +435,7 @@ describe('audit --verify, piped the way the docs pipe it', () => {
     );
 
     const card = JSON.parse(
-      execFileSync(process.execPath, [bin, 'audit', '--claude-dir', claude, '--json'], {
+      execFileSync(process.execPath, [bin, 'audit', '--legacy', '--claude-dir', claude, '--json'], {
         encoding: 'utf8',
       }),
     ) as Record<string, number>;

@@ -68,7 +68,7 @@ export function buildLaunchScreen(snapshot:AuditSnapshot,nav:LaunchNavigation,ge
  }else if(nav.view==='periods'){
   wrap(`Analyzed scope: ${semanticScope(snapshot)}`,'cyan');wrap(`Allowance: ${num(sem?.window.tokenLimit)} total input tokens`,'dim');
   for(const [index,row] of launchRows(snapshot,nav).entries()){const choice=sem?.window.choices.find(item=>row.id===`period:${item.period}`);add(`${row.id===nav.selectedId||!nav.selectedId&&index===nav.selectedIndex?'›':' '} ${row.label}${choice?.period===sem?.window.selected?.period&&!sem?.window.selected?.selection?' · selected':''}`,'amber');wrap(row.value,'dim');if(choice?.reason)wrap(words(choice.reason),'dim');}
-  wrap('Estimates include preparation and questions. Enter analyzes the selected period within this run’s remaining allowance.','dim');if(sem?.window.reason)wrap(words(sem.window.reason),'dim');
+  wrap('Remaining-analysis estimates include questions and retry allowance. Local inventory has already run; these are not total cold-audit times. Enter uses this run’s remaining allowance.','dim');if(sem?.window.reason)wrap(words(sem.window.reason),'dim');
  }else if(nav.view==='prompts'){
   add('DIRECT USER INPUTS','cyan');if(geometry.busy)add('Reading scoped conversation…','dim');
   for(const row of launchRows(snapshot,nav,geometry.promptPage)){add(`${row.id===nav.selectedId?'›':' '} ${row.label}`);add(`  ${row.value}`,'dim');}if(!geometry.busy&&!geometry.promptPage?.prompts.length)add('No accessible inputs in this bounded read.','dim');
