@@ -20,7 +20,7 @@ export function boundedBytes(file:string,max:number):Buffer {
  try{const before=fs.fstatSync(fd);if(!before.isFile()||before.size>max)throw new Error('source_bytes_limit');
   const bytes=Buffer.alloc(before.size);let offset=0;
   while(offset<bytes.length){const n=fs.readSync(fd,bytes,offset,bytes.length-offset,offset);if(!n)throw new Error('source_changed');offset+=n;}
-  const after=fs.fstatSync(fd);if(before.size!==after.size||before.mtimeMs!==after.mtimeMs||before.ino!==after.ino)throw new Error('source_changed');
+  const after=fs.fstatSync(fd);if(before.size!==after.size||before.mtimeMs!==after.mtimeMs||before.ctimeMs!==after.ctimeMs||before.dev!==after.dev||before.ino!==after.ino)throw new Error('source_changed');
   return bytes;
  }finally{fs.closeSync(fd);}
 }

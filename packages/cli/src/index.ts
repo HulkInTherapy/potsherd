@@ -160,7 +160,8 @@ function main(rawArgv: string[]): void {
     program
       .command('audit')
       .description('count what Claude Code has already deleted, and what it deletes next')
-      .option('--overview', 'open the new local audit explorer (staged rollout)')
+      .option('--overview', 'open the terminal audit (the default)')
+      .option('--tone <tone>', 'voice override: elegant,witty,chaotic,roast')
       .option('--legacy', 'use the existing retention audit')
       .option('--plain', 'print the new overview without interactive controls')
       .option('--no-motion', 'keep the new terminal view still')
@@ -188,7 +189,7 @@ example:
         private: Boolean(opts['private']), motion: opts['motion'] !== false,
         harness: opts['harness'] as string | undefined, project: opts['project'] as string | undefined,
         since: opts['since'] as string | undefined, until: opts['until'] as string | undefined,
-        timezone: opts['timezone'] as string | undefined, export: opts['export'] as string | undefined }),
+        timezone: opts['timezone'] as string | undefined, tone:opts['tone'] as string|undefined, export: opts['export'] as string | undefined }),
       o,
     );
   });

@@ -1,6 +1,7 @@
 /** Audit v1 shared contracts. Canonical identity and scope remain memory-owned. */
 import type { Harness } from '../adapters/types.js';
 import type { Scope, SpanRef, Epochs } from '../memory/contracts.js';
+import type {LaunchAudit,AuditTone,SemanticPeriod} from './launch-contracts.js';
 
 export type AuditHarness = Extract<Harness, 'claude'|'codex'|'pi'|'opencode'>;
 export const AUDIT_INTENTS = ['feature_build','bug_fix','ui_design','tests','refactor','code_review','pr_management','research','explanation_learning','planning_architecture','deploy_operations','documentation_writing','agent_coordination','other','mixed','insufficient_context'] as const;
@@ -41,6 +42,7 @@ export interface AuditSnapshot {
   insights: readonly AuditInsight[]; usage: AuditUsage; semantics: AuditSemantics;
   phrases?: readonly AuditPhrase[]; judgments?: readonly AuditPromptJudgment[];
   profanity?:AuditProfanity;
+  launch?:LaunchAudit;
   warnings: readonly string[];
 }
 export type AuditEvent = { type: 'snapshot'; snapshot: AuditSnapshot }|{ type:'progress'; snapshotId: string; sequence: number; progress: AuditProgress; sources: readonly AuditSourceCapability[] }|{ type:'error'; snapshotId:string; code: string; message: string };
@@ -50,6 +52,12 @@ export interface AuditOverviewOptions {
   signal?: AbortSignal; maxSourceBytes?: number; maxCandidates?: number; maxTotalBytes?:number; maxPrompts?:number; maxRecordsPerSource?:number;
   /** Frozen checkpoint allocation bound for this session only; default64MiB,100bytes..256MiB. */
   maxStoreBytes?: number;
+  /** Consumer terminal pipeline; legacy pilot/classify remains separately consent bound. */
+  launch?:boolean;
+  /** Developer preparation only: no network/corpus dispatch. */
+  launchPrepareOnly?:boolean;
+  derivedCacheDir?:string;
+  tone?:AuditTone;
 }
 export interface AuditSemanticSelection { conversationIds: readonly string[]; maxPrompts: number; maxRequests: number; budgetUsd: number; consent: true; confidenceThreshold?:number; signal?: AbortSignal; approvedRequestHashes?:readonly string[]; approvedPolicyVersion?:string; }
 /** Private consent material only: never attach to a public snapshot/default rendering. */
@@ -63,6 +71,8 @@ export interface AuditSemanticPreview { snapshotId:string; model:string; selecte
 export interface AuditSession {
   run(onEvent?: (event: AuditEvent)=>void): Promise<AuditSnapshot>;
   snapshot(): AuditSnapshot;
+  analyzePeriod?(period:SemanticPeriod,onEvent?:(event:AuditEvent)=>void):Promise<AuditSnapshot>;
+  previewLaunch?():Promise<{scope:AuditScope;sourceVersion:string;privacyVersion:string;model:string;window:unknown;requests:readonly {segmentId:string;hash:string;bytes:number;request:unknown}[]}>;
   cancel(): void;
   prompts(conversationId: string, offset?: number, limit?: number): Promise<AuditPromptPage>;
   evidence(route: AuditEvidenceRoute): Promise<AuditEvidence>;

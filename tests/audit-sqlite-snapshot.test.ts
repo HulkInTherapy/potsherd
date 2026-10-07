@@ -11,6 +11,11 @@ const dirs:string[]=[];afterEach(()=>dirs.splice(0).forEach(d=>fs.rmSync(d,{recu
 function fixture(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'audit-sqlite-snapshot-'));dirs.push(dir);return {dir,file:path.join(dir,'potsherd.db')};}
 function inventory(dir:string){return Object.fromEntries(fs.readdirSync(dir).sort().map(n=>[n,createHash('sha256').update(fs.readFileSync(path.join(dir,n))).digest('hex')]));}
 describe('frozen audit SQLite checkpoint',()=>{
+  it('uses identity-only progress checks without overlooking same-size restored-mtime edits or live journals',()=>{
+    const {file}=fixture(),writer=open({file});writer.close();const snapshot=openAuditSqliteSnapshot(file);
+    try{snapshot.assertIdentityCurrent();const before=fs.statSync(file),bytes=fs.readFileSync(file);bytes[bytes.length-1]=bytes[bytes.length-1]!^1;fs.writeFileSync(file,bytes);fs.utimesSync(file,before.atime,before.mtime);expect(()=>snapshot.assertIdentityCurrent()).toThrow('stale');expect(()=>snapshot.assertCurrent()).toThrow('stale');}finally{snapshot.db.close();}
+    const other=fixture(),db=open({file:other.file});db.close();const current=openAuditSqliteSnapshot(other.file);try{fs.writeFileSync(other.file+'-wal','synthetic-live-journal');expect(()=>current.assertIdentityCurrent()).toThrow('live_journal');expect(()=>current.assertCurrent()).toThrow('live_journal');}finally{current.db.close();}
+  });
   it('reads a checkpointed WAL-mode store without new or changed files and blocks snapshot writes',()=>{
     const {dir,file}=fixture(),writer=open({file});writer.exec("CREATE TABLE audit_fixture(value TEXT);INSERT INTO audit_fixture VALUES('checkpoint')");writer.close();
     const before=inventory(dir),snapshot=openAuditSqliteSnapshot(file);

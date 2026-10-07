@@ -208,3 +208,7 @@ export async function runAuditTerminal(session:AuditSession,options:AuditTermina
  try{app=render(React.createElement(App),{alternateScreen:true,incrementalRendering:true,maxFps:12,exitOnCtrlC:false,patchConsole:false});}finally{process.stdout.write=originalWrite;}
  try{await app.waitUntilExit();semanticActions.cancel(!scanSettled||semanticActions.running);await semanticActions.settled();if(!scanSettled)session.cancel();if(scan)await scan;return {snapshot:finalSnapshot,reason};}finally{semanticActions.cancel(!scanSettled||semanticActions.running);if(!scanSettled)session.cancel();app.unmount();await app.waitUntilRenderFlush();}
 }
+
+// Additive consumer launch UI; the legacy pilot renderer remains available.
+export {runLaunchTerminal,buildLaunchScreen,renderLaunchPlain,createLaunchNavigation,launchRows,launchMove,launchBack,launchPush,launchSelectSection,launchFreeze,LAUNCH_SECTIONS} from './launch-terminal.js';
+export type {LaunchNavigation,LaunchSection,LaunchGeometry,LaunchRow} from './launch-terminal.js';

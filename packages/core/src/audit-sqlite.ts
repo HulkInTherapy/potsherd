@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { openDatabaseSnapshot, type Db } from './sqlite-driver.js';
 
-export interface AuditSqliteSnapshot { db: Db; hash: string; assertCurrent(): void; }
+export interface AuditSqliteSnapshot { db: Db; hash: string; assertCurrent(): void; /** Progress-only identity fence; authority boundaries retain full verification. */ assertIdentityCurrent():void; }
 const fingerprint=(stat:fs.BigIntStats)=>[stat.dev,stat.ino,stat.size,stat.mtimeNs,stat.ctimeNs].join(':');
 function checkWal(file:string):void {
   for (const suffix of ['-wal','-journal']) {
@@ -39,7 +39,8 @@ export function openAuditSqliteSnapshot(file:string,maxBytes=64*1024*1024):Audit
   if(bytes.subarray(0,16).toString('binary')!=='SQLite format 3\0')throw new Error('audit_sqlite_format_unavailable');
   const copy=Buffer.from(bytes);copy[18]=1;copy[19]=1;
   const db=openDatabaseSnapshot(copy),assertCurrent=verifier(file,maxBytes,identity,hash);
+  const assertIdentityCurrent=()=>{checkWal(file);if(fingerprint(fs.statSync(file,{bigint:true}))!==identity)throw new Error('audit_sqlite_snapshot_stale');checkWal(file);};
   db.pragma('temp_store = MEMORY');
   db.pragma('query_only = ON');
-  try{assertCurrent();return {db,hash,assertCurrent};}catch(error){db.close();throw error;}
+  try{assertCurrent();return {db,hash,assertCurrent,assertIdentityCurrent};}catch(error){db.close();throw error;}
 }

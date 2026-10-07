@@ -29,12 +29,12 @@ export function validateJevRequest(request:JevRequest):void{
  }
  if(Buffer.byteLength(JSON.stringify(request.state))>8192||Buffer.byteLength(JSON.stringify(request))>32768)fail('request_bytes_limit');
 }
-function distribution(raw:unknown,expected:readonly string[]):Record<string,number>{
+function distribution(raw:unknown,expected:readonly string[],allowRounded=false):Record<string,number>{
  if(!record(raw)||!keys(raw,expected)||Object.values(raw).some(v=>!number(v)))fail('invalid_response');
- const result=raw as Record<string,number>;if(Math.abs(Object.values(result).reduce((a,b)=>a+b,0)-1)>0.001)fail('invalid_response');return result;
+ const result=raw as Record<string,number>;const values=Object.values(result),rounded=allowRounded&&values.every(v=>Math.abs(v*100-Math.round(v*100))<1e-8);const tolerance=rounded?Math.min(0.02,Math.max(0.001,expected.length*0.005)):0.001;if(Math.abs(values.reduce((a,b)=>a+b,0)-1)>tolerance+1e-9)fail('invalid_response');return result;
 }
 /** SDK typing is not runtime validation; every answer and bound is checked here. */
-export function validateJevResponse(raw:unknown,request:JevRequest):JevResponse{
+export function validateJevResponse(raw:unknown,request:JevRequest,allowRounded=false):JevResponse{
  if(!record(raw)||!keys(raw,['model','answers','usage']))fail('invalid_response');if(raw.model!==request.model)fail('model_mismatch');
  if(!record(raw.answers)||!keys(raw.answers,Object.keys(request.questions))||!record(raw.usage)||!keys(raw.usage,['input_tokens','output_tokens']))fail('invalid_response');
  for(const count of Object.values(raw.usage))if(!number(count,0,Number.MAX_SAFE_INTEGER)||!Number.isSafeInteger(count))fail('invalid_response');
@@ -44,10 +44,10 @@ export function validateJevResponse(raw:unknown,request:JevRequest):JevResponse{
   if(q.type==='noul'){if(!keys(a,['type','noul'])||!number(a.noul))fail('invalid_response');answers[id]={type:'noul',noul:a.noul};}
   else if(q.type==='choice'){
    if(!keys(a,['type','choice','probabilities','confidence'])||typeof a.choice!=='string'||!Object.hasOwn(q.criteria,a.choice)||!number(a.confidence))fail('invalid_response');
-   const probabilities=distribution(a.probabilities,Object.keys(q.criteria));if(probabilities[a.choice]!+0.001<Math.max(...Object.values(probabilities)))fail('invalid_response');answers[id]={type:'choice',choice:a.choice,probabilities,confidence:a.confidence};
+   const probabilities=distribution(a.probabilities,Object.keys(q.criteria),allowRounded);if(probabilities[a.choice]!+0.001<Math.max(...Object.values(probabilities)))fail('invalid_response');answers[id]={type:'choice',choice:a.choice,probabilities,confidence:a.confidence};
   }else{
    const levels=q.criteria.map((_,i)=>String(i));if(!keys(a,['type','score','legend','probabilities','confidence'])||!number(a.score,0,levels.length-1)||!number(a.confidence)||!record(a.legend)||!keys(a.legend,levels)||levels.some((level,i)=>(a.legend as Record<string,unknown>)[level]!==q.criteria[i]))fail('invalid_response');
-   const probabilities=distribution(a.probabilities,levels),mean=levels.reduce((n,level)=>n+Number(level)*probabilities[level]!,0);if(Math.abs(a.score-mean)>0.02)fail('invalid_response');answers[id]={type:'score',score:a.score,confidence:a.confidence,probabilities,legend:a.legend as Record<string,string>};
+   const probabilities=distribution(a.probabilities,levels,allowRounded),mean=levels.reduce((n,level)=>n+Number(level)*probabilities[level]!,0);if(Math.abs(a.score-mean)>0.02)fail('invalid_response');answers[id]={type:'score',score:a.score,confidence:a.confidence,probabilities,legend:a.legend as Record<string,string>};
   }
  }
  return {model:request.model,answers,usage:raw.usage as JevResponse['usage']};

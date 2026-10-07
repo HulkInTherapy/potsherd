@@ -37,7 +37,7 @@ function inventory(root:string):Record<string,string>{
 }
 
 describe('compiled CLI audit route boundary',()=>{
-  it('reports new safe local facts without network, UI initialization, or filesystem writes',()=>{
+  it('reports new safe local facts without network/UI initialization while writing only derived cache',()=>{
     const f=fixture(),before=inventory(f.root),result=f.run(['--overview','--json']);
     expect(result.status,result.stderr).toBe(0);
     const report=JSON.parse(result.stdout);
@@ -48,17 +48,16 @@ describe('compiled CLI audit route boundary',()=>{
     expect(result.stdout).not.toContain('A private requested feature.');
     expect(result.stdout).not.toContain('\u001b');
     expect(fs.existsSync(f.attempts)).toBe(false);
-    expect(inventory(f.root)).toEqual(before);
-    expect(fs.existsSync(f.roots.owned)).toBe(false);
+    const after=inventory(f.root);for(const [file,hash] of Object.entries(before))expect(after[file]).toBe(hash);expect(Object.keys(after).filter(file=>!(file in before)).every(file=>file.startsWith('owned/audit-derived/'))).toBe(true);expect(fs.existsSync(path.join(f.roots.owned,'potsherd.db'))).toBe(false);
   });
   it('renders noninteractive plain output with all UI dependencies blocked',()=>{
     const f=fixture(),result=f.run(['--overview','--plain','--ascii']);
-    expect(result.status,result.stderr).toBe(0);expect(result.stdout).toContain('potsherd');
-    expect(result.stdout).not.toContain('\u001b');expect(result.stdout).not.toContain('PRIVATE-CUSTOMER-NAME');
+    expect(result.status,result.stderr).toBe(0);expect(result.stdout).toContain('POTSHERD');
+    expect(result.stdout).not.toContain('\u001b');expect(result.stdout).toContain('PRIVATE-CUSTOMER-NAME');
     expect(fs.existsSync(f.attempts)).toBe(false);
   });
   it('keeps legacy JSON and verifier independent from the new renderer',()=>{
-    const f=fixture(),legacy=f.run(['--json']),verify=f.run(['--verify','--json']);
+    const f=fixture(),legacy=f.run(['--legacy','--json']),verify=f.run(['--verify','--json']);
     expect(legacy.status,legacy.stderr).toBe(0);expect(verify.status,verify.stderr).toBe(0);
     expect(JSON.parse(legacy.stdout)).toHaveProperty('sessionsEver');
     expect(JSON.parse(legacy.stdout)).not.toHaveProperty('metrics');
@@ -73,7 +72,7 @@ describe('compiled CLI audit route boundary',()=>{
     const f=fixture(),file=path.join(f.root,'share.svg'),result=f.run(['--overview','--export',file]);
     expect(result.status,result.stderr).toBe(0);const svg=fs.readFileSync(file,'utf8');
     expect(svg).toContain('<svg');expect(svg).not.toContain('PRIVATE-CUSTOMER-NAME');
-    expect(svg).not.toContain('A private requested feature.');expect(fs.existsSync(f.roots.owned)).toBe(false);
+    expect(svg).not.toContain('A private requested feature.');expect(fs.existsSync(path.join(f.roots.owned,'potsherd.db'))).toBe(false);
     expect(fs.existsSync(f.attempts)).toBe(false);
   });
 });

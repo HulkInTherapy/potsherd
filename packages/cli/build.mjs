@@ -80,3 +80,5 @@ for (const file of ['LICENSE', 'NOTICE', 'README.md']) {
 
 mkdirSync(path.join(here,'licenses'),{recursive:true});
 copyFileSync(path.join(repo,'licenses','js-tiktoken-MIT.txt'),path.join(here,'licenses','js-tiktoken-MIT.txt'));
+
+copyFileSync(path.join(repo,'licenses','models-dev-MIT.txt'),path.join(here,'licenses','models-dev-MIT.txt'));
