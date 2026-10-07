@@ -12,7 +12,7 @@ const at=(v:unknown):string|null=>typeof v==='number'&&Number.isFinite(v)&&Math.
 export interface UsageRecordScope {key:string;rawStart:number;rawEnd:number;eventAt:string|null;project:string|null;}
 export interface NativeUsageOptions {project?:string|null;maxRecords?:number;acceptRecord?:(record:R,scope:UsageRecordScope)=>boolean;}
 /** Reads only the caller's bounded frozen bytes. Excluded records still advance native counters. */
-export interface NativeUsageAccumulator {pushLine(line:string):void;records():RecordedInference[];counts():{observed:number;excluded:number;deduplicated:number};}
+export interface NativeUsageAccumulator {invalidateContext():void;pushLine(line:string):void;records():RecordedInference[];counts():{observed:number;excluded:number;deduplicated:number};}
 /** Stateful per-record extraction lets full usage stream independently of context captures. */
 export function createNativeUsageAccumulator(harness:AuditHarness,conversationId:string,options:NativeUsageOptions={}):NativeUsageAccumulator {
  let observed=0,excluded=0;
@@ -63,7 +63,7 @@ const start=offset;offset+=Buffer.byteLength(line)+1;if(!line.trim())return;if(+
   if(includesReasoning&&output!==null&&reasoning!==null&&reasoning>output)gaps.push('reasoning_exceeds_output');
   put({id,conversationId,harness,eventAt,project,provider:observedProvider,model:observedModel,canonicalModel:null,inputTokens:input,outputTokens:output,cacheReadTokens:read,cacheWriteTokens:write,reasoningTokens:reasoning,inputIncludesCache:includesCache,outputIncludesReasoning:includesReasoning,reportedCostUsd:reported,basis,gaps,...(harness==='claude'?{cacheWrite5mTokens:num(obj(obj(m.usage).cache_creation).ephemeral_5m_input_tokens),cacheWrite1hTokens:num(obj(obj(m.usage).cache_creation).ephemeral_1h_input_tokens)}:{})});
  };
- return {pushLine,records:()=>[...records.values()],counts:()=>({observed,excluded,deduplicated:Math.max(0,observed-excluded-records.size)})};
+ return {invalidateContext:()=>{project=null;model=null;provider=null;previous=null;},pushLine,records:()=>[...records.values()],counts:()=>({observed,excluded,deduplicated:Math.max(0,observed-excluded-records.size)})};
 }
 export function extractNativeUsage(bytes:Buffer|string,harness:AuditHarness,conversationId:string,options:NativeUsageOptions={}):RecordedInference[]{
  const text=Buffer.isBuffer(bytes)?bytes.toString('utf8'):bytes,acc=createNativeUsageAccumulator(harness,conversationId,options);

@@ -6,7 +6,7 @@ function responseAttributions(records:readonly ContextRecord[]):Map<string,{mode
  const groups=new Map<string,ContextRecord[]>(),seen=new Set<string>();
  for(const record of records){const unique=JSON.stringify([record.conversationId,record.project,record.role,record.id]);if(seen.has(unique))continue;seen.add(unique);const key=JSON.stringify([record.conversationId,record.project]);const group=groups.get(key)??[];group.push(record);groups.set(key,group);}
  const attribution=new Map<string,{model:string|null;provider:string|null}>();
- for(const group of groups.values())for(let i=0;i<group.length;i++){const user=group[i]!;if(user.role!=='user'||!user.directUser)continue;const models=new Map<string,{model:string;provider:string|null}>();for(let j=i+1;j<group.length;j++){const next=group[j]!;if(next.role==='user')break;if(next.role==='assistant'&&next.model)models.set(JSON.stringify([next.model,next.provider]),{model:next.model,provider:next.provider});}attribution.set(user.id,models.size===1?[...models.values()][0]!:{model:null,provider:null});}
+ for(const group of groups.values())for(let i=0;i<group.length;i++){const user=group[i]!;if(user.role!=='user'||!user.directUser)continue;const models=new Map<string,{model:string|null;provider:string|null}>();for(let j=i+1;j<group.length;j++){const next=group[j]!;if(next.role==='user')break;if(next.role==='assistant')models.set(JSON.stringify([next.model,next.provider]),{model:next.model,provider:next.provider});}attribution.set(user.id,models.size===1?[...models.values()][0]!:{model:null,provider:null});}
  return attribution;
 }
 /** Attribute only a direct input's own response turn, never a session-last model. */

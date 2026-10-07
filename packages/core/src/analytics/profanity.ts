@@ -23,6 +23,10 @@ function labels(text:string):{labels:Uint8Array;ambiguous:boolean}{
   offset+=line.length;
  }
  if(fence){map.fill(UNKNOWN,fence.start);ambiguous=true;}
+ // Explicit imported-source structure is quoted material, not the user's own reaction.
+ const sourceRows=text.split(/(?<=\n)/u),timestamp=/^\s*(?:(?:[-*#]+|\*\*)\s*)?\[?\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\]?/u;
+ if(/(?:transcript|captions|youtube|youtu\.be|video transcription)/iu.test(text)&&sourceRows.filter(line=>timestamp.test(line)).length>=3){let at=0;for(const line of sourceRows){if(timestamp.test(line))map.fill(QUOTE,at,at+line.length);at+=line.length;}}
+
  for(let i=0;i<text.length;i++){
   if(map[i]||escaped(text,i))continue;const char=text[i]!;
   if(char==='`'){

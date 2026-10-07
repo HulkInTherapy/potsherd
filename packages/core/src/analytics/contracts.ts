@@ -48,7 +48,7 @@ export interface AuditSnapshot {
   warnings: readonly string[];
   funnel?:AuditDataFunnel;
 }
-export interface AuditDataFunnel {nativeFilesDiscovered:number;nativeFilesParsed:number;retainedSources:number;selectedSources:number;responsesObserved:number;responsesDeduplicated:number;responsesExcluded:number;responsesPriced:number;excludedReasons:Readonly<Record<string,number>>;gaps:readonly string[];}
+export interface AuditDataFunnel {sourceFiles?:readonly {fileHash:string;harness:AuditHarness;bytes:number;state:'parsed'|'excluded'|'failed';code:string|null;responsesObserved:number;responsesExcluded:number;responsesDeduplicated:number}[];nativeFilesDiscovered:number;nativeFilesParsed:number;retainedSources:number;selectedSources:number;responsesObserved:number;responsesDeduplicated:number;responsesExcluded:number;responsesPriced:number;excludedReasons:Readonly<Record<string,number>>;gaps:readonly string[];}
 
 export type AuditEvent = {type:'transfer';snapshotId:string;sequence:number;model:string;recipients:readonly string[];attempt:number;selectedSegments:number;notice:string;ackId?:string}|{ type: 'snapshot'; snapshot: AuditSnapshot }|{ type:'progress'; snapshotId: string; sequence: number; progress: AuditProgress; sources: readonly AuditSourceCapability[] }|{ type:'error'; snapshotId:string; code: string; message: string };
 export interface AuditOverviewOptions {
