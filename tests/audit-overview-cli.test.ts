@@ -52,7 +52,7 @@ describe('compiled CLI audit route boundary',()=>{
   });
   it('renders noninteractive plain output with all UI dependencies blocked',()=>{
     const f=fixture(),result=f.run(['--overview','--plain','--ascii']);
-    expect(result.status,result.stderr).toBe(0);expect(result.stdout).toContain('POTSHERD');
+    expect(result.status,result.stderr).toBe(0);expect(result.stdout).toContain('SLOPIE');
     expect(result.stdout).not.toContain('\u001b');expect(result.stdout).toContain('PRIVATE-CUSTOMER-NAME');
     expect(fs.existsSync(f.attempts)).toBe(false);
   });
