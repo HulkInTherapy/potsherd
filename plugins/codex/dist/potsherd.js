@@ -35025,7 +35025,7 @@ function buildLaunchScreen(snapshot, nav, geometry = {}) {
       wrap5(row2.value, "dim");
       if (choice?.reason) wrap5(words3(choice.reason), "dim");
     }
-    wrap5("Estimates include preparation and questions. Enter analyzes the selected period within this run\u2019s remaining allowance.", "dim");
+    wrap5("Remaining-analysis estimates include questions and retry allowance. Local inventory has already run; these are not total cold-audit times. Enter uses this run\u2019s remaining allowance.", "dim");
     if (sem?.window.reason) wrap5(words3(sem.window.reason), "dim");
   } else if (nav.view === "prompts") {
     add("DIRECT USER INPUTS", "cyan");
@@ -37665,8 +37665,20 @@ async function runAuditOverview(o) {
     const session = createAuditSession(options);
     try {
       if (!interactive) {
-        if (o.json) process.stderr.write(session.snapshot().launch.notice + "\n");
-        else print(session.snapshot().launch.notice);
+        const notice = session.snapshot().launch.notice.replace("Esc cancels.", "Ctrl-C cancels.");
+        if (o.json) process.stderr.write(notice + "\n");
+        else {
+          const lines = [];
+          let current = "";
+          for (const word of notice.split(" ")) {
+            if (current.length + word.length + 1 > width) {
+              lines.push(current);
+              current = word;
+            } else current += (current ? " " : "") + word;
+          }
+          if (current) lines.push(current);
+          print(lines.join("\n"));
+        }
         const snapshot = await session.run();
         if (o.json) printJson(publicAuditSnapshot(snapshot));
         else print(ui.renderLaunchPlain(snapshot, { ascii: o.ascii, width }));
