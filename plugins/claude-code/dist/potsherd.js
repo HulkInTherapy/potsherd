@@ -16119,7 +16119,7 @@ var init_native_metadata_projection = __esm({
         if (!this.error && this.imageBodies.length) {
           const root = this.root, payload = root.payload;
           for (const body of this.imageBodies) {
-            if (root.type === "response_item" && payload?.type === "custom_tool_call_output" && body.frame.value?.type === "input_image")
+            if (root.type === "response_item" && (payload?.type === "custom_tool_call_output" || payload?.type === "function_call_output") && body.frame.value?.type === "input_image")
               continue;
             if (body.overflow)
               this.fail("native_metadata_bytes_limit");
