@@ -30,4 +30,4 @@
  * has not been made yet, so it checks the one direction that has actually gone
  * wrong twice.
  */
-export const VERSION = '1.6.1';
+export const VERSION = '1.6.2';

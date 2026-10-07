@@ -2,7 +2,14 @@
 
 Public releases use package versions. Internal development phase numbers are planning milestones, not product versions. This public release consolidates a development snapshot; the original private development branches are preserved separately.
 
-## 1.6.1 — Slopie candidate; publication pending
+## 1.6.2 — Live SQLite history
+
+- Read committed live-WAL history from bounded private snapshots using SQLite recovery, without opening or mutating the source database, WAL or shared-memory files. Keep ignore, forget and source-currentness fences; hold active rollback journals and unsafe captures with distinct reasons.
+- Distinguish local source failures, loading, explicitly offline analysis and provider quota failures. Settled failures no longer leave the selected window pending or imply a model request occurred.
+- Resolve a proven self-counting token-receipt cycle at decimal boundaries using bounded legal whitespace in the actual immutable emission. Keep caller limits, request identity, evidence and exact measured JSON/MCP/human accounting; ordinary stable serialization stays unchanged.
+- Preserve the Slopie command and Potsherd compatibility executable. This patch makes no new live model calls or broader semantic accuracy claim.
+
+## 1.6.1 — Slopie
 
 - Rebrand the public package, primary command, terminal and repository as Slopie (formerly Potsherd). Run `slopie audit`; `potsherd` remains a compatibility executable. Existing storage, cache, settings, plugins and tool IDs keep their compatibility names.
 - Preserve the experimental audit disclosures: partial usage and unknown providers, explicit first-party reference pricing, quota-limited free analysis and unavailable private semantic accuracy. This branding release adds no Jev calls, performance improvement or broader accuracy qualification.

@@ -33,7 +33,7 @@ it('the actual CLI accepts omitted accounting tokenizer and emits safe measured 
  const root=fixture();const {spawnSync}=require('node:child_process') as typeof import('node:child_process');
  const invoke=(input:unknown)=>spawnSync(process.execPath,[bin,'--potsherd-dir',root,'find','--input-json',JSON.stringify(input)],{encoding:'utf8',env:{...process.env,POTSHERD_SQLITE:'node'}});
  const input={query:'cache.X_9',mode:'literal',scope:{project:'/p'},budget:{maxTokens:2048}};
- const good=invoke(input),response=JSON.parse(good.stdout);expect(good.status,good.stderr).toBe(0);expect(response.evidence[0].text).toBe('Exact cache.X_9 recovered');expect(response.budget.tokenizerId).toBe(defaultBudget().tokenizerId);expect(response.budget.usedTokens).toBe(countTokens(good.stdout));expect(response.budget.usedTokens).toBeLessThanOrEqual(2048);
+ const good=invoke(input),response=JSON.parse(good.stdout);expect(good.status,good.stderr||good.stdout).toBe(0);expect(response.evidence[0].text).toBe('Exact cache.X_9 recovered');expect(response.budget.tokenizerId).toBe(defaultBudget().tokenizerId);expect(response.budget.usedTokens).toBe(countTokens(good.stdout));expect(response.budget.usedTokens).toBeLessThanOrEqual(2048);
  for(const [budget,code] of [[{maxTokens:2048,tokenizerId:'private-wrong-secret'},'unsupported_budget_tokenizerId'],[{maxTokens:2048,tokenizerId:null},'invalid_budget_tokenizerId'],[{maxTokens:'private-invalid-secret'},'invalid_budget_maxTokens']] as const){
   const bad=invoke({...input,budget}),body=JSON.parse(bad.stdout);expect(bad.status).toBe(1);expect(body.warnings).toContain(code);expect(body.evidence).toEqual([]);expect(body.budget.usedTokens).toBe(countTokens(bad.stdout));expect(bad.stdout+bad.stderr).not.toContain('private-');
  }
