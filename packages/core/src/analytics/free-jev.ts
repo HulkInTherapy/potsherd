@@ -15,7 +15,7 @@ export interface FreeJevIdentity {sourceVersion:string;privacyVersion:string;seg
 export type FreeJevRoute=
  |{kind:'zen-public'}
  |{kind:'zen';accessVerified:true;apiKey:string;endpoint?:typeof FREE_JEV_ENDPOINT};
-export interface FreeJevProviderOptions {route:FreeJevRoute;fetch?:typeof globalThis.fetch;cache?:FreeJevCache;timeoutMs?:number;}
+export interface FreeJevProviderOptions {beforeDispatch?:(details:{model:typeof FREE_JEV_MODEL;attempt:number;notice:string})=>Promise<void>|void;route:FreeJevRoute;fetch?:typeof globalThis.fetch;cache?:FreeJevCache;timeoutMs?:number;}
 export interface FreeJevRunOptions {tokenLimit?:number;maxAttempts?:number;retries?:0|1;signal?:AbortSignal;isCurrent:()=>boolean;estimateTokens?:(serialized:string)=>number;estimateBasis?:string;}
 export type FreeJevResult={state:'ok';response:FreeJevResponse;cacheHit:boolean}|{state:'skipped'|'failed';code:string};
 export const estimateFreeJevTokens=(serialized:string):number=>Buffer.byteLength(serialized)+128;
@@ -110,6 +110,7 @@ export class FreeJevRun {
    const controller=new AbortController(),abort=()=>controller.abort();this.signal.addEventListener('abort',abort,{once:true});
    const timer=setTimeout(()=>controller.abort(),this.provider.options.timeoutMs??10000);
    try{
+    await abortable(Promise.resolve(this.provider.options.beforeDispatch?.({model:FREE_JEV_MODEL,attempt:this.attemptCount,notice:this.provider.notice})),this.signal);this.assertCurrent();
     const route=this.provider.options.route,endpoint=FREE_JEV_ENDPOINT;
     const auth=route.kind==='zen-public'?'Bearer public':`Bearer ${route.apiKey}`;
     const headers:Record<string,string>={'Content-Type':'application/json',Authorization:auth};

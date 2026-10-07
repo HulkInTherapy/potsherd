@@ -53,7 +53,7 @@ function capture(file:string,maxBytes:number,check:()=>void,buffer:Buffer,direct
  if(!same(identity,inspect(file,maxBytes)))throw new Error('audit_sqlite_snapshot_stale');check();
  const hash=createHash('sha256').update(JSON.stringify([identity.database,identity.wal,identity.journal,identity.shm])).update(database.hash).update(wal===null?'absent':wal.hash).digest('hex');check();return {identity,databaseHeader:database.header,walHeader:wal?.header??null,hash};
 }
-/** Envelope checks only; SQLite, not this module, validates frame checksums and commit marks. */
+/** Header and frame-shape checks; committed WAL checksum verification follows. */
 function validateEnvelope(captured:Captured):void {
  const db=captured.databaseHeader,wal=captured.walHeader;if(db.subarray(0,16).toString('binary')!=='SQLite format 3\0')throw new Error('audit_sqlite_format_unavailable');
  if(!captured.identity.walBytes)return;if(!wal||wal.length<32)throw new Error('audit_sqlite_wal_header_unavailable');
@@ -64,21 +64,20 @@ function validateEnvelope(captured:Captured):void {
 }
 
 /** Certify the published commit boundary, without interpreting or replaying database pages. */
-function validateCommittedWal(captured:Captured,copy:string,buffer:Buffer,check:()=>void):void {
- if(!captured.identity.walBytes)return;const wal=captured.walHeader!,shm=captured.identity.shmHeader!;
+function validateCommittedWal(captured:Captured,walFile:string,buffer:Buffer,check:()=>void):number {
+ if(!captured.identity.walBytes)return 0;const wal=captured.walHeader!,shm=captured.identity.shmHeader!;
  const bigEndian=wal.readUInt32BE(0)===0x377f0683,pageSize=wal.readUInt32BE(8),rawShmPage=nativeBigEndian?shm.readUInt16BE(14):shm.readUInt16LE(14),shmPage=rawShmPage===1?65536:rawShmPage;
  let sum=checksum(wal,0,24,bigEndian);const mxFrame=native32(shm,16),nPage=native32(shm,20),committedBytes=32+mxFrame*(pageSize+24);
  const fail=()=>{throw new Error('audit_sqlite_wal_integrity_unavailable');};
  if(sum[0]!==wal.readUInt32BE(24)||sum[1]!==wal.readUInt32BE(28)||shm[13]!==Number(bigEndian)||shmPage!==pageSize||!shm.subarray(32,40).equals(wal.subarray(16,24))||committedBytes>captured.identity.walBytes)fail();
- const fd=fs.openSync(copy+'-wal',fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+ const fd=fs.openSync(walFile,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
  try{for(let frame=1;frame<=mxFrame;frame++){check();const length=pageSize+24,position=32+(frame-1)*length;let offset=0;while(offset<length){const n=fs.readSync(fd,buffer,offset,length-offset,position+offset);if(!n)fail();offset+=n;}
    if(buffer.readUInt32BE(0)===0||!buffer.subarray(8,16).equals(wal.subarray(16,24)))fail();sum=checksum(buffer,0,8,bigEndian,sum);sum=checksum(buffer,24,pageSize,bigEndian,sum);
    if(sum[0]!==buffer.readUInt32BE(16)||sum[1]!==buffer.readUInt32BE(20))fail();
    if(frame===mxFrame&&(buffer.readUInt32BE(4)===0||buffer.readUInt32BE(4)!==nPage||sum[0]!==native32(shm,24)||sum[1]!==native32(shm,28)))fail();
   }
  }finally{fs.closeSync(fd);}
- // Only our owned WAL is shortened. Full source bytes remain captured in hash.
- fs.truncateSync(copy+'-wal',committedBytes);check();
+ check();return committedBytes;
 }
 /**
  * Stable bounded source bytes are streamed without opening source through SQLite.
@@ -101,7 +100,7 @@ export function openAuditSqliteSnapshot(file:string,maxBytes=MAX_DISK_BYTES,opti
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'slopie-audit-sqlite-'));let db:Db|undefined;
  try{fs.chmodSync(directory,0o700);const buffer=Buffer.allocUnsafe(BUFFER_BYTES),captured=capture(file,maxBytes,check,buffer,directory);validateEnvelope(captured);const confirmed=capture(file,maxBytes,check,buffer);
   if(captured.hash!==confirmed.hash||!same(captured.identity,confirmed.identity))throw new Error('audit_sqlite_snapshot_stale');
-  const copy=path.join(directory,'snapshot.db');validateCommittedWal(captured,copy,buffer,check);db=openDatabase(copy,{readonly:true,fileMustExist:true});db.pragma('temp_store = MEMORY');db.pragma('query_only = ON');db.prepare('SELECT count(*) FROM sqlite_schema').get();
+  const copy=path.join(directory,'snapshot.db');const committedBytes=validateCommittedWal(captured,copy+'-wal',buffer,check);if(captured.identity.walBytes)fs.truncateSync(copy+'-wal',committedBytes);db=openDatabase(copy,{readonly:true,fileMustExist:true});db.pragma('temp_store = MEMORY');db.pragma('query_only = ON');db.prepare('SELECT count(*) FROM sqlite_schema').get();
   for(const name of fs.readdirSync(directory))fs.chmodSync(path.join(directory,name),0o600);check();
   const assertCurrent=()=>{const now=capture(file,maxBytes,deadline(maxCaptureMs),Buffer.allocUnsafe(BUFFER_BYTES));if(now.hash!==captured.hash||!same(now.identity,captured.identity))throw new Error('audit_sqlite_snapshot_stale');};
   const assertIdentityCurrent=()=>{if(!same(inspect(file,maxBytes),captured.identity))throw new Error('audit_sqlite_snapshot_stale');};
@@ -110,4 +109,17 @@ export function openAuditSqliteSnapshot(file:string,maxBytes=MAX_DISK_BYTES,opti
   assertIdentityCurrent();check();const handle=db,rawClose=handle.close.bind(handle);let closed=false;handle.close=()=>{if(!closed){closed=true;try{rawClose();}finally{fs.rmSync(directory,{recursive:true,force:true});}}return handle;};
   return {db,hash:captured.hash,assertCurrent,assertIdentityCurrent};
  }catch(error){try{db?.close();}finally{fs.rmSync(directory,{recursive:true,force:true});}const code=(error as NodeJS.ErrnoException).code;if(code?.startsWith('SQLITE_')||code==='ERR_SQLITE_ERROR')throw new Error('audit_sqlite_snapshot_corrupt',{cause:error});throw error;}
+}
+
+/** Cheap policy guard: certify ONLY published WAL integrity, never read/copy DB
+ * history pages. Missing committed SHM boundary is an explicit refusal. */
+export function verifyAuditPolicyWal(file:string):{assertCurrent():void} {
+ const check=deadline(10000),initial=inspect(file,MAX_DISK_BYTES);if(initial.walBytes>256*1024*1024)throw new Error('audit_policy_wal_byte_limit');
+ const header=(name:string,length:number)=>{const fd=fs.openSync(name,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);try{const bytes=Buffer.alloc(length);let offset=0;while(offset<length){const n=fs.readSync(fd,bytes,offset,length-offset,offset);if(!n)throw new Error('audit_sqlite_format_unavailable');offset+=n;}return bytes;}finally{fs.closeSync(fd);}};
+ const captured:Captured={identity:initial,databaseHeader:header(file,100),walHeader:initial.walBytes?header(file+'-wal',32):null,hash:''};validateEnvelope(captured);validateCommittedWal(captured,file+'-wal',Buffer.allocUnsafe(65536+24),check);
+ // SQLite may rebuild SHM and reset iChange without changing any history.
+ // readShm independently validates both full headers/checksums before this
+ // semantic comparison; the original snapshot whole-header fence is unchanged.
+ const semantic=(header:Buffer|null)=>header?Buffer.concat([header.subarray(0,8),header.subarray(12,40)]).toString('hex'):null;
+ const assertCurrent=()=>{const next=inspect(file,MAX_DISK_BYTES);if(initial.database!==next.database||initial.wal!==next.wal||initial.journal!==next.journal||semantic(initial.shmHeader)!==semantic(next.shmHeader))throw new Error('audit_policy_changed');};assertCurrent();return {assertCurrent};
 }

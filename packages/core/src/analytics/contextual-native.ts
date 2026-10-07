@@ -26,6 +26,7 @@ export function parseContextualNative(options:ContextualNativeOptions):{records:
   if(offset>bytes.length){gaps.add('context_unfinished_tail');break;}if(++count>maxRecords){gaps.add('context_source_records_limit');break;}
   let raw:unknown;try{raw=JSON.parse(line);}catch{gaps.add('context_malformed_record');continue;}if(!isRecord(raw)){gaps.add('context_malformed_record');continue;}
   const p=isRecord(raw.payload)?raw.payload:raw, m=isRecord(raw.message)?raw.message:isRecord(raw.info)?raw.info:raw;
+  if(raw.isSynthetic===true||m.model==='<synthetic>'){gaps.add('context_synthetic_excluded');continue;}
   const nextProject=string(raw.cwd)??string(p.cwd)??string(raw.project)??string(raw.directory)??string(m.directory);
   if(nextProject!==null)project=nextProject;
   const source=isRecord(p.source)?p.source:{},sub=isRecord(source.subagent)?source.subagent:{},spawn=isRecord(sub.thread_spawn)?sub.thread_spawn:{};
@@ -34,7 +35,7 @@ export function parseContextualNative(options:ContextualNativeOptions):{records:
   // An ignored record is a boundary, never available as preceding context or title.
   if(!options.allowRecord(project,raw)){gaps.add('context_record_excluded');continue;}
   if(raw.type==='turn_context'||raw.type==='model_change'){
-   model=string(p.model)??model;provider=string(p.model_provider)??string(p.provider)??provider;continue;
+   model=string(p.model)??string(p.modelId)??model;provider=string(p.model_provider)??string(p.provider)??provider;continue;
   }
   if(['session_meta','session','ai-title'].includes(String(raw.type)))continue;
   const nativeKey=string(raw.uuid)??string(raw.id)??string(p.id)??string(m.id)??`record:${lineNumber}`;
@@ -45,8 +46,8 @@ export function parseContextualNative(options:ContextualNativeOptions):{records:
    const id=direct&&eligible?eligible.id:`${options.conversationId}:${nativeKey}${suffix}`;
    const cleaned=clean(text),old=seen.get(id);if(old!==undefined){if(old!==cleaned)gaps.add('context_identity_conflict');return;}seen.set(id,cleaned);
    records.push({id,conversationId:options.conversationId,parentId:parent,harness,eventAt:stamp,project:project===null?null:clean(project),role,text:cleaned,
-    model:role==='user'?null:string(m.model)??string(m.modelID)??string(p.model)??model,provider:role==='user'?null:string(m.provider)??string(m.providerID)??string(p.model_provider)??provider,
-    directUser:direct&&eligible!==undefined&&parent===null,route:direct&&eligible?eligible.route:null});
+    model:role==='user'?null:string(m.model)??string(m.modelID)??string(isRecord(m.model)?m.model.id:null)??string(p.model)??model,provider:role==='user'?null:string(m.provider)??string(m.providerID)??string(p.model_provider)??provider,
+    directUser:direct&&eligible!==undefined,route:direct&&eligible?eligible.route:null});
   };
   if(harness==='codex'){
    if(raw.type==='event_msg'&&p.type==='user_message'){put('user',string(p.message)??'', '',Boolean(eligible));continue;}
@@ -66,7 +67,7 @@ export function parseContextualNative(options:ContextualNativeOptions):{records:
    for(const [i,block] of blocks(m.content??raw.parts).entries())if(['tool_use','tool','toolCall'].includes(String(block.type)))put('tool',toolText(block),`:tool:${i}`);
   }else if(['tool','toolResult','tool_result'].includes(role??''))put('tool',content(m.content??raw.content??raw.parts));
   else if(role==='user'){
-   const body=m.content??raw.content??raw.parts,results=blocks(body).filter(b=>b.type==='tool_result');
+   const body=m.content??m.text??raw.content??raw.parts,results=blocks(body).filter(b=>b.type==='tool_result');
    if(results.length){for(const [i,result] of results.entries())put('tool',content(result.content),`:result:${i}`);}
    else put('user',content(body),'',Boolean(eligible)&&raw.isMeta!==true&&raw.isSynthetic!==true);
   }else if(role!==null)gaps.add('context_unknown_role');
@@ -87,7 +88,7 @@ function content(value:unknown):string{
 }
 function toolText(value:Record<string,unknown>):string{
  const state=isRecord(value.state)?value.state:{};
- return JSON.stringify({tool:string(value.name)??string(value.tool),callId:string(value.call_id)??string(value.id),input:value.input??value.arguments??state.input??null,output:value.output??state.output??null,status:state.status??null});
+ return JSON.stringify({tool:string(value.name)??string(value.tool),callId:string(value.call_id)??string(value.id),input:value.input??value.arguments??state.input??null,output:value.output??state.output??state.content??null,status:state.status??null});
 }
 
 /** Fit entire conversations once. Large conversations use complete target turns

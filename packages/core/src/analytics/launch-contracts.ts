@@ -4,7 +4,7 @@ import type {AuditHarness,AuditRawAnswer,AuditIntent,AuditEvidenceRoute} from '.
 export interface RecordedInference {
  id:string;conversationId:string;harness:AuditHarness;eventAt:string|null;project:string|null;
  provider:string|null;model:string|null;canonicalModel:string|null;
- inputTokens:number|null;outputTokens:number|null;cacheReadTokens:number|null;cacheWriteTokens:number|null;reasoningTokens:number|null;
+ inputTokens:number|null;outputTokens:number|null;cacheReadTokens:number|null;cacheWriteTokens:number|null;cacheWrite5mTokens?:number|null;cacheWrite1hTokens?:number|null;reasoningTokens:number|null;
  inputIncludesCache:boolean;outputIncludesReasoning:boolean;reportedCostUsd:number|null;
  basis:string;gaps:readonly string[];
 }
@@ -22,4 +22,7 @@ export interface LaunchStory {id:string;conversationId:string;project:string|nul
 export type AuditTone='elegant'|'witty'|'chaotic'|'roast';
 export interface LaunchJudgment {segmentId:string;conversationId:string;model:string;answers:Readonly<Record<string,AuditRawAnswer>>;contentHash:string;questionVersion:string;}
 export interface LaunchSemantics {state:'pending'|'complete'|'partial'|'unavailable'|'cancelled';recipientNotice:string;model:string|null;window:SemanticWindow;stories:readonly LaunchStory[];hallOfFame:readonly LaunchStory[];work:readonly {label:string;count:number}[];tone:AuditTone;judgments:readonly LaunchJudgment[];attempts:number;cacheHits:number;inputTokens:number;outputTokens:number;reservedTokens?:number;gaps:readonly string[];}
-export interface LaunchAudit {languageByModel?:readonly import('./language-models.js').ModelLanguage[];facts:LaunchFacts|null;semantics:LaunchSemantics|null;stage:'discovering'|'sizing'|'preparing'|'analyzing'|'assembling'|'ready';notice:string;}
+export interface AuditLanguageLine {id:string;text:string;occurrences:number;containingInputs:number;models:readonly {provider:string|null;model:string|null;occurrences:number}[];samples:readonly {promptId:string;conversationId:string;startUtf16:number;endUtf16:number;route:AuditEvidenceRoute}[];}
+/** Lexical observed reactions, not objective model quality or general sentiment. */
+export interface AuditModelFeedback {provider:string|null;model:string|null;directedNegativeInputs:number;praiseInputs:number;associatedInputs:number;promptIds:readonly string[];}
+export interface LaunchAudit {languageLines?:readonly AuditLanguageLine[];modelFeedback?:readonly AuditModelFeedback[];languageGaps?:readonly string[];languageByModel?:readonly import('./language-models.js').ModelLanguage[];facts:LaunchFacts|null;semantics:LaunchSemantics|null;stage:'discovering'|'sizing'|'preparing'|'analyzing'|'assembling'|'ready';notice:string;}

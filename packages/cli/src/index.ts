@@ -1152,4 +1152,6 @@ function tour(o: { width?: number; ascii?: boolean; color?: boolean; json?: bool
   print('');
 }
 
-main(process.argv);
+if(process.argv[2]==='__audit_worker'&&process.send){
+  void import('./audit-background.js').then(({runAuditWorkerHost})=>runAuditWorkerHost());
+}else main(process.argv);
