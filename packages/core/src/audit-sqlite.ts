@@ -90,9 +90,13 @@ function validateCommittedWal(captured:Captured,copy:string,buffer:Buffer,check:
  * certification. Full currentness streams hashes; progress uses identities only.
  */
 export function openAuditSqliteSnapshot(file:string,maxBytes=MAX_DISK_BYTES,options:AuditSqliteSnapshotOptions={}):AuditSqliteSnapshot {
- const maxCaptureMs=options.maxCaptureMs??20000;if(!Number.isSafeInteger(maxBytes)||maxBytes<100||maxBytes>MAX_DISK_BYTES)throw new Error('invalid audit SQLite byte limit');
+ if(!Number.isSafeInteger(maxBytes)||maxBytes<100||maxBytes>MAX_DISK_BYTES)throw new Error('invalid audit SQLite byte limit');
+ const initial=inspect(file,maxBytes);
+ // Large snapshots need bounded copy/verification headroom: 20s per started GiB,
+ // bounded at 60s, while explicit caller guards remain authoritative.
+ const maxCaptureMs=options.maxCaptureMs??Math.min(60000,Math.max(20000,Math.ceil((initial.databaseBytes+initial.walBytes)/(1024*1024*1024))*20000));
  if(!Number.isFinite(maxCaptureMs)||maxCaptureMs<1||maxCaptureMs>60000)throw new Error('invalid audit SQLite time limit');
- const check=deadline(maxCaptureMs);check();const initial=inspect(file,maxBytes),free=fs.statfsSync(os.tmpdir(),{bigint:true});
+ const check=deadline(maxCaptureMs);check();const free=fs.statfsSync(os.tmpdir(),{bigint:true});
  if(free.bavail*free.bsize<BigInt(initial.databaseBytes+initial.walBytes+DISK_HEADROOM))throw new Error('audit_sqlite_snapshot_disk_limit');
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'slopie-audit-sqlite-'));let db:Db|undefined;
  try{fs.chmodSync(directory,0o700);const buffer=Buffer.allocUnsafe(BUFFER_BYTES),captured=capture(file,maxBytes,check,buffer,directory);validateEnvelope(captured);const confirmed=capture(file,maxBytes,check,buffer);
