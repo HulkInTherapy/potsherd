@@ -30643,7 +30643,7 @@ var VERSION;
 var init_version2 = __esm({
   "packages/core/dist/version.js"() {
     "use strict";
-    VERSION = "1.6.0";
+    VERSION = "1.6.1";
   }
 });
 
@@ -35170,7 +35170,7 @@ function buildLaunchScreen(snapshot, nav, geometry = {}) {
     if (!rows.length && !["pending", "unavailable"].includes(sem?.state ?? "")) add("No recorded rows for this scope.", "dim");
   }
   if (geometry.notice) wrap5(geometry.notice, "amber");
-  const header = [[{ text: ascii ? "POTSHERD  " : "\u259F  POTSHERD  ", tone: "amber" }, { text: nav.frozen ? "FROZEN \xB7 current view" : nav.view === "section" ? { elegant: "your recorded work", witty: "the receipts", chaotic: "the session pile", roast: "receipts, served cold" }[sem?.tone ?? "elegant"] : NAMES[nav.section], tone: "dim" }]];
+  const header = [[{ text: ascii ? "SLOPIE  " : "\u259F  SLOPIE  ", tone: "amber" }, { text: nav.frozen ? "FROZEN \xB7 current view" : nav.view === "section" ? { elegant: "your recorded work", witty: "the receipts", chaotic: "the session pile", roast: "receipts, served cold" }[sem?.tone ?? "elegant"] : NAMES[nav.section], tone: "dim" }]];
   if (compact2) header.push(line(`${NAMES[nav.section]}  ${LAUNCH_SECTIONS.indexOf(nav.section) + 1}/7${nav.view !== "section" ? ` \xB7 ${nav.view}` : ""}`, "cyan"));
   else header.push(LAUNCH_SECTIONS.flatMap((section, index) => [{ text: `${index ? "  " : ""}${section === nav.section ? "[" : ""}${NAMES[section]}${section === nav.section ? "]" : ""}`, tone: section === nav.section ? "cyan" : "dim" }]));
   header.push(line(`Coverage: ${snapshot.coverage.state === "complete_snapshot" ? "retained snapshot" : snapshot.coverage.state}${active2 ? ` \xB7 ${words3(stage)}` : ""}`, "dim"));
@@ -36981,7 +36981,7 @@ function buildAuditScreen(snapshot, nav = createAuditNavigation(), options = {})
   const title = nav.view === "section" ? nav.section === "home" ? "" : ` / ${LABELS[nav.section]}` : nav.view === "conversations" ? " / conversations" : nav.view === "prompts" ? " / prompts" : nav.view === "evidence" ? " / exact evidence" : nav.view === "receipt" ? " / read receipt" : nav.view === "judgment" ? " / raw judgment" : " / source";
   const coverageLabel = active2 ? "scanning" : snapshot.coverage.state === "complete_snapshot" ? "captured" : snapshot.coverage.state;
   const narrowScope = columns < 60 ? `${coverageLabel} \xB7 ${snapshot.scope.project ? "selected project" : snapshot.scope.eventFrom || snapshot.scope.asOf ? "selected dates" : "all dates"} \xB7 ${snapshot.scope.timezone}` : `${safeScope(snapshot)} \xB7 ${coverageLabel}`;
-  put2(0, `potsherd / audit${title}${nav.screenshot ? " \xB7 screenshot" : ""}`, "amber");
+  put2(0, `slopie / audit${title}${nav.screenshot ? " \xB7 screenshot" : ""}`, "amber");
   put2(1, `${narrowScope}${nav.query ? " \xB7 filtered" : ""}`, "dim");
   const footer3 = height - 2, summary3 = height - 4, mainEnd = summary3 - 1, selected = rows.find((row2) => row2.id === nav.selectedId) ?? rows[Math.min(nav.selectedIndex, Math.max(0, rows.length - 1))];
   put2(footer3, columns < 60 ? "jk/\u2191\u2193 enter esc / f ? S q" : "\u2191\u2193/jk  enter open  esc back  / find  f scope  ?  S freeze  C preview  q quit", "cyan");
@@ -46097,10 +46097,14 @@ var GLOBAL_ONLY = /^(--json|--no-color|--ascii|--width|--claude-dir|--codex-dir|
 function collect3(value, previous) {
   return [...previous ?? [], value];
 }
+var publicCommandName = process25.env["POTSHERD_CLI_PUBLIC_NAME"] === "slopie" ? "slopie" : "potsherd";
+function publicHelpText(text2) {
+  return publicCommandName === "slopie" ? text2.replace(/\bpotsherd(?=\s|:)/g, "slopie") : text2;
+}
 function addGlobals(cmd) {
   const name = cmd.name();
-  if (name && name !== "potsherd") {
-    cmd.showHelpAfterError(`(run  potsherd ${name} --help  for its flags and an example)`);
+  if (name && name !== publicCommandName) {
+    cmd.showHelpAfterError(`(run  ${publicCommandName} ${name} --help  for its flags and an example)`);
   }
   return cmd.option("--json", "machine-readable output, same data as the human view").option("--no-color", "disable colour (NO_COLOR is honoured too)").option("--ascii", "ASCII-only glyphs, for terminals without a unicode font").addOption(new Option("--width <n>", "render for this terminal width").argParser(Number)).option("--claude-dir <path>", "read Claude Code data from here (CLAUDE_CONFIG_DIR is honoured)").option("--codex-dir <path>", "read Codex data from this enrolled root").option("--pi-dir <path>", "read pi data from this enrolled root").option("--opencode-dir <path>", "read OpenCode data from this enrolled root").option("--potsherd-dir <path>", "potsherd's own directory (default ~/.potsherd)").option("--debug", "print full errors");
 }
@@ -46132,13 +46136,18 @@ function filterFlags(opts) {
 function main(rawArgv) {
   const { argv, ops: tagOperands } = splitTagOperands(rawArgv);
   const program2 = new Command();
+  program2.configureOutput({ writeOut: (text2) => {
+    process25.stdout.write(publicHelpText(text2));
+  }, writeErr: (text2) => {
+    process25.stderr.write(publicHelpText(text2));
+  } });
   const reader = addGlobals(program2.command("reader <operation>").description("prepare, validate or select a bounded read tuple for one task; no model or archive access").requiredOption("--input-file <path>", "JSON taskId, query, scope, packets; validate adds raw, next-read adds budget"));
   reader.addHelpText("after", "\nexamples:\n  potsherd reader prepare --input-file public-task.json --json\n  potsherd reader validate --input-file public-task-with-raw-answer.json --json\n  potsherd reader next-read --input-file public-task-with-budget.json --json");
   reader.action((operation, opts) => {
     process25.exitCode = runReaderCommand(operation, String(opts["inputFile"]));
   });
   addGlobals(
-    program2.name("potsherd").description("rescue, index, search and re-enter every coding-agent session on your machine").version(VERSION, "-v, --version").showHelpAfterError("(run  potsherd --help  for the list of verbs)")
+    program2.name(publicCommandName).description("rescue, index, search and re-enter every coding-agent session on your machine").version(VERSION, "-v, --version").showHelpAfterError(`(run  ${publicCommandName} --help  for the list of verbs)`)
   );
   const audit2 = addGlobals(
     program2.command("audit").description("count what Claude Code has already deleted, and what it deletes next").option("--overview", "open the terminal audit (the default)").option("--tone <tone>", "voice override: elegant,witty,chaotic,roast").option("--legacy", "use the existing retention audit").option("--plain", "print the new overview without interactive controls").option("--no-motion", "keep the new terminal view still").option("--private", "show project names in the new private explorer").option("--harness <list>", "scope the overview to claude,codex,pi,opencode").option("--project <path>", "scope the overview to this project").option("--since <when>", "overview events on or after this date").option("--until <when>", "overview events on or before this date").option("--timezone <zone>", "calendar timezone for the overview").option("--export <path>", "save a public-safe overview SVG").option("--sweep", "also list the sessions the next sweep will take, by title").option("--verify", "print standalone python that recomputes the four numbers, then exit")
@@ -46774,14 +46783,14 @@ function tour(o = {}) {
       version: VERSION,
       path: PATH6.map(([verb, what]) => ({ verb, what })),
       also: REST.flatMap(([verbs, group]) => verbs.map((verb) => ({ verb, group }))),
-      start: "potsherd audit"
+      start: `${publicCommandName} audit`
     });
     return;
   }
   const wide = w >= 80;
   print("");
   print(
-    `  ${t.bold("potsherd")} ${t.dim(VERSION)}  ${t.dim(
+    `  ${t.bold(publicCommandName)} ${t.dim(VERSION)}  ${t.dim(
       wide ? `${t.g("\u2014", "-")} your coding-agent sessions, rescued and searchable` : `${t.g("\u2014", "-")} sessions, rescued and searchable`
     )}`
   );
@@ -46790,7 +46799,7 @@ function tour(o = {}) {
   print("");
   for (const [i, [verb, long, short2]] of PATH6.entries()) {
     print(
-      wide ? `    ${t.dim(String(i + 1))}  potsherd ${verb.padEnd(7)} ${t.dim(long)}` : `    ${t.dim(String(i + 1))}  ${verb.padEnd(7)} ${t.dim(short2)}`
+      wide ? `    ${t.dim(String(i + 1))}  ${publicCommandName} ${verb.padEnd(7)} ${t.dim(long)}` : `    ${t.dim(String(i + 1))}  ${verb.padEnd(7)} ${t.dim(short2)}`
     );
   }
   print("");
@@ -46802,9 +46811,9 @@ function tour(o = {}) {
     const line2 = roomy ? `${label4}${names[i]?.padEnd(col3)}  ${gloss}` : `${label4}${names[i]}`;
     print(t.dim(line2));
   });
-  print(t.dim(`         potsherd help <verb> for any of them`));
+  print(t.dim(`         ${publicCommandName} help <verb> for any of them`));
   print("");
-  print(`  start here:  ${t.accent("potsherd audit")}`);
+  print(`  start here:  ${t.accent(`${publicCommandName} audit`)}`);
   print("");
 }
 main(process25.argv);

@@ -60,6 +60,8 @@ function collect(value: string, previous?: readonly string[]): string[] {
   return [...(previous ?? []), value];
 }
 
+const publicCommandName=process.env['POTSHERD_CLI_PUBLIC_NAME']==='slopie'?'slopie':'potsherd';
+function publicHelpText(text:string):string{return publicCommandName==='slopie'?text.replace(/\bpotsherd(?=\s|:)/g,'slopie'):text;}
 function addGlobals(cmd: Command): Command {
   // An error inside a verb should point at that verb's help, not at the list
   // of twenty verbs: `potsherd setup --nosuch` used to answer "run potsherd
@@ -67,10 +69,10 @@ function addGlobals(cmd: Command): Command {
   // `--nosuch` should have been. `05` asks every error for the one command
   // that fixes it, and for a mistyped flag that command names the verb.
   const name = cmd.name();
-  if (name && name !== 'potsherd') {
+  if (name && name !== publicCommandName) {
     // Short enough that the longest verb name still fits 60 columns: `(run
     // potsherd export --help  for its flags and an example)` is 59.
-    cmd.showHelpAfterError(`(run  potsherd ${name} --help  for its flags and an example)`);
+    cmd.showHelpAfterError(`(run  ${publicCommandName} ${name} --help  for its flags and an example)`);
   }
   return cmd
     .option('--json', 'machine-readable output, same data as the human view')
@@ -144,16 +146,17 @@ function main(rawArgv: string[]): void {
   // constructed; see `splitTagOperands` for the rule, which is one sentence.
   const { argv, ops: tagOperands } = splitTagOperands(rawArgv);
   const program = new Command();
+  program.configureOutput({writeOut:text=>{process.stdout.write(publicHelpText(text));},writeErr:text=>{process.stderr.write(publicHelpText(text));}});
   const reader=addGlobals(program.command('reader <operation>').description('prepare, validate or select a bounded read tuple for one task; no model or archive access').requiredOption('--input-file <path>', 'JSON taskId, query, scope, packets; validate adds raw, next-read adds budget'));
   reader.addHelpText('after', '\nexamples:\n  potsherd reader prepare --input-file public-task.json --json\n  potsherd reader validate --input-file public-task-with-raw-answer.json --json\n  potsherd reader next-read --input-file public-task-with-budget.json --json');
   reader.action((operation:string,opts:Record<string,unknown>)=>{process.exitCode=runReaderCommand(operation,String(opts['inputFile']));});
 
   addGlobals(
     program
-      .name('potsherd')
+      .name(publicCommandName)
       .description('rescue, index, search and re-enter every coding-agent session on your machine')
       .version(VERSION, '-v, --version')
-      .showHelpAfterError('(run  potsherd --help  for the list of verbs)'),
+      .showHelpAfterError(`(run  ${publicCommandName} --help  for the list of verbs)`),
   );
 
   const audit = addGlobals(
@@ -1104,7 +1107,7 @@ function tour(o: { width?: number; ascii?: boolean; color?: boolean; json?: bool
       version: VERSION,
       path: PATH6.map(([verb, what]) => ({ verb, what })),
       also: REST.flatMap(([verbs, group]) => verbs.map((verb) => ({ verb, group }))),
-      start: 'potsherd audit',
+      start: `${publicCommandName} audit`,
     });
     return;
   }
@@ -1112,7 +1115,7 @@ function tour(o: { width?: number; ascii?: boolean; color?: boolean; json?: bool
   const wide = w >= 80;
   print('');
   print(
-    `  ${t.bold('potsherd')} ${t.dim(VERSION)}  ${t.dim(
+    `  ${t.bold(publicCommandName)} ${t.dim(VERSION)}  ${t.dim(
       wide
         ? `${t.g('—', '-')} your coding-agent sessions, rescued and searchable`
         : `${t.g('—', '-')} sessions, rescued and searchable`,
@@ -1124,7 +1127,7 @@ function tour(o: { width?: number; ascii?: boolean; color?: boolean; json?: bool
   for (const [i, [verb, long, short]] of PATH6.entries()) {
     print(
       wide
-        ? `    ${t.dim(String(i + 1))}  potsherd ${verb.padEnd(7)} ${t.dim(long)}`
+        ? `    ${t.dim(String(i + 1))}  ${publicCommandName} ${verb.padEnd(7)} ${t.dim(long)}`
         : `    ${t.dim(String(i + 1))}  ${verb.padEnd(7)} ${t.dim(short)}`,
     );
   }
@@ -1143,9 +1146,9 @@ function tour(o: { width?: number; ascii?: boolean; color?: boolean; json?: bool
       : `${label}${names[i]}`;
     print(t.dim(line));
   });
-  print(t.dim(`         potsherd help <verb> for any of them`));
+  print(t.dim(`         ${publicCommandName} help <verb> for any of them`));
   print('');
-  print(`  start here:  ${t.accent('potsherd audit')}`);
+  print(`  start here:  ${t.accent(`${publicCommandName} audit`)}`);
   print('');
 }
 

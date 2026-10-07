@@ -1,13 +1,13 @@
 {
   "name": "potsherd",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Rescue, index, search, interrogate and re-enter every coding-agent session on your machine. Takes a copy before Claude Code's 30-day sweep can delete one.",
   "author": {
     "name": "HulkInTherapy",
     "url": "https://github.com/HulkInTherapy"
   },
-  "homepage": "https://github.com/HulkInTherapy/potsherd",
-  "repository": "https://github.com/HulkInTherapy/potsherd",
+  "homepage": "https://github.com/HulkInTherapy/slopie",
+  "repository": "https://github.com/HulkInTherapy/slopie",
   "license": "MIT",
   "keywords": [
     "claude-code",

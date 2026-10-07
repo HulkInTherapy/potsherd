@@ -129,11 +129,12 @@ jobs:
         run: |
           set -euo pipefail
           PKG="$(node -p "require('./packages/cli/package.json').version")"
-          if npm view "potsherd@$PKG" version >/dev/null 2>&1; then
-            echo "::error::potsherd@$PKG is already on the registry. Bump the version."
+          NAME="$(node -p "require('./packages/cli/package.json').name")"
+          if npm view "$NAME@$PKG" version >/dev/null 2>&1; then
+            echo "::error::${NAME}@$PKG is already on the registry. Bump the version."
             exit 1
           fi
-          echo "potsherd@$PKG is not published yet"
+          echo "${NAME}@$PKG is not published yet"
 
       - name: no committed file carries real-corpus content
         run: |
@@ -172,14 +173,14 @@ jobs:
         run: |
           set -euo pipefail
           cd packages/cli && npm pack --silent && cd ../..
-          TGZ="$(ls packages/cli/potsherd-*.tgz)"
+          TGZ="$(find packages/cli -maxdepth 1 -name '*.tgz' -print)"
           WORK="$(mktemp -d)"
           cp "$TGZ" "$WORK/"
           cd "$WORK"
           npm init -y >/dev/null
-          npm install --silent ./potsherd-*.tgz
-          ./node_modules/.bin/potsherd --version
-          ./node_modules/.bin/potsherd audit --claude-dir /tmp/definitely-not-here
+          npm install --silent ./slopie-*.tgz
+          ./node_modules/.bin/slopie --version
+          ./node_modules/.bin/slopie audit --claude-dir /tmp/definitely-not-here
           du -sh node_modules
 
       - name: publish, with provenance
@@ -192,7 +193,8 @@ jobs:
           set -euo pipefail
           PKG="$(node -p "require('./package.json').version")"
           DIST_TAG="$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"
-          echo "publishing potsherd@$PKG with dist-tag $DIST_TAG"
+          NAME="$(node -p "require('./package.json').name")"
+          echo "publishing $NAME@$PKG with dist-tag $DIST_TAG"
           npm publish --provenance --access public --tag "$DIST_TAG"
 
       # A flag that is documented and does nothing is the failure mode this
@@ -204,17 +206,18 @@ jobs:
         run: |
           set -euo pipefail
           PKG="$(node -p "require('./packages/cli/package.json').version")"
+          NAME="$(node -p "require('./packages/cli/package.json').name")"
           for i in 1 2 3 4 5 6; do
             sleep 10
             # The registry may still be processing the new version. A failed
             # lookup must consume an attempt rather than exit under pipefail.
-            if ! ATT="$(npm view "potsherd@$PKG" --json 2>/dev/null \
+            if ! ATT="$(npm view "$NAME@$PKG" --json 2>/dev/null \
               | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.stringify(JSON.parse(s).dist.attestations??null))}catch{console.log("null")}})')"; then
               ATT="null"
             fi
             echo "attempt $i: $ATT"
             if [ "$ATT" != "null" ]; then
-              echo "provenance recorded for potsherd@$PKG"
+              echo "provenance recorded for $PKG"
               exit 0
             fi
           done
