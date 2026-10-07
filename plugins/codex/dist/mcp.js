@@ -36374,7 +36374,7 @@ function episodicIndexPath(env = process9.env) {
 }
 
 // packages/core/dist/version.js
-var VERSION = "1.6.0";
+var VERSION = "1.6.1";
 
 // packages/core/dist/memory/delete.js
 import fs23 from "node:fs";
