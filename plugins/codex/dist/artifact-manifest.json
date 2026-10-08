@@ -1,11 +1,11 @@
 {
   "contractVersion": 2,
   "version": "1.7.0",
-  "sourceRevision": "14dfb32cf992060104f2276f887442d04b6252f9",
+  "sourceRevision": "d2265a016087ca90e79da4750242789b762d27a0",
   "files": {
     "dist/potsherd.js": {
-      "bytes": 3448676,
-      "sha256": "2e594333f80cc9c5876b1c20c37f318dc938d479cb52e75f1c58b61f9f6280ed"
+      "bytes": 3454313,
+      "sha256": "490d8988c70763b3c1755e8aa698bea74950be393bea2c394971c23c7a50d0c0"
     },
     "dist/mcp.js": {
       "bytes": 3083561,

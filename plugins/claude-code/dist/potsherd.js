@@ -2969,15 +2969,15 @@ function readCleanupStatus(dir) {
 }
 function looksLikeJsonc(text2) {
   let inString = false;
-  let escaped2 = false;
+  let escaped3 = false;
   for (let i = 0; i < text2.length; i++) {
     const c = text2[i];
-    if (escaped2) {
-      escaped2 = false;
+    if (escaped3) {
+      escaped3 = false;
       continue;
     }
     if (c === "\\") {
-      escaped2 = true;
+      escaped3 = true;
       continue;
     }
     if (c === '"') {
@@ -8599,8 +8599,8 @@ function FILE_TOUCHED_SQL(column) {
 }
 function likePattern(value) {
   const hasWildcard = /[%*]/.test(value);
-  const escaped2 = value.replace(/[\\_]/g, (c) => `\\${c}`);
-  return hasWildcard ? escaped2.replace(/\*/g, "%") : `%${escaped2}%`;
+  const escaped3 = value.replace(/[\\_]/g, (c) => `\\${c}`);
+  return hasWildcard ? escaped3.replace(/\*/g, "%") : `%${escaped3}%`;
 }
 function branchClause(value, column) {
   return /[%*]/.test(value) ? `${column} LIKE ? ESCAPE '\\'` : `${column} = ?`;
@@ -8738,8 +8738,8 @@ function stripBoilerplate(text2) {
 }
 function isMostlyBoilerplate(text2) {
   const rest = stripBoilerplate(text2);
-  const words3 = rest.match(/[\p{L}]{2,}/gu) ?? [];
-  return words3.length < 4;
+  const words4 = rest.match(/[\p{L}]{2,}/gu) ?? [];
+  return words4.length < 4;
 }
 function snapStart(spans, at2, masks = []) {
   if (at2 <= 0)
@@ -14127,13 +14127,13 @@ function adjacentDialogueContext(db, anchors, query, filter, options = {}) {
       continue;
     expanded.add(`${anchor.ref.revisionId}:${row2.unit_revision_id}`);
     visited++;
-    const words3 = new Set(queryTerms(canonical3.text).filter((word) => !queryWords.has(word)));
+    const words4 = new Set(queryTerms(canonical3.text).filter((word) => !queryWords.has(word)));
     const comparesPrior = options.allowComparison !== false && /\b(replaces?|replaced|previous|earlier|instead|rather than|original|reversed?)\b/iu.test(canonical3.text);
     const nearby = db.prepare(`SELECT u.unit_revision_id,u.text,ru.ordinal FROM memory_sources s JOIN source_revisions r ON r.source_id=s.source_id JOIN revision_units ru ON ru.revision_id=r.revision_id JOIN evidence_units u ON u.unit_revision_id=ru.unit_revision_id WHERE ${filter.sql} AND s.source_id=? AND r.revision_id=? AND ru.ordinal>=? AND ru.ordinal<? AND u.role IN (${roles.map(() => "?").join(",")}) AND length(u.text)<=? ORDER BY ru.ordinal`).all(...filter.params, anchor.ref.sourceId, anchor.ref.revisionId, Math.max(0, row2.ordinal - distance), row2.ordinal, ...roles, maxUnit);
     for (const unit of nearby) {
       if (unit.text.length > maxUnit || unit.text.length > remaining || !unit.text.trim())
         continue;
-      if (!comparesPrior && queryTerms(unit.text).filter((word) => words3.has(word)).length < 2)
+      if (!comparesPrior && queryTerms(unit.text).filter((word) => words4.has(word)).length < 2)
         continue;
       const context = [];
       let position = 0;
@@ -16598,7 +16598,7 @@ function requestedProjectFocus(prompts) {
   for (const prompt of prompts) {
     if (prompt.languageEligible === false || !(prompt.eligibleNativeInput ?? prompt.eligibleHuman))
       continue;
-    const labels2 = proseLabels(prompt.text), text2 = Array.from({ length: prompt.text.length }, (_, i) => labels2[i] === 0 ? prompt.text[i] : " ").join("");
+    const labels3 = proseLabels(prompt.text), text2 = Array.from({ length: prompt.text.length }, (_, i) => labels3[i] === 0 ? prompt.text[i] : " ").join("");
     for (const [label4, pattern] of categories) {
       if (!pattern.test(text2))
         continue;
@@ -16880,7 +16880,9 @@ var init_derived_cache = __esm({
             fs29.closeSync(fd);
         }
       }
-      write(namespace, binding2, value, validate3) {
+      /** Atomic mode is an explicit opt-in for regenerable native facts only. */
+      write(namespace, binding2, value, validate3, options = {}) {
+        const atomic = options.durability === "atomic" && (namespace === "native-facts" || namespace === "native-fact-pointer");
         const file = this.file(namespace, binding2);
         if (!bodyFree(value) || !validate3(value))
           throw new Error("derived_cache_value_invalid");
@@ -16897,15 +16899,18 @@ var init_derived_cache = __esm({
         try {
           fd = fs29.openSync(temp, fs29.constants.O_WRONLY | fs29.constants.O_CREAT | fs29.constants.O_EXCL | fs29.constants.O_NOFOLLOW, 384);
           fs29.writeFileSync(fd, text2, "utf8");
-          fs29.fsyncSync(fd);
+          if (!atomic)
+            fs29.fsyncSync(fd);
           fs29.closeSync(fd);
           fd = void 0;
           fs29.renameSync(temp, file);
-          const dir = fs29.openSync(this.directory, "r");
-          try {
-            fs29.fsyncSync(dir);
-          } finally {
-            fs29.closeSync(dir);
+          if (!atomic) {
+            const dir = fs29.openSync(this.directory, "r");
+            try {
+              fs29.fsyncSync(dir);
+            } finally {
+              fs29.closeSync(dir);
+            }
           }
         } finally {
           if (fd !== void 0)
@@ -19518,8 +19523,8 @@ var init_analytics = __esm({
           return;
         const stamp = digest([stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":")), binding2 = this.nativeUsageCacheBinding(file, snapshot.hash, stamp), value = { nativeId: snapshot.facts.nativeId, project: snapshot.facts.project, parent: snapshot.facts.parent, usage: snapshot.usage, excluded: snapshot.facts.gaps.includes("maintenance_source_excluded") };
         try {
-          this.derived.write("native-facts", binding2, value, (v) => this.nativeUsageCacheValid(v));
-          this.derived.write("native-fact-pointer", this.nativeUsageCacheBinding(file, "native-pointer-v1", stamp), { hash: snapshot.hash }, (v) => !!v && typeof v === "object" && "hash" in v && typeof v.hash === "string");
+          this.derived.write("native-facts", binding2, value, (v) => this.nativeUsageCacheValid(v), { durability: "atomic" });
+          this.derived.write("native-fact-pointer", this.nativeUsageCacheBinding(file, "native-pointer-v1", stamp), { hash: snapshot.hash }, (v) => !!v && typeof v === "object" && "hash" in v && typeof v.hash === "string", { durability: "atomic" });
         } catch {
         }
       }
@@ -23910,15 +23915,15 @@ function resolveSession(db, ref3) {
   const exactGhost = db.prepare("SELECT session_id FROM ghosts WHERE session_id = ?").get(needle);
   if (exactGhost)
     return { id: exactGhost.session_id, kind: "ghost" };
-  const escaped2 = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const escaped3 = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
   const byId = /* @__PURE__ */ new Map();
-  for (const c of [...matching(db, `${escaped2}%`), ...matching(db, `%:agent-${escaped2}%`)]) {
+  for (const c of [...matching(db, `${escaped3}%`), ...matching(db, `%:agent-${escaped3}%`)]) {
     if (!byId.has(c.id))
       byId.set(c.id, c);
   }
   let candidates2 = [...byId.values()];
   if (candidates2.length === 0)
-    candidates2 = matching(db, `%${escaped2}%`);
+    candidates2 = matching(db, `%${escaped3}%`);
   if (candidates2.length === 0)
     return null;
   const first = candidates2[0];
@@ -27683,10 +27688,10 @@ function clampChars(s) {
   return s.length <= MAX_CLAIM_CHARS ? s : `${s.slice(0, MAX_CLAIM_CHARS - 1).trimEnd()}\u2026`;
 }
 function clampWords(s, max2) {
-  const words3 = s.split(/\s+/).filter(Boolean);
-  if (words3.length <= max2)
-    return words3.join(" ");
-  return `${words3.slice(0, max2).join(" ")}\u2026`;
+  const words4 = s.split(/\s+/).filter(Boolean);
+  if (words4.length <= max2)
+    return words4.join(" ");
+  return `${words4.slice(0, max2).join(" ")}\u2026`;
 }
 function asOutcome(v) {
   const s = asString(v).toLowerCase();
@@ -27864,10 +27869,10 @@ function rankedWindows(text2, probe2, size = 1800, max2 = 4) {
   if (wanted.size === 0)
     return all.slice(0, max2);
   const scored = all.map((w, i) => {
-    const words3 = new Set(w.toLowerCase().match(WORD) ?? []);
+    const words4 = new Set(w.toLowerCase().match(WORD) ?? []);
     let hits = 0;
     for (const token of wanted)
-      if (words3.has(token))
+      if (words4.has(token))
         hits += 1;
     return { w, i, score: hits / wanted.size };
   });
@@ -29643,19 +29648,19 @@ function wordCount(text2) {
 function trimToWordBudget(sentences2, maxWords = ANSWER_MAX_WORDS) {
   const kept = [];
   const trimmed = [];
-  let words3 = 0;
+  let words4 = 0;
   for (const s of sentences2) {
     if (trimmed.length > 0) {
       trimmed.push(s.text);
       continue;
     }
     const n3 = wordCount(s.text);
-    if (kept.length > 0 && words3 + n3 > maxWords) {
+    if (kept.length > 0 && words4 + n3 > maxWords) {
       trimmed.push(s.text);
       continue;
     }
     kept.push(s);
-    words3 += n3;
+    words4 += n3;
   }
   return { kept, trimmed };
 }
@@ -37256,6 +37261,94 @@ var init_report_navigation = __esm({
   }
 });
 
+// packages/core/src/analytics/profanity.ts
+function labels2(text2) {
+  const map = new Uint8Array(text2.length);
+  let ambiguous2 = false, offset = 0, fence = null;
+  for (const line of text2.split(/(?<=\n)/u)) {
+    const marker2 = line.match(/^ {0,3}(`{3,}|~{3,})/u);
+    if (fence) {
+      if (marker2 && marker2[1][0] === fence.char && marker2[1].length >= fence.length && line.slice(marker2[0].length).trim() === "") {
+        map.fill(CODE2, fence.start, offset + line.length);
+        fence = null;
+      }
+    } else if (marker2) fence = { char: marker2[1][0], length: marker2[1].length, start: offset };
+    else if (/^ {0,3}>/u.test(line)) map.fill(QUOTE2, offset, offset + line.length);
+    else if (/^(?: {4}|\t)\S/u.test(line)) {
+      map.fill(UNKNOWN2, offset, offset + line.length);
+      ambiguous2 = true;
+    }
+    offset += line.length;
+  }
+  if (fence) {
+    map.fill(UNKNOWN2, fence.start);
+    ambiguous2 = true;
+  }
+  const sourceRows = text2.split(/(?<=\n)/u), timestamp = /^\s*(?:(?:[-*#]+|\*\*)\s*)?\[?\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\]?/u;
+  if (/(?:transcript|captions|youtube|youtu\.be|video transcription)/iu.test(text2) && sourceRows.filter((line) => timestamp.test(line)).length >= 3) {
+    let at2 = 0;
+    for (const line of sourceRows) {
+      if (timestamp.test(line)) map.fill(QUOTE2, at2, at2 + line.length);
+      at2 += line.length;
+    }
+  }
+  for (let i = 0; i < text2.length; i++) {
+    if (map[i] || escaped2(text2, i)) continue;
+    const char = text2[i];
+    if (char === "`") {
+      let count2 = 1;
+      while (text2[i + count2] === "`") count2++;
+      const token = "`".repeat(count2);
+      let end2 = text2.indexOf(token, i + count2);
+      while (end2 >= 0 && (map[end2] !== 0 || text2[end2 - 1] === "`" || text2[end2 + count2] === "`")) end2 = text2.indexOf(token, end2 + count2);
+      if (end2 < 0) {
+        map.fill(UNKNOWN2, i);
+        ambiguous2 = true;
+        break;
+      }
+      map.fill(CODE2, i, end2 + count2);
+      i = end2 + count2 - 1;
+      continue;
+    }
+    if (!['"', "'", "\u201C", "\u2018"].includes(char)) continue;
+    if ((char === "'" || char === "\u2018") && wordChar2(text2[i - 1]) && wordChar2(text2[i + 1])) continue;
+    const closing3 = char === "\u201C" ? "\u201D" : char === "\u2018" ? "\u2019" : char;
+    let end = i + 1;
+    while (end < text2.length) {
+      if (text2[end] === closing3 && !escaped2(text2, end) && map[end] === 0 && !((closing3 === "'" || closing3 === "\u2019") && wordChar2(text2[end - 1]) && wordChar2(text2[end + 1]))) break;
+      end++;
+    }
+    if (end >= text2.length) {
+      map.fill(UNKNOWN2, i);
+      ambiguous2 = true;
+      break;
+    }
+    map.fill(QUOTE2, i, end + 1);
+    i = end;
+  }
+  return { labels: map, ambiguous: ambiguous2 };
+}
+function proseLabels2(text2) {
+  return labels2(text2).labels;
+}
+var ENGLISH_EXPLICIT_LEXICON2, words3, CODE2, QUOTE2, UNKNOWN2, escaped2, wordChar2;
+var init_profanity2 = __esm({
+  "packages/core/src/analytics/profanity.ts"() {
+    "use strict";
+    ENGLISH_EXPLICIT_LEXICON2 = Object.freeze(["fuck", "fucked", "fucking", "shit", "shitty", "bullshit", "asshole", "bastard"]);
+    words3 = new Set(ENGLISH_EXPLICIT_LEXICON2);
+    CODE2 = 2;
+    QUOTE2 = 1;
+    UNKNOWN2 = 3;
+    escaped2 = (text2, index) => {
+      let count2 = 0;
+      for (let i = index - 1; i >= 0 && text2[i] === "\\"; i--) count2++;
+      return count2 % 2 === 1;
+    };
+    wordChar2 = (char) => char !== void 0 && /[\p{L}\p{N}\p{M}_\u200c\u200d]/u.test(char);
+  }
+});
+
 // packages/cli/src/audit-ui/wallboard.ts
 function readableModelName(value) {
   if (!value) return "Unidentified model";
@@ -37289,15 +37382,15 @@ function aligned(left, right, width, options) {
   return label4 + " ".repeat(Math.max(1, width - widthOf(label4) - widthOf(rightText))) + rightText;
 }
 function displayNames(models) {
-  const base2 = new Map(models.map((model) => [model, readableModelName(model.canonicalModel ?? model.model)])), labels2 = new Map(base2);
+  const base2 = new Map(models.map((model) => [model, readableModelName(model.canonicalModel ?? model.model)])), labels3 = new Map(base2);
   for (const model of models) {
     const label4 = base2.get(model);
     if (models.some((other) => other !== model && base2.get(other) === label4 && ((other.canonicalModel ?? other.model) !== (model.canonicalModel ?? model.model) || other.provider !== model.provider))) {
       const provider = model.provider ?? model.model?.match(/^([^/]+)\//)?.[1];
-      if (provider) labels2.set(model, label4 + " (" + provider + ")");
+      if (provider) labels3.set(model, label4 + " (" + provider + ")");
     }
   }
-  return labels2;
+  return labels3;
 }
 function knownTokens2(snapshot) {
   const facts = snapshot.launch?.facts;
@@ -37364,19 +37457,38 @@ function projectCard(snapshot, width, options) {
   }
   return { id: "projects", lines, anchors };
 }
+function directPhraseWords(text2) {
+  const labels3 = proseLabels2(text2), result = [];
+  for (const token of text2.matchAll(/[\p{L}\p{N}\p{M}_\u200c\u200d]+(?:['’][\p{L}\p{N}\p{M}_\u200c\u200d]+)*/gu)) {
+    if (explicitWords.has(token[0].toLowerCase()) && labels3[token.index] === 0) result.push({ start: token.index, end: token.index + token[0].length });
+  }
+  return result;
+}
 function repeatedLines(snapshot) {
-  return [...snapshot.launch?.languageLines ?? []].filter((line) => line.text.trim().split(/\s+/).length > 1 && line.occurrences > 0 && line.samples.length > 0 && !/^\[Pasted text #\d+ \+\d+ lines\]$/.test(line.text.trim())).sort((a, b) => b.occurrences - a.occurrences || a.id.localeCompare(b.id)).slice(0, 6);
+  return [...snapshot.launch?.languageLines ?? []].filter((line) => (line.text.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) > 1 && line.occurrences > 1 && line.samples.length > 0 && directPhraseWords(line.text).length > 0 && !/^\[Pasted text #\d+ \+\d+ lines\]$/.test(line.text.trim())).sort((a, b) => b.occurrences - a.occurrences || a.id.localeCompare(b.id)).slice(0, 6);
 }
 function wallPhraseText(text2) {
   const suffix = /^\[Pasted text #\d+ \+\d+ lines\]([\s\S]+)$/.exec(text2)?.[1];
   return suffix?.trim() ? suffix.trimStart() : text2;
 }
+function wallPhrasePreview(text2, width, options = {}) {
+  const source = wallPhraseText(text2), offset = text2.length - source.length, hits = directPhraseWords(text2).filter((hit3) => hit3.start >= offset).map((hit3) => ({ start: hit3.start - offset, end: hit3.end - offset })), widthOf = options.widthOf ?? auditCellWidth, shown = (value) => asciiText(cleanReportText(value).replaceAll("\n", " "), Boolean(options.ascii)), ellipsis = options.ascii ? "..." : "\u2026", ellipsisWidth = widthOf(ellipsis), prefixBudget = widthOf(shown(source)) > width ? width - ellipsisWidth : width;
+  if (hits.some((hit3) => widthOf(shown(source.slice(0, hit3.end))) <= prefixBudget)) return clipped(source, width, options);
+  const hit2 = hits[0];
+  if (!hit2) return "";
+  const preceding = [...source.slice(0, hit2.start).matchAll(/\S+/gu)], labels3 = proseLabels2(source);
+  let start = preceding.at(-2)?.index ?? 0;
+  if (labels3[start] !== 0) start = hit2.start;
+  const budget2 = width - (start > 0 ? ellipsisWidth : 0), needsEnd = widthOf(shown(source.slice(start))) > budget2;
+  if (widthOf(shown(source.slice(start, hit2.end))) > budget2 - (needsEnd ? ellipsisWidth : 0)) start = hit2.start;
+  return (start > 0 ? ellipsis : "") + clipped(source.slice(start), width - (start > 0 ? ellipsisWidth : 0), options);
+}
 function phraseCard(snapshot, width, options) {
   const phrases = repeatedLines(snapshot);
   if (!phrases.length) return null;
-  const lines = [textLine(phrases.every((line) => line.occurrences > 1) ? "REPEATED PHRASES" : "YOUR PHRASES")], anchors = [], widthOf = options.widthOf ?? auditCellWidth;
+  const lines = [textLine("REPEATED PHRASES")], anchors = [], widthOf = options.widthOf ?? auditCellWidth;
   for (const phrase of phrases) {
-    const tail2 = `\xD7${wallNumber(phrase.occurrences)}`, quoteWidth = Math.min(36, Math.max(4, width - widthOf(asciiText(tail2, Boolean(options.ascii))) - 3)), quote2 = asciiText("\u201C" + clipped(wallPhraseText(phrase.text), quoteWidth, options) + "\u201D", Boolean(options.ascii));
+    const tail2 = `\xD7${wallNumber(phrase.occurrences)}`, quoteWidth = Math.min(36, Math.max(4, width - widthOf(asciiText(tail2, Boolean(options.ascii))) - 3)), quote2 = asciiText("\u201C" + wallPhrasePreview(phrase.text, quoteWidth, options) + "\u201D", Boolean(options.ascii));
     lines.push([{ text: aligned(quote2, tail2, width, options).slice(0, -asciiText(tail2, Boolean(options.ascii)).length), tone: "normal" }, { text: asciiText(tail2, Boolean(options.ascii)), tone: "dim" }]);
     const sample = phrase.samples[0];
     anchors.push({ row: lines.length - 1, label: phrase.text, route: sample.route });
@@ -37512,19 +37624,21 @@ function buildWallboard(snapshot, options = {}) {
   const padding = " ".repeat(Math.max(2, Math.floor((columns - width) / 2)));
   return { columns, rows, pages: pages.map((page) => ({ ...page, lines: page.lines.map((line) => [{ text: padding, tone: "normal" }, ...line]) })) };
 }
-var cf2, compactNf, dollars2, wallEquivalent, asciiText, wallProgressMark;
+var cf2, compactNf, dollars2, wallEquivalent, asciiText, wallProgressMark, explicitWords;
 var init_wallboard = __esm({
   "packages/cli/src/audit-ui/wallboard.ts"() {
     "use strict";
     init_audit_ui();
     init_report_document();
     init_report_status();
+    init_profanity2();
     cf2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
     compactNf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
     dollars2 = (value) => value == null || !Number.isFinite(value) ? "\u2014" : cf2.format(value);
     wallEquivalent = (value) => value.valueUsd === null && value.referenceValueUsd === null ? null : (value.valueUsd ?? 0) + (value.referenceValueUsd ?? 0);
     asciiText = (text2, ascii) => ascii ? text2.replaceAll("\u2501", "#").replaceAll("\u2500", "-").replaceAll("\u25B0", "#").replaceAll("\u25B1", ".").replaceAll("\u25CF", "*").replaceAll("\xD7", "x").replaceAll("\u201C", '"').replaceAll("\u201D", '"').replaceAll("\u2026", "...").replaceAll("\u2014", "-").replaceAll("\xB7", "|") : text2;
     wallProgressMark = (options = {}) => (options.frame ?? 0) % 14 === 0 ? "[-.-] " : "[o.o] ";
+    explicitWords = new Set(ENGLISH_EXPLICIT_LEXICON2);
   }
 });
 
@@ -41314,13 +41428,13 @@ function likeRows(db, schema, tokens, limit, requireAll) {
   const text2 = schema.textColumn;
   if (!text2)
     return [];
-  const words3 = tokens.filter((t) => t.length > 1).slice(0, 6);
-  if (words3.length === 0)
+  const words4 = tokens.filter((t) => t.length > 1).slice(0, 6);
+  if (words4.length === 0)
     return [];
-  const where = words3.map(() => `${q(text2)} like ? escape '\\'`).join(requireAll ? " and " : " or ");
+  const where = words4.map(() => `${q(text2)} like ? escape '\\'`).join(requireAll ? " and " : " or ");
   const order = schema.timeColumn ? `order by ${q(schema.timeColumn)} desc` : "order by rowid desc";
   try {
-    return db.prepare(`select * from ${q(schema.table)} where ${where} ${order} limit ?`).all(...words3.map((w) => `%${escapeLike(w)}%`), limit);
+    return db.prepare(`select * from ${q(schema.table)} where ${where} ${order} limit ?`).all(...words4.map((w) => `%${escapeLike(w)}%`), limit);
   } catch {
     return [];
   }
@@ -45206,12 +45320,12 @@ function ownershipError(db, nativeId) {
 }
 function activeSourceRows(db, needle) {
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_sources'").get()) return [];
-  const escaped2 = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const escaped3 = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
   const rows = db.prepare(`SELECT s.source_id sourceId,s.native_session_id id,s.harness,s.project,
  CASE WHEN EXISTS(SELECT 1 FROM revision_units ru JOIN evidence_units u ON u.unit_revision_id=ru.unit_revision_id WHERE ru.revision_id=s.active_revision_id AND u.role='ghost_prompt') THEN 'ghost' ELSE 'session' END kind
  FROM memory_sources s WHERE s.active_revision_id IS NOT NULL AND s.availability<>'forgotten'
  AND NOT EXISTS(SELECT 1 FROM forget_tombstones t WHERE t.source_id=s.source_id AND t.state<>'reversed')
- AND (s.native_session_id=? OR s.source_id=? OR s.native_session_id LIKE ? ESCAPE '\\' OR s.native_session_id LIKE ? ESCAPE '\\')`).all(needle, needle, escaped2 + "%", `%:agent-${escaped2}%`);
+ AND (s.native_session_id=? OR s.source_id=? OR s.native_session_id LIKE ? ESCAPE '\\' OR s.native_session_id LIKE ? ESCAPE '\\')`).all(needle, needle, escaped3 + "%", `%:agent-${escaped3}%`);
   const exact = rows.filter((row2) => row2.id === needle || row2.sourceId === needle);
   return exact.length ? exact : rows;
 }
@@ -45517,8 +45631,8 @@ function legacySourceSelection(db, o) {
 function legacyMemoryRef(db, ref3) {
   const exact = db.prepare("SELECT native_session_id FROM memory_sources WHERE native_session_id=? AND availability<>'forgotten'").get(ref3);
   if (exact) return exact.native_session_id;
-  const escaped2 = ref3.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
-  const rows = db.prepare("SELECT native_session_id FROM memory_sources WHERE native_session_id LIKE ? ESCAPE '\\' AND availability<>'forgotten'").all(escaped2 + "%");
+  const escaped3 = ref3.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+  const rows = db.prepare("SELECT native_session_id FROM memory_sources WHERE native_session_id LIKE ? ESCAPE '\\' AND availability<>'forgotten'").all(escaped3 + "%");
   if (rows.length === 1) return rows[0].native_session_id;
   if (rows.length > 1) {
     const found2 = resolveSession(db, ref3);
