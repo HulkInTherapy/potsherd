@@ -2,9 +2,12 @@ import {digest} from './source.js';
 import type {AuditConversation,AuditEvidenceRoute,AuditInsight,AuditPhrase,AuditPrompt} from './contracts.js';
 
 export const EXACT_REPEAT_LIMITS=Object.freeze({rows:20,supports:8,maxRowBytes:8192});
-const inputBasis='exact_redacted_whole_prompt_equality_v1';
+const inputBasis='normalized_short_prompt_equality_v2';
+/** Short prompts compared case- and whitespace-insensitively, paste/image placeholders removed. */
+const PLACEHOLDER=/\[(?:Pasted text|Image) #\d+[^\]]*\]/gi;
+export function normalizedLine(text:string):string|null{const n=text.replace(PLACEHOLDER,'').toLowerCase().replace(/\s+/g,' ').trim().replace(/^[ .!?,]+|[ .!?,]+$/g,'');return n.length>0&&n.length<=60?n:null;}
 const elapsedBasis='eligible_native_input_event_time_range_v1';
-const eligible=(prompt:AuditPrompt)=>prompt.eligibleHuman&&prompt.excludedReason===null&&['claude_prompt_id','codex_human_marker'].includes(prompt.originBasis);
+const eligible=(prompt:AuditPrompt)=>prompt.eligibleHuman&&prompt.excludedReason===null;
 const plural=(n:number,word:string)=>`${n} ${word}${n===1?'':'s'}`;
 function duration(ms:number):string{
  const seconds=ms/1000;if(seconds<60)return `${Number(seconds.toFixed(3))}s`;
@@ -16,7 +19,7 @@ function duration(ms:number):string{
 /** Final-view arithmetic only: literal equality and recorded clocks, never inferred work. */
 export function deterministicFindings(conversations:readonly AuditConversation[],prompts:readonly AuditPrompt[],timezone:string,partial:boolean,scopeHash:string):{insights:AuditInsight[];phrases:AuditPhrase[]}{
  const inputs=prompts.filter(eligible),byConversation=new Map<string,AuditPrompt[]>(),wordings=new Map<string,AuditPrompt[]>();
- for(const prompt of inputs){const group=wordings.get(prompt.text)??[];group.push(prompt);wordings.set(prompt.text,group);const conversation=byConversation.get(prompt.conversationId)??[];conversation.push(prompt);byConversation.set(prompt.conversationId,conversation);}
+ for(const prompt of inputs){const key=normalizedLine(prompt.text);if(key!==null){const group=wordings.get(key)??[];group.push(prompt);wordings.set(key,group);}const conversation=byConversation.get(prompt.conversationId)??[];conversation.push(prompt);byConversation.set(prompt.conversationId,conversation);}
  const repeated=[...wordings].filter(([,group])=>group.length>=2).sort(([textA,a],[textB,b])=>b.length-a.length||textA.localeCompare(textB));
  const phrases:AuditPhrase[]=repeated.filter(([text])=>Buffer.byteLength(text)<=EXACT_REPEAT_LIMITS.maxRowBytes).slice(0,EXACT_REPEAT_LIMITS.rows).map(([text,group])=>{
   const ordered=[...group].sort((a,b)=>a.conversationId.localeCompare(b.conversationId)||a.id.localeCompare(b.id)),supports:AuditPrompt[]=[];const selected=new Set<string>();
@@ -32,8 +35,8 @@ export function deterministicFindings(conversations:readonly AuditConversation[]
   const date=new Intl.DateTimeFormat('en-US',{timeZone:timezone,year:'numeric',month:'short',day:'numeric'});const span=duration(longest.ms),caption=`${longest.conversation.alias}: ${span} observed input span · ${date.format(new Date(longest.first.eventAt!))}–${date.format(new Date(longest.last.eventAt!))}`;
   insights.push({id:'observed-conversation-input-span-v1',basis:'deterministic',caption,publicCaption:`Longest observed input span: ${span}`,value:{value:longest.ms,numerator:longest.ms,denominator:null,unit:'milliseconds_observed_input_span',measurementBasis:elapsedBasis,state:partial||longest.datesMissing?'partial':'observed',definition},conversationIds:[longest.conversation.id],promptIds:[longest.first.id,longest.last.id],definition});
  }
- if(repeated.length){const count=repeated.reduce((n,[,group])=>n+group.length,0),supports=repeated.flatMap(([,group])=>group.slice(0,EXACT_REPEAT_LIMITS.supports)).slice(0,EXACT_REPEAT_LIMITS.supports),definition='Eligible scoped native input events whose entire redacted text equals another eligible event. Equality is exact after existing redaction/elision; case, whitespace and wording are not normalized. All members are counted once; this is not keyword, substring, semantic or personality analysis. Private rows show at most20 groups,8192 UTF-8 bytes each and8 supporting routes.';
-  const caption=`${plural(count,'input')} in ${plural(repeated.length,'exact repeat group')} · ${inputs.length} eligible inputs`;
+ if(repeated.length){const count=repeated.reduce((n,[,group])=>n+group.length,0),supports=repeated.flatMap(([,group])=>group.slice(0,EXACT_REPEAT_LIMITS.supports)).slice(0,EXACT_REPEAT_LIMITS.supports),definition='Short human prompts (60 characters or fewer) that repeat, compared ignoring case, whitespace, trailing punctuation and paste/image placeholders.';
+  const caption=`${plural(count,'prompt')} in ${plural(repeated.length,'repeated line')} · ${inputs.length} prompts`;
   insights.push({id:'exact-repeated-input-wording-v1',basis:'deterministic',caption,publicCaption:caption,value:{value:count,numerator:count,denominator:inputs.length,unit:'eligible_input_in_exact_repeat_group',measurementBasis:inputBasis,state:partial?'partial':'observed',definition},conversationIds:[...new Set(supports.map(p=>p.conversationId))],promptIds:supports.map(p=>p.id),definition});
  }
  return {insights:insights.slice(0,2),phrases};

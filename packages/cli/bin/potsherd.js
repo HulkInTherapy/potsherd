@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // The published entry point. `dist/potsherd.js` is a single bundled file so
 // that `npx potsherd audit` needs no workspace resolution and no build step.
+import {auditSplash} from './audit-splash.js';
+auditSplash();
 import('../dist/potsherd.js').catch((err) => {
   console.error('potsherd failed to start:', err?.message ?? err);
   // NOT `npm i -g potsherd`: the package is unpublished, so that is a 404

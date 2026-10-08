@@ -1,2 +1,2 @@
-import {runNativeScanWorker} from '../../core/src/analytics/native-pool.js';
-runNativeScanWorker();
+import {runScanWorker} from '../../core/src/analytics/scan-pool.js';
+runScanWorker();

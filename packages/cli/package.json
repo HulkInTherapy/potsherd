@@ -1,6 +1,6 @@
 {
   "name": "slopie",
-  "version": "1.7.0",
+  "version": "1.7.5",
   "description": "Slopie: inspect retained coding-agent history with a terminal audit and sourced local memory.",
   "type": "module",
   "license": "MIT",
@@ -47,16 +47,12 @@
     "prepack": "node ../../scripts/package-readme.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
-    "ink": "8.0.0",
-    "react": "19.3.0",
-    "string-width": "8.3.0"
+    "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
     "@potsherd/bridges": "workspace:*",
     "@potsherd/core": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/react": "^19.3.0",
     "commander": "^12.1.0"
   },
   "peerDependencies": {

@@ -12,7 +12,12 @@ export interface AuditScope { harnesses: readonly AuditHarness[]; project: strin
 export interface AuditCoverage { state: 'complete_snapshot'|'partial'|'unavailable'; knownSources: number; parsedSources: number; unknownOriginEvents: number; excludedEvents: number; omittedSources: number; gapCodes: readonly string[]; }
 export interface AuditMetric { value: number|null; numerator: number|null; denominator: number|null; unit: string; measurementBasis: string; state: Availability; definition: string; }
 export interface AuditProgress { stage: AuditState; completed: number; total: number|null; unit: 'candidate_source'|'conversation'|'prompt'; provisional: boolean; cancellable: boolean; label?:string; }
-export interface AuditSourceCapability { harness: AuditHarness; state: 'checking'|'absent'|'available'|'partial'|'unsupported'|'unavailable'; candidateFiles: number; conversations: number; humanPrompts: number|null; humanOrigin: 'native_marker'|'projection'|'unverified'; evidence: 'canonical'|'transient'|'projection'|'unavailable'; usage: 'unavailable'|'partial'|'reported'; firstUnsupportedStep: string|null; gapCodes: readonly string[]; census?:{checked:boolean;files:number;bytes:number;roots:number;unit:'file'|'database';}; }
+export interface AuditSourceCapability { harness: AuditHarness; state: 'checking'|'absent'|'available'|'partial'|'unsupported'|'unavailable'; candidateFiles: number; conversations: number; humanPrompts: number|null; humanOrigin: 'native_marker'|'projection'|'unverified'; evidence: 'canonical'|'transient'|'projection'|'unavailable'; usage: 'unavailable'|'partial'|'reported'; firstUnsupportedStep: string|null; gapCodes: readonly string[]; census?:{checked:boolean;files:number;bytes:number;roots:number;unit:'file'|'database';};
+  /** Subagent/helper conversations of this harness. */ childConversations?:number;
+  /** Slash commands typed (counted separately from prompts). */ slashCommands?:number;
+  /** All user-role messages that are not tool results. */ userMessages?:number;
+  /** De-duplicated priced responses and their API-equivalent cost. */ responses?:number; costUsd?:number;
+  /** User-role messages that are not human prompts, by reason. */ excluded?:Readonly<Record<string,number>>; }
 export interface AuditProjectFocus {label:string;inputs:number;promptIds:readonly string[];evidenceRoutes:readonly AuditEvidenceRoute[];basis:'lexical_requested_work_v1';}
 export interface AuditProject {nativeUserInputs?:number;focus?:readonly AuditProjectFocus[]; id: string; alias: string; displayName: string; path: string|null; humanPrompts: number; conversations: number; share: number|null; }
 export interface AuditActivityBucket { date: string; count: number; }
@@ -31,7 +36,7 @@ export interface AuditWordTerm {term:string;kind:AuditProseKind;occurrences:numb
 export interface AuditProfanity { lexiconVersion:string; language:'en-explicit-lexicon'; measurementBasis:string; eligiblePrompts:number; occurrences:AuditMetric; containingPrompts:AuditMetric; buckets:readonly {kind:AuditProseKind;occurrences:number;containingPrompts:number}[]; coverageGaps:readonly string[]; terms?:readonly AuditWordTerm[]; matches?:readonly {term:string;kind:AuditProseKind;promptId:string;conversationId:string;startUtf16:number;endUtf16:number;route:AuditEvidenceRoute}[]; }
 export type AuditRawAnswer = { type:'choice'; choice: string; probabilities: Readonly<Record<string,number>>; confidence:number }|{ type:'noul'; noul:number }|{ type:'score'; score:number; legend: Readonly<Record<string,string>>; probabilities:Readonly<Record<string,number>>; confidence:number };
 export interface AuditPromptJudgment { promptId: string; conversationId: string; sourceRoute: AuditEvidenceRoute; contentHash:string; scopeHash:string; normalizationVersion:string; questionVersion:string; policyVersion?:string; questionDefinitions?:Readonly<Record<string,unknown>>; model:string; answers:Readonly<Record<string,AuditRawAnswer>>; windowCoverage:'complete'|'truncated'|'partial'; primaryIntent:AuditIntent|null; abstained:boolean; }
-export interface AuditUsage { state: Availability; inputTokens: number|null; outputTokens: number|null; cacheTokens: number|null; reasoningTokens: number|null; costUsd: number|null; measurementBasis: string|null; inclusion: string|null; priceVersion: string|null; }
+export interface AuditUsage { state: Availability; /** Uncached input tokens. */ inputTokens: number|null; /** Output tokens (reasoning included). */ outputTokens: number|null; /** Cache read + cache write. */ cacheTokens: number|null; /** Already included in outputTokens. */ reasoningTokens: number|null; costUsd: number|null; measurementBasis: string|null; inclusion: string|null; priceVersion: string|null; cacheReadTokens?: number; cacheWriteTokens?: number; }
 export interface AuditWorkBar { label: string; count: number; denominator: number; state: Availability; }
 export interface AuditSemantics { state: 'not_run'|'no_key'|'running'|'partial'|'complete'|'cancelled'|'error'; qualified: boolean; model: string|null; classifiedPrompts: number; eligiblePrompts: number; uncertainPrompts: number; unclassifiedPrompts?:number; work: readonly AuditWorkBar[]; requestCount: number; cacheHits: number; estimatedCostUsd: number|null; reportedCostUsd: number|null; unresolvedCostUsd: number|null; errorCode: string|null; }
 export interface AuditSnapshot {
@@ -47,13 +52,15 @@ export interface AuditSnapshot {
   launch?:LaunchAudit;
   warnings: readonly string[];
   funnel?:AuditDataFunnel;
+  /** Wall-clock milliseconds per stage of the run (discoverMs, scanMs, aggregateMs, ...). */
+  timings?:Readonly<Record<string,number>>;
 }
 export interface AuditDataFunnel {sourceFiles?:readonly {fileHash:string;harness:AuditHarness;bytes:number;state:'parsed'|'excluded'|'failed';code:string|null;responsesObserved:number;responsesExcluded:number;responsesDeduplicated:number}[];nativeFilesDiscovered:number;nativeFilesParsed:number;retainedSources:number;selectedSources:number;responsesObserved:number;responsesDeduplicated:number;responsesExcluded:number;responsesPriced:number;excludedReasons:Readonly<Record<string,number>>;gaps:readonly string[];}
 
 export type AuditEvent = {type:'transfer';snapshotId:string;sequence:number;model:string;recipients:readonly string[];attempt:number;selectedSegments:number;notice:string;ackId?:string}|{ type: 'snapshot'; snapshot: AuditSnapshot }|{ type:'progress'; snapshotId: string; sequence: number; progress: AuditProgress; sources: readonly AuditSourceCapability[] }|{ type:'error'; snapshotId:string; code: string; message: string };
 export interface AuditOverviewOptions {
   /** Internal local executor; injected after IPC initialization, never serialized or accepted by the CLI. */
-  nativeScanExecutor?:import('./native-pool.js').NativeScanExecutor;
+  nativeScanExecutor?:import('./scan-pool.js').ScanExecutor;
   /** Internal parent/worker identity handoff; never a CLI input or authority token. */
   sessionIdentity?:string;
   claudeDir?: string; codexDir?: string; piDir?: string; opencodeDir?: string; potsherdDir?: string;
