@@ -417,7 +417,12 @@ function petNames(c: DetectorContext): Draft | null {
 }
 
 export const family = (h: string) => (h.startsWith('claude') ? 'Claude Code' : h === 'codex' ? 'Codex' : h === 'pi' ? 'pi' : h === 'opencode' ? 'OpenCode' : h);
-export function defectionOf(rows: readonly StoryRow[]): {from: string; to: string; week: string; weekStart: string; priorWeeks: number; shareSincePct: number; weeks: Map<string, Map<string, number>>} | null {
+const defectionMemo = new WeakMap<readonly StoryRow[], ReturnType<typeof computeDefection>>();
+export function defectionOf(rows: readonly StoryRow[]): ReturnType<typeof computeDefection> {
+  if (!defectionMemo.has(rows)) defectionMemo.set(rows, computeDefection(rows));
+  return defectionMemo.get(rows)!;
+}
+function computeDefection(rows: readonly StoryRow[]): {from: string; to: string; week: string; weekStart: string; priorWeeks: number; shareSincePct: number; weeks: Map<string, Map<string, number>>} | null {
   const W = new Map<string, Map<string, number>>(), monday = new Map<string, string>();
   for (const r of rows) {
     const w = isoWeek(r.day);
@@ -457,7 +462,13 @@ function defection(c: DetectorContext): Draft | null {
   };
 }
 
-export function lateNight(rows: readonly StoryRow[], shifted: (ts: number) => string) {
+const lateMemo = new WeakMap<readonly StoryRow[], {days: number; late: number}>();
+export function lateNight(rows: readonly StoryRow[], shifted: (ts: number) => string): {days: number; late: number} {
+  let hit = lateMemo.get(rows);
+  if (!hit) { hit = computeLateNight(rows, shifted); lateMemo.set(rows, hit); }
+  return hit;
+}
+function computeLateNight(rows: readonly StoryRow[], shifted: (ts: number) => string) {
   const D = new Map<string, StoryRow>();
   for (const r of rows) { const d = shifted(r.ts); const cur = D.get(d); if (!cur || r.ts > cur.ts) D.set(d, r); }
   const ends = [...D.values()];
@@ -868,15 +879,18 @@ export const DETECTORS: readonly [string, Detector][] = [
 ];
 
 /** Runs every detector; one that throws is dropped, never the board. */
-export function runDetectors(c: DetectorContext, shifted: (ts: number) => string): {cards: StoryCard[]; suppressed: {id: string; reason: string}[]; drafts: Map<string, Draft>} {
+export function runDetectors(c: DetectorContext, shifted: (ts: number) => string): {cards: StoryCard[]; suppressed: {id: string; reason: string}[]; drafts: Map<string, Draft>; ms: Record<string, number>} {
   const drafts: {d: Draft; order: number}[] = [], suppressed: {id: string; reason: string}[] = [], byId = new Map<string, Draft>();
+  const ms: Record<string, number> = {};
   DETECTORS.forEach(([id, fn], order) => {
+    const t = performance.now();
     try {
       const d = c.rows.length ? fn(c, shifted) : null;
       if (d) { drafts.push({d, order}); byId.set(id, d); } else suppressed.push({id, reason: 'guard'});
     } catch {
       suppressed.push({id, reason: 'error'});
     }
+    ms[id] = Math.round((performance.now() - t) * 10) / 10;
   });
   const scored = drafts.map(({d, order}) => ({d, order, score: Math.round(d.wow * (0.6 + 0.4 * d.confidence) * (1 + 0.08 * Math.log2(Math.max(1, d.surprise))) * 10) / 10}))
     .sort((a, b) => b.score - a.score || a.order - b.order);
@@ -884,7 +898,7 @@ export function runDetectors(c: DetectorContext, shifted: (ts: number) => string
     id: d.id, kind: d.kind, section: d.section, headline: d.headline, support: d.support, numbers: d.numbers, chart: d.chart,
     ...(d.quote !== undefined ? {quote: d.quote} : {}), confidence: r2(d.confidence), wow: d.wow, surprise: r2(Math.max(1, d.surprise)), score, rank: i + 1, public: d.public,
   }));
-  return {cards, suppressed, drafts: byId};
+  return {cards, suppressed, drafts: byId, ms};
 }
 
 export const homeDir = () => os.homedir();

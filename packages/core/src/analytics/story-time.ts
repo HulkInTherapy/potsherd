@@ -53,7 +53,13 @@ export function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
 /** ISO week key 'YYYY-Www' and its Monday (YYYY-MM-DD) for a local day. */
+const weekMemo = new Map<string, {key: string; monday: string}>();
 export function isoWeek(day: string): {key: string; monday: string} {
+  let hit = weekMemo.get(day);
+  if (!hit) { hit = computeIsoWeek(day); if (weekMemo.size > 5000) weekMemo.clear(); weekMemo.set(day, hit); }
+  return hit;
+}
+function computeIsoWeek(day: string): {key: string; monday: string} {
   const d = new Date(`${day}T00:00:00Z`);
   const dow = (d.getUTCDay() + 6) % 7;
   const monday = new Date(d.getTime() - dow * 86_400_000);

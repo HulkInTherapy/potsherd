@@ -32,7 +32,7 @@ export function buildStory(input: StoryInput): {story: AuditStory; detectorsMs: 
   const shifted = (ts: number) => clock(ts - 6 * 3_600_000).day;
   const t0 = performance.now();
   const ctx = {table: input.table, rows, dictionary: input.dictionary, alias: input.alias, home: homeDir()};
-  const {cards, suppressed, drafts} = runDetectors(ctx, shifted);
+  const {cards, suppressed, drafts, ms} = runDetectors(ctx, shifted);
   const story: AuditStory = {
     version: STORY_VERSION,
     state: rows.length === 0 ? 'empty' : rows.length < 200 ? 'thin' : 'ready',
@@ -49,7 +49,7 @@ export function buildStory(input: StoryInput): {story: AuditStory; detectorsMs: 
     coldOpen: coldOpen(rows),
     peakTime: peakTime(rows),
     enrichment: {state: input.offline ? 'offline' : 'not_run', model: null, code: null, quotesSent: 0},
-    timings: {featuresMs: 0, detectorsMs: 0},
+    timings: {featuresMs: 0, detectorsMs: 0, byDetector: ms},
   };
   const detectorsMs = Math.round((performance.now() - t0) * 10) / 10;
   story.timings.detectorsMs = detectorsMs;

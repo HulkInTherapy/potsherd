@@ -246,7 +246,8 @@ export interface AuditStory {
   coldOpen: {quote: string; at: string; day: string; hour: number; why: 'first_prompt' | 'most_expensive' | 'last_words' | 'late_night'} | null;
   peakTime: StoryPeakTime | null;
   enrichment: StoryEnrichment;
-  timings: {featuresMs: number; detectorsMs: number};
+  /** featuresMs: feature-table build; detectorsMs: all detectors + story assembly; byDetector: per detector. */
+  timings: {featuresMs: number; detectorsMs: number; byDetector?: Readonly<Record<string, number>>};
 }
 
 /** Loading-screen detail attached to `AuditProgress.detail` (throttled to ≤20 events/s). */
