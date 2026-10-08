@@ -86,7 +86,7 @@ export function drawChrome(s: Scene, card: DeckCard, options: ChromeOptions = {}
   const { c, w, h, tier, t } = s;
   const L = tier.id === 'L';
   const railY = L ? 1 : 0;
-  let busy = drawRail(s, railY);
+  let busy = s.share ? false : drawRail(s, railY);
   const kickY = L ? 3 : tier.id === 'M' ? 2 : 2;
   const a = seg(t, 0, 220);
   busy ||= a < 1;
@@ -99,7 +99,8 @@ export function drawChrome(s: Scene, card: DeckCard, options: ChromeOptions = {}
     const my = L ? 2 : 1;
     mascotBox = drawMascotCorner(s, options.expression ?? card.expression, tier.mascot === 'line' ? kickY : my);
   }
-  if (tier.mascot === 'line' || options.mascot === false) c.text(Math.min(mascotBox.x, w - tier.mx) - textWidth(pos) - 2, kickY, pos, { fg: C.slate, alpha: a });
+  if (s.share) { /* no page counter on the share card */ }
+  else if (tier.mascot === 'line' || options.mascot === false) c.text(Math.min(mascotBox.x, w - tier.mx) - textWidth(pos) - 2, kickY, pos, { fg: C.slate, alpha: a });
   else c.text(tier.mx + textWidth(kicker) + 3, kickY, pos, { fg: C.slate, alpha: a });
 
   let y = kickY + 2;

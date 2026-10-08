@@ -12,7 +12,7 @@ import { buildDeck } from './story/deck.js';
 const CW = 9;
 const CH = 18;
 
-export function shareCanvas(snapshot: AuditSnapshot, columns = 100, rows = 30): Canvas | null {
+export function shareCanvas(snapshot: AuditSnapshot, columns = 100, rows = 36): Canvas | null {
   const deck = buildDeck(snapshot);
   const board = deck.at(-1);
   if (!board || board.kind !== 'board') return null;
@@ -34,6 +34,11 @@ const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').
 
 export function canvasToSvg(c: Canvas, title = 'slopie audit'): string {
   const parts: string[] = [];
+  // Pass 1: backgrounds. Pass 2: pixels and glyphs on top.
+  for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) {
+    const bg = c.bg[y * c.w + x]!;
+    if (bg >= 0 && bg !== C.ink) parts.push(`<rect x="${x * CW}" y="${y * CH}" width="${CW}" height="${CH}" fill="${hex(bg)}"/>`);
+  }
   for (let y = 0; y < c.h; y++) {
     let x = 0;
     while (x < c.w) {
@@ -42,7 +47,6 @@ export function canvasToSvg(c: Canvas, title = 'slopie audit'): string {
       const fg = c.fg[i]!;
       const bg = c.bg[i]!;
       const X = x * CW, Y = y * CH;
-      if (bg >= 0 && bg !== C.ink) parts.push(`<rect x="${X}" y="${Y}" width="${CW}" height="${CH}" fill="${hex(bg)}"/>`);
       if (ch === '▀') parts.push(`<rect x="${X}" y="${Y}" width="${CW}" height="${CH / 2}" fill="${hex(fg)}"/>`);
       else if (ch === '▄') parts.push(`<rect x="${X}" y="${Y + CH / 2}" width="${CW}" height="${CH / 2}" fill="${hex(fg)}"/>`);
       else if (ch === '█') parts.push(`<rect x="${X}" y="${Y}" width="${CW}" height="${CH}" fill="${hex(fg)}"/>`);
@@ -54,7 +58,16 @@ export function canvasToSvg(c: Canvas, title = 'slopie audit'): string {
           const j = y * c.w + k;
           const next = c.ch[j]!;
           if (next === '' ) { k++; continue; }
-          if (next === ' ' || '▀▄█'.includes(next) || c.fg[j] !== fg || c.at[j] !== c.at[i] || c.bg[j] !== bg) break;
+          if ('▀▄█'.includes(next) || c.bg[j] !== bg) break;
+          if (next === ' ') {
+            // Keep inner spaces in the run; stop at a gap of two or at a style change after it.
+            const after = c.ch[j + 1];
+            if (k + 1 >= c.w || after === ' ' || after === undefined || c.fg[j + 1] !== fg || c.at[j + 1] !== c.at[i]) break;
+            run += ' ';
+            k++;
+            continue;
+          }
+          if (c.fg[j] !== fg || c.at[j] !== c.at[i]) break;
           run += next;
           k++;
         }

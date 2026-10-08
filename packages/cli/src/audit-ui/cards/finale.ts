@@ -133,7 +133,7 @@ export function boardBody(s: Scene, data: Data<'board'>, r: Rect, mascot: Rect):
   const pixel = s.caps.color !== 'none';
   const tiles: { key: string; w: number }[] = [];
   if (data.bill !== null) tiles.push({ key: 'bill', w: 0 });
-  if (data.grid && wide) tiles.push({ key: 'clock', w: 4 + 24 + 4 });
+  if (data.grid && wide && tilesH >= 10) tiles.push({ key: 'clock', w: 4 + 24 + 4 });
   tiles.push({ key: 'models', w: 0 });
   const flex = tiles.filter(tl => !tl.w);
   const fixedW = tiles.reduce((sum, tl) => sum + tl.w, 0) + gap * (tiles.length - 1);
@@ -212,7 +212,6 @@ export function boardBody(s: Scene, data: Data<'board'>, r: Rect, mascot: Rect):
       ax += c.text(ax, y, value, { fg: C.cream, bold: true, alpha: aa }) + 3;
     }
   }
-  if (s.share) textRight(c, r.x + r.w, r.y + r.h, 'slopie audit · computed locally', { fg: C.slate });
   return busy;
 }
 
