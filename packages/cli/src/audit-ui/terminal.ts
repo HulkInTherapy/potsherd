@@ -459,9 +459,14 @@ export async function runWallboard(session: AuditSession, options: TerminalOptio
       const svg = storyShareSvg(view.snapshot);
       if (!svg) { flash('nothing to share yet'); return; }
       const dir = options.shareDir ?? process.cwd();
-      let file = path.join(dir, 'slopie-wrapped.svg');
-      for (let n = 2; fs.existsSync(file) && n < 100; n++) file = path.join(dir, `slopie-wrapped-${n}.svg`);
-      fs.writeFileSync(file, svg, { flag: 'wx' });
+      // Exclusive create, moving to the next free name if someone (or another run) got there first.
+      let file = '';
+      for (let n = 1; n < 100 && !file; n++) {
+        const candidate = path.join(dir, n === 1 ? 'slopie-wrapped.svg' : `slopie-wrapped-${n}.svg`);
+        try { fs.writeFileSync(candidate, svg, { flag: 'wx', mode: 0o644 }); file = candidate; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      }
+      if (!file) { flash('too many slopie-wrapped files here already'); return; }
       flash(`saved ${path.basename(file)} · no project names, none of your words`, 2600);
     } catch (error) {
       flash(`couldn't save: ${error instanceof Error ? sanitize(error.message).slice(0, 60) : 'unknown error'}`);
