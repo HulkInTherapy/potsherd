@@ -1,7 +1,7 @@
 {
   "contractVersion": 2,
   "version": "1.7.5",
-  "sourceRevision": "e55c7167792083d7156b93a04d08bc7fb1339dc0",
+  "sourceRevision": "b8073f9d73bd0630b7257db69735a1d1974a1f1b",
   "files": {
     "dist/potsherd.js": {
       "bytes": 3272525,
