@@ -260,6 +260,13 @@ export interface AuditProgressDetail {
     /** Earliest / latest event seen so far in this harness (ISO). */
     firstAt: string | null;
     lastAt: string | null;
+    /** Discovery finished for this harness (rows light up one by one). */
+    discovered: boolean;
+    /** Discovered and nothing on this machine. */
+    absent: boolean;
+    /** Running top-level chats and human prompts of this harness (pre-dedupe while reading). */
+    chats: number;
+    prompts: number;
   }[];
   /** Running counts while reading (pre-dedupe for prompts; final after aggregation). */
   counts: {files: number; filesDone: number; bytes: number; bytesDone: number; messages: number; chats: number; prompts: number};

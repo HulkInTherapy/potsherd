@@ -139,7 +139,7 @@ function moodDrift(c: DetectorContext): Draft | null {
     return {
       id: 'mood_drift', kind: 'mood', section: 'mood', wow: 90,
       headline: `You used to be nice. Swearing went from ${f1(se)}% of prompts to ${sl.toFixed(0)}%.`, support,
-      numbers: {early_pct: r1(se), late_pct: r1(sl), ratio: r1(k), tipping_month: tip, ...byMonth},
+      numbers: {early_pct: r1(se), late_pct: r1(sl), ratio: r1(k), tipping_month: tip, earlyPct: r1(se), latePct: r1(sl), factor: r1(k), tipMonth: tip, ...byMonth},
       chart: {type: 'line', series: [{name: 'swear %', points: series}], highlight: tip, unit: 'pct'},
       confidence: clears(sl / Math.max(se, 0.5), 2.5), surprise: k, public: {headline: `You used to be nice. Swearing went from ${f1(se)}% of prompts to ${sl.toFixed(0)}%.`, support},
     };
@@ -150,7 +150,7 @@ function moodDrift(c: DetectorContext): Draft | null {
     return {
       id: 'mood_drift', kind: 'mood', section: 'mood', wow: 80,
       headline: `You mellowed out. Swearing fell from ${se.toFixed(0)}% of prompts to ${f1(sl)}%.`, support,
-      numbers: {early_pct: r1(se), late_pct: r1(sl), ratio: r1(k), direction: 'down', ...byMonth},
+      numbers: {early_pct: r1(se), late_pct: r1(sl), ratio: r1(k), direction: 'down', earlyPct: r1(se), latePct: r1(sl), factor: r1(k), tipMonth: null, ...byMonth},
       chart: {type: 'line', series: [{name: 'swear %', points: series}], unit: 'pct'},
       confidence: clears(se / Math.max(sl, 0.5), 2.5), surprise: k, public: {headline: `You mellowed out. Swearing fell from ${se.toFixed(0)}% of prompts to ${f1(sl)}%.`, support},
     };
@@ -276,7 +276,7 @@ function thanksVsSwears(c: DetectorContext): Draft | null {
       return {
         id: 'thanks_vs_swears', kind: 'mood', section: 'manners', wow: 80,
         headline: `For every “thank you”, ${ratio.toFixed(0)} ${word}.`, support,
-        numbers: {thanks: th, please: pl, fwords: fw, swears: sw, ratio: r1(ratio), prompts: n},
+        numbers: {thanks: th, please: pl, pleases: pl, fwords: fw, fbombs: fw, swears: sw, ratio: r1(ratio), prompts: n, counted: word},
         chart: {type: 'balance', series: [{name: 'counts', points: [{x: 'thank-yous', y: th}, {x: 'pleases', y: pl}, {x: word, y: k}]}], unit: 'count'},
         confidence: clears(ratio, 3), surprise: ratio, public: {headline: `For every “thank you”, ${ratio.toFixed(0)} ${word}.`, support},
       };
@@ -288,7 +288,7 @@ function thanksVsSwears(c: DetectorContext): Draft | null {
     return {
       id: 'thanks_vs_swears', kind: 'mood', section: 'manners', wow: 70,
       headline: 'You thank your agent more than your barista.', support,
-      numbers: {thanks: th, please: pl, fwords: fw, swears: sw, ratio: r1(ratio), prompts: n},
+      numbers: {thanks: th, please: pl, pleases: pl, fwords: fw, fbombs: fw, swears: sw, ratio: r1(ratio), prompts: n, counted: 'thanks'},
       chart: {type: 'balance', series: [{name: 'counts', points: [{x: 'thank-yous', y: th}, {x: 'pleases', y: pl}, {x: 'swear words', y: sw}]}], unit: 'count'},
       confidence: clears(ratio, 3), surprise: ratio, public: {headline: 'You thank your agent more than your barista.', support},
     };
@@ -351,7 +351,8 @@ function continueCount(c: DetectorContext): Draft | null {
   return {
     id: 'continue_count', kind: 'habit', section: 'delegation', wow: 75,
     headline: `You've typed “${maskLine(word)}” ${n} times.`, support,
-    numbers: {top: maskLine(word), top_n: n, all_n: rs.length, median_gap_s: g === null ? null : Math.round(g)},
+    numbers: {top: maskLine(word), top_n: n, all_n: rs.length, median_gap_s: g === null ? null : Math.round(g),
+      word: maskLine(word), count: n, total: rs.length, gapLabel: g === null ? null : g > 3600 ? `${f1(g / 3600)}h` : `${(g / 60).toFixed(0)} min`, pet: pet ? maskLine(pet[0]) : null, petCount: pet ? pet[1] : null},
     chart: {type: 'tally', series: [{name: 'variants', points: ranked.slice(0, 6).map(([k, v]) => ({x: maskLine(k), y: v}))}], unit: 'count'},
     confidence: clears(rs.length, 15), surprise: 1 + n / 15,
     public: plain ? {headline: `You've typed “${word}” ${n} times.`, support: `${rs.length} nudges in total.`} : {headline: `You've nudged your agent to keep going ${rs.length} times.`, support: `${rs.length} nudges in total.`},
@@ -450,7 +451,7 @@ function defection(c: DetectorContext): Draft | null {
   return {
     id: 'defection', kind: 'model', section: 'models', wow: 70,
     headline: `You left ${d.from} for ${d.to} the week of ${dayName(d.weekStart)}.`, support,
-    numbers: {from: d.from, to: d.to, week: d.week, week_start: d.weekStart, share_since_pct: d.shareSincePct, prior_weeks: d.priorWeeks},
+    numbers: {from: d.from, to: d.to, week: d.weekStart, iso_week: d.week, week_start: d.weekStart, share_since_pct: d.shareSincePct, sharePct: d.shareSincePct, prior_weeks: d.priorWeeks, weeks: d.priorWeeks},
     chart: {type: 'stacked_area', series: fams.map(f => ({name: f, points: weeks.map(w => ({x: w, y: d.weeks.get(w)!.get(f) ?? 0}))})), highlight: d.week, unit: 'prompts'},
     confidence: clamp(d.shareSincePct / 100), surprise: 1 + d.shareSincePct / 50, public: {headline: `You left ${d.from} for ${d.to} the week of ${dayName(d.weekStart)}.`, support},
   };
@@ -481,7 +482,8 @@ function nightOwl(c: DetectorContext, shifted: (ts: number) => string): Draft | 
   return {
     id: 'night_owl', kind: 'time', section: 'clock', wow: share >= 20 ? 70 : 50,
     headline, support,
-    numbers: {days_ending_after_1am_pct: r1(share), days: days, peak_hour: peak, angriest_hour: worst, calmest_hour: calm, angriest_pct: r1(pct(A[worst]!, H[worst]!)), calmest_swears: A[calm]!, calmest_prompts: H[calm]!},
+    numbers: {days_ending_after_1am_pct: r1(share), lateNightPct: r1(share), days: days, peak_hour: peak, angriest_hour: worst, calmest_hour: calm, angriest_pct: r1(pct(A[worst]!, H[worst]!)), calmest_swears: A[calm]!, calmest_prompts: H[calm]!,
+      angriestHour: tone ? worst : null, angriestPct: tone ? r1(pct(A[worst]!, H[worst]!)) : null, calmestHour: tone ? calm : null, calmestSwears: tone ? A[calm]! : null, calmestPrompts: tone ? H[calm]! : null},
     chart: {type: 'clock24', series: [{name: 'prompts', points: H.map((y, x) => ({x, y}))}, {name: 'swear %', points: H.map((n, x) => ({x, y: r1(pct(A[x]!, n))}))}], highlight: share >= 20 ? 1 : peak, unit: 'prompts'},
     confidence: clears(days, 20), surprise: 1 + share / 20, public: {headline, support},
   };
@@ -501,7 +503,7 @@ function iToWe(c: DetectorContext): Draft | null {
   return {
     id: 'i_to_we', kind: 'language', section: 'talk', wow: 70,
     headline: 'You stopped saying “I” and started saying “we”.', support,
-    numbers: {we_per_i_early: r2(re), we_per_i_now: r2(rl), lets_early_pct: r1(le), lets_now_pct: r1(ll)},
+    numbers: {we_per_i_early: r2(re), we_per_i_now: r2(rl), lets_early_pct: r1(le), lets_now_pct: r1(ll), earlyRatio: r2(re), lateRatio: r2(rl), letsNowPct: r1(ll), letsThenPct: r1(le)},
     chart: {type: 'line', series: [{name: 'we per I', points: months.map(m => ({x: m, y: r2(M.get(m)![0] / Math.max(1, M.get(m)![1]))}))}], unit: 'ratio'},
     confidence: clears(rl / Math.max(re, 0.01), 1.5), surprise: rl / Math.max(re, 0.01), public: {headline: 'You stopped saying “I” and started saying “we”.', support},
   };
@@ -542,7 +544,7 @@ function rageDay(c: DetectorContext): Draft | null {
   return {
     id: 'rage_day', kind: 'mood', section: 'mood', wow: 70,
     headline: `${dayName(d, 'long')} was a bad day for ${base(proj)}.`, support,
-    numbers: {day: d, swears: n, prompts: rs.length, project: base(proj), model: mod},
+    numbers: {day: d, swears: n, prompts: rs.length, project: base(proj), model: mod ? modelLabel(mod) : null, model_id: mod},
     chart: {type: 'calendar', series: [{name: 'swear words', points: days}], highlight: d, unit: 'count'},
     confidence: clears(n, 15), surprise: 1 + n / 15,
     public: {headline: `${dayName(d, 'long')} was your most profane day on record.`, support},
@@ -563,7 +565,7 @@ function sprintAndVanish(c: DetectorContext): Draft | null {
   return {
     id: 'sprint_and_vanish', kind: 'project', section: 'projects', wow: 65,
     headline: `${base(p)}: ${rs.length} prompts in ${span.toFixed(0)} days. Then never again.`, support,
-    numbers: {project: base(p), prompts: rs.length, span_days: r1(span), idle_days: Math.round(idle)},
+    numbers: {project: base(p), prompts: rs.length, span_days: r1(span), idle_days: Math.round(idle), days: Math.round(span), idleDays: Math.round(idle)},
     chart: {type: 'sparkline', series: [{name: 'prompts per day', points: dailySeries(rs, lastDay)}], unit: 'prompts'},
     confidence: clears(rs.length, 80), surprise: best.rate,
     public: {headline: `${c.alias(p)}: ${rs.length} prompts in ${span.toFixed(0)} days. Then never again.`, support},
@@ -580,7 +582,7 @@ function typoFingerprint(c: DetectorContext): Draft | null {
   return {
     id: 'typo_fingerprint', kind: 'language', section: 'talk', wow: 60,
     headline: `You've typed “${a!.typo}” ${a!.count} times. It's “${a!.word}”.`, support,
-    numbers: {typos: t.total, pairs: t.pairs, top: a!.typo, top_count: a!.count, correction: a!.word},
+    numbers: {typos: t.total, pairs: t.pairs, top: a!.typo, top_count: a!.count, correction: a!.word, typo: a!.typo, word: a!.word, count: a!.count},
     chart: {type: 'keyboard', series: [{name: 'typos', points: t.top.map(p => ({x: p.typo, y: p.count, label: p.word}))}], unit: 'count'},
     confidence: clears(t.pairs, 10), surprise: 1 + a!.count / 5,
     public: {headline: `${t.total} typos, one fingerprint.`, support: t.kind ? `Your signature slip: you ${t.kind.name} (${pct(t.kind.count, t.total).toFixed(0)}% of ${t.total} typos).` : `${t.pairs} words you keep mistyping.`},
@@ -621,7 +623,8 @@ function orchestrator(c: DetectorContext): Draft | null {
   return {
     id: 'orchestrator', kind: 'habit', section: 'delegation', wow: 60,
     headline: `You went from typing to managing: ${f0(total)} subagents launched.`, support,
-    numbers: {subagents_total: total, first_month: first, launched_before: launchedBefore, prompts_before: before, peak_month: peak, peak: M.get(peak)![0]},
+    numbers: {subagents_total: total, first_month: first, launched_before: launchedBefore, prompts_before: before, peak_month: peak, peak: M.get(peak)![0],
+      total, firstMonth: first, promptsBefore: before, launchedBefore, peakMonth: peak, peakCount: M.get(peak)![0]},
     chart: {type: 'bar', motif: 'clones', series: [{name: 'subagents', points: months.map(m => ({x: m, y: M.get(m)![0]}))}], highlight: first, unit: 'subagents'},
     confidence: clears(total, 30), surprise: 1 + total / 30, public: {headline: `You went from typing to managing: ${f0(total)} subagents launched.`, support},
   };
@@ -638,7 +641,7 @@ function priciestProject(c: DetectorContext): Draft | null {
   return {
     id: 'priciest_project', kind: 'money', section: 'projects', wow: 55,
     headline: `Every prompt in ${base(top.p)} costs ${usd2(top.per)}.`, support,
-    numbers: {project: base(top.p), usd_per_prompt: r2(top.per), total_usd: r2(top.total), prompts: top.n, cheapest: base(low.p), cheapest_usd_per_prompt: r2(low.per)},
+    numbers: {project: base(top.p), usd_per_prompt: r2(top.per), total_usd: r2(top.total), prompts: top.n, cheapest: base(low.p), cheapest_usd_per_prompt: r2(low.per), costPerPrompt: r2(top.per), factor: r1(top.per / low.per)},
     chart: {type: 'bubbles', series: [{name: '$ per prompt', points: cand.slice(0, 12).map(x => ({x: base(x.p), y: r2(x.per), label: `${x.n} prompts · ${usd0(x.total)}`}))}], highlight: base(top.p), unit: 'usd'},
     confidence: clears(top.per / low.per, 3), surprise: top.per / low.per,
     public: {headline: `Every prompt in your priciest project costs ${usd2(top.per)}.`, support: `That's ${(top.per / low.per).toFixed(0)}× your cheapest (${usd2(low.per)}/prompt). ${usd0(top.total)} across ${top.n} prompts.`},
@@ -683,7 +686,7 @@ function marathon(c: DetectorContext): Draft | null {
   const support = `${dayName(b.start.day)}, ${clock12(b.start.ts, b.start.hour, b.start.minute)} to ${clock12(b.end.ts, b.end.hour, b.end.minute)}` + (b.end.day !== b.start.day ? ' the next morning' : '') + `. ${b.n} prompts, never more than 45 minutes apart.`;
   return {
     id: 'marathon', kind: 'time', section: 'more', wow: 55, headline: `Longest unbroken stretch: ${f1(h)} hours.`, support,
-    numbers: {hours: r2(h), start_day: b.start.day, start_hour: b.start.hour, end_day: b.end.day, end_hour: b.end.hour, prompts: b.n},
+    numbers: {hours: r2(h), start_day: b.start.day, start_hour: b.start.hour, end_day: b.end.day, end_hour: b.end.hour, prompts: b.n, day: b.start.day},
     chart: {type: 'big_number', series: [{name: 'hours', points: [{x: 'stretch', y: r1(h)}]}], unit: 'hours'},
     confidence: clears(h, 3), surprise: h / 3, public: {headline: `Longest unbroken stretch: ${f1(h)} hours.`, support},
   };
@@ -732,7 +735,7 @@ function predictedNextWord(c: DetectorContext): Draft | null {
   const support = `${share.toFixed(0)}% of everything you've ever typed opens that way (${f0(k)} times). 1-in-${(n / k).toFixed(0)} odds, better than any model's.`;
   return {
     id: 'predicted_next_word', kind: 'language', section: 'talk', wow: 50, headline: `Prediction: your next prompt starts with “${w}”.`, support,
-    numbers: {word: w, count: k, share_pct: r1(share)},
+    numbers: {word: w, count: k, share_pct: r1(share), pct: r1(share)},
     chart: {type: 'autocomplete', series: [{name: 'share %', points: fw.slice(0, 8).filter(([x]) => !isSwearWord(x)).map(([x, v]) => ({x, y: r1(pct(v, n))}))}], unit: 'pct'},
     confidence: clears(share, 5), surprise: share / 2, public: {headline: `Prediction: your next prompt starts with “${w}”.`, support},
   };
@@ -755,7 +758,7 @@ function streak(c: DetectorContext): Draft | null {
   const support = `${dayName(s.start)} to ${dayName(s.end)}. ${s.active} active days in total.`;
   return {
     id: 'streak', kind: 'time', section: 'scale', wow: 45, headline: `${s.days} days in a row. Not one day off.`, support,
-    numbers: {streak: s.days, start: s.start, end: s.end, active_days: s.active},
+    numbers: {streak: s.days, start: s.start, end: s.end, active_days: s.active, days: s.days, from: s.start, to: s.end},
     chart: {type: 'calendar', series: [{name: 'prompts', points: [...counts].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(0, 60).map(([x, y]) => ({x, y}))}], unit: 'prompts'},
     confidence: clears(s.days, 7), surprise: s.days / 7, public: {headline: `${s.days} days in a row. Not one day off.`, support},
   };

@@ -126,7 +126,7 @@ function listFiles(root: string, accept: (file: string) => boolean): string[] {
   return out;
 }
 
-function discover(harnesses: readonly AuditHarness[], options: AuditOverviewOptions): Discovered {
+function discover(harnesses: readonly AuditHarness[], options: AuditOverviewOptions, onHarness?: (harness: AuditHarness, row: {files: number; bytes: number}) => void): Discovered {
   const result: Discovered = {jobs: [], opencodeDatabases: [], opencodeJson: [], historyFile: null, census: new Map()};
   const seen = new Set<string>();
   for (const harness of harnesses) {
@@ -160,6 +160,7 @@ function discover(harnesses: readonly AuditHarness[], options: AuditOverviewOpti
         result.jobs.push({file, harness: harness as NativeHarness, size: stat.size, mtimeMs: stat.mtimeMs} as ScanJob & {mtimeMs: number});
       }
     }
+    onHarness?.(harness, row);
   }
   return result;
 }
@@ -322,7 +323,18 @@ class LocalAuditSession implements AuditSession {
       let t = performance.now();
       const harnesses = this.current.scope.harnesses;
       const tz = this.current.scope.timezone;
-      const found = discover(harnesses, this.options);
+      this.detail = {
+        stage: 'discovering',
+        harnesses: harnesses.map(h => ({harness: h, files: 0, bytes: 0, filesDone: 0, firstAt: null, lastAt: null, discovered: false, absent: false, chats: 0, prompts: 0})),
+        counts: {files: 0, filesDone: 0, bytes: 0, bytesDone: 0, messages: 0, chats: 0, prompts: 0}, elapsedMs: 0,
+      };
+      // One progress event per harness as soon as its roots are listed, so the loading story lights rows up one by one.
+      const found = discover(harnesses, this.options, (harness, row) => {
+        if (!this.detail) return;
+        this.detail = {...this.detail, harnesses: this.detail.harnesses.map(h => h.harness === harness ? {...h, files: row.files, bytes: row.bytes, discovered: true, absent: row.files === 0} : h),
+          counts: {...this.detail.counts, files: this.detail.counts.files + row.files, bytes: this.detail.counts.bytes + row.bytes}};
+        this.progress('discovering', 'Finding your agents', 0, null);
+      });
       t = lap('discoverMs', t);
       this.policy = loadPolicy(this.root);
       t = lap('policyMs', t);
@@ -330,12 +342,7 @@ class LocalAuditSession implements AuditSession {
       cache.load();
       this.cache = cache;
       t = lap('cacheLoadMs', t);
-      this.detail = {
-        stage: 'reading',
-        harnesses: harnesses.map(h => { const c = found.census.get(h)!; return {harness: h, files: c.files, bytes: c.bytes, filesDone: 0, firstAt: null, lastAt: null}; }),
-        counts: {files: found.jobs.length + found.opencodeDatabases.length + found.opencodeJson.length, filesDone: 0, bytes: [...found.census.values()].reduce((n, c) => n + c.bytes, 0), bytesDone: 0, messages: 0, chats: 0, prompts: 0},
-        elapsedMs: 0,
-      };
+      this.detail = {...this.detail, stage: 'reading'};
       this.publish({sources: this.current.sources.map(s => {
         const c = found.census.get(s.harness)!;
         return {...s, state: c.files ? 'available' : 'absent', candidateFiles: c.files,
@@ -385,6 +392,14 @@ class LocalAuditSession implements AuditSession {
       const historyData: HistoryData = found.historyFile && harnesses.includes('claude')
         ? cache.history(found.historyFile, tz, (file, previous) => readHistory(file, {timezone: tz}, previous)) : {entries: [], counters: new Map()};
       this.historyData = historyData;
+      if (this.detail && historyData.entries.length) {
+        // Claude's typed-prompt log reaches back further than surviving transcripts.
+        let first: number | null = null, last: number | null = null;
+        for (const e of historyData.entries) if (e.at !== null) { if (first === null || e.at < first) first = e.at; if (last === null || e.at > last) last = e.at; }
+        this.detail = {...this.detail, harnesses: this.detail.harnesses.map(h => h.harness !== 'claude' || first === null ? h : {...h,
+          firstAt: !h.firstAt || new Date(first).toISOString() < h.firstAt ? new Date(first).toISOString() : h.firstAt,
+          lastAt: !h.lastAt || new Date(last!).toISOString() > h.lastAt ? new Date(last!).toISOString() : h.lastAt})};
+      }
       const history: HistoryEntry[] = historyData.entries;
       t = lap('extrasMs', t);
       await scanning;
@@ -455,8 +470,11 @@ class LocalAuditSession implements AuditSession {
       if (f.lastAt !== null) { const iso = new Date(f.lastAt).toISOString(); if (!row.lastAt || iso > row.lastAt) row.lastAt = iso; }
     }
     c.messages += f.usage.length + f.prompts.length;
-    if (!f.child) c.chats += f.harness === 'claude' ? (f.sessionIds?.length ? 1 : 0) : 1;
-    for (const p of f.prompts) if (p.kind === 'human') c.prompts++;
+    const chat = f.child ? 0 : f.harness === 'claude' ? (f.sessionIds?.length ? 1 : 0) : 1;
+    let human = 0;
+    for (const p of f.prompts) if (p.kind === 'human') human++;
+    c.chats += chat; c.prompts += human;
+    if (row) { row.chats += chat; row.prompts += human; }
   }
 
   /** Throttled progress event (≤20/s). */
@@ -533,7 +551,8 @@ class LocalAuditSession implements AuditSession {
     const facts = this.launchFacts(a);
     let story: AuditStory | undefined;
     if (this.current.launch) {
-      if (this.detail) this.detail = {...this.detail, stage: 'detecting', counts: {...this.detail.counts, messages: a.responses + userMessages, chats: a.topLevelConversations, prompts: human}};
+      if (this.detail) this.detail = {...this.detail, stage: 'detecting', counts: {...this.detail.counts, messages: a.responses + userMessages, chats: a.topLevelConversations, prompts: human},
+        harnesses: this.detail.harnesses.map(h => ({...h, chats: a.harness[h.harness].conversations, prompts: a.harness[h.harness].humanPrompts}))};
       const aliases = new Map(projects.map(p => [p.path ?? '(unknown)', p.alias]));
       const policy = this.policy;
       const ts = performance.now();

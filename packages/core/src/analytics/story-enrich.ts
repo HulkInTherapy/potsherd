@@ -26,8 +26,10 @@ export function enrichmentRequest(story: AuditStory, rows: readonly StoryRow[]):
   const a = story.archetype, p = story.peakTime;
   if (!a || a.id === 'fresh_install' || !p) return null;
   const profiles = profileVariants(a.id, rows);
-  const share = Number(/(\d+)% of/.exec(p.narrative)?.[1] ?? 0);
-  const peaks = peakNarratives(p.label, p.hour, share);
+  const hourShare = rows.length ? (100 * rows.filter(r => r.hour === p.hour).length) / rows.length : 0;
+  const dayShare = rows.length ? (100 * rows.filter(r => r.dow === p.weekday).length) / rows.length : 0;
+  const peaks = peakNarratives(p.label, p.hour, hourShare, dayShare);
+  const share = Math.round(hourShare);
   if (profiles.length < 2 || peaks.length < 2) return null;
   const quotes = [story.coldOpen?.quote, ...story.cards.map(c => c.quote)].filter((q): q is string => !!q && q.length <= 90);
   const unique = [...new Set(quotes)].slice(0, MAX_QUOTES);

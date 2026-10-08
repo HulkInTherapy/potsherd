@@ -44,7 +44,7 @@ export function buildStory(input: StoryInput): {story: AuditStory; detectorsMs: 
     projects: projects(rows, input.alias),
     highlights: highlights(rows, drafts),
     cards, suppressed,
-    archetype: rows.length ? assignArchetype(rows, rows.length) : null,
+    archetype: rows.length ? assignArchetype(rows, 0) : null,
     awards: awards(rows, drafts),
     coldOpen: coldOpen(rows),
     peakTime: peakTime(rows),
@@ -209,23 +209,21 @@ function coldOpen(rows: readonly StoryRow[]): AuditStory['coldOpen'] {
 
 function peakTime(rows: readonly StoryRow[]): StoryPeakTime | null {
   if (rows.length < 50) return null;
-  const grid = new Map<string, number>(), dows = new Array(7).fill(0) as number[];
-  for (const r of rows) { grid.set(`${r.dow}:${r.hour}`, (grid.get(`${r.dow}:${r.hour}`) ?? 0) + 1); dows[r.dow]!++; }
-  const [cell, n] = [...grid].sort((a, b) => b[1] - a[1])[0]!;
-  const [dow, hour] = cell.split(':').map(Number) as [number, number];
+  const hours = new Array(24).fill(0) as number[], dows = new Array(7).fill(0) as number[];
+  for (const r of rows) { hours[r.hour]!++; dows[r.dow]!++; }
+  const hour = hours.indexOf(Math.max(...hours)), dow = dows.indexOf(Math.max(...dows));
   const label = `${WEEKDAY_NAMES[dow]}s around ${HOUR_NAME(hour)}`;
-  const share = pct(n, rows.length);
-  return {hour, weekday: dow, label, narrative: peakNarratives(label, hour, share)[0]!, source: 'local'};
+  return {hour, weekday: dow, label, narrative: peakNarratives(label, hour, pct(hours[hour]!, rows.length), pct(dows[dow]!, rows.length))[0]!, source: 'local'};
 }
 
 /** Local narrative variants (Jev may only choose among these). */
-export function peakNarratives(label: string, hour: number, share: number): string[] {
-  const s = share.toFixed(0);
+export function peakNarratives(label: string, hour: number, hourShare: number, dayShare: number): string[] {
+  const h = hourShare.toFixed(0), d = dayShare.toFixed(0), at = HOUR_NAME(hour), day = label.split('s around')[0]!;
   const mood = hour >= 22 || hour < 5 ? 'when the house is quiet' : hour < 9 ? 'before the day gets loud' : hour < 13 ? 'with the first coffee still warm' : hour < 18 ? 'in the long afternoon' : 'after dinner';
   return [
-    `You're sharpest on ${label}: ${s}% of everything you typed landed in that one hour of the week.`,
-    `${label[0]!.toUpperCase()}${label.slice(1)}, ${mood}. That's your hour: ${s}% of your prompts.`,
-    `If your agent had office hours, they'd be ${label}. ${s}% of your prompts arrived then.`,
+    `Your clock peaks at ${at}: ${h}% of everything you typed landed in that hour. ${day} is your busiest day (${d}%).`,
+    `${at}, ${mood}. That's your hour: ${h}% of your prompts. And ${day}s carry ${d}% of your week.`,
+    `If your agent had office hours, they'd be ${label}. ${h}% of your prompts arrive at ${at}, ${d}% on ${day}s.`,
   ];
 }
 

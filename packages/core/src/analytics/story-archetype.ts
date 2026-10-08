@@ -40,9 +40,9 @@ const M: Record<string, MetricDef> = {
   focus: {key: 'focus', label: 'top project share', unit: 'pct', lo: 40, hi: 75, display: v => `${v.toFixed(0)}% of prompts in one project`},
   wideModels: {key: 'wideModels', label: 'models over 10%', unit: 'count', lo: 1.5, hi: 4, display: v => `${v.toFixed(0)} models with >10% of your prompts`},
   agents: {key: 'agents', label: 'agents used', unit: 'count', lo: 1.5, hi: 3.5, display: v => `${v.toFixed(0)} different coding agents`},
-  stretch: {key: 'stretchH', label: 'longest stretch', unit: 'hours', lo: 3, hi: 9, display: v => `${v.toFixed(1)}h longest unbroken stretch`},
-  longSessions: {key: 'longSessions', label: '4h+ stretches', unit: 'count', lo: 1, hi: 8, display: v => `${v.toFixed(0)} stretches of 4h or more`},
-  projects: {key: 'projects', label: 'projects', unit: 'count', lo: 5, hi: 20, display: v => `${v.toFixed(0)} projects with 5+ prompts`},
+  stretch: {key: 'stretchH', label: 'longest stretch', unit: 'hours', lo: 4, hi: 12, display: v => `${v.toFixed(1)}h longest unbroken stretch`},
+  longSessions: {key: 'longSessions', label: '4h+ stretches', unit: 'count', lo: 2, hi: 15, display: v => `${v.toFixed(0)} stretches of 4h or more`},
+  projects: {key: 'projects', label: 'projects', unit: 'count', lo: 4, hi: 15, display: v => `${v.toFixed(0)} projects with 5+ sessions`},
   lowFocus: {key: 'focus', label: 'spread', unit: 'pct', lo: 45, hi: 15, display: v => `top project only ${v.toFixed(0)}% of prompts`},
   retry: {key: 'retry', label: 'retries', unit: 'pct', lo: 6, hi: 20, display: v => `${v.toFixed(0)}% of prompts say "again", "still" or "not working"`},
   question: {key: 'question', label: 'questions', unit: 'pct', lo: 25, hi: 55, display: v => `${v.toFixed(0)}% of prompts are questions`},
@@ -99,8 +99,13 @@ export function archetypeMetrics(rows: readonly StoryRow[]): ArchetypeMetrics {
   const models = new Map<string, number>();
   for (const r of rows) if (r.model) models.set(r.model, (models.get(r.model) ?? 0) + 1);
   const withModel = [...models.values()].reduce((a, b) => a + b, 0);
-  const projects = new Map<string, number>();
-  for (const r of rows) projects.set(r.project ?? '', (projects.get(r.project ?? '') ?? 0) + 1);
+  const projects = new Map<string, number>(), projectChats = new Map<string, Set<string>>();
+  for (const r of rows) {
+    projects.set(r.project ?? '', (projects.get(r.project ?? '') ?? 0) + 1);
+    const chats = projectChats.get(r.project ?? '') ?? new Set<string>();
+    chats.add(r.conv);
+    projectChats.set(r.project ?? '', chats);
+  }
   const hours = new Array(24).fill(0) as number[];
   for (const r of rows) hours[r.hour]!++;
   // Stretches of ≥4h (gaps ≤45 min).
@@ -118,7 +123,7 @@ export function archetypeMetrics(rows: readonly StoryRow[]): ArchetypeMetrics {
     loyal: withModel ? pct(Math.max(...models.values()), withModel) : 0, models: models.size,
     wideModels: [...models.values()].filter(v => withModel && v / withModel > 0.1).length,
     agents: new Set(rows.map(r => family(r.harness))).size,
-    projects: [...projects.entries()].filter(([p, v]) => p && v >= 5).length,
+    projects: [...projectChats.entries()].filter(([p, v]) => p && v.size >= 5).length,
     focus: pct(Math.max(0, ...[...projects.entries()].filter(([p]) => p).map(([, v]) => v)), n),
     stretchH: stretch ? stretch.ms / 3_600_000 : 0, longSessions,
     retry: pct(count(r => r.f.fr >= RETRY), n), plan: pct(count(r => has(r.f, FLAG.code) || r.f.ln >= 4), n),
@@ -156,7 +161,9 @@ export function assignArchetype(rows: readonly StoryRow[], variant = 0): StoryAr
   const [win, sub] = [scores[0]!, scores[1]!];
   const deciding = [...win.a.metrics.map(([k]) => metric(k)), ...sub.a.metrics.map(([k]) => metric(k))]
     .filter((x, i, xs) => xs.findIndex(y => y.key === x.key) === i).sort((x, y) => y.band - x.band).slice(0, 3);
-  const rarity: StoryRarity = win.score >= 0.95 && sub.score >= 0.7 ? 'legendary' : win.score >= 0.85 ? 'epic' : win.score >= 0.65 ? 'rare' : 'common';
+  // Rarity: how extreme the deciding metrics are together (no population yet, so no percentile is claimed).
+  const extreme = deciding.reduce((n, d) => n + d.band, 0) / Math.max(1, deciding.length);
+  const rarity: StoryRarity = extreme >= 0.97 && win.score >= 0.95 ? 'legendary' : extreme >= 0.85 && win.score >= 0.8 ? 'epic' : extreme >= 0.65 ? 'rare' : 'common';
   const profiles = win.a.profiles;
   return {
     id: win.a.id, title: win.a.title, tagline: win.a.tagline, profile: profiles[variant % profiles.length]!(m),
