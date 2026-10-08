@@ -10,10 +10,16 @@ const categories:readonly [string,RegExp][]=[
 ];
 /** Every category needs one of these verbs; a single cheap test skips most prompts. */
 const VERBS=/\b(?:write|update|fix|add|edit|draft|revise|review|audit|inspect|debug|repair|resolve|reproduce|build|implement|create|develop|refactor|ship|integrate|research|look up|investigate|compare|verify)\b/iu;
+/** Requested-work labels of one prompt (prose only). */
+export function focusLabels(raw:string):string[]{
+ if(!VERBS.test(raw)||!categories.some(([,pattern])=>pattern.test(raw)))return [];
+ const labels=proseLabels(raw),text=Array.from({length:raw.length},(_,i)=>labels[i]===0?raw[i]:' ').join('');
+ return categories.filter(([,pattern])=>pattern.test(text)).map(([label])=>label);
+}
 export function requestedProjectFocus(prompts:readonly AuditPrompt[]):AuditProjectFocus[]{
  const groups=new Map<string,AuditPrompt[]>();
- for(const prompt of prompts){if(prompt.languageEligible===false||!(prompt.eligibleNativeInput??prompt.eligibleHuman))continue;if(!VERBS.test(prompt.text)||!categories.some(([,pattern])=>pattern.test(prompt.text)))continue;const labels=proseLabels(prompt.text),text=Array.from({length:prompt.text.length},(_,i)=>labels[i]===0?prompt.text[i]:' ').join('');
-  for(const [label,pattern]of categories){if(!pattern.test(text))continue;const rows=groups.get(label)??[];if(!rows.some(p=>p.id===prompt.id))rows.push(prompt);groups.set(label,rows);}
+ for(const prompt of prompts){if(prompt.languageEligible===false||!(prompt.eligibleNativeInput??prompt.eligibleHuman))continue;
+  for(const label of prompt.lex?(prompt.lex.fc??[]):focusLabels(prompt.text)){const rows=groups.get(label)??[];if(!rows.some(p=>p.id===prompt.id))rows.push(prompt);groups.set(label,rows);}
  }
  // A label needs real support: at least 5 prompts and 10% of the project's prompts.
  const minimum=Math.max(5,Math.ceil(prompts.length*0.1));
