@@ -37305,25 +37305,26 @@ function modelCard(snapshot, width, options) {
   const facts = snapshot.launch?.facts;
   if (!facts?.models.length) return null;
   const sorted = [...facts.models].filter((model) => model.model !== null || model.canonicalModel !== null).sort((a, b) => (b.knownTokens ?? b.totalTokens ?? -1) - (a.knownTokens ?? a.totalTokens ?? -1) || a.id.localeCompare(b.id)), models = sorted.slice(0, 5);
-  if (facts.favourite && !models.some((model) => model.id === facts.favourite.id)) models[models.length - 1] = facts.favourite;
-  const widthOf = options.widthOf ?? auditCellWidth, max2 = Math.max(...models.map((model) => wallEquivalent(model) ?? 0), 0) || 1, names = displayNames(models), lines = [textLine(clipped("MODELS \xB7 API-equivalent value", width, options))];
+  if (facts.favourite && (facts.favourite.model !== null || facts.favourite.canonicalModel !== null) && !models.some((model) => model.id === facts.favourite.id)) models[models.length - 1] = facts.favourite;
+  if (!models.length) return null;
+  const widthOf = options.widthOf ?? auditCellWidth, max2 = Math.max(...models.map((model) => wallEquivalent(model) ?? 0), 0) || 1, names = displayNames(models), priceWidth = Math.max(...models.map((model) => widthOf(asciiText(dollars2(wallEquivalent(model)), Boolean(options.ascii))))), lines = [textLine(clipped("MODELS \xB7 price", width, options))];
   for (const model of models) {
     const value = wallEquivalent(model), price = dollars2(value), label4 = names.get(model), favourite = model.id === facts.favourite?.id, marker2 = asciiText(favourite ? "\u25CF " : "  ", Boolean(options.ascii)), barWidth = width >= 45 ? 12 : 5, visual = bar2(value === null ? null : value / max2, barWidth, Boolean(options.ascii));
     if (options.columns !== void 0 && options.columns < 75) {
       lines.push([{ text: marker2, tone: favourite ? "amber" : "normal" }, { text: clipped(label4, width - 2, options), tone: "normal" }]);
       lines.push([{ text: aligned("  " + visual, price, width, options), tone: "dim" }]);
     } else {
-      const tail2 = " " + visual + " " + asciiText(price, Boolean(options.ascii)), nameWidth = Math.max(4, width - 2 - widthOf(tail2)), name2 = clipped(label4, nameWidth, options);
-      lines.push([{ text: marker2, tone: favourite ? "amber" : "normal" }, { text: name2 + " ".repeat(Math.max(0, nameWidth - widthOf(name2))), tone: "normal" }, { text: " " + visual, tone: "dim" }, { text: " " + asciiText(price, Boolean(options.ascii)), tone: "normal" }]);
+      const priceText = asciiText(price, Boolean(options.ascii)), priceField = " ".repeat(Math.max(0, priceWidth - widthOf(priceText))) + priceText, tail2 = " " + visual + " " + priceField, nameWidth = Math.max(4, width - 2 - widthOf(tail2)), name2 = clipped(label4, nameWidth, options);
+      lines.push([{ text: marker2, tone: favourite ? "amber" : "normal" }, { text: name2 + " ".repeat(Math.max(0, nameWidth - widthOf(name2))), tone: "normal" }, { text: " " + visual, tone: "dim" }, { text: " " + priceField, tone: "normal" }]);
     }
   }
   return { id: "models", lines, anchors: [] };
 }
 function projectCard(snapshot, width, options) {
   if (!snapshot.projects.length) return null;
-  const projects = [...snapshot.projects].sort((a, b) => (b.nativeUserInputs ?? b.humanPrompts) - (a.nativeUserInputs ?? a.humanPrompts) || a.id.localeCompare(b.id)).slice(0, 3), max2 = Math.max(...projects.map((project) => project.nativeUserInputs ?? project.humanPrompts), 1), lines = [textLine(clipped("PROJECTS \xB7 recorded inputs", width, options))], anchors = [];
+  const projects = [...snapshot.projects].sort((a, b) => (b.nativeUserInputs ?? b.humanPrompts) - (a.nativeUserInputs ?? a.humanPrompts) || a.id.localeCompare(b.id)).slice(0, 3), max2 = Math.max(...projects.map((project) => project.nativeUserInputs ?? project.humanPrompts), 1), widthOf = options.widthOf ?? auditCellWidth, countWidth = Math.max(...projects.map((project) => widthOf(asciiText(wallNumber(project.nativeUserInputs ?? project.humanPrompts), Boolean(options.ascii))))), lines = [textLine(clipped("PROJECTS \xB7 inputs", width, options))], anchors = [];
   for (const project of projects) {
-    const count2 = project.nativeUserInputs ?? project.humanPrompts, visual = bar2(count2 / max2, width >= 45 ? 10 : 5, Boolean(options.ascii), true), tail2 = ` ${visual} ${wallNumber(count2)}`, widthOf = options.widthOf ?? auditCellWidth;
+    const count2 = project.nativeUserInputs ?? project.humanPrompts, visual = bar2(count2 / max2, width >= 45 ? 10 : 5, Boolean(options.ascii), true), countText = asciiText(wallNumber(count2), Boolean(options.ascii)), tail2 = ` ${visual} ${" ".repeat(Math.max(0, countWidth - widthOf(countText)))}${countText}`;
     lines.push(textLine(aligned(project.displayName, tail2, width, options)));
     const focus = (project.focus ?? []).filter((item) => item.inputs > 0 && (item.promptIds.length > 0 || item.evidenceRoutes.length > 0)).sort((a, b) => b.inputs - a.inputs).slice(0, 2);
     if (focus.length) {
@@ -37335,14 +37336,14 @@ function projectCard(snapshot, width, options) {
   return { id: "projects", lines, anchors };
 }
 function repeatedLines(snapshot) {
-  return [...snapshot.launch?.languageLines ?? []].filter((line) => line.text.trim().split(/\s+/).length > 1 && line.occurrences > 0 && line.samples.length > 0).sort((a, b) => b.occurrences - a.occurrences || a.id.localeCompare(b.id)).slice(0, 6);
+  return [...snapshot.launch?.languageLines ?? []].filter((line) => line.text.trim().split(/\s+/).length > 1 && line.occurrences > 0 && line.samples.length > 0 && !/^\[Pasted text #\d+ \+\d+ lines\]$/.test(line.text.trim())).sort((a, b) => b.occurrences - a.occurrences || a.id.localeCompare(b.id)).slice(0, 6);
 }
 function phraseCard(snapshot, width, options) {
   const phrases = repeatedLines(snapshot);
   if (!phrases.length) return null;
   const lines = [textLine(phrases.every((line) => line.occurrences > 1) ? "REPEATED PHRASES" : "YOUR PHRASES")], anchors = [], widthOf = options.widthOf ?? auditCellWidth;
   for (const phrase of phrases) {
-    const tail2 = `\xD7${wallNumber(phrase.occurrences)}`, quoteWidth = Math.max(4, width - widthOf(asciiText(tail2, Boolean(options.ascii))) - 3), quote2 = asciiText("\u201C" + clipped(phrase.text, quoteWidth, options) + "\u201D", Boolean(options.ascii));
+    const tail2 = `\xD7${wallNumber(phrase.occurrences)}`, quoteWidth = Math.min(36, Math.max(4, width - widthOf(asciiText(tail2, Boolean(options.ascii))) - 3)), quote2 = asciiText("\u201C" + clipped(phrase.text, quoteWidth, options) + "\u201D", Boolean(options.ascii));
     lines.push([{ text: aligned(quote2, tail2, width, options).slice(0, -asciiText(tail2, Boolean(options.ascii)).length), tone: "normal" }, { text: asciiText(tail2, Boolean(options.ascii)), tone: "dim" }]);
     const sample = phrase.samples[0];
     anchors.push({ row: lines.length - 1, label: phrase.text, route: sample.route });
