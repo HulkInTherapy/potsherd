@@ -1,25 +1,12 @@
 import { createRequire as __potsherdCreateRequire } from 'node:module';
 const require = __potsherdCreateRequire(import.meta.url);
 
-// packages/core/src/analytics/native-pool.ts
+// packages/core/src/analytics/scan-pool.ts
 import { Worker, parentPort } from "node:worker_threads";
-import { serialize, deserialize } from "node:v8";
-import { createHash as createHash6 } from "node:crypto";
 
-// packages/core/src/analytics/native-stream.ts
+// packages/core/src/analytics/extract.ts
 import fs from "node:fs";
 import path from "node:path";
-import { createHash as createHash5 } from "node:crypto";
-
-// packages/core/src/parser/content.ts
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function extractTypedText(content, blockType = "text") {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.filter((b) => isRecord(b) && b.type === blockType && typeof b.text === "string").map((b) => b.text).join("\n");
-}
 
 // packages/core/src/markers.ts
 var SUMMARIZER_CONTEXT_MARKER = "Context: This summary will be shown in a list to help users and Claude choose which conversations are relevant";
@@ -34,17 +21,8 @@ function hasExclusionMarker(text) {
   return EXCLUSION_MARKERS.some((marker) => text.includes(marker));
 }
 
-// packages/core/src/memory/source-identity.ts
-import { createHash } from "node:crypto";
-function sourceId(harness, nativeSessionId) {
-  return createHash("sha256").update(`source/v1\0${harness}\0${nativeSessionId}`).digest("hex");
-}
-
-// packages/core/src/analytics/source.ts
-import { createHash as createHash3 } from "node:crypto";
-
 // packages/core/src/redact.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash } from "node:crypto";
 
 // packages/core/src/theme.ts
 var ANSI_RE = new RegExp("\\u001b\\[[0-9;]*m", "g");
@@ -562,7 +540,7 @@ var OPEN = "\u2039";
 var CLOSE = "\u203A";
 var MASK_RE = new RegExp(`${OPEN}redacted:[a-z-]+:[0-9a-f]{8}${CLOSE}`, "g");
 function secretDigest(secret) {
-  return createHash2("sha256").update(secret, "utf8").digest("hex").slice(0, 8);
+  return createHash("sha256").update(secret, "utf8").digest("hex").slice(0, 8);
 }
 function redact(text) {
   if (typeof text !== "string" || text.length === 0) return { text: text ?? "", hits: [] };
@@ -618,785 +596,517 @@ function claim(claimed, s) {
 }
 
 // packages/core/src/analytics/source.ts
-var digest = (value) => createHash3("sha256").update(value).digest("hex");
 var clean = (text) => redact(elideBinary(text)).text;
-var clock = (value) => typeof value === "string" && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
 
-// packages/core/src/analytics/native-metadata-projection.ts
-import { StringDecoder } from "node:string_decoder";
-var NativeMetadataProjection = class {
-  constructor(maxBytes = 8 * 1024 * 1024, harness = null) {
-    this.maxBytes = maxBytes;
-    this.harness = harness;
+// packages/core/src/analytics/extract.ts
+var FACTS_VERSION = 4;
+var MAX_PROMPT_CHARS = 4e3;
+var isRec = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+var str = (v) => typeof v === "string" && v.length > 0 ? v : null;
+var int = (v) => typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+function time(v) {
+  if (typeof v === "string") {
+    const t = Date.parse(v);
+    return Number.isFinite(t) ? t : null;
   }
-  decoder = new StringDecoder("utf8");
-  frames = [];
-  root;
-  done = false;
-  mode = "idle";
-  token = "";
-  isKey = false;
-  keep = false;
-  escape = false;
-  unicode = "";
-  markerTail = "";
-  retained = 0;
-  error = null;
-  marker = false;
-  scanString = false;
-  scanEscape = false;
-  scanUnicode = "";
-  scanTail = "";
-  // Defer the producer check until the whole record is known, retaining unknown values only within the shared metadata budget.
-  imageBodies = [];
-  imageCandidate = null;
-  imageBytes = 0;
-  trimImages() {
-    for (let i = this.imageBodies.length - 1; i >= 0 && this.retained + this.imageBytes > this.maxBytes; i--) {
-      const body = this.imageBodies[i];
-      this.imageBytes -= body.bytes;
-      body.chunks = [];
-      body.bytes = 0;
-      body.overflow = true;
-    }
-  }
-  fail(code2 = "native_metadata_invalid") {
-    this.error ??= code2;
-  }
-  add(c) {
-    if (this.keep || this.isKey) {
-      this.retained += Buffer.byteLength(JSON.stringify(c)) - 2;
-      if (this.retained > this.maxBytes || this.isKey && this.token.length > 32768) {
-        this.fail("native_metadata_bytes_limit");
-        return;
-      }
-      this.token += c;
-      this.trimImages();
-    }
-    if (this.imageCandidate && !this.imageCandidate.overflow) {
-      const bytes = Buffer.byteLength(JSON.stringify(c)) - 2;
-      this.imageCandidate.bytes += bytes;
-      this.imageBytes += bytes;
-      this.imageCandidate.chunks.push(c);
-      this.trimImages();
-    }
-    const searchable = this.markerTail + c;
-    if (EXCLUSION_MARKERS.some((m) => searchable.includes(m))) this.marker = true;
-    this.markerTail = searchable.slice(-256);
-  }
-  expectedValue() {
-    const f = this.frames.at(-1);
-    return f ? f.state === "value" || f.state === "valueRequired" : !this.done;
-  }
-  imageBody(f) {
-    return this.harness === "codex" && f.key === "image_url" && f.path.length === 3 && f.path[0] === "payload" && f.path[1] === "output" && f.path[2] === "[]";
-  }
-  retainValue() {
-    const f = this.frames.at(-1);
-    return !f || f.keep && !(f.key === "content" || f.key === "text" || f.omitImage);
-  }
-  accept(value) {
-    if (this.retainValue()) {
-      this.retained += 16;
-      this.trimImages();
-      if (this.retained > this.maxBytes) {
-        this.fail("native_metadata_bytes_limit");
-        return;
-      }
-    }
-    const f = this.frames.at(-1);
-    if (!f) {
-      if (this.done) {
-        this.fail();
-        return;
-      }
-      this.root = value;
-      this.done = true;
-      return;
-    }
-    if (f.state !== "value" && f.state !== "valueRequired") {
-      this.fail();
-      return;
-    }
-    if (f.keep) {
-      if (f.array) f.value.push(value);
-      else if (f.key !== null && this.retainValue()) Object.defineProperty(f.value, f.key, { value, writable: true, enumerable: true, configurable: true });
-    }
-    f.key = null;
-    f.omitImage = false;
-    f.state = "comma";
-  }
-  scalarEnd() {
-    if (this.mode === "number") {
-      if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(this.token)) {
-        this.fail();
-        return;
-      }
-      this.accept(this.keep ? Number(this.token) : null);
-    } else if (this.mode === "literal") {
-      if (!["true", "false", "null"].includes(this.token)) {
-        this.fail();
-        return;
-      }
-      this.accept(this.keep ? JSON.parse(this.token) : null);
-    }
-    this.mode = "idle";
-    this.token = "";
-  }
-  char(c) {
-    if (this.error) return;
-    if (this.mode === "string") {
-      if (this.unicode) {
-        if (!/[0-9a-f]/i.test(c)) {
-          this.fail();
-          return;
-        }
-        this.unicode += c;
-        if (this.unicode.length === 5) {
-          this.add(String.fromCharCode(parseInt(this.unicode.slice(1), 16)));
-          this.unicode = "";
-        }
-        return;
-      }
-      if (this.escape) {
-        this.escape = false;
-        if (c === "u") {
-          this.unicode = "u";
-          return;
-        }
-        const decoded = { '"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "	" };
-        if (!(c in decoded)) {
-          this.fail();
-          return;
-        }
-        this.add(decoded[c]);
-        return;
-      }
-      if (c === "\\") {
-        this.escape = true;
-        return;
-      }
-      if (c === '"') {
-        if (this.isKey) {
-          const f2 = this.frames.at(-1);
-          f2.key = this.token;
-          f2.state = "colon";
-        } else this.accept(this.keep ? this.token : null);
-        this.mode = "idle";
-        this.token = "";
-        this.imageCandidate = null;
-        this.markerTail = "";
-        return;
-      }
-      if (c.charCodeAt(0) < 32) {
-        this.fail();
-        return;
-      }
-      this.add(c);
-      return;
-    }
-    if (this.mode === "number" || this.mode === "literal") {
-      const allowed = this.mode === "number" ? /[0-9eE+.-]/ : /[a-z]/;
-      if (allowed.test(c)) {
-        if (this.token.length >= 256) {
-          this.fail("native_metadata_scalar_limit");
-          return;
-        }
-        this.token += c;
-        return;
-      }
-      this.scalarEnd();
-      if (this.error) return;
-    }
-    if (/\s/.test(c)) {
-      if (![" ", "	", "\r", "\n"].includes(c)) this.fail();
-      return;
-    }
-    const f = this.frames.at(-1);
-    if (c === '"') {
-      this.isKey = !!f && !f.array && (f.state === "key" || f.state === "keyRequired");
-      if (!this.isKey && !this.expectedValue()) {
-        this.fail();
-        return;
-      }
-      if (!this.isKey && f && this.imageBody(f)) {
-        f.omitImage = true;
-        this.imageCandidate = { frame: f, chunks: [], bytes: 0, overflow: false };
-        this.imageBodies.push(this.imageCandidate);
-      }
-      this.keep = this.isKey || this.retainValue() && f?.key !== "message";
-      this.token = "";
-      this.markerTail = "";
-      this.mode = "string";
-      return;
-    }
-    if (c === "{" || c === "[") {
-      if (!this.expectedValue() || this.frames.length >= 128) {
-        this.fail("native_metadata_depth_limit");
-        return;
-      }
-      const keep = this.retainValue();
-      this.frames.push({ path: f ? [...f.path, f.array ? "[]" : f.key] : [], omitImage: false, array: c === "[", state: c === "[" ? "value" : "key", key: null, keep, value: keep ? c === "[" ? [] : {} : null });
-      return;
-    }
-    if (c === "}" || c === "]") {
-      if (!f || f.array !== (c === "]") || !["comma", f.array ? "value" : "key"].includes(f.state)) {
-        this.fail();
-        return;
-      }
-      this.frames.pop();
-      this.accept(f.value);
-      return;
-    }
-    if (c === ":") {
-      if (!f || f.state !== "colon") {
-        this.fail();
-        return;
-      }
-      f.state = "valueRequired";
-      return;
-    }
-    if (c === ",") {
-      if (!f || f.state !== "comma") {
-        this.fail();
-        return;
-      }
-      f.state = f.array ? "valueRequired" : "keyRequired";
-      return;
-    }
-    if (!this.expectedValue()) {
-      this.fail();
-      return;
-    }
-    this.keep = this.retainValue();
-    this.token = c;
-    if (c === "-" || /[0-9]/.test(c)) this.mode = "number";
-    else if (/[tfn]/.test(c)) this.mode = "literal";
-    else this.fail();
-  }
-  scanMarkers(text) {
-    const special = /["\\]/g;
-    let at2 = 0;
-    const add = (value) => {
-      const combined = this.scanTail + value;
-      if (EXCLUSION_MARKERS.some((m) => combined.includes(m))) this.marker = true;
-      this.scanTail = combined.slice(-256);
-    };
-    while (at2 < text.length) {
-      if (this.scanString && !this.scanEscape && !this.scanUnicode) {
-        special.lastIndex = at2;
-        const hit = special.exec(text), end = hit?.index ?? text.length;
-        add(text.slice(at2, end));
-        at2 = end;
-        if (at2 >= text.length) break;
-      }
-      const c = text[at2++];
-      if (this.scanUnicode) {
-        this.scanUnicode += c;
-        if (this.scanUnicode.length === 5) {
-          if (/^u[0-9a-f]{4}$/i.test(this.scanUnicode)) add(String.fromCharCode(parseInt(this.scanUnicode.slice(1), 16)));
-          this.scanUnicode = "";
-        }
-        continue;
-      }
-      if (this.scanEscape) {
-        this.scanEscape = false;
-        if (c === "u") this.scanUnicode = "u";
-        else add({ n: "\n", r: "\r", t: "	" }[c] ?? c);
-        continue;
-      }
-      if (c === '"') {
-        this.scanString = !this.scanString;
-        this.scanTail = "";
-      } else if (this.scanString && c === "\\") this.scanEscape = true;
-    }
-  }
-  push(bytes) {
-    const text = this.decoder.write(bytes);
-    this.scanMarkers(text);
-    const special = /["\\\x00-\x1f]/g;
-    let at2 = 0;
-    while (at2 < text.length && !this.error) {
-      if (this.mode === "string" && !this.escape && !this.unicode) {
-        special.lastIndex = at2;
-        const hit = special.exec(text), end = hit?.index ?? text.length;
-        if (end > at2) this.add(text.slice(at2, end));
-        at2 = end;
-        if (at2 >= text.length) break;
-      }
-      this.char(text[at2++]);
-    }
-  }
-  finish() {
-    for (const c of this.decoder.end()) this.char(c);
-    if (this.mode === "number" || this.mode === "literal") this.scalarEnd();
-    if (this.mode !== "idle" || this.frames.length || !this.done) this.fail();
-    if (!this.error && (!this.root || typeof this.root !== "object" || Array.isArray(this.root))) this.fail();
-    if (!this.error && this.imageBodies.length) {
-      const root = this.root, payload = root.payload;
-      for (const body of this.imageBodies) {
-        if (root.type === "response_item" && (payload?.type === "custom_tool_call_output" || payload?.type === "function_call_output") && body.frame.value?.type === "input_image") continue;
-        if (body.overflow) this.fail("native_metadata_bytes_limit");
-        else Object.defineProperty(body.frame.value, "image_url", { value: body.chunks.join(""), writable: true, enumerable: true, configurable: true });
-      }
-    }
-    if (!this.error && Buffer.byteLength(JSON.stringify(this.root)) > this.maxBytes) this.fail("native_metadata_bytes_limit");
-    return { record: this.error ? null : this.root, code: this.error, exclusionMarker: this.marker };
-  }
-};
-
-// packages/core/src/analytics/native-usage.ts
-import { createHash as createHash4 } from "node:crypto";
-var obj = (v) => v !== null && typeof v === "object" && !Array.isArray(v) ? v : {};
-var str = (...v) => v.find((x) => typeof x === "string" && x.length > 0) ?? null;
-var num2 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : null;
-var cost = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
-var hash = (v) => createHash4("sha256").update(v).digest("hex");
-var at = (v) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) < 864e13 ? new Date(v).toISOString() : typeof v === "string" && Number.isFinite(Date.parse(v)) ? new Date(v).toISOString() : null;
-function createNativeUsageAccumulator(harness, conversationId, options = {}) {
-  let observed = 0, excluded = 0;
-  const records = /* @__PURE__ */ new Map();
-  let project = options.project ?? null, model = null, provider = null, session = conversationId, offset = 0, seq = 0;
-  let previous = null;
-  const seenTotals = /* @__PURE__ */ new Set();
-  const identities = /* @__PURE__ */ new Map();
-  const score = (v) => (v.inputTokens ?? 0) + (v.outputTokens ?? 0) + (v.cacheReadTokens ?? 0) + Math.max(v.cacheWriteTokens ?? 0, (v.cacheWrite5mTokens ?? 0) + (v.cacheWrite1hTokens ?? 0)) + (v.reasoningTokens ?? 0);
-  const put = (r) => {
-    const old = records.get(r.id), identity = identities.get(r.id) ?? { models: /* @__PURE__ */ new Set(), providers: /* @__PURE__ */ new Set() };
-    if (r.model !== null) identity.models.add(r.model);
-    if (r.provider !== null) identity.providers.add(r.provider);
-    identities.set(r.id, identity);
-    const chosen = !old || score(r) > score(old) ? r : old;
-    const conflict = identity.models.size > 1 || identity.providers.size > 1;
-    records.set(r.id, conflict ? { ...chosen, model: null, provider: null, gaps: [.../* @__PURE__ */ new Set([...chosen.gaps, "response_identity_model_conflict"])] } : chosen);
-  };
-  const pushRecord = (record, position) => {
-    const start = position?.rawStart ?? offset;
-    if (position) offset = position.rawEnd;
-    if (++seq > (options.maxRecords ?? 1e5)) return;
-    let r = record;
-    if (harness === "opencode") {
-      r = { ...r, ...obj(r.message) };
-      const wrapped = r.data ?? r.content;
-      if (typeof wrapped === "string") {
-        try {
-          r = { ...r, ...obj(JSON.parse(wrapped)) };
-        } catch {
-        }
-      } else if (wrapped && typeof wrapped === "object") r = { ...r, ...obj(wrapped) };
-    }
-    const p = obj(r.payload), m = obj(r.message);
-    project = str(r.cwd, p.cwd, r.directory) ?? project;
-    if (harness === "claude") session = str(r.sessionId) ?? session;
-    if (harness === "pi" && r.type === "session") session = str(r.id) ?? session;
-    if (harness === "codex" && (r.type === "session_meta" || r.type === "turn_context")) {
-      session = str(p.session_id, p.id) ?? session;
-      model = str(p.model) ?? model;
-      provider = str(p.model_provider, p.provider) ?? provider;
-      return;
-    }
-    const eventAt = at(r.timestamp) ?? at(m.timestamp) ?? at(obj(r.time).created);
-    const key = str(r.uuid, r.id, p.id, m.id) ?? `record:${seq}`;
-    const accepted = options.acceptRecord?.(r, { key, rawStart: start, rawEnd: offset, eventAt, project }) ?? true;
-    let input = null, output = null, read = null, write = null, reasoning = null, reported = null;
-    let observedModel = null, observedProvider = null, id, basis, includesCache = false, includesReasoning = true;
-    const gaps = [];
-    if (harness === "codex") {
-      if (r.type !== "event_msg" || p.type !== "token_count") return;
-      const info = obj(p.info), last = obj(info.last_token_usage), total = obj(info.total_token_usage);
-      if (!Object.keys(last).length && !Object.keys(total).length) return;
-      observed++;
-      const previousTotal = previous;
-      previous = Object.keys(total).length ? total : previous;
-      const signature = Object.keys(total).length ? JSON.stringify([session, total.input_tokens, total.output_tokens, total.cached_input_tokens, total.reasoning_output_tokens]) : null;
-      if (signature && seenTotals.has(signature)) return;
-      if (signature) seenTotals.add(signature);
-      const delta = (field) => {
-        const current = num2(total[field]), prev = num2(previousTotal?.[field]);
-        return current === null || prev === null || current < prev ? null : current - prev;
-      };
-      const firstComplete = previousTotal === null && num2(last.input_tokens) !== null && last.input_tokens === total.input_tokens && last.output_tokens === total.output_tokens;
-      const bucket = (field) => num2(last[field]) ?? delta(field) ?? (firstComplete ? num2(total[field]) : null);
-      input = bucket("input_tokens");
-      output = bucket("output_tokens");
-      read = bucket("cached_input_tokens");
-      write = bucket("cache_write_input_tokens");
-      reasoning = bucket("reasoning_output_tokens");
-      if (!Object.keys(last).length && previousTotal === null) gaps.push("cumulative_baseline_unknown");
-      if (previousTotal && Object.keys(total).length && ["input_tokens", "output_tokens"].some((k) => num2(total[k]) !== null && num2(previousTotal[k]) !== null && num2(total[k]) < num2(previousTotal[k]))) gaps.push("cumulative_counter_reset");
-      observedModel = str(p.model, info.model) ?? model;
-      observedProvider = str(p.model_provider, p.provider, info.provider) ?? provider;
-      includesCache = true;
-      basis = "codex_last_response_with_cumulative_dedup";
-      id = `codex:${hash(JSON.stringify([session, str(p.response_id, info.response_id) ?? signature ?? [eventAt, last]]))}`;
-      write = write ?? 0;
-    } else if (harness === "claude") {
-      if (r.type !== "assistant" || m.role !== "assistant") return;
-      const u = obj(m.usage);
-      input = num2(u.input_tokens);
-      output = num2(u.output_tokens);
-      read = num2(u.cache_read_input_tokens) ?? (input !== null ? 0 : null);
-      write = num2(u.cache_creation_input_tokens) ?? (input !== null ? 0 : null);
-      reasoning = num2(u.reasoning_tokens);
-      const duration = obj(u.cache_creation);
-      const five = num2(duration.ephemeral_5m_input_tokens), hour = num2(duration.ephemeral_1h_input_tokens);
-      if (five !== null && hour !== null && write !== null && five + hour !== write) gaps.push("cache_write_duration_conflict");
-      if (hour !== null && hour > 0 && (five === null || write === null || five + hour !== write)) gaps.push("cache_write_duration_unknown");
-      observedModel = str(m.model, r.model);
-      observedProvider = str(m.provider, r.provider, r.modelProvider);
-      reported = cost(r.costUSD) ?? cost(m.costUSD);
-      basis = "claude_response_usage";
-      id = `claude:${hash(JSON.stringify([str(m.id, r.uuid) ?? key, str(r.requestId) ?? [session, eventAt]]))}`;
-    } else if (harness === "pi") {
-      if (r.type !== "message" || m.role !== "assistant") return;
-      const u = obj(m.usage);
-      input = num2(u.input);
-      output = num2(u.output);
-      read = num2(u.cacheRead) ?? (input !== null ? 0 : null);
-      write = num2(u.cacheWrite) ?? (input !== null ? 0 : null);
-      reasoning = num2(u.reasoning);
-      reported = cost(obj(u.cost).total);
-      observedModel = str(m.model);
-      observedProvider = str(m.provider);
-      basis = "pi_response_usage";
-      id = `pi:${hash(JSON.stringify([session, str(r.id) ?? key, eventAt]))}`;
-    } else {
-      if (r.role !== "assistant") return;
-      const u = obj(r.tokens), cache = obj(u.cache);
-      input = num2(u.input);
-      output = num2(u.output);
-      read = num2(cache.read) ?? (input !== null ? 0 : null);
-      write = num2(cache.write) ?? (input !== null ? 0 : null);
-      reasoning = num2(u.reasoning);
-      reported = cost(r.cost);
-      observedModel = str(r.modelID, obj(r.model).modelID, obj(r.model).id, r.model);
-      observedProvider = str(r.providerID, obj(r.model).providerID, r.provider);
-      basis = "opencode_response_tokens";
-      includesReasoning = false;
-      id = `opencode:${str(r.id) ?? hash(JSON.stringify([conversationId, key, eventAt]))}`;
-    }
-    if (observedModel === "codex-auto-review") {
-      observedModel = null;
-      gaps.push("workflow_model_identity_unavailable");
-    }
-    if (harness !== "codex") observed++;
-    if (r.isSynthetic === true || r.isMeta === true || m.isSynthetic === true || observedModel === "<synthetic>") {
-      excluded++;
-      return;
-    }
-    if (!accepted) {
-      excluded++;
-      return;
-    }
-    if (!observedModel) gaps.push("model_unrecorded");
-    if (!observedProvider) gaps.push("provider_unrecorded");
-    if (input === null || output === null) gaps.push("usage_partial");
-    if (includesCache && read === null) gaps.push("cache_inclusion_unknown");
-    if (includesCache && input !== null && read !== null && write !== null && read + write > input) gaps.push("cache_exceeds_input");
-    if (includesReasoning && output !== null && reasoning !== null && reasoning > output) gaps.push("reasoning_exceeds_output");
-    put({ id, conversationId, harness, eventAt, project, provider: observedProvider, model: observedModel, canonicalModel: null, inputTokens: input, outputTokens: output, cacheReadTokens: read, cacheWriteTokens: write, reasoningTokens: reasoning, inputIncludesCache: includesCache, outputIncludesReasoning: includesReasoning, reportedCostUsd: reported, basis, gaps, ...harness === "claude" ? { cacheWrite5mTokens: num2(obj(obj(m.usage).cache_creation).ephemeral_5m_input_tokens), cacheWrite1hTokens: num2(obj(obj(m.usage).cache_creation).ephemeral_1h_input_tokens) } : {} });
-  };
-  const pushLine = (line) => {
-    const start = offset;
-    offset += Buffer.byteLength(line) + 1;
-    if (!line.trim()) return;
-    let r;
-    try {
-      r = obj(JSON.parse(line));
-    } catch {
-      seq++;
-      return;
-    }
-    pushRecord(r, { rawStart: start, rawEnd: offset });
-  };
-  return { pushRecord, invalidateContext: () => {
-    project = null;
-    model = null;
-    provider = null;
-    previous = null;
-  }, pushLine, records: () => [...records.values()], counts: () => ({ observed, excluded, deduplicated: Math.max(0, observed - excluded - records.size) }) };
+  if (typeof v === "number" && Number.isFinite(v)) return v < 1e11 ? v * 1e3 : v;
+  return null;
 }
-
-// packages/core/src/analytics/native-stream.ts
-async function streamNativeFacts(file, harness, options) {
-  const before = fs.statSync(file, { bigint: true }), captureSize = options.captureFileBytes ?? Number(before.size);
-  if (!before.isFile() || !Number.isSafeInteger(captureSize) || captureSize < 0 || captureSize > options.maxBytes) throw new Error("native_usage_bytes_limit");
-  if (before.size < BigInt(captureSize) || options.expectedIdentity && (String(before.dev) !== options.expectedIdentity.dev || String(before.ino) !== options.expectedIdentity.ino)) throw new Error("source_changed");
-  let nativeId = path.basename(file, ".jsonl"), project = null, parent = null, records = 0, offset = 0, promptBytes = 0, maintenance = false, programmatic = false, currentModel = null, currentProvider = null;
-  const events = [], language = [], gaps = /* @__PURE__ */ new Set(), seen = /* @__PURE__ */ new Set(), hash2 = createHash5("sha256");
-  let usage = null;
-  let held = [], heldBytes = 0, projection = null, projected = false;
-  const turnLimit = options.captureBytes ?? 0, turns = [];
-  let turnLines = [], turnBytes = 0, turnPrefix = "", keptBytes = 0, capturedRecords = 0, scopeUncertain = false;
-  const finishTurn = () => {
-    if (!turnLines.length) {
-      if (turnLimit > 0 && turnBytes > 0) gaps.add("context_turn_oversize");
-      turnBytes = 0;
-      return;
-    }
-    if (turnBytes + Buffer.byteLength(turnPrefix) <= turnLimit) {
-      turns.push({ lines: turnLines, bytes: turnBytes, prefix: turnPrefix });
-      keptBytes += turnBytes;
-      while (turns.length > 1 && keptBytes + Buffer.byteLength(turns[0].prefix) > turnLimit) keptBytes -= turns.shift().bytes;
-    } else gaps.add("context_turn_oversize");
-    turnLines = [];
-    turnBytes = 0;
+function textOf(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts = [];
+  for (const block of content) if (isRec(block) && typeof block.text === "string") parts.push(block.text);
+  return parts.join("\n");
+}
+var INJECTED_PREFIXES = [
+  ["<task-notification>", "task_notification"],
+  ["<local-command-stdout>", "local_command_output"],
+  ["<local-command-stderr>", "local_command_output"],
+  ["<local-command-caveat>", "local_command_output"],
+  ["[Request interrupted", "interrupt_marker"],
+  ["<turn_aborted>", "interrupt_marker"],
+  ["<environment_context>", "environment_context"],
+  ["# AGENTS.md instructions", "agents_md"],
+  ["<user_instructions>", "agents_md"],
+  ["<external_codex_apps", "app_state"],
+  ["<recommended_plugins>", "app_state"],
+  ["<heartbeat>", "automation"],
+  ["The following is the Codex agent history", "guardian_review"],
+  ["You have new hive inbox message", "automation"],
+  ["Another Claude session sent a message", "cross_session_message"],
+  ["This session is being continued from a previous conversation", "compaction_summary"],
+  ["Your claude.ai usage limit has reset", "auto_continuation"],
+  ["Base directory for this skill:", "skill_expansion"]
+];
+var SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
+function classifyText(raw) {
+  const text = (raw.includes("<system-reminder>") ? raw.replace(SYSTEM_REMINDER, "") : raw).trim();
+  if (!text) return { kind: "excluded", reason: "empty", text };
+  for (const [prefix, reason] of INJECTED_PREFIXES) if (text.startsWith(prefix)) return { kind: "excluded", reason, text };
+  if (text.startsWith("<command-name>") || text.startsWith("<command-message>")) return { kind: "command", reason: "slash_command", text };
+  if (text.startsWith("<send_user_message_question_reply>")) return { kind: "answer", reason: "question_answer", text };
+  return { kind: "human", reason: null, text };
+}
+var CODEX_STRIP = [/<in-app-browser-context[\s\S]*?<\/in-app-browser-context>/g, /<image name=[^>]*>\s*<\/image>/g, /<\/?image[^>]*>/g];
+function cleanCodexText(raw) {
+  let t = raw;
+  if (t.includes("<")) for (const rx of CODEX_STRIP) t = t.replace(rx, "");
+  const at = t.indexOf("## My request");
+  if (at >= 0) {
+    const rest = t.slice(at + "## My request".length), colon = rest.indexOf(":");
+    t = colon >= 0 ? rest.slice(colon + 1) : rest;
+  } else if (t.trimStart().startsWith("# Files mentioned by the user")) t = "";
+  return t.trim();
+}
+function makeBuilder(file, harness, size, mtimeMs) {
+  return {
+    facts: {
+      v: FACTS_VERSION,
+      harness,
+      file,
+      size,
+      mtimeMs,
+      sessionId: path.basename(file, ".jsonl"),
+      parentId: null,
+      child: false,
+      project: null,
+      title: null,
+      automated: false,
+      excluded: false,
+      startedAt: null,
+      firstAt: null,
+      lastAt: null,
+      usage: [],
+      prompts: [],
+      malformed: 0
+    },
+    currentModel: null,
+    currentProvider: null,
+    pending: [],
+    seenPrompts: /* @__PURE__ */ new Set()
   };
-  const process2 = (raw, end) => {
-    if (++records > (options.maxRecords ?? 1e6)) {
-      gaps.add("native_usage_records_limit");
-      return;
-    }
-    const line = raw.toString("utf8");
-    let r;
-    try {
-      const parsed = JSON.parse(line);
-      if (!isRecord(parsed)) return;
-      r = parsed;
-    } catch {
-      gaps.add("malformed_record");
-      return;
-    }
-    if (r.entrypoint === "sdk-ts" || r.originator === "codex_exec") programmatic = true;
-    const p = isRecord(r.payload) ? r.payload : r;
-    if (p.originator === "codex_exec" || p.source === "exec") programmatic = true;
-    const m = isRecord(r.message) ? r.message : {};
-    if (typeof r.cwd === "string") project = r.cwd;
-    if (typeof p.cwd === "string") project = p.cwd;
-    if (harness === "claude" && typeof r.sessionId === "string") {
-      if (file.includes(`${path.sep}subagents${path.sep}`) || r.isSidechain === true) {
-        parent = r.sessionId;
-        nativeId = `${parent}:${path.basename(file, ".jsonl")}`;
-      } else nativeId = r.sessionId;
-    }
-    if (harness === "codex" && r.type === "session_meta") {
-      nativeId = typeof p.id === "string" ? p.id : typeof p.session_id === "string" ? p.session_id : nativeId;
-      const source = isRecord(p.source) ? p.source : {}, sub = isRecord(source.subagent) ? source.subagent : {}, spawn = isRecord(sub.thread_spawn) ? sub.thread_spawn : {};
-      if (typeof spawn.parent_thread_id === "string") parent = spawn.parent_thread_id;
-    }
-    if (harness === "pi" && r.type === "session") {
-      if (typeof r.id === "string") nativeId = r.id;
-      if (typeof r.parentSessionId === "string") parent = r.parentSessionId;
-    }
-    if (r.type === "turn_context" || r.type === "session_meta" || r.type === "model_change") {
-      currentModel = typeof p.model === "string" ? p.model : typeof r.modelId === "string" ? r.modelId : currentModel;
-      currentProvider = typeof p.model_provider === "string" ? p.model_provider : typeof r.provider === "string" ? r.provider : currentProvider;
-    }
-    if (scopeUncertain && project !== null && (harness === "claude" && typeof r.sessionId === "string" || harness === "codex" && r.type === "session_meta" && (typeof p.id === "string" || typeof p.session_id === "string") || harness === "pi" && r.type === "session" && typeof r.id === "string")) scopeUncertain = false;
-    if (options.sourceAllowed && !options.sourceAllowed(nativeId, project)) throw new Error("native_source_policy_excluded");
-    if (hasExclusionMarker(extractTypedText(m.content)) || typeof p.message === "string" && hasExclusionMarker(p.message)) maintenance = true;
-    const isInput = harness === "claude" && r.type === "user" && m.role === "user" && !(Array.isArray(m.content) && m.content.some((b) => isRecord(b) && b.type === "tool_result")) || harness === "codex" && r.type === "event_msg" && p.type === "user_message" || harness === "pi" && r.type === "message" && m.role === "user";
-    if (isInput) {
-      finishTurn();
-      turnPrefix = JSON.stringify({ type: "turn_context", payload: { cwd: project, model: currentModel, model_provider: currentProvider } }) + "\n";
-    }
-    if (projected && turnLimit > 0) {
-      turnLines = [];
-      turnBytes = turnLimit + 1;
-      gaps.add("context_turn_oversize");
-    }
-    if (turnLimit > 0 && !projected && turnBytes <= turnLimit) {
-      const recordKey = typeof r.uuid === "string" ? r.uuid : typeof r.id === "string" ? r.id : typeof p.id === "string" ? p.id : `record:${records}`;
-      const encoded = JSON.stringify({ ...r, _auditRecordKey: recordKey }) + "\n";
-      turnBytes += Buffer.byteLength(encoded);
-      if (turnBytes <= turnLimit) turnLines.push(encoded);
-      else if (turnLines.length) turnLines = [];
-    }
-    if (!usage) usage = createNativeUsageAccumulator(harness, sourceId(harness, nativeId), { maxRecords: 1e6, acceptRecord: (_r, scope) => !maintenance && !scopeUncertain && options.accept(scope.project, scope.eventAt) });
-    usage.pushRecord(r, { rawStart: offset, rawEnd: end });
-    if (scopeUncertain) return;
-    let text = "", identity = "", origin = "unknown", eligible = false, excluded = null;
-    const time = clock(r.timestamp), key = typeof r.uuid === "string" ? r.uuid : typeof r.id === "string" ? r.id : typeof p.id === "string" ? p.id : `record:${records}`;
-    if (harness === "claude" && r.type === "user" && m.role === "user") {
-      if (Array.isArray(m.content) && m.content.some((b) => isRecord(b) && b.type === "tool_result")) return;
-      text = extractTypedText(m.content);
-      identity = typeof r.promptId === "string" ? `prompt:${r.promptId}` : `record:${key}`;
-      origin = typeof r.promptId === "string" ? "claude_prompt_id" : "unknown";
-      eligible = typeof r.promptId === "string" && !programmatic;
-    } else if (harness === "codex" && r.type === "event_msg" && p.type === "user_message") {
-      text = typeof p.message === "string" ? p.message : "";
-      identity = `marker:${offset}`;
-      origin = programmatic ? "unknown" : "codex_human_marker";
-      eligible = !programmatic;
-    } else if (harness === "pi" && r.type === "message" && m.role === "user") {
-      text = extractTypedText(m.content);
-      identity = `node:${key}`;
-      origin = "pi_user_projection";
-    } else {
-      const info = isRecord(p.info) ? p.info : {};
-      const observedModel = typeof m.model === "string" ? m.model : typeof p.model === "string" ? p.model : typeof r.model === "string" ? r.model : typeof info.model === "string" ? info.model : currentModel, observedProvider = typeof m.provider === "string" ? m.provider : typeof p.model_provider === "string" ? p.model_provider : typeof p.provider === "string" ? p.provider : typeof r.provider === "string" ? r.provider : currentProvider;
-      if ((m.role === "assistant" || harness === "codex" && (r.type === "event_msg" && p.type === "token_count" || r.type === "response_item" && p.type === "message" && p.role === "assistant")) && observedModel !== "<synthetic>" && r.isSynthetic !== true && options.accept(project, time)) language.push({ id: `metadata:${records}`, conversationId: sourceId(harness, nativeId), parentId: parent, harness, eventAt: time, project, role: "assistant", text: "", model: observedModel === "codex-auto-review" ? null : observedModel, provider: observedProvider, directUser: false, route: null });
-      return;
-    }
-    if (!text.trim() && !projected) return;
-    if (hasExclusionMarker(text)) {
-      maintenance = true;
-      excluded = "maintenance_exclusion_marker";
-    } else if (r.isMeta === true || r.isSynthetic === true || m.isSynthetic === true) excluded = "declared_meta_or_synthetic_input";
-    else if (parent && events.length === 0) excluded = "child_initialization";
-    else if (typeof r.session_id === "string" && r.session_id !== nativeId) excluded = "inherited_identity_unverified";
-    if (seen.has(identity)) return;
-    seen.add(identity);
-    if (!options.accept(project, time)) return;
-    const redacted = clean(text);
-    if (promptBytes + Buffer.byteLength(redacted) > (options.maxPromptBytes ?? 64 * 1024 * 1024)) {
-      gaps.add("native_input_text_limit");
-      return;
-    }
-    promptBytes += Buffer.byteLength(redacted);
-    language.push({ id: digest(`${sourceId(harness, nativeId)}:${identity}`).slice(0, 32), conversationId: sourceId(harness, nativeId), parentId: parent, harness, eventAt: time, project, role: "user", text: "", model: null, provider: null, directUser: excluded === null && parent === null, route: null });
-    const proofRecord = { ...r };
-    delete proofRecord.sessionId;
-    delete proofRecord.session_id;
-    delete proofRecord.promptId;
-    const stable = (value) => Array.isArray(value) ? value.map(stable) : isRecord(value) ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable(value[k])])) : value;
-    events.push({ key, rawStart: offset, rawEnd: end, role: "user", text: redacted, eventAt: time, project, origin, eligible: eligible && excluded === null && parent === null, languageEligible: parent === null && !projected, excluded, identity, observed: excluded === null, ...harness === "claude" && typeof r.uuid === "string" ? { nativeRecordId: r.uuid, recordCommitment: digest(JSON.stringify(stable(proofRecord))) } : {}, ...harness === "claude" && typeof r.session_id === "string" && r.session_id !== nativeId ? { declaredOrigin: r.session_id } : {} });
+}
+function touch(b, at) {
+  if (at === null) return;
+  if (b.facts.firstAt === null || at < b.facts.firstAt) b.facts.firstAt = at;
+  if (b.facts.lastAt === null || at > b.facts.lastAt) b.facts.lastAt = at;
+}
+function answered(b, model, provider) {
+  if (!model) return;
+  for (const p of b.pending) {
+    p.after = model;
+    p.afterProvider = provider;
+  }
+  b.pending.length = 0;
+  b.currentModel = model;
+  b.currentProvider = provider;
+}
+function addUsage(b, u) {
+  b.facts.usage.push(u);
+  touch(b, u.at);
+  answered(b, u.model, u.provider);
+}
+function addPrompt(b, key, at, project, kind, reason, text) {
+  if (b.seenPrompts.has(key)) return;
+  b.seenPrompts.add(key);
+  if (kind === "human" && hasExclusionMarker(text)) b.facts.excluded = true;
+  const prompt = {
+    key,
+    at,
+    project,
+    kind,
+    reason,
+    text: kind === "human" ? clean(text.length > MAX_PROMPT_CHARS ? text.slice(0, MAX_PROMPT_CHARS) : text) : "",
+    before: b.currentModel,
+    beforeProvider: b.currentProvider,
+    after: null,
+    afterProvider: null
   };
-  const finishLine = (end) => {
-    if (projection) {
-      const result = projection.finish();
-      projection = null;
-      gaps.add("native_record_body_omitted");
-      if (result.exclusionMarker) maintenance = true;
-      if (result.record) {
-        projected = true;
-        process2(Buffer.from(JSON.stringify(result.record)), end);
-        projected = false;
-      } else {
-        turnLines = [];
-        turnBytes = turnLimit + 1;
-        records++;
-        gaps.add(result.code ?? "native_metadata_invalid");
-        gaps.add("native_scope_record_unavailable");
-        usage?.invalidateContext();
-        scopeUncertain = true;
-        project = null;
-        currentModel = null;
-        currentProvider = null;
-      }
-    } else process2(held.length === 1 ? held[0] : Buffer.concat(held, heldBytes), end);
-    held = [];
-    heldBytes = 0;
-    offset = end;
-  };
-  const stream = fs.createReadStream(file, { highWaterMark: 64 * 1024, ...captureSize > 0 ? { end: captureSize - 1 } : {} });
+  b.facts.prompts.push(prompt);
+  if (kind === "human") b.pending.push(prompt);
+  touch(b, at);
+}
+var SUBAGENT_DIR = `${path.sep}subagents${path.sep}`;
+function claudeLine(b, line, subagent, sessions) {
+  const assistant = line.includes('"type":"assistant"');
+  if (assistant ? !line.includes('"usage"') : subagent || !line.includes('"type":"user"')) {
+    if (line.length > 4096 || !line.includes('-title"') && !line.includes('"type":"summary"')) return;
+  }
+  let r;
   try {
-    let consumed = 0;
-    for await (const chunk of captureSize === 0 ? [] : stream) {
-      if (options.signal.aborted) {
-        stream.destroy();
-        throw new Error("cancelled");
-      }
-      const bytes = chunk;
-      hash2.update(bytes);
-      let at2 = 0;
-      while (at2 < bytes.length) {
-        const newline = bytes.indexOf(10, at2), end = newline < 0 ? bytes.length : newline, part = bytes.subarray(at2, end);
-        if (projection) projection.push(part);
-        else if (heldBytes + part.length > 8 * 1024 * 1024) {
-          projection = new NativeMetadataProjection(void 0, harness);
-          for (const piece of held) projection.push(piece);
-          projection.push(part);
-          held = [];
-          heldBytes = 0;
+    r = JSON.parse(line.toString("utf8"));
+  } catch {
+    b.facts.malformed++;
+    return;
+  }
+  if (!isRec(r)) return;
+  const f = b.facts;
+  if (r.type === "summary" || r.type === "custom-title" || r.type === "ai-title") {
+    const title = str(r.customTitle) ?? str(r.aiTitle) ?? str(r.title) ?? str(r.summary);
+    if (title && (r.type !== "summary" || !f.title)) f.title = title;
+    return;
+  }
+  if (typeof r.cwd === "string" && !f.project) f.project = r.cwd;
+  const sid = str(r.sessionId);
+  if (sid) {
+    if (subagent) {
+      f.parentId = sid;
+      f.child = true;
+      f.sessionId = `${sid}:${path.basename(f.file, ".jsonl")}`;
+    } else if (!sessions.size) f.sessionId = sid;
+  }
+  const m = isRec(r.message) ? r.message : {};
+  const at = time(r.timestamp);
+  if (r.type === "assistant") {
+    const u = m.usage;
+    if (!isRec(u)) return;
+    const model = str(m.model);
+    if (model === "<synthetic>") return;
+    const cc = isRec(u.cache_creation) ? u.cache_creation : null;
+    const write = cc ? int(cc.ephemeral_5m_input_tokens) + int(cc.ephemeral_1h_input_tokens) : int(u.cache_creation_input_tokens);
+    const id = str(m.id), request = str(r.requestId), session = sid ?? f.file;
+    const fact = {
+      key: id ? request ? `c:${id}:${request}` : `c:${id}::${session}:${String(r.timestamp)}` : null,
+      at,
+      model,
+      provider: null,
+      input: int(u.input_tokens),
+      output: int(u.output_tokens),
+      cacheRead: int(u.cache_read_input_tokens),
+      cacheWrite: write,
+      cacheWrite1h: cc ? int(cc.ephemeral_1h_input_tokens) : 0,
+      reasoning: 0
+    };
+    if (r.isSidechain === true) fact.sidechain = true;
+    if (!request) fact.requestless = true;
+    if (id) fact.replayKey = `${id}:${session}`;
+    if (u.speed === "fast") fact.tier = "fast";
+    addUsage(b, fact);
+    return;
+  }
+  if (r.type !== "user" || r.isSidechain === true || subagent) return;
+  const content = m.content;
+  if (Array.isArray(content) && content.some((block) => isRec(block) && block.type === "tool_result")) return;
+  if (sid) sessions.add(sid);
+  const origin = isRec(r.origin) ? str(r.origin.kind) : null;
+  const flagged = r.isMeta === true ? "is_meta" : r.isCompactSummary === true ? "compaction_summary" : origin && origin !== "human" ? `origin_${origin}` : r.entrypoint === "sdk-cli" ? "headless_claude_p" : r.promptSource === "system" ? "prompt_source_system" : null;
+  let { kind, reason, text } = classifyText(textOf(content));
+  if (flagged) {
+    kind = "excluded";
+    reason = flagged;
+  } else if (reason === "empty" && origin === "human" && Array.isArray(content) && content.some((block) => isRec(block) && block.type === "image")) {
+    kind = "human";
+    reason = null;
+    text = "[image]";
+  }
+  addPrompt(b, str(r.uuid) ?? `${f.sessionId}:${String(r.timestamp)}`, at, str(r.cwd) ?? f.project, kind, reason, text);
+}
+var U_KEYS = ["input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens"];
+var tuple = (u) => isRec(u) ? U_KEYS.map((k) => int(u[k])) : null;
+var AUTO_REVIEW_MODELS = [
+  ["2026-07-30", "gpt-5.6-luna"],
+  ["2026-03-05", "gpt-5.4"],
+  ["2026-02-05", "gpt-5.3-codex"],
+  ["2025-12-11", "gpt-5.2-codex"],
+  ["2025-11-13", "gpt-5.1-codex"],
+  ["2025-09-15", "gpt-5-codex"]
+];
+function codexModel(model, timestamp) {
+  if (model === "codex-auto-review") {
+    const day = timestamp.slice(0, 10);
+    return { model: AUTO_REVIEW_MODELS.find(([since]) => day >= since)?.[1] ?? "gpt-5", inferred: true };
+  }
+  return model ? { model, inferred: false } : { model: "gpt-5", inferred: true };
+}
+function codexFact(b, s, at, timestamp, d, key) {
+  const input = d[0], output = d[2], reasoning = d[3], cached = Math.min(d[1], input);
+  const { model, inferred } = codexModel(b.currentModel, timestamp);
+  const fact = { key, at, model, provider: "openai", input: input - cached, output, cacheRead: cached, cacheWrite: 0, cacheWrite1h: 0, reasoning };
+  if (inferred) fact.inferredModel = true;
+  if (s.tier) fact.tier = s.tier;
+  return fact;
+}
+function codexWanted(head, lineNo) {
+  return lineNo === 0 && head.includes("session_meta") || head.includes('"token_count"') || head.includes('"turn_context"') || head.includes("thread_settings_applied") || head.includes('"task_started"') || head.includes('"token_usage_record"') || head.includes('"type":"compacted"') || head.includes('"UserMessage"') && head.includes("item_completed") || head.includes('"role":"user"') && head.includes('"response_item"') || head.includes('"event_msg"') && head.includes('"type":"user_message"');
+}
+function codexLine(b, line, s) {
+  const n = s.lineNo++;
+  const head = line.toString("latin1", 0, Math.min(line.length, 260));
+  const f = b.facts;
+  const parse = () => {
+    try {
+      return JSON.parse(line.toString("utf8"));
+    } catch {
+      f.malformed++;
+      return null;
+    }
+  };
+  if (n === 0 && head.includes("session_meta")) {
+    const r = parse();
+    if (!r) return;
+    const p = isRec(r.payload) ? r.payload : {};
+    f.sessionId = str(p.id) ?? str(p.session_id) ?? f.sessionId;
+    f.project = str(p.cwd);
+    f.startedAt = str(p.timestamp) ?? str(r.timestamp);
+    const source = p.source;
+    if (isRec(source) && "subagent" in source) {
+      f.child = true;
+      const sub = isRec(source.subagent) ? source.subagent : {};
+      const spawn = isRec(sub.thread_spawn) ? sub.thread_spawn : {};
+      f.parentId = str(spawn.parent_thread_id) ?? str(p.parent_thread_id) ?? str(p.forked_from_id);
+    }
+    if (source === "exec" || p.originator === "codex_exec" || p.originator === "codex_sdk_ts") f.automated = true;
+    touch(b, time(r.timestamp));
+    return;
+  }
+  if (head.includes('"token_count"')) {
+    const r = parse();
+    const p = r && isRec(r.payload) ? r.payload : null;
+    const info = p && isRec(p.info) ? p.info : null;
+    if (!r || !info) return;
+    const total = tuple(info.total_token_usage), last = tuple(info.last_token_usage);
+    const totalSig = total ? total.join(",") : null;
+    const advanced = totalSig === null || totalSig !== s.previousTotal;
+    let d = null;
+    if (last && advanced) d = last;
+    else if (total) {
+      const prev = s.previousTotal ? s.previousTotal.split(",").map(Number) : [0, 0, 0, 0, 0];
+      d = total.map((v, i) => Math.max(0, v - prev[i]));
+    }
+    if (totalSig) s.previousTotal = totalSig;
+    if (!d || !(d[0] || d[1] || d[2] || d[3])) return;
+    s.deltas.add(d.join(","));
+    const key = totalSig ? `x:${totalSig}|${last ? last.join(",") : ""}` : null;
+    addUsage(b, codexFact(b, s, time(r.timestamp), String(r.timestamp ?? ""), d, key));
+    return;
+  }
+  if (head.includes('"turn_context"')) {
+    const p = parse()?.payload;
+    if (isRec(p)) {
+      b.currentModel = str(p.model) ?? b.currentModel;
+      if (typeof p.cwd === "string") f.project = p.cwd;
+    }
+    return;
+  }
+  if (head.includes("thread_settings_applied")) {
+    const p = parse()?.payload;
+    const settings = isRec(p) && isRec(p.thread_settings) ? p.thread_settings : null;
+    if (settings && "service_tier" in settings) {
+      const v = settings.service_tier;
+      s.tier = v === "priority" || v === "fast" ? "fast" : v === "default" || v === "standard" ? "standard" : void 0;
+    }
+    return;
+  }
+  if (head.includes('"task_started"')) {
+    const p = parse()?.payload;
+    s.imported = isRec(p) && String(p.turn_id ?? "").startsWith("external-import");
+    return;
+  }
+  if (head.includes('"UserMessage"') && head.includes("item_completed")) {
+    const r = parse();
+    const p = r && isRec(r.payload) ? r.payload : null;
+    if (!r || !p) return;
+    const item = isRec(p.item) ? p.item : {};
+    s.itemPrompts.push({
+      key: str(item.id),
+      at: time(r.timestamp),
+      text: textOf(item.content),
+      imported: s.imported || String(p.turn_id ?? "").startsWith("external-import"),
+      project: f.project
+    });
+    return;
+  }
+  if (head.includes('"role":"user"') && head.includes('"response_item"')) {
+    const r = parse();
+    if (!r) return;
+    const p = isRec(r.payload) ? r.payload : {};
+    s.responsePrompts.push({ key: null, at: time(r.timestamp), text: textOf(p.content), imported: s.imported, project: f.project });
+    return;
+  }
+  if (head.includes('"event_msg"') && line.subarray(0, 400).includes('"type":"user_message"')) {
+    const r = parse();
+    if (!r) return;
+    const p = isRec(r.payload) ? r.payload : {};
+    s.itemPrompts.push({ key: null, at: time(r.timestamp), text: typeof p.message === "string" ? p.message : "", imported: s.imported, project: f.project });
+    return;
+  }
+  if (head.includes('"token_usage_record"')) {
+    const r = parse();
+    const p = r && isRec(r.payload) ? r.payload : null;
+    const id = p ? str(p.response_id) : null;
+    if (r && p && id && isRec(p.usage)) s.records.set(id, { at: time(r.timestamp), usage: p.usage });
+    return;
+  }
+  if (head.includes('"type":"compacted"')) {
+    const at = line.lastIndexOf('"compaction_response_id":"');
+    if (at >= 0) {
+      const start = at + 26, end = line.indexOf(34, start);
+      if (end > start) s.compacted.add(line.toString("latin1", start, end));
+    }
+  }
+}
+function finishCodex(b, s) {
+  const f = b.facts;
+  for (const id of s.compacted) {
+    const record = s.records.get(id);
+    const d = record ? tuple(record.usage) : null;
+    if (!record || !d || !(d[0] || d[1] || d[2] || d[3]) || s.deltas.has(d.join(","))) continue;
+    const fact = codexFact(b, s, record.at, record.at ? new Date(record.at).toISOString() : "", d, `codex-compaction:${id}`);
+    fact.compaction = true;
+    f.usage.push(fact);
+    touch(b, record.at);
+  }
+  const list = s.itemPrompts.length ? s.itemPrompts : s.responsePrompts;
+  const reason = f.child ? "subagent_parent_written" : f.automated ? "programmatic_exec_session" : null;
+  const seen = /* @__PURE__ */ new Set();
+  list.forEach((p, i) => {
+    if (p.key) {
+      if (seen.has(p.key)) return;
+      seen.add(p.key);
+    }
+    const key = `codex:${f.sessionId}:${p.key ?? i}`;
+    if (reason) return addPrompt(b, key, p.at, p.project, "excluded", reason, "");
+    if (p.imported) return addPrompt(b, key, p.at, p.project, "excluded", "imported_from_claude_transcript", "");
+    const c = classifyText(cleanCodexText(p.text));
+    addPrompt(b, key, p.at, p.project, c.kind, c.reason, c.text);
+  });
+  const answers = f.usage.filter((u) => u.at !== null).sort((x, y) => x.at - y.at);
+  let j = 0, previous = null;
+  for (const p of [...f.prompts].sort((x, y) => (x.at ?? 0) - (y.at ?? 0))) {
+    while (j < answers.length && answers[j].at <= (p.at ?? 0)) previous = answers[j++].model;
+    p.before = previous;
+    p.beforeProvider = previous ? "openai" : null;
+    p.after = answers[j]?.model ?? null;
+    p.afterProvider = p.after ? "openai" : null;
+  }
+}
+function piLine(b, line) {
+  let r;
+  try {
+    r = JSON.parse(line.toString("utf8"));
+  } catch {
+    b.facts.malformed++;
+    return;
+  }
+  const f = b.facts, at = time(r.timestamp);
+  if (r.type === "session") {
+    f.sessionId = str(r.id) ?? f.sessionId;
+    f.project = str(r.cwd);
+    touch(b, at);
+    return;
+  }
+  if (r.type === "model_change") {
+    b.currentModel = str(r.modelId) ?? b.currentModel;
+    b.currentProvider = str(r.provider) ?? b.currentProvider;
+    return;
+  }
+  if (r.type !== "message" || !isRec(r.message)) return;
+  const m = r.message;
+  if (m.role === "assistant" && isRec(m.usage)) {
+    const u = m.usage;
+    const fact = {
+      key: `pi:${f.sessionId}:${String(r.id)}`,
+      at,
+      model: str(m.model) ?? b.currentModel,
+      provider: str(m.provider) ?? b.currentProvider,
+      input: int(u.input),
+      output: int(u.output),
+      cacheRead: int(u.cacheRead),
+      cacheWrite: int(u.cacheWrite),
+      cacheWrite1h: 0,
+      reasoning: 0
+    };
+    if (fact.input + fact.output + fact.cacheRead + fact.cacheWrite > 0) addUsage(b, fact);
+    else answered(b, fact.model, fact.provider);
+    return;
+  }
+  if (m.role === "user") {
+    const c = classifyText(textOf(m.content));
+    addPrompt(b, `pi:${f.sessionId}:${String(r.id)}`, at, f.project, c.kind, c.reason, c.text);
+  }
+}
+var CHUNK = 4 * 1024 * 1024;
+var MAX_LINE = 256 * 1024 * 1024;
+var sharedBuffer = null;
+function extractFile(file, harness) {
+  const fd = fs.openSync(file, "r");
+  try {
+    const stat = fs.fstatSync(fd);
+    const b = makeBuilder(file, harness, stat.size, stat.mtimeMs);
+    const codex = {
+      lineNo: 0,
+      previousTotal: null,
+      tier: void 0,
+      imported: false,
+      records: /* @__PURE__ */ new Map(),
+      compacted: /* @__PURE__ */ new Set(),
+      deltas: /* @__PURE__ */ new Set(),
+      itemPrompts: [],
+      responsePrompts: []
+    };
+    const subagent = file.includes(SUBAGENT_DIR), sessions = /* @__PURE__ */ new Set();
+    const onLine = harness === "claude" ? (line) => claudeLine(b, line, subagent, sessions) : harness === "codex" ? (line) => codexLine(b, line, codex) : (line) => piLine(b, line);
+    let buffer = sharedBuffer ??= Buffer.allocUnsafe(CHUNK);
+    let filled = 0, position = 0, skipping = false;
+    for (; ; ) {
+      if (filled === buffer.length) {
+        if (harness === "codex" && !codexWanted(buffer.toString("latin1", 0, Math.min(filled, 400)), codex.lineNo)) {
+          skipping = true;
+          filled = 0;
+          codex.lineNo++;
+        } else if (buffer.length >= MAX_LINE) {
+          skipping = true;
+          filled = 0;
+          b.facts.malformed++;
         } else {
-          held.push(part);
-          heldBytes += part.length;
+          const bigger = Buffer.allocUnsafe(buffer.length * 2);
+          buffer.copy(bigger, 0, 0, filled);
+          buffer = bigger;
+          if (bigger.length <= 4 * CHUNK) sharedBuffer = bigger;
         }
-        if (newline < 0) break;
-        finishLine(consumed + newline + 1);
-        at2 = newline + 1;
       }
-      consumed += bytes.length;
+      const n = fs.readSync(fd, buffer, filled, buffer.length - filled, position);
+      position += n;
+      const end = filled + n;
+      let start = 0;
+      for (; ; ) {
+        const nl = buffer.indexOf(10, start);
+        if (nl < 0 || nl >= end) break;
+        if (skipping) skipping = false;
+        else if (nl > start) onLine(buffer.subarray(start, nl));
+        start = nl + 1;
+      }
+      if (n === 0) {
+        if (!skipping && start < end) onLine(buffer.subarray(start, end));
+        break;
+      }
+      buffer.copyWithin(0, start, end);
+      filled = end - start;
     }
+    if (harness === "codex") finishCodex(b, codex);
+    if (harness === "claude" && !subagent && sessions.size) b.facts.sessionIds = [...sessions];
+    if (b.facts.excluded) for (const p of b.facts.prompts) p.text = "";
+    return b.facts;
   } finally {
-    stream.destroy();
+    fs.closeSync(fd);
   }
-  if (heldBytes || projection) gaps.add("unfinished_tail");
-  const after = fs.statSync(file, { bigint: true });
-  if (before.dev !== after.dev || before.ino !== after.ino || after.size < BigInt(captureSize)) throw new Error("source_changed");
-  if (BigInt(captureSize) !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) {
-    const verify = createHash5("sha256"), fd = fs.openSync(file, "r"), buffer = Buffer.allocUnsafe(65536);
-    try {
-      let at2 = 0;
-      while (at2 < captureSize) {
-        const n = fs.readSync(fd, buffer, 0, Math.min(buffer.length, captureSize - at2), at2);
-        if (!n) throw new Error("source_changed");
-        verify.update(buffer.subarray(0, n));
-        at2 += n;
-      }
-    } finally {
-      fs.closeSync(fd);
-    }
-    if (verify.digest("hex") !== hash2.copy().digest("hex")) throw new Error("source_changed");
-    gaps.add("native_appended_after_capture");
-  }
-  if (maintenance) {
-    gaps.add("maintenance_source_excluded");
-    for (const event of events) {
-      event.observed = false;
-      event.eligible = false;
-      event.excluded = "maintenance_exclusion_marker";
-    }
-  }
-  const artifactHash = hash2.digest("hex"), acc = usage, all = acc?.records() ?? [];
-  finishTurn();
-  const captured = Buffer.from((turns[0]?.prefix ?? "") + turns.flatMap((t) => t.lines).join(""));
-  capturedRecords = turns.reduce((n, t) => n + t.lines.length, 0);
-  if (turnLimit > 0 && capturedRecords < records) gaps.add("context_capture_partial");
-  return { facts: { nativeId, project, parent, child: parent !== null, title: null, events, gaps: [...gaps], hash: artifactHash, consumed: offset, bytes: captured }, usage: maintenance ? [] : all, language: maintenance ? [] : language, hash: artifactHash, bytes: captureSize, stamp: { dev: String(after.dev), ino: String(after.ino), size: Number(after.size), mtimeNs: String(after.mtimeNs), ctimeNs: String(after.ctimeNs) }, counts: maintenance ? { observed: acc?.counts().observed ?? 0, excluded: acc?.counts().observed ?? 0, deduplicated: 0 } : acc?.counts() ?? { observed: 0, excluded: 0, deduplicated: 0 } };
 }
 
-// packages/core/src/ignore.ts
-function fold(value) {
-  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-}
-function matchesIgnoreEntry(project, entry) {
-  if (!project) return false;
-  const p = fold(project);
-  const e = fold(entry);
-  if (!p || !e) return false;
-  if (p === e) return true;
-  if (e.includes("/")) return p.startsWith(`${e}/`);
-  return p.split("/").filter(Boolean).includes(e);
-}
-function isIgnoredProject(project, entries) {
-  return entries.some((entry) => matchesIgnoreEntry(project, entry));
-}
-
-// packages/core/src/analytics/native-pool.ts
-var PROTOCOL = "audit-native-v1";
-var FRAME = 1024 * 1024;
-var code = (error) => error instanceof Error && /^(?:[a-z][a-z0-9_]{0,95})$/.test(error.message) ? error.message : "native_worker_failed";
-function runNativeScanWorker() {
-  if (!parentPort) throw new Error("native_worker_requires_port");
+// packages/core/src/analytics/scan-pool.ts
+var errorCode = (error) => error instanceof Error && /^[a-z][a-z0-9_]{0,63}$/.test(error.message) ? error.message : "source_unreadable";
+function runScanWorker() {
+  if (!parentPort) throw new Error("scan_worker_requires_parent");
   const port = parentPort;
-  let busy = false;
-  port.on("message", async (message) => {
-    if (message.protocol !== PROTOCOL || message.kind !== "scan" || !message.job || busy) return;
-    busy = true;
-    const job = message.job;
+  port.on("message", (job) => {
     try {
-      const policy = job.policy, forgotten = new Set(policy.forgottenSourceIds), accept = (project, time) => !(project && isIgnoredProject(project, policy.ignoredProjects)) && (!policy.project || project === policy.project) && (!policy.eventFrom || time !== null && time >= policy.eventFrom) && (!policy.asOf || time !== null && time <= policy.asOf);
-      const snapshot = await streamNativeFacts(job.file, job.harness, { signal: new AbortController().signal, maxBytes: job.maxBytes, maxRecords: job.maxRecords, maxPromptBytes: job.maxPromptBytes, captureBytes: 0, captureFileBytes: job.bytes, expectedIdentity: { dev: job.stamp.dev, ino: job.stamp.ino }, sourceAllowed: (id, project) => !forgotten.has(sourceId(job.harness, id)) && !(project && isIgnoredProject(project, policy.ignoredProjects)), accept });
-      const buffer = serialize(snapshot);
-      if (buffer.length > (message.maxResultBytes ?? 256 * 1024 * 1024)) throw new Error("native_pool_result_bytes_limit");
-      const hash2 = createHash6("sha256").update(buffer).digest("hex");
-      let sequence = 0;
-      for (let at2 = 0; at2 < buffer.length; at2 += FRAME) {
-        const chunk = Uint8Array.from(buffer.subarray(at2, at2 + FRAME));
-        port.postMessage({ protocol: PROTOCOL, kind: "frame", jobId: job.jobId, sequence: sequence++, data: chunk }, [chunk.buffer]);
-      }
-      port.postMessage({ protocol: PROTOCOL, kind: "result", jobId: job.jobId, authorityCommitment: policy.authorityCommitment, bytes: buffer.length, hash: hash2 });
+      port.postMessage({ facts: extractFile(job.file, job.harness) });
     } catch (error) {
-      port.postMessage({ protocol: PROTOCOL, kind: "error", jobId: job.jobId, code: code(error) });
-    } finally {
-      busy = false;
+      port.postMessage({ error: errorCode(error) });
     }
   });
-  port.postMessage({ protocol: PROTOCOL, kind: "ready" });
 }
 
 // packages/cli/src/audit-native-worker.ts
-runNativeScanWorker();
+runScanWorker();
 //# sourceMappingURL=audit-native-worker.js.map

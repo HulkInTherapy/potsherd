@@ -6,13 +6,22 @@ import type {AuditProfanity,AuditPrompt,AuditProseKind,AuditWordTerm} from './co
 export const ENGLISH_EXPLICIT_LEXICON=Object.freeze(['fuck','fucked','fucking','shit','shitty','bullshit','asshole','bastard'] as const);
 export const PROFANITY_LEXICON_VERSION='en-explicit-8-v1';
 const words=new Set<string>(ENGLISH_EXPLICIT_LEXICON);
+/** Cheap pre-check: every lexicon word contains one of these stems. */
+export const LEXICON_HINT=/fuck|shit|asshole|bastard/i;
 const CODE=2,QUOTE=1,UNKNOWN=3;
 const kind=(label:number):AuditProseKind=>label===CODE?'code':label===QUOTE?'quoted':label===UNKNOWN?'unknown':'direct_prose';
 const escaped=(text:string,index:number)=>{let count=0;for(let i=index-1;i>=0&&text[i]==='\\';i--)count++;return count%2===1;};
 const wordChar=(char:string|undefined)=>char!==undefined&&/[\p{L}\p{N}\p{M}_\u200c\u200d]/u.test(char);
 
-/** Conservative textual spans, not a claim to parse every language or Markdown dialect. */
+const labelMemo=new Map<string,{labels:Uint8Array;ambiguous:boolean}>();
+/** Memoized: the same prompt text is labelled by several language passes. */
 function labels(text:string):{labels:Uint8Array;ambiguous:boolean}{
+ let hit=labelMemo.get(text);if(hit)return hit;
+ if(labelMemo.size>20000)labelMemo.clear();
+ hit=computeLabels(text);labelMemo.set(text,hit);return hit;
+}
+/** Conservative textual spans, not a claim to parse every language or Markdown dialect. */
+function computeLabels(text:string):{labels:Uint8Array;ambiguous:boolean}{
  const map=new Uint8Array(text.length);let ambiguous=false,offset=0,fence:{char:string;length:number;start:number}|null=null;
  for(const line of text.split(/(?<=\n)/u)){
   const marker=line.match(/^ {0,3}(`{3,}|~{3,})/u);
@@ -47,7 +56,7 @@ export function proseLabels(text:string):Uint8Array{return labels(text).labels;}
 export function auditProfanity(prompts:readonly AuditPrompt[],partial=false):AuditProfanity{
  const knownExcluded=new Set(['child_initialization','maintenance_exclusion_marker','tool_result','inherited_native_event','declared_meta_or_synthetic_input','declared_synthetic_input']);
  const eligible=prompts.filter(p=>p.languageEligible!==false).filter(p=>p.eligibleNativeInput===true&&!knownExcluded.has(p.excludedReason??'')||p.eligibleNativeInput===undefined&&p.eligibleHuman&&p.excludedReason===null&&['claude_prompt_id','codex_human_marker'].includes(p.originBasis)),bucketCounts=new Map<AuditProseKind,{occurrences:number;prompts:Set<string>}>((['direct_prose','quoted','code','unknown'] as const).map(k=>[k,{occurrences:0,prompts:new Set<string>()}])),containing=new Set<string>(),matches:NonNullable<AuditProfanity['matches']>[number][]=[];const terms=new Map<string,{term:string;kind:AuditProseKind;occurrences:number;ids:Set<string>;samples:AuditWordTerm['samples'][number][]}>();let occurrences=0,ambiguous=false;
- for(const prompt of eligible){const spans=labels(prompt.text);ambiguous||=spans.ambiguous;const pattern=/[\p{L}\p{N}\p{M}_\u200c\u200d]+(?:['’][\p{L}\p{N}\p{M}_\u200c\u200d]+)*/gu;let token:RegExpExecArray|null;
+ for(const prompt of eligible){if(!LEXICON_HINT.test(prompt.text))continue;const spans=labels(prompt.text);ambiguous||=spans.ambiguous;const pattern=/[\p{L}\p{N}\p{M}_\u200c\u200d]+(?:['’][\p{L}\p{N}\p{M}_\u200c\u200d]+)*/gu;let token:RegExpExecArray|null;
   while((token=pattern.exec(prompt.text))!==null){if(!words.has(token[0].toLowerCase()))continue;const start=token.index,end=start+token[0].length,bucket=kind(spans.labels[start]??0),counter=bucketCounts.get(bucket)!;occurrences++;containing.add(prompt.id);counter.occurrences++;counter.prompts.add(prompt.id);
    const normalized=token[0].toLowerCase(),key=JSON.stringify([normalized,bucket]);const term=terms.get(key)??{term:normalized,kind:bucket,occurrences:0,ids:new Set<string>(),samples:[]};term.occurrences++;term.ids.add(prompt.id);if(term.samples.length<3)term.samples.push({promptId:prompt.id,conversationId:prompt.conversationId,startUtf16:start,endUtf16:end,route:prompt.route});terms.set(key,term);
    if(matches.length<8)matches.push({term:token[0],kind:bucket,promptId:prompt.id,conversationId:prompt.conversationId,startUtf16:start,endUtf16:end,route:prompt.route});

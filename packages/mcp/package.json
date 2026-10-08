@@ -1,6 +1,6 @@
 {
   "name": "@potsherd/mcp",
-  "version": "1.7.0",
+  "version": "1.7.5",
   "private": true,
   "description": "potsherd as an MCP stdio server: four tools over your own coding-agent history.",
   "type": "module",
@@ -27,7 +27,7 @@
   "devDependencies": {
     "@potsherd/core": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
-    "potsherd": "workspace:*"
+    "slopie": "workspace:*"
   },
   "optionalDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.238",

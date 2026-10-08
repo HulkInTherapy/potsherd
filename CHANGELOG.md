@@ -2,6 +2,14 @@
 
 Public releases use package versions. Internal development phase numbers are planning milestones, not product versions. This public release consolidates a development snapshot; the original private development branches are preserved separately.
 
+## 1.7.5 — Fast, correct audit
+
+- Rebuild the audit pipeline: each native history file is read once on a worker-thread pool, cached by path/size/mtime, and aggregated in one pass. Full local results in ~5s cold and ~1s warm on a 3.9 GB history (was 35–110s).
+- Fix totals: Claude Code spend is now included in the headline (it was reported only as a reference value), every model with usage gets a price, Codex fast-tier and compaction requests are priced, and cached input is no longer double-counted.
+- Fix prompt counts: recognise current Codex user-message events, exclude slash commands, task notifications and headless runs, include prompts surviving only in Claude Code's history file, and treat Codex auto-review rollouts as child sessions.
+- Deleted Claude Code sessions are read from `~/.claude/history.jsonl` instead of copying the potsherd archive; ignore/forget opt-outs still apply.
+- Redesign the wallboard: big spend hero, model/project bars, weekly activity, repeated lines, reactions and swear jar on one screen; ←/→ pages on small terminals; first paint in ~0.1s.
+
 ## 1.7.0 — Native usage wallboard
 
 - Replace section tabs and scrolling with a responsive orange-and-neutral fullscreen wallboard. Show model prices, top projects and requested work, grouped source lines and observed directed reactions; use mixed left/right pages on smaller terminals.
