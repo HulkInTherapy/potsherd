@@ -3,13 +3,19 @@ import {auditCellWidth,applyAuditEvent} from '../packages/cli/src/audit-ui/index
 import {buildLaunchScreen,renderLaunchPlain,createWallNavigation,turnWall,wallMode,freezeWall,resizeWall,buildWallboard,buildReportHelp,transferFrameVisible,applyLaunchPrivacyEvent,launchEvidenceCanPublish,launchResultAfterPrivacy,applyLaunchPreviewInvalidation,launchResultAfterPreview} from '../packages/cli/src/audit-ui/launch-terminal.js';
 import type {LaunchPrivacyView} from '../packages/cli/src/audit-ui/launch-terminal.js';
 import {buildReportLoader,buildEvidenceDocument} from '../packages/cli/src/audit-ui/report-document.js';
-import {rankedFeedback,repeatedLines,wallNumber,readableModelName} from '../packages/cli/src/audit-ui/wallboard.js';
+import {rankedFeedback,repeatedLines,wallNumber,readableModelName,wallPhraseText} from '../packages/cli/src/audit-ui/wallboard.js';
 import {reportFixture,loadingFixture} from './audit-report-fixture.js';
 import {evidenceFixture} from './audit-ui/fixture.js';
 import type {AuditEvent} from '../packages/core/src/analytics/contracts.js';
 const plain=(screen:readonly (readonly {text:string}[])[])=>screen.map(line=>line.map(segment=>segment.text).join('')).join('\n');
 const transfer:Extract<AuditEvent,{type:'transfer'}>={type:'transfer',snapshotId:'fixture-audit',sequence:8,model:'jev-free',recipients:['OpenCode Zen','TypeSafe/Jev'],attempt:1,selectedSegments:4,notice:'Selected redacted conversation text will be sent to OpenCode Zen and TypeSafe/Jev.',ackId:'request-1'};
 describe('approved fullscreen wallboard',()=>{
+ it('crops only an exact leading paste wrapper while preserving source text, count and reference',()=>{
+  const snapshot=reportFixture(),phrase=snapshot.launch!.languageLines![0]!,suffix='Public source suffix with 界 emoji 👩‍💻 and meaningful wording that stays available in full',original='[Pasted text #17 +4 lines] '+suffix;phrase.text=original;phrase.occurrences=7;
+  expect(wallPhraseText(original)).toBe(suffix);for(const text of ['[Pasted text #17 +4 lines]','[Pasted text #17 +4 lines]  ','Quoted [Pasted text #17 +4 lines] actual words','[Pasted text #17] actual words'])expect(wallPhraseText(text)).toBe(text);
+  for(const [columns,rows] of [[120,40],[80,24],[40,20]] as const){const layout=buildWallboard(snapshot,{columns,rows}),page=layout.pages.find(item=>item.anchors.some(anchor=>anchor.label===original))!,anchor=page.anchors.find(item=>item.label===original)!,line=plain([page.lines[anchor.row]!]),visible=line.match(/“([^”]+)”/)![1]!;expect(line).not.toContain('[Pasted text');expect(line).toContain('×7');expect(auditCellWidth(visible)).toBeLessThanOrEqual(36);expect(suffix.startsWith(visible.replace(/…$/,''))).toBe(true);expect(anchor.route).toBe(phrase.samples[0]!.route);expect(page.lines.length).toBeLessThanOrEqual(rows-1);}
+  expect(phrase.text).toBe(original);expect(phrase.occurrences).toBe(7);expect(renderLaunchPlain(snapshot,{width:160}).replace(/\s+/g,' ')).toContain(original);
+ });
  it('aligns price and input bars despite different figure widths and preserves full prices',()=>{
   const snapshot=reportFixture(),models=snapshot.launch!.facts!.models;models[0]!.valueUsd=123456.78;models[1]!.valueUsd=4;for(const [index,project] of snapshot.projects.entries())project.nativeUserInputs=[99999,12,0][index]!;
   for(const [columns,rows] of [[120,40],[80,24],[40,20]] as const){const layout=buildWallboard(snapshot,{columns,rows});expect(plain(layout.pages.flatMap(page=>page.lines))).toContain('$123,456.78');for(const page of layout.pages)for(const line of page.lines)expect(auditCellWidth(plain([line]))).toBeLessThanOrEqual(columns);}
