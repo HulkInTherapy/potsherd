@@ -163,7 +163,7 @@ export function awardsBody(s: Scene, data: Data<'awards'>, r: Rect): boolean {
   const rowsNeeded = Math.ceil(data.trophies.length / perRow);
   const big = tier.id === 'L' && r.h >= 14 && s.caps.color !== 'none' && s.caps.color !== '16';
   const cupH = big ? 8 : 4;
-  const rowH = cupH + 6;
+  const rowH = cupH + 7;
   const shelves = Math.min(rowsNeeded, Math.max(1, Math.floor((r.h + 1) / rowH)));
   const colW = Math.floor(r.w / perRow);
   let busy = false;
@@ -186,10 +186,13 @@ export function awardsBody(s: Scene, data: Data<'awards'>, r: Rect): boolean {
       trophy(s, cx - (big ? 7 : 3), y, dy * 2, Math.min(1, fall * 1.5), index, big ? 2 : 1);
       const la = seg(t, delay + 300, 300);
       const w = colW - 2;
-      textCenter(c, cx, shelfY + 1, wrapText(award.title, w, 1)[0] ?? '', { fg: C.gray, alpha: la });
+      // Titles get two lines rather than an ellipsis ("Most expensive sentence" in a narrow column).
+      const title = wrapText(award.title, w, 2);
+      title.forEach((line, li) => textCenter(c, cx, shelfY + 1 + li, line, { fg: C.gray, alpha: la }));
+      const valueY = shelfY + 1 + title.length;
       const value = wrapText(s.share && award.publicValue ? award.publicValue : award.value, w, 2);
-      value.forEach((line, li) => textCenter(c, cx, shelfY + 2 + li, line, { fg: index === 0 ? C.orange : C.cream, bold: true, alpha: la }));
-      if (award.sub) textCenter(c, cx, shelfY + 2 + value.length, wrapText(award.sub, w, 1)[0] ?? '', { fg: C.slate, alpha: la });
+      value.forEach((line, li) => textCenter(c, cx, valueY + li, line, { fg: index === 0 ? C.orange : C.cream, bold: true, alpha: la }));
+      if (award.sub) textCenter(c, cx, valueY + value.length, wrapText(award.sub, w, 1)[0] ?? '', { fg: C.slate, alpha: la });
     });
   }
   return busy;

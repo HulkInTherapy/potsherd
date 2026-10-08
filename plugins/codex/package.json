@@ -1,6 +1,6 @@
 {
   "name": "potsherd-codex-plugin",
-  "version": "1.7.5",
+  "version": "1.8.0",
   "private": true,
   "type": "module",
   "description": "Self-contained Codex plugin runtime; ESM bundles work when installed under a CommonJS parent."

@@ -155,7 +155,7 @@ function scale(story: AuditStory | null, board: BoardData): DeckCard | null {
   const prompts = story?.totals.prompts ?? board.stats.prompts;
   if (!prompts) return null;
   const counters: Counter[] = [{ label: 'PROMPTS', value: prompts, style: 'count' }];
-  const chats = story?.totals.sessions ?? board.stats.chats;
+  const chats = board.stats.chats ?? story?.totals.sessions;
   if (chats) counters.push({ label: 'CHATS', value: chats, style: 'count' });
   const tokens = story?.totals.tokens || board.stats.tokens;
   if (tokens) counters.push({ label: 'TOKENS', value: tokens, style: 'compact' });
@@ -406,7 +406,8 @@ function projects(story: AuditStory | null, board: BoardData): DeckCard | null {
   return {
     kind: 'projects', id: 'projects', kicker: 'WHERE IT WENT', expression: 'idle',
     headline: awayCard ? mask(awayCard.headline) : `${top.name} got ${Math.round((top.prompts / rows.reduce((s, r) => s + r.prompts, 0)) * 100)}% of your top-project attention.`,
-    support: pricey ? mask(pricey.headline) : awayCard ? mask(awayCard.support) : `${count(story?.totals.projects ?? board.stats.projects)} projects in all.`,
+    // The support line must back the headline: got-away facts under a got-away headline, cost otherwise.
+    support: awayCard ? mask(awayCard.support) : pricey ? mask(pricey.headline) : `${count(story?.totals.projects ?? board.stats.projects)} projects in all.`,
     notes: ['Projects are the folders you typed prompts in. Names stay on this machine; the share card replaces them.', '"Got away" = a project with 60+ prompts and no prompt in the last 45 days of your history.'],
     data: {
       rows,
@@ -515,7 +516,7 @@ function boardSummary(story: AuditStory | null, board: BoardData, deck: DeckCard
   const face = deck.find(c => c.kind === 'faceoff');
   const stats = [
     { label: 'prompts', value: count(story?.totals.prompts ?? board.stats.prompts) },
-    { label: 'chats', value: count(story?.totals.sessions ?? board.stats.chats) },
+    { label: 'chats', value: count(board.stats.chats ?? story?.totals.sessions) },
     { label: 'tokens', value: compact(board.stats.tokens) },
     { label: 'active days', value: count(story?.totals.activeDays ?? board.stats.activeDays) },
   ].filter(s => s.value !== '—');

@@ -198,7 +198,10 @@ function awards(rows: readonly StoryRow[], drafts: Map<string, Draft>): StoryAwa
 
 function coldOpen(rows: readonly StoryRow[]): AuditStory['coldOpen'] {
   const pick = (r: StoryRow, why: NonNullable<AuditStory['coldOpen']>['why']) => ({quote: r.q!.length > 90 ? r.q!.slice(0, 89) + '…' : r.q!, at: new Date(r.ts).toISOString(), day: r.day, hour: r.hour, why});
-  const late = rows.filter(r => r.q && r.hour >= 1 && r.hour < 5 && r.f.w >= 3);
+  // Not something typed this week (it may be the very session running the audit), and a real sentence.
+  const lastTs = rows.reduce((m, r) => Math.max(m, r.ts), 0);
+  const settled = (r: StoryRow) => lastTs - r.ts > 7 * 86_400_000;
+  const late = rows.filter(r => r.q && settled(r) && r.hour >= 1 && r.hour < 5 && r.f.w >= 5 && r.f.w <= 40);
   if (late.length) return pick(late.at(-1)!, 'late_night');
   const priced = rows.filter(r => r.q && (r.costTotalUsd ?? 0) > 0).sort((a, b) => b.costTotalUsd! - a.costTotalUsd!);
   if (priced.length) return pick(priced[0]!, 'most_expensive');

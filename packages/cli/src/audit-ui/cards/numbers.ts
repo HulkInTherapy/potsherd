@@ -1,5 +1,5 @@
 /** Scale (block-digit counters) and The Bill (a receipt that prints line by line). */
-import { C, fade, mix } from '../gfx/color.js';
+import { C, fade, hx, mix } from '../gfx/color.js';
 import { hbar, spaced, textCenter, textRight, textWidth, type Rect } from '../gfx/draw.js';
 import { bigHeight, bigWidth, drawBig } from '../gfx/font.js';
 import { countUp, easeOutCubic, seg } from '../gfx/motion.js';
@@ -60,9 +60,9 @@ export function scaleBody(s: Scene, data: Data<'scale'>, r: Rect): boolean {
 
 /* ── The Bill ─────────────────────────────────────────────────────────────── */
 
-const PAPER = 0xfbf1e4;
-const INK = 0x2a2522;
-const FAINT = 0x8c8279;
+const PAPER = hx('fbf1e4');
+const INK = hx('2a2522');
+const FAINT = hx('8c8279');
 
 export function billBody(s: Scene, data: Data<'bill'>, r: Rect): boolean {
   const { c, t, tier } = s;

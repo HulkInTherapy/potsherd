@@ -4,22 +4,24 @@
  */
 export type Rgb = number;
 export const DEFAULT: Rgb = -1;
+/** Colours are written as hex strings so the bundle keeps them recognisable (not as 8-digit decimals). */
+export const hx = (rrggbb: string): Rgb => parseInt(rrggbb, 16);
 
 export const C = {
-  orange: 0xff7a1a,
-  ember: 0xff4d00,
-  peach: 0xffb070,
-  cream: 0xfff4e6,
-  white: 0xffffff,
-  gray: 0x9a9a9a,
-  slate: 0x5c5c5c,
-  coal: 0x2a2a2a,
+  orange: hx('ff7a1a'),
+  ember: hx('ff4d00'),
+  peach: hx('ffb070'),
+  cream: hx('fff4e6'),
+  white: hx('ffffff'),
+  gray: hx('9a9a9a'),
+  slate: hx('5c5c5c'),
+  coal: hx('2a2a2a'),
   /** Card background: a warm near-black so fades have a known start colour. */
-  ink: 0x0d0b0a,
+  ink: hx('0d0b0a'),
   /** Mascot-only shades (still orange family). */
-  rust: 0xc94a0a,
-  deep: 0x8a2e05,
-  pupil: 0x1c0f08,
+  rust: hx('c94a0a'),
+  deep: hx('8a2e05'),
+  pupil: hx('1c0f08'),
 } as const;
 
 const r = (c: Rgb) => (c >> 16) & 255;
@@ -39,7 +41,7 @@ export function mix(a: Rgb, bColor: Rgb, t: number): Rgb {
 /** Fade a colour in from the card background. */
 export const fade = (color: Rgb, alpha: number): Rgb => (alpha >= 1 ? color : mix(C.ink, color, alpha));
 
-const HEAT: readonly Rgb[] = [0x1a1512, 0x5a1d05, C.ember, C.orange, C.peach, C.cream];
+const HEAT: readonly Rgb[] = [hx('1a1512'), hx('5a1d05'), C.ember, C.orange, C.peach, C.cream];
 /** Heat ramp for heatmaps, t in 0..1. */
 export function heat(t: number): Rgb {
   const k = Math.max(0, Math.min(1, t)) * (HEAT.length - 1);
@@ -98,4 +100,4 @@ export function to16(color: Rgb): number {
 
 export const luminance = (color: Rgb) => (color < 0 ? 0 : (0.299 * r(color) + 0.587 * g(color) + 0.114 * b(color)) / 255);
 export const channels = (color: Rgb): [number, number, number] => [r(color), g(color), b(color)];
-export const hex = (color: Rgb) => '#' + (color & 0xffffff).toString(16).padStart(6, '0').toUpperCase();
+export const hex = (color: Rgb) => '#' + (color & hx('ffffff')).toString(16).padStart(6, '0').toUpperCase();

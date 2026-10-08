@@ -3751,10 +3751,10 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative, options, skipNormalization) {
+    function resolveComponent(base2, relative, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
-        base = parse10(serialize(base, options), options);
+        base2 = parse10(serialize(base2, options), options);
         relative = parse10(serialize(relative, options), options);
       }
       options = options || {};
@@ -3774,32 +3774,32 @@ var require_fast_uri = __commonJS({
           target.query = relative.query;
         } else {
           if (!relative.path) {
-            target.path = base.path;
+            target.path = base2.path;
             if (relative.query !== void 0) {
               target.query = relative.query;
             } else {
-              target.query = base.query;
+              target.query = base2.query;
             }
           } else {
             if (relative.path[0] === "/") {
               target.path = removeDotSegments(relative.path);
             } else {
-              if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
+              if ((base2.userinfo !== void 0 || base2.host !== void 0 || base2.port !== void 0) && !base2.path) {
                 target.path = "/" + relative.path;
-              } else if (!base.path) {
+              } else if (!base2.path) {
                 target.path = relative.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative.path;
+                target.path = base2.path.slice(0, base2.path.lastIndexOf("/") + 1) + relative.path;
               }
               target.path = removeDotSegments(target.path);
             }
             target.query = relative.query;
           }
-          target.userinfo = base.userinfo;
-          target.host = base.host;
-          target.port = base.port;
+          target.userinfo = base2.userinfo;
+          target.host = base2.host;
+          target.port = base2.port;
         }
-        target.scheme = base.scheme;
+        target.scheme = base2.scheme;
       }
       target.fragment = relative.fragment;
       return target;
@@ -23852,10 +23852,10 @@ function runtimeFiles() {
   ];
 }
 function modelFiles() {
-  const base = `${modelBase()}/${MODEL_ID}/resolve/main`;
+  const base2 = `${modelBase()}/${MODEL_ID}/resolve/main`;
   const at = (name, bytes2, sha256) => ({
     name: `${MODEL_ID}/${name}`,
-    url: `${base}/${name}`,
+    url: `${base2}/${name}`,
     bytes: bytes2,
     sha256
   });
@@ -24050,9 +24050,9 @@ async function wasmPipeline(cacheDir) {
       if (!mask[i])
         continue;
       counted += 1;
-      const base = i * width;
+      const base2 = i * width;
       for (let j = 0; j < width; j += 1)
-        v[j] = (v[j] ?? 0) + (data[base + j] ?? 0);
+        v[j] = (v[j] ?? 0) + (data[base2 + j] ?? 0);
     }
     if (counted > 0)
       for (let j = 0; j < width; j += 1)
@@ -24181,7 +24181,7 @@ function vectorReport(counts) {
   const total = counts.embedded + counts.pending;
   const runtimeReady = isEmbeddingReady(counts.cacheDir);
   const acquireBytes = runtimeReady ? 0 : acquisitionPlan(counts.cacheDir).bytes || ACQUIRE_BYTES;
-  const base = {
+  const base2 = {
     embedded: counts.embedded,
     pending: counts.pending,
     total,
@@ -24191,14 +24191,14 @@ function vectorReport(counts) {
     ...counts.working === void 0 ? {} : { working: counts.working }
   };
   if (counts.reason)
-    return { ...base, phase: "unavailable", reason: counts.reason };
+    return { ...base2, phase: "unavailable", reason: counts.reason };
   if (total === 0)
-    return { ...base, phase: "empty" };
+    return { ...base2, phase: "empty" };
   if (counts.pending === 0)
-    return { ...base, phase: "ready" };
+    return { ...base2, phase: "ready" };
   if (counts.embedded === 0)
-    return { ...base, phase: "pending" };
-  return { ...base, phase: "warming" };
+    return { ...base2, phase: "pending" };
+  return { ...base2, phase: "warming" };
 }
 function fetchClause(r, bytes2) {
   return `fetching the ${bytes2(r.acquireBytes)} runtime`;
@@ -24500,13 +24500,13 @@ function vecTableUsable(db, table2 = "vec_exchanges") {
   return statementsCompile(db, table2);
 }
 function vecStatus(db, root, opts = {}) {
-  const base = loadVec(db);
+  const base2 = loadVec(db);
   if (root === void 0)
-    return base;
+    return base2;
   const counts = vectorCounts(db);
   const cacheDir = modelsDir(potsherdDir(root));
   const backend2 = embeddingBackend();
-  const reason = base.available ? void 0 : base.reason;
+  const reason = base2.available ? void 0 : base2.reason;
   const working = opts.working ?? holder({ root, lane: "embed" }) !== null;
   const report = vectorReport({
     embedded: counts.embedded,
@@ -24518,7 +24518,7 @@ function vecStatus(db, root, opts = {}) {
   });
   const worded = vectorNote(report, { num, bytes });
   return {
-    ...base,
+    ...base2,
     report,
     row: {
       ...worded,
@@ -26932,13 +26932,13 @@ ${text3}` : text3;
 function resolveSessionId(absolute2, options, recordSessionId, sidechainFlag) {
   if (options.sessionId)
     return options.sessionId;
-  const base = path7.basename(absolute2, ".jsonl");
+  const base2 = path7.basename(absolute2, ".jsonl");
   const isSidechain = options.isSidechain ?? sidechainFlag ?? false;
   if (isSidechain) {
     const parent = options.parentSessionId ?? recordSessionId;
-    return parent ? `${parent}:${base}` : base;
+    return parent ? `${parent}:${base2}` : base2;
   }
-  return recordSessionId ?? base;
+  return recordSessionId ?? base2;
 }
 function deriveProjectSlug(absolute2) {
   const parts = absolute2.split(path7.sep);
@@ -27646,11 +27646,11 @@ async function parse4(source, options = {}) {
 }
 function sessionIdFromPath(file2) {
   const ext = path9.extname(file2);
-  const base = path9.basename(file2, ext);
+  const base2 = path9.basename(file2, ext);
   if (STATE_FILES.includes(path9.basename(file2))) {
     return path9.basename(path9.dirname(file2));
   }
-  return base;
+  return base2;
 }
 function readDocument(file2, raw) {
   if (!raw.trim())
@@ -28828,9 +28828,9 @@ function scopeSql(scope3, aliases = { source: "s", revision: "r", unit: "u" }) {
       clauses.push(`${s}.source_id IN (${scope3.sourceIds.map(() => "?").join(",")})`);
       params.push(...scope3.sourceIds);
     } else {
-      const family = lineageFamilySql(scope3);
-      clauses.push(`${s}.source_id IN (${family.sql})`);
-      params.push(...family.params);
+      const family2 = lineageFamilySql(scope3);
+      clauses.push(`${s}.source_id IN (${family2.sql})`);
+      params.push(...family2.params);
     }
   }
   if (scope3.eventFrom) {
@@ -28980,8 +28980,8 @@ function validateSupport(db, ref3, scope3) {
 function noteSelection(db, scope3, options) {
   validateScope(scope3);
   if (scope3.sourceIds && scope3.lineage && scope3.lineage !== "self") {
-    const family = lineageFamilySql(scope3);
-    const result = db.prepare(family.sql).all(...family.params);
+    const family2 = lineageFamilySql(scope3);
+    const result = db.prepare(family2.sql).all(...family2.params);
     scope3 = { ...scope3, sourceIds: result.map((r) => r.id), lineage: "self" };
   }
   const params = [];
@@ -29088,10 +29088,10 @@ function readEpochs(db) {
 function compatibilityRecords(parsed) {
   const records = [];
   for (const e of parsed.exchanges) {
-    const base = { exchangeId: e.id, seq: e.seq, eventAt: e.ts || null, timeBasis: "exchange", locatorFidelity: "exchange_ordinal", project: parsed.session.project, branch: parsed.session.gitBranch, recordType: "legacy_exchange" };
+    const base2 = { exchangeId: e.id, seq: e.seq, eventAt: e.ts || null, timeBasis: "exchange", locatorFidelity: "exchange_ordinal", project: parsed.session.project, branch: parsed.session.gitBranch, recordType: "legacy_exchange" };
     const add = (role, text2, key2, extra = {}) => {
       if (text2)
-        records.push({ ...base, unitKey: `${role}:${key2}`, role, text: text2, locator: { recordKey: key2, mapping: "unavailable" }, ...extra });
+        records.push({ ...base2, unitKey: `${role}:${key2}`, role, text: text2, locator: { recordKey: key2, mapping: "unavailable" }, ...extra });
     };
     add("user", e.userText, `${e.seq}:user`);
     add("assistant", e.assistantText, `${e.seq}:assistant`);
@@ -30216,13 +30216,6 @@ function firstSubstantivePrompt(texts) {
 
 // packages/core/dist/analytics/extract.js
 import path12 from "node:path";
-var FACTS_VERSION = 4;
-var SUBAGENT_DIR = `${path12.sep}subagents${path12.sep}`;
-var CHUNK = 4 * 1024 * 1024;
-var MAX_LINE = 256 * 1024 * 1024;
-
-// packages/core/dist/analytics/facts-cache.js
-var FILE = `facts-v${FACTS_VERSION}.bin`;
 
 // packages/core/dist/analytics/profanity.js
 var ENGLISH_EXPLICIT_LEXICON = Object.freeze(["fuck", "fucked", "fucking", "shit", "shitty", "bullshit", "asshole", "bastard"]);
@@ -30231,9 +30224,116 @@ var words = new Set(ENGLISH_EXPLICIT_LEXICON);
 // packages/core/dist/analytics/findings.js
 var EXACT_REPEAT_LIMITS = Object.freeze({ rows: 20, supports: 8, maxRowBytes: 8192 });
 
+// packages/core/dist/analytics/story-lexicon.js
+var SWEAR_STEMS = [
+  "fuck",
+  "shit",
+  "bullshit",
+  "wtf",
+  "damn",
+  "goddamn",
+  "crap",
+  "bitch",
+  "asshole",
+  "dumbass",
+  "stfu",
+  "ffs",
+  "piss",
+  "bastard",
+  "motherf",
+  "bloody",
+  "bsdk",
+  "chutiya",
+  "chutiye",
+  "madarchod",
+  "bhenchod",
+  "behenchod",
+  "gandu"
+];
+var SWEAR_EXACT = /* @__PURE__ */ new Set(["ffs", "wtf", "stfu"]);
+var SWEAR_PREFIX = SWEAR_STEMS.filter((s) => !SWEAR_EXACT.has(s));
+var TICS = [
+  "one more thing",
+  "each and every",
+  "do one thing",
+  "every single thing",
+  "kind of a thing",
+  "and all",
+  "and stuff",
+  "or something",
+  "at the end of the day",
+  "to be honest",
+  "basically",
+  "you know what",
+  "let me know",
+  "best possible",
+  "world class",
+  "insanely",
+  "make it pop",
+  "help me out",
+  "what do you think",
+  "i don't know",
+  "just do it",
+  "ship it",
+  "go ahead",
+  "lfg",
+  "let's go",
+  "no worries",
+  "makes sense",
+  "figure it out",
+  "deep research",
+  "ultra think",
+  "ultrathink",
+  "step by step",
+  "one shot",
+  "whatever it takes",
+  "end to end",
+  "from scratch",
+  "like a pro",
+  "production ready",
+  "properly",
+  "exactly",
+  "and everything",
+  "all of that",
+  "the whole thing",
+  "you know",
+  "i mean",
+  "sort of",
+  "kind of",
+  "so yeah",
+  "okay so"
+];
+var CLAUSE_FINAL = /* @__PURE__ */ new Set(["and all", "and stuff", "or something", "and everything", "all of that", "and all that"]);
+var esc2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var TIC_BY_FIRST = /* @__PURE__ */ new Map();
+TICS.forEach((phrase, index) => {
+  const first = phrase.split(" ")[0];
+  const list = TIC_BY_FIRST.get(first) ?? [];
+  list.push({ phrase, index, final: CLAUSE_FINAL.has(phrase) });
+  TIC_BY_FIRST.set(first, list);
+});
+var ADDRESS = ["dude", "bro", "buddy", "babe", "baby", "my friend", "man", "mate", "boss", "sir", "brother", "bhai", "yaar", "chief", "champ", "my guy", "darling", "love"];
+var ADDRESS_GATE = new RegExp("\\b(" + ADDRESS.map(esc2).join("|") + ")\\b", "g");
+var ADDRESS_INDEX = new Map(ADDRESS.map((a, i) => [a, i]));
+var TOPIC_STOP = new Set("the a an and or of to in on for is it that this i you we be are was with as at by from so if but not do can me my your our just what how all also now like then there they them these those one some any more much very really thing things something everything get got make made want need see know think going go let lets let's okay ok yes no up out into about will would should could have has had been being he she his her him its it's i'm don't can't isn't doesn't which who when where why here same other only even still well right good way time new use using done try give take put come look".split(" "));
+
+// packages/core/dist/analytics/extract.js
+var FACTS_VERSION = 5;
+var SUBAGENT_DIR = `${path12.sep}subagents${path12.sep}`;
+var CHUNK = 4 * 1024 * 1024;
+var MAX_LINE = 256 * 1024 * 1024;
+var RESUME_RECENT_MS = 48 * 36e5;
+
+// packages/core/dist/analytics/story-typos.js
+var SLANG_OK = new Set("intro sorta kinda gonna wanna gotta lemme dunno okay repo repos config configs env async auth admin todo todos dev devs infra prod app apps ui ux url urls api apis json yaml npm pnpm cli gui ide sdk llm llms gpt mcp oauth uuid dms dm vibe vibes tldr btw imo tbh lol lmao nah yeah yep yup hmm ohh ok pls plz thx ya yo".split(" "));
+var IRREGULAR = new Set("became began begun bent bound bred broke broken brought built burnt caught chose chosen clung dealt drew drawn drove driven ate eaten fed felt fled flung forbade forgot forgotten forgave froze frozen gave given went gone grew grown hung heard hid hidden held hurt kept knelt knew known laid led leapt left lent lay lain lit lost made meant met paid ran rang rung rode ridden rose risen sang sung sank sunk sat said saw seen sought sold sent set shook shaken shone shot shown shrank shut slept slid slung spoke spoken spent spun split spread sprang stood stole stolen stuck stung struck strove swore sworn swept swam swum swung taught tore torn told thought threw thrown took taken understood woke woken wore worn wove won wound wrote written children men women mice feet teeth geese data indices matrices analyses".split(" "));
+
 // packages/core/dist/analytics/jev-contract.js
 var JEV_PRICE_PER_MILLION_INPUT = 0.042;
 var JEV_ATTEMPT_RESERVATION_USD = 64e3 / 1e6 * JEV_PRICE_PER_MILLION_INPUT;
+
+// packages/core/dist/analytics/facts-cache.js
+var FILE = `facts-v${FACTS_VERSION}.bin`;
 
 // packages/core/dist/analytics/jev-questions.js
 var INTENT_CRITERIA = Object.freeze({
@@ -30254,6 +30354,9 @@ var INTENT_CRITERIA = Object.freeze({
   mixed: "Several equally central requested actions, with no one primary action.",
   insufficient_context: "No established action, an acknowledgment alone, or missing context needed to identify the request."
 });
+
+// packages/core/dist/analytics/index.js
+var RESUME_MAX_BYTES = 64 * 1024 * 1024;
 
 // packages/core/dist/adapters/claude.js
 import fs14 from "node:fs";
@@ -30723,10 +30826,10 @@ function normalise(text2) {
   return text2.trim();
 }
 function sessionIdFromPath2(filePath) {
-  const base = path14.basename(filePath, ".jsonl");
-  const matches = base.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
+  const base2 = path14.basename(filePath, ".jsonl");
+  const matches = base2.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
   const last = matches?.[matches.length - 1];
-  return last ?? base;
+  return last ?? base2;
 }
 function statBytes2(absolute2) {
   try {
@@ -30763,9 +30866,9 @@ var ROLLOUT_FILE = /^rollout-.*\.jsonl$/i;
 var UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 var MAX_WALK_DEPTH = 8;
 function sessionIdFromRolloutPath(filePath) {
-  const base = path15.basename(filePath, ".jsonl");
-  const matches = base.match(UUID);
-  return matches?.[matches.length - 1] ?? base;
+  const base2 = path15.basename(filePath, ".jsonl");
+  const matches = base2.match(UUID);
+  return matches?.[matches.length - 1] ?? base2;
 }
 function discover4(options = {}) {
   const paths = codexPaths(codexDir(options.codexHome));
@@ -31491,9 +31594,9 @@ function discover6(override) {
   return out;
 }
 function sessionIdFromFilename(file2) {
-  const base = path17.basename(file2, ".jsonl");
-  const at = base.lastIndexOf("_");
-  return at === -1 ? base : base.slice(at + 1);
+  const base2 = path17.basename(file2, ".jsonl");
+  const at = base2.lastIndexOf("_");
+  return at === -1 ? base2 : base2.slice(at + 1);
 }
 async function parse8(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
@@ -31814,8 +31917,8 @@ function discover7(override) {
   return out;
 }
 function sessionIdFromFilename2(file2, projectHash) {
-  const base = path18.basename(file2, ".json").replace(/^checkpoint-/, "") || "checkpoint";
-  return `${projectHash.slice(0, 12)}-${base}`;
+  const base2 = path18.basename(file2, ".json").replace(/^checkpoint-/, "") || "checkpoint";
+  return `${projectHash.slice(0, 12)}-${base2}`;
 }
 async function parse9(source, options = {}) {
   const src = typeof source === "string" ? void 0 : source;
@@ -33797,7 +33900,7 @@ function solveWeights(hits, k = RRF_K) {
   const known = () => {
     const out2 = /* @__PURE__ */ new Map();
     for (const [list, values] of samples)
-      out2.set(list, median(values));
+      out2.set(list, median2(values));
     return out2;
   };
   for (let pass = 0; pass < 3; pass++) {
@@ -33823,7 +33926,7 @@ function solveWeights(hits, k = RRF_K) {
   }
   return out;
 }
-function median(values) {
+function median2(values) {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
@@ -34229,8 +34332,8 @@ function stdio(res) {
 }
 function opencodeConfigDir(env = process8.env) {
   const xdg = env["XDG_CONFIG_HOME"];
-  const base = xdg && xdg.trim() ? path22.resolve(expandTilde(xdg.trim())) : path22.join(home(), ".config");
-  return path22.join(base, "opencode");
+  const base2 = xdg && xdg.trim() ? path22.resolve(expandTilde(xdg.trim())) : path22.join(home(), ".config");
+  return path22.join(base2, "opencode");
 }
 function claudeJsonPath(dir, env = process8.env) {
   const override = dir ?? (env["CLAUDE_CONFIG_DIR"]?.trim() || void 0);
@@ -34474,8 +34577,8 @@ var TOOLS = [
 ];
 function episodicIndexPath(env = process9.env) {
   const xdg = env["XDG_CONFIG_HOME"];
-  const base = xdg && xdg.trim() ? path23.resolve(expandTilde(xdg.trim())) : path23.join(home(), ".config");
-  return path23.join(base, "superpowers", "conversation-index", "db.sqlite");
+  const base2 = xdg && xdg.trim() ? path23.resolve(expandTilde(xdg.trim())) : path23.join(home(), ".config");
+  return path23.join(base2, "superpowers", "conversation-index", "db.sqlite");
 }
 
 // packages/core/dist/version.js
@@ -34651,7 +34754,7 @@ var MemoryPacketError = class extends Error {
 var sourceKeys = ["harness", "nativeSessionId", "artifactHash", "artifactBytes", "artifactBasis", "adapterVersion", "normalizationVersion", "availability", "manifestHash", "parentNativeSessionId", "transcriptAvailability"];
 var unitKeys = ["role", "sourceEventAt", "observedAt", "project", "branch", "toolOutcome", "authority", "historical", "quoteBasis"];
 var unitProvenanceKeys = ["locator", "locatorFidelity", "timeBasis", "unitRevisionId", "unitKey", "unitTextHash", "unitToolName", "producerNameBasis", "unitToolCallId"];
-var has = (o, k) => Object.hasOwn(o, k);
+var has2 = (o, k) => Object.hasOwn(o, k);
 var fail = (code) => {
   throw new MemoryPacketError(code);
 };
@@ -34662,7 +34765,7 @@ function object2(v) {
 }
 function keys(v, allowed, required2 = allowed) {
   const o = object2(v);
-  if (Object.keys(o).some((k) => !allowed.includes(k)) || required2.some((k) => !has(o, k)))
+  if (Object.keys(o).some((k) => !allowed.includes(k)) || required2.some((k) => !has2(o, k)))
     fail("fields");
   return o;
 }
@@ -34714,7 +34817,7 @@ function json2(v, maxBytes = 2097152) {
       if (typeof key2 !== "string")
         fail("json");
       const descriptor = Object.getOwnPropertyDescriptor(value, key2);
-      if (!descriptor.enumerable || !has(descriptor, "value"))
+      if (!descriptor.enumerable || !has2(descriptor, "value"))
         fail("property");
       visit(descriptor.value, depth + 1);
     }
@@ -34737,7 +34840,7 @@ function ref(v) {
 function provenance(v) {
   const p = object2(v);
   for (const key2 of [...sourceKeys, ...unitProvenanceKeys, "spanTextHash", "chunkPolicy"]) {
-    if (!has(p, key2))
+    if (!has2(p, key2))
       continue;
     if (key2 === "artifactBytes")
       integer2(p[key2]);
@@ -34747,9 +34850,9 @@ function provenance(v) {
       if (!["exact", "record_container", "unavailable"].includes(String(l.mapping)))
         fail("locator");
       for (const coordinate of ["rawStart", "rawEnd"])
-        if (has(l, coordinate))
+        if (has2(l, coordinate))
           integer2(l[coordinate]);
-      if (has(l, "rawStart") && has(l, "rawEnd") && Number(l.rawEnd) < Number(l.rawStart))
+      if (has2(l, "rawStart") && has2(l, "rawEnd") && Number(l.rawEnd) < Number(l.rawStart))
         fail("locator_range");
     } else if (["parentNativeSessionId", "unitToolName", "unitToolCallId"].includes(key2))
       nullableString(p[key2]);
@@ -34757,15 +34860,15 @@ function provenance(v) {
       string4(p[key2]);
   }
   for (const key2 of ["spanStartUtf16", "spanEndUtf16"])
-    if (has(p, key2))
+    if (has2(p, key2))
       integer2(p[key2]);
-  if (has(p, "artifactBasis") && !["raw_prefix", "legacy_projection", "history_records"].includes(String(p.artifactBasis)))
+  if (has2(p, "artifactBasis") && !["raw_prefix", "legacy_projection", "history_records"].includes(String(p.artifactBasis)))
     fail("artifact_basis");
-  if (has(p, "transcriptAvailability") && p.transcriptAvailability !== "unavailable")
+  if (has2(p, "transcriptAvailability") && p.transcriptAvailability !== "unavailable")
     fail("transcript_availability");
-  if (has(p, "producerNameBasis") && !["recorded", "verified_prior_unit", "unavailable", "unverified", "projection"].includes(String(p.producerNameBasis)))
+  if (has2(p, "producerNameBasis") && !["recorded", "verified_prior_unit", "unavailable", "unverified", "projection"].includes(String(p.producerNameBasis)))
     fail("producer_basis");
-  if (has(p, "spanStartUtf16") && has(p, "spanEndUtf16") && Number(p.spanEndUtf16) < Number(p.spanStartUtf16))
+  if (has2(p, "spanStartUtf16") && has2(p, "spanEndUtf16") && Number(p.spanEndUtf16) < Number(p.spanStartUtf16))
     fail("span_range");
 }
 function evidence(v) {
@@ -34778,7 +34881,7 @@ function evidence(v) {
   boolean4(e.historical);
   if (e.quoteBasis !== "redacted_unit")
     fail("quote_basis");
-  if (has(e, "toolOutcome") && !["success", "error", "unknown"].includes(String(e.toolOutcome)))
+  if (has2(e, "toolOutcome") && !["success", "error", "unknown"].includes(String(e.toolOutcome)))
     fail("outcome");
   integer2(e.startUtf16);
   integer2(e.endUtf16);
@@ -34787,16 +34890,16 @@ function evidence(v) {
   const text2 = String(e.text);
   if (/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/u.test(text2))
     fail("surrogate_boundary");
-  if (has(e, "provenance")) {
+  if (has2(e, "provenance")) {
     provenance(e.provenance);
     const p = object2(e.provenance);
-    if (has(p, "spanStartUtf16") && Number(e.startUtf16) < Number(p.spanStartUtf16) || has(p, "spanEndUtf16") && Number(e.endUtf16) > Number(p.spanEndUtf16))
+    if (has2(p, "spanStartUtf16") && Number(e.startUtf16) < Number(p.spanStartUtf16) || has2(p, "spanEndUtf16") && Number(e.endUtf16) > Number(p.spanEndUtf16))
       fail("span_bounds");
   }
 }
 function response(v) {
   const r = object2(v);
-  if (has(r, "navigation") && r.navigation !== "inspect-v1")
+  if (has2(r, "navigation") && r.navigation !== "inspect-v1")
     fail("navigation_version");
   if (r.contractVersion !== 2)
     fail("contract_version");
@@ -34814,7 +34917,7 @@ function response(v) {
     integer2(object2(c.snapshotEpochs)[key2]);
   for (const code of array2(c.omittedKinds))
     string4(code);
-  if (has(c, "unavailableKinds"))
+  if (has2(c, "unavailableKinds"))
     for (const code of array2(c.unavailableKinds))
       string4(code);
   const s = object2(r.support);
@@ -34830,11 +34933,11 @@ function response(v) {
       fail("requirement");
     for (const item of array2(q.refs))
       ref(item);
-    if (has(q, "noteIds"))
+    if (has2(q, "noteIds"))
       for (const id of array2(q.noteIds))
         string4(id);
   }
-  if (has(s, "assessor")) {
+  if (has2(s, "assessor")) {
     const a = object2(s.assessor);
     string4(a.kind);
     string4(a.version);
@@ -34851,12 +34954,12 @@ function response(v) {
     for (const lane of array2(c2.lanes))
       if (!["lexical", "dense", "literal"].includes(String(lane)))
         fail("lane");
-    if (has(c2, "evidence")) {
+    if (has2(c2, "evidence")) {
       evidence(c2.evidence);
       if (r.navigation === "inspect-v1" && canonical2(object2(c2.evidence).ref) !== canonical2(c2.ref))
         fail("candidate_preview_ref");
     }
-    if (r.navigation === "inspect-v1" && has(c2, "previewIndex"))
+    if (r.navigation === "inspect-v1" && has2(c2, "previewIndex"))
       fail("preview_index_semantic");
   }
   for (const item of array2(r.assertions)) {
@@ -34873,7 +34976,7 @@ function response(v) {
       fail("note_support");
     if (!["cli", "mcp", "api", "migration"].includes(String(n.origin)))
       fail("note_origin");
-    if (has(n, "availability") && n.availability !== "privacy_refresh_required")
+    if (has2(n, "availability") && n.availability !== "privacy_refresh_required")
       fail("note_availability");
     boolean4(n.current);
     for (const support of array2(n.supportRefs))
@@ -34889,7 +34992,7 @@ function response(v) {
   boolean4(b.truncated);
   for (const warning of array2(r.warnings))
     string4(warning);
-  if (has(r, "continuation"))
+  if (has2(r, "continuation"))
     string4(r.continuation);
 }
 function put(o, k, v) {
@@ -34898,7 +35001,7 @@ function put(o, k, v) {
 function take(o, names) {
   const result = {};
   for (const key2 of names)
-    if (has(o, key2)) {
+    if (has2(o, key2)) {
       put(result, key2, o[key2]);
       delete o[key2];
     }
@@ -34930,21 +35033,21 @@ function encodeCompactMemoryPacket(value) {
     const e = structuredClone(item);
     const r = e.ref;
     delete e.ref;
-    const provenancePresent = has(e, "provenance");
+    const provenancePresent = has2(e, "provenance");
     const p = provenancePresent ? object2(e.provenance) : {};
     delete e.provenance;
     const source = { sourceId: r.sourceId, revisionId: r.revisionId, provenance: take(p, sourceKeys) };
     const unit = { facts: take(e, unitKeys), provenance: take(p, unitProvenanceKeys) };
     const row = { sourceRevisionIndex: intern(sourceRevisions, source), unitIndex: intern(units, unit), spanId: r.spanId, provenancePresent, spanProvenance: p, facts: e };
-    if (has(p, "chunkPolicy")) {
+    if (has2(p, "chunkPolicy")) {
       row.chunkPolicyIndex = intern(chunkPolicies, p.chunkPolicy);
       delete p.chunkPolicy;
     }
-    const base = `span:${r.sourceId}:${r.revisionId}:${r.spanId}`;
-    if (e.citation === base) {
+    const base2 = `span:${r.sourceId}:${r.revisionId}:${r.spanId}`;
+    if (e.citation === base2) {
       row.citationForm = "ref";
       delete e.citation;
-    } else if (e.citation === `${base}@${e.startUtf16}-${e.endUtf16}`) {
+    } else if (e.citation === `${base2}@${e.startUtf16}-${e.endUtf16}`) {
       row.citationForm = "range";
       delete e.citation;
     }
@@ -36082,8 +36185,8 @@ var LocalMemoryService = class {
   }
   effectiveScope(scope3, selection) {
     if (scope3.sourceIds && scope3.lineage && scope3.lineage !== "self") {
-      const family = lineageFamilySql(scope3);
-      scope3 = { ...scope3, sourceIds: this.db.prepare(family.sql).all(...family.params).map((row) => row.id), lineage: "self" };
+      const family2 = lineageFamilySql(scope3);
+      scope3 = { ...scope3, sourceIds: this.db.prepare(family2.sql).all(...family2.params).map((row) => row.id), lineage: "self" };
     }
     if (selection)
       scope3 = { ...scope3, sourceIds: scope3.sourceIds ? scope3.sourceIds.filter((id) => selection.sourceIds.includes(id)) : selection.sourceIds };
@@ -36481,8 +36584,8 @@ var SpanDenseLane = class {
     if (!space)
       return { candidates: [], state: "building", spaceId: DEFAULT_SPACE_ID };
     const f = denseEligibility(this.db, input.scope, this.options.root, this.options.includeIgnored);
-    const base = `FROM revision_spans rs JOIN evidence_spans p ON p.span_id=rs.span_id JOIN evidence_units u ON u.unit_revision_id=p.unit_revision_id JOIN source_revisions r ON r.revision_id=rs.revision_id JOIN memory_sources s ON s.source_id=r.source_id`;
-    const count2 = this.db.prepare(`SELECT COUNT(*) n ${base} WHERE ${f.sql}`).get(...f.params).n;
+    const base2 = `FROM revision_spans rs JOIN evidence_spans p ON p.span_id=rs.span_id JOIN evidence_units u ON u.unit_revision_id=p.unit_revision_id JOIN source_revisions r ON r.revision_id=rs.revision_id JOIN memory_sources s ON s.source_id=r.source_id`;
+    const count2 = this.db.prepare(`SELECT COUNT(*) n ${base2} WHERE ${f.sql}`).get(...f.params).n;
     try {
       const encoder = this.options.encoder ?? (this.ownEncoder ??= new LocalEncoder(this.options.cacheDir));
       const q = await encoder.encode(BGE_QUERY_PREFIX + input.query, signal, true);
@@ -36492,7 +36595,7 @@ var SpanDenseLane = class {
       let valid = 0, corrupt = false, ordinal = -1, revision = "";
       for (; ; ) {
         signal?.throwIfAborted();
-        const rows = this.db.prepare(`SELECT s.source_id,r.revision_id,p.span_id,rs.ordinal,e.vector_blob ${base} JOIN span_embeddings e ON e.span_id=p.span_id AND e.space_id=? AND e.input_hash=p.embedding_input_hash WHERE ${f.sql} AND p.chunk_policy IN (?,?) AND (rs.revision_id,rs.ordinal)>(?,?) ORDER BY rs.revision_id,rs.ordinal LIMIT 128`).all(DEFAULT_SPACE_ID, ...f.params, ...compatibleSpanPolicies(TOKENIZER_HASH), revision, ordinal);
+        const rows = this.db.prepare(`SELECT s.source_id,r.revision_id,p.span_id,rs.ordinal,e.vector_blob ${base2} JOIN span_embeddings e ON e.span_id=p.span_id AND e.space_id=? AND e.input_hash=p.embedding_input_hash WHERE ${f.sql} AND p.chunk_policy IN (?,?) AND (rs.revision_id,rs.ordinal)>(?,?) ORDER BY rs.revision_id,rs.ordinal LIMIT 128`).all(DEFAULT_SPACE_ID, ...f.params, ...compatibleSpanPolicies(TOKENIZER_HASH), revision, ordinal);
         if (!rows.length)
           break;
         for (const row of rows) {
@@ -37222,7 +37325,7 @@ function plausibleProjectDir(dir) {
     return false;
   }
   const forbidden = new Set(
-    [path25.parse(resolved).root, homeDir(), tmpDir()].filter(Boolean).map((d) => {
+    [path25.parse(resolved).root, homeDir2(), tmpDir()].filter(Boolean).map((d) => {
       try {
         return fs25.realpathSync(d);
       } catch {
@@ -37239,7 +37342,7 @@ function plausibleProjectDir(dir) {
   }
   return true;
 }
-function homeDir() {
+function homeDir2() {
   try {
     return os6.homedir();
   } catch {
@@ -40864,23 +40967,23 @@ var ZodEffects = class extends ZodType2 {
     }
     if (effect.type === "transform") {
       if (ctx.common.async === false) {
-        const base = this._def.schema._parseSync({
+        const base2 = this._def.schema._parseSync({
           data: ctx.data,
           path: ctx.path,
           parent: ctx
         });
-        if (!isValid(base))
+        if (!isValid(base2))
           return INVALID;
-        const result = effect.transform(base.value, checkCtx);
+        const result = effect.transform(base2.value, checkCtx);
         if (result instanceof Promise) {
           throw new Error(`Asynchronous transform encountered during synchronous parse operation. Use .parseAsync instead.`);
         }
         return { status: status.value, value: result };
       } else {
-        return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((base) => {
-          if (!isValid(base))
+        return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((base2) => {
+          if (!isValid(base2))
             return INVALID;
-          return Promise.resolve(effect.transform(base.value, checkCtx)).then((result) => ({
+          return Promise.resolve(effect.transform(base2.value, checkCtx)).then((result) => ({
             status: status.value,
             value: result
           }));
@@ -42270,19 +42373,19 @@ function parseNullableDef(def, refs2) {
     };
   }
   if (refs2.target === "openApi3") {
-    const base2 = parseDef(def.innerType._def, {
+    const base3 = parseDef(def.innerType._def, {
       ...refs2,
       currentPath: [...refs2.currentPath]
     });
-    if (base2 && "$ref" in base2)
-      return { allOf: [base2], nullable: true };
-    return base2 && { ...base2, nullable: true };
+    if (base3 && "$ref" in base3)
+      return { allOf: [base3], nullable: true };
+    return base3 && { ...base3, nullable: true };
   }
-  const base = parseDef(def.innerType._def, {
+  const base2 = parseDef(def.innerType._def, {
     ...refs2,
     currentPath: [...refs2.currentPath, "anyOf", "0"]
   });
-  return base && { anyOf: [base, { type: "null" }] };
+  return base2 && { anyOf: [base2, { type: "null" }] };
 }
 
 // node_modules/.pnpm/zod-to-json-schema@3.25.2_zod@4.4.3/node_modules/zod-to-json-schema/dist/esm/parsers/number.js
@@ -43686,8 +43789,8 @@ var Protocol = class {
 function isPlainObject2(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-function mergeCapabilities(base, additional) {
-  const result = { ...base };
+function mergeCapabilities(base2, additional) {
+  const result = { ...base2 };
   for (const key2 in additional) {
     const k = key2;
     const addValue = additional[k];
