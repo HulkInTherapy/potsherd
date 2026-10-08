@@ -28,6 +28,8 @@ export interface AuditModelFeedback {provider:string|null;model:string|null;dire
 /** Facts contain completed eligible sources; collecting values may be repriced as aliases are resolved. */
 export interface LaunchFactProgress {
  state:'collecting'|'complete';completedSources:number;totalSources:number|null;cacheHits:number;
+ /** Exact completed-source subset represented by the currently published prices; undefined means completedSources. */
+ representedSources?:number;
  coverage:'completed_sources';origin:'fresh'|'cache'|'mixed';
 }
 export interface LaunchAudit {factProgress?:LaunchFactProgress;languageLines?:readonly AuditLanguageLine[];modelFeedback?:readonly AuditModelFeedback[];languageGaps?:readonly string[];languageByModel?:readonly import('./language-models.js').ModelLanguage[];facts:LaunchFacts|null;semantics:LaunchSemantics|null;stage:'discovering'|'sizing'|'preparing'|'analyzing'|'assembling'|'ready';notice:string;}

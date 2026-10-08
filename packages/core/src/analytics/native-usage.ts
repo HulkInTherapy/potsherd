@@ -65,7 +65,9 @@ export function createNativeUsageAccumulator(harness:AuditHarness,conversationId
  const pushLine=(line:string):void=>{const start=offset;offset+=Buffer.byteLength(line)+1;if(!line.trim())return;let r:R;try{r=obj(JSON.parse(line));}catch{seq++;return;}pushRecord(r,{rawStart:start,rawEnd:offset});};
  return {pushRecord,invalidateContext:()=>{project=null;model=null;provider=null;previous=null;},pushLine,records:()=>[...records.values()],counts:()=>({observed,excluded,deduplicated:Math.max(0,observed-excluded-records.size)})};
 }
-export function extractNativeUsage(bytes:Buffer|string,harness:AuditHarness,conversationId:string,options:NativeUsageOptions={}):RecordedInference[]{
+export function extractNativeUsageWithCounts(bytes:Buffer|string,harness:AuditHarness,conversationId:string,options:NativeUsageOptions={}):{usage:RecordedInference[];counts:{observed:number;excluded:number;deduplicated:number}}{
  const text=Buffer.isBuffer(bytes)?bytes.toString('utf8'):bytes,acc=createNativeUsageAccumulator(harness,conversationId,options);
- const lines=text.trimStart().startsWith('[')?(()=>{try{return (JSON.parse(text) as unknown[]).map(x=>JSON.stringify(x));}catch{return [];}})():text.split('\n');for(const line of lines)acc.pushLine(line);return acc.records();
+ const lines=text.trimStart().startsWith('[')?(()=>{try{return (JSON.parse(text) as unknown[]).map(x=>JSON.stringify(x));}catch{return [];}})():text.split('\n');for(const line of lines)acc.pushLine(line);return {usage:acc.records(),counts:acc.counts()};
 }
+
+export function extractNativeUsage(bytes:Buffer|string,harness:AuditHarness,conversationId:string,options:NativeUsageOptions={}):RecordedInference[]{return extractNativeUsageWithCounts(bytes,harness,conversationId,options).usage;}

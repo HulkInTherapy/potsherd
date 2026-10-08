@@ -39,9 +39,16 @@ export function buildWallHero(snapshot:AuditSnapshot,width:number,options:Report
  const cached=progress&&(progress.origin==='cache'||progress.origin==='mixed'),collecting=launchIsLoading(snapshot),completed=progress?`${wallNumber(progress.completedSources)}${progress.totalSources===null?'':'/'+wallNumber(progress.totalSources)} sources`:'';
  const cacheLabel=progress?.origin==='mixed'?'Cached + fresh':cached?'Cached':'';
  const count=progress?`${wallNumber(progress.completedSources)}${progress.totalSources===null?'':'/'+wallNumber(progress.totalSources)}`:'';
+ const represented=progress?.representedSources??progress?.completedSources,subset=progress&&represented!==undefined&&represented<progress.completedSources;
+ const mark=collecting?wallProgressMark(options):'',markWidth=(options.widthOf??auditCellWidth)(mark);
+ if(subset){
+  const priced=`Subtotal · prices from ${wallNumber(represented)} sources`,checked=`checked ${count}`;
+  if(width<45){rows.push([{text:mark,tone:'amber'},{text:clipped(`Checked ${count}${cached?' · '+(progress.origin==='mixed'?'cache+fresh':'cached'):''}`,width-markWidth,options),tone:'dim'}]);rows.push(textLine(clipped(priced,width,options),'dim'));}
+  else rows.push([{text:mark,tone:'amber'},{text:clipped(`${priced} · ${checked}${cacheLabel?' · '+cacheLabel:''}`,width-markWidth,options),tone:'dim'}]);
+  return rows;
+ }
  const cue=collecting&&width<45&&progress?`${progress.state==='complete'?'Work':'Collect'} ${count} src${cached?' · '+(progress.origin==='mixed'?'cache+fresh':'cached'):''}`:collecting?`${cacheLabel?cacheLabel+' · ':''}${progress?.state==='complete'?'Working':'Collecting'}${completed?' · '+completed:''} · ${snapshot.progress.label??'Reading local history'}`:cached?`${cacheLabel} · ${partial?'partial sources':'completed sources'}`:partial?'Partial · known usage only':'Current-rate estimate';
- const mark=collecting?wallProgressMark(options):'';
- rows.push([{text:mark,tone:'amber'},{text:clipped(cue,width-(options.widthOf??auditCellWidth)(mark),options),tone:'dim'}]);
+ rows.push([{text:mark,tone:'amber'},{text:clipped(cue,width-markWidth,options),tone:'dim'}]);
  return rows;
 }
 function modelCard(snapshot:AuditSnapshot,width:number,options:ReportOptions):WallCard|null {

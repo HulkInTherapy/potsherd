@@ -1,6 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import {auditCellWidth,applyAuditEvent} from '../packages/cli/src/audit-ui/index.js';
-import {buildLaunchScreen,renderLaunchPlain,createWallNavigation,turnWall,wallMode,freezeWall,resizeWall,buildWallboard,buildReportHelp,transferFrameVisible,applyLaunchPrivacyEvent,launchEvidenceCanPublish,launchResultAfterPrivacy} from '../packages/cli/src/audit-ui/launch-terminal.js';
+import {buildLaunchScreen,renderLaunchPlain,createWallNavigation,turnWall,wallMode,freezeWall,resizeWall,buildWallboard,buildReportHelp,transferFrameVisible,applyLaunchPrivacyEvent,launchEvidenceCanPublish,launchResultAfterPrivacy,applyLaunchPreviewInvalidation,launchResultAfterPreview} from '../packages/cli/src/audit-ui/launch-terminal.js';
 import type {LaunchPrivacyView} from '../packages/cli/src/audit-ui/launch-terminal.js';
 import {buildReportLoader,buildEvidenceDocument} from '../packages/cli/src/audit-ui/report-document.js';
 import {rankedFeedback,repeatedLines,wallNumber,readableModelName} from '../packages/cli/src/audit-ui/wallboard.js';
@@ -37,6 +37,19 @@ describe('approved fullscreen wallboard',()=>{
  it('sanitizes terminal controls in project names, line quotes and evidence',()=>{const snapshot=reportFixture();snapshot.projects[0]!.displayName='Clean\x1b[2J\x1b]0;hidden\x07 project';snapshot.launch!.languageLines![0]!.text='line\x1b[2J words';expect(plain(buildWallboard(snapshot).pages.flatMap(page=>page.lines))).not.toContain('\x1b');expect(plain(buildEvidenceDocument({...evidenceFixture(),text:'A\x1b[2J\nB'}).lines)).not.toContain('\x1b');});
 });
 describe('wallboard interaction and honest loading/transfer states',()=>{
+ it('withdraws an explicitly revoked frozen price preview but permits later allowed final facts',()=>{
+  const snapshot=reportFixture();snapshot.launch!.stage='sizing';snapshot.launch!.factProgress={state:'collecting',completedSources:2,totalSources:8,representedSources:2,cacheHits:0,coverage:'completed_sources',origin:'fresh'};
+  const view:LaunchPrivacyView={snapshot,nav:wallMode(freezeWall(createWallNavigation()),'help'),frozen:snapshot,evidence:evidenceFixture(),busy:true,generation:10,revoked:null};
+  const invalid={...snapshot,sequence:snapshot.sequence+1,coverage:{...snapshot.coverage,gapCodes:['native_price_preview_revoked']},launch:{...snapshot.launch!,facts:null,factProgress:{...snapshot.launch!.factProgress!,representedSources:0}}},event:AuditEvent={type:'snapshot',snapshot:invalid},cleared=applyLaunchPreviewInvalidation(view,event)!;
+  expect(cleared.nav.mode).toBe('help');expect(cleared.nav.frozen).toBe(false);expect(cleared.frozen).toBeNull();expect(cleared.evidence).toBeNull();expect(cleared.busy).toBe(false);expect(cleared.generation).toBe(11);expect(cleared.revoked).toBeNull();expect(cleared.snapshot.launch!.facts).toBeNull();expect(launchEvidenceCanPublish(10,cleared.generation,false)).toBe(false);
+  const floor={snapshotId:invalid.snapshotId,sequence:invalid.sequence};expect(launchResultAfterPreview(snapshot,invalid,floor)).toBe(invalid);const allowed={...reportFixture(),sequence:invalid.sequence+1};expect(launchResultAfterPreview(allowed,invalid,floor)).toBe(allowed);expect(applyLaunchPreviewInvalidation(cleared,{type:'snapshot',snapshot:allowed})).toBeNull();
+  expect(applyLaunchPreviewInvalidation(view,{type:'snapshot',snapshot:{...invalid,coverage:{...invalid.coverage,gapCodes:['excluded_by_policy']}}})).toBeNull();expect(applyLaunchPreviewInvalidation(view,{type:'snapshot',snapshot:{...snapshot,sequence:snapshot.sequence+1}})).toBeNull();expect(applyLaunchPreviewInvalidation({...view,snapshot:invalid,frozen:invalid},event)).toBeNull();
+ });
+ it('distinguishes the priced subtotal from actually checked sources without dropping narrow cards',()=>{
+  const snapshot=reportFixture();snapshot.status='parsing';snapshot.launch!.stage='sizing';snapshot.launch!.factProgress={state:'collecting',completedSources:232,totalSources:653,representedSources:2,cacheHits:1,coverage:'completed_sources',origin:'mixed'};
+  for(const [columns,rows] of [[120,40],[80,24],[40,20]] as const){const layout=buildWallboard(snapshot,{columns,rows}),output=plain(layout.pages.flatMap(page=>page.lines));expect(output).toContain('prices from 2 sources');expect(output.toLowerCase()).toContain('checked 232/653');expect(output).toContain('Subtotal');expect(layout.pages.every(page=>page.lines.length<=rows-1)).toBe(true);expect(new Set(layout.pages.flatMap(page=>page.cards))).toEqual(new Set(['value','models','projects','phrases','reactions','moment']));for(const page of layout.pages)for(const line of page.lines)expect(auditCellWidth(plain([line]))).toBeLessThanOrEqual(columns);}
+  delete snapshot.launch!.factProgress.representedSources;expect(plain(buildWallboard(snapshot,{columns:120,rows:40}).pages[0]!.lines)).not.toContain('Subtotal');snapshot.launch!.factProgress.representedSources=232;expect(plain(buildWallboard(snapshot,{columns:120,rows:40}).pages[0]!.lines)).not.toContain('Subtotal');
+ });
  it('revokes a frozen captured view on an explicit privacy error and rejects late evidence/results',()=>{
   const snapshot=reportFixture();snapshot.launch!.semantics!.attempts=1;const layout=buildWallboard(snapshot,{columns:40,rows:20}),nav=wallMode(freezeWall(turnWall(createWallNavigation(),2,layout.pages.length,layout)),'help');
   const view:LaunchPrivacyView={snapshot,nav,frozen:snapshot,evidence:{...evidenceFixture(),text:'PUBLIC captured evidence'},busy:true,generation:7,revoked:null};
