@@ -41,4 +41,4 @@ export interface LaunchFactProgress {
  representedSources?:number;
  coverage:'completed_sources';origin:'fresh'|'cache'|'mixed';
 }
-export interface LaunchAudit {factProgress?:LaunchFactProgress;languageLines?:readonly AuditLanguageLine[];modelFeedback?:readonly AuditModelFeedback[];languageGaps?:readonly string[];languageByModel?:readonly import('./language-models.js').ModelLanguage[];facts:LaunchFacts|null;semantics:LaunchSemantics|null;stage:'discovering'|'sizing'|'preparing'|'analyzing'|'assembling'|'ready';notice:string;}
+export interface LaunchAudit {/** 1.8 "Wrapped" story: feature table, ranked insight cards, archetype. */story?:import('./story-contracts.js').AuditStory;factProgress?:LaunchFactProgress;languageLines?:readonly AuditLanguageLine[];modelFeedback?:readonly AuditModelFeedback[];languageGaps?:readonly string[];languageByModel?:readonly import('./language-models.js').ModelLanguage[];facts:LaunchFacts|null;semantics:LaunchSemantics|null;stage:'discovering'|'sizing'|'preparing'|'analyzing'|'assembling'|'ready';notice:string;}

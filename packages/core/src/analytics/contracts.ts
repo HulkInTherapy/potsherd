@@ -2,6 +2,8 @@
 import type { Harness } from '../adapters/types.js';
 import type { Scope, SpanRef, Epochs } from '../memory/contracts.js';
 import type {LaunchAudit,AuditTone,SemanticPeriod} from './launch-contracts.js';
+export type * from './story-contracts.js';
+export {STORY_VERSION} from './story-contracts.js';
 
 export type AuditHarness = Extract<Harness, 'claude'|'codex'|'pi'|'opencode'>;
 export const AUDIT_INTENTS = ['feature_build','bug_fix','ui_design','tests','refactor','code_review','pr_management','research','explanation_learning','planning_architecture','deploy_operations','documentation_writing','agent_coordination','other','mixed','insufficient_context'] as const;
@@ -11,7 +13,8 @@ export type Availability = 'observed'|'partial'|'unavailable'|'not_run';
 export interface AuditScope { harnesses: readonly AuditHarness[]; project: string|null; eventFrom: string|null; asOf: string|null; timezone: string; }
 export interface AuditCoverage { state: 'complete_snapshot'|'partial'|'unavailable'; knownSources: number; parsedSources: number; unknownOriginEvents: number; excludedEvents: number; omittedSources: number; gapCodes: readonly string[]; }
 export interface AuditMetric { value: number|null; numerator: number|null; denominator: number|null; unit: string; measurementBasis: string; state: Availability; definition: string; }
-export interface AuditProgress { stage: AuditState; completed: number; total: number|null; unit: 'candidate_source'|'conversation'|'prompt'; provisional: boolean; cancellable: boolean; label?:string; }
+export interface AuditProgress { stage: AuditState; completed: number; total: number|null; unit: 'candidate_source'|'conversation'|'prompt'; provisional: boolean; cancellable: boolean; label?:string;
+  /** 1.8: loading-story detail (harnesses discovered, running counts, stage). */ detail?: import('./story-contracts.js').AuditProgressDetail; }
 export interface AuditSourceCapability { harness: AuditHarness; state: 'checking'|'absent'|'available'|'partial'|'unsupported'|'unavailable'; candidateFiles: number; conversations: number; humanPrompts: number|null; humanOrigin: 'native_marker'|'projection'|'unverified'; evidence: 'canonical'|'transient'|'projection'|'unavailable'; usage: 'unavailable'|'partial'|'reported'; firstUnsupportedStep: string|null; gapCodes: readonly string[]; census?:{checked:boolean;files:number;bytes:number;roots:number;unit:'file'|'database';};
   /** Subagent/helper conversations of this harness. */ childConversations?:number;
   /** Slash commands typed (counted separately from prompts). */ slashCommands?:number;
