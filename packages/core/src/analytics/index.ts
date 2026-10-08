@@ -401,6 +401,9 @@ class LocalAuditSession implements AuditSession {
           lastAt: !h.lastAt || new Date(last!).toISOString() > h.lastAt ? new Date(last!).toISOString() : h.lastAt})};
       }
       const history: HistoryEntry[] = historyData.entries;
+      // A cold cache has no dictionary memo: load the word lists while the workers are still reading.
+      this.dictionary = new DictionaryLookup(cache.dictionary);
+      if (this.options.launch && toRead.length > 8 && cache.dictionary.size === 0) this.dictionary.preload();
       t = lap('extrasMs', t);
       await scanning;
       facts.push(...extra);
@@ -455,6 +458,7 @@ class LocalAuditSession implements AuditSession {
   private cache: FactsCache | null = null;
   private historyData: HistoryData | null = null;
   private historyFile: string | null = null;
+  private dictionary: DictionaryLookup | null = null;
 
   /** Running counts for the loading story (cheap: a few additions per file). */
   private count(f: SourceFacts | null, bytes: number): void {
@@ -561,7 +565,7 @@ class LocalAuditSession implements AuditSession {
         allowed: (project, session) => !policy?.ignored(project) && !(session && policy?.forgotten.has(sourceId('claude', session))) && (scope.project === null || project === scope.project),
       });
       this.timings['storyTableMs'] = Math.round(performance.now() - ts);
-      const dictionary = new DictionaryLookup(this.cache?.dictionary);
+      const dictionary = this.dictionary ?? new DictionaryLookup(this.cache?.dictionary);
       const built = buildStory({table, timezone: scope.timezone, alias: p => aliases.get(p ?? '(unknown)') ?? 'a project', dictionary, tokens: a.tokens.input + a.tokens.output + a.tokens.cacheRead + a.tokens.cacheWrite, offline: offline()});
       story = built.story;
       story.timings.featuresMs = this.timings['storyTableMs'];

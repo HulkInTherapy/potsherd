@@ -23,6 +23,9 @@ export class DictionaryLookup {
     return value;
   }
 
+  /** Loads the word lists now (e.g. while worker threads are still reading). */
+  preload(): void { this.load(); }
+
   private load(): Set<string> {
     if (this.words) return this.words;
     this.loaded = true;

@@ -101,13 +101,50 @@ export const TIC_PRIOR: Readonly<Record<string, number>> = {
   'deep research': 0.5,
 };
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const TIC_RX = TICS.map(t => new RegExp('\\b' + esc(t) + (CLAUSE_FINAL.has(t) ? "(?=\\s*(?:[.,!?;:)\\n]|$|\\band\\b|\\bso\\b|\\bbut\\b))" : '\\b')));
-/** All tics share a first word with one of these; one cheap test skips most of the 49 regexes. */
-const TIC_GATE = new RegExp('\\b(?:' + [...new Set(TICS.map(t => esc(t.split(' ')[0]!)))].join('|') + ')');
+/** Phrases by first word: one walk over the words of a prompt finds every catchphrase. */
+const TIC_BY_FIRST = new Map<string, {phrase: string; index: number; final: boolean}[]>();
+TICS.forEach((phrase, index) => {
+  const first = phrase.split(' ')[0]!;
+  const list = TIC_BY_FIRST.get(first) ?? [];
+  list.push({phrase, index, final: CLAUSE_FINAL.has(phrase)});
+  TIC_BY_FIRST.set(first, list);
+});
+const CLAUSE_END = /^\s*(?:[.,!?;:)\n]|$|and\b|so\b|but\b)/;
+const isWordChar = (c: string | undefined) => c !== undefined && /[A-Za-z0-9_]/.test(c);
+/** Indices of TICS present in the (lowercase) text; clause-final hedges only before punctuation, the end, or and/so/but. */
+export function ticsIn(low: string): number[] {
+  const found = new Set<number>();
+  const rx = /[a-z']+/g;
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(low)) !== null) {
+    const list = TIC_BY_FIRST.get(m[0]);
+    if (!list || isWordChar(low[m.index - 1])) continue;
+    for (const t of list) {
+      if (found.has(t.index) || !low.startsWith(t.phrase, m.index)) continue;
+      const end = m.index + t.phrase.length;
+      if (t.final ? CLAUSE_END.test(low.slice(end, end + 12)) : !isWordChar(low[end]) || !isWordChar(low[end - 1])) found.add(t.index);
+    }
+  }
+  return [...found].sort((a, b) => a - b);
+}
 
 export const ADDRESS = ['dude', 'bro', 'buddy', 'babe', 'baby', 'my friend', 'man', 'mate', 'boss', 'sir', 'brother', 'bhai', 'yaar', 'chief', 'champ', 'my guy', 'darling', 'love'] as const;
-const ADDRESS_RX = ADDRESS.map(a => new RegExp('(?:^|[,.!?]\\s*|\\b(?:hey|yo|ok|okay|thanks|no|come on)\\s+)' + a + '\\b|\\b' + a + '\\s*[,.!?]|\\b' + a + '$'));
-const ADDRESS_GATE = new RegExp('\\b(?:' + ADDRESS.map(esc).join('|') + ')\\b');
+const ADDRESS_GATE = new RegExp('\\b(' + ADDRESS.map(esc).join('|') + ')\\b', 'g');
+const ADDRESS_INDEX = new Map<string, number>(ADDRESS.map((a, i) => [a, i]));
+const VOCATIVE_BEFORE = /(?:^|[,.!?]\s*|\b(?:hey|yo|ok|okay|thanks|no|come on)\s+)$/;
+/** Indices of ADDRESS terms used vocatively: at a clause start or end, after hey/yo/ok/thanks, or before punctuation. */
+export function addressIn(low: string): number[] {
+  const found = new Set<number>();
+  ADDRESS_GATE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = ADDRESS_GATE.exec(low)) !== null) {
+    const i = ADDRESS_INDEX.get(m[1]!)!;
+    if (found.has(i)) continue;
+    const end = m.index + m[0].length;
+    if (VOCATIVE_BEFORE.test(low.slice(Math.max(0, m.index - 12), m.index)) || /^\s*[,.!?]/.test(low.slice(end, end + 8)) || end === low.length) found.add(i);
+  }
+  return [...found].sort((a, b) => a - b);
+}
 
 /* ----------------------------------------------------------- featurize --- */
 
@@ -185,16 +222,10 @@ export function featurize(input: FeaturizeInput): PromptFeatures {
     const sl = raw.replace(PLACEHOLDER, '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 60);
     if (sl) f.sl = sl;
   }
-  if (TIC_GATE.test(rawLow)) {
-    const tc: number[] = [];
-    TIC_RX.forEach((rx, k) => { if (rx.test(rawLow)) tc.push(k); });
-    if (tc.length) f.tc = tc;
-  }
-  if (ADDRESS_GATE.test(rawLow)) {
-    const ad: number[] = [];
-    ADDRESS_RX.forEach((rx, k) => { if (rx.test(rawLow)) ad.push(k); });
-    if (ad.length) f.ad = ad;
-  }
+  const tc = ticsIn(rawLow);
+  if (tc.length) f.tc = tc;
+  const ad = addressIn(rawLow);
+  if (ad.length) f.ad = ad;
   return f;
 }
 
@@ -211,7 +242,8 @@ export const SECRETISH = /(sk-[A-Za-z0-9]|tvly-|AKIA|ghp_|xox[bp]-|@[\w.-]+\.\w{
 export function safeQuote(text: string, maxLength = 90): string | null {
   let t = text.replace(PLACEHOLDER, '').replace(/\s+/g, ' ').trim();
   if (!t || SENSITIVE.test(t) || SECRETISH.test(t)) return null;
-  t = t.replace(/[A-Za-z']+/g, w => { const l = w.toLowerCase(); return isSwearWord(l) || isSlur(l) ? mask(w) : w; });
+  // Masking keeps length, so only the part that can be shown needs it.
+  t = t.slice(0, maxLength + 40).replace(/[A-Za-z']+/g, w => { const l = w.toLowerCase(); return isSwearWord(l) || isSlur(l) ? mask(w) : w; }) + t.slice(maxLength + 40);
   if (t.length <= maxLength) return t;
   const cut = t.slice(0, maxLength - 1);
   const space = cut.lastIndexOf(' ');
