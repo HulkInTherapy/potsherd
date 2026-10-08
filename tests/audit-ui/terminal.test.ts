@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import type { AuditEvent, AuditSession, AuditSnapshot } from '../../packages/core/src/analytics/contracts.js';
-import { decodeKey, runWallboard } from '../../packages/cli/src/audit-ui/terminal.js';
+import { decodeKey, runWallboard, splitKeys } from '../../packages/cli/src/audit-ui/terminal.js';
 import { DiffRenderer, detectColorMode, lineToAnsi } from '../../packages/cli/src/audit-ui/renderer.js';
 import { applyAuditEvent, applyPreviewInvalidation, applyPrivacyEvent } from '../../packages/cli/src/audit-ui/session-state.js';
 import fs from 'node:fs';
@@ -236,6 +236,9 @@ describe('keys, colours and diffing', () => {
     expect(decodeKey('s')).toBe('share');
     expect(decodeKey('3')).toBe('guess3');
     expect(decodeKey('quit')).toBeNull();
+    expect(splitKeys('\x1bs')).toEqual(['\x1b', 's']);
+    expect(splitKeys('\x1b[C\x1b[C')).toEqual(['\x1b[C', '\x1b[C']);
+    expect(splitKeys('qqq')).toEqual(['qqq']);
   });
 
   it('uses only the orange / white / gray palette and honours NO_COLOR', () => {

@@ -18,7 +18,8 @@ export function renderCard(s: Scene, card: DeckCard): boolean {
     options.hint = s.state.guess === undefined ? `1–${card.data.options.length} guess` : undefined;
     if (s.state.guess !== undefined) options.expression = s.state.guess === card.data.answer ? 'proud' : 'shocked';
   }
-  const { body, busy, mascot } = drawChrome(s, card, options);
+  const shown = card.kind === 'guess' && s.state.guess !== undefined ? { ...card, support: `Ranked by ${card.data.basis}.` } : card;
+  const { body, busy, mascot } = drawChrome(s, shown, options);
   if (body.h <= 0 || body.w <= 0) return busy;
   let bodyBusy = false;
   switch (card.kind) {

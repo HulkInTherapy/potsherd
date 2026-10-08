@@ -50,7 +50,25 @@ export interface TerminalResult {
 
 export type Key = 'quit' | 'left' | 'right' | 'details' | 'back' | 'enter' | 'board' | 'share' | `guess${1 | 2 | 3 | 4}` | null;
 
-/** Decode one stdin chunk. Pasted or unknown multi-character input never triggers a command. */
+/**
+ * Split a stdin chunk into keys at escape boundaries, so fast typists (or a terminal that batches
+ * "Esc s") still get every key. Runs of plain characters stay one token and are ignored as paste.
+ */
+export function splitKeys(chunk: string): string[] {
+  const out: string[] = [];
+  for (const part of chunk.split(/(?=\x1b)/)) {
+    if (!part) continue;
+    const seq = /^\x1b(?:\[[0-9;]*[A-Za-z~]|O[A-Za-z])/.exec(part);
+    if (seq) {
+      out.push(seq[0]);
+      if (part.length > seq[0].length) out.push(part.slice(seq[0].length));
+    } else if (part[0] === '\x1b' && part.length > 1) out.push('\x1b', part.slice(1));
+    else out.push(part);
+  }
+  return out;
+}
+
+/** Decode one key token. Pasted or unknown multi-character input never triggers a command. */
 export function decodeKey(chunk: string): Key {
   switch (chunk) {
     case '\x03': case 'q': case 'Q': return 'quit';
@@ -388,7 +406,11 @@ export async function runWallboard(session: AuditSession, options: TerminalOptio
       if (chunk.includes('\x1b[201~')) pasting = false;
       return;
     }
-    const key = decodeKey(chunk);
+    for (const token of splitKeys(chunk)) onKey(token);
+  };
+  const onKey = (token: string) => {
+    if (stopping) return;
+    const key = decodeKey(token);
     if (!key) return;
     if (key === 'quit') { stop(); return; }
     const now = clock();

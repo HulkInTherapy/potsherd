@@ -97,6 +97,12 @@ function safeQuote(text: string | null | undefined): string | null {
   return clean;
 }
 
+/** One spelling for a model everywhere (the bill uses the same formatter). */
+function displayModel(id: string | null | undefined, label: string): string {
+  const formatted = id ? modelName(id) : '';
+  return mask(formatted && formatted !== 'Unknown model' && formatted !== id ? formatted : label);
+}
+
 const engineCopy = (card: StoryCard | null) => (card ? { headline: mask(card.headline), support: mask(card.support) } : null);
 
 function title(text: string): string {
@@ -230,7 +236,7 @@ function clockCallouts(story: AuditStory, owl: StoryCard | null): { label: strin
 function guess(story: AuditStory | null, board: BoardData, snapshot: AuditSnapshot): DeckCard | null {
   const top = story?.models.top ?? [];
   if (top.length >= 2) {
-    const options = top.slice(0, 4).map(m => ({ name: mask(m.label), share: m.sharePct / 100 }));
+    const options = top.slice(0, 4).map(m => ({ name: displayModel(m.model, m.label), share: m.sharePct / 100 }));
     const seed = top.reduce((sum, m) => sum + m.prompts, 0) % 997;
     const order = options.map((_, i) => i).sort((a, b) => ((a * 7 + seed) % 11) - ((b * 7 + seed) % 11));
     const d = story!.models.defection;
@@ -274,7 +280,7 @@ function faceoff(story: AuditStory | null): DeckCard | null {
   const worst = story?.models.worst ?? null;
   if (!best && !worst) return null;
   const gauge = (m: NonNullable<typeof best>, key: 'praise' | 'swear'): Gauge => ({
-    label: mask(m.label), prompts: m.prompts,
+    label: displayModel(m.model, m.label), prompts: m.prompts,
     per100: key === 'praise' ? m.praisePer100 : m.swearPer100,
     expected: key === 'praise' ? m.expectedPraisePer100 : m.expectedSwearPer100,
     ratio: key === 'praise' ? m.praiseRatio : m.swearRatio,
