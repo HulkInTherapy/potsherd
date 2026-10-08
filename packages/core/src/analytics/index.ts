@@ -83,14 +83,17 @@ export function publicAuditSnapshot(snapshot: AuditSnapshot): AuditSnapshot {
   });
 }
 
+/** Cards whose chart labels are project names or typed words. */
+const PRIVATE_CHARTS = new Set(['priciest_project', 'project_graveyard', 'continue_count', 'typo_fingerprint', 'day_night_topics']);
+
 /** Story without quotes, project names or typed lines: cards use their number-only public wording. */
 export function publicStory(story: AuditStory): AuditStory {
   const h = story.highlights;
   return {
     ...story,
     cards: story.cards.filter(c => c.public).map((c, i) => ({...c, headline: c.public!.headline, support: c.public!.support, quote: null, rank: i + 1,
-      numbers: Object.fromEntries(Object.entries(c.numbers).filter(([k]) => !/project|cheapest|top$|night_words|day_words/.test(k))),
-      chart: c.id === 'priciest_project' || c.id === 'project_graveyard' || c.id === 'continue_count' || c.id === 'typo_fingerprint' ? {...c.chart, series: []} : c.chart})),
+      numbers: Object.fromEntries(Object.entries(c.numbers).filter(([k]) => !/project|cheapest|^top$|night_words|day_words|^typo$|correction|^pet$/.test(k) && !(c.id === 'typo_fingerprint' && k === 'word'))),
+      chart: PRIVATE_CHARTS.has(c.id) ? {...c.chart, series: [], highlight: null} : c.chart})),
     projects: story.projects.map(p => ({...p, id: p.alias, name: null})),
     highlights: {
       ...h, mostTypedLine: null,
