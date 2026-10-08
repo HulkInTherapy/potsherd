@@ -2,6 +2,15 @@
 
 Public releases use package versions. Internal development phase numbers are planning milestones, not product versions. This public release consolidates a development snapshot; the original private development branches are preserved separately.
 
+## 1.7.0 — Native usage wallboard
+
+- Replace section tabs and scrolling with a responsive orange-and-neutral fullscreen wallboard. Show model prices, top projects and requested work, grouped source lines and observed directed reactions; use mixed left/right pages on smaller terminals.
+- Inventory native Claude Code, Codex, OpenCode and pi history before retained fallback. Stream full response usage separately from bounded latest complete-turn context; preserve cumulative, request/copy/fork and model-identity ambiguity semantics.
+- Keep current-catalog API-equivalent pricing, named exact Anthropic references, explicit cache durations and native recorded API-cost fields distinct. Unknown or contradictory usage and routing are not guessed.
+- Read actual privacy authority through guarded read-only SQLite metadata transactions instead of making a large index backup a startup prerequisite. Preserve committed-WAL checksums, ignore/forget revocation and immutable captured details after ordinary source appends.
+- Run heavy work in a cancellable background process. Require a visible, flushed recipient notice before every actual free-provider request, including concurrent requests; keep offline facts usable without a transfer claim.
+- Preserve legacy routes, executable aliases, storage and plugin identities. This release does not establish private semantic accuracy or universal latency.
+
 ## 1.6.2 — Live SQLite history
 
 - Read committed live-WAL history from bounded private snapshots using SQLite recovery, without opening or mutating the source database, WAL or shared-memory files. Keep ignore, forget and source-currentness fences; hold active rollback journals and unsafe captures with distinct reasons.

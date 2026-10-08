@@ -2,7 +2,7 @@
 
 [Slopie](https://github.com/HulkInTherapy/slopie), formerly Potsherd, is local memory for coding-agent sessions. Capture supported history, find exact source evidence, and save scoped handoffs with provenance.
 
-**Slopie 1.6.1 is published with provenance; this checkout prepares the 1.6.2 live-store patch.** Requires Node.js 22 or newer.
+Requires Node.js 22 or newer.
 
 ## Audit your recorded history
 
@@ -10,13 +10,17 @@
 npx slopie audit
 ```
 
-The default interactive audit sends selected redacted conversation text to OpenCode Zen and TypeSafe/Jev after its opening recipient notice, with no extra Enter step. It presents recorded API-equivalent value at a dated current price catalog, favourite model, real projects, recent Jev work stories, memorable source lines and direct-user language. Arrow keys or Tab switch sections; Enter opens details and evidence, Esc returns, S freezes the current view and q exits. `--tone elegant|witty|chaotic|roast` overrides the inferred voice. `--plain`, `--ascii`, `--no-color` and `--no-motion` support simpler terminals.
+The interactive audit opens one responsive wallboard with recorded API-equivalent value, known tokens, favourite models and prices, your top projects, requested work focus and source-backed repeated lines. Small terminals use left/right pages; `?` opens help, `s` freezes the displayed results, `d` opens a captured source and `q` exits. There are no section tabs or scrolling controls. `--plain` prints the full report; `--json` uses the safe aggregate representation. `--ascii`, `--no-color` and `--no-motion` support simpler terminals.
 
-Jev analyzes the largest complete recent scope that fits the free token and estimated time allowance: All, 45, 30, 7 or 3 days. When none fits, an explicitly labelled selection of the newest coherent episodes keeps the scope bounded and the calendar coverage partial. Its opening notice names OpenCode Zen and TypeSafe/Jev as recipients. Retained archives remain read-only; redacted conversation text is sent only through the qualified free route, with no paid fallback. The anonymous free-model route previously returned zero-cost answers for an authored synthetic sample. Current free capacity is limited: four authorized private requests received quota errors and no accepted answers, so private semantic accuracy is unavailable. No private accuracy pass or guaranteed capacity is claimed. Results and date inventories use a separate body-free local cache. Prices revalue recorded tokens at current catalog rates; they are not historical invoices. Missing usage, endpoints, rates or provenance stay visible.
+Native Claude Code, Codex, OpenCode and pi usage is read before retained-history fallback. Message/request identities, cumulative usage, cache inclusion and recorded per-response models determine the totals. Known machine/test inputs and copied history are separated from personal language. Reaction counts describe recorded feedback associated with a known assistant model; they are not model-quality benchmarks or universal human-authorship claims.
 
-The audit remains experimental. The unchanged large synthetic fixture took about 33 seconds cold and 22 seconds warm. Independent, untuned scores were usefulness 7/10, ease 8/10 and appearance 8/10 at 80 columns (7/10 at 40); these do not establish broader semantic accuracy.
+Prices revalue recorded usage at a dated current catalog. Exact known Claude models can use an explicitly named Anthropic first-party reference when the serving provider is unrecorded. Native recorded API-cost fields remain a separate basis. None is an invoice or subscription bill. Missing models, usage, rates and contradictory cache-duration fields stay unavailable.
 
-Use `slopie audit --legacy` for the local retention audit, or set `POTSHERD_OFFLINE=1` to keep the new retrospective local. Window estimates describe remaining analysis after inventory, not the entire cold command; large cold archives can take longer. `--sweep` and `--verify` keep their prior behavior. See [terminal audit coverage and privacy](docs/audit-terminal.md).
+Selected redacted conversations may be sent to OpenCode Zen and TypeSafe/Jev for free semantic analysis. A recipient notice is physically displayed immediately before each actual request, with no extra Enter or consumer key required. Offline and cache-only work makes no transfer claim. Set `POTSHERD_OFFLINE=1` to keep the retrospective local. Free capacity is limited; quota errors leave local facts usable and do not produce invented stories or quotes. Private semantic accuracy remains unqualified.
+
+Jev selects the largest complete recent scope fitting the free allowance, or a visibly smaller selection of newest whole episodes. Recorded requests, assistant-reported outcomes and supported success remain distinct. `--tone elegant|witty|chaotic|roast` overrides the inferred voice. The audit remains experimental; large inventories can take longer, and source-format or pricing gaps are disclosed. See [coverage and privacy](docs/audit-terminal.md).
+
+Use `slopie audit --legacy` for the local retention audit. `--sweep` and `--verify` keep their prior behavior.
 
 ## Install and use
 

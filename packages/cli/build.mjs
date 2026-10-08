@@ -47,6 +47,7 @@ const external = [
 
 const targets = [
   { in: 'src/index.ts', out: 'dist/potsherd.js' },
+  { in: 'src/audit-native-worker.ts', out: 'dist/audit-native-worker.js' },
 ];
 
 for (const t of targets) {
@@ -82,3 +83,5 @@ mkdirSync(path.join(here,'licenses'),{recursive:true});
 copyFileSync(path.join(repo,'licenses','js-tiktoken-MIT.txt'),path.join(here,'licenses','js-tiktoken-MIT.txt'));
 
 copyFileSync(path.join(repo,'licenses','models-dev-MIT.txt'),path.join(here,'licenses','models-dev-MIT.txt'));
+
+copyFileSync(path.join(repo,'licenses','ccusage-MIT.txt'),path.join(here,'licenses','ccusage-MIT.txt'));

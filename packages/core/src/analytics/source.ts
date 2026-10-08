@@ -11,7 +11,7 @@ import type {AuditHarness} from './contracts.js';
 export const digest=(value:string|Buffer):string=>createHash('sha256').update(value).digest('hex');
 export const clean=(text:string):string=>redact(elideBinary(text)).text;
 export const clock=(value:unknown):string|null=>typeof value==='string'&&Number.isFinite(Date.parse(value))?new Date(value).toISOString():null;
-export interface NativeEvent {key:string;rawStart:number;rawEnd:number;role:'user';text:string;eventAt:string|null;project:string|null;origin:'claude_prompt_id'|'codex_human_marker'|'pi_user_projection'|'unknown';eligible:boolean;excluded:string|null;identity:string;evidenceStart?:number;nativeRecordId?:string;recordCommitment?:string;declaredOrigin?:string;}
+export interface NativeEvent {observed?:boolean;languageEligible?:boolean;key:string;rawStart:number;rawEnd:number;role:'user';text:string;eventAt:string|null;project:string|null;origin:'claude_prompt_id'|'codex_human_marker'|'pi_user_projection'|'opencode_user_projection'|'unknown';eligible:boolean;excluded:string|null;identity:string;evidenceStart?:number;nativeRecordId?:string;recordCommitment?:string;declaredOrigin?:string;}
 export interface NativeFacts {nativeId:string;project:string|null;parent:string|null;child:boolean;title:string|null;events:NativeEvent[];gaps:string[];hash:string;consumed:number;bytes:Buffer;}
 
 /** A size check and a bounded fd read, with identity rechecked after reading. */
@@ -70,9 +70,9 @@ export async function nativeFacts(file:string,harness:Exclude<AuditHarness,'open
    const declared=typeof r.session_id==='string'&&r.session_id!==nativeId?r.session_id:undefined;
    const recordCopy={...r};delete recordCopy.sessionId;delete recordCopy.session_id;delete recordCopy.promptId;
    const stable=(value:unknown):unknown=>Array.isArray(value)?value.map(stable):isRecord(value)?Object.fromEntries(Object.keys(value).sort().map(k=>[k,stable(value[k])])):value;
-   const excluded=parent?'child_initialization':maintenance(text)?'maintenance_exclusion_marker':results?'tool_result':explicitMeta?'declared_meta_or_synthetic_input':declared?'inherited_identity_unverified':programmatic?'programmatic_origin_unattested':native?null:'injected_or_origin_unknown';
+   const excluded=parent&&events.length===0?'child_initialization':maintenance(text)?'maintenance_exclusion_marker':results?'tool_result':explicitMeta?'declared_meta_or_synthetic_input':declared?'inherited_identity_unverified':programmatic?'programmatic_origin_unattested':native?null:'injected_or_origin_unknown';
    if(programmatic&&!parent&&excluded!=='maintenance_exclusion_marker')gaps.add('human_attestation_unavailable');if(explicitMeta&&!parent)gaps.add('explicit_meta_or_synthetic_origin_unattested');
-   put({...base,text:clean(text),origin:native&&!declared&&!programmatic&&!explicitMeta?'claude_prompt_id':'unknown',eligible:native&&excluded===null,excluded,identity:native&&!explicitMeta?`prompt:${r.promptId}`:`record:${key}`,...(typeof r.uuid==='string'&&r.uuid.length>0?{nativeRecordId:r.uuid,recordCommitment:digest(JSON.stringify(stable(recordCopy)))}:{}),...(declared?{declaredOrigin:declared}:{})});
+   put({...base,observed:!results&&!explicitMeta&&!maintenance(text)&&!declared&&!(parent&&events.length===0),text:clean(text),origin:native&&!declared&&!programmatic&&!explicitMeta?'claude_prompt_id':'unknown',eligible:native&&excluded===null,excluded,identity:native&&!explicitMeta?`prompt:${r.promptId}`:`record:${key}`,...(typeof r.uuid==='string'&&r.uuid.length>0?{nativeRecordId:r.uuid,recordCommitment:digest(JSON.stringify(stable(recordCopy)))}:{}),...(declared?{declaredOrigin:declared}:{})});
   }else if(harness==='codex'){
    if(r.type==='session_meta'){
     nativeId=typeof p.session_id==='string'?p.session_id:typeof p.id==='string'?p.id:nativeId;
@@ -92,14 +92,14 @@ export async function nativeFacts(file:string,harness:Exclude<AuditHarness,'open
    const text=p.type==='user_message'&&typeof p.message==='string'?p.message:p.type==='item_completed'&&item.type==='UserMessage'?extractTextFromContent(item.content):'';
    if(!text.trim())continue;
    const id=typeof item.id==='string'?`item:${item.id}`:`marker:${line.start}`;
-   const excluded=parent?'child_initialization':maintenance(text)?'maintenance_exclusion_marker':programmatic?'programmatic_origin_unattested':null;
+   const excluded=parent&&events.length===0?'child_initialization':maintenance(text)?'maintenance_exclusion_marker':programmatic?'programmatic_origin_unattested':null;
    if(programmatic&&!parent&&excluded!=='maintenance_exclusion_marker')gaps.add('human_attestation_unavailable');
-   const event:NativeEvent={...base,text:clean(text),origin:programmatic?'unknown':'codex_human_marker',eligible:excluded===null,excluded,identity:id};
+   const event:NativeEvent={...base,observed:excluded===null||excluded==='programmatic_origin_unattested',text:clean(text),origin:programmatic?'unknown':'codex_human_marker',eligible:excluded===null,excluded,identity:id};
    const before=events.length;put(event);if(events.length>before)markers.push({event,turn});
   }else{
    if(r.type==='session'){if(typeof r.id==='string')nativeId=r.id;if(typeof r.cwd==='string')project=r.cwd;if(typeof r.parentSessionId==='string')parent=r.parentSessionId;continue;}
    if(r.type!=='message'||m.role!=='user')continue;const text=extractTypedText(m.content);if(!text.trim())continue;
-   put({...base,text:clean(text),origin:'pi_user_projection',eligible:false,excluded:'projection_origin_unverified',identity:`node:${typeof r.id==='string'?r.id:key}`});gaps.add('pi_exchange_projection_fidelity');
+   put({...base,observed:r.isMeta!==true&&r.isSynthetic!==true&&!maintenance(text),text:clean(text),origin:'pi_user_projection',eligible:false,excluded:'projection_origin_unverified',identity:`node:${typeof r.id==='string'?r.id:key}`});gaps.add('pi_exchange_projection_fidelity');
   }
  }
  if(harness==='codex'){
@@ -116,7 +116,7 @@ export async function nativeFacts(file:string,harness:Exclude<AuditHarness,'open
   }
  }
  if(parent&&harness==='claude')nativeId=`${parent}:${path.basename(file,'.jsonl')}`;
- if(parent){for(const event of events){event.eligible=false;event.excluded='child_initialization';}}
+ if(parent){for(const event of events)event.eligible=false;}
  if(harness==='pi')gaps.add('pi_exchange_projection_fidelity');
  const complete=bytes.subarray(0,consumed);return {nativeId,project,parent,child:parent!==null,title,events,gaps:[...gaps],hash:digest(complete),consumed,bytes:complete};
 }

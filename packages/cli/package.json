@@ -1,6 +1,6 @@
 {
   "name": "slopie",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "description": "Slopie: inspect retained coding-agent history with a terminal audit and sourced local memory.",
   "type": "module",
   "license": "MIT",
@@ -34,6 +34,8 @@
     "bin",
     "dist/potsherd.js",
     "dist/potsherd.js.map",
+    "dist/audit-native-worker.js",
+    "dist/audit-native-worker.js.map",
     "README.md",
     "LICENSE",
     "NOTICE",

@@ -11,6 +11,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ARTIFACTS = [
   ['packages/cli/dist/potsherd.js', 'dist/potsherd.js'],
   ['packages/mcp/dist/index.js', 'dist/mcp.js'],
+  ['packages/cli/dist/audit-native-worker.js', 'dist/audit-native-worker.js'],
 ];
 const PLUGINS = ['plugins/claude-code','plugins/codex'];
 
@@ -27,7 +28,7 @@ const BUILD_INPUTS = [
   ':(glob)plugins/*/package.json',
   ':(glob)plugins/*/.*-plugin/*.json',
   '.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json',
-  'LICENSE', 'NOTICE', 'licenses/js-tiktoken-MIT.txt', 'licenses/models-dev-MIT.txt',
+  'LICENSE', 'NOTICE', 'licenses/js-tiktoken-MIT.txt', 'licenses/models-dev-MIT.txt', 'licenses/ccusage-MIT.txt',
 ];
 const sourceRevision = execFileSync('git', ['log', '-1', '--format=%H', '--', ...BUILD_INPUTS], {
   cwd: repo, encoding: 'utf8',
@@ -52,7 +53,7 @@ for (const plugin of PLUGINS) {
   }
   for(const license of ['LICENSE','NOTICE'])copyFileSync(path.join(repo,license),path.join(repo,plugin,license));
   mkdirSync(path.join(repo,plugin,'licenses'),{recursive:true});
-  for(const license of ['js-tiktoken-MIT.txt','models-dev-MIT.txt'])copyFileSync(path.join(repo,'licenses',license),path.join(repo,plugin,'licenses',license));
+  for(const license of ['js-tiktoken-MIT.txt','models-dev-MIT.txt','ccusage-MIT.txt'])copyFileSync(path.join(repo,'licenses',license),path.join(repo,plugin,'licenses',license));
   const files=Object.fromEntries(ARTIFACTS.map(([,name])=>{const body=readFileSync(path.join(repo,plugin,name));return [name,{bytes:body.length,sha256:createHash('sha256').update(body).digest('hex')}];}));
   const version=JSON.parse(readFileSync(path.join(repo,'packages','cli','package.json'),'utf8')).version;
   writeFileSync(path.join(repo,plugin,'dist','artifact-manifest.json'),JSON.stringify({contractVersion:2,version,sourceRevision,files,budgetTokenizer:'cl100k-base/js-tiktoken@1.0.21',semanticAssets:'explicit maintain acquisition; not bundled or downloaded on read'},null,2)+'\n');

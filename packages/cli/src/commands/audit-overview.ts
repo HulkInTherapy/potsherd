@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createAuditSession, publicAuditSnapshot, type AuditHarness, type AuditOverviewOptions, type AuditScope, type AuditTone } from '@potsherd/core';
+import { publicAuditSnapshot, type AuditHarness, type AuditOverviewOptions, type AuditScope, type AuditTone } from '@potsherd/core';
 import { print, printJson, themeFrom, UserError } from '../output.js';
 import type { AuditOptions } from './audit.js';
 
@@ -23,12 +23,12 @@ export async function runAuditOverview(o: AuditOptions): Promise<number> {
   const interactive = !o.json && !o.plain && !o.export && Boolean(process.stdin.isTTY && process.stdout.isTTY) && width >= 38 && (process.stdout.rows ?? 24) >= 18;
   themeFrom(o);
   for (;;) {
-    const session = createAuditSession(options);
+    const {createBackgroundAuditSession}=await import('../audit-background.js');
+    const session = createBackgroundAuditSession(options);
     try {
       if (!interactive) {
-        const notice=session.snapshot().launch!.notice.replace('Esc cancels.','Ctrl-C cancels.');
-        if(o.json)process.stderr.write(notice+'\n');else{const lines:string[]=[];let current='';for(const word of notice.split(' ')){if(current.length+word.length+1>width){lines.push(current);current=word;}else current+=(current?' ':'')+word;}if(current)lines.push(current);print(lines.join('\n'));}
-        const snapshot = await session.run();
+        const stop=()=>session.cancel();process.once('SIGTERM',stop);process.once('SIGHUP',stop);
+        let snapshot;try{snapshot = await session.run(event=>{if(event.type==='transfer'){process.stderr.write(event.notice+'\n',()=>{if(event.ackId)session.acknowledgeTransfer?.(event.ackId);});}});}finally{process.removeListener('SIGTERM',stop);process.removeListener('SIGHUP',stop);}
         if (o.json) printJson(publicAuditSnapshot(snapshot));
         else print(ui.renderLaunchPlain(snapshot,{ascii:o.ascii,width}));
         if (o.export) {
@@ -36,7 +36,7 @@ export async function runAuditOverview(o: AuditOptions): Promise<number> {
           fs.writeFileSync(file,ui.renderAuditShareSvg(snapshot,{width}),{flag:'wx'});
           if (!o.json) print(`Saved safe share preview: ${file}`);
         }
-        return snapshot.status === 'error' ? 1 : 0;
+        return snapshot.status === 'cancelled' ? 130 : snapshot.status === 'error' ? 1 : 0;
       }
       let requestedScope: AuditScope|null = null;
       const result = await ui.runLaunchTerminal(session,{
@@ -48,7 +48,6 @@ export async function runAuditOverview(o: AuditOptions): Promise<number> {
         options={...options,harnesses:scope.harnesses,project:scope.project ?? undefined,since:scope.eventFrom ?? undefined,until:scope.asOf ?? undefined,timezone:scope.timezone};
         continue;
       }
-      print(ui.renderLaunchPlain(result.snapshot,{ascii:o.ascii,width}));
       return result.reason === 'cancelled' ? 130 : result.snapshot.status === 'error' ? 1 : 0;
     } finally { session.dispose(); }
   }

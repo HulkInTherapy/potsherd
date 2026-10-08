@@ -29,6 +29,10 @@ import { runStack } from './commands/stack.js';
 import { VERSION } from '@potsherd/core';
 export { VERSION };
 
+// React and Ink are loaded only by the interactive route, after this bootstrap.
+// Ordinary CLI processes use production rendering; explicit environments stay intact.
+if (process.env.NODE_ENV === undefined) process.env.NODE_ENV = 'production';
+
 /**
  * The `potsherd` binary.
  *
@@ -1152,4 +1156,6 @@ function tour(o: { width?: number; ascii?: boolean; color?: boolean; json?: bool
   print('');
 }
 
-main(process.argv);
+if(process.argv[2]==='__audit_worker'&&process.send){
+  void import('./audit-background.js').then(({runAuditWorkerHost})=>runAuditWorkerHost());
+}else main(process.argv);
