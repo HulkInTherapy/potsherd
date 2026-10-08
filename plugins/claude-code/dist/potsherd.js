@@ -15294,7 +15294,7 @@ function createNativeUsageAccumulator(harness, conversationId, options = {}) {
     previous = null;
   }, pushLine, records: () => [...records.values()], counts: () => ({ observed: observed2, excluded, deduplicated: Math.max(0, observed2 - excluded - records.size) }) };
 }
-function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
+function extractNativeUsageWithCounts(bytes3, harness, conversationId, options = {}) {
   const text2 = Buffer.isBuffer(bytes3) ? bytes3.toString("utf8") : bytes3, acc = createNativeUsageAccumulator(harness, conversationId, options);
   const lines = text2.trimStart().startsWith("[") ? (() => {
     try {
@@ -15305,7 +15305,10 @@ function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
   })() : text2.split("\n");
   for (const line of lines)
     acc.pushLine(line);
-  return acc.records();
+  return { usage: acc.records(), counts: acc.counts() };
+}
+function extractNativeUsage(bytes3, harness, conversationId, options = {}) {
+  return extractNativeUsageWithCounts(bytes3, harness, conversationId, options).usage;
 }
 var obj, str2, num2, cost, hash3, at;
 var init_native_usage = __esm({
@@ -18751,6 +18754,7 @@ var init_analytics = __esm({
       epochs = null;
       policyCommitment = null;
       hadStore = false;
+      nativeExcluded = /* @__PURE__ */ new Map();
       nativeLedger = [];
       entries = /* @__PURE__ */ new Map();
       routes = /* @__PURE__ */ new Map();
@@ -18768,8 +18772,13 @@ var init_analytics = __esm({
       nativeReadBytes = 0;
       globalUsageDuplicates = 0;
       databaseResponsesObserved = 0;
+      retainedResponseCounts = { observed: 0, excluded: 0, deduplicated: 0 };
       lastParsingEmit = 0;
       lastFactsEmit = 0;
+      earlyPricing = false;
+      earlySeen = /* @__PURE__ */ new Set();
+      representedFiles = /* @__PURE__ */ new Set();
+      representedIds = /* @__PURE__ */ new Set();
       factTotal = null;
       factsCompleted = /* @__PURE__ */ new Set();
       factsCacheHits = 0;
@@ -18854,6 +18863,16 @@ var init_analytics = __esm({
           this.policyAvailable = false;
           this.gap("audit_snapshot_stale");
           stage = "partial";
+        }
+        if (stage === "parsing" && this.options.launch) {
+          const counts2 = /* @__PURE__ */ new Map();
+          for (const entry of this.entries.values())
+            counts2.set(entry.conversation.harness, (counts2.get(entry.conversation.harness) ?? 0) + 1);
+          const progress2 = { ...this.current.progress, stage: "parsing", completed: this.factsCompleted.size + this.funnel.retainedSources, total: null, provisional: true, cancellable: true };
+          this.update({ status: "parsing", sequence: ++this.sequence, progress: progress2, sources: this.current.sources.map((source) => ({ ...source, conversations: counts2.get(source.harness) ?? 0 })), funnel: { ...this.funnel, selectedSources: this.entries.size, gaps: [...this.gaps] } });
+          this.callback?.({ type: "progress", snapshotId: this.id, sequence: this.sequence, progress: progress2, sources: this.current.sources });
+          this.callback?.({ type: "snapshot", snapshot: this.current });
+          return;
         }
         this.originProofs();
         if (stage === "cancelled")
@@ -19022,7 +19041,7 @@ var init_analytics = __esm({
           if (this.authority && readAuditAuthority(dbPath(this.root), configPath(this.root)).commitment !== this.authority.commitment)
             return false;
           if (content)
-            for (const source of this.nativeLedger) {
+            for (const source of [...this.nativeLedger, ...this.nativeExcluded.values()]) {
               const stat = fs30.statSync(source.file);
               if (stat.size !== source.bytes || digestFile(source.file) !== source.hash)
                 return false;
@@ -19105,6 +19124,8 @@ var init_analytics = __esm({
         }
       }
       denied(id, project) {
+        if (this.nativeExcluded.has(id))
+          return true;
         if (project && isIgnoredProject(project, this.ignored))
           return true;
         if (this.options.launch && this.authority)
@@ -19233,7 +19254,7 @@ var init_analytics = __esm({
         this.callback?.({ type: "snapshot", snapshot: this.current });
       }
       cacheBinding(id, identity5, contentHash, currentness) {
-        return { sourceId: id, sourceIdentity: identity5, contentHash, currentness, privacyPolicy: digest(JSON.stringify([this.authority?.commitment, this.policyCommitment, this.current.scope.project, this.ignored])), forgetEpoch: digest(JSON.stringify(this.epochs ?? "no-store")), normalizationVersion: NORMALIZATION_VERSION + "/audit-requested-user-v4" };
+        return { sourceId: id, sourceIdentity: identity5, contentHash, currentness, privacyPolicy: digest(JSON.stringify([this.authority?.commitment, this.policyCommitment, this.current.scope.project, this.ignored, [...this.nativeExcluded.keys()].sort()])), forgetEpoch: digest(JSON.stringify(this.epochs ?? "no-store")), normalizationVersion: NORMALIZATION_VERSION + "/audit-source-exclusion-v5" };
       }
       launchAllowed(project) {
         return !(project && isIgnoredProject(project, this.ignored)) && (!this.current.scope.project || project === this.current.scope.project);
@@ -19244,6 +19265,7 @@ var init_analytics = __esm({
           return;
         }
         this.launchPublish({ stage: "sizing" });
+        this.retainedResponseCounts = { observed: 0, excluded: 0, deduplicated: 0 };
         const nativeIds = new Set(this.nativeLedger.map((source) => source.id));
         const records = this.nativeLedger.flatMap((source) => source.usage), contexts = [], language = this.nativeLedger.flatMap((source) => source.language), contextGaps = /* @__PURE__ */ new Set();
         for (const entry of this.entries.values()) {
@@ -19260,9 +19282,13 @@ var init_analytics = __esm({
           }
           const id = entry.conversation.id, binding2 = { ...this.cacheBinding(id, entry.file ?? id, entry.hash, digest(JSON.stringify(entry.fileStat ?? entry.hash))), scopeHash: digest(JSON.stringify([this.current.scope.eventFrom, this.current.scope.asOf, this.current.scope.harnesses])) };
           const validateUsage = (v) => Array.isArray(v) && v.every((r) => r && typeof r === "object" && typeof r.id === "string" && r.conversationId === id && ["claude", "codex", "pi", "opencode"].includes(r.harness) && Array.isArray(r.gaps) && ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens"].every((k) => r[k] === null || Number.isSafeInteger(r[k]) && r[k] >= 0));
-          let usage = entry.fullUsage ?? this.derived?.read("native-usage", binding2, validateUsage) ?? null;
+          let usage = entry.fullUsage ?? null;
           if (!usage) {
-            usage = extractNativeUsage(bytes3, entry.conversation.harness, id, { project: entry.project, maxRecords: this.limits.records, acceptRecord: (_record, scope2) => this.launchAllowed(scope2.project) && (!this.current.scope.eventFrom || scope2.eventAt !== null && scope2.eventAt >= this.current.scope.eventFrom) && (!this.current.scope.asOf || scope2.eventAt !== null && scope2.eventAt <= this.current.scope.asOf) });
+            const extracted = extractNativeUsageWithCounts(bytes3, entry.conversation.harness, id, { project: entry.project, maxRecords: this.limits.records, acceptRecord: (_record, scope2) => this.launchAllowed(scope2.project) && (!this.current.scope.eventFrom || scope2.eventAt !== null && scope2.eventAt >= this.current.scope.eventFrom) && (!this.current.scope.asOf || scope2.eventAt !== null && scope2.eventAt <= this.current.scope.asOf) });
+            usage = extracted.usage;
+            this.retainedResponseCounts.observed += extracted.counts.observed;
+            this.retainedResponseCounts.excluded += extracted.counts.excluded;
+            this.retainedResponseCounts.deduplicated += extracted.counts.deduplicated;
             try {
               if (this.fresh())
                 this.derived?.write("native-usage", binding2, usage, validateUsage);
@@ -19295,7 +19321,7 @@ var init_analytics = __esm({
         this.globalUsageDuplicates = globalDuplicates;
         this.deriveResponseFunnel();
         this.update({ funnel: { ...this.funnel, selectedSources: this.entries.size, gaps: [...this.gaps] } });
-        this.launchPublish({ facts, factProgress: { state: "complete", completedSources: this.factsCompleted.size, totalSources: this.factTotal, cacheHits: this.factsCacheHits, coverage: "completed_sources", origin: this.factsCacheHits ? "mixed" : "fresh" }, ...summarizeDirectedLanguage(allPrompts, language), languageByModel: attributeDirectLanguage(this.current.profanity, language, allPrompts), stage: "preparing" });
+        this.launchPublish({ facts, factProgress: { state: "complete", completedSources: this.factsCompleted.size, totalSources: this.factTotal, representedSources: this.factsCompleted.size, cacheHits: this.factsCacheHits, coverage: "completed_sources", origin: this.factsCacheHits ? "mixed" : "fresh" }, ...summarizeDirectedLanguage(allPrompts, language), languageByModel: attributeDirectLanguage(this.current.profanity, language, allPrompts), stage: "preparing" });
         if (process.env["POTSHERD_OFFLINE"] === "1" && !this.options.launchPrepareOnly) {
           this.launchPublish({ semantics: { state: "unavailable", recipientNotice: this.current.launch.notice, model: null, window: { selected: null, choices: [], tokenLimit: 1e5, reason: "Offline audit; requested-work analysis was not run." }, stories: [], hallOfFame: [], work: [], tone: this.options.tone ?? "elegant", judgments: [], attempts: 0, cacheHits: 0, inputTokens: 0, outputTokens: 0, gaps: ["offline_requested", "requested_user_context_only"] }, stage: "ready" });
           return;
@@ -19363,9 +19389,9 @@ var init_analytics = __esm({
         }
       }
       deriveResponseFunnel() {
-        this.funnel.responsesObserved = this.databaseResponsesObserved + this.funnel.sourceFiles.reduce((n3, r) => n3 + r.responsesObserved, 0);
-        this.funnel.responsesExcluded = this.funnel.sourceFiles.reduce((n3, r) => n3 + r.responsesExcluded, 0);
-        this.funnel.responsesDeduplicated = this.globalUsageDuplicates + this.funnel.sourceFiles.reduce((n3, r) => n3 + r.responsesDeduplicated, 0);
+        this.funnel.responsesObserved = this.databaseResponsesObserved + this.retainedResponseCounts.observed + this.funnel.sourceFiles.reduce((n3, r) => n3 + r.responsesObserved, 0);
+        this.funnel.responsesExcluded = this.retainedResponseCounts.excluded + this.funnel.sourceFiles.reduce((n3, r) => n3 + r.responsesExcluded, 0);
+        this.funnel.responsesDeduplicated = this.globalUsageDuplicates + this.retainedResponseCounts.deduplicated + this.funnel.sourceFiles.reduce((n3, r) => n3 + r.responsesDeduplicated, 0);
       }
       /** Only complete, policy-eligible frozen sources enter progressive pricing. */
       orderedNativeFiles(files) {
@@ -19382,19 +19408,69 @@ var init_analytics = __esm({
       publishNativeFacts(force = false) {
         if (!this.current.launch || this.stale || this.controller.signal.aborted)
           return;
+        const revoked = [...this.representedIds].some((id) => this.nativeExcluded.has(id));
+        if (revoked) {
+          this.earlyPricing = true;
+          this.earlySeen.clear();
+          this.representedFiles.clear();
+          this.representedIds.clear();
+          this.gap("native_price_preview_revoked");
+          this.update({ coverage: { ...this.current.coverage, state: "partial", gapCodes: [...this.gaps].sort() } });
+        }
+        let meaningful = false;
+        if (!this.earlyPricing) {
+          const nativeIds = new Set(this.nativeLedger.map((source) => source.id));
+          for (const source of this.nativeLedger) {
+            if (this.earlySeen.has(source.file))
+              continue;
+            this.earlySeen.add(source.file);
+            for (const r of source.usage) {
+              const value = valueInference(r, this.catalog ?? void 0);
+              if ((value.valueUsd ?? 0) > 0 || (value.referenceValueUsd ?? 0) > 0) {
+                meaningful = true;
+                break;
+              }
+            }
+            if (meaningful)
+              break;
+          }
+          if (!meaningful)
+            for (const entry of this.entries.values()) {
+              if (nativeIds.has(entry.conversation.id) || !entry.fullUsage || this.earlySeen.has(entry.conversation.id))
+                continue;
+              this.earlySeen.add(entry.conversation.id);
+              if (entry.fullUsage.some((r) => {
+                const v = valueInference(r, this.catalog ?? void 0);
+                return (v.valueUsd ?? 0) > 0 || (v.referenceValueUsd ?? 0) > 0;
+              })) {
+                meaningful = true;
+                break;
+              }
+            }
+        }
         const now = Date.now();
-        if (!force && now - this.lastFactsEmit < 250)
+        if (!force && !meaningful && !revoked && now - this.lastFactsEmit < 250)
           return;
         this.lastFactsEmit = now;
-        const nativeIds = new Set(this.nativeLedger.map((source) => source.id)), records = this.nativeLedger.flatMap((source) => source.usage);
-        for (const entry of this.entries.values())
-          if (!nativeIds.has(entry.conversation.id) && entry.fullUsage)
-            records.push(...entry.fullUsage);
-        const facts = aggregateLaunchFacts(records, this.catalog ?? void 0);
-        this.funnel.responsesPriced = facts.equivalentPricedResponses;
-        this.globalUsageDuplicates = Math.max(0, records.length - facts.recordedResponses);
-        this.deriveResponseFunnel();
-        this.launchPublish({ facts: { ...facts, records: [], recordsIncluded: false }, factProgress: { state: "collecting", completedSources: this.factsCompleted.size, totalSources: this.factTotal, cacheHits: this.factsCacheHits, coverage: "completed_sources", origin: this.factsCacheHits ? "mixed" : "fresh" } });
+        let facts = this.current.launch.facts;
+        if (meaningful) {
+          const nativeIds = new Set(this.nativeLedger.map((source) => source.id)), records = this.nativeLedger.flatMap((source) => source.usage);
+          for (const source of this.nativeLedger) {
+            this.representedFiles.add(source.file);
+            this.representedIds.add(source.id);
+          }
+          for (const entry of this.entries.values())
+            if (!nativeIds.has(entry.conversation.id) && entry.fullUsage) {
+              records.push(...entry.fullUsage);
+              this.representedFiles.add(entry.file ?? entry.conversation.id);
+              this.representedIds.add(entry.conversation.id);
+            }
+          const full = aggregateLaunchFacts(records, this.catalog ?? void 0);
+          facts = { ...full, records: [], recordsIncluded: false };
+          this.earlyPricing = true;
+        } else if (revoked)
+          facts = null;
+        this.launchPublish({ facts, factProgress: { state: "collecting", completedSources: this.factsCompleted.size, totalSources: this.factTotal, representedSources: this.representedFiles.size, cacheHits: this.factsCacheHits, coverage: "completed_sources", origin: this.factsCacheHits ? "mixed" : "fresh" } });
       }
       nativeUsageCacheBinding(file, hash5, stamp) {
         return { ...this.cacheBinding(digest(file), file, hash5, stamp), scopeHash: digest(JSON.stringify(this.current.scope)) };
@@ -19456,6 +19532,34 @@ var init_analytics = __esm({
         this.factsCacheHits = this.factsCachedFiles.size;
         return true;
       }
+      excludeNativeSource(id, file, snapshot) {
+        this.nativeExcluded.set(id, { file, hash: snapshot.hash, bytes: snapshot.bytes });
+        const removed = this.nativeLedger.filter((source) => source.id === id), hashes = new Set(removed.map((source) => digest(source.file)));
+        this.nativeLedger = this.nativeLedger.filter((source) => source.id !== id);
+        this.remove(id);
+        for (const row2 of this.funnel.sourceFiles)
+          if (hashes.has(row2.fileHash)) {
+            row2.state = "excluded";
+            row2.code = "maintenance_source_excluded";
+            row2.responsesExcluded = row2.responsesObserved;
+            row2.responsesDeduplicated = 0;
+          }
+        for (const source of [...removed, { file, hash: snapshot.hash }]) {
+          this.factsCachedFiles.delete(source.file);
+          try {
+            const binding2 = this.nativeUsageCacheBinding(source.file, source.hash, "source-excluded");
+            this.derived?.invalidate("native-facts", binding2);
+            this.derived?.invalidate("native-fact-pointer", binding2);
+          } catch {
+          }
+        }
+        this.factsCacheHits = this.factsCachedFiles.size;
+        try {
+          this.derived?.invalidate("native-usage", this.cacheBinding(id, file, snapshot.hash, "source-excluded"));
+        } catch {
+        }
+        this.deriveResponseFunnel();
+      }
       async streamPrimary(file, harness, prepared) {
         const remaining = 4 * 1024 * 1024 * 1024 - this.nativeReadBytes;
         if (remaining <= 0)
@@ -19468,8 +19572,19 @@ var init_analytics = __esm({
           this.invalidate();
           throw new Error("audit_snapshot_stale");
         }
+        const source = sourceId(harness, snapshot.facts.nativeId), wholeExcluded = snapshot.facts.gaps.includes("maintenance_source_excluded") || this.nativeExcluded.has(source);
+        if (snapshot.facts.gaps.includes("maintenance_source_excluded"))
+          this.excludeNativeSource(source, file, snapshot);
+        if (wholeExcluded) {
+          snapshot.usage = [];
+          snapshot.language = [];
+          snapshot.facts.events = [];
+          if (!snapshot.facts.gaps.includes("maintenance_source_excluded"))
+            snapshot.facts.gaps.push("maintenance_source_excluded");
+          snapshot.counts = { observed: snapshot.counts.observed, excluded: snapshot.counts.observed, deduplicated: 0 };
+        }
         this.factsCompleted.add(file);
-        if (!this.reuseCapturedUsage(file, harness, snapshot))
+        if (!wholeExcluded && !this.reuseCapturedUsage(file, harness, snapshot))
           this.cacheNativeUsage(file, snapshot);
         this.nativeReadBytes += snapshot.bytes;
         this.totalBytes += snapshot.facts.bytes.length;
@@ -19477,12 +19592,13 @@ var init_analytics = __esm({
         this.funnel.sourceFiles.push({ fileHash: digest(file), harness, bytes: snapshot.bytes, state: snapshot.facts.gaps.includes("maintenance_source_excluded") ? "excluded" : "parsed", code: snapshot.facts.gaps.find((g) => g.startsWith("native_metadata_") || g === "native_scope_record_unavailable") ?? snapshot.facts.gaps[0] ?? null, responsesObserved: snapshot.counts.observed, responsesExcluded: snapshot.facts.gaps.includes("maintenance_source_excluded") ? snapshot.counts.observed : snapshot.counts.excluded, responsesDeduplicated: snapshot.counts.deduplicated });
         this.deriveResponseFunnel();
         if (snapshot.facts.gaps.includes("maintenance_source_excluded")) {
-          this.nativeLedger = this.nativeLedger.filter((source) => source.file !== file);
+          this.nativeLedger = this.nativeLedger.filter((source2) => source2.file !== file);
           this.funnel.excludedReasons = { ...this.funnel.excludedReasons, maintenance_source: (this.funnel.excludedReasons.maintenance_source ?? 0) + 1 };
+          this.publishNativeFacts(true);
           return;
         }
         const id = sourceId(harness, snapshot.facts.nativeId);
-        const ledger = { id, file, hash: snapshot.hash, bytes: snapshot.bytes, usage: snapshot.usage, language: snapshot.language }, cachedIndex = this.nativeLedger.findIndex((source) => source.file === file);
+        const ledger = { id, file, hash: snapshot.hash, bytes: snapshot.bytes, usage: snapshot.usage, language: snapshot.language }, cachedIndex = this.nativeLedger.findIndex((source2) => source2.file === file);
         if (cachedIndex >= 0)
           this.nativeLedger[cachedIndex] = ledger;
         else
@@ -19682,7 +19798,7 @@ var init_analytics = __esm({
                 throw new Error("native_usage_total_bytes_limit");
               this.sourceCandidate(candidate.harness, false);
               reserved += bytes3;
-              const job = { jobId: this.id + ":native:" + cursor, ordinal: cursor, file: candidate.file, harness: candidate.harness, bytes: bytes3, stamp: { dev: String(stat.dev), ino: String(stat.ino), size: bytes3, mtimeNs: String(stat.mtimeNs), ctimeNs: String(stat.ctimeNs) }, maxBytes: bytes3, maxRecords: 1e6, maxPromptBytes: 64 * 1024 * 1024, policy: { authorityCommitment: this.authority?.commitment ?? "no-store", ignoredProjects: this.ignored, forgottenSourceIds: [...this.authority?.forgottenSourceIds ?? []], project: this.current.scope.project, eventFrom: this.current.scope.eventFrom, asOf: this.current.scope.asOf } };
+              const job = { jobId: this.id + ":native:" + cursor, ordinal: cursor, file: candidate.file, harness: candidate.harness, bytes: bytes3, stamp: { dev: String(stat.dev), ino: String(stat.ino), size: bytes3, mtimeNs: String(stat.mtimeNs), ctimeNs: String(stat.ctimeNs) }, maxBytes: bytes3, maxRecords: 1e6, maxPromptBytes: 64 * 1024 * 1024, policy: { authorityCommitment: this.authority?.commitment ?? "no-store", ignoredProjects: this.ignored, forgottenSourceIds: [...this.authority?.forgottenSourceIds ?? [], ...this.nativeExcluded.keys()], project: this.current.scope.project, eventFrom: this.current.scope.eventFrom, asOf: this.current.scope.asOf } };
               const result = (executor ? executor.scan(job, this.controller.signal) : streamNativeFacts(candidate.file, job.harness, { signal: this.controller.signal, maxBytes: bytes3, maxRecords: job.maxRecords, maxPromptBytes: job.maxPromptBytes, captureBytes: 0, captureFileBytes: bytes3, expectedIdentity: { dev: job.stamp.dev, ino: job.stamp.ino }, sourceAllowed: (id, project) => !this.denied(sourceId(job.harness, id), project), accept: (project, time2) => this.launchAllowed(project) && (!this.current.scope.eventFrom || time2 !== null && time2 >= this.current.scope.eventFrom) && (!this.current.scope.asOf || time2 !== null && time2 <= this.current.scope.asOf) })).then((snapshot) => ({ snapshot }), (error) => ({ error }));
               pending.push({ candidate, result, reserved: bytes3 });
             } catch (error) {
@@ -19935,7 +20051,7 @@ var init_analytics = __esm({
         });
         if (!this.fresh(true))
           throw new Error("audit_snapshot_stale");
-        return { scope: this.current.scope, sourceVersion: this.current.commitment ?? digest(JSON.stringify(this.epochs)), privacyVersion: digest(JSON.stringify([this.policyCommitment, this.current.scope.project, this.ignored])), model: FREE_JEV_MODEL, window: semantic?.window ?? null, requests };
+        return { scope: this.current.scope, sourceVersion: this.current.commitment ?? digest(JSON.stringify(this.epochs)), privacyVersion: digest(JSON.stringify([this.policyCommitment, this.current.scope.project, this.ignored, [...this.nativeExcluded.keys()].sort()])), model: FREE_JEV_MODEL, window: semantic?.window ?? null, requests };
       }
       async analyzePeriod(period, onEvent) {
         this.assertOpen();
@@ -37171,9 +37287,18 @@ function buildWallHero(snapshot, width, options = {}) {
   const cached4 = progress && (progress.origin === "cache" || progress.origin === "mixed"), collecting = launchIsLoading(snapshot), completed = progress ? `${wallNumber(progress.completedSources)}${progress.totalSources === null ? "" : "/" + wallNumber(progress.totalSources)} sources` : "";
   const cacheLabel = progress?.origin === "mixed" ? "Cached + fresh" : cached4 ? "Cached" : "";
   const count2 = progress ? `${wallNumber(progress.completedSources)}${progress.totalSources === null ? "" : "/" + wallNumber(progress.totalSources)}` : "";
+  const represented = progress?.representedSources ?? progress?.completedSources, subset = progress && represented !== void 0 && represented < progress.completedSources;
+  const mark = collecting ? wallProgressMark(options) : "", markWidth = (options.widthOf ?? auditCellWidth)(mark);
+  if (subset) {
+    const priced = `Subtotal \xB7 prices from ${wallNumber(represented)} sources`, checked = `checked ${count2}`;
+    if (width < 45) {
+      rows.push([{ text: mark, tone: "amber" }, { text: clipped(`Checked ${count2}${cached4 ? " \xB7 " + (progress.origin === "mixed" ? "cache+fresh" : "cached") : ""}`, width - markWidth, options), tone: "dim" }]);
+      rows.push(textLine(clipped(priced, width, options), "dim"));
+    } else rows.push([{ text: mark, tone: "amber" }, { text: clipped(`${priced} \xB7 ${checked}${cacheLabel ? " \xB7 " + cacheLabel : ""}`, width - markWidth, options), tone: "dim" }]);
+    return rows;
+  }
   const cue = collecting && width < 45 && progress ? `${progress.state === "complete" ? "Work" : "Collect"} ${count2} src${cached4 ? " \xB7 " + (progress.origin === "mixed" ? "cache+fresh" : "cached") : ""}` : collecting ? `${cacheLabel ? cacheLabel + " \xB7 " : ""}${progress?.state === "complete" ? "Working" : "Collecting"}${completed ? " \xB7 " + completed : ""} \xB7 ${snapshot.progress.label ?? "Reading local history"}` : cached4 ? `${cacheLabel} \xB7 ${partial ? "partial sources" : "completed sources"}` : partial ? "Partial \xB7 known usage only" : "Current-rate estimate";
-  const mark = collecting ? wallProgressMark(options) : "";
-  rows.push([{ text: mark, tone: "amber" }, { text: clipped(cue, width - (options.widthOf ?? auditCellWidth)(mark), options), tone: "dim" }]);
+  rows.push([{ text: mark, tone: "amber" }, { text: clipped(cue, width - markWidth, options), tone: "dim" }]);
   return rows;
 }
 function modelCard(snapshot, width, options) {
@@ -37420,6 +37545,12 @@ function applyLaunchPrivacyEvent(view, event) {
   const snapshot = { ...source, status: "error", coverage: { ...source.coverage, state: "unavailable", gapCodes: [.../* @__PURE__ */ new Set([...source.coverage.gapCodes, code2])] }, progress: { ...source.progress, stage: "error", provisional: false, cancellable: false }, metrics, projects: [], activity: [], conversations: [], insights: [], phrases: [], judgments: [], profanity: void 0, funnel: void 0, usage: { ...source.usage, state: "unavailable", inputTokens: null, outputTokens: null, cacheTokens: null, reasoningTokens: null, costUsd: null }, semantics: { ...source.semantics, state: "cancelled", qualified: false, work: [], estimatedCostUsd: null, reportedCostUsd: null, unresolvedCostUsd: null }, launch: source.launch ? { ...source.launch, stage: "ready", facts: null, semantics: source.launch.semantics ? { ...source.launch.semantics, state: "cancelled", stories: [], hallOfFame: [], work: [], judgments: [], window: { ...source.launch.semantics.window, selected: null, choices: [], reason: "privacy_view_revoked" } } : null, languageLines: [], modelFeedback: [], languageByModel: void 0, languageGaps: [code2], factProgress: void 0 } : void 0 };
   return { ...view, snapshot, revoked: snapshot, nav: { ...view.nav, frozen: false }, frozen: null, evidence: null, busy: false, generation: view.generation + 1 };
 }
+function applyLaunchPreviewInvalidation(view, event) {
+  if (view.revoked || event.type !== "snapshot" || event.snapshot.snapshotId !== view.snapshot.snapshotId || event.snapshot.sequence < view.snapshot.sequence) return null;
+  const next = event.snapshot, progress = next.launch?.factProgress, held = view.frozen ?? view.snapshot, previous = held.launch?.factProgress;
+  if (!next.coverage.gapCodes.includes("native_price_preview_revoked") || next.launch?.facts !== null || progress?.state !== "collecting" || progress.representedSources !== 0 || !held.launch?.facts || (previous?.representedSources ?? previous?.completedSources ?? 0) <= 0) return null;
+  return { ...view, snapshot: next, nav: { ...view.nav, frozen: false }, frozen: null, evidence: null, busy: false, generation: view.generation + 1 };
+}
 function hasReport(snapshot) {
   return Boolean(snapshot.launch?.facts) || !launchIsLoading(snapshot);
 }
@@ -37477,7 +37608,7 @@ async function runLaunchTerminal(session, options = {}) {
     const [live, setLive] = useState(finalSnapshot), [nav, setNav] = useState(createWallNavigation()), [frozen, setFrozen] = useState(null), [evidence2, setEvidence] = useState(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState(""), [transfer, setTransfer] = useState(null), [transfers, setTransfers] = useState([]);
     const { columns: rawColumns, rows } = useWindowSize(), columns = Math.min(rawColumns, options.width ?? rawColumns), { exit } = useApp(), mounted = useRef(true), generation = useRef(0), pending = useRef(null), transferTimer = useRef(null), cueTimer = useRef(null), frozenFrame = useRef(0), transferSequence = useRef(-1), acknowledged = useRef(/* @__PURE__ */ new Set()), transferQueue = useRef([]), activeTransfer = useRef(null), terminating = useRef(false);
     const renderedRows = useRef([]), rowGeneration = useRef("");
-    const revoked = useRef(null), privacyView = useRef({ snapshot: live, nav, frozen, evidence: evidence2, busy, generation: generation.current, revoked: null });
+    const revoked = useRef(null), previewFloor = useRef(null), privacyView = useRef({ snapshot: live, nav, frozen, evidence: evidence2, busy, generation: generation.current, revoked: null });
     privacyView.current = { snapshot: live, nav, frozen, evidence: evidence2, busy, generation: generation.current, revoked: revoked.current };
     const snapshot = nav.frozen && frozen ? frozen : live, visible = Math.max(1, rows - 1), loading = launchIsLoading(snapshot), { frame } = useAnimation({ interval: 100, isActive: loading && nav.mode === "board" && !nav.frozen && options.motion !== false });
     const geometry = { ...options, columns, rows, widthOf: stringWidth, frame: nav.frozen ? frozenFrame.current : frame, evidence: evidence2, busy, notice, transfer, transfers }, doc = nav.mode === "board" ? { lines: [], anchors: [] } : launchDocument(snapshot, nav, geometry), layout = useMemo(() => buildWallboard(snapshot, { ...options, columns, rows, widthOf: stringWidth }), [snapshot, columns, rows, options]), pageCount = nav.mode === "board" ? layout.pages.length : Math.max(1, Math.ceil(doc.lines.length / visible));
@@ -37511,6 +37642,28 @@ async function runLaunchTerminal(session, options = {}) {
           session.cancel();
           return;
         }
+        const withdrawn = event.type === "snapshot" && event.snapshot.sequence >= finalSnapshot.sequence ? applyLaunchPreviewInvalidation({ ...privacyView.current, generation: generation.current }, event) : null;
+        if (withdrawn) {
+          finalSnapshot = withdrawn.snapshot;
+          previewFloor.current = { snapshotId: finalSnapshot.snapshotId, sequence: finalSnapshot.sequence };
+          generation.current = withdrawn.generation;
+          renderedRows.current = [];
+          rowGeneration.current = "";
+          transferQueue.current = [];
+          activeTransfer.current = null;
+          for (const timer of [pending.current, transferTimer.current, cueTimer.current]) if (timer) clearTimeout(timer);
+          pending.current = null;
+          transferTimer.current = null;
+          cueTimer.current = null;
+          setFrozen(null);
+          setEvidence(null);
+          setBusy(false);
+          setTransfer(null);
+          setNotice("Subtotal withdrawn \xB7 checking allowed sources");
+          setNav((current) => ({ ...current, frozen: false }));
+          setLive(withdrawn.snapshot);
+          return;
+        }
         if (event.type === "transfer") {
           if (event.snapshotId !== finalSnapshot.snapshotId || event.sequence < finalSnapshot.sequence || event.sequence <= transferSequence.current) return;
           if (event.ackId && (acknowledged.current.has(event.ackId) || transferQueue.current.some((queued) => queued.ackId === event.ackId))) return;
@@ -37535,6 +37688,7 @@ async function runLaunchTerminal(session, options = {}) {
           return;
         }
         finalSnapshot = applyAuditEvent(finalSnapshot, event);
+        if (previewFloor.current && event.type === "snapshot" && event.snapshot.snapshotId === previewFloor.current.snapshotId && event.snapshot.sequence > previewFloor.current.sequence && event.snapshot.launch?.facts) setNotice("");
         if (event.type === "error" || event.type === "snapshot" && event.snapshot.launch?.stage === "ready") {
           if (pending.current) {
             clearTimeout(pending.current);
@@ -37550,7 +37704,7 @@ async function runLaunchTerminal(session, options = {}) {
       };
       scan2 = Promise.resolve().then(() => session.run(publish)).then((value) => {
         settled = true;
-        finalSnapshot = launchResultAfterPrivacy(value, revoked.current);
+        finalSnapshot = launchResultAfterPrivacy(launchResultAfterPreview(value, finalSnapshot, previewFloor.current), revoked.current);
         if (pending.current) {
           clearTimeout(pending.current);
           pending.current = null;
@@ -37743,7 +37897,7 @@ async function runLaunchTerminal(session, options = {}) {
     await app?.waitUntilRenderFlush();
   }
 }
-var createLaunchNavigation, privacyCode, revokedPrivacyGap, launchEvidenceCanPublish, launchResultAfterPrivacy, COLORS, footer3;
+var createLaunchNavigation, privacyCode, revokedPrivacyGap, launchEvidenceCanPublish, launchResultAfterPrivacy, launchResultAfterPreview, COLORS, footer3;
 var init_launch_terminal = __esm({
   "packages/cli/src/audit-ui/launch-terminal.ts"() {
     "use strict";
@@ -37758,6 +37912,7 @@ var init_launch_terminal = __esm({
     revokedPrivacyGap = (code2) => privacyCode(code2) && (!/excluded|ignored|partial/.test(code2) || /changed|revok|unavailable|required|hold|invalid|stale|mismatch/.test(code2));
     launchEvidenceCanPublish = (token, generation, revoked) => token === generation && !revoked;
     launchResultAfterPrivacy = (snapshot, revoked) => revoked ?? snapshot;
+    launchResultAfterPreview = (snapshot, current, floor) => floor && snapshot.snapshotId === floor.snapshotId && snapshot.sequence <= floor.sequence ? current : snapshot;
     COLORS = { normal: "#EEEAE4", dim: "#A6A29B", amberDim: "#68665F", amber: "#F2A45E", amberLight: "#F2A45E", cyan: "#EEEAE4", green: "#EEEAE4", violet: "#A6A29B", blue: "#A6A29B" };
     footer3 = (ascii, page, count2, frozen = false) => [{ text: (count2 > 1 ? (ascii ? "< " : "\u2190 ") + (page + 1) + "/" + count2 + (ascii ? " > | " : " \u2192 \xB7 ") : "") + (ascii ? "? help | q quit" : "? help \xB7 q quit") + (frozen ? ascii ? " | frozen" : " \xB7 frozen" : ""), tone: "dim" }];
   }
