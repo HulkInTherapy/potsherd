@@ -19,7 +19,7 @@ function duration(ms:number):string{
 /** Final-view arithmetic only: literal equality and recorded clocks, never inferred work. */
 export function deterministicFindings(conversations:readonly AuditConversation[],prompts:readonly AuditPrompt[],timezone:string,partial:boolean,scopeHash:string):{insights:AuditInsight[];phrases:AuditPhrase[]}{
  const inputs=prompts.filter(eligible),byConversation=new Map<string,AuditPrompt[]>(),wordings=new Map<string,AuditPrompt[]>();
- for(const prompt of inputs){const key=normalizedLine(prompt.text);if(key!==null){const group=wordings.get(key)??[];group.push(prompt);wordings.set(key,group);}const conversation=byConversation.get(prompt.conversationId)??[];conversation.push(prompt);byConversation.set(prompt.conversationId,conversation);}
+ for(const prompt of inputs){const key=prompt.lex?prompt.lex.nl??null:normalizedLine(prompt.text);if(key!==null){const group=wordings.get(key)??[];group.push(prompt);wordings.set(key,group);}const conversation=byConversation.get(prompt.conversationId)??[];conversation.push(prompt);byConversation.set(prompt.conversationId,conversation);}
  const repeated=[...wordings].filter(([,group])=>group.length>=2).sort(([textA,a],[textB,b])=>b.length-a.length||textA.localeCompare(textB));
  const phrases:AuditPhrase[]=repeated.filter(([text])=>Buffer.byteLength(text)<=EXACT_REPEAT_LIMITS.maxRowBytes).slice(0,EXACT_REPEAT_LIMITS.rows).map(([text,group])=>{
   const ordered=[...group].sort((a,b)=>a.conversationId.localeCompare(b.conversationId)||a.id.localeCompare(b.id)),supports:AuditPrompt[]=[];const selected=new Set<string>();

@@ -52,14 +52,29 @@ function computeLabels(text:string):{labels:Uint8Array;ambiguous:boolean}{
  return {labels:map,ambiguous};
 }
 export function proseLabels(text:string):Uint8Array{return labels(text).labels;}
+/** One lexicon occurrence: [token as written, label (0 prose, 1 quoted, 2 code, 3 unknown), start, end] in UTF-16 of the prompt. */
+export type ProfanityHit=[token:string,label:number,start:number,end:number];
+const TOKEN=/[\p{L}\p{N}\p{M}_\u200c\u200d]+(?:['’][\p{L}\p{N}\p{M}_\u200c\u200d]+)*/gu;
+/** Per-prompt lexicon hits; computed once (in the scan worker) so the text need not be kept. */
+export function profanityHits(text:string):{hits:ProfanityHit[];ambiguous:boolean}|null{
+ if(!LEXICON_HINT.test(text))return null;const spans=labels(text),hits:ProfanityHit[]=[];TOKEN.lastIndex=0;let token:RegExpExecArray|null;
+ while((token=TOKEN.exec(text))!==null){if(!words.has(token[0].toLowerCase()))continue;hits.push([token[0],spans.labels[token.index]??0,token.index,token.index+token[0].length]);}
+ return {hits,ambiguous:spans.ambiguous};
+}
+const knownExcluded=new Set(['child_initialization','maintenance_exclusion_marker','tool_result','inherited_native_event','declared_meta_or_synthetic_input','declared_synthetic_input']);
+export const languageEligibleInput=(p:AuditPrompt)=>p.languageEligible!==false&&(p.eligibleNativeInput===true&&!knownExcluded.has(p.excludedReason??'')||p.eligibleNativeInput===undefined&&p.eligibleHuman&&p.excludedReason===null&&['claude_prompt_id','codex_human_marker'].includes(p.originBasis));
+/** Hits of one prompt: precomputed lexical data when present, else from its text. */
+export function hitsOf(p:AuditPrompt):{hits:ProfanityHit[];ambiguous:boolean}|null{
+ if(p.lex)return p.lex.pt?{hits:p.lex.pt as ProfanityHit[],ambiguous:!!p.lex.pa}:null;
+ return profanityHits(p.text);
+}
 /** Counts already-redacted, immutable eligible inputs; support ranges are redacted-prompt UTF-16. */
 export function auditProfanity(prompts:readonly AuditPrompt[],partial=false):AuditProfanity{
- const knownExcluded=new Set(['child_initialization','maintenance_exclusion_marker','tool_result','inherited_native_event','declared_meta_or_synthetic_input','declared_synthetic_input']);
- const eligible=prompts.filter(p=>p.languageEligible!==false).filter(p=>p.eligibleNativeInput===true&&!knownExcluded.has(p.excludedReason??'')||p.eligibleNativeInput===undefined&&p.eligibleHuman&&p.excludedReason===null&&['claude_prompt_id','codex_human_marker'].includes(p.originBasis)),bucketCounts=new Map<AuditProseKind,{occurrences:number;prompts:Set<string>}>((['direct_prose','quoted','code','unknown'] as const).map(k=>[k,{occurrences:0,prompts:new Set<string>()}])),containing=new Set<string>(),matches:NonNullable<AuditProfanity['matches']>[number][]=[];const terms=new Map<string,{term:string;kind:AuditProseKind;occurrences:number;ids:Set<string>;samples:AuditWordTerm['samples'][number][]}>();let occurrences=0,ambiguous=false;
- for(const prompt of eligible){if(!LEXICON_HINT.test(prompt.text))continue;const spans=labels(prompt.text);ambiguous||=spans.ambiguous;const pattern=/[\p{L}\p{N}\p{M}_\u200c\u200d]+(?:['’][\p{L}\p{N}\p{M}_\u200c\u200d]+)*/gu;let token:RegExpExecArray|null;
-  while((token=pattern.exec(prompt.text))!==null){if(!words.has(token[0].toLowerCase()))continue;const start=token.index,end=start+token[0].length,bucket=kind(spans.labels[start]??0),counter=bucketCounts.get(bucket)!;occurrences++;containing.add(prompt.id);counter.occurrences++;counter.prompts.add(prompt.id);
-   const normalized=token[0].toLowerCase(),key=JSON.stringify([normalized,bucket]);const term=terms.get(key)??{term:normalized,kind:bucket,occurrences:0,ids:new Set<string>(),samples:[]};term.occurrences++;term.ids.add(prompt.id);if(term.samples.length<3)term.samples.push({promptId:prompt.id,conversationId:prompt.conversationId,startUtf16:start,endUtf16:end,route:prompt.route});terms.set(key,term);
-   if(matches.length<8)matches.push({term:token[0],kind:bucket,promptId:prompt.id,conversationId:prompt.conversationId,startUtf16:start,endUtf16:end,route:prompt.route});
+ const eligible=prompts.filter(languageEligibleInput),bucketCounts=new Map<AuditProseKind,{occurrences:number;prompts:Set<string>}>((['direct_prose','quoted','code','unknown'] as const).map(k=>[k,{occurrences:0,prompts:new Set<string>()}])),containing=new Set<string>(),matches:NonNullable<AuditProfanity['matches']>[number][]=[];const terms=new Map<string,{term:string;kind:AuditProseKind;occurrences:number;ids:Set<string>;samples:AuditWordTerm['samples'][number][]}>();let occurrences=0,ambiguous=false;
+ for(const prompt of eligible){const found=hitsOf(prompt);if(!found)continue;ambiguous||=found.ambiguous;
+  for(const [raw,label,start,end] of found.hits){const bucket=kind(label),counter=bucketCounts.get(bucket)!;occurrences++;containing.add(prompt.id);counter.occurrences++;counter.prompts.add(prompt.id);
+   const normalized=raw.toLowerCase(),key=normalized+'\0'+bucket;const term=terms.get(key)??{term:normalized,kind:bucket,occurrences:0,ids:new Set<string>(),samples:[]};term.occurrences++;term.ids.add(prompt.id);if(term.samples.length<3)term.samples.push({promptId:prompt.id,conversationId:prompt.conversationId,startUtf16:start,endUtf16:end,route:prompt.route});terms.set(key,term);
+   if(matches.length<8)matches.push({term:raw,kind:bucket,promptId:prompt.id,conversationId:prompt.conversationId,startUtf16:start,endUtf16:end,route:prompt.route});
   }
  }
  const measurementBasis='literal_english_lexicon_observed_native_input_utf16_v2',definition='Literal occurrences of the documented eight-word English lexicon in eligible observed native user-role inputs after existing redaction/elision; this does not attest universal human authorship. Unicode whole-word tokens; containing inputs counted once. No emotion, intent or universal-language inference. Ranges are relative to the immutable redacted containing input; routes identify that input.';

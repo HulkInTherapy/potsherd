@@ -6,14 +6,19 @@
  */
 import os from 'node:os';
 import {Worker, parentPort} from 'node:worker_threads';
-import {extractFile, type NativeHarness, type SourceFacts} from './extract.js';
+import {extractFile, stripText, type NativeHarness, type SourceFacts} from './extract.js';
 
 export interface ScanJob {
   file: string;
   harness: NativeHarness;
   /** Bytes, used to schedule the largest files first. */
   size: number;
+  /** Time zone for story counters. */
+  timezone?: string;
 }
+
+/** Facts as they leave a reader: story fields kept, prompt text dropped. */
+export const readFacts = (job: ScanJob): SourceFacts => stripText(extractFile(job.file, job.harness, {timezone: job.timezone}));
 
 export type ScanResult = {job: ScanJob; facts: SourceFacts} | {job: ScanJob; error: string};
 
@@ -26,7 +31,7 @@ export interface ScanExecutor {
 const errorCode = (error: unknown) => (error instanceof Error && /^[a-z][a-z0-9_]{0,63}$/.test(error.message) ? error.message : 'source_unreadable');
 
 function runInline(job: ScanJob): ScanResult {
-  try { return {job, facts: extractFile(job.file, job.harness)}; } catch (error) { return {job, error: errorCode(error)}; }
+  try { return {job, facts: readFacts(job)}; } catch (error) { return {job, error: errorCode(error)}; }
 }
 
 /** In-process executor: yields between files so progress events can flow. */
@@ -106,6 +111,6 @@ export function runScanWorker(): void {
   if (!parentPort) throw new Error('scan_worker_requires_parent');
   const port = parentPort;
   port.on('message', (job: ScanJob) => {
-    try { port.postMessage({facts: extractFile(job.file, job.harness)}); } catch (error) { port.postMessage({error: errorCode(error)}); }
+    try { port.postMessage({facts: readFacts(job)}); } catch (error) { port.postMessage({error: errorCode(error)}); }
   });
 }

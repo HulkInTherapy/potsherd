@@ -2,6 +2,8 @@
 import type { Harness } from '../adapters/types.js';
 import type { Scope, SpanRef, Epochs } from '../memory/contracts.js';
 import type {LaunchAudit,AuditTone,SemanticPeriod} from './launch-contracts.js';
+export type * from './story-contracts.js';
+export {STORY_VERSION} from './story-contracts.js';
 
 export type AuditHarness = Extract<Harness, 'claude'|'codex'|'pi'|'opencode'>;
 export const AUDIT_INTENTS = ['feature_build','bug_fix','ui_design','tests','refactor','code_review','pr_management','research','explanation_learning','planning_architecture','deploy_operations','documentation_writing','agent_coordination','other','mixed','insufficient_context'] as const;
@@ -11,7 +13,8 @@ export type Availability = 'observed'|'partial'|'unavailable'|'not_run';
 export interface AuditScope { harnesses: readonly AuditHarness[]; project: string|null; eventFrom: string|null; asOf: string|null; timezone: string; }
 export interface AuditCoverage { state: 'complete_snapshot'|'partial'|'unavailable'; knownSources: number; parsedSources: number; unknownOriginEvents: number; excludedEvents: number; omittedSources: number; gapCodes: readonly string[]; }
 export interface AuditMetric { value: number|null; numerator: number|null; denominator: number|null; unit: string; measurementBasis: string; state: Availability; definition: string; }
-export interface AuditProgress { stage: AuditState; completed: number; total: number|null; unit: 'candidate_source'|'conversation'|'prompt'; provisional: boolean; cancellable: boolean; label?:string; }
+export interface AuditProgress { stage: AuditState; completed: number; total: number|null; unit: 'candidate_source'|'conversation'|'prompt'; provisional: boolean; cancellable: boolean; label?:string;
+  /** 1.8: loading-story detail (harnesses discovered, running counts, stage). */ detail?: import('./story-contracts.js').AuditProgressDetail; }
 export interface AuditSourceCapability { harness: AuditHarness; state: 'checking'|'absent'|'available'|'partial'|'unsupported'|'unavailable'; candidateFiles: number; conversations: number; humanPrompts: number|null; humanOrigin: 'native_marker'|'projection'|'unverified'; evidence: 'canonical'|'transient'|'projection'|'unavailable'; usage: 'unavailable'|'partial'|'reported'; firstUnsupportedStep: string|null; gapCodes: readonly string[]; census?:{checked:boolean;files:number;bytes:number;roots:number;unit:'file'|'database';};
   /** Subagent/helper conversations of this harness. */ childConversations?:number;
   /** Slash commands typed (counted separately from prompts). */ slashCommands?:number;
@@ -26,7 +29,15 @@ export type AuditEvidenceRoute =
   | { basis: 'canonical'; refs: readonly SpanRef[]; scope: Scope }
   | { basis: 'transient_snapshot'; sourceId: string; artifactHash: string; sourcePath: string; recordKey: string|null; rawStart: number|null; rawEnd: number|null; startUtf16: number; endUtf16: number; snapshotId: string; }
   | { basis: 'projection_snapshot'; sourceId: string; artifactHash: string; sourcePath: string; nativeSessionId: string; seq: number; snapshotId: string; fidelity: 'exchange_projection'; };
-export interface AuditPrompt { /** Recorded per-input cwd; undefined only for legacy snapshots. */ project?:string|null; id: string; conversationId: string; role: 'user'; originBasis: 'claude_prompt_id'|'codex_human_marker'|'pi_user_projection'|'opencode_user_projection'|'unknown'; identityBasis: string; eligibleHuman: boolean; /** Observed native user role, without universal human attestation. */ eligibleNativeInput?:boolean; /** False for known orchestration channels; role counts are separate. */ languageEligible?:boolean; excludedReason: string|null; eventAt: string|null; text: string; route: AuditEvidenceRoute; }
+/** Internal: lexical data of one prompt computed while its text was in memory (the derived cache keeps this, not the text). */
+export interface AuditPromptLex {
+  /** Profanity lexicon hits [token, label 0 prose|1 quoted|2 code|3 unknown, start, end]. */ pt?: readonly (readonly [string,number,number,number])[]; /** Ambiguous quote/code spans. */ pa?: 1;
+  /** Normalized short line (repeated lines). */ nl?: string; /** Requested-work focus labels. */ fc?: readonly string[];
+  /** Conversation models named in the prompt's prose. */ nm?: readonly string[]; /** Lines carrying profanity or praise wording. */ ll?: readonly AuditLangLine[];
+}
+/** d direct profanity, np non-prose profanity, y addresses "you", p positive, ng negated praise, q quoted line, n negative wording; sp display spans [text,start,end]; ns no displayable span. */
+export interface AuditLangLine {d?:1;np?:1;y?:1;p?:1;ng?:1;q?:1;n?:1;sp?:readonly (readonly [string,number,number])[];ns?:1;}
+export interface AuditPrompt { /** Recorded per-input cwd; undefined only for legacy snapshots. */ project?:string|null; /** Internal precomputed lexical data; when present the text may be empty. */ lex?:AuditPromptLex; id: string; conversationId: string; role: 'user'; originBasis: 'claude_prompt_id'|'codex_human_marker'|'pi_user_projection'|'opencode_user_projection'|'unknown'; identityBasis: string; eligibleHuman: boolean; /** Observed native user role, without universal human attestation. */ eligibleNativeInput?:boolean; /** False for known orchestration channels; role counts are separate. */ languageEligible?:boolean; excludedReason: string|null; eventAt: string|null; text: string; route: AuditEvidenceRoute; }
 export interface AuditPromptPage { snapshotId: string; conversationId: string; prompts: readonly AuditPrompt[]; offset: number; total: number|null; nextOffset: number|null; coverage: AuditCoverage; }
 export interface AuditEvidence { state: 'available'|'stale'|'unavailable'; text: string|null; role: string|null; eventAt: string|null; route: AuditEvidenceRoute; gapCodes: readonly string[]; }
 export interface AuditInsight { id: string; basis: 'deterministic'|'semantic'; caption: string; publicCaption: string; value: AuditMetric; conversationIds: readonly string[]; promptIds: readonly string[]; definition: string; }

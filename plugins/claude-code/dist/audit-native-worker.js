@@ -6,6 +6,7 @@ import { Worker, parentPort } from "node:worker_threads";
 
 // packages/core/src/analytics/extract.ts
 import fs from "node:fs";
+import { createHash as createHash2 } from "node:crypto";
 import path from "node:path";
 
 // packages/core/src/markers.ts
@@ -598,8 +599,661 @@ function claim(claimed, s) {
 // packages/core/src/analytics/source.ts
 var clean = (text) => redact(elideBinary(text)).text;
 
+// packages/core/src/analytics/profanity.ts
+var ENGLISH_EXPLICIT_LEXICON = Object.freeze(["fuck", "fucked", "fucking", "shit", "shitty", "bullshit", "asshole", "bastard"]);
+var PROFANITY_LEXICON_VERSION = "en-explicit-8-v1";
+var words = new Set(ENGLISH_EXPLICIT_LEXICON);
+var LEXICON_HINT = /fuck|shit|asshole|bastard/i;
+var CODE = 2;
+var QUOTE = 1;
+var UNKNOWN = 3;
+var kind = (label) => label === CODE ? "code" : label === QUOTE ? "quoted" : label === UNKNOWN ? "unknown" : "direct_prose";
+var escaped = (text, index) => {
+  let count2 = 0;
+  for (let i = index - 1; i >= 0 && text[i] === "\\"; i--) count2++;
+  return count2 % 2 === 1;
+};
+var wordChar = (char) => char !== void 0 && /[\p{L}\p{N}\p{M}_\u200c\u200d]/u.test(char);
+var labelMemo = /* @__PURE__ */ new Map();
+function labels(text) {
+  let hit = labelMemo.get(text);
+  if (hit) return hit;
+  if (labelMemo.size > 2e4) labelMemo.clear();
+  hit = computeLabels(text);
+  labelMemo.set(text, hit);
+  return hit;
+}
+function computeLabels(text) {
+  const map = new Uint8Array(text.length);
+  let ambiguous = false, offset = 0, fence = null;
+  for (const line of text.split(/(?<=\n)/u)) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/u);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && line.slice(marker[0].length).trim() === "") {
+        map.fill(CODE, fence.start, offset + line.length);
+        fence = null;
+      }
+    } else if (marker) fence = { char: marker[1][0], length: marker[1].length, start: offset };
+    else if (/^ {0,3}>/u.test(line)) map.fill(QUOTE, offset, offset + line.length);
+    else if (/^(?: {4}|\t)\S/u.test(line)) {
+      map.fill(UNKNOWN, offset, offset + line.length);
+      ambiguous = true;
+    }
+    offset += line.length;
+  }
+  if (fence) {
+    map.fill(UNKNOWN, fence.start);
+    ambiguous = true;
+  }
+  const sourceRows = text.split(/(?<=\n)/u), timestamp = /^\s*(?:(?:[-*#]+|\*\*)\s*)?\[?\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\]?/u;
+  if (/(?:transcript|captions|youtube|youtu\.be|video transcription)/iu.test(text) && sourceRows.filter((line) => timestamp.test(line)).length >= 3) {
+    let at = 0;
+    for (const line of sourceRows) {
+      if (timestamp.test(line)) map.fill(QUOTE, at, at + line.length);
+      at += line.length;
+    }
+  }
+  for (let i = 0; i < text.length; i++) {
+    if (map[i] || escaped(text, i)) continue;
+    const char = text[i];
+    if (char === "`") {
+      let count2 = 1;
+      while (text[i + count2] === "`") count2++;
+      const token = "`".repeat(count2);
+      let end2 = text.indexOf(token, i + count2);
+      while (end2 >= 0 && (map[end2] !== 0 || text[end2 - 1] === "`" || text[end2 + count2] === "`")) end2 = text.indexOf(token, end2 + count2);
+      if (end2 < 0) {
+        map.fill(UNKNOWN, i);
+        ambiguous = true;
+        break;
+      }
+      map.fill(CODE, i, end2 + count2);
+      i = end2 + count2 - 1;
+      continue;
+    }
+    if (!['"', "'", "\u201C", "\u2018"].includes(char)) continue;
+    if ((char === "'" || char === "\u2018") && wordChar(text[i - 1]) && wordChar(text[i + 1])) continue;
+    const closing = char === "\u201C" ? "\u201D" : char === "\u2018" ? "\u2019" : char;
+    let end = i + 1;
+    while (end < text.length) {
+      if (text[end] === closing && !escaped(text, end) && map[end] === 0 && !((closing === "'" || closing === "\u2019") && wordChar(text[end - 1]) && wordChar(text[end + 1]))) break;
+      end++;
+    }
+    if (end >= text.length) {
+      map.fill(UNKNOWN, i);
+      ambiguous = true;
+      break;
+    }
+    map.fill(QUOTE, i, end + 1);
+    i = end;
+  }
+  return { labels: map, ambiguous };
+}
+function proseLabels(text) {
+  return labels(text).labels;
+}
+var TOKEN = /[\p{L}\p{N}\p{M}_\u200c\u200d]+(?:['’][\p{L}\p{N}\p{M}_\u200c\u200d]+)*/gu;
+function profanityHits(text) {
+  if (!LEXICON_HINT.test(text)) return null;
+  const spans = labels(text), hits = [];
+  TOKEN.lastIndex = 0;
+  let token;
+  while ((token = TOKEN.exec(text)) !== null) {
+    if (!words.has(token[0].toLowerCase())) continue;
+    hits.push([token[0], spans.labels[token.index] ?? 0, token.index, token.index + token[0].length]);
+  }
+  return { hits, ambiguous: spans.ambiguous };
+}
+var knownExcluded = /* @__PURE__ */ new Set(["child_initialization", "maintenance_exclusion_marker", "tool_result", "inherited_native_event", "declared_meta_or_synthetic_input", "declared_synthetic_input"]);
+var languageEligibleInput = (p) => p.languageEligible !== false && (p.eligibleNativeInput === true && !knownExcluded.has(p.excludedReason ?? "") || p.eligibleNativeInput === void 0 && p.eligibleHuman && p.excludedReason === null && ["claude_prompt_id", "codex_human_marker"].includes(p.originBasis));
+function hitsOf(p) {
+  if (p.lex) return p.lex.pt ? { hits: p.lex.pt, ambiguous: !!p.lex.pa } : null;
+  return profanityHits(p.text);
+}
+function auditProfanity(prompts, partial = false) {
+  const eligible = prompts.filter(languageEligibleInput), bucketCounts = new Map(["direct_prose", "quoted", "code", "unknown"].map((k) => [k, { occurrences: 0, prompts: /* @__PURE__ */ new Set() }])), containing = /* @__PURE__ */ new Set(), matches = [];
+  const terms = /* @__PURE__ */ new Map();
+  let occurrences = 0, ambiguous = false;
+  for (const prompt of eligible) {
+    const found = hitsOf(prompt);
+    if (!found) continue;
+    ambiguous ||= found.ambiguous;
+    for (const [raw, label, start, end] of found.hits) {
+      const bucket = kind(label), counter = bucketCounts.get(bucket);
+      occurrences++;
+      containing.add(prompt.id);
+      counter.occurrences++;
+      counter.prompts.add(prompt.id);
+      const normalized = raw.toLowerCase(), key = normalized + "\0" + bucket;
+      const term = terms.get(key) ?? { term: normalized, kind: bucket, occurrences: 0, ids: /* @__PURE__ */ new Set(), samples: [] };
+      term.occurrences++;
+      term.ids.add(prompt.id);
+      if (term.samples.length < 3) term.samples.push({ promptId: prompt.id, conversationId: prompt.conversationId, startUtf16: start, endUtf16: end, route: prompt.route });
+      terms.set(key, term);
+      if (matches.length < 8) matches.push({ term: raw, kind: bucket, promptId: prompt.id, conversationId: prompt.conversationId, startUtf16: start, endUtf16: end, route: prompt.route });
+    }
+  }
+  const measurementBasis = "literal_english_lexicon_observed_native_input_utf16_v2", definition = "Literal occurrences of the documented eight-word English lexicon in eligible observed native user-role inputs after existing redaction/elision; this does not attest universal human authorship. Unicode whole-word tokens; containing inputs counted once. No emotion, intent or universal-language inference. Ranges are relative to the immutable redacted containing input; routes identify that input.";
+  return { lexiconVersion: PROFANITY_LEXICON_VERSION, language: "en-explicit-lexicon", measurementBasis, eligiblePrompts: eligible.length, occurrences: { value: occurrences, numerator: occurrences, denominator: eligible.length, unit: "english_lexicon_occurrence", measurementBasis, state: partial ? "partial" : "observed", definition }, containingPrompts: { value: containing.size, numerator: containing.size, denominator: eligible.length, unit: "eligible_input_containing_english_lexicon_match", measurementBasis, state: partial ? "partial" : "observed", definition }, buckets: [...bucketCounts].map(([kind2, value]) => ({ kind: kind2, occurrences: value.occurrences, containingPrompts: value.prompts.size })), coverageGaps: ["outside_english_lexicon_unassessed", "hindi_hinglish_and_other_languages_unassessed", ...ambiguous ? ["ambiguous_quote_or_code_span"] : []], terms: [...terms.values()].map((t) => ({ term: t.term, kind: t.kind, occurrences: t.occurrences, containingPrompts: t.ids.size, samples: t.samples })).sort((a, b) => b.occurrences - a.occurrences || a.term.localeCompare(b.term) || a.kind.localeCompare(b.kind)), matches };
+}
+
+// packages/core/src/analytics/language-feedback.ts
+var POSITIVE_HINT = /good (?:work|job)|well done|you understood|you (?:got|nailed)|you(?:['’]re| are)/i;
+var POSITIVE = /\b(?:good (?:work|job)|well done|you understood (?:me|it)|you (?:got|nailed) (?:it|this)|you(?:['’]re| are) (?:fucking )?(?:great|awesome))\b/iu;
+var NEGATED = /\b(?:not|never|don['’]?t|didn['’]?t|no)\b.{0,35}\b(?:good|well done|understood|nailed|great|awesome)\b/iu;
+var NEGATIVE = /\b(?:wrong|broken|stupid|missed|failed|why|mess|didn['’]?t|not|bullshit|fuck(?:ed|ing)? (?:up|off))\b/iu;
+var YOU = /\b(?:you|your|you['’]re)\b/iu;
+var words2 = (s) => s.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
+function namedModels(text, models) {
+  const out = [];
+  let labels2 = null;
+  for (const model of models) {
+    const at = text.indexOf(model);
+    if (at < 0) continue;
+    labels2 ??= proseLabels(text);
+    if (labels2[at] !== 0 || /[\p{L}\p{N}_/-]/u.test(text[at - 1] ?? "") || /[\p{L}\p{N}_/-]/u.test(text[at + model.length] ?? "")) continue;
+    out.push(model);
+  }
+  return out;
+}
+function languageLines(text) {
+  const out = [];
+  let labelCache = null;
+  const L = (i) => (labelCache ??= proseLabels(text))[i];
+  let offset = 0;
+  for (const line of text.split("\n")) {
+    const start = offset;
+    offset += line.length + 1;
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const at = start + line.indexOf(trimmed), end = at + trimmed.length;
+    if (!LEXICON_HINT.test(trimmed) && !POSITIVE_HINT.test(trimmed)) continue;
+    const probe = { id: "line", conversationId: "", role: "user", originBasis: "claude_prompt_id", identityBasis: "", eligibleHuman: true, excludedReason: null, eventAt: null, route: { basis: "canonical", refs: [], scope: {} } };
+    const local = auditProfanity([{ ...probe, text: line }]);
+    const direct = local.terms?.some((t) => t.kind === "direct_prose" && t.samples.some((sample) => L(start + sample.startUtf16) === 0)) ?? false;
+    const nonprose = local.terms?.some((t) => t.kind !== "direct_prose") ?? false;
+    const positiveMatch = trimmed.match(POSITIVE), positive = !!positiveMatch && L(at + (positiveMatch.index ?? 0)) === 0, negated = NEGATED.test(trimmed);
+    const quoted = L(at) !== 0 || /^\s*(?:>|[`~]{3}|["“'])/u.test(line) || /^ {4}|^\t/u.test(line);
+    const row = {};
+    if (direct) row.d = 1;
+    if (nonprose) row.np = 1;
+    if (YOU.test(trimmed)) row.y = 1;
+    if (positive) row.p = 1;
+    if (negated) row.ng = 1;
+    if (quoted) row.q = 1;
+    if (NEGATIVE.test(trimmed)) row.n = 1;
+    if (direct && !quoted && words2(trimmed) >= 2) {
+      const spans = trimmed.length <= 160 ? [{ text: trimmed, start: at, end }] : [...trimmed.matchAll(/[^.!?;\n]+[.!?;]?/gu)].map((match) => {
+        const value = match[0].trim(), begin = at + match.index + match[0].indexOf(value);
+        return { text: value, start: begin, end: begin + value.length };
+      }).filter((span) => span.text.length <= 160 && words2(span.text) >= 2 && auditProfanity([{ ...probe, text: span.text }]).terms?.some((t) => t.kind === "direct_prose" && L(span.start + t.samples[0].startUtf16) === 0));
+      if (spans.length) row.sp = spans.map((s) => [s.text, s.start, s.end]);
+      else row.ns = 1;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+// packages/core/src/analytics/project-focus.ts
+var categories = [
+  ["Documentation", /\b(?:write|update|fix|add|edit|draft|revise)\b.{0,64}\b(?:docs?|documentation|readme|guide|changelog)\b/iu],
+  ["Review", /\b(?:review|audit|inspect)\b.{0,64}\b(?:code|diff|pr|pull request|implementation|tests?|changes|repo|repository)\b/iu],
+  ["Debugging", /\b(?:fix|debug|repair|resolve|reproduce)\b.{0,64}\b(?:bug|error|crash|failure|issue|test|broken|timeout|memory|hang|problem)\b/iu],
+  ["Development", /\b(?:build|implement|add|create|develop|refactor|ship|integrate)\b.{0,64}\b(?:feature|app|api|cli|function|component|command|module|tool|parser|service|code|support)\b/iu],
+  ["Research", /\b(?:research|look up|investigate|compare|verify)\b.{0,64}\b(?:docs?|source|pricing|model|library|approach|behavior|format|implementation)\b/iu]
+];
+var VERBS = /\b(?:write|update|fix|add|edit|draft|revise|review|audit|inspect|debug|repair|resolve|reproduce|build|implement|create|develop|refactor|ship|integrate|research|look up|investigate|compare|verify)\b/iu;
+function focusLabels(raw) {
+  if (!VERBS.test(raw) || !categories.some(([, pattern]) => pattern.test(raw))) return [];
+  const labels2 = proseLabels(raw), text = Array.from({ length: raw.length }, (_, i) => labels2[i] === 0 ? raw[i] : " ").join("");
+  return categories.filter(([, pattern]) => pattern.test(text)).map(([label]) => label);
+}
+
+// packages/core/src/analytics/findings.ts
+var EXACT_REPEAT_LIMITS = Object.freeze({ rows: 20, supports: 8, maxRowBytes: 8192 });
+var PLACEHOLDER = /\[(?:Pasted text|Image) #\d+[^\]]*\]/gi;
+function normalizedLine(text) {
+  const n = text.replace(PLACEHOLDER, "").toLowerCase().replace(/\s+/g, " ").trim().replace(/^[ .!?,]+|[ .!?,]+$/g, "");
+  return n.length > 0 && n.length <= 60 ? n : null;
+}
+
+// packages/core/src/analytics/story-lexicon.ts
+var FLAG = {
+  paste: 1,
+  image: 2,
+  code: 4,
+  url: 8,
+  pasteSuspect: 16,
+  slur: 32,
+  polite: 64,
+  thanks: 128,
+  sorry: 256,
+  multiPunct: 512,
+  question: 1024,
+  delegate: 2048,
+  lets: 4096,
+  please: 8192,
+  history: 16384
+};
+var PLACEHOLDER2 = /\[(?:Pasted text|Image) #\d+[^\]]*\]/gi;
+var URL_RX = /https?:\/\/\S+/g;
+var CODEISH = /```[\s\S]*?```/g;
+var WORD = /[a-z][a-z']*/g;
+var SWEAR_STEMS = [
+  "fuck",
+  "shit",
+  "bullshit",
+  "wtf",
+  "damn",
+  "goddamn",
+  "crap",
+  "bitch",
+  "asshole",
+  "dumbass",
+  "stfu",
+  "ffs",
+  "piss",
+  "bastard",
+  "motherf",
+  "bloody",
+  "bsdk",
+  "chutiya",
+  "chutiye",
+  "madarchod",
+  "bhenchod",
+  "behenchod",
+  "gandu"
+];
+var SWEAR_EXACT = /* @__PURE__ */ new Set(["ffs", "wtf", "stfu"]);
+var SWEAR_PREFIX = SWEAR_STEMS.filter((s) => !SWEAR_EXACT.has(s));
+var INSULT = ["stupid", "idiot", "dumb", "moron", "useless", "pathetic", "lazy", "incompetent", "garbage", "trash", "retard"];
+var SLUR_STEMS = ["retard"];
+var POLITE = /\b(please|pls|plz|thanks|thank you|thank u|thx|ty|appreciate|great job|good job|well done|awesome|amazing|love it|love this|nice work|brilliant|you're the best|perfect)\b/;
+var THANKS = /\b(thanks|thank you|thank u|thx|ty|appreciate it|great job|good job|well done|nice work)\b/;
+var SORRY = /\b(sorry|my bad|apologi[sz]e)\b/;
+var FRUSTRATION = /\b(again|still not|still doesn't|still isn't|i told you|i said|i already|not working|doesn't work|didn't work|isn't working|why (?:the|did|are|is|would) |what the|seriously|come on|for the last time|how many times|are you (?:kidding|serious|dumb|stupid))\b/g;
+var DELEGATE = /\b(sub-?agents?|agents? in parallel|parallel agents?|spawn|launch (?:\w+ )?agents?|team of agents|multiple agents|\d+ agents)\b/;
+var FILLER = /\b(basically|kind of|sort of|i guess|i mean|you know|like,|um+|uh+|okay so|so yeah|whatever)\b/g;
+var PERFECTION = /\b(best possible|perfect(?:ly)?|exactly|properly|every single|completely|100%|flawless|world[- ]class|insanely|extremely)\b/g;
+var QWORDS = /* @__PURE__ */ new Set(["what", "why", "how", "is", "are", "can", "could", "should", "does", "do", "did", "where", "when", "which", "who", "will", "would"]);
+var WE = /\b(we|we're|we've|let's|us|our)\b/g;
+var I_ = /\b(i|i'm|i've|me|my)\b/g;
+var HINGLISH = /\b(bhai|yaar|kya|hai|nahi|kar|karo|acha|accha|theek|matlab|abhi|bas|chal|haan)\b/g;
+var CAPS = /\b[A-Z][A-Z']{2,}\b/g;
+var CAPS_OK = /* @__PURE__ */ new Set(["API", "URL", "HTML", "CSS", "JSON", "CLI", "PR", "UI", "UX", "MCP", "LLM", "SDK", "README", "TODO", "IST", "PDF", "NPM", "AWS", "GPT", "MD", "SEO", "JS", "TS", "ID", "OK", "AI", "CEO", "USA", "SQL", "DB", "SSH", "HTTP", "HTTPS", "PNG", "SVG", "CTA", "FAQ"]);
+function isSwearWord(w) {
+  if (SWEAR_EXACT.has(w)) return true;
+  for (const s of SWEAR_PREFIX) if (w.startsWith(s)) return true;
+  return false;
+}
+var isInsult = (w) => INSULT.some((s) => w.startsWith(s));
+var isSlur = (w) => SLUR_STEMS.some((s) => w.startsWith(s));
+function mask(w) {
+  return w.length <= 2 ? w : w[0] + "*".repeat(w.length - 2) + w[w.length - 1];
+}
+function cleanForTone(text) {
+  return text.replace(PLACEHOLDER2, " ").replace(/[‘’]/g, "'").replace(CODEISH, " ").replace(URL_RX, " ");
+}
+var count = (rx, s) => {
+  rx.lastIndex = 0;
+  let n = 0;
+  while (rx.exec(s)) n++;
+  rx.lastIndex = 0;
+  return n;
+};
+var words3 = (s) => s.match(WORD) ?? [];
+var TICS = [
+  "one more thing",
+  "each and every",
+  "do one thing",
+  "every single thing",
+  "kind of a thing",
+  "and all",
+  "and stuff",
+  "or something",
+  "at the end of the day",
+  "to be honest",
+  "basically",
+  "you know what",
+  "let me know",
+  "best possible",
+  "world class",
+  "insanely",
+  "make it pop",
+  "help me out",
+  "what do you think",
+  "i don't know",
+  "just do it",
+  "ship it",
+  "go ahead",
+  "lfg",
+  "let's go",
+  "no worries",
+  "makes sense",
+  "figure it out",
+  "deep research",
+  "ultra think",
+  "ultrathink",
+  "step by step",
+  "one shot",
+  "whatever it takes",
+  "end to end",
+  "from scratch",
+  "like a pro",
+  "production ready",
+  "properly",
+  "exactly",
+  "and everything",
+  "all of that",
+  "the whole thing",
+  "you know",
+  "i mean",
+  "sort of",
+  "kind of",
+  "so yeah",
+  "okay so"
+];
+var CLAUSE_FINAL = /* @__PURE__ */ new Set(["and all", "and stuff", "or something", "and everything", "all of that", "and all that"]);
+var esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var TIC_BY_FIRST = /* @__PURE__ */ new Map();
+TICS.forEach((phrase, index) => {
+  const first = phrase.split(" ")[0];
+  const list = TIC_BY_FIRST.get(first) ?? [];
+  list.push({ phrase, index, final: CLAUSE_FINAL.has(phrase) });
+  TIC_BY_FIRST.set(first, list);
+});
+var CLAUSE_END = /^\s*(?:[.,!?;:)\n]|$|and\b|so\b|but\b)/;
+var isWordChar = (c) => c !== void 0 && /[A-Za-z0-9_]/.test(c);
+function ticsIn(low) {
+  const found = /* @__PURE__ */ new Set();
+  const rx = /[a-z']+/g;
+  let m;
+  while ((m = rx.exec(low)) !== null) {
+    const list = TIC_BY_FIRST.get(m[0]);
+    if (!list || isWordChar(low[m.index - 1])) continue;
+    for (const t of list) {
+      if (found.has(t.index) || !low.startsWith(t.phrase, m.index)) continue;
+      const end = m.index + t.phrase.length;
+      if (t.final ? CLAUSE_END.test(low.slice(end, end + 12)) : !isWordChar(low[end]) || !isWordChar(low[end - 1])) found.add(t.index);
+    }
+  }
+  return [...found].sort((a, b) => a - b);
+}
+var ADDRESS = ["dude", "bro", "buddy", "babe", "baby", "my friend", "man", "mate", "boss", "sir", "brother", "bhai", "yaar", "chief", "champ", "my guy", "darling", "love"];
+var ADDRESS_GATE = new RegExp("\\b(" + ADDRESS.map(esc).join("|") + ")\\b", "g");
+var ADDRESS_INDEX = new Map(ADDRESS.map((a, i) => [a, i]));
+var VOCATIVE_BEFORE = /(?:^|[,.!?]\s*|\b(?:hey|yo|ok|okay|thanks|no|come on)\s+)$/;
+function addressIn(low) {
+  const found = /* @__PURE__ */ new Set();
+  ADDRESS_GATE.lastIndex = 0;
+  let m;
+  while ((m = ADDRESS_GATE.exec(low)) !== null) {
+    const i = ADDRESS_INDEX.get(m[1]);
+    if (found.has(i)) continue;
+    const end = m.index + m[0].length;
+    if (VOCATIVE_BEFORE.test(low.slice(Math.max(0, m.index - 12), m.index)) || /^\s*[,.!?]/.test(low.slice(end, end + 8)) || end === low.length) found.add(i);
+  }
+  return [...found].sort((a, b) => a - b);
+}
+function featurize(input) {
+  const raw = input.text;
+  let t = cleanForTone(raw);
+  const all = words3(t.toLowerCase());
+  const pasteSuspect = all.length > 1500 || all.length > 600 && !input.typed;
+  if (pasteSuspect) {
+    const toks = t.split(/\s+/).filter(Boolean);
+    t = toks.slice(0, 150).concat("\u2026", toks.slice(-150)).join(" ");
+  }
+  const low = t.toLowerCase();
+  const tone = pasteSuspect ? words3(low) : all;
+  let letters = 0, upper = 0;
+  for (let k = 0; k < t.length; k++) {
+    const c = t.charCodeAt(k);
+    if (c >= 65 && c <= 90) {
+      letters++;
+      upper++;
+    } else if (c >= 97 && c <= 122) letters++;
+    else if (c > 127 && new RegExp("\\p{L}", "u").test(t[k])) {
+      letters++;
+      if (t[k] !== t[k].toLowerCase()) upper++;
+    }
+  }
+  let caps = 0;
+  for (const m of t.match(CAPS) ?? []) if (!CAPS_OK.has(m)) caps++;
+  const swears = [];
+  let insults = 0, slur = false;
+  for (const w of tone) {
+    if (isSwearWord(w)) swears.push(w);
+    if (isInsult(w)) insults++;
+    if (!slur && isSlur(w)) slur = true;
+  }
+  const first = all[0] ?? "";
+  const rawLow = raw.toLowerCase();
+  const trimmed = raw.trim();
+  let fl = 0;
+  if (/\[Pasted text #/.test(raw) || input.hasPaste) fl |= FLAG.paste;
+  if (input.hasImage || raw.includes("[Image #")) fl |= FLAG.image;
+  if (raw.includes("```")) fl |= FLAG.code;
+  URL_RX.lastIndex = 0;
+  if (URL_RX.test(raw)) fl |= FLAG.url;
+  URL_RX.lastIndex = 0;
+  if (pasteSuspect) fl |= FLAG.pasteSuspect;
+  if (slur) fl |= FLAG.slur;
+  if (POLITE.test(low)) fl |= FLAG.polite;
+  if (THANKS.test(low)) fl |= FLAG.thanks;
+  if (SORRY.test(low)) fl |= FLAG.sorry;
+  if (/[!?]{3,}/.test(raw)) fl |= FLAG.multiPunct;
+  if (trimmed.endsWith("?") || QWORDS.has(first) && all.length < 40) fl |= FLAG.question;
+  if (DELEGATE.test(low)) fl |= FLAG.delegate;
+  if (/\blet'?s\b/.test(rawLow)) fl |= FLAG.lets;
+  if (/\b(please|pls|plz)\b/.test(rawLow)) fl |= FLAG.please;
+  if (input.typed) fl |= FLAG.history;
+  let excl = 0;
+  for (let k = raw.indexOf("!"); k >= 0; k = raw.indexOf("!", k + 1)) excl++;
+  let lines = 1;
+  for (let k = raw.indexOf("\n"); k >= 0; k = raw.indexOf("\n", k + 1)) lines++;
+  const f = {
+    ch: raw.length,
+    w: all.length,
+    ln: lines,
+    fl,
+    sw: swears.length,
+    ins: insults,
+    fr: count(FRUSTRATION, low),
+    cw: caps,
+    cr: letters >= 12 ? Math.round(upper / letters * 1e3) / 1e3 : 0,
+    ex: excl,
+    we: count(WE, low),
+    i: count(I_, low),
+    fi: count(FILLER, low),
+    pf: count(PERFECTION, low),
+    hi: count(HINGLISH, low),
+    fw: first.slice(0, 24)
+  };
+  if (swears.length) f.sws = swears.slice(0, 6);
+  if (raw.length <= 80) {
+    const sl = raw.replace(PLACEHOLDER2, "").toLowerCase().replace(/\s+/g, " ").trim().slice(0, 60);
+    if (sl) f.sl = sl;
+  }
+  const tc = ticsIn(rawLow);
+  if (tc.length) f.tc = tc;
+  const ad = addressIn(rawLow);
+  if (ad.length) f.ad = ad;
+  return f;
+}
+var SENSITIVE = /\b(die|dying|suicid\w*|kill (?:my|me)\w*|depress\w*|demons?|deserve|anxiety|therap\w*|panic|lonely|worthless|hate myself|cry(?:ing)?|breakup|girlfriend|boyfriend|wife|husband|sex\w*|porn|nude|drunk|password|token|secret|api[_ -]?key|ssn|salary|loan|debt|visa|lawyer|doctor|hospital|meds?)\b/i;
+var SECRETISH = /(sk-[A-Za-z0-9]|tvly-|AKIA|ghp_|xox[bp]-|@[\w.-]+\.\w{2,}|[A-Za-z0-9_-]{32,}|\/Users\/|\/home\/|~\/|https?:\/\/|\[REDACTED|<redacted)/;
+function safeQuote(text, maxLength = 90) {
+  let t = text.replace(PLACEHOLDER2, "").replace(/\s+/g, " ").trim();
+  if (!t || SENSITIVE.test(t) || SECRETISH.test(t)) return null;
+  t = t.slice(0, maxLength + 40).replace(/[A-Za-z']+/g, (w) => {
+    const l = w.toLowerCase();
+    return isSwearWord(l) || isSlur(l) ? mask(w) : w;
+  }) + t.slice(maxLength + 40);
+  if (t.length <= maxLength) return t;
+  const cut = t.slice(0, maxLength - 1);
+  const space = cut.lastIndexOf(" ");
+  return (space > 0 ? cut.slice(0, space) : cut) + "\u2026";
+}
+var TOPIC_STOP = new Set("the a an and or of to in on for is it that this i you we be are was with as at by from so if but not do can me my your our just what how all also now like then there they them these those one some any more much very really thing things something everything get got make made want need see know think going go let lets let's okay ok yes no up out into about will would should could have has had been being he she his her him its it's i'm don't can't isn't doesn't which who when where why here same other only even still well right good way time new use using done try give take put come look".split(" "));
+function vocabularyWords(text) {
+  return words3(cleanForTone(text).toLowerCase()).filter((w) => w.length >= 3 && w.length <= 24);
+}
+function topicWords(text) {
+  const out = /* @__PURE__ */ new Set();
+  for (const w of words3(cleanForTone(text).toLowerCase())) if (w.length >= 3 && w.length <= 24 && !TOPIC_STOP.has(w) && !isSwearWord(w)) out.add(w);
+  return out;
+}
+
+// packages/core/src/analytics/story-time.ts
+var WEEKDAY = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+function localClock(timezone) {
+  const format = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    weekday: "short",
+    hourCycle: "h23"
+  });
+  const memo = /* @__PURE__ */ new Map();
+  return (at) => {
+    const slot = Math.floor(at / 9e5);
+    let hit = memo.get(slot);
+    if (hit) return { ...hit, minute: hit.minute + Math.floor((at - slot * 9e5) / 6e4) };
+    const parts = {};
+    for (const p of format.formatToParts(new Date(slot * 9e5))) parts[p.type] = p.value;
+    const hour = Number(parts.hour) % 24;
+    hit = { day: `${parts.year}-${parts.month}-${parts.day}`, month: `${parts.year}-${parts.month}`, hour, dow: WEEKDAY[parts.weekday] ?? 0, minute: Number(parts.minute) };
+    memo.set(slot, hit);
+    return { ...hit, minute: hit.minute + Math.floor((at - slot * 9e5) / 6e4) };
+  };
+}
+
+// packages/core/src/analytics/story-extract.ts
+var AGENT_TOOLS = /* @__PURE__ */ new Set(["Task", "Agent", "spawn_agent", "spawn_agents", "TaskCreate"]);
+var isAgentTool = (name) => AGENT_TOOLS.has(name) || name.startsWith("spawn");
+function promptLex(text, models) {
+  const lex = {};
+  const hits = profanityHits(text);
+  if (hits?.hits.length) lex.pt = hits.hits;
+  if (hits?.ambiguous) lex.pa = 1;
+  const nl = normalizedLine(text);
+  if (nl !== null) lex.nl = nl;
+  const fc = focusLabels(text);
+  if (fc.length) lex.fc = fc;
+  const nm = namedModels(text, models);
+  if (nm.length) lex.nm = nm;
+  const ll = languageLines(text);
+  if (ll.length) lex.ll = ll;
+  return Object.keys(lex).length ? lex : void 0;
+}
+var QUOTE_TOP = 8;
+var QUOTE_SUBAGENT_TOP = 5;
+var QUOTE_LAST_PER_PROJECT = 3;
+function deriveStory(prompts, events, interrupts, options) {
+  const human = prompts.filter((p) => p.kind === "human" && p.at !== null).sort((a, b) => a.at - b.at);
+  const fresh = new Set(prompts.slice(options.from ?? 0));
+  const models = /* @__PURE__ */ new Set();
+  for (const p of prompts) {
+    if (p.before) models.add(p.before);
+    if (p.after) models.add(p.after);
+  }
+  const vocab = options.counters ? options.previous?.vocab ?? /* @__PURE__ */ new Map() : null;
+  const topics = options.counters ? new Map((options.previous?.topics ?? []).map((t) => [t.month, t])) : null;
+  const clock = localClock(options.timezone);
+  for (const p of human) {
+    if (!fresh.has(p)) continue;
+    p.f = featurize({ text: p.text, typed: options.typed });
+    const lex = promptLex(p.text, models);
+    if (lex) p.lex = lex;
+    if (vocab) for (const w of vocabularyWords(p.text)) vocab.set(w, (vocab.get(w) ?? 0) + 1);
+    if (topics) {
+      const { hour, month } = clock(p.at);
+      const slot = hour < 5 ? 0 : hour >= 9 && hour < 19 ? 1 : -1;
+      if (slot >= 0) {
+        let bag = topics.get(month);
+        if (!bag) {
+          bag = { month, night: 0, day: 0, words: /* @__PURE__ */ new Map() };
+          topics.set(month, bag);
+        }
+        if (slot === 0) bag.night++;
+        else bag.day++;
+        for (const w of topicWords(p.text)) {
+          let c = bag.words.get(w);
+          if (!c) {
+            c = [0, 0];
+            bag.words.set(w, c);
+          }
+          c[slot]++;
+        }
+      }
+    }
+  }
+  turnStats(human, events, interrupts);
+  const weight = /* @__PURE__ */ new Map();
+  const slots = /* @__PURE__ */ new Set();
+  if (human.length) slots.add(human[0]);
+  const byProject = /* @__PURE__ */ new Map();
+  for (const p of human) {
+    const k = p.project ?? "";
+    const list = byProject.get(k) ?? [];
+    list.push(p);
+    byProject.set(k, list);
+  }
+  for (const list of byProject.values()) for (const p of list.slice(-QUOTE_LAST_PER_PROJECT)) slots.add(p);
+  turnWeights(human, events, weight);
+  for (const p of [...human].sort((a, b) => (weight.get(b) ?? 0) - (weight.get(a) ?? 0)).slice(0, QUOTE_TOP)) slots.add(p);
+  for (const p of human.filter((p2) => (p2.t?.sa ?? 0) > 0).sort((a, b) => b.t.sa - a.t.sa).slice(0, QUOTE_SUBAGENT_TOP)) slots.add(p);
+  for (const p of slots) {
+    if (!p.text) continue;
+    const q = safeQuote(p.text, 90);
+    if (q) p.q = q;
+  }
+  return { vocab, topics: topics ? [...topics.values()] : null };
+}
+function turnStats(human, events, interrupts) {
+  const ev = events.filter((e) => Number.isFinite(e.at)).sort((a, b) => a.at - b.at);
+  const intr = interrupts.filter(Number.isFinite).sort((a, b) => a - b);
+  let j = 0, k = 0, lastAt = null;
+  human.forEach((p, i) => {
+    const start = p.at, next = i + 1 < human.length ? human[i + 1].at : Infinity;
+    while (j < ev.length && ev[j].at < start) lastAt = ev[j++].at;
+    const t = { m: 0, tl: 0, sa: 0, d: null, x: 0, g: lastAt === null ? null : round1((start - lastAt) / 1e3) };
+    let end = null;
+    while (j < ev.length && ev[j].at < next) {
+      const e = ev[j++];
+      t.m++;
+      t.tl += e.tools;
+      t.sa += e.subs;
+      end = e.at;
+      lastAt = e.at;
+    }
+    if (end !== null) t.d = round1((end - start) / 1e3);
+    while (k < intr.length && intr[k] < start) k++;
+    if (k < intr.length && intr[k] < next) t.x = 1;
+    p.t = t;
+  });
+}
+function turnWeights(human, events, out) {
+  const ev = events.filter((e) => e.weight > 0).sort((a, b) => a.at - b.at);
+  let j = 0;
+  human.forEach((p, i) => {
+    const next = i + 1 < human.length ? human[i + 1].at : Infinity;
+    while (j < ev.length && ev[j].at < p.at) j++;
+    let w = 0;
+    while (j < ev.length && ev[j].at < next) w += ev[j++].weight;
+    out.set(p, w);
+  });
+}
+var round1 = (x) => Math.round(x * 10) / 10;
+var usageWeight = (input, output, cacheRead, cacheWrite) => input + 5 * output + 1.25 * cacheWrite + 0.1 * cacheRead;
+
 // packages/core/src/analytics/extract.ts
-var FACTS_VERSION = 4;
+var FACTS_VERSION = 5;
 var MAX_PROMPT_CHARS = 4e3;
 var isRec = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 var str = (v) => typeof v === "string" && v.length > 0 ? v : null;
@@ -684,7 +1338,9 @@ function makeBuilder(file, harness, size, mtimeMs) {
     currentModel: null,
     currentProvider: null,
     pending: [],
-    seenPrompts: /* @__PURE__ */ new Set()
+    seenPrompts: /* @__PURE__ */ new Set(),
+    events: [],
+    interrupts: []
   };
 }
 function touch(b, at) {
@@ -707,24 +1363,25 @@ function addUsage(b, u) {
   touch(b, u.at);
   answered(b, u.model, u.provider);
 }
-function addPrompt(b, key, at, project, kind, reason, text) {
+function addPrompt(b, key, at, project, kind2, reason, text) {
   if (b.seenPrompts.has(key)) return;
   b.seenPrompts.add(key);
-  if (kind === "human" && hasExclusionMarker(text)) b.facts.excluded = true;
+  if (kind2 === "human" && hasExclusionMarker(text)) b.facts.excluded = true;
+  if (reason === "interrupt_marker" && at !== null) b.interrupts.push(at);
   const prompt = {
     key,
     at,
     project,
-    kind,
+    kind: kind2,
     reason,
-    text: kind === "human" ? clean(text.length > MAX_PROMPT_CHARS ? text.slice(0, MAX_PROMPT_CHARS) : text) : "",
+    text: kind2 === "human" ? clean(text.length > MAX_PROMPT_CHARS ? text.slice(0, MAX_PROMPT_CHARS) : text) : "",
     before: b.currentModel,
     beforeProvider: b.currentProvider,
     after: null,
     afterProvider: null
   };
   b.facts.prompts.push(prompt);
-  if (kind === "human") b.pending.push(prompt);
+  if (kind2 === "human") b.pending.push(prompt);
   touch(b, at);
 }
 var SUBAGENT_DIR = `${path.sep}subagents${path.sep}`;
@@ -783,6 +1440,16 @@ function claudeLine(b, line, subagent, sessions) {
     if (id) fact.replayKey = `${id}:${session}`;
     if (u.speed === "fast") fact.tier = "fast";
     addUsage(b, fact);
+    if (at !== null) {
+      let tools = 0, subs = 0;
+      if (Array.isArray(m.content)) {
+        for (const block of m.content) if (isRec(block) && block.type === "tool_use") {
+          tools++;
+          if (typeof block.name === "string" && isAgentTool(block.name)) subs++;
+        }
+      }
+      b.events.push({ at, tools, subs, weight: usageWeight(fact.input, fact.output, fact.cacheRead, fact.cacheWrite) });
+    }
     return;
   }
   if (r.type !== "user" || r.isSidechain === true || subagent) return;
@@ -791,17 +1458,37 @@ function claudeLine(b, line, subagent, sessions) {
   if (sid) sessions.add(sid);
   const origin = isRec(r.origin) ? str(r.origin.kind) : null;
   const flagged = r.isMeta === true ? "is_meta" : r.isCompactSummary === true ? "compaction_summary" : origin && origin !== "human" ? `origin_${origin}` : r.entrypoint === "sdk-cli" ? "headless_claude_p" : r.promptSource === "system" ? "prompt_source_system" : null;
-  let { kind, reason, text } = classifyText(textOf(content));
+  let { kind: kind2, reason, text } = classifyText(textOf(content));
   if (flagged) {
-    kind = "excluded";
+    kind2 = "excluded";
     reason = flagged;
   } else if (reason === "empty" && origin === "human" && Array.isArray(content) && content.some((block) => isRec(block) && block.type === "image")) {
-    kind = "human";
+    kind2 = "human";
     reason = null;
     text = "[image]";
   }
-  addPrompt(b, str(r.uuid) ?? `${f.sessionId}:${String(r.timestamp)}`, at, str(r.cwd) ?? f.project, kind, reason, text);
+  addPrompt(b, str(r.uuid) ?? `${f.sessionId}:${String(r.timestamp)}`, at, str(r.cwd) ?? f.project, kind2, reason, text);
 }
+var newCodexState = () => ({
+  lineNo: 0,
+  previousTotal: null,
+  tier: void 0,
+  imported: false,
+  records: /* @__PURE__ */ new Map(),
+  compacted: /* @__PURE__ */ new Set(),
+  deltas: /* @__PURE__ */ new Set(),
+  itemPrompts: [],
+  responsePrompts: [],
+  mode: null,
+  converted: 0,
+  seen: /* @__PURE__ */ new Set(),
+  compactionDone: /* @__PURE__ */ new Set()
+});
+var ResumeMismatch = class extends Error {
+  constructor() {
+    super("resume_mismatch");
+  }
+};
 var U_KEYS = ["input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens"];
 var tuple = (u) => isRec(u) ? U_KEYS.map((k) => int(u[k])) : null;
 var AUTO_REVIEW_MODELS = [
@@ -878,7 +1565,9 @@ function codexLine(b, line, s) {
     if (!d || !(d[0] || d[1] || d[2] || d[3])) return;
     s.deltas.add(d.join(","));
     const key = totalSig ? `x:${totalSig}|${last ? last.join(",") : ""}` : null;
-    addUsage(b, codexFact(b, s, time(r.timestamp), String(r.timestamp ?? ""), d, key));
+    const fact = codexFact(b, s, time(r.timestamp), String(r.timestamp ?? ""), d, key);
+    addUsage(b, fact);
+    if (fact.at !== null) b.events.push({ at: fact.at, tools: 0, subs: 0, weight: usageWeight(fact.input, fact.output, fact.cacheRead, fact.cacheWrite) });
     return;
   }
   if (head.includes('"turn_context"')) {
@@ -931,6 +1620,7 @@ function codexLine(b, line, s) {
     s.itemPrompts.push({ key: null, at: time(r.timestamp), text: typeof p.message === "string" ? p.message : "", imported: s.imported, project: f.project });
     return;
   }
+  if (codexToolOrAbort(b, head)) return;
   if (head.includes('"token_usage_record"')) {
     const r = parse();
     const p = r && isRec(r.payload) ? r.payload : null;
@@ -946,21 +1636,45 @@ function codexLine(b, line, s) {
     }
   }
 }
+var TOOL_CALL = /"type":"(?:function_call|custom_tool_call)"/;
+var NAME = /"name":"([^"]{1,80})"/;
+var STAMP = /"timestamp":"([^"]{10,40})"/;
+function codexToolOrAbort(b, head) {
+  if (TOOL_CALL.test(head) && head.includes('"response_item"')) {
+    const at = time(STAMP.exec(head)?.[1]);
+    const name = NAME.exec(head)?.[1] ?? "";
+    if (at !== null) b.events.push({ at, tools: 1, subs: isAgentTool(name) ? 1 : 0, weight: 0 });
+    return true;
+  }
+  if (head.includes('"turn_aborted"') && head.includes('"event_msg"')) {
+    const at = time(STAMP.exec(head)?.[1]);
+    if (at !== null) b.interrupts.push(at);
+    return true;
+  }
+  return false;
+}
 function finishCodex(b, s) {
   const f = b.facts;
   for (const id of s.compacted) {
+    if (s.compactionDone.has(id)) continue;
     const record = s.records.get(id);
     const d = record ? tuple(record.usage) : null;
     if (!record || !d || !(d[0] || d[1] || d[2] || d[3]) || s.deltas.has(d.join(","))) continue;
+    s.compactionDone.add(id);
     const fact = codexFact(b, s, record.at, record.at ? new Date(record.at).toISOString() : "", d, `codex-compaction:${id}`);
     fact.compaction = true;
     f.usage.push(fact);
     touch(b, record.at);
   }
-  const list = s.itemPrompts.length ? s.itemPrompts : s.responsePrompts;
+  if (s.mode === "responses" && s.itemPrompts.length) throw new ResumeMismatch();
+  const mode = s.mode ?? (s.itemPrompts.length ? "items" : s.responsePrompts.length ? "responses" : null);
+  const list = mode === "items" ? s.itemPrompts : mode === "responses" ? s.responsePrompts : [];
+  s.mode = mode;
   const reason = f.child ? "subagent_parent_written" : f.automated ? "programmatic_exec_session" : null;
-  const seen = /* @__PURE__ */ new Set();
-  list.forEach((p, i) => {
+  const seen = s.seen, base = s.converted;
+  s.converted += list.length;
+  list.forEach((p, n) => {
+    const i = base + n;
     if (p.key) {
       if (seen.has(p.key)) return;
       seen.add(p.key);
@@ -1019,6 +1733,10 @@ function piLine(b, line) {
     };
     if (fact.input + fact.output + fact.cacheRead + fact.cacheWrite > 0) addUsage(b, fact);
     else answered(b, fact.model, fact.provider);
+    if (at !== null) {
+      const tools = Array.isArray(m.content) ? m.content.filter((c) => isRec(c) && typeof c.type === "string" && c.type.toLowerCase().includes("tool")).length : 0;
+      b.events.push({ at, tools, subs: 0, weight: usageWeight(fact.input, fact.output, fact.cacheRead, fact.cacheWrite) });
+    }
     return;
   }
   if (m.role === "user") {
@@ -1029,34 +1747,41 @@ function piLine(b, line) {
 var CHUNK = 4 * 1024 * 1024;
 var MAX_LINE = 256 * 1024 * 1024;
 var sharedBuffer = null;
-function extractFile(file, harness) {
+var RESUME_RECENT_MS = 48 * 36e5;
+function extractFile(file, harness, options = {}, previous) {
   const fd = fs.openSync(file, "r");
   try {
     const stat = fs.fstatSync(fd);
-    const b = makeBuilder(file, harness, stat.size, stat.mtimeMs);
-    const codex = {
-      lineNo: 0,
-      previousTotal: null,
-      tier: void 0,
-      imported: false,
-      records: /* @__PURE__ */ new Map(),
-      compacted: /* @__PURE__ */ new Set(),
-      deltas: /* @__PURE__ */ new Set(),
-      itemPrompts: [],
-      responsePrompts: []
-    };
+    let b = makeBuilder(file, harness, stat.size, stat.mtimeMs);
+    let codex = newCodexState();
+    let position = 0, firstNew = 0;
     const subagent = file.includes(SUBAGENT_DIR), sessions = /* @__PURE__ */ new Set();
+    if (previous) {
+      const r = previous.resume;
+      if (!r || previous.excluded || r.dev !== stat.dev || r.ino !== stat.ino || r.offset > stat.size || r.offset < 1 || tailHash(fd, r.offset) !== r.tail) throw new ResumeMismatch();
+      const nl = Buffer.alloc(1);
+      fs.readSync(fd, nl, 0, 1, r.offset - 1);
+      if (nl[0] !== 10) throw new ResumeMismatch();
+      b = resumeBuilder(previous, r, stat);
+      if (r.codex) codex = { ...structuredClone(r.codex), itemPrompts: [], responsePrompts: [] };
+      for (const sid of r.sessions ?? []) sessions.add(sid);
+      position = r.offset;
+      firstNew = b.facts.prompts.length;
+    }
     const onLine = harness === "claude" ? (line) => claudeLine(b, line, subagent, sessions) : harness === "codex" ? (line) => codexLine(b, line, codex) : (line) => piLine(b, line);
     let buffer = sharedBuffer ??= Buffer.allocUnsafe(CHUNK);
-    let filled = 0, position = 0, skipping = false;
+    let filled = 0, skipping = false, base = position, endsWithNewline = true;
     for (; ; ) {
       if (filled === buffer.length) {
         if (harness === "codex" && !codexWanted(buffer.toString("latin1", 0, Math.min(filled, 400)), codex.lineNo)) {
+          codexToolOrAbort(b, buffer.toString("latin1", 0, Math.min(filled, 400)));
           skipping = true;
+          base += filled;
           filled = 0;
           codex.lineNo++;
         } else if (buffer.length >= MAX_LINE) {
           skipping = true;
+          base += filled;
           filled = 0;
           b.facts.malformed++;
         } else {
@@ -1078,29 +1803,116 @@ function extractFile(file, harness) {
         start = nl + 1;
       }
       if (n === 0) {
-        if (!skipping && start < end) onLine(buffer.subarray(start, end));
+        if (start < end) {
+          endsWithNewline = false;
+          if (!skipping) onLine(buffer.subarray(start, end));
+        }
+        base += start;
         break;
       }
       buffer.copyWithin(0, start, end);
+      base += start;
       filled = end - start;
     }
     if (harness === "codex") finishCodex(b, codex);
     if (harness === "claude" && !subagent && sessions.size) b.facts.sessionIds = [...sessions];
-    if (b.facts.excluded) for (const p of b.facts.prompts) p.text = "";
+    b.facts.size = stat.size;
+    b.facts.mtimeMs = stat.mtimeMs;
+    finishStory(b, harness, options, firstNew);
+    delete b.facts.resume;
+    if (endsWithNewline && !b.facts.excluded && Date.now() - stat.mtimeMs < RESUME_RECENT_MS) {
+      const events = new Float64Array(b.events.length * 4);
+      b.events.forEach((e, i) => {
+        events[i * 4] = e.at;
+        events[i * 4 + 1] = e.tools;
+        events[i * 4 + 2] = e.subs;
+        events[i * 4 + 3] = e.weight;
+      });
+      const { itemPrompts: _items, responsePrompts: _responses, ...codexState } = codex;
+      b.facts.resume = {
+        offset: base,
+        tail: tailHash(fd, base),
+        dev: stat.dev,
+        ino: stat.ino,
+        model: b.currentModel,
+        provider: b.currentProvider,
+        events,
+        interrupts: Float64Array.from(b.interrupts),
+        ...sessions.size ? { sessions: [...sessions] } : {},
+        ...harness === "codex" ? { codex: codexState } : {}
+      };
+    }
     return b.facts;
   } finally {
     fs.closeSync(fd);
   }
 }
+function resumeBuilder(previous, r, stat) {
+  const facts = {
+    ...previous,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    usage: [...previous.usage],
+    prompts: previous.prompts.map((p) => ({ ...p })),
+    ...previous.sessionIds ? { sessionIds: [...previous.sessionIds] } : {},
+    ...previous.story ? { story: { vocab: previous.story.vocab ? new Map(previous.story.vocab) : null, topics: previous.story.topics ? previous.story.topics.map((t) => ({ ...t, words: new Map([...t.words].map(([w, c]) => [w, [c[0], c[1]]])) })) : null } } : {}
+  };
+  delete facts.resume;
+  const b = makeBuilder(previous.file, previous.harness, stat.size, stat.mtimeMs);
+  b.facts = facts;
+  b.currentModel = r.model;
+  b.currentProvider = r.provider;
+  for (const p of facts.prompts) b.seenPrompts.add(p.key);
+  for (let i = facts.prompts.length - 1; i >= 0; i--) {
+    const p = facts.prompts[i];
+    if (p.kind !== "human") continue;
+    if (p.after !== null) break;
+    b.pending.unshift(p);
+  }
+  for (let i = 0; i < r.events.length; i += 4) b.events.push({ at: r.events[i], tools: r.events[i + 1], subs: r.events[i + 2], weight: r.events[i + 3] });
+  b.interrupts.push(...r.interrupts);
+  return b;
+}
+function finishStory(b, harness, options, from = 0) {
+  const f = b.facts;
+  f.tz = options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (f.excluded) {
+    for (const p of f.prompts) {
+      p.text = "";
+      delete p.f;
+      delete p.lex;
+      delete p.q;
+    }
+    delete f.story;
+    return;
+  }
+  f.story = deriveStory(f.prompts, b.events, b.interrupts, { typed: false, counters: harness !== "claude" && !f.child, timezone: f.tz, from, previous: f.story });
+}
+function stripText(facts) {
+  for (const p of facts.prompts) p.text = "";
+  return facts;
+}
+function tailHash(fd, offset) {
+  const start = Math.max(0, offset - TAIL), buffer = Buffer.alloc(offset - start);
+  let read = 0;
+  while (read < buffer.length) {
+    const n = fs.readSync(fd, buffer, read, buffer.length - read, start + read);
+    if (!n) break;
+    read += n;
+  }
+  return createHash2("sha256").update(buffer.subarray(0, read)).digest("hex");
+}
+var TAIL = 4096;
 
 // packages/core/src/analytics/scan-pool.ts
+var readFacts = (job) => stripText(extractFile(job.file, job.harness, { timezone: job.timezone }));
 var errorCode = (error) => error instanceof Error && /^[a-z][a-z0-9_]{0,63}$/.test(error.message) ? error.message : "source_unreadable";
 function runScanWorker() {
   if (!parentPort) throw new Error("scan_worker_requires_parent");
   const port = parentPort;
   port.on("message", (job) => {
     try {
-      port.postMessage({ facts: extractFile(job.file, job.harness) });
+      port.postMessage({ facts: readFacts(job) });
     } catch (error) {
       port.postMessage({ error: errorCode(error) });
     }

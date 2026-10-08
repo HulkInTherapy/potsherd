@@ -2,6 +2,15 @@
 
 Public releases use package versions. Internal development phase numbers are planning milestones, not product versions. This public release consolidates a development snapshot; the original private development branches are preserved separately.
 
+## 1.8.0 — Your story
+
+- `slopie audit` is now a story: a loading screen where Slopie, the new mascot, finds each coding agent on your machine and eats your history, then one full-screen card per insight (←/→ to move), ending on a share board. `s` saves an anonymised share card; `--plain` prints the story as text.
+- 30 offline insight detectors, each with sample-size guards and a receipt (a number, a date or your own words): most expensive sentence, swear-rate turning point, the model you swear at most and the one you thank most (compared within the same months), your fuse length, catchphrase, nudges, pet names, typos, honeymoon with a model, the project that got away, weekday-by-hour clock, first prompt vs latest, delegation, and more.
+- A deterministic archetype (12 types, with sub-role and rarity) and awards. With the optional free model online, it only chooses among local wordings; numbers are never generated.
+- Quotes come only from fixed slots and pass secret and sensitive-topic filters; swears are masked. The derived cache stores per-prompt features, not prompt text.
+- Incremental reads: growing history files are parsed from where the last run stopped.
+- Unchanged: offline cold run ~5 s, warm ~1 s; totals still match an independent check.
+
 ## 1.7.5 — Fast, correct audit
 
 - Rebuild the audit pipeline: each native history file is read once on a worker-thread pool, cached by path/size/mtime, and aggregated in one pass. Full local results in ~5s cold and ~1s warm on a 3.9 GB history (was 35–110s).

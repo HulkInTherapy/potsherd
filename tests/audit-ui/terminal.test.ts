@@ -1,10 +1,16 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import type { AuditEvent, AuditSession, AuditSnapshot } from '../../packages/core/src/analytics/contracts.js';
-import { decodeKey, runWallboard } from '../../packages/cli/src/audit-ui/terminal.js';
+import { decodeKey, runWallboard, splitKeys } from '../../packages/cli/src/audit-ui/terminal.js';
 import { DiffRenderer, detectColorMode, lineToAnsi } from '../../packages/cli/src/audit-ui/renderer.js';
 import { applyAuditEvent, applyPreviewInvalidation, applyPrivacyEvent } from '../../packages/cli/src/audit-ui/session-state.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { buildDeck } from '../../packages/cli/src/audit-ui/story/deck.js';
 import { readingSnapshot, readySnapshot, startingSnapshot } from './fixture.js';
+import { storySnapshot } from './story-fixture.js';
+import { Screen } from './screen.js';
 
 class FakeIn extends EventEmitter {
   isTTY = true;
@@ -27,6 +33,8 @@ class FakeOut extends EventEmitter {
     return true;
   }
   get text() { return this.chunks.join(''); }
+  /** What the terminal shows now (only the alt-screen frames matter). */
+  get screen() { return new Screen(this.columns, this.rows).feed(this.chunks.join('')).text(); }
 }
 
 function fakeSession(initial: AuditSnapshot) {
@@ -50,7 +58,7 @@ const tick = (ms = 40) => new Promise(resolve => setTimeout(resolve, ms));
 const visible = (ansi: string) => ansi.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
 
 describe('interactive wallboard', () => {
-  it('paints at once, fills progressively, quits on q and restores the terminal', async () => {
+  it('paints the loading story at once, moves to the cards when ready, quits on q and restores the terminal', async () => {
     const stdin = new FakeIn();
     const stdout = new FakeOut();
     const { session, emit, finish } = fakeSession(startingSnapshot());
@@ -58,17 +66,18 @@ describe('interactive wallboard', () => {
     await tick(5);
     expect(stdout.text).toContain('\x1b[?1049h');
     expect(stdin.raw).toBe(true);
-    expect(visible(stdout.text)).toContain('finding history');
+    expect(visible(stdout.text)).toContain('finding your agents');
+    expect(visible(stdout.text)).toContain('nothing leaves this machine');
     emit({ type: 'snapshot', snapshot: readingSnapshot() });
     await tick();
-    expect(visible(stdout.text)).toContain('405 of 670');
-    finish({ ...readySnapshot(), sequence: 20 });
+    expect(visible(stdout.text)).toContain('Claude Code');
+    finish({ ...storySnapshot(), sequence: 20 });
     await tick();
-    expect(visible(stdout.text)).toContain('Rotor-Notes');
+    expect(visible(stdout.text)).toContain('BEFORE WE START');
     stdin.emit('data', 'q');
     const outcome = await result;
     expect(outcome.reason).toBe('quit');
-    expect(stdout.text.endsWith('\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l')).toBe(true);
+    expect(stdout.text.endsWith('\x1b[?2026l\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l')).toBe(true);
     expect(stdin.raw).toBe(false);
     expect(session.cancel).not.toHaveBeenCalled();
   });
@@ -87,30 +96,86 @@ describe('interactive wallboard', () => {
     expect(session.cancel).toHaveBeenCalled();
   });
 
-  it('turns pages with arrows, toggles details and redraws only changed rows', async () => {
+  it('pages through the story, plays the guess, opens notes and the board, and redraws only what changed', async () => {
     const stdin = new FakeIn();
     const stdout = new FakeOut();
+    stdout.columns = 120;
+    stdout.rows = 40;
     const { session, finish } = fakeSession(startingSnapshot());
     const result = runWallboard(session, { io: { stdin: stdin as never, stdout: stdout as never }, motion: false });
     await tick(5);
-    finish({ ...readySnapshot(), sequence: 20 });
+    const deck = buildDeck(storySnapshot());
+    finish({ ...storySnapshot(), sequence: 20 });
     await tick();
+    expect(stdout.screen).toContain(`1/${deck.length}`);
     stdin.emit('data', '\x1b[C');
-    expect(visible(stdout.chunks.at(-1)!)).toContain('2/2');
-    stdin.emit('data', '\x1b[C');
-    expect(visible(stdout.chunks.at(-1)!)).toContain('last page');
-    const before = stdout.chunks.length;
+    expect(stdout.screen).toContain(`2/${deck.length}`);
+    stdin.emit('data', '\x1b[D');
+    stdin.emit('data', '\x1b[D');
+    expect(stdout.screen).toContain('this is the start');
+    // Jump to the quiz and guess.
+    const quiz = deck.findIndex(card => card.kind === 'guess');
+    for (let i = 0; i < quiz; i++) stdin.emit('data', 'l');
+    expect(stdout.screen).toContain('Which model did you talk to most?');
+    stdin.emit('data', '1');
+    expect(stdout.screen).toMatch(/Nailed it|Not quite/);
+    // Method notes open and close.
     stdin.emit('data', '?');
-    expect(visible(stdout.chunks.at(-1)!)).toContain('WHAT THE NUMBERS MEAN');
+    expect(stdout.screen).toContain('HOW WE KNOW');
     stdin.emit('data', '\x1b');
-    expect(stdout.chunks.length).toBeGreaterThan(before);
+    expect(stdout.screen).not.toContain('HOW WE KNOW');
+    // b jumps to the board.
+    stdin.emit('data', 'b');
+    expect(stdout.screen).toContain(`${deck.length}/${deck.length}`);
     // A repaint with nothing changed writes nothing.
     const count = stdout.chunks.length;
-    stdout.emit('resize');
     stdin.emit('data', 'x');
-    expect(stdout.chunks.length).toBe(count + 1);
+    expect(stdout.chunks.length).toBe(count);
     stdin.emit('data', 'q');
     await result;
+  });
+
+  it('asks for a bigger window below 60×20 instead of drawing a broken card', async () => {
+    const stdin = new FakeIn();
+    const stdout = new FakeOut();
+    stdout.columns = 50;
+    stdout.rows = 16;
+    const { session, finish } = fakeSession(startingSnapshot());
+    const result = runWallboard(session, { io: { stdin: stdin as never, stdout: stdout as never }, motion: false });
+    await tick(5);
+    finish({ ...storySnapshot(), sequence: 20 });
+    await tick();
+    expect(stdout.screen).toContain('make me bigger');
+    stdout.columns = 80;
+    stdout.rows = 24;
+    stdout.emit('resize');
+    await tick();
+    expect(stdout.screen).toContain('BEFORE WE START');
+    stdin.emit('data', 'q');
+    await result;
+  });
+
+  it('saves an anonymised share card with s', async () => {
+    const stdin = new FakeIn();
+    const stdout = new FakeOut();
+    stdout.columns = 100;
+    stdout.rows = 30;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopie-share-'));
+    const { session, finish } = fakeSession(startingSnapshot());
+    const result = runWallboard(session, { io: { stdin: stdin as never, stdout: stdout as never }, motion: false, shareDir: dir });
+    await tick(5);
+    finish({ ...storySnapshot(), sequence: 20 });
+    await tick();
+    stdin.emit('data', 's');
+    const svg = fs.readFileSync(path.join(dir, 'slopie-wrapped.svg'), 'utf8');
+    expect(svg.startsWith('<svg')).toBe(true);
+    for (const secret of ['lantern-api', 'tidepool', 'paper-boats', 'real quick', 'sync layer', 'Rotor-Notes']) expect(svg).not.toContain(secret);
+    expect(stdout.screen).toContain('saved slopie-wrapped.svg');
+    stdin.emit('data', 's');
+    expect(fs.existsSync(path.join(dir, 'slopie-wrapped-2.svg'))).toBe(true);
+    stdin.emit('data', 'q');
+    await result;
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   it('acknowledges a transfer only after the frame showing it is flushed', async () => {
@@ -166,7 +231,14 @@ describe('keys, colours and diffing', () => {
     expect(decodeKey('\x1b[D')).toBe('left');
     expect(decodeKey('?')).toBe('details');
     expect(decodeKey('\x1b')).toBe('back');
+    expect(decodeKey(' ')).toBe('right');
+    expect(decodeKey('b')).toBe('board');
+    expect(decodeKey('s')).toBe('share');
+    expect(decodeKey('3')).toBe('guess3');
     expect(decodeKey('quit')).toBeNull();
+    expect(splitKeys('\x1bs')).toEqual(['\x1b', 's']);
+    expect(splitKeys('\x1b[C\x1b[C')).toEqual(['\x1b[C', '\x1b[C']);
+    expect(splitKeys('qqq')).toEqual(['qqq']);
   });
 
   it('uses only the orange / white / gray palette and honours NO_COLOR', () => {
