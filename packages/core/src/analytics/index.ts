@@ -17,7 +17,12 @@ import {openDatabase} from '../sqlite-driver.js';
 import {sourceId} from '../memory/source-identity.js';
 import {NORMALIZATION_VERSION} from '../memory/privacy.js';
 import {clock, digest} from './source.js';
-import {extractHistory, type HistoryEntry, type NativeHarness, type SourceFacts} from './extract.js';
+import {extractFile, finishExternalFacts, parseHistory, readHistory, stripText, type HistoryData, type HistoryEntry, type NativeHarness, type SourceFacts} from './extract.js';
+import {buildStoryTable} from './story-table.js';
+import {buildStory} from './story.js';
+import {DictionaryLookup} from './story-dictionary.js';
+import {enrichStory} from './story-enrich.js';
+import type {AuditProgressDetail, AuditStory} from './story-contracts.js';
 import {aggregate, projectName, type Aggregate} from './aggregate.js';
 import {PriceBook} from './pricing.js';
 import {bundledModelCatalog} from './model-catalog.js';
@@ -47,6 +52,8 @@ export {composeJevJudgments} from './jev-session.js';
 
 const HARNESSES: AuditHarness[] = ['claude', 'codex', 'pi', 'opencode'];
 const LAUNCH_ORDER: AuditHarness[] = ['codex', 'claude', 'opencode', 'pi'];
+/** Appended tails up to this size are parsed on the main thread; bigger ones go to the pool. */
+const RESUME_MAX_BYTES = 64 * 1024 * 1024;
 const offline = () => process.env['POTSHERD_OFFLINE'] === '1';
 
 const metric = (value: number | null, unit: string, basis: string, definition: string): AuditMetric =>
@@ -63,6 +70,7 @@ export function publicAuditSnapshot(snapshot: AuditSnapshot): AuditSnapshot {
       modelFeedback: launch.modelFeedback?.map(row => ({...row, promptIds: []})),
       languageByModel: launch.languageByModel?.map(row => ({...row, promptIds: []})),
       facts: launch.facts ? {...launch.facts, records: [], recordsIncluded: false} : null,
+      ...(launch.story ? {story: publicStory(launch.story)} : {}),
       semantics: launch.semantics ? {...launch.semantics, stories: [], hallOfFame: [], judgments: []} : null,
     }} : {}),
     ...(snapshot.profanity ? {profanity: {...snapshot.profanity, matches: [], terms: []}} : {}),
@@ -73,6 +81,27 @@ export function publicAuditSnapshot(snapshot: AuditSnapshot): AuditSnapshot {
     insights: snapshot.insights.map(i => ({...i, caption: i.publicCaption})),
     warnings: snapshot.warnings.map(w => w.split(':')[0]!.slice(0, 96)),
   });
+}
+
+/** Story without quotes, project names or typed lines: cards use their number-only public wording. */
+export function publicStory(story: AuditStory): AuditStory {
+  const h = story.highlights;
+  return {
+    ...story,
+    cards: story.cards.filter(c => c.public).map((c, i) => ({...c, headline: c.public!.headline, support: c.public!.support, quote: null, rank: i + 1,
+      numbers: Object.fromEntries(Object.entries(c.numbers).filter(([k]) => !/project|cheapest|top$|night_words|day_words/.test(k))),
+      chart: c.id === 'priciest_project' || c.id === 'project_graveyard' || c.id === 'continue_count' || c.id === 'typo_fingerprint' ? {...c.chart, series: []} : c.chart})),
+    projects: story.projects.map(p => ({...p, id: p.alias, name: null})),
+    highlights: {
+      ...h, mostTypedLine: null,
+      mostExpensivePrompt: h.mostExpensivePrompt ? {...h.mostExpensivePrompt, quote: null, project: null} : null,
+      firstPrompt: h.firstPrompt ? {...h.firstPrompt, quote: null} : null,
+      latestPrompt: h.latestPrompt ? {...h.latestPrompt, quote: null} : null,
+      gotAway: h.gotAway ? {...h.gotAway, project: null, lastWords: null} : null,
+    },
+    awards: story.awards.map(a => ({...a, receipt: a.publicReceipt})),
+    coldOpen: null,
+  };
 }
 
 export function createAuditSession(options: AuditOverviewOptions = {}): AuditSession {
@@ -167,6 +196,11 @@ function loadPolicy(root: string): Policy {
     }
   }
   return policy;
+}
+
+/** Parses only what was appended to a file since its facts were cached; null means "read it in full". */
+function resumeFacts(previous: SourceFacts, job: ScanJob, timezone: string): SourceFacts | null {
+  try { return stripText(extractFile(job.file, job.harness, {timezone}, previous)); } catch { return null; }
 }
 
 function codexFastDefault(options: AuditOverviewOptions): boolean {
@@ -271,7 +305,8 @@ class LocalAuditSession implements AuditSession {
   }
 
   private progress(stage: AuditSnapshot['status'], label: string, completed: number, total: number | null): void {
-    this.publish({status: stage, progress: {stage, label, completed, total, unit: 'candidate_source', provisional: true, cancellable: true}}, true);
+    const detail = this.detail ? {...this.detail, harnesses: this.detail.harnesses.map(h => ({...h})), counts: {...this.detail.counts}, elapsedMs: Math.round(performance.now() - this.t0)} : undefined;
+    this.publish({status: stage, progress: {stage, label, completed, total, unit: 'candidate_source', provisional: true, cancellable: true, ...(detail ? {detail} : {})}}, true);
   }
 
   async run(onEvent?: (event: AuditEvent) => void): Promise<AuditSnapshot> {
@@ -280,54 +315,77 @@ class LocalAuditSession implements AuditSession {
     this.started = true;
     this.callback = onEvent;
     const t0 = performance.now();
+    this.t0 = t0;
     const lap = (name: string, since: number) => { this.timings[name] = Math.round(performance.now() - since); return performance.now(); };
     try {
       this.publish({});
       let t = performance.now();
       const harnesses = this.current.scope.harnesses;
+      const tz = this.current.scope.timezone;
       const found = discover(harnesses, this.options);
       t = lap('discoverMs', t);
       this.policy = loadPolicy(this.root);
       t = lap('policyMs', t);
       const cache = new FactsCache(this.derived ? this.derived.directory : null);
       cache.load();
+      this.cache = cache;
       t = lap('cacheLoadMs', t);
+      this.detail = {
+        stage: 'reading',
+        harnesses: harnesses.map(h => { const c = found.census.get(h)!; return {harness: h, files: c.files, bytes: c.bytes, filesDone: 0, firstAt: null, lastAt: null}; }),
+        counts: {files: found.jobs.length + found.opencodeDatabases.length + found.opencodeJson.length, filesDone: 0, bytes: [...found.census.values()].reduce((n, c) => n + c.bytes, 0), bytesDone: 0, messages: 0, chats: 0, prompts: 0},
+        elapsedMs: 0,
+      };
       this.publish({sources: this.current.sources.map(s => {
         const c = found.census.get(s.harness)!;
         return {...s, state: c.files ? 'available' : 'absent', candidateFiles: c.files,
           census: {checked: true, files: c.files, bytes: c.bytes, roots: c.roots, unit: s.harness === 'opencode' && found.opencodeDatabases.length ? 'database' : 'file'}};
       })}, true);
 
-      // ---- cached facts first, then read what changed
+      // ---- cached facts first; appended files resume from their old end; read the rest
       const facts: SourceFacts[] = [];
       const toRead: ScanJob[] = [];
+      const resumable: {job: ScanJob & {mtimeMs: number}; previous: SourceFacts}[] = [];
       for (const job of found.jobs as (ScanJob & {mtimeMs: number})[]) {
-        const hit = cache.get(job.file, job.size, job.mtimeMs);
-        if (hit) facts.push(hit); else toRead.push({file: job.file, harness: job.harness, size: job.size});
+        const hit = cache.get(job.file, job.size, job.mtimeMs, tz);
+        if (hit) { facts.push(hit); this.count(hit, job.size); continue; }
+        const previous = cache.previous(job.file);
+        if (previous?.resume && previous.tz === tz && previous.size < job.size && job.size - previous.size <= RESUME_MAX_BYTES) resumable.push({job, previous});
+        else toRead.push({file: job.file, harness: job.harness, size: job.size, timezone: tz});
       }
       const cacheHits = facts.length, total = found.jobs.length;
       const failures: string[] = [];
       this.progress('parsing', 'Reading history', cacheHits, total);
       let scanning: Promise<void> = Promise.resolve();
+      const readOne = (job: ScanJob) => { toRead.push(job); };
+      // Appended JSONL: parse only the new tail on this thread (falls back to a full read on any mismatch).
+      let resumed = 0;
+      for (const {job, previous} of resumable) {
+        const merged = resumeFacts(previous, job, tz);
+        if (merged) { facts.push(merged); cache.set(merged); this.count(merged, job.size); resumed++; } else readOne({file: job.file, harness: job.harness, size: job.size, timezone: tz});
+      }
+      this.timings['filesResumed'] = resumed;
       if (toRead.length && !this.controller.signal.aborted) {
         const executor = this.options.nativeScanExecutor ?? inlineScanExecutor;
-        let last = 0;
         scanning = executor.scan(toRead, result => {
-          if ('facts' in result) { facts.push(result.facts); cache.set(result.facts); } else failures.push(result.error);
-          const now = Date.now();
-          if (now - last > 200) { last = now; this.progress('parsing', 'Reading history', facts.length + failures.length, total); }
+          if ('facts' in result) { facts.push(result.facts); cache.set(result.facts); this.count(result.facts, result.job.size); } else { failures.push(result.error); this.count(null, result.job.size); }
+          this.tick(facts.length + failures.length, total);
         }, this.controller.signal);
       }
       // While worker threads read, this thread handles OpenCode (read in place,
       // read-only) and Claude's typed-prompt log.
       const extra: SourceFacts[] = [];
       for (const file of found.opencodeDatabases) {
-        try { extra.push(...extractOpenCodeDatabase(file)); } catch { failures.push('opencode_database_unreadable'); }
+        try { extra.push(...extractOpenCodeDatabase(file).map(f => stripText(finishExternalFacts(f, {timezone: tz})))); } catch { failures.push('opencode_database_unreadable'); }
       }
       if (found.opencodeJson.length) {
-        try { extra.push(...extractOpenCodeJson(found.opencodeJson)); } catch { failures.push('opencode_storage_unreadable'); }
+        try { extra.push(...extractOpenCodeJson(found.opencodeJson).map(f => stripText(finishExternalFacts(f, {timezone: tz})))); } catch { failures.push('opencode_storage_unreadable'); }
       }
-      const history: HistoryEntry[] = found.historyFile && harnesses.includes('claude') ? cache.history(found.historyFile, extractHistory) : [];
+      for (const f of extra) this.count(f, 0);
+      const historyData: HistoryData = found.historyFile && harnesses.includes('claude')
+        ? cache.history(found.historyFile, tz, (file, previous) => readHistory(file, {timezone: tz}, previous)) : {entries: [], counters: new Map()};
+      this.historyData = historyData;
+      const history: HistoryEntry[] = historyData.entries;
       t = lap('extrasMs', t);
       await scanning;
       facts.push(...extra);
@@ -338,8 +396,10 @@ class LocalAuditSession implements AuditSession {
       if (this.controller.signal.aborted) return this.finishCancelled();
 
       // ---- aggregate once
+      this.setStage('aggregating');
       const scope = this.current.scope;
       const policy = this.policy;
+      this.historyFile = found.historyFile;
       this.result = aggregate({
         sources: facts, history, historyFile: found.historyFile,
         scope: {harnesses, project: scope.project, eventFrom: scope.eventFrom ? Date.parse(scope.eventFrom) : null, asOf: scope.asOf ? Date.parse(scope.asOf) : null, timezone: scope.timezone},
@@ -351,7 +411,7 @@ class LocalAuditSession implements AuditSession {
       t = lap('languageMs', t);
 
       // Never keep opted-out sources in the cache.
-      cache.save(f => fs.existsSync(f.file) && !policy.forgotten.has(sourceId(f.harness, f.sessionId)) && !policy.ignored(f.project),
+      cache.save(f => fs.existsSync(f.file) && !policy.forgotten.has(sourceId(f.harness, f.sessionId)) && !(f.parentId && policy.forgotten.has(sourceId(f.harness, f.parentId))) && !policy.ignored(f.project),
         h => !policy.ignored(h.project) && !(h.sessionId && policy.forgotten.has(sourceId('claude', h.sessionId))));
       lap('cacheWriteMs', t);
       this.timings['totalMs'] = Math.round(performance.now() - t0);
@@ -363,13 +423,54 @@ class LocalAuditSession implements AuditSession {
       if (this.options.launch && !this.controller.signal.aborted) {
         if (!offline() && !this.options.launchPrepareOnly) void refreshPublicCatalog(this.derived, this.catalog, this.controller.signal);
         this.launchRunning = true;
-        try { await this.runSemantics(); } finally { this.launchRunning = false; }
+        try { await Promise.all([this.runSemantics(), this.runEnrichment()]); } finally { this.launchRunning = false; }
       }
       return this.current;
     } finally {
       await this.options.nativeScanExecutor?.close();
       this.callback = undefined;
     }
+  }
+
+  /* ------------------------------------------------- progress detail --- */
+
+  private t0 = 0;
+  private detail: AuditProgressDetail | null = null;
+  private lastTick = 0;
+  private cache: FactsCache | null = null;
+  private historyData: HistoryData | null = null;
+  private historyFile: string | null = null;
+
+  /** Running counts for the loading story (cheap: a few additions per file). */
+  private count(f: SourceFacts | null, bytes: number): void {
+    const d = this.detail;
+    if (!d) return;
+    const c = d.counts as {-readonly [K in keyof AuditProgressDetail['counts']]: number};
+    c.filesDone++; c.bytesDone += bytes;
+    if (!f) return;
+    const row = d.harnesses.find(h => h.harness === f.harness) as {-readonly [K in keyof AuditProgressDetail['harnesses'][number]]: AuditProgressDetail['harnesses'][number][K]} | undefined;
+    if (row) {
+      row.filesDone++;
+      if (f.firstAt !== null) { const iso = new Date(f.firstAt).toISOString(); if (!row.firstAt || iso < row.firstAt) row.firstAt = iso; }
+      if (f.lastAt !== null) { const iso = new Date(f.lastAt).toISOString(); if (!row.lastAt || iso > row.lastAt) row.lastAt = iso; }
+    }
+    c.messages += f.usage.length + f.prompts.length;
+    if (!f.child) c.chats += f.harness === 'claude' ? (f.sessionIds?.length ? 1 : 0) : 1;
+    for (const p of f.prompts) if (p.kind === 'human') c.prompts++;
+  }
+
+  /** Throttled progress event (≤20/s). */
+  private tick(completed: number, total: number, force = false): void {
+    const now = performance.now();
+    if (!force && now - this.lastTick < 50) return;
+    this.lastTick = now;
+    this.progress('parsing', 'Reading history', completed, total);
+  }
+
+  private setStage(stage: AuditProgressDetail['stage']): void {
+    if (!this.detail) return;
+    this.detail = {...this.detail, stage};
+    this.progress(this.current.status === 'discovering' ? 'parsing' : this.current.status, stage === 'aggregating' ? 'Counting' : stage === 'detecting' ? 'Noticing patterns' : this.current.progress.label ?? 'Reading history', this.current.progress.completed, this.current.progress.total);
   }
 
   private finishCancelled(): AuditSnapshot {
@@ -430,8 +531,28 @@ class LocalAuditSession implements AuditSession {
     };
     const userMessages = Object.values(a.harness).reduce((n, h) => n + h.userMessages, 0);
     const facts = this.launchFacts(a);
+    let story: AuditStory | undefined;
+    if (this.current.launch) {
+      if (this.detail) this.detail = {...this.detail, stage: 'detecting', counts: {...this.detail.counts, messages: a.responses + userMessages, chats: a.topLevelConversations, prompts: human}};
+      const aliases = new Map(projects.map(p => [p.path ?? '(unknown)', p.alias]));
+      const policy = this.policy;
+      const ts = performance.now();
+      const table = buildStoryTable({
+        aggregate: a, history: this.historyData?.entries ?? [], historyCounters: this.historyData?.counters ?? new Map(), historyFile: this.historyFile, timezone: scope.timezone,
+        allowed: (project, session) => !policy?.ignored(project) && !(session && policy?.forgotten.has(sourceId('claude', session))) && (scope.project === null || project === scope.project),
+      });
+      this.timings['storyTableMs'] = Math.round(performance.now() - ts);
+      const dictionary = new DictionaryLookup(this.cache?.dictionary);
+      const built = buildStory({table, timezone: scope.timezone, alias: p => aliases.get(p ?? '(unknown)') ?? 'a project', dictionary, tokens: a.tokens.input + a.tokens.output + a.tokens.cacheRead + a.tokens.cacheWrite, offline: offline()});
+      story = built.story;
+      story.timings.featuresMs = this.timings['storyTableMs'];
+      this.timings['detectorsMs'] = Math.round(built.detectorsMs);
+      this.timings['dictionaryLoaded'] = dictionary.loaded ? 1 : 0;
+      this.storyRows = table.rows;
+      lap('storyMs');
+    }
     const launch: LaunchAudit | undefined = this.current.launch ? {
-      ...this.current.launch, stage: 'preparing', facts,
+      ...this.current.launch, stage: 'preparing', facts, ...(story ? {story} : {}),
       factProgress: {state: 'complete', completedSources: run.total - run.failures.length, totalSources: run.total, representedSources: run.total - run.failures.length,
         cacheHits: run.cacheHits, coverage: 'completed_sources', origin: run.cacheHits === 0 ? 'fresh' : run.cacheHits === run.total ? 'cache' : 'mixed'},
       ...language,
@@ -442,7 +563,8 @@ class LocalAuditSession implements AuditSession {
     const status = failures.length ? 'partial' : 'ready';
     this.publish({
       status, measuredAt: new Date().toISOString(), coverage,
-      progress: {stage: status, label: 'Local facts ready', completed: run.total, total: run.total, unit: 'candidate_source', provisional: false, cancellable: false},
+      progress: {stage: status, label: 'Local facts ready', completed: run.total, total: run.total, unit: 'candidate_source', provisional: false, cancellable: false,
+        ...(this.detail ? {detail: {...this.detail, stage: 'ready' as const, elapsedMs: Math.round(performance.now() - this.t0)}} : {})},
       sources, projects, activity: a.activity, conversations: a.conversations.map(c => c.conversation),
       metrics: {
         conversations: metric(a.topLevelConversations, 'top_level_conversation', 'native_session_id',
@@ -472,6 +594,8 @@ class LocalAuditSession implements AuditSession {
       },
     });
   }
+
+  private storyRows: import('./story-table.js').StoryRow[] = [];
 
   private launchFacts(a: Aggregate): LaunchFacts {
     const favourite = a.models.filter(m => m.favouriteScore !== null).sort((x, y) => (y.favouriteScore ?? 0) - (x.favouriteScore ?? 0))[0] ?? null;
@@ -506,6 +630,74 @@ class LocalAuditSession implements AuditSession {
     return out;
   }
 
+  /* ------------------------------------------------- story enrichment --- */
+
+  /** Online only: lets the free Jev model choose persona/peak-time wording. Never blocks the board. */
+  private async runEnrichment(): Promise<void> {
+    const launch = this.current.launch;
+    if (!launch?.story || offline() || this.options.launchPrepareOnly) return;
+    const recipients = ['OpenCode Zen', 'TypeSafe/Jev'];
+    const provider = new FreeJevProvider({
+      route: {kind: 'zen-public'}, timeoutMs: 8000,
+      beforeDispatch: async ({model, attempt}) => {
+        const notice = 'Persona wording: aggregated numbers and up to 8 short, filtered quotes go to OpenCode Zen and TypeSafe/Jev. No prompts are sent.';
+        const event: Extract<AuditEvent, {type: 'transfer'}> = {type: 'transfer', snapshotId: this.id, sequence: ++this.sequence, model, recipients, attempt, selectedSegments: 0, notice};
+        if (this.options.onTransfer) await this.options.onTransfer(event); else this.callback?.(event);
+        if (this.controller.signal.aborted) throw new Error('cancelled');
+      },
+    });
+    const pending = {...launch.story, enrichment: {...launch.story.enrichment, state: 'pending' as const}};
+    this.current = {...this.current, launch: {...this.current.launch!, story: pending}};
+    const result = await enrichStory(pending, this.storyRows, provider, {signal: this.controller.signal, isCurrent: () => !this.controller.signal.aborted});
+    if (this.controller.signal.aborted || !this.current.launch) return;
+    this.publish({launch: {...this.current.launch, story: {...result.story, enrichment: result.state}}});
+  }
+
+  /* ----------------------------------------------------- text on demand --- */
+
+  /**
+   * The cache keeps no prompt text. Detail views and online analysis read it
+   * back from the original files (read-only) for just the prompts they need.
+   */
+  private rehydrate(prompts: readonly AuditPrompt[]): void {
+    const byFile = new Map<string, AuditPrompt[]>();
+    for (const p of prompts) {
+      if (p.text || p.route.basis !== 'transient_snapshot') continue;
+      const list = byFile.get(p.route.sourcePath) ?? [];
+      list.push(p);
+      byFile.set(p.route.sourcePath, list);
+    }
+    const tz = this.current.scope.timezone;
+    for (const [file, list] of byFile) {
+      try {
+        const texts = new Map<string, string>();
+        if (file === this.historyFile) {
+          parseHistory(fs.readFileSync(file, 'utf8'), {timezone: tz}).entries.forEach((e, i) => { if (e.kind === 'human') texts.set(`history:${i}`, e.text); });
+        } else {
+          const conv = this.result?.conversations.find(c => c.file === file);
+          const harness = (conv?.conversation.harness ?? (file.includes(`${path.sep}.codex${path.sep}`) || path.basename(file).startsWith('rollout-') ? 'codex' : 'claude')) as NativeHarness;
+          if (harness === 'opencode' as AuditHarness) continue;
+          for (const p of extractFile(file, harness, {timezone: tz}).prompts) if (p.kind === 'human') texts.set(p.key, p.text);
+        }
+        for (const p of list) {
+          const key = p.route.basis === 'transient_snapshot' ? p.route.recordKey : null;
+          const text = key ? texts.get(key) : undefined;
+          if (text !== undefined) (p as {text: string}).text = text;
+        }
+      } catch { /* the source moved or changed: detail stays unavailable */ }
+    }
+  }
+
+  /** Text for the newest conversations, enough for the online analysis window. */
+  private rehydrateRecent(maxPrompts = 1500): void {
+    const a = this.result;
+    if (!a) return;
+    const recent = [...a.conversations].filter(c => c.prompts.length).sort((x, y) => (y.conversation.eventTo ?? '').localeCompare(x.conversation.eventTo ?? ''));
+    const chosen: AuditPrompt[] = [];
+    for (const c of recent) { if (chosen.length >= maxPrompts) break; chosen.push(...c.prompts); }
+    this.rehydrate(chosen);
+  }
+
   /* ------------------------------------------------------- semantics --- */
 
   private launchPublish(patch: Partial<LaunchAudit>): void {
@@ -520,7 +712,8 @@ class LocalAuditSession implements AuditSession {
       this.launchPublish({stage: 'ready', semantics: unavailableSemantics(this.current.launch.notice, this.options.tone, 'Offline audit; requested-work analysis was not run.', ['offline_requested'])});
       return;
     }
-    const segmented = segmentContext(this.contextRecords(a, true), {gaps: ['requested_user_context_only']});
+    this.rehydrateRecent();
+    const segmented = segmentContext(this.contextRecords(a, true).filter(r => r.role !== 'user' || r.text), {gaps: ['requested_user_context_only']});
     this.launchSegments = segmented.segments;
     const sourceVersion = this.current.commitment ?? this.id;
     const privacyVersion = digest(JSON.stringify([this.policy?.ignoredList ?? [], [...this.policy?.forgotten ?? []].sort(), this.current.scope.project, NORMALIZATION_VERSION]));
@@ -588,6 +781,7 @@ class LocalAuditSession implements AuditSession {
     const entry = this.result?.conversations.find(c => c.conversation.id === conversationId);
     if (!entry) throw new Error('audit_conversation_unavailable');
     const all = entry.prompts;
+    this.rehydrate(all.slice(offset, offset + limit));
     return {snapshotId: this.id, conversationId, prompts: all.slice(offset, offset + limit), offset, total: all.length,
       nextOffset: offset + limit < all.length ? offset + limit : null, coverage: entry.conversation.coverage};
   }
@@ -599,6 +793,8 @@ class LocalAuditSession implements AuditSession {
       return {state: 'unavailable', text: null, role: null, eventAt: null, route, gapCodes: ['unknown_evidence_route']};
     }
     if (this.policy?.ignored(prompt.project ?? null)) return {state: 'stale', text: null, role: null, eventAt: null, route, gapCodes: ['source_or_policy_changed']};
+    this.rehydrate([prompt]);
+    if (!prompt.text) return {state: 'stale', text: null, role: null, eventAt: null, route, gapCodes: ['source_or_policy_changed']};
     return {state: 'available', text: prompt.text, role: prompt.role, eventAt: prompt.eventAt, route, gapCodes: []};
   }
 
@@ -606,6 +802,7 @@ class LocalAuditSession implements AuditSession {
     return ids.map(id => {
       const entry = this.result?.conversations.find(c => c.conversation.id === id);
       if (!entry) throw new Error('audit_conversation_unavailable');
+      this.rehydrate(entry.prompts);
       return {id, sourceVersion: digest(JSON.stringify(entry.prompts.map(p => p.id))), prompts: entry.prompts};
     });
   }
