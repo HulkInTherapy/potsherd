@@ -57,7 +57,7 @@ export function clockBody(s: Scene, data: Data<'clock'>, r: Rect): boolean {
   const tall = tier.id === 'L' && r.h >= 18 && cellW === 3;
   const gridH = tall ? 15 : 8;
   const calloutRows = side ? 0 : 2;
-  const y0 = r.y + Math.max(0, Math.floor((r.h - gridH - calloutRows - (side ? 0 : 1)) * 0.3));
+  const y0 = r.y + Math.max(0, Math.min(Math.floor((r.h - gridH - calloutRows - (side ? 0 : 1)) * 0.3), r.h - gridH - 2));
   const peak: [number, number] | null = data.peakWeekday !== null && data.peakHour !== null ? [data.peakWeekday, data.peakHour] : null;
   const { busy } = drawHeatmap(s, data.grid, r.x, y0, cellW, { t, peak, tall });
   // Peak marker under the axis.
@@ -72,7 +72,7 @@ export function clockBody(s: Scene, data: Data<'clock'>, r: Rect): boolean {
       c.text(sx + Math.max(15, textWidth(call.label) + 2), cy, call.value, { fg: i === 0 ? C.orange : C.cream, bold: true, alpha: a });
       c.text(sx, cy + 1, call.sub, { fg: C.slate, alpha: a }, r.x + r.w - sx);
     });
-  } else {
+  } else if (y0 + gridH + 1 < r.y + r.h) {
     let x = r.x;
     const cy = y0 + gridH + 1;
     for (const call of data.callouts.slice(0, tier.id === 'S' ? 2 : 3)) {
@@ -93,7 +93,7 @@ export function moodBody(s: Scene, data: Data<'mood'>, r: Rect): boolean {
   const max = Math.max(1, ...months.map(m => m.pct));
   const axisW = 5;
   const plotW = Math.min(r.w - axisW - 2, months.length * (s.tier.id === 'L' ? 9 : 7));
-  const plotH = Math.max(4, Math.min(r.h - 3, s.tier.id === 'L' ? 14 : 10));
+  const plotH = Math.max(3, Math.min(r.h - 4, s.tier.id === 'L' ? 14 : 10));
   const x0 = r.x + axisW;
   const yTop = r.y + 2;
   const yBottom = yTop + plotH - 1; // last cell row of the plot
@@ -221,9 +221,9 @@ export function fuseBody(s: Scene, data: Data<'fuse'>, r: Rect): boolean {
       [`${data.sessions} of ${data.of}`, ' sessions had a snap'],
       [`${data.firstPrompt}`, ' times you came in swinging on prompt #1'],
     ];
+    const inline = lines.every(([strong, rest]) => sx + textWidth(strong + rest) <= r.x + r.w);
     lines.forEach(([strong, rest], i) => {
       const la = seg(t, 1600 + i * 150, 300);
-      const inline = sx + 30 <= r.x + r.w;
       const lx = inline ? sx : x0;
       const ly = inline ? by + i * 2 : by + 4 + i;
       if (ly >= r.y + r.h) return;

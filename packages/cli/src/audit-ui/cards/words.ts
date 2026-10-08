@@ -23,7 +23,8 @@ export function coldOpenBody(s: Scene, data: Data<'cold_open'>, r: Rect): boolea
   const x0 = r.x + Math.floor((r.w - width) / 2);
   // Oversized opening quote mark.
   const qa = seg(t, 0, 300);
-  if (s.caps.color !== 'none' && s.caps.color !== '16') {
+  if (x0 - 9 < 0) { /* no room for the oversized mark */ }
+  else if (s.caps.color !== 'none' && s.caps.color !== '16') {
     // A fat opening quote mark: two pixel commas.
     const mark = ['.##..##', '#...#..', '##..##.', '##..##.'];
     mark.forEach((row, py) => { for (let px = 0; px < row.length; px++) if (row[px] === '#') c.px(x0 - 9 + px, y0 * 2 - 1 + py, fade(C.orange, qa)); });
@@ -103,7 +104,7 @@ export function mannersBody(s: Scene, data: Data<'manners'>, r: Rect): boolean {
   const lean = (data.rude - data.kind) / total; // >0: rude side (right) is heavier
   const swing = s.caps.motion ? spring(Math.max(0, t - 450) / 1000, 1.4, 0.32) : 1;
   const tilt = Math.round(lean * 5 * swing);
-  const small = r.h < 12;
+  const small = r.h < 17;
   const top = r.y + (small ? 0 : 1);
   const beamY = top * 2 + 3; // pixel row of the pivot
   const strings = small ? 5 : 9;
@@ -172,7 +173,7 @@ export function thenNowBody(s: Scene, data: Data<'then_now'>, r: Rect): boolean 
     const lines = wrapText(text, bw - 4, 3);
     const h = lines.length + 2;
     box(c, { x, y: r.y + 2, w: bw, h }, fade(accent, a * 0.8), { ascii: !s.caps.unicode });
-    c.put(x + 3, r.y + 2 + h, s.caps.unicode ? '╲' : '\\', fade(accent, a * 0.8));
+    if (r.y + 2 + h < r.y + r.h) c.put(x + 3, r.y + 2 + h, s.caps.unicode ? '╲' : '\\', fade(accent, a * 0.8));
     lines.forEach((line, i) => c.text(x + 2, r.y + 3 + i, line, { fg: color, italic: Boolean(quote), alpha: a }));
     // One pixel per word you typed: the length difference, made visible.
     const gy = r.y + 3 + h;

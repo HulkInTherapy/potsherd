@@ -142,16 +142,46 @@ function panel(s: Scene, g: Gauge, side: 'best' | 'worst', r: Rect, delay: numbe
   return a < 1 || k < 1 || t < delay + 1100;
 }
 
+/** Every model's observed rate next to what the others got in the same months. */
+function compareChart(s: Scene, data: Data<'faceoff'>, r: Rect): boolean {
+  const { c, t } = s;
+  const a = seg(t, 400, 350);
+  c.text(r.x, r.y, data.compareUnit.toUpperCase(), { fg: C.gray, alpha: a }, r.w);
+  const max = Math.max(1e-9, ...data.compare.flatMap(m => [m.observed, m.expected ?? 0]));
+  const nameW = Math.min(16, Math.max(...data.compare.map(m => textWidth(m.label))) + 2);
+  const barW = Math.max(8, r.w - nameW - 7);
+  let busy = a < 1;
+  data.compare.forEach((m, i) => {
+    const y = r.y + 2 + i * 2;
+    if (y >= r.y + r.h + 4) return;
+    const k = seg(t, 500 + i * 90, 600, easeOutCubic);
+    busy ||= k < 1;
+    c.text(r.x, y, m.label, { fg: m.highlight ? C.cream : C.gray, bold: m.highlight, alpha: a }, nameW - 1);
+    const fill = Math.round(barW * (m.observed / max) * k);
+    for (let x = 0; x < barW; x++) c.put(r.x + nameW + x, y, s.caps.unicode ? '━' : '-', x < fill ? (m.highlight ? C.ember : fade(C.orange, 0.55)) : C.coal);
+    if (m.expected !== null) {
+      const ex = r.x + nameW + Math.min(barW - 1, Math.round(barW * (m.expected / max)));
+      c.put(ex, y, s.caps.unicode ? '┃' : '|', k >= 1 ? C.cream : C.coal);
+    }
+    c.text(r.x + nameW + barW + 1, y, m.observed.toFixed(1), { fg: m.highlight ? C.cream : C.gray, alpha: k });
+  });
+  const ly = r.y + 3 + data.compare.length * 2;
+  if (ly < r.y + r.h) c.text(r.x, ly, `${s.caps.unicode ? '┃' : '|'} = what the other models got in the same months`, { fg: C.slate, alpha: seg(t, 1000, 300) }, r.w);
+  return busy;
+}
+
 export function faceoffBody(s: Scene, data: Data<'faceoff'>, r: Rect): boolean {
   const { c, t } = s;
   const both = data.best && data.worst;
-  const gap = both ? (s.tier.id === 'L' ? 10 : 6) : 0;
-  const pw = both ? Math.floor((r.w - gap) / 2) : r.w;
+  const compare = !both && data.compare.length >= 2 && r.w >= 90;
+  const gap = both || compare ? (s.tier.id === 'L' ? 10 : 6) : 0;
+  const pw = both || compare ? Math.floor((r.w - gap) / 2) : r.w;
   const y = r.y + Math.max(0, Math.floor((r.h - 10) * 0.3));
   const ph = Math.min(r.h, 10);
   let busy = false;
   if (data.best) busy = panel(s, data.best, 'best', { x: r.x, y, w: pw, h: ph }, 80) || busy;
   if (data.worst) busy = panel(s, data.worst, 'worst', { x: r.x + (both ? pw + gap : 0), y, w: pw, h: ph }, both ? 260 : 80) || busy;
+  if (compare) busy = compareChart(s, data, { x: r.x + pw + gap, y, w: r.w - pw - gap, h: ph }) || busy;
   if (both) {
     const k = seg(t, 450, 400, easeOutCubic);
     const vx = r.x + pw + Math.floor(gap / 2) - 1;

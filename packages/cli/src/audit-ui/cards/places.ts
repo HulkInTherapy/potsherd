@@ -95,10 +95,16 @@ export function delegationBody(s: Scene, data: Data<'delegation'>, r: Rect): boo
   drawBig(c, r.x, r.y, total, { scale, color: (_x, py) => fade(mix(C.cream, C.orange, py / (5 * scale - 1)), a) });
   const tw = bigWidth(total, scale);
   c.text(r.x, r.y + (scale === 2 ? 6 : 4), 'subagents launched', { fg: C.gray, alpha: a });
-  const months = data.months;
-  if (!months.length) return a < 1;
+  if (!data.months.length) return a < 1;
   const colW = 6;
-  const sideBySide = r.w - Math.max(tw, 20) - 6 >= months.length * colW;
+  // Keep the months that fit, dropping leading empty ones first (one zero month stays as "before").
+  let months = data.months;
+  const firstUsed = months.findIndex(m => m.n > 0);
+  if (firstUsed > 1) months = months.slice(firstUsed - 1);
+  const room = Math.floor((r.w - Math.max(tw, 20) - 6) / colW);
+  const sideBySide = room >= Math.min(months.length, 5);
+  const fit = sideBySide ? room : Math.floor(r.w / colW);
+  if (months.length > fit) months = months.slice(months.length - fit);
   const gx = sideBySide ? r.x + Math.max(tw, 20) + 6 : r.x;
   const gy = sideBySide ? r.y : r.y + (scale === 2 ? 8 : 6);
   const gh = Math.max(2, r.y + r.h - gy - 2);
@@ -157,7 +163,7 @@ export function awardsBody(s: Scene, data: Data<'awards'>, r: Rect): boolean {
   const rowsNeeded = Math.ceil(data.trophies.length / perRow);
   const big = tier.id === 'L' && r.h >= 14 && s.caps.color !== 'none' && s.caps.color !== '16';
   const cupH = big ? 8 : 4;
-  const rowH = cupH + 5;
+  const rowH = cupH + 6;
   const shelves = Math.min(rowsNeeded, Math.max(1, Math.floor((r.h + 1) / rowH)));
   const colW = Math.floor(r.w / perRow);
   let busy = false;
@@ -177,9 +183,11 @@ export function awardsBody(s: Scene, data: Data<'awards'>, r: Rect): boolean {
       const dy = Math.round((1 - Math.min(1.15, fall)) * -10);
       trophy(s, cx - (big ? 7 : 3), y, dy * (big ? 2 : 1), Math.min(1, fall * 1.5), index, big ? 2 : 1);
       const la = seg(t, delay + 300, 300);
-      textCenter(c, cx, shelfY + 1, award.title, { fg: C.gray, alpha: la });
-      textCenter(c, cx, shelfY + 2, award.value, { fg: index === 0 ? C.orange : C.cream, bold: true, alpha: la });
-      textCenter(c, cx, shelfY + 3, award.sub, { fg: C.slate, alpha: la });
+      const w = colW - 2;
+      textCenter(c, cx, shelfY + 1, wrapText(award.title, w, 1)[0] ?? '', { fg: C.gray, alpha: la });
+      const value = wrapText(s.share && award.publicValue ? award.publicValue : award.value, w, 2);
+      value.forEach((line, li) => textCenter(c, cx, shelfY + 2 + li, line, { fg: index === 0 ? C.orange : C.cream, bold: true, alpha: la }));
+      if (award.sub) textCenter(c, cx, shelfY + 2 + value.length, wrapText(award.sub, w, 1)[0] ?? '', { fg: C.slate, alpha: la });
     });
   }
   return busy;

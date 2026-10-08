@@ -18,10 +18,12 @@ function counterText(counter: Counter, value: number): string {
 
 export function scaleBody(s: Scene, data: Data<'scale'>, r: Rect): boolean {
   const { c, t } = s;
-  const counters = data.counters;
+  // Too short for a 2×2 grid: keep the two biggest counters in one row.
+  const counters = r.h < 9 && data.counters.length > 2 && s.tier.id === 'S' ? data.counters.slice(0, 2) : data.counters;
   const finals = counters.map(k => counterText(k, k.value));
   const gap = 4;
-  const rowFits = (scale: number) => finals.reduce((sum, f) => sum + Math.max(bigWidth(f, scale), textWidth(spaced(counters[0]!.label))), 0) + gap * (counters.length - 1) <= r.w;
+  const label = (text: string) => (s.tier.id === 'L' ? spaced(text) : text);
+  const rowFits = (scale: number) => finals.reduce((sum, f, i) => sum + Math.max(bigWidth(f, scale), textWidth(label(counters[i]!.label))), 0) + (gap + 2) * (counters.length - 1) <= r.w;
   let layout: { scale: number; cols: number };
   if (s.tier.id === 'L' && r.h >= 16 && counters.length >= 3) layout = { scale: 2, cols: 2 };
   else if (rowFits(1) && r.h >= 5) layout = { scale: 1, cols: counters.length };
@@ -34,9 +36,13 @@ export function scaleBody(s: Scene, data: Data<'scale'>, r: Rect): boolean {
   const totalH = rows * blockH + (rows - 1) * rowGap;
   const y0 = r.y + Math.max(0, Math.floor((r.h - totalH) / 2) - (s.tier.id === 'L' ? 1 : 0));
   let busy = false;
+  // In a single row, columns are as wide as their content and the slack goes into the gaps.
+  const widths = finals.map((f, i) => Math.max(bigWidth(f, scale), textWidth(label(counters[i]!.label))));
+  const slack = cols === counters.length && cols > 1 ? Math.max(3, Math.floor((r.w - widths.reduce((a, b) => a + b, 0)) / (cols - 1))) : 0;
+  const xs = widths.map((_, i) => r.x + widths.slice(0, i).reduce((a, b) => a + b, 0) + slack * i);
   counters.forEach((counter, i) => {
     const col = i % cols, row = Math.floor(i / cols);
-    const x = r.x + col * (cellW + gap);
+    const x = cols === counters.length && cols > 1 ? xs[i]! : r.x + col * (cellW + gap);
     const y = y0 + row * (blockH + rowGap);
     const start = i * 170;
     const k = seg(t, start, 950);
@@ -47,7 +53,7 @@ export function scaleBody(s: Scene, data: Data<'scale'>, r: Rect): boolean {
     if (a <= 0) return;
     const glow = k < 1 ? 0.25 * (1 - k) : 0;
     drawBig(c, x, y, text, { scale, color: (px, py) => fade(mix(warmGradient(scale)(px, py), C.cream, glow), a) });
-    c.text(x, y + bigHeight(scale) + (scale === 2 ? 1 : 0), s.tier.id === 'S' ? counter.label : spaced(counter.label), { fg: C.gray, alpha: a });
+    c.text(x, y + bigHeight(scale) + (scale === 2 ? 1 : 0), label(counter.label), { fg: C.gray, alpha: a }, cellW);
   });
   return busy;
 }
@@ -79,6 +85,9 @@ export function billBody(s: Scene, data: Data<'bill'>, r: Rect): boolean {
   while (totalRows(rows) > r.h && optional.length) { optional.pop(); rows = [...fixed, ...items, ...tail, ...optional]; }
   if (totalRows(rows) > r.h) { fixed.splice(1, 1); rows = [...fixed, ...items, ...tail, ...optional]; }
   while (totalRows(rows) > r.h && items.length > 1) { items = items.slice(0, -1); rows = [...fixed, ...items, ...tail, ...optional]; }
+  // Last resort on tiny screens: drop the title and the separators around the total.
+  if (totalRows(rows) > r.h) rows = rows.filter(row => row.kind !== 'title');
+  while (totalRows(rows) > r.h && rows.some(row => row.kind === 'sep')) rows.splice(rows.findIndex(row => row.kind === 'sep'), 1);
 
   const height = totalRows(rows);
   const y0 = r.y + Math.max(0, Math.floor((r.h - height) / 2));

@@ -44,7 +44,7 @@ export type DeckCard =
   | Base<'bill', { total: number; lines: BillLine[]; more: number; byAgent: { name: string; share: number }[]; priciest: { cost: number; day: string; model: string | null } | null }>
   | Base<'clock', { grid: number[][]; peakHour: number | null; peakWeekday: number | null; lateNightPct: number | null; callouts: { label: string; value: string; sub: string }[] }>
   | Base<'guess', { options: Option[]; answer: number; basis: string; after: string | null }>
-  | Base<'faceoff', { best: Gauge | null; worst: Gauge | null }>
+  | Base<'faceoff', { best: Gauge | null; worst: Gauge | null; compare: { label: string; observed: number; expected: number | null; highlight: boolean }[]; compareUnit: string }>
   | Base<'mood', { months: { month: string; pct: number }[]; tip: number }>
   | Base<'fuse', { median: number; sessions: number; of: number; firstPrompt: number; hist: number[] }>
   | Base<'talk', { tiles: Tile[] }>
@@ -286,7 +286,22 @@ function faceoff(story: AuditStory | null): DeckCard | null {
   return {
     kind: 'faceoff', id: 'faceoff', kicker: 'FAVOURITE VS NEMESIS', expression: 'side-eye', headline, support,
     notes: ['Rates per 100 prompts sent to each model, compared with what the other models got from you in the same months (month-matched), so a model is not blamed for the month you had.', 'Only models with at least 40 prompts seen in transcripts are ranked.'],
-    data: { best: best ? gauge(best, 'praise') : null, worst: worst ? gauge(worst, 'swear') : null },
+    data: { best: best ? gauge(best, 'praise') : null, worst: worst ? gauge(worst, 'swear') : null, ...compareOf(worstCard ?? bestCard) },
+  };
+}
+
+/** Observed vs month-matched expected per model, from the worst/best model chart. */
+function compareOf(card: StoryCard | null): { compare: { label: string; observed: number; expected: number | null; highlight: boolean }[]; compareUnit: string } {
+  const observed = card?.chart.series.find(sr => /observed/i.test(sr.name)) ?? card?.chart.series[0];
+  const expected = card?.chart.series.find(sr => /expected/i.test(sr.name));
+  if (!card || !observed) return { compare: [], compareUnit: '' };
+  return {
+    compare: observed.points.slice(0, 6).map(p => ({
+      label: mask(String(p.x)), observed: p.y,
+      expected: expected?.points.find(q => String(q.x) === String(p.x))?.y ?? null,
+      highlight: card.chart.highlight !== undefined && String(card.chart.highlight) === String(p.x),
+    })),
+    compareUnit: card.id === 'best_model' ? 'thank-yous per 100 prompts' : 'swears per 100 prompts',
   };
 }
 
@@ -449,11 +464,15 @@ function awards(story: AuditStory | null): DeckCard | null {
   const list = story?.awards ?? [];
   if (list.length < 3) return null;
   const trophies: Trophy[] = list.slice(0, 6).map(award => {
-    const receipt = mask(award.receipt);
-    const [head, ...rest] = receipt.split(/:\s*/);
-    const detail = rest.join(': ') || head!;
-    const [value, ...sub] = detail.split(/,\s*/);
-    return { title: mask(award.title), value: (value ?? '').trim(), sub: sub.join(', ').trim(), publicValue: mask(award.publicReceipt) } as Trophy;
+    const split = (text: string): [string, string] => {
+      const colon = text.indexOf(': ');
+      if (colon > 0) return [text.slice(colon + 2).trim(), text.slice(0, colon).trim()];
+      const comma = text.indexOf(', ');
+      return comma > 0 ? [text.slice(0, comma).trim(), text.slice(comma + 2).trim()] : [text.trim(), ''];
+    };
+    const [value, sub] = split(mask(award.receipt));
+    const [publicValue] = split(mask(award.publicReceipt));
+    return { title: mask(award.title), value, sub, publicValue } as Trophy;
   });
   return {
     kind: 'awards', id: 'awards', kicker: 'THE AWARDS', expression: 'proud',
