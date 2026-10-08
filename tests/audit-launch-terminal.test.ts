@@ -10,6 +10,19 @@ import type {AuditEvent} from '../packages/core/src/analytics/contracts.js';
 const plain=(screen:readonly (readonly {text:string}[])[])=>screen.map(line=>line.map(segment=>segment.text).join('')).join('\n');
 const transfer:Extract<AuditEvent,{type:'transfer'}>={type:'transfer',snapshotId:'fixture-audit',sequence:8,model:'jev-free',recipients:['OpenCode Zen','TypeSafe/Jev'],attempt:1,selectedSegments:4,notice:'Selected redacted conversation text will be sent to OpenCode Zen and TypeSafe/Jev.',ackId:'request-1'};
 describe('approved fullscreen wallboard',()=>{
+ it('aligns price and input bars despite different figure widths and preserves full prices',()=>{
+  const snapshot=reportFixture(),models=snapshot.launch!.facts!.models;models[0]!.valueUsd=123456.78;models[1]!.valueUsd=4;for(const [index,project] of snapshot.projects.entries())project.nativeUserInputs=[99999,12,0][index]!;
+  for(const [columns,rows] of [[120,40],[80,24],[40,20]] as const){const layout=buildWallboard(snapshot,{columns,rows});expect(plain(layout.pages.flatMap(page=>page.lines))).toContain('$123,456.78');for(const page of layout.pages)for(const line of page.lines)expect(auditCellWidth(plain([line]))).toBeLessThanOrEqual(columns);}
+  const lines=buildWallboard(snapshot,{columns:120,rows:40}).pages[0]!.lines.map(line=>plain([line])),priced=lines.filter(line=>line.includes('$')&&!line.includes('API-equivalent'));
+  expect(new Set(priced.map(line=>auditCellWidth(line.slice(0,line.search(/[█·]+\s+\$/))))).size).toBe(1);
+  const projects=lines.filter(line=>line.includes('▰')||line.includes('▱'));expect(new Set(projects.map(line=>auditCellWidth(line.slice(0,line.search(/[▰▱]/))))).size).toBe(1);
+ });
+ it('keeps six sourced phrases, caps only visual prefixes and skips only empty paste wrappers',()=>{
+  const snapshot=reportFixture(),base=snapshot.launch!.languageLines![0]!;const long='PUBLIC source wording with 界 emoji 👩‍💻 and a long recognizable request that remains exact in the captured reference';snapshot.launch!.languageLines=[{...base,id:'wrapper',text:'[Pasted text #8 +2 lines]',occurrences:99},{...base,id:'wrapped-body',text:'[Pasted text #8 +2 lines] Please review the public example',occurrences:98},{...base,id:'long-public',text:long,occurrences:97},...snapshot.launch!.languageLines!];
+  const selected=repeatedLines(snapshot);expect(selected).toHaveLength(6);expect(selected.some(line=>line.id==='wrapper')).toBe(false);expect(selected.some(line=>line.id==='wrapped-body')).toBe(true);expect(snapshot.launch!.languageLines.some(line=>line.id==='wrapper')).toBe(true);
+  const layout=buildWallboard(snapshot,{columns:120,rows:40}),page=layout.pages[0]!,anchor=page.anchors.find(item=>item.label===long)!;expect(anchor.route).toBe(base.samples[0]!.route);const displayed=plain([page.lines[anchor.row]!]).match(/“([^”]+)”/)![1]!;expect(auditCellWidth(displayed)).toBeLessThanOrEqual(36);expect(displayed.endsWith('…')).toBe(true);expect(long.startsWith(displayed.slice(0,-1))).toBe(true);expect(renderLaunchPlain(snapshot,{width:160}).replace(/\s+/g,' ')).toContain(long);
+  snapshot.launch!.facts!.models=snapshot.launch!.facts!.models.map(model=>({...model,model:null,canonicalModel:null}));snapshot.launch!.facts!.favourite=null;expect(buildWallboard(snapshot,{columns:120,rows:40}).pages[0]!.cards).not.toContain('models');
+ });
  it('scales model bars to actual value despite opposing token ranks and keeps unknown prices unfilled',()=>{
   const snapshot=reportFixture(),models=snapshot.launch!.facts!.models;models[0]!.valueUsd=1;models[1]!.valueUsd=10;
   const lines=buildWallboard(snapshot,{columns:120,rows:40}).pages[0]!.lines.map(line=>plain([line]));
