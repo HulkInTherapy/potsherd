@@ -70,7 +70,18 @@ export interface Conversation {
   file: string | null;
 }
 
+/** One human prompt in scope with the facts it came from (input to the story feature table). */
+export interface StoryPromptRef {
+  prompt: AuditPrompt;
+  fact: PromptFact | HistoryEntry;
+  source: SourceFacts | null;
+  /** History-only Claude prompt. */
+  history: boolean;
+}
+
 export interface Aggregate {
+  /** Story inputs: prompts with their facts, priced kept usage, sources in scope. */
+  story: {refs: StoryPromptRef[]; costOf: Map<UsageFact, number>; sources: SourceFacts[]};
   conversations: Conversation[];
   /** Human prompts in scope, in time order. */
   prompts: AuditPrompt[];
@@ -175,10 +186,12 @@ export function aggregate(input: AggregateInput): Aggregate {
   const tokens = {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0};
   let costUsd = 0, estimatedCostUsd = 0, inferredModelResponses = 0, compactionResponses = 0;
   const conversationOf = (s: SourceFacts) => sid(s.harness, s.child && s.parentId ? s.parentId : s.sessionId);
+  const costOf = new Map<UsageFact, number>();
   for (const {u, s} of usageRows) {
     const price = book.lookup(u.model);
     const fast = u.tier === 'fast' || (s.harness === 'codex' && u.tier === undefined && input.codexFastDefault);
     const cost = price ? usageCost(u, price, fast) : 0;
+    costOf.set(u, cost);
     const name = u.model ?? 'unknown';
     let row = models.get(name);
     if (!row) {
@@ -211,6 +224,7 @@ export function aggregate(input: AggregateInput): Aggregate {
   const conversations = new Map<string, Conversation>();
   const around: Aggregate['around'] = new Map();
   const prompts: AuditPrompt[] = [];
+  const refs: StoryPromptRef[] = [];
   const seenPrompts = new Set<string>();
   const topClaudeSessions = new Set<string>();
   const route = (id: string, file: string, key: string, text: string): AuditEvidenceRoute => ({
@@ -251,14 +265,16 @@ export function aggregate(input: AggregateInput): Aggregate {
     else if (p.kind === 'command') t.slashCommands++;
     else t.excluded[p.reason ?? p.kind] = (t.excluded[p.reason ?? p.kind] ?? 0) + 1;
   };
-  const addHuman = (entry: Conversation, h: AuditHarness, p: PromptFact | HistoryEntry, key: string, file: string, identity: string) => {
+  const addHuman = (entry: Conversation, h: AuditHarness, p: PromptFact | HistoryEntry, key: string, file: string, identity: string, source: SourceFacts | null) => {
     const conv = entry.conversation;
     const prompt: AuditPrompt = {
       id: digest(`${conv.id}:${key}`).slice(0, 32), conversationId: conv.id, role: 'user', originBasis: originBasis(h), identityBasis: identity,
       eligibleHuman: true, eligibleNativeInput: true, languageEligible: true, excludedReason: null,
       eventAt: p.at === null ? null : new Date(p.at).toISOString(), text: p.text, project: normProject(p.project ?? entry.project),
       route: route(conv.id, file, key, p.text),
+      ...(p.lex ? {lex: p.lex} : {}),
     };
+    refs.push({prompt, fact: p, source, history: source === null});
     entry.prompts.push(prompt);
     prompts.push(prompt);
     conv.promptCount = (conv.promptCount ?? 0) + 1;
@@ -288,7 +304,7 @@ export function aggregate(input: AggregateInput): Aggregate {
       if (seenPrompts.has(unique)) continue;
       seenPrompts.add(unique);
       countPrompt(s.harness, p);
-      if (p.kind === 'human') addHuman(entry, s.harness, p, p.key, s.file, `${s.harness}_record`);
+      if (p.kind === 'human') addHuman(entry, s.harness, p, p.key, s.file, `${s.harness}_record`, s);
     }
   }
 
@@ -307,7 +323,7 @@ export function aggregate(input: AggregateInput): Aggregate {
       }
       const entry = conversations.get(sid('claude', session))!;
       countPrompt('claude', {kind: h.kind, reason: null});
-      if (h.kind === 'human') addHuman(entry, 'claude', h, `history:${i}`, input.historyFile!, 'claude_history_jsonl');
+      if (h.kind === 'human') addHuman(entry, 'claude', h, `history:${i}`, input.historyFile!, 'claude_history_jsonl', null);
     });
     historyOnlyConversations = historySessions.size;
   }
@@ -358,6 +374,7 @@ export function aggregate(input: AggregateInput): Aggregate {
   }).sort((a, b) => (b.valueUsd ?? 0) - (a.valueUsd ?? 0) || a.id.localeCompare(b.id));
 
   return {
+    story: {refs, costOf, sources},
     conversations: list, prompts, around, models: modelRows, harness, tokens, costUsd, estimatedCostUsd,
     responses: usageRows.length, inferredModelResponses, compactionResponses,
     topLevelConversations: top, childConversations: children, historyOnlyConversations,

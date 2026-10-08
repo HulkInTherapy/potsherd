@@ -186,7 +186,7 @@ describe('conversations, history and opt-outs', () => {
     expect(warm.usage.costUsd).toBe(cold.usage.costUsd);
     fs.appendFileSync(a, jsonl([user('u9', 'third', {timestamp: at(9)})]));
     const appended = await run(options);
-    expect(appended.timings).toMatchObject({filesRead: 1, filesCached: 1});
+    expect(appended.timings).toMatchObject({filesRead: 0, filesResumed: 1, filesCached: 1});
     expect(appended.metrics.humanPrompts.value).toBe(3);
     expect(fs.readFileSync(a, 'utf8')).toContain('third');
     expect(fs.statSync(a).size).toBeGreaterThan(before.size);

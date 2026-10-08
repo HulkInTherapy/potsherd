@@ -13,12 +13,17 @@
  * `classifyText` and next to each harness below.
  */
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {hasExclusionMarker} from '../markers.js';
 import {clean} from './source.js';
-import type {AuditHarness} from './contracts.js';
+import type {AuditHarness, AuditPromptLex} from './contracts.js';
+import {deriveStory, promptLex, isAgentTool, usageWeight, type StoryTextFacts, type TurnEvent, type TurnStats} from './story-extract.js';
+import {featurize, safeQuote, topicWords, vocabularyWords, type PromptFeatures} from './story-lexicon.js';
+import {localClock} from './story-time.js';
 
-export const FACTS_VERSION = 4;
+/** 5: story features; prompt text is no longer kept in the cache. */
+export const FACTS_VERSION = 5;
 
 export type NativeHarness = Exclude<AuditHarness, 'opencode'>;
 
@@ -68,6 +73,14 @@ export interface PromptFact {
   /** Model that answered this prompt. */
   after: string | null;
   afterProvider: string | null;
+  /** Story: features of the text (human prompts). */
+  f?: PromptFeatures;
+  /** Lexical data for the language passes (human prompts). */
+  lex?: AuditPromptLex;
+  /** Story: safe quote candidate (fixed slots only). */
+  q?: string;
+  /** Story: stats of the turn this prompt started, from this file. */
+  t?: TurnStats;
 }
 
 export interface SourceFacts {
@@ -94,6 +107,17 @@ export interface SourceFacts {
   usage: UsageFact[];
   prompts: PromptFact[];
   malformed: number;
+  /** Time zone the story counters were bucketed in. */
+  tz?: string;
+  /** Story word counters (see story-extract.ts). */
+  story?: StoryTextFacts;
+  /** Append-only resume state (recent files only). */
+  resume?: ResumeState;
+}
+
+export interface ExtractOptions {
+  /** Time zone for story counters (default: the system zone). */
+  timezone?: string;
 }
 
 const MAX_PROMPT_CHARS = 4000;
@@ -171,6 +195,9 @@ interface Builder {
   /** Prompts waiting for the model that answers them. */
   pending: PromptFact[];
   seenPrompts: Set<string>;
+  /** Assistant events and interrupts for per-turn stats. */
+  events: TurnEvent[];
+  interrupts: number[];
 }
 
 function makeBuilder(file: string, harness: NativeHarness, size: number, mtimeMs: number): Builder {
@@ -180,7 +207,7 @@ function makeBuilder(file: string, harness: NativeHarness, size: number, mtimeMs
       sessionId: path.basename(file, '.jsonl'), parentId: null, child: false, project: null, title: null,
       automated: false, excluded: false, startedAt: null, firstAt: null, lastAt: null, usage: [], prompts: [], malformed: 0,
     },
-    currentModel: null, currentProvider: null, pending: [], seenPrompts: new Set(),
+    currentModel: null, currentProvider: null, pending: [], seenPrompts: new Set(), events: [], interrupts: [],
   };
 }
 
@@ -208,6 +235,7 @@ function addPrompt(b: Builder, key: string, at: number | null, project: string |
   if (b.seenPrompts.has(key)) return;
   b.seenPrompts.add(key);
   if (kind === 'human' && hasExclusionMarker(text)) b.facts.excluded = true;
+  if (reason === 'interrupt_marker' && at !== null) b.interrupts.push(at);
   const prompt: PromptFact = {
     key, at, project, kind, reason,
     text: kind === 'human' ? clean(text.length > MAX_PROMPT_CHARS ? text.slice(0, MAX_PROMPT_CHARS) : text) : '',
@@ -264,6 +292,11 @@ function claudeLine(b: Builder, line: Buffer, subagent: boolean, sessions: Set<s
     if (id) fact.replayKey = `${id}:${session}`;
     if (u.speed === 'fast') fact.tier = 'fast';
     addUsage(b, fact);
+    if (at !== null) {
+      let tools = 0, subs = 0;
+      if (Array.isArray(m.content)) for (const block of m.content) if (isRec(block) && block.type === 'tool_use') { tools++; if (typeof block.name === 'string' && isAgentTool(block.name)) subs++; }
+      b.events.push({at, tools, subs, weight: usageWeight(fact.input, fact.output, fact.cacheRead, fact.cacheWrite)});
+    }
     return;
   }
   if (r.type !== 'user' || r.isSidechain === true || subagent) return;
@@ -298,7 +331,17 @@ interface CodexState {
   deltas: Set<string>;
   itemPrompts: PendingCodexPrompt[];
   responsePrompts: PendingCodexPrompt[];
+  /** Which list became prompts, how many entries of it were converted, and their seen ids (resume). */
+  mode: 'items' | 'responses' | null;
+  converted: number;
+  seen: Set<string>;
+  compactionDone: Set<string>;
 }
+const newCodexState = (): CodexState => ({lineNo: 0, previousTotal: null, tier: undefined, imported: false, records: new Map(), compacted: new Set(),
+  deltas: new Set(), itemPrompts: [], responsePrompts: [], mode: null, converted: 0, seen: new Set(), compactionDone: new Set()});
+
+/** Thrown when an appended file cannot be resumed; the caller reads it in full. */
+export class ResumeMismatch extends Error { constructor() { super('resume_mismatch'); } }
 
 const U_KEYS = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens'] as const;
 const tuple = (u: unknown): number[] | null => (isRec(u) ? U_KEYS.map(k => int(u[k])) : null);
@@ -377,7 +420,9 @@ function codexLine(b: Builder, line: Buffer, s: CodexState): void {
     s.deltas.add(d.join(','));
     // Counters replayed into another file repeat exactly; count each fingerprint once.
     const key = totalSig ? `x:${totalSig}|${last ? last.join(',') : ''}` : null;
-    addUsage(b, codexFact(b, s, time(r.timestamp), String(r.timestamp ?? ''), d, key));
+    const fact = codexFact(b, s, time(r.timestamp), String(r.timestamp ?? ''), d, key);
+    addUsage(b, fact);
+    if (fact.at !== null) b.events.push({at: fact.at, tools: 0, subs: 0, weight: usageWeight(fact.input, fact.output, fact.cacheRead, fact.cacheWrite)});
     return;
   }
   if (head.includes('"turn_context"')) {
@@ -422,6 +467,7 @@ function codexLine(b: Builder, line: Buffer, s: CodexState): void {
     s.itemPrompts.push({key: null, at: time(r.timestamp), text: typeof p.message === 'string' ? p.message : '', imported: s.imported, project: f.project});
     return;
   }
+  if (codexToolOrAbort(b, head)) return;
   if (head.includes('"token_usage_record"')) {
     const r = parse();
     const p = r && isRec(r.payload) ? r.payload : null;
@@ -439,13 +485,34 @@ function codexLine(b: Builder, line: Buffer, s: CodexState): void {
   }
 }
 
+const TOOL_CALL = /"type":"(?:function_call|custom_tool_call)"/;
+const NAME = /"name":"([^"]{1,80})"/;
+const STAMP = /"timestamp":"([^"]{10,40})"/;
+/** Codex tool calls and aborted turns, judged from the line head only (the body can be huge). */
+function codexToolOrAbort(b: Builder, head: string): boolean {
+  if (TOOL_CALL.test(head) && head.includes('"response_item"')) {
+    const at = time(STAMP.exec(head)?.[1]);
+    const name = NAME.exec(head)?.[1] ?? '';
+    if (at !== null) b.events.push({at, tools: 1, subs: isAgentTool(name) ? 1 : 0, weight: 0});
+    return true;
+  }
+  if (head.includes('"turn_aborted"') && head.includes('"event_msg"')) {
+    const at = time(STAMP.exec(head)?.[1]);
+    if (at !== null) b.interrupts.push(at);
+    return true;
+  }
+  return false;
+}
+
 function finishCodex(b: Builder, s: CodexState): void {
   const f = b.facts;
   // Remote compaction requests: linked to a compacted marker and not already a token_count delta.
   for (const id of s.compacted) {
+    if (s.compactionDone.has(id)) continue;
     const record = s.records.get(id);
     const d = record ? tuple(record.usage) : null;
     if (!record || !d || !(d[0]! || d[1]! || d[2]! || d[3]!) || s.deltas.has(d.join(','))) continue;
+    s.compactionDone.add(id);
     const fact = codexFact(b, s, record.at, record.at ? new Date(record.at).toISOString() : '', d, `codex-compaction:${id}`);
     fact.compaction = true;
     f.usage.push(fact);
@@ -453,10 +520,15 @@ function finishCodex(b: Builder, s: CodexState): void {
   }
   // Current Codex marks typed input with item_completed/UserMessage (older: event_msg/user_message);
   // response_item role=user also carries injected context and is only a fallback.
-  const list = s.itemPrompts.length ? s.itemPrompts : s.responsePrompts;
+  if (s.mode === 'responses' && s.itemPrompts.length) throw new ResumeMismatch();
+  const mode = s.mode ?? (s.itemPrompts.length ? 'items' : s.responsePrompts.length ? 'responses' : null);
+  const list = mode === 'items' ? s.itemPrompts : mode === 'responses' ? s.responsePrompts : [];
+  s.mode = mode;
   const reason = f.child ? 'subagent_parent_written' : f.automated ? 'programmatic_exec_session' : null;
-  const seen = new Set<string>();
-  list.forEach((p, i) => {
+  const seen = s.seen, base = s.converted;
+  s.converted += list.length;
+  list.forEach((p, n) => {
+    const i = base + n;
     if (p.key) { if (seen.has(p.key)) return; seen.add(p.key); }
     const key = `codex:${f.sessionId}:${p.key ?? i}`;
     if (reason) return addPrompt(b, key, p.at, p.project, 'excluded', reason, '');
@@ -501,6 +573,10 @@ function piLine(b: Builder, line: Buffer): void {
     };
     if (fact.input + fact.output + fact.cacheRead + fact.cacheWrite > 0) addUsage(b, fact);
     else answered(b, fact.model, fact.provider);
+    if (at !== null) {
+      const tools = Array.isArray(m.content) ? m.content.filter(c => isRec(c) && typeof c.type === 'string' && c.type.toLowerCase().includes('tool')).length : 0;
+      b.events.push({at, tools, subs: 0, weight: usageWeight(fact.input, fact.output, fact.cacheRead, fact.cacheWrite)});
+    }
     return;
   }
   if (m.role === 'user') {
@@ -517,26 +593,63 @@ const MAX_LINE = 256 * 1024 * 1024;
 
 let sharedBuffer: Buffer | null = null;
 
-/** Reads one file once, in large chunks, and returns its facts. */
-export function extractFile(file: string, harness: NativeHarness): SourceFacts {
+/** Files touched within this window keep resume state: they are the ones still being appended to. */
+const RESUME_RECENT_MS = 48 * 3_600_000;
+
+/** What an append-only file needs to continue where the last read stopped. Only kept for recently modified files. */
+export interface ResumeState {
+  /** Byte offset just after the last newline read. */
+  offset: number;
+  /** sha256 of the 4 KiB before `offset`. */
+  tail: string;
+  dev: number;
+  ino: number;
+  model: string | null;
+  provider: string | null;
+  /** [at, tools, subagents, weight] per assistant event. */
+  events: Float64Array;
+  interrupts: Float64Array;
+  sessions?: string[];
+  codex?: Omit<CodexState, 'itemPrompts' | 'responsePrompts'>;
+}
+
+/**
+ * Reads one file once, in large chunks, and returns its facts. With
+ * `previous` (facts of an earlier read that carry resume state) only the bytes
+ * appended since are parsed; ResumeMismatch is thrown when the file is not
+ * the same append-only file any more.
+ */
+export function extractFile(file: string, harness: NativeHarness, options: ExtractOptions = {}, previous?: SourceFacts): SourceFacts {
   const fd = fs.openSync(file, 'r');
   try {
     const stat = fs.fstatSync(fd);
-    const b = makeBuilder(file, harness, stat.size, stat.mtimeMs);
-    const codex: CodexState = {lineNo: 0, previousTotal: null, tier: undefined, imported: false,
-      records: new Map(), compacted: new Set(), deltas: new Set(), itemPrompts: [], responsePrompts: []};
+    let b = makeBuilder(file, harness, stat.size, stat.mtimeMs);
+    let codex = newCodexState();
+    let position = 0, firstNew = 0;
     const subagent = file.includes(SUBAGENT_DIR), sessions = new Set<string>();
+    if (previous) {
+      const r = previous.resume;
+      if (!r || previous.excluded || r.dev !== stat.dev || r.ino !== stat.ino || r.offset > stat.size || r.offset < 1 || tailHash(fd, r.offset) !== r.tail) throw new ResumeMismatch();
+      const nl = Buffer.alloc(1);
+      fs.readSync(fd, nl, 0, 1, r.offset - 1);
+      if (nl[0] !== 10) throw new ResumeMismatch();
+      b = resumeBuilder(previous, r, stat);
+      if (r.codex) codex = {...structuredClone(r.codex), itemPrompts: [], responsePrompts: []};
+      for (const sid of r.sessions ?? []) sessions.add(sid);
+      position = r.offset;
+      firstNew = b.facts.prompts.length;
+    }
     const onLine = harness === 'claude' ? (line: Buffer) => claudeLine(b, line, subagent, sessions)
       : harness === 'codex' ? (line: Buffer) => codexLine(b, line, codex)
       : (line: Buffer) => piLine(b, line);
     // One read buffer per thread, reused across files (it only grows for very long lines).
     let buffer = sharedBuffer ??= Buffer.allocUnsafe(CHUNK);
-    let filled = 0, position = 0, skipping = false;
+    let filled = 0, skipping = false, base = position, endsWithNewline = true;
     for (;;) {
       if (filled === buffer.length) {
         // A line longer than the buffer: drop it unread unless its head says we need it.
-        if (harness === 'codex' && !codexWanted(buffer.toString('latin1', 0, Math.min(filled, 400)), codex.lineNo)) { skipping = true; filled = 0; codex.lineNo++; }
-        else if (buffer.length >= MAX_LINE) { skipping = true; filled = 0; b.facts.malformed++; }
+        if (harness === 'codex' && !codexWanted(buffer.toString('latin1', 0, Math.min(filled, 400)), codex.lineNo)) { codexToolOrAbort(b, buffer.toString('latin1', 0, Math.min(filled, 400))); skipping = true; base += filled; filled = 0; codex.lineNo++; }
+        else if (buffer.length >= MAX_LINE) { skipping = true; base += filled; filled = 0; b.facts.malformed++; }
         else { const bigger = Buffer.allocUnsafe(buffer.length * 2); buffer.copy(bigger, 0, 0, filled); buffer = bigger; if (bigger.length <= 4 * CHUNK) sharedBuffer = bigger; }
       }
       const n = fs.readSync(fd, buffer, filled, buffer.length - filled, position);
@@ -551,19 +664,70 @@ export function extractFile(file: string, harness: NativeHarness): SourceFacts {
         start = nl + 1;
       }
       if (n === 0) {
-        if (!skipping && start < end) onLine(buffer.subarray(start, end));
+        if (start < end) { endsWithNewline = false; if (!skipping) onLine(buffer.subarray(start, end)); }
+        base += start;
         break;
       }
       buffer.copyWithin(0, start, end);
+      base += start;
       filled = end - start;
     }
     if (harness === 'codex') finishCodex(b, codex);
     if (harness === 'claude' && !subagent && sessions.size) b.facts.sessionIds = [...sessions];
-    if (b.facts.excluded) for (const p of b.facts.prompts) p.text = '';
+    b.facts.size = stat.size;
+    b.facts.mtimeMs = stat.mtimeMs;
+    finishStory(b, harness, options, firstNew);
+    delete b.facts.resume;
+    if (endsWithNewline && !b.facts.excluded && Date.now() - stat.mtimeMs < RESUME_RECENT_MS) {
+      const events = new Float64Array(b.events.length * 4);
+      b.events.forEach((e, i) => { events[i * 4] = e.at; events[i * 4 + 1] = e.tools; events[i * 4 + 2] = e.subs; events[i * 4 + 3] = e.weight; });
+      const {itemPrompts: _items, responsePrompts: _responses, ...codexState} = codex;
+      b.facts.resume = {offset: base, tail: tailHash(fd, base), dev: stat.dev, ino: stat.ino, model: b.currentModel, provider: b.currentProvider,
+        events, interrupts: Float64Array.from(b.interrupts), ...(sessions.size ? {sessions: [...sessions]} : {}), ...(harness === 'codex' ? {codex: codexState} : {})};
+    }
     return b.facts;
   } finally {
     fs.closeSync(fd);
   }
+}
+
+/** A builder positioned where `previous` stopped: copies of its lists, pending prompts and events. */
+function resumeBuilder(previous: SourceFacts, r: ResumeState, stat: fs.Stats): Builder {
+  const facts: SourceFacts = {...previous, size: stat.size, mtimeMs: stat.mtimeMs, usage: [...previous.usage], prompts: previous.prompts.map(p => ({...p})),
+    ...(previous.sessionIds ? {sessionIds: [...previous.sessionIds]} : {}),
+    ...(previous.story ? {story: {vocab: previous.story.vocab ? new Map(previous.story.vocab) : null, topics: previous.story.topics ? previous.story.topics.map(t => ({...t, words: new Map([...t.words].map(([w, c]) => [w, [c[0], c[1]] as [number, number]]))})) : null}} : {})};
+  delete facts.resume;
+  const b = makeBuilder(previous.file, previous.harness as NativeHarness, stat.size, stat.mtimeMs);
+  b.facts = facts;
+  b.currentModel = r.model; b.currentProvider = r.provider;
+  for (const p of facts.prompts) b.seenPrompts.add(p.key);
+  // Prompts after the last answer still wait for the model that answers them.
+  for (let i = facts.prompts.length - 1; i >= 0; i--) { const p = facts.prompts[i]!; if (p.kind !== 'human') continue; if (p.after !== null) break; b.pending.unshift(p); }
+  for (let i = 0; i < r.events.length; i += 4) b.events.push({at: r.events[i]!, tools: r.events[i + 1]!, subs: r.events[i + 2]!, weight: r.events[i + 3]!});
+  b.interrupts.push(...r.interrupts);
+  return b;
+}
+
+function finishStory(b: Builder, harness: AuditHarness, options: ExtractOptions, from = 0): void {
+  const f = b.facts;
+  f.tz = options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (f.excluded) { for (const p of f.prompts) { p.text = ''; delete p.f; delete p.lex; delete p.q; } delete f.story; return; }
+  // Claude's typed text lives in history.jsonl; its transcripts expand pastes inline.
+  f.story = deriveStory(f.prompts, b.events, b.interrupts, {typed: false, counters: harness !== 'claude' && !f.child, timezone: f.tz, from, previous: f.story});
+}
+
+/** Story fields for facts built outside `extractFile` (OpenCode). */
+export function finishExternalFacts(facts: SourceFacts, options: ExtractOptions = {}): SourceFacts {
+  const b = makeBuilder(facts.file, 'pi', facts.size, facts.mtimeMs);
+  b.facts = facts;
+  finishStory(b, facts.harness, options);
+  return facts;
+}
+
+/** Drops prompt text (story features and lexical data stay). Used before facts leave a worker or enter the cache. */
+export function stripText(facts: SourceFacts): SourceFacts {
+  for (const p of facts.prompts) p.text = '';
+  return facts;
 }
 
 /* ------------------------------------------------- Claude history.jsonl --- */
@@ -573,18 +737,93 @@ export interface HistoryEntry {
   at: number | null;
   project: string | null;
   kind: PromptKind;
+  /** Empty once stripped (cache); story fields below stay. */
   text: string;
+  /** The user pasted content into this prompt. */
+  paste?: boolean;
+  f?: PromptFeatures;
+  lex?: AuditPromptLex;
+  /** Safe quote candidate (history prompts are short typed text; ≤90 chars, masked). */
+  q?: string;
+}
+
+/** Story word counters of history.jsonl, per Claude session. */
+export interface HistoryCounters {project: string | null; vocab: Map<string, number>; topics: Map<string, {night: number; day: number; words: Map<string, [number, number]>}>}
+
+export interface HistoryData {
+  entries: HistoryEntry[];
+  /** Per session id ('' when missing). */
+  counters: Map<string, HistoryCounters>;
+  /** sha256 of the 4 KiB before the end of what was read (append-only resume check). */
+  tail?: string;
+  /** Lines appended since the previous run were parsed alone (diagnostics). */
+  resumed?: boolean;
+  /** Bytes parsed (whole lines). */
+  bytes?: number;
+}
+
+/** sha256 of the `TAIL` bytes before `offset`. */
+export function tailHash(fd: number, offset: number): string {
+  const start = Math.max(0, offset - TAIL), buffer = Buffer.alloc(offset - start);
+  let read = 0;
+  while (read < buffer.length) { const n = fs.readSync(fd, buffer, read, buffer.length - read, start + read); if (!n) break; read += n; }
+  return createHash('sha256').update(buffer.subarray(0, read)).digest('hex');
+}
+const TAIL = 4096;
+
+/**
+ * Reads history.jsonl; when `previous` covers a prefix of the file (same
+ * bytes before its end, ending on a newline) only the appended tail is parsed.
+ */
+export function readHistory(file: string, options: ExtractOptions, previous: {data: HistoryData; size: number} | null): HistoryData {
+  let fd: number;
+  try { fd = fs.openSync(file, 'r'); } catch { return {entries: [], counters: new Map()}; }
+  try {
+    const size = fs.fstatSync(fd).size;
+    if (previous && previous.data.tail && previous.size <= size && tailHash(fd, previous.size) === previous.data.tail) {
+      const last = Buffer.alloc(1);
+      fs.readSync(fd, last, 0, 1, previous.size - 1);
+      if (last[0] === 10) {
+        const tail = Buffer.alloc(size - previous.size);
+        let read = 0;
+        while (read < tail.length) { const n = fs.readSync(fd, tail, read, tail.length - read, previous.size + read); if (!n) break; read += n; }
+        // Only whole lines: an unfinished last line is left for the next run.
+        const end = tail.lastIndexOf(10, read - 1) + 1;
+        const data = parseHistory(tail.toString('utf8', 0, end), options, {entries: [...previous.data.entries], counters: previous.data.counters});
+        data.tail = tailHash(fd, previous.size + end);
+        data.bytes = previous.size + end;
+        data.resumed = true;
+        return data;
+      }
+    }
+    const raw = Buffer.alloc(size);
+    let read = 0;
+    while (read < size) { const n = fs.readSync(fd, raw, read, size - read, read); if (!n) break; read += n; }
+    const end = raw.lastIndexOf(10, read - 1) + 1;
+    const data = parseHistory(raw.toString('utf8', 0, end), options);
+    data.tail = tailHash(fd, end);
+    data.bytes = end;
+    return data;
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 /**
- * `~/.claude/history.jsonl` is Claude Code's log of what the user typed. It is
- * used only for sessions whose transcript is gone: `display` starting with `/`
- * is a slash command, anything else a human prompt.
+ * `~/.claude/history.jsonl` is Claude Code's log of what the user typed. It
+ * gives sessions whose transcript is gone, and the typed text (without
+ * expanded pastes) of live ones: `display` starting with `/` is a slash
+ * command, anything else a human prompt.
  */
-export function extractHistory(file: string): HistoryEntry[] {
+export function extractHistory(file: string, options: ExtractOptions = {}): HistoryEntry[] {
   let raw: string;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return []; }
-  const out: HistoryEntry[] = [];
+  return parseHistory(raw, options).entries;
+}
+
+/** Parses history lines into entries (with story features) and appends to `into`. */
+export function parseHistory(raw: string, options: ExtractOptions = {}, into: HistoryData = {entries: [], counters: new Map()}): HistoryData {
+  const clock = localClock(options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
   for (const line of raw.split('\n')) {
     if (!line) continue;
     let r: Rec;
@@ -592,11 +831,32 @@ export function extractHistory(file: string): HistoryEntry[] {
     const display = typeof r.display === 'string' ? r.display.trim() : '';
     if (!display) continue;
     const command = display.startsWith('/');
-    out.push({
-      sessionId: str(r.sessionId), at: time(r.timestamp), project: str(r.project),
-      kind: command ? 'command' : 'human',
-      text: command ? '' : clean(display.length > MAX_PROMPT_CHARS ? display.slice(0, MAX_PROMPT_CHARS) : display),
-    });
+    const text = command ? '' : clean(display.length > MAX_PROMPT_CHARS ? display.slice(0, MAX_PROMPT_CHARS) : display);
+    const entry: HistoryEntry = {sessionId: str(r.sessionId), at: time(r.timestamp), project: str(r.project), kind: command ? 'command' : 'human', text};
+    if (!command) {
+      const pasted = isRec(r.pastedContents) && Object.keys(r.pastedContents).length > 0;
+      if (pasted) entry.paste = true;
+      entry.f = featurize({text, typed: true, hasPaste: pasted});
+      const lex = promptLex(text, []);
+      if (lex) entry.lex = lex;
+      const q = safeQuote(text, 90);
+      if (q) entry.q = q;
+      const key = entry.sessionId ?? '';
+      let c = into.counters.get(key);
+      if (!c) { c = {project: entry.project, vocab: new Map(), topics: new Map()}; into.counters.set(key, c); }
+      for (const w of vocabularyWords(text)) c.vocab.set(w, (c.vocab.get(w) ?? 0) + 1);
+      if (entry.at !== null) {
+        const {hour, month} = clock(entry.at);
+        const slot = hour < 5 ? 0 : hour >= 9 && hour < 19 ? 1 : -1;
+        if (slot >= 0) {
+          let bag = c.topics.get(month);
+          if (!bag) { bag = {night: 0, day: 0, words: new Map()}; c.topics.set(month, bag); }
+          if (slot === 0) bag.night++; else bag.day++;
+          for (const w of topicWords(text)) { let n = bag.words.get(w); if (!n) { n = [0, 0]; bag.words.set(w, n); } n[slot as 0 | 1]++; }
+        }
+      }
+    }
+    into.entries.push(entry);
   }
-  return out;
+  return into;
 }
