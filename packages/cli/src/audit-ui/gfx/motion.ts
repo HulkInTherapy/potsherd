@@ -19,7 +19,8 @@ export const easeOutBack = (t: number) => {
  * Damped spring from 0 to 1 (Harmonica-style). `t` in seconds. ζ < 1 overshoots a little.
  */
 export function spring(t: number, frequency = 7, damping = 0.55): number {
-  if (t <= 0) return 0;
+  if (!(t > 0)) return 0;
+  if (!Number.isFinite(t)) return 1;
   const omega = 2 * Math.PI * frequency / 4;
   const zeta = damping;
   if (zeta >= 1) return 1 - (1 + omega * t) * Math.exp(-omega * t);

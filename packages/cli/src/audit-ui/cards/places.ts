@@ -180,8 +180,10 @@ export function awardsBody(s: Scene, data: Data<'awards'>, r: Rect): boolean {
       busy ||= t < delay + 900;
       if (t < delay) return;
       const cx = r.x + i * colW + Math.floor(colW / 2);
-      const dy = Math.round((1 - Math.min(1.15, fall)) * -10);
-      trophy(s, cx - (big ? 7 : 3), y, dy * (big ? 2 : 1), Math.min(1, fall * 1.5), index, big ? 2 : 1);
+      // Drop from just above the shelf row, never through the headline.
+      const dropRows = Math.min(6, Math.max(1, y - r.y + 2));
+      const dy = Math.round((1 - Math.min(1.15, fall)) * -dropRows);
+      trophy(s, cx - (big ? 7 : 3), y, dy * 2, Math.min(1, fall * 1.5), index, big ? 2 : 1);
       const la = seg(t, delay + 300, 300);
       const w = colW - 2;
       textCenter(c, cx, shelfY + 1, wrapText(award.title, w, 1)[0] ?? '', { fg: C.gray, alpha: la });

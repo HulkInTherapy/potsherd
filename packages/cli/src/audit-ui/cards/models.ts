@@ -139,7 +139,8 @@ function panel(s: Scene, g: Gauge, side: 'best' | 'worst', r: Rect, delay: numbe
   } else if (g.ratio !== null) {
     c.text(tx, r.y + 6, `${g.ratio.toFixed(1)}× vs the others`, { fg: color, bold: true, alpha: seg(t, delay + 700, 350) });
   }
-  return a < 1 || k < 1 || t < delay + 1100;
+  // Springs overshoot and come back, so "busy" is decided by time, not by k.
+  return t < delay + 1700;
 }
 
 /** Every model's observed rate next to what the others got in the same months. */

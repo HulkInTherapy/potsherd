@@ -70,6 +70,8 @@ export function decodeKey(chunk: string): Key {
 }
 
 const FRAME_MS = 33;
+/** Card clocks run 1.5× real time: entrances read as snappy (most settle in ~1 s) without losing their shape. */
+const CARD_SPEED = 1.5;
 const TRANSFER_LINGER_MS = 1800;
 const BLINK_MS = 140;
 
@@ -229,7 +231,7 @@ export async function runWallboard(session: AuditSession, options: TerminalOptio
       if (card) {
         const scene: Scene = {
           c: canvas, w, h, tier, caps, blink, state: stateOf(card), index, total: deck.length,
-          t: caps.motion ? now - enteredAt : Infinity,
+          t: caps.motion ? (now - enteredAt) * CARD_SPEED : Infinity,
         };
         busy = renderCard(scene, card);
         if (notes) drawNotes(canvas, card, w, h);
@@ -414,7 +416,7 @@ export async function runWallboard(session: AuditSession, options: TerminalOptio
       case 'right': case 'enter': {
         if (card.kind === 'guess') {
           const state = stateOf(card);
-          if (state.guess === undefined) { state.guess = -1; state.guessAt = now - enteredAt; paint(); return; }
+          if (state.guess === undefined) { state.guess = -1; state.guessAt = (now - enteredAt) * CARD_SPEED; paint(); return; }
         }
         go(index + 1);
         return;
@@ -423,7 +425,7 @@ export async function runWallboard(session: AuditSession, options: TerminalOptio
         if (key.startsWith('guess') && card.kind === 'guess') {
           const choice = Number(key.slice(5)) - 1;
           const state = stateOf(card);
-          if (state.guess === undefined && choice < card.data.options.length) { state.guess = choice; state.guessAt = now - enteredAt; paint(); }
+          if (state.guess === undefined && choice < card.data.options.length) { state.guess = choice; state.guessAt = (now - enteredAt) * CARD_SPEED; paint(); }
         }
       }
     }

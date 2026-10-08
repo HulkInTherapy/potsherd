@@ -83,6 +83,8 @@ export class Canvas {
     x = Math.round(x); y = Math.round(y);
     if (y < 0 || y >= this.h) return 0;
     const alpha = style.alpha ?? 1;
+    // Fully transparent text is not drawn at all (16-colour terminals would show it as black).
+    if (alpha <= 0.02) return Math.min(maxW, textWidth(text));
     const fg = style.fg === undefined ? C.cream : fade(style.fg, alpha);
     const attr = (style.bold ? BOLD : 0) | (style.dim ? DIM : 0) | (style.italic ? ITALIC : 0) | (style.underline ? UNDERLINE : 0);
     let used = 0;

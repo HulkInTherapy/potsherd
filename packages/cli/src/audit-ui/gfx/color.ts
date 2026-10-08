@@ -88,7 +88,8 @@ export function to16(color: Rgb): number {
   }
   // Warm hues: ember → red, orange/peach → yellow (most themes draw yellow as orange-ish).
   if (red > green && red > blue) {
-    if (green < 110) return lum > 90 ? 91 : 31;
+    // Hue, not brightness, decides red vs yellow: ember stays red, every orange/peach shade is yellow.
+    if (green / red < 0.36) return lum > 90 ? 91 : 31;
     if (lum > 200) return 97;
     return lum > 140 ? 93 : 33;
   }

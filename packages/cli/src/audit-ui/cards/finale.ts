@@ -85,9 +85,10 @@ export function archetypeBody(s: Scene, data: Data<'archetype'>, r: Rect): boole
     if (y >= r.y + r.h) return;
     const ta = seg(t, after + 600 + i * 150, 300);
     const k = seg(t, after + 650 + i * 150, 600, easeOutCubic);
+    if (ta <= 0) { y += tier.id === 'S' ? 1 : 2; return; }
     c.text(r.x, y, m.display, { fg: C.cream, alpha: ta }, labelW - 1);
     const fill = Math.round(barW * m.band * k);
-    for (let x = 0; x < barW; x++) c.put(r.x + labelW + x, y, s.caps.unicode ? (x < fill ? '━' : '─') : (x < fill ? '=' : '-'), x < fill ? (i === 0 ? C.orange : fade(C.orange, 0.65)) : C.coal);
+    for (let x = 0; x < barW; x++) c.put(r.x + labelW + x, y, s.caps.unicode ? (x < fill ? '━' : '─') : (x < fill ? '=' : '-'), x < fill ? (i === 0 ? C.orange : fade(C.orange, 0.65)) : fade(C.coal, ta));
     y += tier.id === 'S' ? 1 : 2;
   });
   if (data.code && y + 1 < r.y + r.h && tier.id !== 'S') c.text(r.x, y + 1, `code ${data.code}`, { fg: C.slate, alpha: seg(t, after + 1100, 300) });
