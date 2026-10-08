@@ -21,7 +21,7 @@ const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export function plainCard(card: DeckCard, width = 80): string[] {
   const out: string[] = [card.kicker];
   for (const line of wrap(card.headline, width - 2)) out.push(line);
-  if (card.support) for (const line of wrap(card.support, width - 2)) out.push(line);
+  if (card.support && card.kind !== 'guess') for (const line of wrap(card.support, width - 2)) out.push(line);
   const rows: string[] = [];
   const d = card.data as never;
   switch (card.kind) {
@@ -31,12 +31,12 @@ export function plainCard(card: DeckCard, width = 80): string[] {
       for (const line of card.data.lines) rows.push(`${line.name.padEnd(24, '.')} ${money(line.value)}`);
       if (card.data.more) rows.push(`${'everything else'.padEnd(24, '.')} ${money(card.data.more)}`);
       rows.push(`${'TOTAL'.padEnd(24)} ${money(card.data.total)}`);
-      if (card.data.byAgent.length) rows.push('by agent: ' + card.data.byAgent.map(a => `${a.name} ${Math.round(a.share * 100)}%`).join(' · '));
+      if (card.data.byAgent.length) rows.push('by agent: ' + card.data.byAgent.map(a => `${a.name} ${a.share > 0 && a.share < 0.01 ? '<1' : Math.round(a.share * 100)}%`).join(' · '));
       break;
     case 'clock': for (const call of card.data.callouts) rows.push(`${call.label.toLowerCase()}: ${call.value} (${call.sub})`); break;
     case 'guess': {
       const best = card.data.options[card.data.answer]!;
-      rows.push(`answer: ${best.name}`, ...card.data.options.map(o => `  ${o.name} ${Math.round(o.share * 100)}%`));
+      rows.push(`answer: ${best.name}`, ...[...card.data.options].sort((a, b) => b.share - a.share).map(o => `  ${o.name} ${Math.round(o.share * 100)}%`));
       if (card.data.after) rows.push(card.data.after);
       break;
     }
